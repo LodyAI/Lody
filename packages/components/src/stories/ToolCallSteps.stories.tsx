@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * What an expanded tool step shows (`ai-gui/tool-call-detail.tsx`): one sheet
  * per step, sections in the order they happened, no header repeating the row's
@@ -15,6 +16,20 @@ import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    height: '1500px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame2: {
+    position: 'relative',
+    height: '700px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const storyStore = createStore();
 storyStore.set(runtimeAtom, {
@@ -191,7 +206,7 @@ const meta = {
   args: { sessionId, items, renderMessageRow },
   render: () => (
     <Provider store={storyStore}>
-      <div className="relative h-[1500px] w-full bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <SessionChatStreamView
           items={items}
           sessionId={sessionId}
@@ -257,7 +272,7 @@ export const CustomAcpEcho: Story = {
   globals: { theme: 'dark' },
   render: () => (
     <Provider store={storyStore}>
-      <div className="relative h-[700px] w-full bg-background">
+      <div {...stylex.props(storyLayout.frame2)}>
         <SessionChatStreamView
           items={[{ type: 'message', sessionId, message: customAcpTurn, turnIndex: 0 }]}
           sessionId={sessionId}

@@ -1,7 +1,29 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
+
+const styles = stylex.create({
+  container: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'auto',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  trigger: {
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    cursor: 'zoom-in',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  image: { maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' },
+});
 
 interface SessionFileImagePreviewProps {
   readonly path: string;
@@ -74,17 +96,14 @@ export const SessionFileImagePreview = memo(function SessionFileImagePreview({
 
   if (!mimeType || !imageUrl) return null;
   return (
-    <div
-      ref={containerRef}
-      className="flex h-full min-h-0 items-center justify-center overflow-auto p-3"
-    >
+    <div ref={containerRef} {...stylex.props(styles.container)}>
       <button
         type="button"
-        className="flex h-full w-full cursor-zoom-in items-center justify-center"
+        {...stylex.props(styles.trigger)}
         onClick={() => setViewerOpen(true)}
         aria-label={t('sessions.imagePreview.zoom', 'Open image in full screen')}
       >
-        <img src={imageUrl} alt={path} className="max-h-full max-w-full object-contain" />
+        <img src={imageUrl} alt={path} {...stylex.props(styles.image)} />
       </button>
       <ZoomableImageViewer
         open={viewerOpen}

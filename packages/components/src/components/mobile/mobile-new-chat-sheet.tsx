@@ -9,8 +9,10 @@ import {
 } from 'react';
 import { useDrag } from '@use-gesture/react';
 
-import { cn } from '@/lib/utils';
-import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { withClassName } from '@/lib/stylex';
+import { getSessionChatInputAreaShellStyles } from '@/components/chat/composer-surface';
 import { BaseHeader } from '@/components/page-headers/base-header';
 import { MobileSessionHeaderBackButton } from '@/components/mobile/glass-icon-button';
 import { SessionConversationPage } from '@/components/sessions/session-conversation-page';
@@ -45,6 +47,7 @@ export type MobileNewChatSheetContentProps = {
   coordinator?: ComponentType<{ children: ReactNode }>;
   className?: string;
   scrollAreaClassName?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 /* Keep in sync with `.mobile-drill-in` in `tailwind/index.css`. */
@@ -205,10 +208,11 @@ function MobileNewChatPage({
   );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
+    <div {...stylex.props(styles.pageLayer)}>
       <div
         ref={panelRef}
-        className={cn('flex h-full flex-col bg-background', entering && 'mobile-drill-in')}
+        data-mobile-new-chat-panel=""
+        {...withClassName(stylex.props(styles.panel), entering ? 'mobile-drill-in' : undefined)}
         onAnimationEnd={(event) => {
           if (event.target === event.currentTarget) setEntering(false);
         }}
@@ -217,7 +221,8 @@ function MobileNewChatPage({
         <MobileNewChatSheetContent
           {...contentProps}
           onClose={close}
-          className={cn('min-h-0 flex-1', className)}
+          className={className}
+          xstyle={styles.flexFill}
         />
       </div>
     </div>
@@ -232,6 +237,7 @@ export function MobileNewChatSheetContent({
   coordinator: Coordinator = Fragment,
   className,
   scrollAreaClassName,
+  xstyle,
   onClose,
 }: MobileNewChatSheetContentProps & { onClose?: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -244,13 +250,13 @@ export function MobileNewChatSheetContent({
   useKeyboardAwareScrollIntoView(scrollRef);
   const headerInset = isNativeAppShell() ? 'calc(3rem + var(--safe-area-top, 0px))' : '3rem';
   return (
-    <div className={cn('flex min-h-0 flex-col bg-background text-foreground', className)}>
+    <div {...withClassName(stylex.props(styles.root, xstyle), className)}>
       <Coordinator>
-        <SessionConversationPage className="min-h-0 flex-1">
+        <SessionConversationPage xstyle={styles.flexFill}>
           <BaseHeader
             truncateTitle={false}
             hideMenuButton
-            className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+            xstyle={styles.header}
             style={{ height: headerInset, paddingTop: 'var(--safe-area-top, 0px)' }}
             leading={
               <MobileSessionHeaderBackButton
@@ -262,7 +268,7 @@ export function MobileNewChatSheetContent({
           />
           <div
             ref={setScrollElement}
-            className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto', scrollAreaClassName)}
+            {...withClassName(stylex.props(styles.scroll), scrollAreaClassName)}
             style={{
               paddingTop: headerInset,
               scrollPaddingTop: headerInset,
@@ -270,11 +276,11 @@ export function MobileNewChatSheetContent({
             }}
           >
             {labels.description ? (
-              <p className="text-xs text-muted-foreground">{labels.description}</p>
+              <p {...stylex.props(styles.description)}>{labels.description}</p>
             ) : null}
-            <div className="min-h-6 flex-1" />
+            <div {...stylex.props(styles.summarySpacer)} />
             <ConversationColumn>{summary}</ConversationColumn>
-            <div className="h-6 shrink-0" />
+            <div {...stylex.props(styles.summaryBottom)} />
           </div>
           <div
             data-new-chat-fold-lower=""
@@ -296,10 +302,12 @@ export function MobileNewChatSheetContent({
           >
             <div
               data-new-chat-no-edge-back=""
-              className={getSessionChatInputAreaShellClassName({
-                protectFromEdgeBackZone: true,
-                liftAboveKeyboard: true,
-              })}
+              {...stylex.props(
+                getSessionChatInputAreaShellStyles({
+                  protectFromEdgeBackZone: true,
+                  liftAboveKeyboard: true,
+                })
+              )}
             >
               <ConversationColumn>{composer}</ConversationColumn>
             </div>
@@ -309,3 +317,40 @@ export function MobileNewChatSheetContent({
     </div>
   );
 }
+
+const styles = stylex.create({
+  pageLayer: { position: 'fixed', inset: 0, zIndex: 50, overflow: 'hidden' },
+  panel: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  flexFill: { minHeight: 0, flex: '1 1 0%' },
+  root: {
+    display: 'flex',
+    minHeight: 0,
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+  },
+  header: {
+    position: 'absolute',
+    insetInline: 0,
+    top: 0,
+    zIndex: 30,
+    borderBottomWidth: 0,
+    backgroundColor: `color-mix(in oklab, ${themeColors.background} 55%, transparent)`,
+    backdropFilter: 'blur(24px)',
+  },
+  scroll: {
+    display: 'flex',
+    minHeight: 0,
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    overflowY: 'auto',
+  },
+  description: { fontSize: '12px', lineHeight: '16px', color: themeColors.mutedForeground },
+  summarySpacer: { minHeight: '24px', flex: '1 1 0%' },
+  summaryBottom: { height: '24px', flexShrink: 0 },
+});

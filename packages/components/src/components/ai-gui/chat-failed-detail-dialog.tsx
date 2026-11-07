@@ -1,14 +1,98 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { toast } from '@/lib/toast';
 import { AlertCircle, Check, Copy } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Dialog } from '@/ui/dialog';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import {
   buildChatFailedErrorReport,
   type ChatFailedErrorReportInput,
 } from './chat-failed-error-report';
+
+const MONO_FONT =
+  'JetBrains Mono, SF Mono, Monaco, Inconsolata, Fira Code, Droid Sans Mono, Source Code Pro, monospace';
+
+const styles = stylex.create({
+  panelSpacing: { [dialog.gap]: 'calc(var(--spacing) * 3)' },
+  footerSpacing: { [dialog.footerGap]: 'calc(var(--spacing) * 2)' },
+  header: {
+    paddingRight: themeSpace[6],
+    textAlign: 'left',
+  },
+  title: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+  },
+  titleGlyph: {
+    marginTop: themeSpace[0.5],
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.destructive,
+  },
+  titleText: {
+    minWidth: 0,
+    overflowWrap: 'break-word',
+  },
+  description: {
+    textAlign: 'left',
+    overflowWrap: 'anywhere',
+  },
+  summary: {
+    minWidth: 0,
+    fontSize: themeFontSize.sm,
+    lineHeight: themeSpace[5],
+    overflowWrap: 'anywhere',
+  },
+  tags: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    gap: themeSpace[1.5],
+  },
+  tag: {
+    borderRadius: themeRadius.sm,
+    backgroundColor: themeColors.muted,
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[0.5],
+    fontFamily: MONO_FONT,
+    fontSize: '11px',
+    lineHeight: themeSpace[4],
+    color: themeColors.mutedForeground,
+    overflowWrap: 'anywhere',
+  },
+  raw: {
+    minWidth: 0,
+    overflow: 'auto',
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    padding: themeSpace[3],
+    maxHeight: '45vh',
+  },
+  rawText: {
+    whiteSpace: 'pre-wrap',
+    fontFamily: MONO_FONT,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+    overflowWrap: 'anywhere',
+  },
+  glyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  glyphSuccess: { color: 'var(--color-emerald-500)' },
+});
 
 export type ChatFailedDetailDialogProps = ChatFailedErrorReportInput & {
   open: boolean;
@@ -71,20 +155,20 @@ export function ChatFailedDetailDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {/* A wider panel than the modal default keeps the raw error readable; the
           rung's own viewport cap still bounds it on phones. */}
-      <Dialog.Content width="42rem" className="gap-3">
-        <Dialog.Header className="pr-6 text-left sm:text-left">
-          <Dialog.Title className="flex items-start gap-2 text-base">
-            <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-            <span className="min-w-0 break-words">{title}</span>
+      <Dialog.Content width="42rem" className={stylex.props(styles.panelSpacing).className}>
+        <Dialog.Header className={stylex.props(styles.header).className}>
+          <Dialog.Title className={stylex.props(styles.title).className}>
+            <AlertCircle {...stylex.props(styles.titleGlyph)} aria-hidden="true" />
+            <span {...stylex.props(styles.titleText)}>{title}</span>
           </Dialog.Title>
           {action ? (
-            <Dialog.Description className="text-left [overflow-wrap:anywhere]">
+            <Dialog.Description className={stylex.props(styles.description).className}>
               {action}
             </Dialog.Description>
           ) : (
             // Radix always wires `aria-describedby`; without a description node
             // the dialog points at a missing id.
-            <Dialog.Description className="sr-only">
+            <Dialog.Description visuallyHidden>
               {t(
                 'sessions.systemNotices.chatFailed.detailsDescription',
                 'Full agent error details'
@@ -93,17 +177,12 @@ export function ChatFailedDetailDialog({
           )}
         </Dialog.Header>
 
-        {showSummary ? (
-          <p className="min-w-0 text-sm leading-5 [overflow-wrap:anywhere]">{summary}</p>
-        ) : null}
+        {showSummary ? <p {...stylex.props(styles.summary)}>{summary}</p> : null}
 
         {tags.length > 0 ? (
-          <div className="flex min-w-0 flex-wrap gap-1.5">
+          <div {...stylex.props(styles.tags)}>
             {tags.map((tag) => (
-              <span
-                key={tag.label}
-                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] leading-4 text-muted-foreground [overflow-wrap:anywhere]"
-              >
+              <span key={tag.label} {...stylex.props(styles.tag)}>
                 {tag.label}: {tag.value}
               </span>
             ))}
@@ -111,22 +190,20 @@ export function ChatFailedDetailDialog({
         ) : null}
 
         {detailText ? (
-          <div className="min-w-0 overflow-auto rounded-md border border-border/60 bg-muted/40 p-3 max-h-[45vh]">
-            <pre className="whitespace-pre-wrap font-mono text-xs leading-5 [overflow-wrap:anywhere]">
-              {detailText}
-            </pre>
+          <div {...stylex.props(styles.raw)}>
+            <pre {...stylex.props(styles.rawText)}>{detailText}</pre>
           </div>
         ) : null}
 
-        <Dialog.Footer className="gap-2">
+        <Dialog.Footer className={stylex.props(styles.footerSpacing).className}>
           <Dialog.Close render={<Button type="button" variant="ghost" size="small" />}>
             {t('common.close', 'Close')}
           </Dialog.Close>
           <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
             {copied ? (
-              <Check className="size-3.5 text-emerald-500" aria-hidden="true" />
+              <Check {...stylex.props(styles.glyph, styles.glyphSuccess)} aria-hidden="true" />
             ) : (
-              <Copy className="size-3.5" aria-hidden="true" />
+              <Copy {...stylex.props(styles.glyph)} aria-hidden="true" />
             )}
             {copied
               ? t('sessions.systemNotices.chatFailed.copied', 'Copied')

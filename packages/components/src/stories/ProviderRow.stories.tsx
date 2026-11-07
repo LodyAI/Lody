@@ -9,7 +9,17 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 import { ProviderRow } from '@/components/settings/provider-row';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+
+const providerStory = stylex.create({
+  panel: {
+    borderRadius: 'var(--radius-lg)',
+    borderWidth:"1px",borderStyle:"solid",borderColor:"color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)",
+    backgroundColor: 'color-mix(in oklab, hsl(var(--card) / 1) 50%, transparent)',
+  },
+  narrow: { width: 340 },
+  wide: { width: 520 },
+});
 
 const machineId = 'machine-1' as MachineId;
 const resetIn = (seconds: number) => Math.floor(getServerNow() / 1000) + seconds;
@@ -44,12 +54,7 @@ type StoryProps = {
 
 function StoryWrapper({ config, machine, showActions, narrow, usage }: StoryProps) {
   return (
-    <div
-      className={cn(
-        'rounded-lg border border-border/60 bg-card/50',
-        narrow ? 'w-[340px]' : 'w-[520px]'
-      )}
-    >
+    <div {...stylex.props(providerStory.panel, narrow ? providerStory.narrow : providerStory.wide)}>
       <ProviderRow
         config={config}
         machine={machine}

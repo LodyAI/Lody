@@ -59,6 +59,10 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
    * viewport cap still applies on top.
    */
   width?: CSSProperties['width'];
+  /** Keep the panel inset, or let embedded content reach its edges. */
+  padding?: 'default' | 'none';
+  /** Space direct content blocks, or let embedded content own their spacing. */
+  gap?: 'default' | 'none';
   /**
    * An element to centre the panel on across the window's width, in place of
    * the window's own centre: a dialog opened from one pane of a larger surface
@@ -71,6 +75,9 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
 }
 
 export interface DialogContentProps extends ModalContentProps {
+  backdropXstyle?: stylex.StyleXStyles;
+  backdropStyle?: DialogBackdropProps['style'];
+  xstyle?: stylex.StyleXStyles;
   /**
    * The cross in the panel's corner. It is on by default because a dialog is
    * dismissable and a person has to be able to see that without trying; a panel
@@ -82,12 +89,21 @@ export interface DialogContentProps extends ModalContentProps {
 }
 
 export interface DialogTitleProps extends Omit<TitleBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
+  /** Keeps the name mounted for accessibility while removing its visual footprint. */
+  visuallyHidden?: boolean;
   className?: string;
+  /** Explicit heading weight; omission preserves the modal default. */
+  fontWeight?: CSSProperties['fontWeight'];
 }
 export interface DialogDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
+  /** Keeps the accessible description mounted while removing its visual footprint. */
+  visuallyHidden?: boolean;
   className?: string;
 }
 export interface DialogBackdropProps extends Omit<BackdropBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -114,18 +130,27 @@ const styles = stylex.create({
  * stack.
  */
 export const DialogBackdrop = forwardRef<HTMLDivElement, DialogBackdropProps>(
-  function DialogBackdrop({ className, children, ...rest }, ref) {
+  function DialogBackdrop({ className, xstyle, children, ...rest }, ref) {
     const nested = useModalDepth() > 0;
     return (
       <BaseDialog.Backdrop
         ref={ref}
         forceRender
         {...rest}
+        style={
+          xstyle
+            ? (state) => ({
+                ...stylex.props(xstyle).style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : rest.style
+        }
         className={(state) =>
           appendClassName(
             stylex.props(
               modal.backdrop,
               nested && modal.backdropNested,
+              xstyle,
               isHidden(state.transitionStatus) && modal.backdropHidden
             ).className,
             className
@@ -152,14 +177,19 @@ export const DialogBackdrop = forwardRef<HTMLDivElement, DialogBackdropProps>(
 export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(function DialogContent(
   {
     className,
+    xstyle,
     children,
     container,
     backdropContent,
     backdropClassName,
+    backdropXstyle,
+    backdropStyle,
     noAnimation,
     closeButton = true,
     closeLabel = 'Close',
     width,
+    padding = 'default',
+    gap = 'default',
     centerOn,
     style,
     ...rest
@@ -174,22 +204,37 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
   // portal, where they cascade into the backdrop and the panel alike.
   const palette = useForcedThemeClassNames();
   const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
+  const panelStyle = mergePanelLayout(style, { width, centre });
   return (
     <BaseDialog.Portal
       container={container === undefined ? modalContainer : container}
       className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
     >
-      <DialogBackdrop className={appendClassName(backdropClassName, noTransition)}>
+      <DialogBackdrop
+        className={appendClassName(backdropClassName, noTransition)}
+        xstyle={backdropXstyle}
+        style={backdropStyle}
+      >
         {backdropContent}
       </DialogBackdrop>
       <BaseDialog.Popup
         ref={panelRef}
         {...rest}
-        style={mergePanelLayout(style, { width, centre })}
+        style={
+          xstyle
+            ? (state) => ({
+                ...stylex.props(xstyle).style,
+                ...(typeof panelStyle === 'function' ? panelStyle(state) : panelStyle),
+              })
+            : panelStyle
+        }
         className={(state) =>
           appendClassName(
             stylex.props(
               modal.popup,
+              padding === 'none' && modal.noPadding,
+              gap === 'none' && modal.noGap,
+              xstyle,
               isHidden(state.transitionStatus) && modal.popupHidden,
               noAnimation && modal.noTransition
             ).className,
@@ -222,30 +267,52 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
 
 /** The heading. Base UI wires it to the panel's accessible name. */
 export const DialogTitle = forwardRef<HTMLHeadingElement, DialogTitleProps>(function DialogTitle(
-  { className, ...rest },
+  { className, xstyle, visuallyHidden = false, fontWeight, ...rest },
   ref
 ) {
-  const sx = stylex.props(modal.title);
+  const sx = stylex.props(
+    modal.title,
+    xstyle,
+    visuallyHidden && modal.srOnly,
+    visuallyHidden && modal.hiddenTitleInset
+  );
   return (
     <BaseDialog.Title
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...sx.style,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              ...(fontWeight != null ? { fontWeight } : {}),
+            })
+          : fontWeight == null
+            ? sx.style
+            : { ...sx.style, fontWeight }
+      }
     />
   );
 });
 
 /** What the heading is about; Base UI wires it to the accessible description. */
 export const DialogDescription = forwardRef<HTMLParagraphElement, DialogDescriptionProps>(
-  function DialogDescription({ className, ...rest }, ref) {
-    const sx = stylex.props(modal.description);
+  function DialogDescription({ className, xstyle, visuallyHidden = false, ...rest }, ref) {
+    const sx = stylex.props(modal.description, xstyle, visuallyHidden && modal.srOnly);
     return (
       <BaseDialog.Description
         ref={ref}
         {...rest}
         className={appendClassName(sx.className, className)}
-        style={sx.style}
+        style={
+          xstyle
+            ? (state) => ({
+                ...sx.style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : sx.style
+        }
       />
     );
   }

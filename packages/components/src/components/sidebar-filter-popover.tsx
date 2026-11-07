@@ -17,13 +17,116 @@ const typography = stylex.create({
   option: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
 });
 
-import { cn } from '@/lib/utils';
 import { Popover } from '@lody/ui/popover';
 import { Button, type ButtonSize } from '@lody/ui/button';
-import { menuGroupLabelClassName, menuSeparatorClassName } from '@/ui/menu-styles';
+import { menuSeparatorClassName, menuStyles } from '@/ui/menu-styles';
 import { Switch } from '@lody/ui/switch';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeRadius, themeSpace } from '../style/theme-scale.stylex';
+
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  content: {
+    width: 'max-content',
+    minWidth: 200,
+    gap: 'calc(var(--spacing) * 0)',
+    padding: 'calc(var(--spacing) * 0.5)',
+  },
+  /** A menu option: the row a person picks an option from. */
+  option: {
+    display: 'flex',
+    minHeight: themeSpace[7],
+    width: '100%',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1],
+    textAlign: 'left',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': {
+        default: 'hsl(var(--foreground) / 0.05)',
+        [DARK_SCOPE]: {
+          '@media (hover: hover)': {
+            default: '#ffffff1a',
+            '@supports (color: color-mix(in lab, red, red))':
+              'color-mix(in oklab, var(--color-white) 10%, transparent)',
+          },
+        },
+      },
+      ':focus-visible': {
+        default: 'hsl(var(--foreground) / 0.05)',
+        [DARK_SCOPE]: {
+          default: '#ffffff1a',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, var(--color-white) 10%, transparent)',
+        },
+      },
+    },
+    color: {
+      default: themeColors.popoverForeground,
+      ':hover': themeColors.foreground,
+      ':focus-visible': themeColors.foreground,
+    },
+  },
+  optionIcon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  optionSpacer: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  optionLabel: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The menu's pre-v2 rhythm, kept on purpose: a heading hugs the rows under
+      it (6px above, 2px below) instead of taking a whole 28px row of its own. */
+  sectionHeading: {
+    minHeight: 0,
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[0.5],
+    fontWeight: 400,
+  },
+  /** The switch counterpart of an option: the same row geometry. */
+  switchRow: {
+    display: 'flex',
+    minHeight: themeSpace[7],
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    paddingBlock: '3px',
+    color: themeColors.popoverForeground,
+  },
+  switchLabel: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    userSelect: 'none',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+  },
+  triggerGlyph: { width: '14px', height: '14px' },
+});
 
 export type { SidebarOrganizeMode, SidebarChatScope };
 
@@ -98,43 +201,29 @@ type MenuOptionProps = {
 };
 
 function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) {
+  const optionProps = stylex.props(styles.option, typography.option);
   return (
     <button
       type="button"
       role="menuitemradio"
       aria-checked={selected}
-      className={cn(
-        'flex min-h-7 w-full select-none items-center gap-2 rounded-md px-2 py-1 text-left text-popover-foreground',
-        stylex.props(typography.option).className,
-        'hover:bg-foreground/[0.05] hover:text-foreground',
-        'focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-hidden',
-        'dark:hover:bg-white/[0.10] dark:focus-visible:bg-white/[0.10]'
-      )}
+      className={optionProps.className}
       onClick={onSelect}
     >
-      <Icon
-        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-        strokeWidth={1.75}
-        aria-hidden="true"
-      />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <Icon {...stylex.props(styles.optionIcon)} strokeWidth={1.75} aria-hidden="true" />
+      <span {...stylex.props(styles.optionLabel)}>{label}</span>
       {selected ? (
-        <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Check {...stylex.props(styles.optionIcon)} aria-hidden="true" />
       ) : (
-        <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span {...stylex.props(styles.optionSpacer)} aria-hidden="true" />
       )}
     </button>
   );
 }
 
-// The menu's pre-v2 rhythm, kept on purpose: a heading hugs the rows under it
-// (6px above, 2px below) instead of taking a whole 28px row of its own.
 function SectionHeading({ children }: { children: ReactNode }) {
-  return (
-    <div className={cn(menuGroupLabelClassName, 'min-h-0 pb-0.5 pt-1.5 font-normal')}>
-      {children}
-    </div>
-  );
+  const headingProps = stylex.props(menuStyles.groupLabel, styles.sectionHeading);
+  return <div className={headingProps.className}>{children}</div>;
 }
 
 // The switch counterpart of {@link MenuOption}: the same row geometry, with a
@@ -155,23 +244,11 @@ function SwitchRow({
   kind: 'project' | 'branch';
 }) {
   const switchId = useId();
+  const labelProps = stylex.props(styles.switchLabel, typography.option);
   return (
-    <div
-      data-sidebar-filter-section-row="details"
-      className="flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px] text-popover-foreground"
-    >
-      <Icon
-        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-        strokeWidth={1.75}
-        aria-hidden="true"
-      />
-      <label
-        htmlFor={switchId}
-        className={cn(
-          'min-w-0 flex-1 select-none truncate cursor-pointer',
-          stylex.props(typography.option).className
-        )}
-      >
+    <div data-sidebar-filter-section-row="details" {...stylex.props(styles.switchRow)}>
+      <Icon {...stylex.props(styles.optionIcon)} strokeWidth={1.75} aria-hidden="true" />
+      <label htmlFor={switchId} className={labelProps.className}>
         {label}
       </label>
       <Switch
@@ -237,7 +314,7 @@ export function SidebarFilterPopover({
               data-state-open={open || undefined}
               className={triggerClassName}
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <SlidersHorizontal {...stylex.props(styles.triggerGlyph)} strokeWidth={1.5} />
             </Button>
           )
         }
@@ -248,7 +325,8 @@ export function SidebarFilterPopover({
         sideOffset={6}
         // A panel sets its children apart with a gap; this is a menu, whose
         // sections are set apart by their headings and separators alone.
-        className={cn('w-max min-w-[200px] gap-0 p-0.5', className)}
+        xstyle={styles.content}
+        className={className}
       >
         <div data-sidebar-filter-section="view">
           <SectionHeading>{merged.organizeHeading}</SectionHeading>

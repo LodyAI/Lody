@@ -41,7 +41,7 @@ export const well = stylex.create({
     backgroundColor: field.background,
     // A text control is always focus-visible, so this covers pointer focus too.
     boxShadow: { default: field.well, ':focus-visible': `${RING}, ${field.well}` },
-    color: field.value,
+    color: { default: field.value, '::placeholder': field.placeholder },
     fontFamily: 'inherit',
     // Controls are 13 at weight 500 with controlTracking; the size step sets
     // the size, this sets the weight and tracking for every control here.
@@ -49,12 +49,11 @@ export const well = stylex.create({
     letterSpacing: text.controlTracking,
     cornerShape: corner.round,
     outlineStyle: 'none',
-    opacity: { default: 1, ':disabled': field.disabledOpacity },
+    opacity: { default: 1, ':disabled': field.disabledOpacity, '::placeholder': 1 },
     cursor: { default: 'auto', ':disabled': 'default' },
     transitionProperty: 'box-shadow, opacity',
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
-    '::placeholder': { color: field.placeholder, opacity: 1 },
   },
   // StyleX keys a conditional value per condition, so the focused case is
   // restated here; otherwise an invalid control would flip back to the accent
@@ -108,15 +107,15 @@ export const well = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: 'transparent',
-    boxShadow: 'none',
-    color: 'inherit',
+    boxShadow: { default: 'none', ':focus': 'none', ':focus-visible': 'none' },
+    color: { default: 'inherit', '::placeholder': field.placeholder },
     fontFamily: 'inherit',
     fontSize: 'inherit',
     fontWeight: 500,
     letterSpacing: text.controlTracking,
     outlineStyle: 'none',
     cursor: { default: 'auto', ':disabled': 'default' },
-    '::placeholder': { color: field.placeholder, opacity: 1 },
+    opacity: { default: null, '::placeholder': 1 },
   },
   /**
    * A glyph sharing a well with the value: a Combobox chevron or cross, a

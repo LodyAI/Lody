@@ -1,9 +1,12 @@
+import { createRef } from 'react';
+
+import { step } from './dom';
 import * as stylex from '@stylexjs/stylex';
 import { act, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ContextMenu } from '../src/menu/context-menu';
-import { Menu } from '../src/menu/menu';
+import { Menu, type MenuContentProps } from '../src/menu/menu';
 import { Menubar } from '../src/menu/menubar';
 import { PopupContainerProvider } from '../src/popup/portal-container';
 
@@ -100,6 +103,62 @@ describe('Menu', () => {
     expect(rowNamed('Rename').hasAttribute('data-highlighted')).toBe(false);
     expect(document.activeElement).toBe(rowNamed('Duplicate'));
   });
+
+  test.each(['menu', 'context'] as const)(
+    '%s bounds preserve the popup, its selected value and positioner ownership',
+    async (kind) => {
+      const Parts = kind === 'menu' ? Menu : ContextMenu;
+      const positionerRef = createRef<HTMLDivElement>();
+      function Subject(bounds: Pick<MenuContentProps, 'minWidth' | 'maxWidth' | 'maxHeight'>) {
+        const [checked, setChecked] = useState(false);
+        const [applied, setApplied] = useState(false);
+        const [open, setOpen] = useState(true);
+        return (
+          <>
+            <output data-bounds-result data-bounds-open={open}>
+              {applied ? 'applied' : 'waiting'}
+            </output>
+            <Parts.Root open={open} onOpenChange={setOpen}>
+              <Parts.Trigger>Bounded actions</Parts.Trigger>
+              <Parts.Content ref={positionerRef} style={{ minWidth: 97 }} {...bounds}>
+                <Parts.CheckboxItem
+                  checked={checked}
+                  onCheckedChange={setChecked}
+                  closeOnClick={false}
+                >
+                  Keep selected
+                </Parts.CheckboxItem>
+                <Parts.Item onClick={() => setApplied(true)}>Apply</Parts.Item>
+              </Parts.Content>
+            </Parts.Root>
+          </>
+        );
+      }
+      mounted = await mount(<Subject minWidth={190} maxWidth={280} maxHeight="8rem" />);
+      const originalPopup = popups()[0]!;
+      const positioner = positionerRef.current!;
+      const checkbox = one('[role="menuitemcheckbox"]');
+      await click(checkbox);
+      expect(checkbox.getAttribute('aria-checked')).toBe('true');
+      for (const bounds of [{ minWidth: 0, maxWidth: 0, maxHeight: 0 }, {}]) {
+        await step(() => mounted!.root.render(<Subject {...bounds} />));
+        expect(popups()[0]).toBe(originalPopup);
+        expect(one('[role="menuitemcheckbox"]')).toBe(checkbox);
+        expect(checkbox.getAttribute('aria-checked')).toBe('true');
+        expect(positionerRef.current).toBe(positioner);
+        expect(positioner.contains(originalPopup)).toBe(true);
+        expect(positioner.style.minWidth).toBe('97px');
+        for (const node of [positioner, originalPopup]) {
+          for (const name of ['minwidth', 'maxwidth', 'maxheight']) {
+            expect(node.hasAttribute(name)).toBe(false);
+          }
+        }
+      }
+      await click(rowNamed('Apply'));
+      expect(one('[data-bounds-result]').textContent).toBe('applied');
+      expect(one('[data-bounds-result]').getAttribute('data-bounds-open')).toBe('false');
+    }
+  );
 });
 
 describe('Menu checkbox and radio rows', () => {

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import {
@@ -5,6 +6,21 @@ import {
   FileTreeStatePanel,
 } from '@/components/sessions/components/file-tree-states';
 import { Button } from '@lody/ui/button';
+const sceneStyles = stylex.create({
+  retryGlyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    height: '560px',
+    width: '320px',
+    overflow: 'hidden',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/FileTreeStates',
@@ -13,7 +29,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="h-[560px] w-[320px] overflow-hidden border border-border bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -67,7 +83,7 @@ export const ErrorWithRetry: Story = {
       description="Permission denied while reading the project directory."
       action={
         <Button variant="secondary" size="small">
-          <RefreshCw className="h-3.5 w-3.5" />
+          <RefreshCw {...stylex.props(sceneStyles.retryGlyph)} />
           Try again
         </Button>
       }

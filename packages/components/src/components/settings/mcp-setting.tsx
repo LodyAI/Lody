@@ -36,7 +36,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 import { McpAuthenticationPanel } from './mcp-authentication-panel';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -285,7 +285,7 @@ export function McpSetting() {
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>

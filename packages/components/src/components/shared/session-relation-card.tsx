@@ -73,6 +73,7 @@ export function SessionRelationCard({
   icon: Icon = GitBranchPlus,
   actionIcon: ActionIcon = ArrowUpRight,
   className,
+  xstyle,
   relation,
   status,
   detail,
@@ -84,6 +85,7 @@ export function SessionRelationCard({
   icon?: ElementType<{ className?: string }>;
   actionIcon?: ElementType<{ className?: string }>;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   relation: 'opened' | 'opened-by';
   status?: ReactNode;
   /** Optional one-glance context under the title (a reply preview, an error). */
@@ -92,7 +94,7 @@ export function SessionRelationCard({
   // One line: the info bar's related-Sessions chip is the persistent index,
   // so the in-stream record only needs what happened, to whom, and a way there.
   return (
-    <div data-session-relation-card={relation} {...withClassName(stylex.props(styles.root), className)}>
+    <div data-session-relation-card={relation} {...withClassName(stylex.props(styles.root, xstyle), className)}>
       <button
         type="button"
         data-session-relation-action

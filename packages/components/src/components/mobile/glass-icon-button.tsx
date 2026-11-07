@@ -1,8 +1,14 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { ChevronLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '@/lib/utils';
+import {
+  themeDuration,
+  themeEasing,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 /**
  * Circular "glass" icon button for the mobile floating session header.
@@ -23,6 +29,66 @@ import { cn } from '@/lib/utils';
  */
 
 type GlassMode = 'light' | 'dark';
+
+const styles = stylex.create({
+  backOffset: { marginInlineStart: '-4px' },
+  backGlyph: { width: '20px', height: '20px' },
+  button: {
+    position: 'relative',
+    display: 'inline-flex',
+    height: themeSpace[11],
+    width: themeSpace[11],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    color: {
+      default: '#1c1c1e',
+      ':is(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing.out,
+    transform: {
+      default: 'none',
+      ':hover': 'scale(1.05)',
+      ':active': 'scale(1.25)',
+    },
+  },
+  disc: {
+    position: 'absolute',
+    pointerEvents: 'none',
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
+    borderRadius: themeRadius.full,
+  },
+  canvas: {
+    opacity: { default: 1, ':is(button:active > *)': 0 },
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  pressed: {
+    opacity: { default: 0, ':is(button:active > *)': 1 },
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing['in-out'],
+    backgroundColor: {
+      default: '#f3f3f5',
+      ':is(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--foreground)) 15%, transparent)',
+    },
+  },
+  content: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'currentColor',
+  },
+});
 
 function resolveMode(): GlassMode {
   if (typeof document === 'undefined') return 'light';
@@ -179,10 +245,11 @@ export const GlassIconButton = forwardRef<
     onClick?: () => void;
     children: ReactNode;
     className?: string;
+    xstyle?: stylex.StyleXStyles;
     /** Visible glass circle diameter; the touch target stays 44px. */
     discSize?: number;
   }
->(function GlassIconButton({ label, onClick, children, className, discSize = 36 }, ref) {
+>(function GlassIconButton({ label, onClick, children, className, xstyle, discSize = 36 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -209,6 +276,9 @@ export const GlassIconButton = forwardRef<
     return () => observer.disconnect();
   }, [discSize]);
 
+  const sx = stylex.props(styles.button, xstyle);
+  const buttonClassName = [sx.className, className].filter(Boolean).join(' ');
+
   return (
     <button
       ref={(node) => {
@@ -219,25 +289,13 @@ export const GlassIconButton = forwardRef<
       type="button"
       aria-label={label}
       onClick={onClick}
-      className={cn(
-        /* Press: scale up slightly; glass fades to a solid disc. */
-        'group relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full',
-        /* Light: one solid near-black for every glyph (matches reference).
-           Dark: soft foreground on the translucent glass. Active overrides
-           (e.g. text-primary) still win via caller className. */
-        'text-[#1c1c1e] dark:text-foreground/90',
-        'transition-transform duration-200 ease-out',
-        'hover:scale-105 active:scale-125',
-        className
-      )}
+      className={buttonClassName}
+      style={sx.style}
     >
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className={cn(
-          'pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full',
-          'transition-opacity duration-200 group-active:opacity-0'
-        )}
+        {...stylex.props(styles.disc, styles.canvas)}
         style={{
           width: discSize,
           height: discSize,
@@ -246,16 +304,10 @@ export const GlassIconButton = forwardRef<
       {/* Pressed solid disc — slightly deeper cool gray than rest fill. */}
       <span
         aria-hidden="true"
-        className={cn(
-          'pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full',
-          'opacity-0 transition-opacity duration-200 group-active:opacity-100',
-          'bg-[#f3f3f5] dark:bg-foreground/15'
-        )}
+        {...stylex.props(styles.disc, styles.pressed)}
         style={{ width: discSize, height: discSize }}
       />
-      <span className="relative inline-flex items-center justify-center text-current [&_svg]:text-current">
-        {children}
-      </span>
+      <span {...stylex.props(styles.content)}>{children}</span>
     </button>
   );
 });
@@ -270,8 +322,12 @@ export function MobileSessionHeaderBackButton({
 }) {
   const { t } = useTranslation();
   return (
-    <GlassIconButton label={label ?? t('common.back', 'Back')} onClick={onBack} className="-ms-1">
-      <ChevronLeft className="h-5 w-5" strokeWidth={1.75} />
+    <GlassIconButton
+      label={label ?? t('common.back', 'Back')}
+      onClick={onBack}
+      className={stylex.props(styles.backOffset).className}
+    >
+      <ChevronLeft {...stylex.props(styles.backGlyph)} strokeWidth={1.75} />
     </GlassIconButton>
   );
 }

@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
+import * as stylex from '@stylexjs/stylex';
 import { LoroAppSidebar } from './loro-app-sidebar';
 import {
   DEFAULT_DESKTOP_SIDEBAR_WIDTH,
@@ -20,7 +21,7 @@ import {
 import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
 import { useVerticalDivision } from './mobile/use-vertical-division';
@@ -37,7 +38,7 @@ const DesktopSidebarContent = memo(function DesktopSidebarContent({
       <LoroAppSidebar
         pauseSidebarSourcesWhenHidden
         overlay={fitDivision}
-        className={cn('h-full transition-shadow duration-150', fitDivision && 'w-full')}
+        xstyle={[styles.desktopSidebar, fitDivision && styles.fitDivision]}
       />
     </ErrorBoundary>
   );
@@ -85,7 +86,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     return (
       <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true })}>
         <WindowDragStrip />
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div {...stylex.props(styles.settingsPane)}>
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
             {children}
           </ErrorBoundary>
@@ -106,6 +107,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     ),
     MAX_DESKTOP_SIDEBAR_WIDTH
   );
+  const rootProps = stylex.props(styles.root);
   // Only use a division when each side can hold its own usable surface.
   const fold =
     !compact &&
@@ -116,10 +118,13 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       : null;
   const visibleSidebarWidth = fold?.left ?? sidebarSlideWidth;
   return (
-    // `bg-sidebar` after the base class: the sidebar's colour is the window's ground.
     <div
       ref={setLayoutRoot}
-      className={cn(getWebWorkspaceLayoutRootClassName(), 'relative bg-sidebar')}
+      {...rootProps}
+      className={clsx(
+        getWebWorkspaceLayoutRootClassName({ surface: 'sidebar' }),
+        rootProps.className
+      )}
     >
       {compact ? (
         <CompactNavigationDialog
@@ -129,13 +134,13 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           returnFocus={returnFocusRef}
         >
           <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-            <LoroAppSidebar overlay className="h-full border-r border-sidebar-border shadow-xl" />
+            <LoroAppSidebar overlay xstyle={styles.overlaySidebar} />
           </ErrorBoundary>
         </CompactNavigationDialog>
       ) : (
         <div
           ref={sidebarRef}
-          className="relative z-10 h-full shrink-0"
+          {...stylex.props(styles.sidebarColumn)}
           style={{
             width: fold ? visibleSidebarWidth : undefined,
             transform: `translateX(${sidebarVisible ? 0 : -visibleSidebarWidth}px)`,
@@ -159,7 +164,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           returnFocusRef.current = event.target;
         }}
         style={fold && !sidebarVisible ? { marginLeft: fold.left + fold.width } : undefined}
-        className="relative flex min-w-0 flex-1 overflow-hidden"
+        className={stylex.props(styles.content).className}
       >
         <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
@@ -169,3 +174,47 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+const styles = stylex.create({
+  fitDivision: { width: '100%' },
+  desktopSidebar: {
+    height: '100%',
+    transitionProperty: 'box-shadow',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+  overlaySidebar: {
+    height: '100%',
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    boxShadow: 'var(--shadow-xl)',
+  },
+  /** The settings route's single pane, under the window drag strip. */
+  settingsPane: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  /** The content pane shrinks beside the sidebar and clips its own viewport. */
+  content: {
+    position: 'relative',
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  /** The layout root: the sidebar's plane, with the content beside it. */
+  root: { position: 'relative' },
+  /** The sidebar's own column, slid out of view when it is closed. */
+  sidebarColumn: {
+    position: 'relative',
+    zIndex: 10,
+    height: '100%',
+    flexShrink: 0,
+  },
+});

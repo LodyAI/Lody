@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
@@ -8,6 +9,10 @@ import {
 } from '@/components/chat/chat-landing-derived';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { mobileWorkspaceBaseContextAtom } from '@/atoms';
+
+const styles = stylex.create({
+  root: { height: '100%' },
+});
 
 export type ChatSearch = ChatLandingSearch;
 
@@ -53,7 +58,7 @@ function ChatRoute() {
   }
 
   return (
-    <div className="h-full" data-window-workspace-ready={workspaceName}>
+    <div {...stylex.props(styles.root)} data-window-workspace-ready={workspaceName}>
       <ChatLanding
         workspaceSlug={workspaceName}
         preSelectedContext={search.context}

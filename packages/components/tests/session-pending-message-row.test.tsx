@@ -285,9 +285,12 @@ describe('PendingMessageRow failure presentation', () => {
     const host = await render(record({ error: REASON, attachments: [readyImage] }));
 
     expect(reasonNodes(host)).toHaveLength(1);
-    expect(
-      host.querySelector('.border-destructive\\/30')?.contains(host.querySelector('img'))
-    ).toBe(false);
+    // The reason is not inside the image's own frame: the image card says
+    // what failed, the row notice says why.
+    const reason = reasonNodes(host)[0];
+    const image = host.querySelector('img');
+    expect(reason?.contains(image)).toBe(false);
+    expect(image?.contains(reason)).toBe(false);
   });
 
   // Image frames match the delivered image and carry no caption, so a failed

@@ -21,9 +21,469 @@ import {
   Search,
 } from 'lucide-react';
 import { cn } from './utils';
+import * as stylex from '@stylexjs/stylex';
 import { WorktreeIcon } from './icons';
 import { MOBILE_LABELS, type ReplicaMobileChat } from './mobile';
 import type { ReplicaLocale, ReplicaPrStatus } from './types';
+
+const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+
+const styles = stylex.create({
+  waitingGlyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  workingStatus: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    animationName: spin,
+    animationTimingFunction: 'linear',
+    animationDuration: '1s',
+    animationIterationCount: 'infinite',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'hsl(var(--primary))',
+    willChange: 'transform',
+  },
+  workingGlyph: {
+    width: '100%',
+    height: '100%',
+  },
+  unreadStatus: {
+    display: 'inline-block',
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    flexShrink: 0,
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'hsl(var(--primary))',
+  },
+  conversationRow: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 'calc(var(--spacing) * 11)',
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    borderWidth: 0,
+    backgroundColor: 'hsl(var(--background))',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+    textAlign: 'left',
+    boxShadow: 'none',
+    outlineStyle: 'none',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  statusSlot: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleSlot: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  conversationTitle: {
+    minWidth: 0,
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '15px',
+    fontWeight: 'var(--font-weight-medium)',
+    lineHeight: '1.375',
+    letterSpacing: '-0.01em',
+    color: 'hsl(var(--foreground))',
+  },
+  diffStats: {
+    flexShrink: 0,
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: '1',
+    letterSpacing: '-0.025em',
+  },
+  additions: {
+    color: 'hsl(var(--github-addition))',
+  },
+  deletions: {
+    marginInlineStart: 'calc(var(--spacing) * 1)',
+    color: 'hsl(var(--github-deletion))',
+  },
+  worktreeGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 55%, transparent)',
+  },
+  home: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    color: 'hsl(var(--foreground))',
+  },
+  homeShell: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  homeHeader: {
+    position: 'relative',
+    zIndex: 30,
+    paddingBottom: 'calc(var(--spacing) * 2)',
+  },
+  headerRow: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  identitySlot: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  identity: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--border)) 50%, transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 12%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+    },
+    color: 'hsl(var(--foreground))',
+  },
+  avatar: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    flexShrink: 0,
+    overflow: 'hidden',
+    borderRadius: 'calc(infinity * 1px)',
+    fontSize: '0.72rem',
+  },
+  avatarImage: {
+    aspectRatio: '1',
+    width: '100%',
+    height: '100%',
+  },
+  searchSlot: {
+    position: 'relative',
+    zIndex: 10,
+    height: 'calc(var(--spacing) * 9)',
+    minWidth: 0,
+    flex: '1',
+    translate: '0 0',
+    opacity: 1,
+    transitionProperty: 'opacity,transform',
+    transitionTimingFunction: 'var(--ease-out)',
+    transitionDuration: '150ms',
+  },
+  search: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'calc(infinity * 1px)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--border)) 50%, transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 12%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+    },
+    paddingInline: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--foreground))',
+  },
+  searchGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  searchInput: {
+    minWidth: 0,
+    flex: '1',
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontSize: '0.82rem',
+    outlineStyle: 'none',
+    '::placeholder': {
+      color: 'hsl(var(--muted-foreground))',
+    },
+  },
+  headerActions: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  main: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 0,
+    flex: '1',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  mainColumn: {
+    display: 'flex',
+    minHeight: 0,
+    flex: '1',
+    flexDirection: 'column',
+  },
+  listScroll: {
+    position: 'relative',
+    zIndex: 0,
+    minHeight: 0,
+    flex: '1',
+    overflowY: 'auto',
+    paddingTop: 'calc(var(--spacing) * 1)',
+    scrollbarGutter: 'auto',
+    paddingBottom: 'calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom, 0px) + 1rem)',
+  },
+  conversationList: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  filterRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 'calc(var(--spacing) * 1.5)',
+    paddingInlineEnd: 'calc(var(--spacing) * 4)',
+    paddingInlineStart: '18px',
+    paddingTop: 'calc(var(--spacing) * 2)',
+  },
+  filterButton: {
+    position: 'relative',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--border)) 50%, transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 12%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+    },
+    color: 'hsl(var(--muted-foreground))',
+  },
+  filterGlyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    color: 'currentColor',
+  },
+  conversationWrapper: {
+    overflow: 'hidden',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  dock: {
+    position: 'fixed',
+    bottom: 'calc(var(--spacing) * 0)',
+    left: 'calc(var(--spacing) * 0)',
+    right: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBottom: 'calc(0.5rem + var(--k-safe-area-bottom, 0px))',
+    paddingTop: 'calc(var(--spacing) * 2)',
+  },
+  dockPill: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 14)',
+    minWidth: 0,
+    flex: '1',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'calc(infinity * 1px)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--foreground))',
+  },
+  chatTab: {
+    position: 'relative',
+    isolation: 'isolate',
+    display: 'inline-flex',
+    height: '100%',
+    flex: '1',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+    borderRadius: 'calc(infinity * 1px)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: '0.72rem',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--primary))',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  activeTab: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    zIndex: 0,
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--primary)) 20%, transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, hsl(var(--primary)) 25%, transparent)',
+    },
+  },
+  chatTabGlyph: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'inline-flex',
+    width: 'calc(var(--spacing) * 6)',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ':is(*) > svg': {
+      height: 'calc(var(--spacing) * 6)',
+      width: 'calc(var(--spacing) * 6)',
+    },
+  },
+  chatGlyph: {
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+  },
+  chatLabel: {
+    position: 'relative',
+    zIndex: 10,
+    lineHeight: '1',
+  },
+  projectTab: {
+    position: 'relative',
+    isolation: 'isolate',
+    display: 'inline-flex',
+    height: '100%',
+    flex: '1',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+    borderRadius: 'calc(infinity * 1px)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: '0.72rem',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground))',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  projectTabGlyph: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'inline-flex',
+    width: 'calc(var(--spacing) * 6)',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ':is(*) > svg': {
+      height: 'calc(var(--spacing) * 6)',
+      width: 'calc(var(--spacing) * 6)',
+    },
+  },
+  projectGlyph: {
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+  },
+  projectLabel: {
+    position: 'relative',
+    zIndex: 10,
+    lineHeight: '1',
+  },
+  newChat: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 14)',
+    width: 'calc(var(--spacing) * 14)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'hsl(var(--foreground))',
+    color: 'hsl(var(--background))',
+    boxShadow: {
+      default: '0 6px 20px -6px rgba(0,0,0,0.28),0 2px 8px -2px rgba(0,0,0,0.16)',
+      ':where(.dark, .dark *)': '0 8px 24px -6px rgba(0,0,0,0.55)',
+    },
+  },
+  newChatGlyph: {
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+  },
+  prOpen: {
+    color: 'hsl(var(--github-open))',
+  },
+  prMerged: {
+    color: 'hsl(var(--github-merged))',
+  },
+  prClosed: {
+    color: 'hsl(var(--github-closed))',
+  },
+  prGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+});
 
 /** Carbon "settings adjust" glyph on the chat-list filter chip. */
 function CarbonSettingsAdjust(props: SVGProps<SVGSVGElement>) {
@@ -38,33 +498,29 @@ function CarbonSettingsAdjust(props: SVGProps<SVGSVGElement>) {
 }
 
 // `text-pr-merged` in the app resolves to --github-merged.
-const PR_ICON: Record<ReplicaPrStatus, { icon: typeof GitPullRequest; className: string }> = {
-  open: { icon: GitPullRequest, className: 'text-github-open' },
-  merged: { icon: GitMerge, className: 'text-github-merged' },
-  closed: { icon: GitPullRequestClosed, className: 'text-github-closed' },
-  draft: { icon: GitPullRequestDraft, className: 'text-github-draft' },
+const PR_ICON: Record<
+  ReplicaPrStatus,
+  { icon: typeof GitPullRequest; xstyle?: stylex.StyleXStyles }
+> = {
+  open: { icon: GitPullRequest, xstyle: styles.prOpen },
+  merged: { icon: GitMerge, xstyle: styles.prMerged },
+  closed: { icon: GitPullRequestClosed, xstyle: styles.prClosed },
+  draft: { icon: GitPullRequestDraft, xstyle: undefined },
 };
 
 function StatusIndicator({ chat }: { chat: ReplicaMobileChat }) {
   if (chat.isWaitingPermission) {
-    return (
-      <Hand className="h-4 w-4 shrink-0 text-status-warning" aria-label="waiting permission" />
-    );
+    return <Hand {...stylex.props(styles.waitingGlyph)} aria-label="waiting permission" />;
   }
   if (chat.isWorking) {
     return (
-      <span
-        className="inline-flex h-4 w-4 shrink-0 animate-spin items-center justify-center text-primary will-change-transform"
-        aria-label="running"
-      >
-        <Loader2 className="size-full" aria-hidden="true" />
+      <span {...stylex.props(styles.workingStatus)} aria-label="running">
+        <Loader2 {...stylex.props(styles.workingGlyph)} aria-hidden="true" />
       </span>
     );
   }
   if (chat.hasUnreadMessages) {
-    return (
-      <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="unread" />
-    );
+    return <span {...stylex.props(styles.unreadStatus)} aria-label="unread" />;
   }
   return null;
 }
@@ -81,34 +537,30 @@ function ConversationRow({ chat }: { chat: ReplicaMobileChat }) {
     <button
       type="button"
       aria-pressed={false}
-      className="mobile-project-conversation-row relative flex min-h-11 w-full items-center gap-2.5 border-0 bg-background px-4 py-2.5 text-left shadow-none outline-none transition-colors"
+      {...stylex.props(styles.conversationRow)}
+      className={cn(
+        stylex.props(styles.conversationRow).className,
+        'mobile-project-conversation-row'
+      )}
     >
-      <div
-        data-conversation-row-leading-slot=""
-        className="flex h-4 w-4 shrink-0 items-center justify-center"
-      >
+      <div data-conversation-row-leading-slot="" {...stylex.props(styles.statusSlot)}>
         <StatusIndicator chat={chat} />
       </div>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate text-[15px] font-medium leading-snug tracking-[-0.01em] text-foreground">
-          {chat.title}
-        </span>
+      <div {...stylex.props(styles.titleSlot)}>
+        <span {...stylex.props(styles.conversationTitle)}>{chat.title}</span>
       </div>
       {hasChanges ? (
-        <span className="shrink-0 text-[11px] tabular-nums leading-none tracking-tight">
-          <span className="text-github-addition">+{chat.addedLines}</span>
-          <span className="ms-1 text-github-deletion">-{chat.deletedLines}</span>
+        <span {...stylex.props(styles.diffStats)}>
+          <span {...stylex.props(styles.additions)}>+{chat.addedLines}</span>
+          <span {...stylex.props(styles.deletions)}>-{chat.deletedLines}</span>
         </span>
       ) : null}
       {chat.isWorktree ? (
-        <WorktreeIcon
-          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/55"
-          aria-label="Worktree"
-        />
+        <WorktreeIcon {...stylex.props(styles.worktreeGlyph)} aria-label="Worktree" />
       ) : null}
       {showPr ? (
         <PrIcon
-          className={cn('h-3.5 w-3.5 shrink-0', pr.className)}
+          {...stylex.props(styles.prGlyph, pr.xstyle)}
           strokeWidth={2.25}
           aria-hidden="true"
         />
@@ -135,34 +587,41 @@ export function ReplicaMobileHomeScreen({
 }) {
   const labels = MOBILE_LABELS[locale];
   return (
-    <div className="mobile-home-app safe-areas relative h-full min-h-0 w-full text-foreground">
-      <div className="mobile-home-shell relative flex h-full w-full flex-col bg-background">
-        <header className="mobile-home-glass relative z-30 pt-safe-2 pb-2 ps-safe-3 pe-safe-3">
-          <div className="relative flex h-9 w-full items-center gap-2">
-            <div className="relative z-10 flex shrink-0 items-center justify-start">
-              <div
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-border/50 bg-muted text-foreground dark:border-white/12 dark:bg-white/10"
-                data-workspace-identity
-              >
-                <span className="relative flex h-7 w-7 shrink-0 overflow-hidden rounded-full text-[0.72rem]">
+    <div
+      {...stylex.props(styles.home)}
+      className={cn(stylex.props(styles.home).className, 'mobile-home-app safe-areas')}
+    >
+      <div
+        {...stylex.props(styles.homeShell)}
+        className={cn(stylex.props(styles.homeShell).className, 'mobile-home-shell')}
+      >
+        <header
+          {...stylex.props(styles.homeHeader)}
+          className={cn(
+            stylex.props(styles.homeHeader).className,
+            'mobile-home-glass pt-safe-2 ps-safe-3 pe-safe-3'
+          )}
+        >
+          <div {...stylex.props(styles.headerRow)}>
+            <div {...stylex.props(styles.identitySlot)}>
+              <div {...stylex.props(styles.identity)} data-workspace-identity>
+                <span {...stylex.props(styles.avatar)}>
                   <img
                     src={workspaceAvatarUrl}
                     alt={workspaceName}
-                    className="aspect-square size-full"
+                    {...stylex.props(styles.avatarImage)}
                   />
                 </span>
               </div>
             </div>
 
-            <div className="relative z-10 h-9 min-w-0 flex-1 translate-y-0 opacity-100 transition-[opacity,transform] duration-150 ease-out">
+            <div {...stylex.props(styles.searchSlot)}>
               <label
-                className={cn(
-                  'mobile-home-header-search flex h-9 w-full min-w-0 items-center gap-1.5 rounded-full border border-border/50 bg-muted px-3 text-foreground',
-                  'dark:border-white/12 dark:bg-white/10'
-                )}
+                {...stylex.props(styles.search)}
+                className={cn(stylex.props(styles.search).className, 'mobile-home-header-search')}
               >
                 <Search
-                  className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                  {...stylex.props(styles.searchGlyph)}
                   strokeWidth={1.8}
                   aria-hidden="true"
                 />
@@ -173,41 +632,39 @@ export function ReplicaMobileHomeScreen({
                   value=""
                   placeholder={labels.searchConversations}
                   aria-label={labels.search}
-                  className="min-w-0 flex-1 border-none bg-transparent text-[0.82rem] outline-none placeholder:text-muted-foreground"
+                  {...stylex.props(styles.searchInput)}
                 />
               </label>
             </div>
 
-            <div className="relative z-10 flex shrink-0 items-center justify-end gap-2" />
+            <div {...stylex.props(styles.headerActions)} />
           </div>
         </header>
 
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col">
+        <div {...stylex.props(styles.main)}>
+          <div {...stylex.props(styles.mainColumn)}>
             <div
               data-mobile-session-list-scroll-region=""
-              className={cn(
-                'mobile-home-list-region relative z-0 min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
-                'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
-              )}
+              {...stylex.props(styles.listScroll)}
+              className={cn(stylex.props(styles.listScroll).className, 'mobile-home-list-region')}
+              data-landing-scroll-region=""
             >
-              <section aria-label={labels.chatTab} className="flex flex-col">
-                <div className="flex w-full items-center justify-end pb-1.5 pe-4 ps-[18px] pt-2">
+              <section aria-label={labels.chatTab} {...stylex.props(styles.conversationList)}>
+                <div {...stylex.props(styles.filterRow)}>
                   <button
                     type="button"
                     aria-label={labels.filters}
                     aria-pressed={false}
-                    className={cn(
-                      'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-                      'border-border/50 bg-muted text-muted-foreground',
-                      'dark:border-white/12 dark:bg-white/10'
-                    )}
+                    {...stylex.props(styles.filterButton)}
                   >
-                    <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
+                    <CarbonSettingsAdjust
+                      {...stylex.props(styles.filterGlyph)}
+                      aria-hidden="true"
+                    />
                   </button>
                 </div>
                 {chats.slice(0, MOBILE_CHAT_PREVIEW_MAX_ROOTS).map((chat) => (
-                  <div key={chat.id} className="overflow-hidden bg-background">
+                  <div key={chat.id} {...stylex.props(styles.conversationWrapper)}>
                     <ConversationRow chat={chat} />
                   </div>
                 ))}
@@ -216,50 +673,56 @@ export function ReplicaMobileHomeScreen({
           </div>
         </div>
 
-        <div className="mobile-workspace-dock fixed bottom-0 left-0 right-0 z-30 flex items-end justify-between gap-3 px-4 pb-[calc(0.5rem+var(--k-safe-area-bottom,0px))] pt-2">
+        <div
+          {...stylex.props(styles.dock)}
+          className={cn(stylex.props(styles.dock).className, 'mobile-workspace-dock')}
+        >
           <div
             role="tablist"
             aria-label={labels.chatTab}
-            className="mobile-workspace-tab-pill mobile-tabbar-glass relative flex h-14 min-w-0 flex-1 items-center justify-around gap-1 rounded-full px-2 py-1.5 text-foreground"
+            {...stylex.props(styles.dockPill)}
+            className={cn(
+              stylex.props(styles.dockPill).className,
+              'mobile-workspace-tab-pill mobile-tabbar-glass'
+            )}
           >
             <button
               type="button"
               role="tab"
               aria-selected
-              className="mobile-workspace-tab relative isolate inline-flex h-full flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-2 py-1 text-[0.72rem] font-medium text-primary transition-colors"
+              {...stylex.props(styles.chatTab)}
+              className={cn(stylex.props(styles.chatTab).className, 'mobile-workspace-tab')}
             >
-              <span
-                aria-hidden="true"
-                className="absolute inset-0 z-0 rounded-full bg-primary/20 dark:bg-primary/25"
-              />
-              <span className="relative z-10 inline-flex size-6 shrink-0 items-center justify-center [&>svg]:h-6 [&>svg]:w-6">
-                <MessageCircle className="h-6 w-6" strokeWidth={1.75} />
+              <span aria-hidden="true" {...stylex.props(styles.activeTab)} />
+              <span {...stylex.props(styles.chatTabGlyph)}>
+                <MessageCircle {...stylex.props(styles.chatGlyph)} strokeWidth={1.75} />
               </span>
-              <span className="relative z-10 leading-none">{labels.chatTab}</span>
+              <span {...stylex.props(styles.chatLabel)}>{labels.chatTab}</span>
             </button>
             <button
               type="button"
               role="tab"
               aria-selected={false}
-              className="mobile-workspace-tab relative isolate inline-flex h-full flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-2 py-1 text-[0.72rem] font-medium text-muted-foreground transition-colors"
+              {...stylex.props(styles.projectTab)}
+              className={cn(stylex.props(styles.projectTab).className, 'mobile-workspace-tab')}
             >
-              <span className="relative z-10 inline-flex size-6 shrink-0 items-center justify-center [&>svg]:h-6 [&>svg]:w-6">
-                <Folders className="h-6 w-6" strokeWidth={1.75} />
+              <span {...stylex.props(styles.projectTabGlyph)}>
+                <Folders {...stylex.props(styles.projectGlyph)} strokeWidth={1.75} />
               </span>
-              <span className="relative z-10 leading-none">{labels.projectsTab}</span>
+              <span {...stylex.props(styles.projectLabel)}>{labels.projectsTab}</span>
             </button>
           </div>
           <button
             type="button"
             aria-label={labels.newChat}
-            className={cn(
-              'mobile-workspace-new-chat inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full',
-              'bg-foreground text-background',
-              'shadow-[0_6px_20px_-6px_rgba(0,0,0,0.28),0_2px_8px_-2px_rgba(0,0,0,0.16)]',
-              'dark:shadow-[0_8px_24px_-6px_rgba(0,0,0,0.55)]'
-            )}
+            {...stylex.props(styles.newChat)}
+            className={cn(stylex.props(styles.newChat).className, 'mobile-workspace-new-chat')}
           >
-            <PencilLine className="h-6 w-6" strokeWidth={1.85} aria-hidden="true" />
+            <PencilLine
+              {...stylex.props(styles.newChatGlyph)}
+              strokeWidth={1.85}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>

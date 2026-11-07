@@ -37,7 +37,7 @@ export default defineConfig(async () => {
 
   if (!isStorybook) {
     const { tanstackRouter } = await import('@tanstack/router-plugin/vite');
-    plugins.splice(2, 0, tanstackRouter({ target: 'react', autoCodeSplitting: true }));
+    plugins.splice(0, 0, tanstackRouter({ target: 'react', autoCodeSplitting: true }));
   }
 
   return {

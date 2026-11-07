@@ -1,5 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { fn } from 'storybook/test';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
@@ -17,6 +18,28 @@ import {
   type MobileInboxItem,
   type MobileProjectsSubTab,
 } from '@/components/mobile/mobile-home-screen';
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
 
 const meta = {
   title: 'Mobile/MobileHomeScreen',
@@ -202,6 +225,7 @@ function MobileHomeScreenStory({
   showInboxTab = false,
   inboxItems: inboxItemsProp = [],
   workspaceSwitcher = false,
+  projectActions = false,
 }: {
   theme: 'ios' | 'material';
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
@@ -224,14 +248,16 @@ function MobileHomeScreenStory({
   showInboxTab?: boolean;
   inboxItems?: MobileInboxItem[];
   workspaceSwitcher?: boolean;
+  projectActions?: boolean;
 }) {
+  const [projectAction, setProjectAction] = useState('none');
   const [selectedTab, setSelectedTab] = useState<MobileHomeTab>(initialTab);
   const [selectedProjectsSubTab, setSelectedProjectsSubTab] =
     useState<MobileProjectsSubTab>('local');
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <MobileHomeScreen
           theme={theme}
           workspace={{ id: 'lody', name: workspaceName }}
@@ -310,6 +336,8 @@ function MobileHomeScreenStory({
           onWorkspaceSelect={fn()}
           onWorkspaceMenuOpen={workspaceSwitcher ? fn() : undefined}
           onTabSelect={setSelectedTab}
+          onAddLocalProject={projectActions ? () => setProjectAction('local') : undefined}
+          onAddGitHubRepository={projectActions ? () => setProjectAction('github') : undefined}
           onLocalProjectSelect={fn()}
           onGitHubRepositorySelect={fn()}
           onChatSelect={fn()}
@@ -317,6 +345,7 @@ function MobileHomeScreenStory({
           onNewChat={fn()}
           onboardingDownloadUrl="https://lody.ai/download"
         />
+        {projectActions ? <output data-project-action={projectAction} hidden /> : null}
       </div>
     </div>
   );
@@ -363,6 +392,25 @@ export const IOS: Story = {
     chats,
   },
   render: () => <MobileHomeScreenStory theme="ios" />,
+};
+
+export const OwnedHeaderControls: Story = {
+  args: IOS.args,
+  render: () => (
+    <div
+      data-owned-home-controls=""
+      className="dark-scope"
+      style={{ '--color-white': '#93c5fd' } as CSSProperties}
+    >
+      <MobileHomeScreenStory
+        theme="ios"
+        crowdedHeader
+        workspaceSwitcher
+        chats={chats.slice(1, 3)}
+        githubRepositories={[]}
+      />
+    </div>
+  ),
 };
 
 /** A synthetic, non-square logo makes both the cover fit and circular crop visible. */
@@ -452,6 +500,21 @@ export const TeamPrivateProjects: Story = {
         ...project,
         isPrivate: index < 2,
       }))}
+    />
+  ),
+};
+
+/** Real Add/Help sheet entrances; existing stories keep their omitted action callbacks. */
+export const SafeAreaSheets: Story = {
+  ...TeamPrivateProjects,
+  render: () => (
+    <MobileHomeScreenStory
+      theme="ios"
+      initialTab="projects"
+      showInboxTab
+      projectActions
+      machines={machines.map((machine, index) => ({ ...machine, isPrivate: index === 0 }))}
+      localProjects={localProjects.map((project, index) => ({ ...project, isPrivate: index < 2 }))}
     />
   ),
 };

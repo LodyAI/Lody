@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import { Provider, createStore } from 'jotai';
@@ -8,6 +9,46 @@ import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/worksp
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
+const storyCallerStyles = stylex.create({
+  sheetOverride: {
+    overflow: 'visible',
+    borderTopLeftRadius: 'var(--radius-xl)',
+    borderTopRightRadius: 'var(--radius-xl)',
+    borderBottomRightRadius: 'var(--radius-md)',
+    borderBottomLeftRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '2px',
+    borderColor: 'var(--color-red-500)',
+    backgroundColor: 'var(--color-blue-100)',
+    boxShadow:
+      '0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(2px + 0px) var(--color-green-600), 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+    backgroundColor: 'hsl(var(--composer))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+  },
+});
+
+const storyLayout = stylex.create({
+  canvas: {
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  section: {
+    'margin-inline': 'calc(var(--spacing) * 3)',
+  },
+});
 
 const TASKS = [
   'Refactor the message queue to support priority ordering and cancellation tokens',
@@ -46,17 +87,15 @@ const meta = {
   },
   decorators: [
     (Story, ctx) => {
-      const width = (ctx.parameters as { containerWidth?: string }).containerWidth ?? 'w-[420px]';
+      const width = (ctx.parameters as { containerWidth?: string | number }).containerWidth ?? 420;
       // Mirror production: the sheet is inset over a faux composer and sits on it.
       return (
-        <div className="bg-background p-6">
-          <div className={`${width}`}>
-            <div className="mx-3">
+        <div {...stylex.props(storyLayout.canvas)}>
+          <div style={{ width }}>
+            <div {...stylex.props(storyLayout.section)}>
               <Story />
             </div>
-            <div className="rounded-xl border border-foreground/[0.10] bg-[hsl(var(--composer))] px-3 py-3 text-xs text-muted-foreground/60">
-              Composer placeholder
-            </div>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Composer placeholder</div>
           </div>
         </div>
       );
@@ -105,7 +144,7 @@ export const MobileWidth: Story = {
     items: makeItems(3),
   },
   parameters: {
-    containerWidth: 'w-[320px]',
+    containerWidth: 320,
   },
 };
 
@@ -174,7 +213,7 @@ export const ScheduledSectionWide: Story = {
     items: makeItems(2),
     scheduledItems,
   },
-  parameters: { containerWidth: 'w-[720px]' },
+  parameters: { containerWidth: 720 },
 };
 
 export const ScheduledOnly: Story = {
@@ -196,7 +235,7 @@ export const ScheduledSectionMobile: Story = {
     footerPosition: 'inline',
   },
   decorators: mobileDecorator,
-  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
+  parameters: { containerWidth: 'calc(100vw - 48px)' },
 };
 
 export const ScheduledOnlyMobile: Story = {
@@ -209,7 +248,7 @@ export const ScheduledOnlyMobile: Story = {
     footerPosition: 'inline',
   },
   decorators: mobileDecorator,
-  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
+  parameters: { containerWidth: 'calc(100vw - 48px)' },
 };
 
 export const EditingFirstItem: Story = {
@@ -420,4 +459,139 @@ export const CollapsedWithUploads: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: /Up next/ }));
   },
+};
+
+const ownedScopeVariables = {
+  '--composer': '210 35% 88%',
+  '--foreground': '270 55% 31%',
+  '--input': '32 58% 72%',
+  '--input-border': '315 60% 38%',
+  '--border': '155 56% 33%',
+  '--radius-lg': '17px',
+} as const;
+
+const callerStyles = stylex.create({
+  sheet: {
+    backgroundColor: 'rgb(230, 205, 180)',
+    borderColor: 'rgb(115, 45, 85)',
+    borderWidth: '3px',
+    borderRadius: '21px',
+    overflow: 'visible',
+  },
+});
+
+function OwnedQueueFixture({
+  scope = 'default',
+  caller = 'none',
+  count = 10,
+  rowFooter = false,
+}: {
+  scope?: 'default' | 'root' | 'subtree';
+  caller?: 'none' | 'utilities' | 'opaque';
+  count?: number;
+  rowFooter?: boolean;
+}) {
+  const [items, setItems] = useState(() => makeItems(count));
+  const [result, setResult] = useState('Ready');
+  useLayoutEffect(() => {
+    if (scope !== 'root') return undefined;
+    const previous = Object.keys(ownedScopeVariables).map((key) => [
+      key,
+      document.documentElement.style.getPropertyValue(key),
+      document.documentElement.style.getPropertyPriority(key),
+    ]);
+    for (const [key, value] of Object.entries(ownedScopeVariables)) {
+      document.documentElement.style.setProperty(key, value);
+    }
+    return () => {
+      for (const [key, value, priority] of previous) {
+        if (key && value) document.documentElement.style.setProperty(key, value, priority);
+        else if (key) document.documentElement.style.removeProperty(key);
+      }
+    };
+  }, [scope]);
+  return (
+    <div
+      data-owned-queue-fixture=""
+      style={scope === 'subtree' ? (ownedScopeVariables as CSSProperties) : undefined}
+    >
+      <MessageQueueDisplay
+        {...commonArgs}
+        items={items}
+        renderItemFooter={
+          rowFooter
+            ? (item) => (
+                <span data-owned-queue-row-footer="" tabIndex={0}>
+                  Synthetic metadata for {item.$cid}
+                </span>
+              )
+            : undefined
+        }
+        xstyle={
+          caller === 'utilities'
+            ? storyCallerStyles.sheetOverride
+            : caller === 'opaque'
+              ? callerStyles.sheet
+              : undefined
+        }
+        onRemove={(cid) => {
+          setItems((rows) => rows.filter((row) => row.$cid !== cid));
+          setResult(`Removed ${cid}`);
+        }}
+        onEditStart={(item) => {
+          setItems((rows) => rows.map((row) => ({ ...row, isEditing: row.$cid === item.$cid })));
+          setResult(`Editing ${item.$cid}`);
+        }}
+        onEditCancel={(item) => {
+          setItems((rows) => rows.map((row) => ({ ...row, isEditing: false })));
+          setResult(`Cancelled ${item.$cid}`);
+        }}
+        onEditSave={(item, task) => {
+          setItems((rows) =>
+            rows.map((row) => (row.$cid === item.$cid ? { ...row, task, isEditing: false } : row))
+          );
+          setResult(`Saved ${task}`);
+        }}
+        onReorder={(activeCid, overCid) => setResult(`Reordered ${activeCid} ${overCid}`)}
+        onSteer={(item) => setResult(`Steered ${item.$cid}`)}
+      />
+      <output data-owned-queue-result="">{result}</output>
+    </div>
+  );
+}
+
+type OwnedQueueStory = StoryObj<typeof OwnedQueueFixture>;
+
+const ownedParameters = { containerWidth: 'min(420px,calc(100vw - 48px))' };
+export const OwnedDefault: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture />,
+};
+export const OwnedRootVariables: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture scope="root" />,
+};
+export const OwnedSubtreeVariables: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture scope="subtree" />,
+};
+export const OwnedUtilityCaller: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture caller="utilities" />,
+};
+export const OwnedOpaqueCaller: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture caller="opaque" />,
+};
+
+export const OwnedRowFooter: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => (
+    <div {...stylex.props(stylex.defaultMarker())} data-unrelated-queue-marker="">
+      <button type="button" data-unrelated-queue-control="">
+        Unrelated outer marker target
+      </button>
+      <OwnedQueueFixture count={3} rowFooter />
+    </div>
+  ),
 };

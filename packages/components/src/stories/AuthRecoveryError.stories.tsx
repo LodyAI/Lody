@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
@@ -20,6 +21,39 @@ import { SessionTabBar } from '@/components/sessions/session-tab-bar';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import type { SessionHistoryParsed, SessionMeta } from '@lody/shared';
+const sceneStyles = stylex.create({
+  fill: { height: '100%' },
+  content: {
+    marginInline: 'auto',
+    marginBottom: 'calc(var(--spacing) * 4)',
+    width: '100%',
+    maxWidth: '48rem',
+    paddingInline: 'calc(var(--spacing) * 4)',
+  },
+  failureTrigger: {
+    position: 'fixed',
+    right: 'calc(var(--spacing) * 4)',
+    top: 'calc(var(--spacing) * 4)',
+    zIndex: 50,
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  element: {
+    position: 'relative',
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+  },
+});
 
 const session = {
   id: 'auth-recovery-story-session',
@@ -81,7 +115,7 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
   return (
     <PlatformContext.Provider value={platform}>
       <AuthRecoveryEntryProvider notice={recovery}>
-        <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+        <div {...stylex.props(storyLayout.row)}>
           <LoroSidebar
             workspaceName="Lody"
             userEmail="zixuan@lody.dev"
@@ -128,9 +162,9 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
             onSchedulesClicked={fn()}
           />
           <WorkspaceCard>
-            <main className="relative min-w-0 flex-1 overflow-hidden">
+            <main {...stylex.props(storyLayout.element)}>
               <SessionConversationPage
-                className="h-full"
+                xstyle={sceneStyles.fill}
                 subHeaderSlot={
                   <SessionTabBar
                     variant="session"
@@ -178,7 +212,7 @@ function RealWorkspace({ recovery }: { recovery?: ReactNode }) {
                           onPromptChange={setDraft}
                           promptPlaceholder="Message the agent…"
                           primaryAction={<Button size="small">Send</Button>}
-                          className="mx-auto mb-4 w-full max-w-3xl px-4"
+                          {...stylex.props(sceneStyles.content)}
                         />
                       </>
                     }
@@ -282,7 +316,7 @@ export const FailureWhileTyping: Story = {
           }
         />
         {!failed ? (
-          <Button className="fixed right-4 top-4 z-50" size="small" onClick={() => setFailed(true)}>
+          <Button xstyle={sceneStyles.failureTrigger} size="small" onClick={() => setFailed(true)}>
             Simulate recovery failure
           </Button>
         ) : null}

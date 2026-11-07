@@ -112,11 +112,18 @@ for (const { story, label, working } of [
     await expect(activity).toBeInViewport();
     await expect(page.locator('[data-message-selection-scroll]')).toHaveCount(0);
     const activityPresentation = () =>
-      activity.evaluate((element) => ({
-        shimmer:
-          window.getComputedStyle(element, '::after').animationName === 'agent-shimmer-sweep',
-        warning: element.classList.contains('text-status-warning'),
-      }));
+      activity.evaluate((element) => {
+        const reference = document.createElement('span');
+        reference.style.color = 'hsl(var(--status-warning) / 1)';
+        element.append(reference);
+        const warningColor = getComputedStyle(reference).color;
+        reference.remove();
+        return {
+          shimmer:
+            window.getComputedStyle(element, '::after').animationName === 'agent-shimmer-sweep',
+          warning: getComputedStyle(element).color === warningColor,
+        };
+      });
     expect(await activityPresentation()).toEqual({ shimmer: working, warning: !working });
 
     const toggleActivity = page.getByRole('button', { name: 'Toggle activity', exact: true });

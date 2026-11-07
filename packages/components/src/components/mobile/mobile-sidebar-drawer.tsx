@@ -9,8 +9,78 @@ import {
 } from 'react';
 import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { canUseSidebarSwipeOpenGesture } from '@/lib/native-platform';
-import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeEasing, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  edgeZone: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 30,
+    width: themeSpace[7],
+  },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgb(0 0 0 / 0.6)',
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  scrimInteractive: {
+    pointerEvents: 'auto',
+  },
+  scrimIdle: {
+    pointerEvents: 'none',
+  },
+  container: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 40,
+    overflow: 'hidden',
+    visibility: 'hidden',
+  },
+  containerVisible: {
+    visibility: 'visible',
+  },
+  containerInteractive: {
+    pointerEvents: 'auto',
+    visibility: 'visible',
+  },
+  panel: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    display: 'flex',
+    height: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
+    backgroundColor: themeColors.background,
+    boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.25)',
+  },
+  panelBody: {
+    minHeight: 0,
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+});
 
 const EDGE_SWIPE_ZONE_PX = 28;
 const OPEN_THRESHOLD_RATIO = 0.42;
@@ -186,7 +256,7 @@ export function resolveMobileDrawerWidth(preferredWidth: number, viewportWidth: 
 }
 
 export function getMobileSidebarDrawerPanelClassName(): string {
-  return 'absolute inset-y-0 left-0 flex h-full min-w-0 overflow-hidden border-r bg-background shadow-2xl';
+  return stylex.props(styles.panel).className ?? '';
 }
 
 export function MobileSidebarDrawer({
@@ -481,7 +551,7 @@ export function MobileSidebarDrawer({
     <>
       {!open && swipeOpenEnabled && (
         <div
-          className="absolute inset-y-0 left-0 z-30 w-7 touch-pan-y"
+          {...stylex.props(styles.edgeZone)}
           style={{ touchAction: 'pan-y' }}
           onTouchStart={handleEdgeTouchStart}
           onTouchMove={handleEdgeTouchMove}
@@ -491,9 +561,9 @@ export function MobileSidebarDrawer({
       )}
 
       <div
-        className={cn(
-          'pointer-events-none absolute inset-0 z-40 overflow-hidden',
-          isInteractive ? 'pointer-events-auto visible' : isPresent ? 'visible' : 'invisible'
+        {...stylex.props(
+          styles.container,
+          isInteractive ? styles.containerInteractive : isPresent ? styles.containerVisible : false
         )}
         role={isInteractive ? 'dialog' : undefined}
         aria-modal={isInteractive ? true : undefined}
@@ -503,20 +573,20 @@ export function MobileSidebarDrawer({
         <motion.button
           type="button"
           aria-label={t('sidebar.closeNavigationMenu', 'Close navigation menu')}
-          className={cn(
-            'absolute inset-0 bg-black/60 transition-opacity',
-            isInteractive ? 'pointer-events-auto' : 'pointer-events-none'
+          {...stylex.props(
+            styles.scrim,
+            isInteractive ? styles.scrimInteractive : styles.scrimIdle
           )}
           style={{ opacity: overlayOpacity }}
           onClick={() => onOpenChange(false)}
         />
 
         <motion.aside
-          className={getMobileSidebarDrawerPanelClassName()}
+          {...stylex.props(styles.panel)}
           style={{ width, maxWidth: '80vw', x: drawerX }}
         >
           {/* Let long sidebar content shrink inside the drawer instead of leaking past the 80vw cap. */}
-          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+          <div {...stylex.props(styles.panelBody)}>{children}</div>
         </motion.aside>
       </div>
     </>

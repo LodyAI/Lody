@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
@@ -22,6 +23,32 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'flex-start',
+    'background-color': 'var(--color-stone-950)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 /**
  * The mobile composer's consolidated run-config bottom sheet, opened by
@@ -202,11 +229,11 @@ function StoryShell({
 
   return (
     <Provider store={store}>
-      <div className="flex min-h-dvh flex-col items-center justify-start bg-stone-950 p-6">
+      <div {...stylex.props(storyLayout.stack)}>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="rounded-md border border-border/60 bg-background px-3 py-1.5 text-sm text-foreground"
+          {...stylex.props(storyLayoutStyles.canvas)}
         >
           Open run config
         </button>

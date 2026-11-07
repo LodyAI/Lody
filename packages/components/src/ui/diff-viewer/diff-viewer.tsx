@@ -30,7 +30,7 @@ import { FileIcon } from '@/components/icons/file-icons';
 import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
 import { getDiffPerfNow, isDiffPerfEnabled, logDiffPerfDurationLazy } from '@/lib/diff-perf';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DEFAULT_VSCODE_DIFF_THEME_FALLBACK } from '@/lib/vscode-theme';
 import { parseDiffInWorker, parseDiffTextSourceInWorker } from '@/lib/diff-parse-worker';
@@ -53,6 +53,141 @@ import { SessionCommentAddButton } from './session-comment-add-button';
 import { isCommentableDiffLineType } from './session-comment-line';
 import { EMPTY_COMMENT_REFERENCE_KEYS } from '@/components/chat/comment-reference-state';
 import { DiffFileHeaderActions } from './diff-file-header-actions';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const expand = stylex.keyframes({
+  from: { height: 0 },
+  to: { height: 'var(--radix-collapsible-content-height)' },
+});
+const collapse = stylex.keyframes({
+  from: { height: 'var(--radix-collapsible-content-height)' },
+  to: { height: 0 },
+});
+
+const styles = stylex.create({
+  fullWidth: { width: '100%' },
+  toggleGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    rotate: { default: null, ':is([data-state="closed"] *)': '-90deg' },
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+  },
+  status: { paddingInline: themeSpace[4], paddingBlock: themeSpace[3] },
+  statusTitle: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  statusDetail: {
+    marginTop: themeSpace[1],
+    overflowWrap: 'break-word',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  hoverUtility: { display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  diffHost: { width: '100%', backgroundColor: themeColors.background },
+  headerless: { fontSize: '0.8rem', width: '100%', minHeight: themeSpace[8] },
+  chrome: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    fontSize: '0.8rem',
+    minHeight: 'calc(var(--spacing) * 8)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 12%, transparent)',
+      ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
+        'hsl(var(--border) / 1)',
+    },
+    boxShadow: '0 1px 2px hsl(0 0% 0% / .04)',
+  },
+  defaultHeader: {
+    height: 'calc(var(--spacing) * 8)',
+    insetInline: 'calc(var(--spacing) * 0)',
+    borderRadius: 0,
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingLeft: 'calc(var(--spacing) * 1)',
+    paddingRight: 'calc(var(--spacing) * 4)',
+  },
+  defaultHeaderOpen: {
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
+      ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
+        'hsl(var(--border) / 1)',
+    },
+  },
+  customContent: {
+    animationName: {
+      default: null,
+      ':is([data-state="open"])': expand,
+      ':is([data-state="closed"])': collapse,
+    },
+    animationDuration: '.2s',
+    animationTimingFunction: 'ease-out',
+    overflow: 'hidden',
+    height: { default: null, ':is([data-state="closed"])': 0 },
+  },
+  flushBody: { paddingBottom: 0 },
+  fileIcon: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0 },
+  pathRow: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  path: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+  },
+  commentCount: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  commentGlyph: { width: themeSpace[3], height: themeSpace[3] },
+  stats: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  addition: { color: 'hsl(var(--github-addition))' },
+  deletion: { color: 'hsl(var(--github-deletion))' },
+});
 
 /** Minimum container width (in pixels) to auto-switch to split view */
 const SPLIT_VIEW_MIN_WIDTH = 1024;
@@ -94,7 +229,9 @@ const viewportStyles = stylex.create({
   placeholder: (height: number) => ({ height }),
 });
 type DiffLineEnterProps = Parameters<
-  NonNullable<NonNullable<FileDiffProps<CommentAnnotationMeta, undefined>['options']>['onLineEnter']>
+  NonNullable<
+    NonNullable<FileDiffProps<CommentAnnotationMeta, undefined>['options']>['onLineEnter']
+  >
 >[0];
 type DiffLineClickHandler = NonNullable<
   NonNullable<FileDiffProps<CommentAnnotationMeta, undefined>['options']>['onLineClick']
@@ -124,7 +261,7 @@ const MemoizedFileDiff = memo(
         lineAnnotations={lineAnnotations}
         renderAnnotation={renderAnnotation}
         renderGutterUtility={renderGutterUtility}
-        className="w-full"
+        className={stylex.props(styles.fullWidth).className}
       />
     );
   },
@@ -262,6 +399,9 @@ export interface DiffViewerProps {
    * Class name for the container
    */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
+  headerXstyle?: stylex.StyleXStyles;
+  contentXstyle?: stylex.StyleXStyles;
   /**
    * Whether to show the collapsible header
    * @default true
@@ -401,8 +541,8 @@ function createParsedDiffCacheKey(
 function CollapseToggle({ className }: { className?: string }) {
   return (
     <Collapsible.Trigger asChild>
-      <Button variant="ghost" size="mini" icon className={cn('shrink-0', className)}>
-        <ChevronDown className="h-4 w-4 transition-transform duration-200 [[data-state=closed]_&]:-rotate-90" />
+      <Button variant="ghost" size="mini" icon className={className}>
+        <ChevronDown {...stylex.props(styles.toggleGlyph)} />
       </Button>
     </Collapsible.Trigger>
   );
@@ -412,11 +552,11 @@ function DiffViewerErrorState({ message }: { message: string }) {
   const { t } = useTranslation();
 
   return (
-    <div className="px-4 py-3">
-      <div className="text-sm font-medium text-foreground">
+    <div {...stylex.props(styles.status)}>
+      <div {...stylex.props(styles.statusTitle)}>
         {t('sessions.fileDiff.unavailable', 'Diff unavailable')}
       </div>
-      <div className="mt-1 break-words text-xs text-muted-foreground">{message}</div>
+      <div {...stylex.props(styles.statusDetail)}>{message}</div>
     </div>
   );
 }
@@ -425,11 +565,11 @@ function DiffViewerLoadingState({ path }: { path: string }) {
   const { t } = useTranslation();
 
   return (
-    <div className="px-4 py-3">
-      <div className="text-sm font-medium text-foreground">
+    <div {...stylex.props(styles.status)}>
+      <div {...stylex.props(styles.statusTitle)}>
         {t('sessions.fileDiff.preparingLargeDiff', 'Preparing diff')}
       </div>
-      <div className="mt-1 break-words text-xs text-muted-foreground">
+      <div {...stylex.props(styles.statusDetail)}>
         {t(
           'sessions.fileDiff.preparingLargeDiffDescription',
           'The diff for {{path}} is being parsed off the main thread.',
@@ -490,6 +630,9 @@ function DiffViewerImpl({
   diffStyle,
   responsiveSplit = false,
   className,
+  xstyle,
+  headerXstyle,
+  contentXstyle,
   showHeader = true,
   // stickyHeader remains on DiffViewerProps for API compatibility, but sticky is
   // forced off below so overflow-hidden can clip the rounded card border.
@@ -675,7 +818,11 @@ function DiffViewerImpl({
     const publishParsed = (parsed: FileDiffMetadata) => {
       if (cancelled) return;
       const fileDiff = retainStandaloneContext
-        ? restoreParsedFileDiffContext(parsed, oldText.split(SPLIT_WITH_NEWLINES), newText.split(SPLIT_WITH_NEWLINES))
+        ? restoreParsedFileDiffContext(
+            parsed,
+            oldText.split(SPLIT_WITH_NEWLINES),
+            newText.split(SPLIT_WITH_NEWLINES)
+          )
         : parsed;
       if (parsedDiffCacheKey !== null) {
         writeParsedDiffCache(parsedDiffCacheKey, fileDiff);
@@ -870,8 +1017,9 @@ function DiffViewerImpl({
     return total;
   }, [fileDiff]);
 
-  const defaultLineDiffType: NonNullable<FileDiffProps<undefined, undefined>['options']>['lineDiffType'] =
-    changedLinePairCount > MAX_WORD_LEVEL_LINE_DIFF_PAIRS ? 'none' : 'word';
+  const defaultLineDiffType: NonNullable<
+    FileDiffProps<undefined, undefined>['options']
+  >['lineDiffType'] = changedLinePairCount > MAX_WORD_LEVEL_LINE_DIFF_PAIRS ? 'none' : 'word';
   const diffRenderWorkerOptions = useMemo<WorkerInitializationRenderOptions>(
     () => ({
       lineDiffType: defaultLineDiffType,
@@ -1016,7 +1164,7 @@ function DiffViewerImpl({
         return null;
       }
       return (
-        <div className="flex h-full items-center justify-center">
+        <div {...stylex.props(styles.hoverUtility)}>
           <SessionCommentAddButton
             onClick={() => startDraft(hovered.side as DiffCommentSide, hovered.lineNumber)}
           />
@@ -1183,7 +1331,7 @@ function DiffViewerImpl({
       ref={diffHostRef}
       onPointerDownCapture={() => setKeepContentMounted(true)}
       onFocusCapture={() => setKeepContentMounted(true)}
-      className="lody-pierre-diff w-full bg-background"
+      className={clsx('lody-pierre-diff', stylex.props(styles.diffHost).className)}
       style={pierreDiffHostStyle}
     >
       {diffContent}
@@ -1193,7 +1341,11 @@ function DiffViewerImpl({
   // No header mode - just render the diff content
   if (!showHeader && !renderHeader) {
     return (
-      <div ref={containerRef} className={cn('text-[0.8rem] w-full min-h-8', className)}>
+      <div
+        ref={containerRef}
+        className={clsx(stylex.props(styles.headerless, xstyle).className, className)}
+        style={stylex.props(styles.headerless, xstyle).style}
+      >
         {diffContentContainer}
       </div>
     );
@@ -1203,11 +1355,6 @@ function DiffViewerImpl({
   // stronger edge than default --border (≈90% L), which vanishes on white.
   // Always overflow-hidden so full-bleed addition rows clip to rounded corners
   // without painting over the border.
-  const diffCardChromeClass = cn(
-    'relative flex min-h-8 w-full flex-col overflow-hidden rounded-xl bg-background text-[0.8rem]',
-    'border border-foreground/[0.12] dark:border-border',
-    'shadow-[0_1px_2px_hsl(0_0%_0%/0.04)]'
-  );
 
   // Custom header mode - user provides their own header with CollapseToggle
   if (renderHeader) {
@@ -1217,11 +1364,12 @@ function DiffViewerImpl({
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
         defaultOpen={isControlledOpen ? undefined : defaultOpen}
-        className={cn(diffCardChromeClass, className)}
+        className={clsx(stylex.props(styles.chrome, xstyle).className, className)}
+        style={stylex.props(styles.chrome, xstyle).style}
       >
         {renderHeader({ fileName, path, additions, deletions, CollapseToggle })}
-        <Collapsible.Content className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up data-[state=closed]:h-0">
-          <div className="pb-0">{diffContentContainer}</div>
+        <Collapsible.Content className={stylex.props(styles.customContent).className}>
+          <div {...stylex.props(styles.flushBody)}>{diffContentContainer}</div>
         </Collapsible.Content>
       </Collapsible.Root>
     );
@@ -1229,11 +1377,12 @@ function DiffViewerImpl({
 
   // Default header mode - use CollapsibleCard
   return (
-    <div ref={containerRef} className="w-full">
+    <div ref={containerRef} {...stylex.props(styles.fullWidth)}>
       <CollapsibleCard
         data-section-id="diff-viewer"
         id="diff-viewer"
-        className={cn(diffCardChromeClass, className)}
+        xstyle={[styles.chrome, xstyle]}
+        className={className}
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
         defaultOpen={isControlledOpen ? undefined : defaultOpen}
@@ -1245,35 +1394,34 @@ function DiffViewerImpl({
         <CollapsibleCardHeader
           sticky={false}
           position="relative"
-          className={cn(
-            'inset-x-0 h-8 rounded-none bg-background pl-1 pr-4',
-            // Separator only when open — collapsed cards must not stack border-b
-            // on the outer bottom edge (dirty corner AA).
-            isOpen && 'border-b border-foreground/[0.08] dark:border-border'
-          )}
+          xstyle={[styles.defaultHeader, isOpen && styles.defaultHeaderOpen, headerXstyle]}
         >
-          <FileIcon filePath={path} className="h-4 w-4 shrink-0" />
-          <div className="flex min-w-0 flex-1 items-center gap-1">
-            <span className="min-w-0 truncate text-sm text-foreground/90" title={path}>
+          <FileIcon filePath={path} className={stylex.props(styles.fileIcon).className} />
+          <div {...stylex.props(styles.pathRow)}>
+            <span {...stylex.props(styles.path)} title={path}>
               {path}
             </span>
             <DiffFileHeaderActions path={path} onOpenFile={onOpenFile} />
           </div>
           {commentCount > 0 && (
-            <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <MessageSquare className="h-3 w-3" />
+            <div {...stylex.props(styles.commentCount)}>
+              <MessageSquare {...stylex.props(styles.commentGlyph)} />
               <span>{commentCount}</span>
             </div>
           )}
           {(additions > 0 || deletions > 0) && (
-            <div className="flex shrink-0 items-center gap-1.5 text-xs">
-              {additions > 0 && <span className="text-github-addition">+{additions}</span>}
-              {deletions > 0 && <span className="text-github-deletion">-{deletions}</span>}
+            <div {...stylex.props(styles.stats)}>
+              {additions > 0 && <span {...stylex.props(styles.addition)}>+{additions}</span>}
+              {deletions > 0 && <span {...stylex.props(styles.deletion)}>-{deletions}</span>}
             </div>
           )}
         </CollapsibleCardHeader>
         {/* No bottom padding: green/red last rows meet the clipped card edge. */}
-        <CollapsibleCardContent noInternalScroll className="pb-0">
+        <CollapsibleCardContent
+          noInternalScroll
+          xstyle={styles.flushBody}
+          containerXstyle={contentXstyle}
+        >
           {diffContentContainer}
         </CollapsibleCardContent>
       </CollapsibleCard>
@@ -1294,6 +1442,9 @@ const areDiffViewerPropsEqual = (prev: DiffViewerProps, next: DiffViewerProps): 
   prev.diffStyle === next.diffStyle &&
   prev.responsiveSplit === next.responsiveSplit &&
   prev.className === next.className &&
+  prev.xstyle === next.xstyle &&
+  prev.headerXstyle === next.headerXstyle &&
+  prev.contentXstyle === next.contentXstyle &&
   prev.showHeader === next.showHeader &&
   prev.stickyHeader === next.stickyHeader &&
   prev.cachePrerenderedHtml === next.cachePrerenderedHtml &&

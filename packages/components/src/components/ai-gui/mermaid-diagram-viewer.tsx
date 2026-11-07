@@ -11,7 +11,9 @@ import { createPortal } from 'react-dom';
 import { Maximize, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
+import { themeSpace } from '../../style/theme-scale.stylex';
 import { WINDOW_CAPTION_CLEAR_TOP } from '@/ui/window-drag-region';
 
 /**
@@ -94,8 +96,13 @@ function measureTouchGesture(
  * `size="icon"` is 36px square. The viewer's controls sit at the top edge of a
  * phone screen, where the shared size is under the 44px touch-target floor
  * (iOS HIG / WCAG 2.5.5) that this whole fix is about.
+ *
+ * The primitive's dimension and labelColor props own the box and ink; padding
+ * and the local zoom readout style own padding and typography. Reset zoom keeps
+ * automatic width above its minimum.
  */
-const CONTROL_CLASS_NAME = 'h-11 w-11 shrink-0 text-muted-foreground';
+const CONTROL_SIZE = 'calc(var(--spacing) * 11)';
+const CONTROL_LABEL_COLOR = 'hsl(var(--muted-foreground) / 1)';
 
 /**
  * Inline rather than a utility class because an inline `padding-left` would
@@ -105,6 +112,58 @@ const CONTROL_CLASS_NAME = 'h-11 w-11 shrink-0 text-muted-foreground';
 const SAFE_AREA_RIGHT = 'calc(0.25rem + var(--safe-area-right, env(safe-area-inset-right, 0px)))';
 const SAFE_AREA_BOTTOM = 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))';
 const SAFE_AREA_LEFT = 'calc(0.25rem + var(--safe-area-left, env(safe-area-inset-left, 0px)))';
+
+const styles = stylex.create({
+  viewer: {
+    position: 'fixed',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background) / 0.95)',
+    backdropFilter: 'blur(4px)',
+  },
+  zoomReadout: {
+    minWidth: 'calc(var(--spacing) * 11)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  controls: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1],
+  },
+  glyph: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+  },
+  surface: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'auto',
+    overscrollBehavior: 'contain',
+  },
+  canvas: {
+    display: 'grid',
+    minHeight: '100%',
+    minWidth: '100%',
+    boxSizing: 'border-box',
+    padding: themeSpace[4],
+  },
+  host: {
+    flexShrink: 0,
+    cursor: 'grab',
+    ':active': { cursor: 'grabbing' },
+  },
+});
 
 export type MermaidDiagramSelection = {
   /**
@@ -638,13 +697,13 @@ function OpenMermaidDiagramViewer({
       aria-modal="true"
       aria-label={t('sessions.diagramViewer.title', 'Diagram')}
       data-testid="mermaid-diagram-viewer"
-      className="fixed inset-0 flex flex-col bg-background/95 backdrop-blur-xs"
+      {...stylex.props(styles.viewer)}
       // The app's own scale, not a bare `z-50`: a diagram opened from a message
       // inside a dialog has to land above that dialog.
       style={{ zIndex: 'var(--z-image-viewer, 95)' }}
     >
       <div
-        className="flex shrink-0 items-center justify-end gap-1"
+        {...stylex.props(styles.controls)}
         style={{
           paddingTop: WINDOW_CAPTION_CLEAR_TOP,
           paddingLeft: SAFE_AREA_LEFT,
@@ -655,36 +714,45 @@ function OpenMermaidDiagramViewer({
           type="button"
           variant="ghost"
           icon
-          className={CONTROL_CLASS_NAME}
+          height={CONTROL_SIZE}
+          width={CONTROL_SIZE}
+          labelColor={CONTROL_LABEL_COLOR}
           onClick={() => zoomBy(1 / MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom <= MERMAID_DIAGRAM_MIN_ZOOM}
           title={zoomOutLabel}
           aria-label={zoomOutLabel}
         >
-          <ZoomOut className="h-5 w-5" />
+          <ZoomOut {...stylex.props(styles.glyph)} />
         </Button>
         <Button
           type="button"
           variant="ghost"
           icon
-          className={cn(CONTROL_CLASS_NAME, 'w-auto min-w-11 px-2 font-mono text-xs tabular-nums')}
+          height={CONTROL_SIZE}
+          width="auto"
+          fontSize="var(--text-xs)"
+          lineHeight="var(--text-xs--line-height)"
+          labelColor={CONTROL_LABEL_COLOR}
+          xstyle={styles.zoomReadout}
           onClick={resetZoom}
           title={resetZoomLabel}
           aria-label={resetZoomLabel}
         >
-          {zoomLabel || <Maximize className="h-5 w-5" />}
+          {zoomLabel || <Maximize {...stylex.props(styles.glyph)} />}
         </Button>
         <Button
           type="button"
           variant="ghost"
           icon
-          className={CONTROL_CLASS_NAME}
+          height={CONTROL_SIZE}
+          width={CONTROL_SIZE}
+          labelColor={CONTROL_LABEL_COLOR}
           onClick={() => zoomBy(MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom >= MERMAID_DIAGRAM_MAX_ZOOM}
           title={zoomInLabel}
           aria-label={zoomInLabel}
         >
-          <ZoomIn className="h-5 w-5" />
+          <ZoomIn {...stylex.props(styles.glyph)} />
         </Button>
         <Button
           ref={closeRef}
@@ -692,18 +760,20 @@ function OpenMermaidDiagramViewer({
           variant="ghost"
           icon
           data-testid="mermaid-diagram-viewer-close"
-          className={CONTROL_CLASS_NAME}
+          height={CONTROL_SIZE}
+          width={CONTROL_SIZE}
+          labelColor={CONTROL_LABEL_COLOR}
           onClick={onClose}
           title={closeLabel}
           aria-label={closeLabel}
         >
-          <X className="h-5 w-5" />
+          <X {...stylex.props(styles.glyph)} />
         </Button>
       </div>
       <div
         ref={scrollRef}
         data-testid="mermaid-diagram-viewer-surface"
-        className="scrollbar-pro min-h-0 flex-1 overflow-auto overscroll-contain"
+        className={clsx('scrollbar-pro', stylex.props(styles.surface).className)}
         style={{
           paddingBottom: SAFE_AREA_BOTTOM,
           paddingLeft: SAFE_AREA_LEFT,
@@ -720,13 +790,13 @@ function OpenMermaidDiagramViewer({
         onPointerCancel={handlePointerEnd}
       >
         <div
-          className="grid min-h-full min-w-full box-border p-4"
+          {...stylex.props(styles.canvas)}
           // `safe center` keeps a diagram centred while it fits and falls back
           // to the start edge as soon as it overflows, so both ends remain
           // reachable through the scroll surface.
           style={{ placeItems: 'safe center' }}
         >
-          <div ref={hostRef} className="shrink-0 cursor-grab active:cursor-grabbing" />
+          <div ref={hostRef} {...stylex.props(styles.host)} />
         </div>
       </div>
     </div>

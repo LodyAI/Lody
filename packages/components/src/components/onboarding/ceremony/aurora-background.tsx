@@ -1,6 +1,16 @@
 import { Water } from '@paper-design/shaders-react';
+import * as stylex from '@stylexjs/stylex';
 
 const BACKDROP_MAX_PIXELS = 1280 * 720;
+
+const styles = stylex.create({
+  /** The shader fills the box it is given. */
+  fill: { position: 'absolute', inset: 0 },
+  /** The light layer over the shader. */
+  light: { position: 'absolute', inset: 0 },
+  /** The grid drawn over the light. */
+  grid: { position: 'absolute', inset: 0, opacity: 0.1 },
+});
 
 export type CeremonyBackgroundProps = {
   opacity?: number;
@@ -30,7 +40,7 @@ export function CeremonyBackground({
       style={{ width: '100%', height: '100%', overflow: 'hidden', opacity, ...style }}
     >
       <Water
-        className="absolute inset-0"
+        {...stylex.props(styles.fill)}
         style={{ width: '100%', height: '100%' }}
         colorBack="#dce5e7"
         colorHighlight="#fbffff"
@@ -49,7 +59,7 @@ export function CeremonyBackground({
       />
       <div
         aria-hidden
-        className="absolute inset-0"
+        {...stylex.props(styles.light)}
         style={{
           backgroundImage:
             'radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%), radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%), linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06))',
@@ -57,7 +67,7 @@ export function CeremonyBackground({
       />
       <div
         aria-hidden
-        className="absolute inset-0 opacity-[0.1]"
+        {...stylex.props(styles.grid)}
         style={{
           backgroundImage: 'linear-gradient(90deg, rgba(25,58,68,.28) 1px, transparent 1px)',
           backgroundSize: '88px 100%',

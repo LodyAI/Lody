@@ -20,7 +20,16 @@ import {
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { Spinner } from '@/ui/spinner';
 import type {
@@ -64,6 +73,7 @@ const ROW_HOVER = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
 const LIST_MAX_HEIGHT = 'min(52vh, 420px)';
 
 const styles = stylex.create({
+  mobileSheet: { height: '92dvh', maxHeight: '92dvh' },
   srOnly: {
     position: 'absolute',
     width: '1px',
@@ -166,7 +176,7 @@ const styles = stylex.create({
   },
   machineRowDisabled: {
     backgroundColor: { default: REGION, ':hover': REGION },
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
   },
   machineText: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
@@ -299,7 +309,7 @@ const styles = stylex.create({
   },
   entryRowDisabled: {
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
   },
   entryName: { flexGrow: 1 },
@@ -1022,10 +1032,10 @@ export function AddLocalProjectDialog({
           // the top (already above the keyboard), and each step decides what to
           // do with its footer — browse lets the keyboard cover it (and disables
           // Add), confirm lifts its action with `mb-[--native-keyboard-height]`.
-          className="h-[92dvh] max-h-[92dvh]"
+          xstyle={styles.mobileSheet}
         >
-          <DrawerTitle className="sr-only">{a11yTitle}</DrawerTitle>
-          <DrawerDescription className="sr-only">{a11yDescription}</DrawerDescription>
+          <DrawerTitle visuallyHidden>{a11yTitle}</DrawerTitle>
+          <DrawerDescription visuallyHidden>{a11yDescription}</DrawerDescription>
           <MobileAddLocalProjectFlow
             machines={machines}
             machinesLoading={machinesLoading}

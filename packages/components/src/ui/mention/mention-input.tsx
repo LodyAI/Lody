@@ -1,10 +1,10 @@
+import { clsx } from 'clsx';
 import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
-import { cn } from '@/lib/utils';
 import {
   applyTextEditToMentions,
   areMentionsEqual,
@@ -21,7 +21,11 @@ import { type Mention, useMentionContext } from './mention-root';
 
 const INPUT_NAME = 'MentionInput';
 
-const styles = stylex.create({
+const inputStyles = stylex.create({
+  container: { position: 'relative' },
+  input: { position: 'relative', backgroundColor: 'transparent' },
+  caret: { zIndex: 10 },
+  raisedCaret: { zIndex: 30 },
   mirroredInput: {
     // The native control owns editing and the caret, never visible text.
     WebkitTextFillColor: 'transparent',
@@ -142,13 +146,16 @@ function constrainCaretToMentionBoundary(input: InputElement, mentions: readonly
 
 interface MentionInputProps extends React.ComponentPropsWithoutRef<typeof Primitive.textarea> {
   containerClassName?: string;
+  xstyle?: stylex.StyleXStyles;
+  containerXstyle?: stylex.StyleXStyles;
   highlighterClassName?: string;
 }
 
 const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, forwardedRef) => {
   const context = useMentionContext(INPUT_NAME);
   const composedRef = useComposedRefs(forwardedRef, context.inputRef);
-  const { containerClassName, highlighterClassName, ...inputProps } = props;
+  const { containerClassName, containerXstyle, xstyle, highlighterClassName, ...inputProps } =
+    props;
   const pendingSelectionFromRoot = context.pendingSelection;
   const onPendingSelectionFromRootChange = context.onPendingSelectionChange;
   const inputRef = context.inputRef;
@@ -881,8 +888,18 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     onMentionUpdate(inputElement);
   }, [context, onMentionUpdate]);
 
+  const containerStyles = stylex.props(inputStyles.container, containerXstyle);
+  const textareaStyles = stylex.props(
+    inputStyles.input,
+    inputStyles.caret,
+    hideNativeText && inputStyles.mirroredInput,
+    xstyle
+  );
   return (
-    <div className={cn('relative', containerClassName)}>
+    <div
+      className={clsx(containerStyles.className, containerClassName)}
+      style={containerStyles.style}
+    >
       <Primitive.textarea
         role="combobox"
         id={context.inputId}
@@ -900,15 +917,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         {...inputProps}
         ref={composedRef}
         value={renderedInputValue}
-        className={cn(
-          'relative',
-          'z-10',
-          hideNativeText && stylex.props(styles.mirroredInput).className,
-          inputProps.className,
-          'bg-transparent'
-        )}
-        style={inputProps.style}
-        // Native spelling decorations can repaint glyphs above the mirror.
+        className={clsx(textareaStyles.className, inputProps.className)}
+        style={{ ...textareaStyles.style, ...inputProps.style }}
         spellCheck={mirrorText ? false : inputProps.spellCheck}
         onBeforeInput={composeEventHandlers(inputProps.onBeforeInput, onBeforeInput)}
         onChange={composeEventHandlers(inputProps.onChange, onChange)}

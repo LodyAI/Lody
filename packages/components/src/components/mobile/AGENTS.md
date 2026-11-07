@@ -31,7 +31,7 @@ before touching gestures.
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` (>= `EDGE_ZONE_PX`, pinned by
   `tests/assistant-turn-action-inset.test.ts`) with a duration label nothing may
   precede, whose width survives an unknown duration.
-- Full-screen right drawers need `border-l-0!`; plain `border-0` loses to Vaul.
+- Full-screen right drawers clear the left edge in their direction styles.
 
 ## Home and chat lists
 

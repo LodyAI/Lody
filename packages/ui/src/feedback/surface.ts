@@ -287,7 +287,26 @@ export const feedbackSurface = stylex.create({
     cornerShape: corner.shape,
   },
   skeletonBlock: { borderRadius: radius.medium, cornerShape: corner.shape },
+  skeletonBar: {
+    height: text.bodyLeading,
+    borderTopLeftRadius: '3px',
+    borderTopRightRadius: '3px',
+    borderBottomLeftRadius: radius.mini,
+    borderBottomRightRadius: radius.mini,
+    cornerShape: corner.shape,
+  },
+  skeletonTile: { borderRadius: '20%', cornerShape: corner.shape },
+  skeletonInline: { display: 'inline-block' },
   skeletonCircle: { borderRadius: radius.full, cornerShape: corner.round },
+  skeletonRing: {
+    aspectRatio: '1 / 1',
+    borderWidth: '2px',
+    borderStyle: 'solid',
+    borderColor: feedback.skeleton,
+    backgroundColor: 'transparent',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+  },
 
   /**
    * The spinner, in `currentColor`: it takes the ink of whatever holds it, so a

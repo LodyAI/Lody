@@ -1,5 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SkillMarkdownFallback } from '@/components/settings/skill-markdown';
+const storyLayout = stylex.create({
+  frame: {
+    width: '640px',
+    'max-width': '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const CONTENT = [
   '# Konsta UI Design Guide',
@@ -22,7 +31,7 @@ const CONTENT = [
 ].join('\n');
 
 function Frame({ children }: { children: React.ReactNode }) {
-  return <div className="w-[640px] max-w-full bg-background p-6">{children}</div>;
+  return <div {...stylex.props(storyLayout.frame)}>{children}</div>;
 }
 
 const meta = {

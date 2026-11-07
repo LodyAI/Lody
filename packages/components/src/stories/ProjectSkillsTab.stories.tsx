@@ -1,9 +1,18 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
   ProjectSkillsView,
   type ProjectSkillsViewProps,
 } from '@/components/settings/project-skills-tab';
 import type { ProjectSkillResolvedGroup } from '@/hooks/use-project-skills';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 /* Fixed timestamp so the "updated … ago" relative label is deterministic
    across screenshots (Date.now() is intentionally avoided). */
@@ -133,7 +142,7 @@ const LOADED_GROUPS: ProjectSkillResolvedGroup[] = [
 ];
 
 function Frame({ children }: { children: React.ReactNode }) {
-  return <div className="w-[720px] max-w-full bg-background p-4">{children}</div>;
+  return <div {...stylex.props(storyLayout.frame)}>{children}</div>;
 }
 
 const meta = {

@@ -1,9 +1,11 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import {
   type MentionFileSourceKind,
   type MentionSurface,
@@ -721,6 +723,7 @@ export interface CombinedMentionTextareaProps extends Omit<
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
+  containerXstyle?: stylex.StyleXStyles;
   /** Let the input fill a flex-column parent (the full-height chat sheet). */
   fillHeight?: boolean;
   /** Full-height composers dock the mobile mention panel above their footer. */
@@ -793,6 +796,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       value,
       onValueChange,
       containerClassName,
+      containerXstyle,
       mentionValues: mentionValuesProp,
       onMentionValuesChange,
       label = 'Message',
@@ -808,6 +812,9 @@ export const CombinedMentionTextarea = React.forwardRef<
       draftKey,
       mentionActionsRef,
       className,
+      xstyle,
+      focusRing,
+      appearance = 'well',
       fillHeight = false,
       mentionPanelPlacement,
       ...props
@@ -1075,13 +1082,29 @@ export const CombinedMentionTextarea = React.forwardRef<
           onChange={(event) => {
             onValueChange(event.target.value);
           }}
-          className={cn('resize-none', fillHeight && 'min-h-0 flex-1', className)}
+          className={className}
+          focusRing={focusRing}
+          appearance={appearance}
+          xstyle={[
+            styles.input,
+            appearance === 'bare' && styles.bareDisabled,
+            fillHeight && styles.fillRoot,
+            xstyle,
+          ]}
           aria-label={props['aria-label'] ?? label}
           {...props}
+          resize="none"
         />
       );
 
-      return containerClassName ? <div className={containerClassName}>{textarea}</div> : textarea;
+      const wrapper = stylex.props(containerXstyle);
+      return containerClassName || containerXstyle ? (
+        <div className={clsx(wrapper.className, containerClassName)} style={wrapper.style}>
+          {textarea}
+        </div>
+      ) : (
+        textarea
+      );
     }
 
     return (
@@ -1108,7 +1131,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         onFilter={(options) => options}
         autoCloseOnEmpty={false}
         loop
-        className={cn('w-full', fillHeight && 'min-h-0 flex-1')}
+        {...stylex.props(styles.root, fillHeight && styles.fillRoot)}
       >
         <React.Fragment key={hydrationKey}>
           <FileMentionHydrator
@@ -1156,14 +1179,18 @@ export const CombinedMentionTextarea = React.forwardRef<
             </>
           ) : null}
         </React.Fragment>
-        <MentionLabel className="sr-only">{label}</MentionLabel>
+        <MentionLabel xstyle={styles.label}>{label}</MentionLabel>
         <MentionInput
           ref={ref}
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
-          containerClassName={cn(containerClassName, fillHeight && 'h-full')}
-          className={cn('resize-none', fillHeight && 'h-full', className)}
+          containerClassName={containerClassName}
+          containerXstyle={[fillHeight && styles.fillHeight, containerXstyle]}
+          className={className}
+          appearance={appearance}
+          focusRing={focusRing}
+          xstyle={[styles.input, fillHeight && styles.fillHeight, xstyle]}
           {...props}
         />
         <TwoLevelMentionMenu
@@ -1201,3 +1228,21 @@ export const CombinedMentionTextarea = React.forwardRef<
 );
 
 CombinedMentionTextarea.displayName = 'CombinedMentionTextarea';
+
+const styles = stylex.create({
+  fillRoot: { minHeight: 0, flex: '1 1 0%' },
+  fillHeight: { height: '100%' },
+  input: { resize: 'none' },
+  bareDisabled: { opacity: { default: 1, ':disabled': control.disabledOpacity } },
+  root: { width: '100%' },
+  label: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});

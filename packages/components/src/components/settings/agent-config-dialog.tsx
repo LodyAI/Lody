@@ -274,7 +274,7 @@ const styles = stylex.create({
   railItem: { gap: '10px', fontSize: '13px' },
   railItemNarrow: { paddingBlock: '10px', fontSize: '15px' },
   railItemDisabled: {
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
   },
@@ -3537,8 +3537,10 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         noAnimation={isNarrowLayout}
         style={isNarrowLayout ? PANEL_STYLE_NARROW : PANEL_STYLE}
       >
-        <Dialog.Title className="sr-only">{dialogTitle}</Dialog.Title>
-        <Dialog.Description className="sr-only">
+        <Dialog.Title className={stylex.props(catalog.srOnly).className}>
+          {dialogTitle}
+        </Dialog.Title>
+        <Dialog.Description className={stylex.props(catalog.srOnly).className}>
           {t(
             'settings.agent.dialog.a11yDescription',
             'Choose an agent type on the left and fill in the configuration on the right.'

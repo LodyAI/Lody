@@ -7,13 +7,14 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
 import { Switch } from '@lody/ui/switch';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/toast';
@@ -36,6 +37,111 @@ import { GitHubPersonalIdentitySettingsCard } from '@/components/settings/integr
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
+import { mobileSurface } from './surface';
+
+const styles = stylex.create({
+  foldPage: { height: '100%', minHeight: 0, paddingTop: 0, paddingBottom: 0 },
+  unfoldPage: { paddingBottom: '24px', paddingTop: '4px' },
+
+  spinnerInk: { color: 'hsl(var(--muted-foreground) / 1)' },
+  searchInput: {
+    borderRadius: 'var(--radius-md)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--input-field) / 1)',
+    paddingLeft: 'calc(var(--spacing) * 9)',
+    boxShadow: { default: 'none', ':focus-visible': 'none' },
+  },
+
+  /** The page: the sections stacked, set apart by the page's own rhythm. */
+  page: {
+    display: 'flex',
+    flexDirection: 'column',
+    paddingBottom: themeSpace[6],
+    paddingTop: themeSpace[1],
+  },
+  /** The identity tile, in the accent's stronger wash. */
+  identityTileStrong: { backgroundColor: 'hsl(var(--primary) / 0.15)' },
+  /** The identity's name, in the ink of the page. */
+  identityName: { color: themeColors.foreground },
+  /** The panel the personal-identity card sits in, under its row. */
+  identityPanel: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: themeColors.border,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[3],
+  },
+  /** The search field's row, at the top of the repositories card. */
+  searchBar: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: themeColors.border,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  searchField: { position: 'relative' },
+  searchIcon: {
+    position: 'absolute',
+    left: themeSpace[3],
+    top: '50%',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    transform: 'translateY(-50%)',
+    color: themeColors.mutedForeground,
+  },
+  /** The list is still loading. */
+  notice: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[6],
+    fontSize: '0.9rem',
+    color: themeColors.mutedForeground,
+  },
+  /** The list has nothing to show. */
+  emptyNotice: {
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[6],
+    fontSize: '0.9rem',
+    color: themeColors.mutedForeground,
+  },
+  /** A repository's row: its mark and its name. */
+  repoIdentity: { display: 'flex', alignItems: 'center', gap: themeSpace[2], minWidth: 0 },
+  repoIdentityDisabled: { opacity: control.disabledOpacity },
+  repoIcon: {
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  /** The note under the card, with the way to fix it. */
+  hint: {
+    marginInline: themeSpace[5],
+    marginTop: themeSpace[2],
+    fontSize: '0.78rem',
+    lineHeight: 1.625,
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  hintLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[0.5],
+    color: 'hsl(var(--foreground) / 0.8)',
+    textUnderlineOffset: '2px',
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+  },
+  hintIcon: { height: themeSpace[3], width: themeSpace[3] },
+  /** The arrow inside a button. */
+  buttonArrow: { height: themeSpace[3.5], width: themeSpace[3.5] },
+});
 import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
 
@@ -322,7 +428,7 @@ function MobileCloudIntegrationsSettings() {
   ]);
 
   return (
-    <div id="github" className={cn('flex flex-col', fold ? 'h-full min-h-0' : 'pb-6 pt-1')}>
+    <div id="github" {...stylex.props(styles.page, fold ? styles.foldPage : styles.unfoldPage)}>
       <MobileSettingsFoldPanels
         upper={
           <>
@@ -334,11 +440,11 @@ function MobileCloudIntegrationsSettings() {
               <MobileSettingsRowGroup>
                 <MobileSettingsRow
                   label={
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/[0.15] text-primary">
-                        <Github className="h-[1.05rem] w-[1.05rem]" />
+                    <div {...stylex.props(mobileSurface.identity)}>
+                      <div {...stylex.props(mobileSurface.identityTile, styles.identityTileStrong)}>
+                        <Github {...stylex.props(mobileSurface.identityGlyph)} />
                       </div>
-                      <span className="truncate text-[0.95rem] font-medium text-foreground">
+                      <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
                         GitHub App
                       </span>
                     </div>
@@ -353,9 +459,13 @@ function MobileCloudIntegrationsSettings() {
                       }}
                       disabled={showGitHubConnectSpinner || !workspaceAuthReady}
                     >
-                      {showGitHubConnectSpinner ? <Spinner className="h-3.5 w-3.5" /> : null}
+                      {showGitHubConnectSpinner ? (
+                        <Spinner diameter="calc(var(--spacing) * 3.5)" />
+                      ) : null}
                       {t('settings.integrations.github.connect')}
-                      {!showGitHubConnectSpinner ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
+                      {!showGitHubConnectSpinner ? (
+                        <ArrowUpRight {...stylex.props(styles.buttonArrow)} />
+                      ) : null}
                     </Button>
                   ) : undefined}
                 </MobileSettingsRow>
@@ -382,7 +492,10 @@ function MobileCloudIntegrationsSettings() {
                   )}
                 >
                   {updatingPersonalPreference ? (
-                    <Spinner className="h-4 w-4 text-muted-foreground" />
+                    <Spinner
+                      diameter="calc(var(--spacing) * 4)"
+                      className={stylex.props(styles.spinnerInk).className}
+                    />
                   ) : (
                     <Switch
                       checked={personalIdentityEnabled}
@@ -401,7 +514,7 @@ function MobileCloudIntegrationsSettings() {
                 </MobileSettingsRow>
               </MobileSettingsRowGroup>
               {personalIdentityEnabled ? (
-                <div className="border-t border-border px-3 py-3">
+                <div {...stylex.props(styles.identityPanel)}>
                   <GitHubPersonalIdentitySettingsCard
                     enabled={personalIdentityEnabled}
                     authorizationState={personalAuthorizationState}
@@ -449,33 +562,33 @@ function MobileCloudIntegrationsSettings() {
               }
             >
               {repos.length > 5 ? (
-                <div className="border-b border-border px-3 py-2">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <div {...stylex.props(styles.searchBar)}>
+                  <div {...stylex.props(styles.searchField)}>
+                    <Search {...stylex.props(styles.searchIcon)} />
                     <Input
                       type="search"
                       value={repoSearch}
                       onChange={(event) => setRepoSearch(event.target.value)}
                       placeholder={t('repos.search')}
-                      className="rounded-md border border-input-border/70 bg-input-field pl-9 shadow-none"
+                      xstyle={styles.searchInput}
                     />
                   </div>
                 </div>
               ) : null}
               {workspaceReposLoading ? (
-                <div className="flex items-center justify-center gap-2 px-4 py-6 text-[0.9rem] text-muted-foreground">
-                  <Spinner className="h-4 w-4" />
+                <div {...stylex.props(styles.notice)}>
+                  <Spinner diameter="calc(var(--spacing) * 4)" />
                   {t('settings.integrations.github.loading')}
                 </div>
               ) : repos.length === 0 ? (
-                <div className="px-4 py-6 text-[0.9rem] text-muted-foreground">
+                <div {...stylex.props(styles.emptyNotice)}>
                   {t(
                     'settings.integrations.github.noAuthorizedRepos',
                     'No repositories authorized yet. Install the GitHub App to get started.'
                   )}
                 </div>
               ) : filteredRepos.length === 0 ? (
-                <div className="px-4 py-6 text-[0.9rem] text-muted-foreground">
+                <div {...stylex.props(styles.emptyNotice)}>
                   {t('settings.integrations.github.noRepos')}
                 </div>
               ) : (
@@ -483,11 +596,16 @@ function MobileCloudIntegrationsSettings() {
                   {filteredRepos.map((repo) => (
                     <MobileSettingsRow
                       key={repo.repoFullName}
-                      className={cn((!canManage || !workspaceAuthReady) && 'opacity-60')}
+
                       label={
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Book className="h-4 w-4 shrink-0 opacity-70" />
-                          <span className="truncate text-[0.95rem] font-medium text-foreground">
+                        <div
+                          {...stylex.props(
+                            styles.repoIdentity,
+                            (!canManage || !workspaceAuthReady) && styles.repoIdentityDisabled
+                          )}
+                        >
+                          <Book {...stylex.props(styles.repoIcon)} />
+                          <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
                             {repo.repoFullName}
                           </span>
                           {repo.private && (
@@ -509,13 +627,13 @@ function MobileCloudIntegrationsSettings() {
               )}
             </MobileSettingsSection>
 
-            <p className="mx-5 mt-2 text-[0.78rem] leading-relaxed text-muted-foreground/80">
+            <p {...stylex.props(styles.hint)}>
               {t('settings.integrations.github.missingReposHint')}{' '}
               <a
                 href="https://github.com/settings/installations"
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-0.5 text-foreground/80 underline-offset-2 hover:underline"
+                {...stylex.props(styles.hintLink)}
                 onClick={(event) => {
                   if (isElectronRenderer()) {
                     event.preventDefault();
@@ -524,7 +642,7 @@ function MobileCloudIntegrationsSettings() {
                 }}
               >
                 {t('settings.integrations.github.missingReposHintAction')}
-                <ArrowUpRight className="h-3 w-3" />
+                <ArrowUpRight {...stylex.props(styles.hintIcon)} />
               </a>
             </p>
           </>

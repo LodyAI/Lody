@@ -4,6 +4,7 @@ import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
@@ -49,7 +50,7 @@ import {
 } from './prompt-shortcut-form';
 import { ScopePills } from './prompt-shortcut-scope';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -115,6 +116,12 @@ const styles = stylex.create({
    * The prompt field is the composer's mention textarea, so it is given the
    * well by hand: the recess, and the ring on `:focus-within` because the
    * element that takes focus is the textarea inside it.
+   *
+   * A mention chip covers the textarea's glyphs with `--mention-chip-surface`,
+   * which has to be opaque and equal to what shows through the well. The well is
+   * translucent ink over the dialog. Two native background layers paint that
+   * same composition over an opaque dialog backdrop, independent of the
+   * well's alpha and the active palette.
    */
   promptWell: {
     boxSizing: 'border-box',
@@ -128,8 +135,11 @@ const styles = stylex.create({
     },
     borderRadius: radius.medium,
     cornerShape: corner.round,
+    '--mention-chip-surface': dialogTokens.background,
+    '--mention-chip-overlay': `linear-gradient(${colors.wellBackground},${colors.wellBackground})`,
   },
   promptInput: {
+    boxShadow: { default: null, ':focus-visible': 'none' },
     minHeight: '112px',
     width: '100%',
     padding: 0,
@@ -241,7 +251,7 @@ function PromptShortcutsSettingContent({
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>
@@ -761,13 +771,12 @@ export function ShortcutPromptField({
       disabled={disabled}
       rows={4}
       // A value holder, so the well every other field in the form is.
-      containerClassName={stylex.props(styles.promptWell).className}
+      appearance="bare"
+      containerXstyle={styles.promptWell}
       // The wrapper owns this field's focus ring; suppress the shell's global
       // inset focus shadow on the textarea inside it.
-      className={
-        withClassName(stylex.props(styles.promptInput), 'input-scrollbar focus-visible:shadow-none')
-          .className
-      }
+      className="input-scrollbar"
+      xstyle={styles.promptInput}
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

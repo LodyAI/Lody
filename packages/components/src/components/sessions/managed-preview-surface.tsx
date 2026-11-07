@@ -46,6 +46,7 @@ import {
 import { userAtom } from '@/atoms';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
+import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { toast } from '@/lib/toast';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { getVisiblePreviewVisualComments } from '@/components/preview/preview-visual-comments';
@@ -70,6 +71,10 @@ import {
 } from './managed-preview-frame-cache';
 
 const styles = stylex.create({
+  annotationTextarea: {
+    [fieldTokens.textareaMinHeight]: 'calc(var(--spacing) * 20)',
+    [fieldTokens.background]: 'hsl(var(--background) / 1)',
+  },
   root: {
     position: 'relative',
     minHeight: 0,
@@ -777,7 +782,6 @@ export function ManagedPreviewSurface({
               variant="ghost"
               size="mini"
               icon
-              className="shrink-0"
               aria-label={t('common.cancel', 'Cancel')}
               onClick={() => {
                 setSelectedTarget(null);
@@ -791,7 +795,12 @@ export function ManagedPreviewSurface({
             value={draftBody}
             onChange={(event) => setDraftBody(event.target.value)}
             placeholder={t('sessions.preview.annotation.placeholder', 'Describe the change...')}
-            className="min-h-20 resize-none bg-background text-xs"
+            {...stylex.props(styles.annotationTextarea)}
+            resize="none"
+            style={{
+              fontSize: 'var(--text-xs)',
+              lineHeight: 'var(--text-xs--line-height)',
+            }}
             autoFocus
           />
           <div {...stylex.props(styles.draftSubmitRow)}>
@@ -802,7 +811,7 @@ export function ManagedPreviewSurface({
               onClick={() => void submitDraft()}
             >
               {submitting ? (
-                <Spinner className="h-3.5 w-3.5" />
+                <Spinner diameter="calc(var(--spacing) * 3.5)" />
               ) : (
                 <Send {...stylex.props(styles.draftSubmitIcon)} />
               )}

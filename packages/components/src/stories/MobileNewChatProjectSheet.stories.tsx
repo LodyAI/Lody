@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -11,6 +12,16 @@ import {
 } from '@/components/mobile/mobile-new-chat-project-sheet';
 import type { UnifiedProjectSelection } from '@/components/chat/unified-project-selector';
 import { Button } from '@lody/ui/button';
+
+const projectSheetFrame = stylex.create({
+  frame: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
+  },
+});
 
 const spikes = 'spikes-powerbook' as MachineId;
 const zx = 'zx-macbook' as MachineId;
@@ -87,7 +98,7 @@ function Harness({
   const [selection, setSelection] = useState<UnifiedProjectSelection>(initialSelection);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-muted/40">
+    <div {...stylex.props(projectSheetFrame.frame)}>
       <Button type="button" onClick={() => setOpen(true)}>
         Open project picker
       </Button>

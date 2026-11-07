@@ -1,14 +1,29 @@
+import { clsx } from 'clsx';
 import { type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Clock, Download, Eye } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import type { SessionFilePayload } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { FileSheet } from './session-file-sheet';
 import { evidenceSurface } from './surface';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import {
   formatFileSize,
   getSessionFileDisplayState,
@@ -72,21 +87,21 @@ const buildActionIcon = ({
   isDownloading: boolean;
 }): ReactNode => {
   if (state === 'pending') {
-    return <Spinner className="h-4 w-4" aria-hidden="true" />;
+    return <Spinner size="small" aria-hidden="true" />;
   }
   if (state === 'expired') {
-    return <Clock className="h-4 w-4" aria-hidden="true" />;
+    return <Clock {...stylex.props(card.glyph)} aria-hidden="true" />;
   }
   if (state === 'downloadable') {
     return isDownloading ? (
-      <Spinner className="h-4 w-4" aria-hidden="true" />
+      <Spinner size="small" aria-hidden="true" />
     ) : (
-      <Download className="h-4 w-4" aria-hidden="true" />
+      <Download {...stylex.props(card.glyph)} aria-hidden="true" />
     );
   }
   // previewable — a download in flight belongs to the separate download
   // button, so the preview affordance keeps reading as a preview.
-  return <Eye className="h-4 w-4" aria-hidden="true" />;
+  return <Eye {...stylex.props(card.glyph)} aria-hidden="true" />;
 };
 
 /*
@@ -195,9 +210,49 @@ const card = stylex.create({
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     backgroundColor: { default: 'transparent', ':hover': colors.wellBackground },
     cursor: { default: 'pointer', ':disabled': 'not-allowed' },
-    opacity: { default: 1, ':disabled': 0.6 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   actionFailed: { color: colors.label },
+  /** The glyphs the card's own actions carry. */
+  glyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  glyphShrink: { flexShrink: 0 },
+  list: {
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    gap: themeSpace[2],
+  },
+  listEnd: {
+    alignItems: 'flex-end',
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[1],
+  },
+  listStart: { alignItems: 'flex-start' },
+  error: {
+    display: 'flex',
+    width: '100%',
+    maxWidth: '24rem',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--destructive) / 0.4)',
+    backgroundColor: 'hsl(var(--destructive) / 0.05)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.destructive,
+  },
+  errorText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
 });
 
 /** The extension a type label prints: short and plain, or nothing (the size stands alone). */
@@ -251,7 +306,7 @@ export function SessionFileCardLayout({
   const Frame = inline ? 'span' : 'div';
   return (
     <Frame
-      className={cn(
+      className={clsx(
         stylex.props(card.root, isInteractive && card.interactive, failed && card.failed).className,
         className
       )}
@@ -377,9 +432,9 @@ export function SessionFileCard({
             className={SESSION_FILE_CARD_ACTION_CLASS}
           >
             {isDownloading ? (
-              <Spinner className="h-4 w-4" aria-hidden="true" />
+              <Spinner size="small" aria-hidden="true" />
             ) : (
-              <Download className="h-4 w-4" aria-hidden="true" />
+              <Download {...stylex.props(card.glyph)} aria-hidden="true" />
             )}
           </button>
         ) : null
@@ -403,13 +458,10 @@ export function SessionFileCardList({
 }) {
   return (
     <div
-      className={cn(
-        'flex w-full flex-col gap-2',
-        /* An assistant attachment (`align="start"`) is a top-level conversation
-           row: the horizontal gutter belongs to `ConversationColumn` and the row
-           gap to `cardSiblingGap`. User attachments keep their own insets. */
-        align === 'end' ? 'items-end px-2 pt-1' : 'items-start'
-      )}
+      /* An assistant attachment (`align="start"`) is a top-level conversation
+         row: the horizontal gutter belongs to `ConversationColumn` and the row
+         gap to `cardSiblingGap`. User attachments keep their own insets. */
+      className={stylex.props(card.list, align === 'end' ? card.listEnd : card.listStart).className}
     >
       {children}
     </div>
@@ -419,9 +471,9 @@ export function SessionFileCardList({
 /** Lightweight error/unavailable inline state for the card (e.g. preview 4xx). */
 export function SessionFileCardError({ message }: { message: string }) {
   return (
-    <div className="flex w-full max-w-sm items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-      <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="truncate">{message}</span>
+    <div {...stylex.props(card.error)}>
+      <AlertCircle {...stylex.props(card.glyph, card.glyphShrink)} aria-hidden="true" />
+      <span {...stylex.props(card.errorText)}>{message}</span>
     </div>
   );
 }

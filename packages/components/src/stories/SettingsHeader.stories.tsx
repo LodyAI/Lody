@@ -1,7 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SettingsHeader } from '@/components/settings/settings-header';
 import { Button } from '@lody/ui/button';
 import { Save } from 'lucide-react';
+const storyLayout = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
 
 /**
  * SettingsHeader 组件的 Storybook 故事
@@ -50,7 +57,7 @@ export const WithActions: Story = {
     title: 'Profile Settings',
     actions: (
       <Button variant="ghost" size="small">
-        <Save className="h-4 w-4" />
+        <Save {...stylex.props(storyLayout.frame)} />
       </Button>
     ),
   },
@@ -110,7 +117,7 @@ export const DarkMode: Story = {
     title: 'General Settings',
     actions: (
       <Button variant="ghost" size="small">
-        <Save className="h-4 w-4" />
+        <Save {...stylex.props(storyLayout.frame)} />
       </Button>
     ),
   },

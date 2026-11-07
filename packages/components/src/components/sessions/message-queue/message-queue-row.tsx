@@ -1,4 +1,6 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import {
   useCallback,
   useEffect,
@@ -28,13 +30,257 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Tooltip } from '@lody/ui/tooltip';
 import { text as type } from '@lody/ui/tokens/scales.stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
-import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
 import { QUEUE_LINE, queueSurface } from './surface';
 import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
+import {
+  themeFontWeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../../style/theme-scale.stylex';
 
 const MAX_INLINE_IMAGES = 3;
+
+/** The queue's own muted index ink. */
+const MUTED_FOREGROUND_70 =
+  'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)';
+
+/** Tailwind's `transition-colors`, as the property it actually sets. */
+const transitionColors = stylex.create({
+  colors: {
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+});
+
+/**
+ * The queue's shared row look. The pending row (a send still uploading) is the
+ * same row, so it reads these too.
+ */
+export const queueRowStyles = stylex.create({
+  divider: {
+    borderTopWidth: {
+      default: null,
+      ':is([data-message-queue-row] + [data-message-queue-row])': '1px',
+    },
+    borderTopStyle: {
+      default: null,
+      ':is([data-message-queue-row] + [data-message-queue-row])': 'solid',
+    },
+    borderTopColor: {
+      default: null,
+      ':is([data-message-queue-row] + [data-message-queue-row])':
+        'color-mix(in oklab, hsl(var(--border) / 1) 30%, transparent)',
+    },
+  },
+  row: {
+    position: 'relative',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1.5],
+  },
+  roomyPosition: { position: 'relative' },
+  rowDragging: {
+    zIndex: 10,
+    backgroundColor: 'hsl(var(--composer))',
+    opacity: 0.95,
+    boxShadow: themeShadow.md,
+  },
+  rowEditing: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 60%, transparent)',
+  },
+  /** The index sits on the task text's first line: its box is exactly that
+   *  line box (`text-xs leading-snug` = 0.75rem × 1.375). */
+  leadingHeight: (height: string) => ({ height }),
+  leadingBox: {
+    display: 'flex',
+    width: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leadingIndex: {
+    transform: 'translateY(1px)',
+    fontSize: '11px',
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  leadingIndexMuted: { color: MUTED_FOREGROUND_70 },
+  leadingButton: {
+    borderRadius: '0.25rem',
+    cursor: { default: 'grab', ':active': 'grabbing' },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 1)' },
+    },
+    // The old Tailwind `focus-visible:ring-*` painted nothing — the app forces
+    // Tailwind's own ring transparent — but it still declared a `box-shadow`,
+    // and a utility-layer shadow beats the base layer's inset focus ring. So
+    // the handle showed NO focus indicator at all. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  leadingButtonInk: {
+    color: {
+      default: MUTED_FOREGROUND_70,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+  },
+  indexGlyph: {
+    display: {
+      default: 'block',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-message-queue-row]):hover')]: 'none',
+      },
+      [stylex.when.ancestor(':is([data-message-queue-row]):focus-within')]: 'none',
+    },
+  },
+  gripGlyph: {
+    display: {
+      default: 'none',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-message-queue-row]):hover')]: 'block',
+      },
+      [stylex.when.ancestor(':is([data-message-queue-row]):focus-within')]: 'block',
+    },
+    height: themeSpace[3],
+    width: themeSpace[3],
+  },
+  footerBody: { minWidth: 'calc(var(--spacing) * 0)', flex: 1 },
+  editorBody: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  editorShell: {
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+      ':focus-within': 'hsl(var(--ring) / 1)',
+    },
+    backgroundColor: 'hsl(var(--composer))',
+    // The wrapper is never focused itself — its textarea is — so this ring is
+    // a real one, not the focus-scoped ring the app's base layer erases.
+    boxShadow: {
+      default: null,
+      ':focus-within': '0 0 0 2px color-mix(in oklab, hsl(var(--ring) / 1) 20%, transparent)',
+    },
+  },
+  editorInput: {
+    display: 'block',
+    width: '100%',
+    resize: 'none',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[1.5],
+    color: 'hsl(var(--foreground) / 1)',
+    // The shell owns the focus ring; the base layer's inset shadow would draw
+    // another rectangle on the textarea.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  editorFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    paddingInline: themeSpace[1],
+    paddingBottom: themeSpace[1],
+  },
+  editorImages: {
+    marginTop: themeSpace[1],
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  overflowCount: { fontSize: '10px', color: MUTED_FOREGROUND_70 },
+  rowBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'flex-start',
+    gap: themeSpace[1.5],
+  },
+  rowImages: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[0.5],
+    paddingTop: '1px',
+  },
+  rowOverflow: {
+    marginLeft: themeSpace[0.5],
+    fontSize: '10px',
+    color: MUTED_FOREGROUND_70,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  rowText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  rowActions: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  actionButton: {
+    display: 'flex',
+    height: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '0.25rem',
+    paddingInline: themeSpace[1.5],
+    // Same as the drag handle above: the old Tailwind `focus-visible:ring-*`
+    // erased the base layer's inset focus ring, so the button showed NO focus
+    // indicator. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  actionInk: {
+    fontSize: '11px',
+    fontWeight: themeFontWeight.medium,
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 1)' },
+    },
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+  },
+  iconButton: {
+    display: 'flex',
+    height: '22px',
+    width: '22px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '5px',
+    // Same as the drag handle above: the old Tailwind `focus-visible:ring-*`
+    // erased the base layer's inset focus ring, so the button showed NO focus
+    // indicator. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  iconInk: {
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 0.07)' },
+    },
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+    pointerEvents: { default: 'auto', ':disabled': 'none' },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
+  },
+  iconInkDestructive: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--destructive) / 1)' },
+    },
+  },
+  actionGlyph: { height: themeSpace[3], width: themeSpace[3] },
+});
 
 export type MessageQueueRowProps = {
   sessionId: SessionId;
@@ -114,19 +360,30 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
     }
   }, [isEditing, isPending]);
 
+  const rowProps = stylex.props(
+    stylex.defaultMarker(),
+    queueSurface.row,
+    props.roomy && queueRowStyles.roomyPosition,
+    props.roomy && queueSurface.roomyRow,
+    props.roomy === 'airy' && queueSurface.airyRow,
+    transitionColors.colors,
+    sortable.isDragging && queueRowStyles.rowDragging,
+    isEditing && queueSurface.editingRow
+  );
+
   return (
     <div
       ref={sortable.setNodeRef}
+      data-message-queue-row=""
+      {...rowProps}
       style={style}
-      className={cn(
-        'group/row',
-        stylex.props(
-          queueSurface.row,
-          props.roomy && queueSurface.roomyRow,
-          props.roomy === 'airy' && queueSurface.airyRow,
-          isEditing && queueSurface.editingRow
-        ).className,
-        sortable.isDragging && 'z-10 bg-[hsl(var(--composer))] opacity-95 shadow-md'
+      className={clsx(
+        rowProps.className,
+        // Keep the CSS hook; the StyleX marker limits the swap to this row.
+        'group/row'
+        // Dividers go between rows only. (`divide-y` on the list also lined the
+        // last row, because dnd-kit appends hidden nodes after it, and that
+        // line doubled the composer's top border into a shadow-like band.)
       )}
     >
       {props.roomy ? (
@@ -140,7 +397,7 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
         <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
       ) : null}
       {props.footer && (!props.footerPosition || props.footerPosition === 'below') ? (
-        <div className="min-w-0 flex-1">
+        <div {...stylex.props(queueRowStyles.footerBody)}>
           <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
           {props.footer}
         </div>
@@ -154,12 +411,6 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
     </div>
   );
 }
-
-/* The index sits on the task text's first line: its box is exactly that line
-   box (`QUEUE_LINE`), so both share one center. */
-const LEADING_HANDLE_BOX_CLASS = 'flex w-4 shrink-0 items-center justify-center';
-const LEADING_HANDLE_BOX_STYLE = { height: QUEUE_LINE };
-const ROOMY_LEADING_HANDLE_BOX_STYLE = { height: type.bodyLeading };
 
 function LeadingHandle({
   index,
@@ -175,10 +426,11 @@ function LeadingHandle({
     return (
       <div
         aria-hidden="true"
-        style={roomy ? ROOMY_LEADING_HANDLE_BOX_STYLE : LEADING_HANDLE_BOX_STYLE}
-        className={cn(
-          LEADING_HANDLE_BOX_CLASS,
-          'translate-y-px text-[11px] font-medium tabular-nums text-muted-foreground/70'
+        {...stylex.props(
+          queueRowStyles.leadingBox,
+          queueRowStyles.leadingHeight(roomy ? type.bodyLeading : QUEUE_LINE),
+          queueRowStyles.leadingIndex,
+          queueRowStyles.leadingIndexMuted
         )}
       >
         {index + 1}
@@ -194,23 +446,20 @@ function LeadingHandle({
           <button
             type="button"
             ref={sortable.setActivatorNodeRef}
-            style={roomy ? ROOMY_LEADING_HANDLE_BOX_STYLE : LEADING_HANDLE_BOX_STYLE}
-            className={cn(
-              LEADING_HANDLE_BOX_CLASS,
-              'rounded',
-              'translate-y-px text-[11px] font-medium tabular-nums text-muted-foreground/70',
-              'cursor-grab transition-colors active:cursor-grabbing',
-              'hover:bg-hover hover:text-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+            {...stylex.props(
+              queueRowStyles.leadingBox,
+              queueRowStyles.leadingHeight(roomy ? type.bodyLeading : QUEUE_LINE),
+              queueRowStyles.leadingIndex,
+              transitionColors.colors,
+              queueRowStyles.leadingButton,
+              queueRowStyles.leadingButtonInk
             )}
             aria-label={label}
             {...sortable.attributes}
             {...sortable.listeners}
           >
-            <span className="block group-hover/row:hidden group-focus-within/row:hidden">
-              {index + 1}
-            </span>
-            <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
+            <span {...stylex.props(queueRowStyles.indexGlyph)}>{index + 1}</span>
+            <GripVertical {...stylex.props(queueRowStyles.gripGlyph)} />
           </button>
         }
       />
@@ -248,28 +497,14 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
     // newline. Esc blurs, which commits too — there is no separate "discard changes"
     // affordance by design.
     return (
-      <div
-        className={cn('min-w-0 flex-1', props.roomy && stylex.props(queueSurface.editor).className)}
-      >
-        <div
-          className={cn(
-            'rounded-md border border-border/60 bg-[hsl(var(--composer))] transition-colors',
-            'focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20'
-          )}
-        >
+      <div {...stylex.props(queueRowStyles.editorBody, props.roomy && queueSurface.editor)}>
+        <div {...stylex.props(queueRowStyles.editorShell, transitionColors.colors)}>
           <textarea
             // The synced editing flag can arrive before startEdit resolves; attach when enabled.
             ref={isPending ? null : focusEditorAtEnd}
             value={editValue}
             rows={3}
-            className={cn(
-              'block w-full resize-none border-transparent bg-transparent',
-              'px-2 pt-1.5 text-foreground',
-              stylex.props(queueSurface.editorText).className,
-              // The shell owns the focus ring; the base layer's inset shadow
-              // would draw another rectangle on the textarea.
-              'outline-none focus-visible:outline-hidden focus-visible:shadow-none'
-            )}
+            {...stylex.props(queueRowStyles.editorInput, queueSurface.editorText)}
             disabled={isPending}
             aria-label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
             onChange={(event) => onEditValueChange(event.currentTarget.value)}
@@ -298,7 +533,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
           />
           {/* Keep footer presses from blur-saving before focus or confirmation. */}
           <div
-            className="flex justify-end px-1 pb-1"
+            {...stylex.props(queueRowStyles.editorFooter)}
             onMouseDown={(event) => {
               event.preventDefault();
               if (event.button === 0 && event.target === event.currentTarget)
@@ -314,7 +549,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
           </div>
         </div>
         {inlineImages.length > 0 ? (
-          <div className="mt-1 flex flex-wrap items-center gap-1">
+          <div {...stylex.props(queueRowStyles.editorImages)}>
             {inlineImages.map((image, i) => (
               <QueuedImagePreview
                 key={`${image.imageId}-${i}`}
@@ -324,7 +559,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
               />
             ))}
             {overflowImageCount > 0 ? (
-              <span className="text-[10px] text-muted-foreground/70">+{overflowImageCount}</span>
+              <span {...stylex.props(queueRowStyles.overflowCount)}>+{overflowImageCount}</span>
             ) : null}
           </div>
         ) : null}
@@ -333,15 +568,9 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
   }
 
   return (
-    <div
-      className={cn(
-        'flex flex-1 items-start gap-1.5',
-        !props.roomy && 'min-w-0',
-        props.roomy && stylex.props(queueSurface.roomyBody).className
-      )}
-    >
+    <div {...stylex.props(queueRowStyles.rowBody, props.roomy && queueSurface.roomyBody)}>
       {inlineImages.length > 0 ? (
-        <div className="flex shrink-0 items-center gap-0.5 pt-px">
+        <div {...stylex.props(queueRowStyles.rowImages)}>
           {inlineImages.map((image, i) => (
             <QueuedImagePreview
               key={`${image.imageId}-${i}`}
@@ -351,14 +580,16 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
             />
           ))}
           {overflowImageCount > 0 ? (
-            <span className="ml-0.5 text-[10px] text-muted-foreground/70 tabular-nums">
-              +{overflowImageCount}
-            </span>
+            <span {...stylex.props(queueRowStyles.rowOverflow)}>+{overflowImageCount}</span>
           ) : null}
         </div>
       ) : null}
       <div
-        className={cn('min-w-0 flex-1 overflow-hidden', stylex.props(queueSurface.text).className)}
+        {...stylex.props(
+          queueSurface.text,
+          queueRowStyles.rowText,
+          props.roomy && queueSurface.roomyBody
+        )}
         style={{
           display: '-webkit-box',
           // A narrow sheet keeps every row to one line, like the phone layout.
@@ -435,7 +666,13 @@ function RowActions(props: MessageQueueRowProps) {
   }
 
   return (
-    <div {...stylex.props(queueSurface.actions, props.roomy && queueSurface.roomyActions)}>
+    <div
+      {...stylex.props(
+        queueSurface.actions,
+        queueRowStyles.rowActions,
+        props.roomy && queueSurface.roomyActions
+      )}
+    >
       {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <button
           type="button"
@@ -501,12 +738,11 @@ export function TextAction({
     <button
       type="button"
       aria-label={ariaLabel}
-      className={cn(
-        'flex h-5 shrink-0 items-center justify-center rounded px-1.5',
-        stylex.props(queueSurface.action).className,
-        'text-[11px] font-medium text-muted-foreground transition-colors',
-        'hover:bg-hover hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+      {...stylex.props(
+        queueSurface.action,
+        queueRowStyles.actionButton,
+        transitionColors.colors,
+        queueRowStyles.actionInk
       )}
       onClick={onClick}
     >
@@ -539,14 +775,13 @@ export function IconAction({
             type="button"
             aria-label={label}
             disabled={disabled}
-            className={cn(
-              'flex size-[22px] items-center justify-center rounded-[5px]',
-              stylex.props(queueSurface.action, roomy && queueSurface.roomyAction).className,
-              'text-muted-foreground transition-colors',
-              'hover:bg-[hsl(var(--foreground)/0.07)]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-              'disabled:pointer-events-none disabled:opacity-50',
-              destructive && 'hover:text-destructive'
+            {...stylex.props(
+              queueSurface.action,
+              queueRowStyles.iconButton,
+              roomy && queueSurface.roomyAction,
+              transitionColors.colors,
+              queueRowStyles.iconInk,
+              destructive && queueRowStyles.iconInkDestructive
             )}
             onClick={onClick}
           >

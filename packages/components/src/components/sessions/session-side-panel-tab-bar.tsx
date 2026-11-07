@@ -10,7 +10,7 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { LayoutGroup, MotionConfig, motion, useDragControls } from 'framer-motion';
 import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
-import { space, radius } from '@lody/ui/tokens/scales.stylex';
+import { space, radius, control } from '@lody/ui/tokens/scales.stylex';
 import { tabPillStyles } from '../shared/tab-pill-strip';
 import {
   FileDiff,
@@ -27,7 +27,7 @@ import { FileIcon } from '@/components/icons/file-icons';
 import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { ScrollArea } from '@lody/ui/scroll-area';
 import { Menu } from '@/ui/menu';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 
 export type SessionSidePanelTabItem = {
@@ -236,11 +236,14 @@ type SessionSidePanelTabBarProps = {
   moreSlot?: ReactNode;
   endSlot?: ReactNode;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const pulse = stylex.keyframes({ '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } });
 
 const styles = stylex.create({
+  busySpinner: { width: '14px', height: '14px', color: colors.tertiaryLabel },
+  addMenu: { minWidth: '160px' },
   emptyState: {
     containerName: 'empty-panel',
     containerType: 'inline-size',
@@ -306,7 +309,7 @@ const styles = stylex.create({
       },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     outline: {
@@ -323,20 +326,7 @@ const styles = stylex.create({
         '@media (forced-colors: active)': '2px',
       },
     },
-    '--tw-ring-color': {
-      default: null,
-      ':focus-visible': 'hsl(var(--ring) / 0.4)',
-    },
-    '--tw-ring-shadow': {
-      default: null,
-      ':focus-visible':
-        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentColor)',
-    },
-    boxShadow: {
-      default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
-    },
+    boxShadow: { default: null, ':focus-visible': 'none' },
     cursor: {
       default: null,
       ':disabled': 'not-allowed',
@@ -385,7 +375,7 @@ const styles = stylex.create({
     cursor: 'default',
     fontSize: '0.9em',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
@@ -573,7 +563,7 @@ const styles = stylex.create({
       },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     backgroundColor: {
@@ -601,34 +591,21 @@ const styles = stylex.create({
         '@media (forced-colors: active)': '2px',
       },
     },
-    '--tw-ring-color': {
-      default: null,
-      ':focus-visible': 'hsl(var(--ring) / 0.4)',
-    },
-    '--tw-ring-shadow': {
-      default: null,
-      ':focus-visible':
-        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentColor)',
-    },
-    boxShadow: {
-      default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
-    },
+    boxShadow: { default: null, ':focus-visible': 'none' },
     cursor: {
       default: null,
       ':disabled': 'default',
     },
     opacity: {
       default: null,
-      ':disabled': 0.35,
+      ':disabled': control.disabledOpacity,
     },
   },
 });
 
 function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
   if (tab.pending) {
-    return <Spinner className="h-3.5 w-3.5 opacity-70" />;
+    return <Spinner className={stylex.props(styles.busySpinner).className} />;
   }
   switch (tab.kind) {
     case 'files':
@@ -751,7 +728,7 @@ function SidePanelTab({
         });
         if ('clientX' in event) onDragEnd(event.clientX);
       }}
-      className={cn(
+      className={clsx(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -865,6 +842,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   moreSlot,
   endSlot,
   className,
+  xstyle,
 }: SessionSidePanelTabBarProps) {
   const windowDragClass = useWindowDragRegionClass();
   const layoutGroupId = useId();
@@ -944,7 +922,10 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   };
 
   return (
-    <div className={cn(stylex.props(styles.container).className, windowDragClass, className)}>
+    <div
+      className={clsx(stylex.props(styles.container, xstyle).className, windowDragClass, className)}
+      style={stylex.props(styles.container, xstyle).style}
+    >
       <ScrollArea
         axis="horizontal"
         compact
@@ -1008,7 +989,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         </MotionConfig>
       </ScrollArea>
       {moreSlot ? (
-        <div className={cn(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+        <div className={clsx(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
           {moreSlot}
         </div>
       ) : null}
@@ -1019,7 +1000,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
               type="button"
               disabled={availablePanels.length === 0}
               aria-label={addPanelLabel}
-              className={cn(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              className={clsx(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
             >
               <Plus {...stylex.props(styles.addGlyph)} />
             </button>
@@ -1029,12 +1010,12 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
             type="button"
             disabled={availablePanels.length === 0}
             aria-label={addPanelLabel}
-            className={cn(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+            className={clsx(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
           >
             <Plus {...stylex.props(styles.addGlyph)} />
           </button>
         </Menu.Trigger>
-        <Menu.Content align="end" className="min-w-40">
+        <Menu.Content align="end" xstyle={styles.addMenu}>
           {availablePanels.map((panel) => (
             <Menu.Item
               key={panel.id}
@@ -1048,7 +1029,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         </Menu.Content>
       </Menu.Root>
       {endSlot ? (
-        <div className={cn(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+        <div className={clsx(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
           {endSlot}
         </div>
       ) : null}

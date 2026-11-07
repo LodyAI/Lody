@@ -1,3 +1,4 @@
+import { SessionPrIcon } from '../src/components/sidebar-row-shared';
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
@@ -12,29 +13,27 @@ import { initI18n } from '../src/i18n';
 import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
 
 const PR_STATUS_CASES = [
-  ['open', '.lucide-git-pull-request', 'text-github-open'],
-  ['merged', '.lucide-git-merge', 'text-pr-merged'],
-  ['closed', '.lucide-git-pull-request-closed', 'text-github-closed'],
-  ['draft', '.lucide-git-pull-request-draft', 'text-github-draft'],
+  ['open', '.lucide-git-pull-request'],
+  ['merged', '.lucide-git-merge'],
+  ['closed', '.lucide-git-pull-request-closed'],
+  ['draft', '.lucide-git-pull-request-draft'],
 ] as const;
 
 const PR_CI_CASES = [
-  ['s', 'success', '.lucide-check', 'text-status-success', '5'],
-  ['f', 'failure', '.lucide-x', 'text-destructive', '5'],
-  ['e', 'failure', '.lucide-x', 'text-destructive', '5'],
-  ['p', 'pending', '[data-pr-ci-verdict-slot] > circle', 'text-status-warning', '3.75'],
-  ['x', 'expected', '.lucide-circle-dot', 'text-status-warning', '5'],
+  ['s', 'success', '.lucide-check', '5'],
+  ['f', 'failure', '.lucide-x', '5'],
+  ['e', 'failure', '.lucide-x', '5'],
+  ['p', 'pending', '[data-pr-ci-verdict-slot] > circle', '3.75'],
+  ['x', 'expected', '.lucide-circle-dot', '5'],
 ] as const;
 
-const PR_STATUS_CI_CASES = PR_STATUS_CASES.flatMap(([prStatus, baseSelector, baseToneClassName]) =>
-  PR_CI_CASES.map(([prCiState, verdict, verdictSelector, verdictToneClassName, cutoutRadius]) => ({
+const PR_STATUS_CI_CASES = PR_STATUS_CASES.flatMap(([prStatus, baseSelector]) =>
+  PR_CI_CASES.map(([prCiState, verdict, verdictSelector, cutoutRadius]) => ({
     prStatus,
     baseSelector,
-    baseToneClassName,
     prCiState,
     verdict,
     verdictSelector,
-    verdictToneClassName,
     cutoutRadius,
   }))
 );
@@ -171,11 +170,9 @@ describe('SessionList PR badge', () => {
 
     const row = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(row?.querySelector('[data-session-mergeable-pill]')?.textContent).toBe('Mergeable');
-    expect(row?.querySelector('.text-github-addition')).toBeNull();
-    expect(row?.querySelector('.text-github-deletion')).toBeNull();
+    expect(row?.textContent).not.toMatch(/[+-]\d/);
     const anchor = row?.querySelector('[data-session-pr-icon-anchor]');
     expect(anchor).not.toBeNull();
-    expect(anchor?.className).toContain('w-5');
     expect(anchor?.querySelector('.lucide-git-pull-request')).not.toBeNull();
     expect(anchor?.querySelector('[data-session-mergeable-pill]')).toBeNull();
 
@@ -191,14 +188,12 @@ describe('SessionList PR badge', () => {
 
     const selectedRow = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(selectedRow?.querySelector('[data-session-mergeable-pill]')).toBeNull();
-    expect(selectedRow?.querySelector('.text-github-addition')).toBeNull();
-    expect(selectedRow?.querySelector('.text-github-deletion')).toBeNull();
+    expect(selectedRow?.textContent).not.toMatch(/[+-]\d/);
     const selectedAnchor = selectedRow?.querySelector('[data-session-pr-icon-anchor]');
-    expect(selectedAnchor?.className).toBe(anchor?.className);
     expect(selectedAnchor?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 
-  it('keeps the PR mark in the same trailing box when a sibling row has no Mergeable pill', () => {
+  it('keeps the Mergeable pill outside the PR mark and limits it to ready siblings', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -236,7 +231,7 @@ describe('SessionList PR badge', () => {
     const plain = anchorOf('plain');
     const ready = anchorOf('ready');
     expect(plain).not.toBeNull();
-    expect(ready?.className).toBe(plain?.className);
+    expect(ready).not.toBeNull();
     expect(
       container?.querySelector('[data-sidebar-session-id="plain"] [data-session-mergeable-pill]')
     ).toBeNull();
@@ -383,4 +378,41 @@ describe('SessionList PR badge', () => {
       container!.querySelector('[data-sidebar-group-activity]')?.getAttribute('aria-label')
     ).toBe('2 working · 1 sending');
   });
+
+  it.each(PR_STATUS_CI_CASES)(
+    'keeps the $prStatus PR glyph masked separately from CI $prCiState',
+    ({ prStatus, baseSelector, prCiState, verdict, verdictSelector, cutoutRadius }) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      flushSync(() => {
+        root?.render(React.createElement(SessionPrIcon, { prStatus, prCiState }));
+      });
+
+      const icon = container.querySelector(`svg[data-pr-ci-verdict="${verdict}"]`);
+      const baseIcon = icon?.querySelector(baseSelector);
+      const cutout = icon?.querySelector('mask circle');
+      const verdictIcon = icon?.querySelector(verdictSelector);
+      expect(icon).not.toBeNull();
+      expect(baseIcon).not.toBeNull();
+      const mask = icon?.querySelector('mask');
+      expect(baseIcon?.closest('g')?.getAttribute('mask')).toBe(`url(#${mask?.id})`);
+      expect(cutout?.getAttribute('cx')).toBe('12');
+      expect(cutout?.getAttribute('cy')).toBe('12');
+      expect(cutout?.getAttribute('r')).toBe(cutoutRadius);
+      expect(verdictIcon).not.toBeNull();
+      expect(verdictIcon?.closest('g[mask]')).toBeNull();
+      expect(verdictIcon?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
+      expect(icon?.querySelectorAll('rect')).toHaveLength(1);
+      expect(icon?.querySelector('rect')?.parentElement).toBe(mask);
+      if (verdict === 'pending') {
+        expect(verdictIcon?.getAttribute('cx')).toBe('5');
+        expect(verdictIcon?.getAttribute('cy')).toBe('5');
+        expect(verdictIcon?.getAttribute('r')).toBe('2.5');
+        expect(verdictIcon?.getAttribute('fill')).toBe('currentColor');
+        expect(icon?.querySelector('.lucide-loader-circle')).toBeNull();
+      }
+    }
+  );
 });

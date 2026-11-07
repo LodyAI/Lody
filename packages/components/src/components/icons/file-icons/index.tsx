@@ -1,5 +1,8 @@
 import { useMemo, type ComponentType } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { getFileIconUrl, getFolderIconUrl } from '@/components/icons/file-icons/asset-url';
+import { ICON_GLYPH_BOX_CLASS, iconSurface } from '@/components/icons/surface';
 import {
   compoundExtensionMap,
   extensionMap,
@@ -71,8 +74,7 @@ interface FolderIconProps {
   className?: string;
 }
 
-
-export const FileIcon = ({ filePath, className = 'h-4 w-4' }: FileIconProps) => {
+export const FileIcon = ({ filePath, className = ICON_GLYPH_BOX_CLASS }: FileIconProps) => {
   const iconUrl = useMemo(() => {
     const iconName = getFileIconName(filePath);
     return getFileIconUrl(iconName);
@@ -101,25 +103,39 @@ const maskStyle = (url: string): React.CSSProperties => ({
   WebkitMaskSize: 'contain',
 });
 
-export const MonochromeFileIcon = ({ filePath, className = 'h-4 w-4' }: FileIconProps) => {
+export const MonochromeFileIcon = ({
+  filePath,
+  className = ICON_GLYPH_BOX_CLASS,
+}: FileIconProps) => {
   const iconUrl = useMemo(() => getFileIconUrl(getFileIconName(filePath)), [filePath]);
+  const glyph = stylex.props(iconSurface.maskedFileGlyph);
   return (
     <span
       aria-hidden="true"
-      className={`inline-block ${className} bg-current`}
+      {...glyph}
+      className={clsx(glyph.className, className)}
       style={maskStyle(iconUrl)}
     />
   );
 };
 
-export const MonochromeFolderIcon = ({ folderPath, className = 'h-4 w-4' }: FolderIconProps) => {
+export const MonochromeFolderIcon = ({
+  folderPath,
+  className = ICON_GLYPH_BOX_CLASS,
+}: FolderIconProps) => {
   const iconUrl = useMemo(() => getFolderIconUrl(getFolderIconName(folderPath)), [folderPath]);
+  const glyph = stylex.props(iconSurface.maskedFolderGlyph);
   return (
-    <span aria-hidden="true" className={`${className} bg-current`} style={maskStyle(iconUrl)} />
+    <span
+      aria-hidden="true"
+      {...glyph}
+      className={clsx(glyph.className, className)}
+      style={maskStyle(iconUrl)}
+    />
   );
 };
 
-export const FolderIcon = ({ folderPath, className = 'h-4 w-4' }: FolderIconProps) => {
+export const FolderIcon = ({ folderPath, className = ICON_GLYPH_BOX_CLASS }: FolderIconProps) => {
   const iconUrl = useMemo(() => {
     const iconName = getFolderIconName(folderPath);
     return getFolderIconUrl(iconName);
@@ -149,7 +165,7 @@ export const createFileIconComponent = (filePath: string) => {
     return cached;
   }
   const iconUrl = getFileIconUrl(iconName);
-  const FileIconComponent = ({ className = 'h-4 w-4' }: { className?: string }) => (
+  const FileIconComponent = ({ className = ICON_GLYPH_BOX_CLASS }: { className?: string }) => (
     <img src={iconUrl} alt="" className={className} />
   );
   FileIconComponent.displayName = `FileIconComponent(${iconName})`;
@@ -164,7 +180,7 @@ export const createFolderIconComponent = (folderPath: string) => {
     return cached;
   }
   const iconUrl = getFolderIconUrl(iconName);
-  const FolderIconComponent = ({ className = 'h-4 w-4' }: { className?: string }) => (
+  const FolderIconComponent = ({ className = ICON_GLYPH_BOX_CLASS }: { className?: string }) => (
     <img src={iconUrl} alt="" className={className} />
   );
   FolderIconComponent.displayName = `FolderIconComponent(${iconName})`;
@@ -173,12 +189,12 @@ export const createFolderIconComponent = (folderPath: string) => {
 };
 
 // Default icon components for TreeView fallback
-export const DefaultFileIcon = ({ className = 'h-4 w-4' }: { className?: string }) => {
+export const DefaultFileIcon = ({ className = ICON_GLYPH_BOX_CLASS }: { className?: string }) => {
   const iconUrl = getFileIconUrl(defaultFileIcon);
   return <img src={iconUrl} alt="" className={className} />;
 };
 
-export const DefaultFolderIcon = ({ className = 'h-4 w-4' }: { className?: string }) => {
+export const DefaultFolderIcon = ({ className = ICON_GLYPH_BOX_CLASS }: { className?: string }) => {
   const iconUrl = getFolderIconUrl(defaultFolderIcon);
   return <img src={iconUrl} alt="" className={className} />;
 };

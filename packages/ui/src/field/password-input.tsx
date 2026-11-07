@@ -1,6 +1,6 @@
 import { Input as BaseInput } from '@base-ui/react/input';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, useState, type ComponentProps } from 'react';
+import { forwardRef, useState, type ComponentProps, type CSSProperties } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { EyeGlyph, EyeOffGlyph } from '../internal/glyphs';
 import { field } from './field.tokens.stylex';
@@ -25,6 +25,8 @@ export interface PasswordInputProps extends Omit<
 > {
   /** Control height and density. `size` is the token step, not the HTML attribute. */
   size?: PasswordInputSize;
+  /** Height of the well; density and the reveal keep the named size's geometry. */
+  controlHeight?: CSSProperties['height'];
   /**
    * What the reveal is called in each of its two states. A surface shown to
    * somebody not reading English states both: this is the only text in the
@@ -71,6 +73,10 @@ const sizeStyles = {
   large: styles.large,
 };
 
+const dimensions = stylex.create({
+  height: (height: string | number) => ({ height }),
+});
+
 /**
  * A secret, and the control that reveals it. The two share one well the way a
  * Combobox's input and its chevron do: a reveal button beside the control
@@ -89,7 +95,10 @@ const sizeStyles = {
  * persisting "show me the password".
  */
 export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
-  function PasswordInput({ size = 'medium', labels, className, inputClassName, ...rest }, ref) {
+  function PasswordInput(
+    { size = 'medium', controlHeight, labels, className, inputClassName, ...rest },
+    ref
+  ) {
     const [visible, setVisible] = useState(false);
     const words = { ...DEFAULT_LABELS, ...labels };
     const ariaInvalid = rest['aria-invalid'];
@@ -106,7 +115,8 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             isInvalid(state.valid, ariaInvalid) && well.shellInvalid,
             // `:disabled` cannot reach a `<div>`, so the family's one disabled
             // value is applied from the control's state instead.
-            state.disabled && well.dimmed
+            state.disabled && well.dimmed,
+            controlHeight != null && dimensions.height(controlHeight)
           );
           return (
             <div

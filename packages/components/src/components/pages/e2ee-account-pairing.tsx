@@ -22,6 +22,15 @@ import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-co
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 
 const styles = stylex.create({
+  retryAlert: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
   code: {
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -282,7 +291,7 @@ export function E2eeAccountPairingRequest(props: {
 export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
   const { t } = useTranslation();
   return (
-    <div role="alert" className="flex items-center gap-3 px-4 py-2 text-sm">
+    <div role="alert" {...stylex.props(styles.retryAlert)}>
       <span>{t('e2ee.accountPair.request.keyFailed')}</span>
       <Button variant="secondary" size="small" onClick={props.onRetry}>
         {t('e2ee.accountPair.request.keyRetry')}

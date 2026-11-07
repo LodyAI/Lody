@@ -1,14 +1,28 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent, within } from 'storybook/test';
 import { Copy, Image } from 'lucide-react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 
-import { SessionAccessControl } from '@/components/session-sharing';
+import { SessionAccessControl, type SessionShareEditorContext } from '@/components/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 import { ShareEditorStory } from './ShareEditorStory';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'flex-start',
+    'justify-content': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const machineId = 'machine-access-story' as MachineId;
 const localProjectId = 'project-access-story' as LocalProjectId;
+
+const renderShareEditor = (context: SessionShareEditorContext) => <ShareEditorStory {...context} />;
 
 const meta = {
   title: 'Sessions/SessionAccessControl',
@@ -17,7 +31,7 @@ const meta = {
   decorators: [
     (Story) => (
       <Tooltip.Provider>
-        <div className="flex min-h-dvh items-start justify-end bg-background p-10 text-foreground">
+        <div {...stylex.props(storyLayout.row)}>
           <Story />
         </div>
       </Tooltip.Provider>
@@ -84,22 +98,22 @@ const teamState = {
 
 /** A conversation the team can already open still gets the panel, minus the team action. */
 export const TeamShareButton: Story = {
-  args: { state: teamState, publicShare: { status: 'none', renderEditor: ShareEditorStory } },
+  args: { state: teamState, publicShare: { status: 'none', renderEditor: renderShareEditor } },
 };
 
 /** The trigger reports the published link once the status resolves. */
 export const TeamShared: Story = {
-  args: { state: teamState, publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
+  args: { state: teamState, publicShare: { status: 'shared', renderEditor: renderShareEditor } },
 };
 
 export const TeamSharedDark: Story = {
   globals: { theme: 'dark' },
-  args: { state: teamState, publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
+  args: { state: teamState, publicShare: { status: 'shared', renderEditor: renderShareEditor } },
 };
 
 /** A private conversation answers who can open it, then offers Copy link and copies. */
 export const PrivateWithPublishing: Story = {
-  args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
+  args: { publicShare: { status: 'none', renderEditor: renderShareEditor } },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
   },
@@ -107,7 +121,7 @@ export const PrivateWithPublishing: Story = {
 
 /** Web opens the editor inside the same panel: publish end to end, then back. */
 export const PublishInPanel: Story = {
-  args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
+  args: { publicShare: { status: 'none', renderEditor: renderShareEditor } },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
     await userEvent.click(await within(document.body).findByRole('tab', { name: 'Web' }));
@@ -116,7 +130,7 @@ export const PublishInPanel: Story = {
 
 /** A published link outranks the "Share" label on the pill; the scope stays in the popover. */
 export const PrivateAndShared: Story = {
-  args: { publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
+  args: { publicShare: { status: 'shared', renderEditor: renderShareEditor } },
   play: async ({ canvasElement }) => {
     await userEvent.click(
       within(canvasElement).getByRole('button', { name: /Anyone with the link/ })

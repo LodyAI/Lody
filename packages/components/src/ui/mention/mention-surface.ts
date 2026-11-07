@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import {
   control,
   corner,
@@ -22,14 +23,8 @@ const rise = stylex.keyframes({
   to: { opacity: 1, transform: 'none' },
 });
 
-/** The popup row highlight: the floating rung mixed 6% toward the ink. */
-const HIGHLIGHT = `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`;
-
 /**
- * The mention menu's surface and rows, restating `@lody/ui`'s popup surface
- * from the semantic tokens it resolves to (the package keeps its `popup` group
- * internal), as `components/shared/composer-surface.ts` does for the composer's
- * other lists. Desktop and mobile share it; only the container's placement
+ * The mention menu reuses the popup family's semantic highlight. Desktop and mobile share it; only the container's placement
  * differs. StyleX cannot read `data-highlighted`, so a row's highlight is read
  * from the mention context and applied as a class.
  */
@@ -79,7 +74,7 @@ export const mentionSurface = stylex.create({
     scrollMarginBlock: space[1],
     // No transition: the highlight follows the pointer and the arrow keys.
   },
-  itemHighlighted: { backgroundColor: HIGHLIGHT },
+  itemHighlighted: { backgroundColor: popup.highlight },
   /**
    * A disabled row stays legible, because it explains why it cannot be picked:
    * it takes no pointer, and the menu mutes its words, not the whole row.

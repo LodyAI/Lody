@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@/ui/armed-overlays';
 import { Menu } from '@/ui/menu';
@@ -22,7 +22,9 @@ export type AcpSessionSelectProps = {
   iconOnly?: boolean;
   disabled?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   contentClassName?: string;
+  contentXstyle?: stylex.StyleXStyles;
   align?: 'start' | 'center' | 'end';
   ariaLabel?: string;
   /** Native hover tooltip for the trigger. Defaults to the selected option label. */
@@ -34,13 +36,60 @@ export type AcpSessionSelectProps = {
   showDescription?: boolean;
 };
 
-const compactClassName = (_isDark: boolean, iconOnly: boolean) =>
-  cn(
-    iconOnly
-      ? 'h-6 w-6 rounded-[4px] px-0'
-      : 'h-6 w-auto min-w-0 shrink rounded-[4px] px-2 gap-1 [&_span]:text-xs [&_span]:leading-tight',
-    'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-  );
+const styles = stylex.create({
+  trigger: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    userSelect: 'none',
+    gap: 'calc(var(--spacing) * 1)',
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 70%, transparent)',
+      ':hover': {
+        default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 70%, transparent)',
+        '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+      },
+    },
+    boxShadow: { default: 'none', ':focus-visible': 'none' },
+  },
+  compact: {
+    borderRadius: '4px',
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      ':hover': {
+        default: 'hsl(var(--muted-foreground) / 1)',
+        '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+      },
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': {
+        default: 'transparent',
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+      },
+    },
+  },
+  iconTrigger: { borderRadius: '4px' },
+  compactIcon: { paddingInline: 'calc(var(--spacing) * 0)' },
+  labelTrigger: { paddingInline: 'calc(var(--spacing) * 2)' },
+  compactLabel: { flexShrink: 1 },
+  pill: {
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: { default: 'transparent', ':hover': 'hsl(var(--hover) / 1)' },
+  },
+  plain: {
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  },
+  compactText: { fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-tight)' },
+  label: { fontWeight: 'var(--font-weight-medium)' },
+  icon: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  chevron: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+});
 
 export function AcpSessionSelect({
   value,
@@ -51,18 +100,18 @@ export function AcpSessionSelect({
   iconOnly = false,
   disabled = false,
   className,
+  xstyle,
   contentClassName,
+  contentXstyle,
   align = 'start',
   ariaLabel,
   triggerTitle,
-  tone = 'light',
   variant = 'default',
   showDescription = true,
 }: AcpSessionSelectProps) {
   const selectedOption = options.find((option) => option.value === value);
   const label = selectedOption?.label ?? placeholder ?? '';
   const isMenuEnabled = !disabled && options.length > 1;
-  const isDark = tone === 'dark';
   // Icon-only triggers hide the selected label, so the tooltip and the
   // accessible name carry it instead ("Permission mode: Plan").
   const withSelectedLabel = (name: string | undefined) =>
@@ -74,24 +123,40 @@ export function AcpSessionSelect({
       variant="ghost"
       size="mini"
       icon={iconOnly}
-      className={cn(
-        'min-w-0 select-none gap-1 text-foreground/70 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
-        variant === 'compact' && compactClassName(isDark, iconOnly),
-        variant !== 'compact' && iconOnly && 'h-6 w-6 rounded-[4px]',
-        variant !== 'compact' && !iconOnly && 'h-8 px-2',
-        variant === 'default' && !iconOnly && 'rounded-full hover:bg-hover',
-        variant === 'text' && !iconOnly && 'rounded-md bg-transparent px-1 hover:bg-transparent',
-        className
-      )}
+      width={iconOnly ? 'calc(var(--spacing) * 6)' : variant === 'compact' ? 'auto' : undefined}
+      height={
+        variant === 'compact' || iconOnly ? 'calc(var(--spacing) * 6)' : 'calc(var(--spacing) * 8)'
+      }
+      shape={variant === 'default' && !iconOnly ? 'pill' : 'default'}
+      xstyle={[
+        styles.trigger,
+        variant === 'compact' && styles.compact,
+        iconOnly && styles.iconTrigger,
+        variant === 'compact' && iconOnly && styles.compactIcon,
+        !iconOnly && styles.labelTrigger,
+        variant === 'compact' && !iconOnly && styles.compactLabel,
+        variant === 'default' && !iconOnly && styles.pill,
+        variant === 'text' && !iconOnly && styles.plain,
+        xstyle,
+      ]}
+      className={className}
       aria-label={withSelectedLabel(ariaLabel)}
       disabled={disabled}
       title={withSelectedLabel(triggerTitle) ?? label}
     >
-      {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
-      {!iconOnly ? <span className="font-medium">{label}</span> : null}
-      {isMenuEnabled && !iconOnly ? (
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+      {icon ? (
+        <span
+          {...stylex.props(styles.icon, variant === 'compact' && !iconOnly && styles.compactText)}
+        >
+          {icon}
+        </span>
       ) : null}
+      {!iconOnly ? (
+        <span {...stylex.props(styles.label, variant === 'compact' && styles.compactText)}>
+          {label}
+        </span>
+      ) : null}
+      {isMenuEnabled && !iconOnly ? <ChevronDown {...stylex.props(styles.chevron)} /> : null}
     </Button>
   );
 
@@ -102,7 +167,12 @@ export function AcpSessionSelect({
   return (
     <Menu.Root>
       <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
-      <Menu.Content align={align} className={cn('min-w-[120px]', contentClassName)}>
+      <Menu.Content
+        align={align}
+        minWidth={120}
+        className={contentClassName}
+        xstyle={contentXstyle}
+      >
         <Menu.RadioGroup value={value ?? ''} onValueChange={onChange}>
           {options.map((option) => {
             const menuItem = (

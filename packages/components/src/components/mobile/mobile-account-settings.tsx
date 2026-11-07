@@ -1,6 +1,10 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
   UserPlus,
@@ -31,6 +35,291 @@ import { ChangePasswordButton } from '../settings/change-password-button';
 import { LinkedAccountsList } from '../settings/linked-accounts-list';
 import { InviteMemberDialog, type InviteMemberRole } from '../settings/invite-member-dialog';
 import type { AccountSettingsPureProps } from '../settings/account-setting-pure';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+const styles = stylex.create({
+  foldColumn: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
+  foldScroll: { minHeight: 0, overflowY: 'auto' },
+  foldDetails: { minHeight: 0, flex: '1 1 0%', overflowY: 'auto' },
+  shrink: { flexShrink: 0 },
+
+  destructiveOutline: {
+    borderColor: 'color-mix(in oklab, hsl(var(--destructive) / 1) 40%, transparent)',
+    backgroundColor: {
+      default: button.secondaryBackground,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--destructive) / 1) 10%, transparent)',
+      },
+    },
+  },
+  destructiveConfirm: {
+    backgroundColor: {
+      default: 'hsl(var(--destructive) / 1)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--destructive) / 1) 90%, transparent)',
+      },
+    },
+  },
+  destructiveTitle: { [dialog.title]: 'hsl(var(--destructive) / 1)' },
+  fieldSpacing: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+
+  // These private ghost actions contain only currentColor glyphs. Keep every other
+  // control token inherited; the semantic label supplies their existing hover ink.
+  workspaceActionInk: {
+    [button.ghostLabel]: 'hsl(var(--muted-foreground) / 1)',
+    [colors.label]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+    },
+  },
+  workspaceDestructiveActionInk: {
+    [button.ghostLabel]: 'hsl(var(--muted-foreground) / 1)',
+    [colors.label]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': 'hsl(var(--destructive) / 1)',
+    },
+  },
+  actionSpacing: {
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
+  },
+  dangerConfirmLabel: { [button.primaryLabel]: 'hsl(var(--destructive-foreground) / 1)' },
+  pendingNameInk: { color: 'hsl(var(--muted-foreground) / 1)' },
+  pendingActionSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
+  pendingAccountDeletionSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
+  /** The account's address, in the section's header. */
+  email: {
+    maxWidth: '55vw',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78rem',
+    color: themeColors.mutedForeground,
+  },
+  /**
+   * The name that opens the inline editor. Its focus ring was a Tailwind
+   * `focus-visible:ring-*`, which this app paints as nothing (the global
+   * focus rule zeroes Tailwind's ring shadow) — and which also erased the
+   * app's own focus ring. The button keeps no focus indicator, as before.
+   */
+  nameButton: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '60vw',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    textAlign: 'right',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.25,
+    // The focus ring was a Tailwind `focus-visible:ring-*`, which painted
+    // nothing and erased the app's global focus ring. The button keeps no
+    // focus indicator, exactly as before.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    pointerEvents: { default: null, ':disabled': 'none' },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
+  },
+  /** The name inside that button. */
+  nameValue: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The pencil that says the name is editable. */
+  namePencil: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+  },
+  /** A plain value in a row, quiet because it is not the row's name. */
+  plainValue: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    color: themeColors.mutedForeground,
+  },
+  /** A list row inside a card: the member, the invitation, the API key. */
+  listRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  /** The rule between two rows of a card. */
+  listRowDivider: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: themeColors.border,
+  },
+  /** A list row stacked in a column, for a record with its own actions. */
+  listStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  /** The text column of a list row: it takes the remaining width. */
+  listBody: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  /** A record's name. */
+  listName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.25,
+  },
+  /** A record's secondary line. */
+  listMeta: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78rem',
+    lineHeight: 1.25,
+    color: themeColors.mutedForeground,
+  },
+  /** The "(you)" beside the current user's own name. */
+  listYou: {
+    marginLeft: themeSpace[1.5],
+    fontSize: '11px',
+    fontWeight: themeFontWeight.normal,
+    color: themeColors.mutedForeground,
+  },
+  /** A row's trailing actions. */
+  listActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: themeSpace[1] },
+  /** The chevron that says a row opens a menu. */
+  chevron: { height: themeSpace[3], width: themeSpace[3], opacity: 0.5 },
+  /** The mark an invitation carries. */
+  inviteMark: {
+    display: 'flex',
+    height: themeSpace[9],
+    width: themeSpace[9],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.muted,
+  },
+  inviteIcon: { height: themeSpace[4], width: themeSpace[4], color: themeColors.mutedForeground },
+  /** An address: it has no spaces, so it wraps rather than truncates. */
+  inviteEmail: {
+    wordBreak: 'break-all',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.25,
+  },
+  /** The line under an address: the role, and the invitation's state. */
+  inviteMeta: {
+    marginTop: themeSpace[0.5],
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontSize: '0.72rem',
+    color: themeColors.mutedForeground,
+  },
+  inviteMetaItem: { display: 'inline-flex', alignItems: 'center', gap: themeSpace[0.5] },
+  inviteClock: { height: themeSpace[2.5], width: themeSpace[2.5] },
+  /** The CLI key list's own rows. */
+  keyRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    fontSize: '0.78rem',
+    color: themeColors.mutedForeground,
+  },
+  keyEmpty: {
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    fontSize: '0.78rem',
+    color: themeColors.mutedForeground,
+  },
+  keyBody: { minWidth: 0 },
+  keyTitleLine: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: themeSpace[2],
+    rowGap: themeSpace[1],
+  },
+  keyNote: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+  },
+  keyTime: { flexShrink: 0, fontSize: '0.72rem', color: themeColors.mutedForeground },
+  keyDetails: {
+    marginTop: themeSpace[1],
+    display: 'flex',
+    flexWrap: 'wrap',
+    columnGap: themeSpace[3],
+    rowGap: themeSpace[1],
+    fontSize: '0.72rem',
+    color: themeColors.mutedForeground,
+  },
+  keyPreview: { fontFamily: MONO },
+  /** The dialog's own copy. */
+  dialogBody: {
+    paddingBlock: themeSpace[4],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  /** The dialog's field block. */
+  dialogField: { paddingBlock: themeSpace[4] },
+  /** The hint under a generated key; it carries the gap to the button below. */
+  usageNote: { color: themeColors.mutedForeground, marginBottom: themeSpace[3] },
+  dialogNote: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  /** The icon inside a button, with the button's own gap before it. */
+  buttonIcon: {
+    marginRight: themeSpace[1.5],
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+  },
+  /** The icon inside a round button. */
+  smallIcon: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  /** The join-requests block keeps the page's own inset. */
+  workspaceInset: { marginInline: themeSpace[3] },
+});
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
 
 function formatCliApiKeyTimestamp(
@@ -339,10 +628,10 @@ export function MobileAccountSettings({
 
   return (
     <>
-      <div className={cn(fold && 'flex h-full min-h-0 flex-col')}>
+      <div {...stylex.props(fold && styles.foldColumn)}>
         <div
           data-workspace-settings-summary
-          className={cn(fold && 'min-h-0 overflow-y-auto')}
+          {...stylex.props(fold && styles.foldScroll)}
           style={fold ? { flex: `0 0 ${fold.messageHeight}px` } : undefined}
         >
           {surface === 'account' ? (
@@ -350,9 +639,7 @@ export function MobileAccountSettings({
               title={t('settings.profile.title')}
               actions={
                 currentUser?.email ? (
-                  <span className="max-w-[55vw] truncate text-[0.78rem] text-muted-foreground">
-                    {currentUser.email}
-                  </span>
+                  <span {...stylex.props(styles.email)}>{currentUser.email}</span>
                 ) : undefined
               }
             >
@@ -374,31 +661,32 @@ export function MobileAccountSettings({
                       maxLength={120}
                       placeholder={t('settings.profile.namePlaceholder')}
                       disabled={isSavingUserName}
-                      className="h-9 w-full"
+                      controlHeight="calc(var(--spacing) * 9)"
                       aria-label={t('settings.profile.name')}
                     />
                   ) : (
                     <button
                       type="button"
-                      className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                      {...stylex.props(styles.nameButton)}
                       onClick={beginUserNameEdit}
                       disabled={isSavingUserName}
                       aria-label={t('settings.profile.nameEditLabel')}
                     >
-                      <span className="min-w-0 truncate">
+                      <span {...stylex.props(styles.nameValue)}>
                         {userNameBaseline || t('settings.profile.nameEmpty')}
                       </span>
                       {isSavingUserName ? (
-                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <Spinner
+                          diameter="calc(var(--spacing) * 3.5)"
+                          className={stylex.props(styles.pendingNameInk).className}
+                        />
                       ) : (
-                        <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                        <Pencil {...stylex.props(styles.namePencil)} />
                       )}
                     </button>
                   )
                 ) : (
-                  <span className="truncate text-[0.95rem] text-muted-foreground">
-                    {userNameBaseline || '—'}
-                  </span>
+                  <span {...stylex.props(styles.plainValue)}>{userNameBaseline || '—'}</span>
                 )}
               </MobileSettingsRow>
               <MobileSettingsRow label={t('settings.profile.avatar.label')} hasDivider>
@@ -446,7 +734,7 @@ export function MobileAccountSettings({
                     void onSignOut();
                   }}
                 >
-                  <LogOut className="mr-1.5 h-3.5 w-3.5" />
+                  <LogOut {...stylex.props(styles.buttonIcon)} />
                   {t('settings.account.signOut')}
                 </Button>
               </MobileSettingsRow>
@@ -473,29 +761,30 @@ export function MobileAccountSettings({
                       maxLength={120}
                       placeholder={t('settings.account.workspaceNamePlaceholder')}
                       disabled={isRenamingOrganization}
-                      className="h-9 w-full"
+                      controlHeight="calc(var(--spacing) * 9)"
                       aria-label={t('settings.account.workspaceName')}
                     />
                   ) : (
                     <button
                       type="button"
-                      className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                      {...stylex.props(styles.nameButton)}
                       onClick={beginWorkspaceNameEdit}
                       disabled={isRenamingOrganization}
                       aria-label={t('settings.account.workspaceNameEditLabel')}
                     >
-                      <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
+                      <span {...stylex.props(styles.nameValue)}>{workspaceNameBaseline}</span>
                       {isRenamingOrganization ? (
-                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <Spinner
+                          diameter="calc(var(--spacing) * 3.5)"
+                          className={stylex.props(styles.pendingNameInk).className}
+                        />
                       ) : (
-                        <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                        <Pencil {...stylex.props(styles.namePencil)} />
                       )}
                     </button>
                   )
                 ) : (
-                  <span className="truncate text-[0.95rem] text-muted-foreground">
-                    {organization.name}
-                  </span>
+                  <span {...stylex.props(styles.plainValue)}>{organization.name}</span>
                 )}
               </MobileSettingsRow>
               <MobileSettingsRow label={t('settings.workspace.avatar.label')} hasDivider>
@@ -511,10 +800,7 @@ export function MobileAccountSettings({
           ) : null}
         </div>
         {fold ? <div aria-hidden="true" style={{ flex: `0 0 ${fold.gapHeight}px` }} /> : null}
-        <div
-          data-workspace-settings-details
-          className={cn(fold && 'min-h-0 flex-1 overflow-y-auto')}
-        >
+        <div data-workspace-settings-details {...stylex.props(fold && styles.foldDetails)}>
           {surface === 'account' ? (
             <>
               {accountMachinesSlot}
@@ -530,10 +816,11 @@ export function MobileAccountSettings({
                   <Button
                     size="small"
                     variant="secondary"
-                    className="h-8 px-2.5"
+                    height="calc(var(--spacing) * 8)"
+                    className={stylex.props(styles.actionSpacing).className}
                     onClick={() => setInviteDialogOpen(true)}
                   >
-                    <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+                    <UserPlus {...stylex.props(styles.buttonIcon)} />
                     {t('workspace.members.invite')}
                   </Button>
                 ) : undefined
@@ -548,33 +835,28 @@ export function MobileAccountSettings({
                 return (
                   <div
                     key={member.id}
-                    className={cn(
-                      'flex items-center gap-3 px-4 py-3 text-sm',
-                      index > 0 && 'border-t border-border'
-                    )}
+                    {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
                   >
-                    <UserAvatar user={member.user} size="large" className="shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[0.95rem] font-medium leading-tight">
+                    <UserAvatar user={member.user} size="large" {...stylex.props(styles.shrink)} />
+                    <div {...stylex.props(styles.listBody)}>
+                      <p {...stylex.props(styles.listName)}>
                         {member.user?.name || '—'}
                         {member.userId === currentUser?.id && (
-                          <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                          <span {...stylex.props(styles.listYou)}>
                             ({t('workspace.members.you', 'you')})
                           </span>
                         )}
                       </p>
                       {member.user?.email ? (
-                        <p className="truncate text-[0.78rem] leading-tight text-muted-foreground">
-                          {member.user.email}
-                        </p>
+                        <p {...stylex.props(styles.listMeta)}>{member.user.email}</p>
                       ) : null}
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div {...stylex.props(styles.listActions)}>
                       {isEditable ? (
                         <Menu.Root>
                           <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
                             {t(`organization.role.${member.role}`)}
-                            <ChevronDown className="h-3 w-3 opacity-50" />
+                            <ChevronDown {...stylex.props(styles.chevron)} />
                           </Menu.Trigger>
                           <Menu.Content align="end">
                             <Menu.RadioGroup
@@ -602,13 +884,15 @@ export function MobileAccountSettings({
                           variant="ghost"
                           icon
                           aria-label={t('workspace.removeMember.title')}
-                          className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                          height="calc(var(--spacing) * 9)"
+                          width="calc(var(--spacing) * 9)"
+                          className={stylex.props(styles.workspaceDestructiveActionInk).className}
                           onClick={() => {
                             setUserToDelete(member.id);
                             setDeleteUserDialogOpen(true);
                           }}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 {...stylex.props(styles.smallIcon)} />
                         </Button>
                       )}
                     </div>
@@ -623,47 +907,46 @@ export function MobileAccountSettings({
               {pendingInvitations.map((invitation, index) => (
                 <div
                   key={invitation.id}
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-3 text-sm',
-                    index > 0 && 'border-t border-border'
-                  )}
+                  {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
                 >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
+                  <div {...stylex.props(styles.inviteMark)}>
+                    <Mail {...stylex.props(styles.inviteIcon)} />
                   </div>
-                  <div className="min-w-0 flex-1">
+                  <div {...stylex.props(styles.listBody)}>
                     {/* Emails have no spaces — `truncate` cut long addresses to an
                    unreadable stub on narrow phones; wrap them instead. */}
-                    <p className="break-all text-[0.95rem] font-medium leading-tight">
-                      {invitation.email}
-                    </p>
-                    <div className="mt-0.5 flex items-center gap-2 text-[0.72rem] text-muted-foreground">
+                    <p {...stylex.props(styles.inviteEmail)}>{invitation.email}</p>
+                    <div {...stylex.props(styles.inviteMeta)}>
                       <span>{t(`organization.role.${invitation.role}`)}</span>
-                      <span className="inline-flex items-center gap-0.5">
-                        <Clock className="h-2.5 w-2.5" />
+                      <span {...stylex.props(styles.inviteMetaItem)}>
+                        <Clock {...stylex.props(styles.inviteClock)} />
                         {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
                       </span>
                     </div>
                   </div>
                   {invitation.status === 'pending' && (
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div {...stylex.props(styles.listActions)}>
                       <Button
                         variant="ghost"
                         icon
                         aria-label={t('workspace.invitations.copyLink')}
-                        className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                        height="calc(var(--spacing) * 9)"
+                        width="calc(var(--spacing) * 9)"
+                        className={stylex.props(styles.workspaceActionInk).className}
                         onClick={() => {
                           void onCopyInviteLink(getInviteLink(invitation));
                         }}
                       >
-                        <Copy className="h-3.5 w-3.5" />
+                        <Copy {...stylex.props(styles.smallIcon)} />
                       </Button>
                       {hasAdminPermission && (
                         <Button
                           variant="ghost"
                           icon
                           aria-label={t('common.cancel')}
-                          className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                          height="calc(var(--spacing) * 9)"
+                          width="calc(var(--spacing) * 9)"
+                          className={stylex.props(styles.workspaceDestructiveActionInk).className}
                           disabled={cancellingInvitationIds.has(invitation.id)}
                           onClick={() => {
                             void (async () => {
@@ -690,9 +973,9 @@ export function MobileAccountSettings({
                           }}
                         >
                           {cancellingInvitationIds.has(invitation.id) ? (
-                            <Spinner className="h-3.5 w-3.5" />
+                            <Spinner diameter="calc(var(--spacing) * 3.5)" />
                           ) : (
-                            <X className="h-3.5 w-3.5" />
+                            <X {...stylex.props(styles.smallIcon)} />
                           )}
                         </Button>
                       )}
@@ -705,7 +988,7 @@ export function MobileAccountSettings({
 
           {isWorkspaceSurface && workspaceJoinRequestsSlot ? (
             <MobileSettingsSection noCard>
-              <div className="mx-3">{workspaceJoinRequestsSlot}</div>
+              <div {...stylex.props(styles.workspaceInset)}>{workspaceJoinRequestsSlot}</div>
             </MobileSettingsSection>
           ) : null}
 
@@ -716,24 +999,25 @@ export function MobileAccountSettings({
               actions={
                 <Button
                   size="small"
-                  className="h-8 px-2.5"
+                  height="calc(var(--spacing) * 8)"
+                  className={stylex.props(styles.actionSpacing).className}
                   onClick={() => {
                     setCliApiKeyDialogOpen(true);
                   }}
                   disabled={!onGenerateCliApiKey}
                 >
-                  <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                  <KeyRound {...stylex.props(styles.buttonIcon)} />
                   {t('settings.account.cliAuth.generateButton')}
                 </Button>
               }
             >
               {isLoadingCliApiKeys ? (
-                <div className="flex items-center gap-2 px-4 py-3 text-[0.78rem] text-muted-foreground">
-                  <Spinner className="h-3.5 w-3.5" />
+                <div {...stylex.props(styles.keyRow)}>
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" />
                   {t('settings.account.cliAuth.loadingRecords')}
                 </div>
               ) : cliApiKeys.length === 0 ? (
-                <div className="px-4 py-3 text-[0.78rem] text-muted-foreground">
+                <div {...stylex.props(styles.keyEmpty)}>
                   {t('settings.account.cliAuth.noRecords')}
                 </div>
               ) : (
@@ -750,30 +1034,24 @@ export function MobileAccountSettings({
                   return (
                     <div
                       key={apiKey.id}
-                      className={cn(
-                        'flex flex-col gap-3 px-4 py-3 text-sm',
-                        index > 0 && 'border-t border-border'
-                      )}
+                      {...stylex.props(styles.listStack, index > 0 && styles.listRowDivider)}
                     >
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                          <p className="truncate text-[0.95rem] font-medium">
+                      <div {...stylex.props(styles.keyBody)}>
+                        <div {...stylex.props(styles.keyTitleLine)}>
+                          <p {...stylex.props(styles.keyNote)}>
                             {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                           </p>
                           {sourceLabel && <Badge>{sourceLabel}</Badge>}
                           {createdAt && (
-                            <time
-                              dateTime={createdAt.dateTime}
-                              className="shrink-0 text-[0.72rem] text-muted-foreground"
-                            >
+                            <time dateTime={createdAt.dateTime} {...stylex.props(styles.keyTime)}>
                               {createdAt.label}
                             </time>
                           )}
                         </div>
                         {(apiKey.keyPreview || lastRequest) && (
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
+                          <div {...stylex.props(styles.keyDetails)}>
                             {apiKey.keyPreview && (
-                              <span className="font-mono">{apiKey.keyPreview}</span>
+                              <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>
                             )}
                             {lastRequest && (
                               <span>
@@ -787,14 +1065,17 @@ export function MobileAccountSettings({
                         <Button
                           variant="secondary"
                           size="small"
-                          className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          xstyle={styles.destructiveOutline}
                           onClick={() => setCliApiKeyToRevoke(apiKey)}
                           disabled={revokingCliApiKeyId === apiKey.id}
                         >
                           {revokingCliApiKeyId === apiKey.id ? (
-                            <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                            <Spinner
+                              diameter="calc(var(--spacing) * 3.5)"
+                              className={stylex.props(styles.pendingActionSpacing).className}
+                            />
                           ) : (
-                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            <Trash2 {...stylex.props(styles.buttonIcon)} />
                           )}
                           {t('settings.account.cliAuth.revokeButton')}
                         </Button>
@@ -818,7 +1099,7 @@ export function MobileAccountSettings({
                   <Button
                     variant="secondary"
                     size="small"
-                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    xstyle={styles.destructiveOutline}
                     onClick={() => setLeaveDialogOpen(true)}
                   >
                     {t('workspace.danger.leaveWorkspace.button')}
@@ -834,7 +1115,7 @@ export function MobileAccountSettings({
                   <Button
                     variant="secondary"
                     size="small"
-                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    xstyle={styles.destructiveOutline}
                     onClick={() => {
                       // A live subscription blocks deletion; explain instead of
                       // letting the backend reject the delete.
@@ -862,10 +1143,10 @@ export function MobileAccountSettings({
                 <Button
                   variant="secondary"
                   size="small"
-                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  xstyle={styles.destructiveOutline}
                   onClick={() => setDeleteAccountDialogOpen(true)}
                 >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  <Trash2 {...stylex.props(styles.buttonIcon)} />
                   {t('settings.account.accountDeletion.button')}
                 </Button>
               </MobileSettingsRow>
@@ -890,8 +1171,8 @@ export function MobileAccountSettings({
               </Dialog.Description>
             </Dialog.Header>
             {hasGeneratedCliApiKey ? (
-              <div className="space-y-3 py-4 text-sm">
-                <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
+              <div {...stylex.props(styles.dialogBody)}>
+                <p {...stylex.props(styles.usageNote)}>{t('settings.account.cliAuth.usageHint')}</p>
                 <Button
                   variant="secondary"
                   size="small"
@@ -900,12 +1181,13 @@ export function MobileAccountSettings({
                   }}
                   disabled={!onCopyGeneratedCliApiKey}
                 >
-                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                  <Copy {...stylex.props(styles.buttonIcon)} />
                   {t('settings.account.cliAuth.copyGeneratedButton')}
                 </Button>
               </div>
             ) : (
-              <div className="space-y-2 py-4">
+              /* Field spacing belongs to the field wrapper. */
+              <div {...stylex.props(styles.dialogField, styles.fieldSpacing)}>
                 <UiField.Label htmlFor="cli-api-key-note">
                   {t('settings.account.cliAuth.noteLabel')}
                 </UiField.Label>
@@ -916,7 +1198,7 @@ export function MobileAccountSettings({
                   maxLength={160}
                   placeholder={t('settings.account.cliAuth.notePlaceholder')}
                 />
-                <p className="text-xs text-muted-foreground">
+                <p {...stylex.props(styles.dialogNote)}>
                   {t('settings.account.cliAuth.noteHelper')}
                 </p>
               </div>
@@ -938,7 +1220,12 @@ export function MobileAccountSettings({
                   }}
                   disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
                 >
-                  {isCreatingCliApiKey && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
+                  {isCreatingCliApiKey && (
+                    <Spinner
+                      diameter="calc(var(--spacing) * 3.5)"
+                      className={stylex.props(styles.pendingActionSpacing).className}
+                    />
+                  )}
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
@@ -978,12 +1265,15 @@ export function MobileAccountSettings({
                   })();
                 }}
                 disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                xstyle={[styles.destructiveConfirm, styles.dangerConfirmLabel]}
               >
                 {revokingCliApiKeyId ? (
-                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 3.5)"
+                    className={stylex.props(styles.pendingActionSpacing).className}
+                  />
                 ) : (
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  <Trash2 {...stylex.props(styles.buttonIcon)} />
                 )}
                 {t('settings.account.cliAuth.revokeConfirmButton')}
               </AlertDialog.Action>
@@ -1024,7 +1314,7 @@ export function MobileAccountSettings({
               onClick={() => {
                 void handleRemoveMember();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              xstyle={[styles.destructiveConfirm, styles.dangerConfirmLabel]}
             >
               {t('common.remove')}
             </AlertDialog.Action>
@@ -1061,11 +1351,14 @@ export function MobileAccountSettings({
                 })();
               }}
               disabled={isLeaving}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              xstyle={[styles.destructiveConfirm, styles.dangerConfirmLabel]}
             >
               {isLeaving ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(styles.pendingAccountDeletionSpacing).className}
+                  />
                   {t('common.processing')}
                 </>
               ) : (
@@ -1120,15 +1413,16 @@ export function MobileAccountSettings({
       >
         <Dialog.Content>
           <Dialog.Header>
-            <Dialog.Title className="text-destructive">
+            <Dialog.Title className={stylex.props(styles.destructiveTitle).className}>
               {t('settings.account.accountDeletion.confirmTitle')}
             </Dialog.Title>
             <Dialog.Description>
               {t('settings.account.accountDeletion.confirmDescription')}
             </Dialog.Description>
           </Dialog.Header>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
+          <div {...stylex.props(styles.dialogField)}>
+            {/* Field spacing belongs to the field wrapper. */}
+            <div {...stylex.props(styles.fieldSpacing)}>
               <UiField.Label htmlFor="mobileDeleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',
@@ -1181,7 +1475,10 @@ export function MobileAccountSettings({
             >
               {isDeletingAccount ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(styles.pendingAccountDeletionSpacing).className}
+                  />
                   {t('common.processing')}
                 </>
               ) : (

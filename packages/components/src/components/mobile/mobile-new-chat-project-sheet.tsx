@@ -19,7 +19,10 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Input } from '@lody/ui/input';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { sheetSurface } from './sheet-surface';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import type { UnifiedProjectSelection } from '@/components/chat/unified-project-selector';
 import { filterMobileProjectOptions } from './mobile-new-chat-project-options';
 
@@ -88,35 +91,20 @@ function RailRow({ icon, title, description, selected, disabled, onClick }: Rail
       onClick={onClick}
       disabled={disabled}
       aria-pressed={selected}
-      className={cn(
-        'flex w-full min-w-0 items-start gap-3 rounded-lg px-2 py-2.5 text-left transition-colors',
-        'active:bg-muted/70 hover:bg-muted/50',
-        disabled && 'cursor-not-allowed opacity-50',
-        selected && 'bg-muted/60'
-      )}
+      {...stylex.props(styles.row, selected && styles.selectedRow, disabled && styles.disabledRow)}
     >
-      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-foreground/75">
-        {icon}
+      <span {...stylex.props(styles.rowIcon)}>{icon}</span>
+      <span {...stylex.props(styles.rowText)}>
+        <span {...stylex.props(styles.rowTitle)}>{title}</span>
+        {description ? <span {...stylex.props(styles.rowDescription)}>{description}</span> : null}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[15px] leading-5 text-foreground">{title}</span>
-        {description ? (
-          <span className="truncate text-xs leading-4 text-muted-foreground">{description}</span>
-        ) : null}
-      </span>
-      {selected ? (
-        <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-      ) : null}
+      {selected ? <Check {...stylex.props(styles.rowCheck)} aria-hidden="true" /> : null}
     </button>
   );
 }
 
 function GroupTitle({ children }: { children: ReactNode }) {
-  return (
-    <div className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-      {children}
-    </div>
-  );
+  return <div {...stylex.props(styles.groupTitle)}>{children}</div>;
 }
 
 /**
@@ -194,77 +182,66 @@ export function MobileNewChatProjectSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent
-        className={cn(
-          'h-[calc(90dvh-var(--native-keyboard-height,0px))]! max-h-[calc(90dvh-var(--native-keyboard-height,0px))]! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
-      >
-        <DrawerTitle className="sr-only">{t('chat.projectPicker.title', 'Project')}</DrawerTitle>
-        <DrawerDescription className="sr-only">
+      <DrawerContent xstyle={[styles.sheet, keyboard.contentXstyle]}>
+        <DrawerTitle xstyle={sheetSurface.srOnly}>
+          {t('chat.projectPicker.title', 'Project')}
+        </DrawerTitle>
+        <DrawerDescription xstyle={sheetSurface.srOnly}>
           {t('chat.projectPicker.description', 'Choose a local folder or GitHub repository')}
         </DrawerDescription>
 
-        <header className="relative flex h-12 shrink-0 items-center justify-center px-12">
-          <h2 className="select-none text-[17px] font-semibold leading-6">
-            {t('chat.projectPicker.title', 'Project')}
-          </h2>
+        <header {...stylex.props(styles.header)}>
+          <h2 {...stylex.props(styles.title)}>{t('chat.projectPicker.title', 'Project')}</h2>
           <button
             type="button"
             aria-label={t('common.close', 'Close')}
             onClick={close}
-            className="absolute right-3 top-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-muted/60 text-foreground/75 transition-colors hover:bg-muted"
+            {...stylex.props(styles.closeButton)}
           >
-            <X className="h-4 w-4" aria-hidden="true" />
+            <X {...stylex.props(styles.glyph)} aria-hidden="true" />
           </button>
         </header>
 
-        <div className="shrink-0 px-4">
+        <div {...stylex.props(styles.inset)}>
           <button
             type="button"
             onClick={() => {
               onSelect({ kind: 'none' });
               close();
             }}
-            className={cn(
-              'flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left text-[15px]',
-              'transition-colors hover:bg-muted/50 active:bg-muted/70'
-            )}
+            {...stylex.props(styles.clearRow)}
           >
-            <CircleSlash2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="flex-1">
+            <CircleSlash2 {...stylex.props(styles.hintGlyph)} aria-hidden="true" />
+            <span {...stylex.props(styles.grow)}>
               {t('chat.projectPicker.clear', "Don't work in a project")}
             </span>
             {selection.kind === 'none' ? (
-              <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              <Check {...stylex.props(styles.checkGlyph)} aria-hidden="true" />
             ) : null}
           </button>
 
-          <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
+          <div {...stylex.props(styles.machineCard)}>
             <button
               type="button"
               aria-expanded={machineOpen}
               onClick={() => setMachineOpen((prev) => !prev)}
-              className="flex h-11 w-full items-center gap-2.5 px-3 text-left text-sm"
+              {...stylex.props(styles.machineTrigger)}
             >
-              <span className="w-14 shrink-0 text-xs font-semibold text-muted-foreground">
+              <span {...stylex.props(styles.machineLabel)}>
                 {t('chat.mobileNewChat.machineLabel', 'Machine')}
               </span>
-              <Monitor className="h-4 w-4 shrink-0 text-foreground/70" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">{machineName}</span>
+              <Monitor {...stylex.props(styles.machineGlyph)} aria-hidden="true" />
+              <span {...stylex.props(styles.truncateGrow)}>{machineName}</span>
               {lockedMachineId ? (
                 <LockKeyhole
-                  className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                  {...stylex.props(styles.lockedGlyph)}
                   aria-label={lockedMachineReason ?? t('chat.mobileNewChat.roleMachineLocked')}
                 />
               ) : null}
-              <ChevronsUpDown
-                className="h-4 w-4 shrink-0 text-muted-foreground"
-                aria-hidden="true"
-              />
+              <ChevronsUpDown {...stylex.props(styles.hintGlyph)} aria-hidden="true" />
             </button>
             {machineOpen ? (
-              <div className="border-t border-border/60 p-1">
+              <div {...stylex.props(styles.machineList)}>
                 {machines.map((machine) => {
                   const locked = lockedMachineId !== null && machine.id !== lockedMachineId;
                   const disabledReason =
@@ -280,24 +257,18 @@ export function MobileNewChatProjectSheet({
                       disabled={Boolean(disabledReason)}
                       onClick={() => selectMachine(machine)}
                       aria-pressed={selected}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm',
-                        selected && 'bg-muted/60',
-                        disabledReason && 'cursor-not-allowed opacity-50',
-                        !disabledReason && 'hover:bg-muted/50 active:bg-muted/70'
+                      {...stylex.props(
+                        styles.machineRow,
+                        selected && styles.selectedRow,
+                        Boolean(disabledReason) && styles.disabledRow
                       )}
                     >
-                      <Monitor
-                        className="h-4 w-4 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{machine.name}</span>
+                      <Monitor {...stylex.props(styles.hintGlyph)} aria-hidden="true" />
+                      <span {...stylex.props(styles.truncateGrow)}>{machine.name}</span>
                       {disabledReason ? (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {disabledReason}
-                        </span>
+                        <span {...stylex.props(styles.disabledReason)}>{disabledReason}</span>
                       ) : selected ? (
-                        <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                        <Check {...stylex.props(styles.checkGlyph)} aria-hidden="true" />
                       ) : null}
                     </button>
                   );
@@ -306,11 +277,11 @@ export function MobileNewChatProjectSheet({
             ) : null}
           </div>
 
-          <div className="pt-2.5">
+          <div {...stylex.props(styles.searchWrap)}>
             <Input
               ref={searchRef}
               autoFocus
-              leading={<Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+              leading={<Search {...stylex.props(styles.searchGlyph)} aria-hidden="true" />}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t(
@@ -318,7 +289,7 @@ export function MobileNewChatProjectSheet({
                 'Search local folders and GitHub repos'
               )}
               aria-label={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-              className="h-9"
+              controlHeight="36px"
             />
           </div>
         </div>
@@ -326,7 +297,7 @@ export function MobileNewChatProjectSheet({
         <div
           ref={keyboard.scrollRef}
           data-vaul-no-drag=""
-          className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+          {...stylex.props(styles.body)}
           style={keyboard.scrollStyle}
         >
           {filtered.groups.length > 0 ? (
@@ -335,7 +306,7 @@ export function MobileNewChatProjectSheet({
               {filtered.groups.map((group) => (
                 <RailRow
                   key={group.projectId}
-                  icon={<FolderKanban className="h-4 w-4" aria-hidden="true" />}
+                  icon={<FolderKanban {...stylex.props(styles.glyph)} aria-hidden="true" />}
                   title={group.name}
                   description={
                     group.disabledReason ??
@@ -367,7 +338,7 @@ export function MobileNewChatProjectSheet({
               {filtered.folders.map((folder) => (
                 <RailRow
                   key={`${folder.machineId}:${folder.localProjectId}`}
-                  icon={<FolderOpen className="h-4 w-4" aria-hidden="true" />}
+                  icon={<FolderOpen {...stylex.props(styles.glyph)} aria-hidden="true" />}
                   title={folder.name}
                   description={folder.rootPath}
                   selected={
@@ -394,7 +365,7 @@ export function MobileNewChatProjectSheet({
               {filtered.repositories.map((repo) => (
                 <RailRow
                   key={repo.fullName}
-                  icon={<Github className="h-4 w-4" aria-hidden="true" />}
+                  icon={<Github {...stylex.props(styles.glyph)} aria-hidden="true" />}
                   title={repo.fullName}
                   description={repo.description}
                   selected={selection.kind === 'github' && selection.repoFullName === repo.fullName}
@@ -410,22 +381,22 @@ export function MobileNewChatProjectSheet({
           {filtered.folders.length === 0 &&
           filtered.repositories.length === 0 &&
           filtered.groups.length === 0 ? (
-            <div className="px-2 py-10 text-center text-sm text-muted-foreground">
+            <div {...stylex.props(styles.empty)}>
               {t('chat.projectPicker.emptyText', 'No projects found')}
             </div>
           ) : null}
         </div>
 
-        <div className="shrink-0 border-t border-border/60 px-3 py-1.5">
+        <div {...stylex.props(styles.footer)}>
           <button
             type="button"
             onClick={() => {
               close();
               onAddLocalProject();
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left text-sm hover:bg-muted/50 active:bg-muted/70"
+            {...stylex.props(styles.footerAction)}
           >
-            <FolderPlus className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <FolderPlus {...stylex.props(styles.searchGlyph)} aria-hidden="true" />
             <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
           </button>
           <button
@@ -434,9 +405,9 @@ export function MobileNewChatProjectSheet({
               close();
               onConnectGitHub();
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left text-sm hover:bg-muted/50 active:bg-muted/70"
+            {...stylex.props(styles.footerAction)}
           >
-            <ArrowUpRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <ArrowUpRight {...stylex.props(styles.searchGlyph)} aria-hidden="true" />
             <span>{t('repos.connectMore', 'Connect more GitHub projects')}</span>
           </button>
         </div>
@@ -444,3 +415,255 @@ export function MobileNewChatProjectSheet({
     </Drawer>
   );
 }
+
+const styles = stylex.create({
+  row: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: '12px',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: '8px',
+    paddingBlock: '10px',
+    textAlign: 'left',
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    backgroundColor: {
+      default: 'transparent',
+      ':active': `color-mix(in oklab,${themeColors.muted} 70%,transparent)`,
+      '@media (hover:hover)': {
+        ':hover': `color-mix(in oklab,${themeColors.muted} 50%,transparent)`,
+      },
+    },
+  },
+  selectedRow: {
+    backgroundColor: {
+      default: `color-mix(in oklab,${themeColors.muted} 60%,transparent)`,
+      ':active': `color-mix(in oklab,${themeColors.muted} 70%,transparent)`,
+      '@media (hover:hover)': {
+        ':hover': `color-mix(in oklab,${themeColors.muted} 50%,transparent)`,
+      },
+    },
+  },
+  disabledRow: { cursor: 'not-allowed', opacity: control.disabledOpacity },
+  rowIcon: {
+    marginTop: '2px',
+    display: 'flex',
+    height: '20px',
+    width: '20px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: `color-mix(in oklab,${themeColors.foreground} 75%,transparent)`,
+  },
+  rowText: { display: 'flex', minWidth: 0, flex: '1 1 0%', flexDirection: 'column', gap: '2px' },
+  rowTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '15px',
+    lineHeight: '20px',
+    color: themeColors.foreground,
+  },
+  rowDescription: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12px',
+    lineHeight: '16px',
+    color: themeColors.mutedForeground,
+  },
+  rowCheck: {
+    marginTop: '2px',
+    width: '16px',
+    height: '16px',
+    flexShrink: 0,
+    color: themeColors.primary,
+  },
+  groupTitle: {
+    paddingInline: '8px',
+    paddingBottom: '4px',
+    paddingTop: '12px',
+    fontSize: '10px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: themeColors.mutedForeground,
+  },
+  sheet: {
+    height: 'calc(90dvh - var(--native-keyboard-height,0px))',
+    maxHeight: 'calc(90dvh - var(--native-keyboard-height,0px))',
+    borderTopLeftRadius: 'var(--radius-2xl)',
+    borderTopRightRadius: 'var(--radius-2xl)',
+    borderColor: `color-mix(in oklab,${themeColors.border} 60%,transparent)`,
+  },
+  header: {
+    position: 'relative',
+    display: 'flex',
+    height: '48px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingInline: '48px',
+  },
+  title: { userSelect: 'none', fontSize: '17px', fontWeight: 600, lineHeight: '24px' },
+  closeButton: {
+    position: 'absolute',
+    right: '12px',
+    top: '6px',
+    display: 'flex',
+    height: '32px',
+    width: '32px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '9999px',
+    backgroundColor: {
+      default: `color-mix(in oklab,${themeColors.muted} 60%,transparent)`,
+      '@media (hover:hover)': { ':hover': themeColors.muted },
+    },
+    color: `color-mix(in oklab,${themeColors.foreground} 75%,transparent)`,
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke',
+    transitionDuration: '150ms',
+  },
+  glyph: { width: '16px', height: '16px' },
+  inset: { flexShrink: 0, paddingInline: '16px' },
+  hintGlyph: { width: '16px', height: '16px', flexShrink: 0, color: themeColors.mutedForeground },
+  grow: { flex: '1 1 0%' },
+  checkGlyph: { width: '16px', height: '16px', flexShrink: 0, color: themeColors.primary },
+  machineCard: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: `color-mix(in oklab,${themeColors.border} 60%,transparent)`,
+    backgroundColor: themeColors.card,
+  },
+  machineTrigger: {
+    display: 'flex',
+    height: '44px',
+    width: '100%',
+    alignItems: 'center',
+    gap: '10px',
+    paddingInline: '12px',
+    textAlign: 'left',
+    fontSize: '14px',
+    lineHeight: '20px',
+  },
+  machineLabel: {
+    width: '56px',
+    flexShrink: 0,
+    fontSize: '12px',
+    lineHeight: '16px',
+    fontWeight: 600,
+    color: themeColors.mutedForeground,
+  },
+  machineGlyph: {
+    width: '16px',
+    height: '16px',
+    flexShrink: 0,
+    color: `color-mix(in oklab,${themeColors.foreground} 70%,transparent)`,
+  },
+  truncateGrow: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  lockedGlyph: { width: '14px', height: '14px', flexShrink: 0, color: themeColors.mutedForeground },
+  machineList: {
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: `color-mix(in oklab,${themeColors.border} 60%,transparent)`,
+    padding: '4px',
+  },
+  disabledReason: { flexShrink: 0, fontSize: '10px', color: themeColors.mutedForeground },
+  searchWrap: { paddingTop: '10px' },
+  searchGlyph: { width: '16px', height: '16px', color: themeColors.mutedForeground },
+  body: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflowY: 'auto',
+    paddingInline: '16px',
+    paddingBottom: '8px',
+  },
+  empty: {
+    paddingInline: '8px',
+    paddingBlock: '40px',
+    textAlign: 'center',
+    fontSize: '14px',
+    lineHeight: '20px',
+    color: themeColors.mutedForeground,
+  },
+  footer: {
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: `color-mix(in oklab,${themeColors.border} 60%,transparent)`,
+    paddingInline: '12px',
+    paddingBlock: '6px',
+  },
+  clearRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: '12px',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: '8px',
+    paddingBlock: '10px',
+    textAlign: 'left',
+    fontSize: '15px',
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke',
+    transitionDuration: '150ms',
+    backgroundColor: {
+      default: 'transparent',
+      ':active': `color-mix(in oklab,${themeColors.muted} 70%,transparent)`,
+      '@media (hover:hover)': {
+        ':hover': `color-mix(in oklab,${themeColors.muted} 50%,transparent)`,
+      },
+    },
+  },
+  machineRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: '10px',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: '10px',
+    paddingBlock: '8px',
+    textAlign: 'left',
+    fontSize: '14px',
+    lineHeight: '20px',
+    backgroundColor: {
+      default: 'transparent',
+      ':active': `color-mix(in oklab,${themeColors.muted} 70%,transparent)`,
+      '@media (hover:hover)': {
+        ':hover': `color-mix(in oklab,${themeColors.muted} 50%,transparent)`,
+      },
+    },
+  },
+  footerAction: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: '10px',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: '8px',
+    paddingBlock: '10px',
+    textAlign: 'left',
+    fontSize: '14px',
+    lineHeight: '20px',
+    backgroundColor: {
+      default: 'transparent',
+      ':active': `color-mix(in oklab,${themeColors.muted} 70%,transparent)`,
+      '@media (hover:hover)': {
+        ':hover': `color-mix(in oklab,${themeColors.muted} 50%,transparent)`,
+      },
+    },
+  },
+});

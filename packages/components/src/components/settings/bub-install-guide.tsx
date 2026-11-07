@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@lody/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/native-browser';
 
@@ -9,23 +11,61 @@ export const BUB_ACP_INSTALL_DOCS_URL =
   'https://bub.build/docs/tutorials/acp-server/?utm_source=lody';
 const BUB_ACP_INSTALL_COMMAND = 'curl -fsSL https://bub.build/install.sh | bash -- --preset acp';
 
+const styles = stylex.create({
+  docsLink: { padding: 0 },
+  actionSpacing: {
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2)',
+    [button.gap]: 'calc(var(--spacing) * 1)',
+  },
+  intro: {
+    marginBlockStart: 0,
+    marginBlockEnd: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  commandRow: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    marginBlockStart: 0,
+    marginBlockEnd: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+  },
+  command: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    userSelect: 'all',
+    overflowX: 'auto',
+    whiteSpace: 'nowrap',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+  mark: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+});
+
 export function BubInstallGuide() {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
+    <div>
+      <p {...stylex.props(styles.intro)}>
         {t('settings.agent.setup.bubInstallCommand', 'Install it in one step:')}
       </p>
-      <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/60 px-2 py-1.5">
-        <code className="min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap text-xs">
-          {BUB_ACP_INSTALL_COMMAND}
-        </code>
+      <div {...stylex.props(styles.commandRow)}>
+        <code {...stylex.props(styles.command)}>{BUB_ACP_INSTALL_COMMAND}</code>
         <Button
           type="button"
           variant="ghost"
           size="small"
-          className="h-7 shrink-0 gap-1 px-2 text-xs"
+          height="calc(var(--spacing) * 7)"
+          fontSize="var(--text-xs)"
+          lineHeight="var(--text-xs--line-height)"
+          xstyle={styles.actionSpacing}
           aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
           onClick={() => {
             void writeTextToClipboard(BUB_ACP_INSTALL_COMMAND).then((success) => {
@@ -33,7 +73,11 @@ export function BubInstallGuide() {
             });
           }}
         >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? (
+            <Check {...stylex.props(styles.mark)} />
+          ) : (
+            <Copy {...stylex.props(styles.mark)} />
+          )}
           {copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
         </Button>
       </div>
@@ -41,7 +85,10 @@ export function BubInstallGuide() {
         type="button"
         variant="link"
         size="small"
-        className="h-auto p-0 text-xs"
+        height="auto"
+        fontSize="var(--text-xs)"
+        lineHeight="var(--text-xs--line-height)"
+        xstyle={styles.docsLink}
         onClick={() => {
           void openExternalUrl(BUB_ACP_INSTALL_DOCS_URL);
         }}

@@ -1,6 +1,10 @@
 # Product surfaces (`src/components`)
 
-Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
+Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
+
+## Styling
+
+- StyleX, not Tailwind; tokens/rules: `../../style/` and its `MIGRATION.md`.
 
 ## Sidebar and session rows
 
@@ -9,21 +13,20 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   separation and opener placement. Hide empty machine sections, while retaining
   machines with populated multi-repository projects.
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
-  and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
+  and Mark as unread (hidden when unread). Use `lib/session-mention-drag.ts` for
   conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
-  `startSessionMentionDrag` / `armSessionMentionDrag` must light
-  `ConversationDropOverlay` before `dragenter`. Navigation overlays use
-  `draggable={false}`; rows own `draggable`.
-- Full-width sidebar stays mounted/inert with scroll; Cmd+B animates content width
-  (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
+  `startSessionMentionDrag` / `armSessionMentionDrag` light `ConversationDropOverlay`
+  before `dragenter`. Rows own `draggable`; navigation overlays set false.
+- Full-width sidebar stays mounted/inert with scroll. Cmd+B animates content width
+  (zero under reduced motion); hidden eager-sync/keyboard-nav pauses. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
   nested Escape first. [Spec](../../../../specs/desktop-windows.md).
-- Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
-  `sidebar-navigation-model.ts`.
-- `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.
-  `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
-  `parentSessionId` to root using sidebar `allActiveSessions`, not visible rows.
-  Preserve the precise opener and independent child workspace. `parentSessionId`
+- All lists use `lib/session-opened-by-tree.ts`; `sidebar-navigation-model.ts`
+  owns matching keyboard navigation.
+- Keep `openedBySessionId` (precise opener) distinct from `openedByRowSessionId`
+  (row). `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
+  `parentSessionId` to root using `allActiveSessions`, never visible rows.
+  Preserve the precise opener and independent child workspace; `parentSessionId`
   children stay out of `sessionListAtom` rows.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
@@ -34,7 +37,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 - Conversation titles stay `font-normal`; pin with the glyph, never weight.
 - Sidebar row radius, inset, ink, hover/selected fill and title clipping use
   `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
-  Tailwind wins same-property conflicts; keep it only for groups, menu-open and focus states.
+  Compose overrides in the owner; native group/data hooks drive menu-open and focus states.
 - Desktop work/wait/unread/send status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`, never the leading slot; it replaces resting `Mergeable`,
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
@@ -87,24 +90,23 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Conversation access
 
-- `session-sharing.tsx` owns one desktop header control for team and web access: team visibility
-  selects menu/button, public status selects the label, and its audience strip shows current access.
-  Unavailable audiences are disabled with a reason; narrowing, tabs, search, and a second badge are
-  forbidden. Paths and base branch stay in `⋯`. Closed headers read only the `useSessionShareStatus`
-  management row (`unknown` means not shared). The inline panel and `⋯` dialog reuse one keyed
-  publisher; the panel stays open while publishing. [Contract](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
+- `session-sharing.tsx` owns one desktop team/web header control: team visibility
+  selects menu/button; public status selects its label; audience strip shows
+  access. Disable unavailable audiences with reasons; no narrowing,
+  tabs, search or second badge. Paths/base branch stay in ⋯. Closed headers read
+  only `useSessionShareStatus`'s management row (`unknown` means not shared).
+  Inline panel/⋯ dialog reuse one keyed publisher; panel stays open while publishing. [Contract](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
 ## Local projects
 
-- Project rows follow visibility, not machine ownership: a teammate's shared project
-  navigates and offers New chat; only removal is owner-only.
-- Adding a folder is a workspace action, not a this-machine action: the picker chooses
-  the machine, so every entry point says "Add folder", not "Add a local project".
-  Settings > Projects pills EVERY machine the user may add to, even ones with no project
-  yet, and passes it as `initialMachineId`. The addable set comes from
-  `useAddLocalProjectMachines`; the ownership rule (`canAddProjects`) has one home and
-  must not be re-derived per surface. Onboarding is the deliberate exception: its
-  desktop native picker really is this-machine only.
+- Teammates' visible shared projects navigate and offer New chat; only removal
+  is owner-only.
+- Adding folders is workspace-scoped: say Add folder, not Add a local project;
+  picker chooses the machine. Settings > Projects pills every
+  addable machine, even without projects, and passes `initialMachineId`.
+  `useAddLocalProjectMachines` owns the addable set/`canAddProjects`; never
+  rederive per surface. Onboarding alone uses the this-machine desktop
+  native picker.
 - Local directory registration and standalone display are independent. Missing
   `standaloneVisible` means visible. Standalone lists filter hidden registrations;
   member resolution, repository-copy selection and session access retain them.

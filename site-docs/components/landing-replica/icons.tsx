@@ -1,6 +1,16 @@
 import type { SVGProps } from 'react';
 import { cn } from './utils';
+import * as stylex from '@stylexjs/stylex';
 import type { ReplicaAgent } from './types';
+
+const styles = stylex.create({
+  agentGlyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  fileGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+  },
+});
 
 /* Brand + file glyphs for the landing replica. Copied as static artwork so the
    replica never imports the app's icon registry. */
@@ -48,9 +58,18 @@ export function WorktreeIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function AgentIcon({ agent, className }: { agent: ReplicaAgent; className?: string }) {
-  const cls = className ?? 'h-4 w-4';
-  return agent === 'claude' ? <AnthropicIcon className={cls} /> : <OpenAIIcon className={cls} />;
+export function AgentIcon({
+  agent,
+  className,
+  xstyle,
+}: {
+  agent: ReplicaAgent;
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+}) {
+  const sx = stylex.props(className == null && styles.agentGlyph, xstyle);
+  const props = { ...sx, className: cn(sx.className, className) };
+  return agent === 'claude' ? <AnthropicIcon {...props} /> : <OpenAIIcon {...props} />;
 }
 
 /* File glyphs from vscode-symbols (MIT, Miguel Solorio), the set the app uses.
@@ -119,14 +138,24 @@ function glyphFor(path: string) {
 }
 
 /** Colored file-type glyph (the app renders these as `<img>` of the same SVGs). */
-export function FileIcon({ path, className }: { path: string; className?: string }) {
+export function FileIcon({
+  path,
+  className,
+  xstyle,
+}: {
+  path: string;
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+}) {
+  const sx = stylex.props(styles.fileGlyph, xstyle);
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
-      className={cn('h-4 w-4 shrink-0', className)}
+      {...sx}
+      className={cn(sx.className, className)}
     >
       {glyphFor(path)}
     </svg>

@@ -157,7 +157,7 @@ describe('PrTabView refresh button', () => {
     const { button, onRefresh } = renderView({ state: 'loading', data: null });
 
     expect(button.disabled).toBe(false);
-    expect(button.querySelector('.animate-spin')).not.toBeNull();
+    expect(button.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).not.toBeNull();
 
     flushSync(() => {
       button.click();

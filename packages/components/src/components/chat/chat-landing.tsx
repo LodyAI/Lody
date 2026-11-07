@@ -1,3 +1,4 @@
+import { SessionLimitNotice } from './session-limit-notice';
 import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import {
   useLegacyWorkspaceMutation,
@@ -81,6 +82,8 @@ import {
   X,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
@@ -241,6 +244,230 @@ import {
 } from './submission/use-composer-navigation-focus';
 import { BranchSelector } from './chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const landingStyles = stylex.create({
+  inlineValue: {
+    display: 'flex',
+    minWidth: 0,
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    textAlign: 'start',
+  },
+  inlineIcon: { flexShrink: 0, color: colors.tertiaryLabel },
+  inlineValueText: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflowWrap: 'anywhere',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: colors.label,
+  },
+  inlineChevron: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  inlineTrigger: {
+    minHeight: 'calc(var(--spacing) * 11)',
+    borderRadius: field.radiusMedium,
+    backgroundColor: field.background,
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    boxShadow: field.well,
+  },
+  inlinePanel: {
+    borderColor: colors.separator,
+    backgroundColor: colors.secondaryBackground,
+    boxShadow: 'none',
+  },
+  inlineSummary: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  inlineBranchRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+  },
+  inlineWorktree: { paddingTop: 'calc(var(--spacing) * 1)' },
+  inlineBranchBody: { minWidth: 0, flex: '1 1 0%' },
+  inlineBranchTrigger: {
+    height: 'calc(var(--spacing) * 8)',
+    borderRadius: field.radiusMedium,
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+    paddingInline: 'calc(var(--spacing) * 2)',
+  },
+  inlineBranchGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  inlineBranchLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  inlineBranchChevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  inlineComposer: { display: 'flex', minHeight: 0, flexDirection: 'column' },
+  inlineNotice: {
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingTop: 'calc(var(--spacing) * 2)',
+  },
+  minHeightZero: { minHeight: 0 },
+  branchTrigger: { minWidth: 'calc(var(--spacing) * 0)', maxWidth: '100%' },
+  nonShrinking: { flexShrink: 0 },
+  usageTrigger: { height: 'calc(var(--spacing) * 8)', flexShrink: 0 },
+  mobileSend: {
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    borderRadius: 'calc(infinity * 1px)',
+    boxShadow: 'var(--shadow-xs)',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--background) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--background) / 1)' },
+    },
+    translate: { default: null, ':active': '0 1px' },
+  },
+  branchSlot: { display: 'inline-flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
+  topSelectorRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  footerSlot: { display: 'contents' },
+  glyph14: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  glyph14Muted: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  glyph20: { width: themeSpace[5], height: themeSpace[5] },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  mobileFooterRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+    overflow: 'hidden',
+  },
+  mobileFooterRunConfig: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  hidden: { display: 'none' },
+  topSelector: { width: '100%', minWidth: 0 },
+
+  /* The sharing-review notice. */
+  sharingReviewNotice: {
+    marginBottom: themeSpace[2],
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2.5],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.35)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.foreground,
+    boxShadow: themeShadow.xs,
+  },
+  sharingReviewGlyph: {
+    marginTop: '0.5px',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  sharingReviewBody: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  sharingReviewTitle: { fontWeight: themeFontWeight.medium },
+  sharingReviewText: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: '1.625',
+    color: themeColors.mutedForeground,
+  },
+  sharingReviewActions: {
+    marginTop: themeSpace[1.5],
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[3],
+    rowGap: themeSpace[1],
+  },
+  sharingReviewPrimary: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.primary,
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+  },
+  sharingReviewSecondary: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+  },
+  sharingReviewDismiss: {
+    display: 'flex',
+    height: themeSpace[7],
+    width: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.md,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    backgroundColor: { default: 'transparent', ':hover': themeColors.hover },
+  },
+});
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -3669,7 +3896,7 @@ function WorkspaceChatLanding({
     });
 
   const branchSelectorNode = showBranchSelector ? (
-    <span className="inline-flex min-w-0 items-center gap-1">
+    <span {...stylex.props(landingStyles.branchSlot)}>
       <BranchSelector
         key={branchSelectorKey}
         value={currentBranch}
@@ -3681,7 +3908,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="min-w-0 max-w-full"
+        xstyle={landingStyles.branchTrigger}
         disabled={isBranchDisabled}
       />
     </span>
@@ -4123,7 +4350,7 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      <div className="flex w-full min-w-0 items-center gap-2">
+      <div {...stylex.props(landingStyles.topSelectorRow)}>
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
@@ -4164,7 +4391,7 @@ function WorkspaceChatLanding({
       resetKeys={[workspaceId, selectedAgent?.agentId]}
       fallback={null}
     >
-      <div className="contents">
+      <div {...stylex.props(landingStyles.footerSlot)}>
         <DesktopRunConfigMenu
           agentSelection={selectedAgent}
           allowedMachineIds={desktopAgentMachineIds}
@@ -4444,7 +4671,7 @@ function WorkspaceChatLanding({
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}
           showRateLimitWithoutContext
-          className="h-7 shrink-0"
+          xstyle={landingStyles.usageTrigger}
         />
       </MobileFooterRail>
     </ErrorBoundary>
@@ -6197,42 +6424,33 @@ function WorkspaceChatLanding({
   const sessionLimitReached =
     !sessionLimitAdmission.allowed && sessionLimitAdmission.reason === 'limit_reached';
   const sessionLimitNoticeNode = sessionLimitReached ? (
-    <div className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-950 shadow-xs dark:text-amber-100">
-      <span>
-        {t(hidesBillingUi ? 'chat.sessionLimitNoticeMobile' : 'chat.sessionLimitNotice', {
-          limit: FREE_SESSION_LIMIT_PER_WORKSPACE,
-        })}
-      </span>
-      {!hidesBillingUi ? (
-        <button
-          type="button"
-          className="font-semibold text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-200 dark:hover:text-amber-100"
-          onClick={() => {
-            capturePostHogEvent(postHog, 'session/free_session_limit_upgrade_clicked', {
-              user_id: userId,
-              workspace_id: workspaceId,
-              entrypoint: 'chat_landing',
-            });
-            openSettings('billing');
-          }}
-        >
-          {t('sessions.freeTurnLimitUpgrade')}
-        </button>
-      ) : null}
-    </div>
+    <SessionLimitNotice
+      message={t(hidesBillingUi ? 'chat.sessionLimitNoticeMobile' : 'chat.sessionLimitNotice', {
+        limit: FREE_SESSION_LIMIT_PER_WORKSPACE,
+      })}
+      actionLabel={hidesBillingUi ? undefined : t('sessions.freeTurnLimitUpgrade')}
+      onUpgrade={() => {
+        capturePostHogEvent(postHog, 'session/free_session_limit_upgrade_clicked', {
+          user_id: userId,
+          workspace_id: workspaceId,
+          entrypoint: 'chat_landing',
+        });
+        openSettings('billing');
+      }}
+    />
   ) : null;
   const sharingReviewRow =
     sharingReviewState.ready && sharingReviewState.active
       ? inboxRows?.find((item) => item.kind === 'sharing_review')
       : undefined;
   const sharingReviewNoticeNode = sharingReviewRow ? (
-    <div className="mb-2 flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/35 px-3 py-2.5 text-sm text-foreground shadow-xs">
-      <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">
+    <div {...stylex.props(landingStyles.sharingReviewNotice)}>
+      <LockKeyhole {...stylex.props(landingStyles.sharingReviewGlyph)} aria-hidden="true" />
+      <div {...stylex.props(landingStyles.sharingReviewBody)}>
+        <div {...stylex.props(landingStyles.sharingReviewTitle)}>
           {t('inbox.sharingReview.title', 'Review what your team can see')}
         </div>
-        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+        <p {...stylex.props(landingStyles.sharingReviewText)}>
           {sharingReviewState.teamLooksEmpty
             ? t(
                 'inbox.sharingReview.emptyTeam',
@@ -6248,11 +6466,11 @@ function WorkspaceChatLanding({
                   'Private machines and projects are only visible to you. Share the ones your teammates should be able to use.'
                 )}
         </p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div {...stylex.props(landingStyles.sharingReviewActions)}>
           {sharingReviewState.actionTarget ? (
             <button
               type="button"
-              className="text-xs font-semibold text-primary hover:underline"
+              {...stylex.props(landingStyles.sharingReviewPrimary)}
               onClick={() => {
                 void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
                   console.error('Failed to mark sharing review read', error)
@@ -6267,7 +6485,7 @@ function WorkspaceChatLanding({
           ) : null}
           <button
             type="button"
-            className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+            {...stylex.props(landingStyles.sharingReviewSecondary)}
             onClick={() =>
               void suppressSharingReview({ itemId: sharingReviewRow._id }).catch((error) =>
                 console.error('Failed to suppress sharing review', error)
@@ -6280,7 +6498,7 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
+        {...stylex.props(landingStyles.sharingReviewDismiss)}
         onClick={() =>
           void dismissInboxItem({ itemId: sharingReviewRow._id }).catch((error) =>
             console.error('Failed to dismiss sharing review', error)
@@ -6288,7 +6506,7 @@ function WorkspaceChatLanding({
         }
         aria-label={t('common.dismiss', 'Dismiss')}
       >
-        <X className="h-4 w-4" aria-hidden="true" />
+        <X {...stylex.props(landingStyles.glyph16)} aria-hidden="true" />
       </button>
     </div>
   ) : null;
@@ -6374,7 +6592,7 @@ function WorkspaceChatLanding({
     {
       value: 'none',
       label: t('chat.mobileNewChat.noProject', 'No project selected'),
-      icon: <CircleSlash2 className="size-4" />,
+      icon: <CircleSlash2 {...stylex.props(landingStyles.glyph16)} />,
       selection: { kind: 'none' } as UnifiedProjectSelection,
     },
     ...mobileProjectChoices.map((option) => ({
@@ -6383,22 +6601,22 @@ function WorkspaceChatLanding({
       disabled: Boolean(option.disabledReason),
       icon:
         option.selection.kind === 'group' ? (
-          <Folders className="size-4" />
+          <Folders {...stylex.props(landingStyles.glyph16)} />
         ) : option.selection.kind === 'local' ? (
-          <FolderOpen className="size-4" />
+          <FolderOpen {...stylex.props(landingStyles.glyph16)} />
         ) : (
           <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
         ),
     })),
     {
       value: '__add_local__',
-      icon: <FolderPlus className="size-4" />,
+      icon: <FolderPlus {...stylex.props(landingStyles.glyph16)} />,
       label: t('chat.contextSwitch.addProject', 'Add a folder'),
       selection: null,
     },
     {
       value: '__connect_github__',
-      icon: <ArrowUpRight className="size-4" />,
+      icon: <ArrowUpRight {...stylex.props(landingStyles.glyph16)} />,
       label: t('repos.connectMore', 'Connect more GitHub projects'),
       selection: null,
     },
@@ -6412,25 +6630,21 @@ function WorkspaceChatLanding({
           ? `github:${desktopProjectSelection.repoFullName}`
           : 'none';
   const mobileInlineValue = (icon: ReactNode, value: string) => (
-    <span className="flex min-w-0 w-full items-center gap-2 text-start">
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
-      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm text-foreground">
-        {value}
-      </span>
-      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <span {...stylex.props(landingStyles.inlineValue)}>
+      <span {...stylex.props(landingStyles.inlineIcon)}>{icon}</span>
+      <span {...stylex.props(landingStyles.inlineValueText)}>{value}</span>
+      <ChevronsUpDown {...stylex.props(landingStyles.inlineChevron)} aria-hidden="true" />
     </span>
   );
-  const mobileInlineTrigger = 'min-h-11 rounded-xl bg-foreground/[0.04] px-3 py-2';
-  const mobileInlinePanel = 'border-border/30 bg-muted/45 shadow-none';
   const mobileProjectIcon =
     desktopProjectSelection.kind === 'group' ? (
-      <Folders className="size-4" />
+      <Folders {...stylex.props(landingStyles.glyph16)} />
     ) : desktopProjectSelection.kind === 'local' ? (
-      <FolderOpen className="size-4" />
+      <FolderOpen {...stylex.props(landingStyles.glyph16)} />
     ) : desktopProjectSelection.kind === 'github' ? (
       <GitHubOwnerAvatarIcon repoFullName={desktopProjectSelection.repoFullName} />
     ) : (
-      <CircleSlash2 className="size-4" />
+      <CircleSlash2 {...stylex.props(landingStyles.glyph16)} />
     );
   const mobileLocalGitProject =
     contextType === 'local' && !!selectedLocalProject && activeLocalGitState?.git === true;
@@ -6454,7 +6668,7 @@ function WorkspaceChatLanding({
     targetNode: t('chat.mobileNewChat.title', 'New chat'),
     coordinator: MobileInlinePickerCoordinator,
     summary: (
-      <div className="flex flex-col gap-2 py-3">
+      <div {...stylex.props(landingStyles.inlineSummary)}>
         <MobileInlinePicker
           id="new-machine"
           value={mobileProjectSelectedMachineId}
@@ -6479,10 +6693,10 @@ function WorkspaceChatLanding({
             }
           }}
           ariaLabel={t('chat.mobileNewChat.machineLabel', 'Machine')}
-          triggerClassName={mobileInlineTrigger}
-          expansionPanelClassName={mobileInlinePanel}
+          triggerXstyle={landingStyles.inlineTrigger}
+          expansionPanelXstyle={landingStyles.inlinePanel}
           triggerContent={mobileInlineValue(
-            <Monitor className="size-4" />,
+            <Monitor {...stylex.props(landingStyles.glyph16)} />,
             mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')
           )}
         />
@@ -6501,14 +6715,14 @@ function WorkspaceChatLanding({
           ariaLabel={t('chat.projectPicker.title', 'Project')}
           searchable
           searchPlaceholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-          triggerClassName={mobileInlineTrigger}
-          expansionPanelClassName={mobileInlinePanel}
+          triggerXstyle={landingStyles.inlineTrigger}
+          expansionPanelXstyle={landingStyles.inlinePanel}
           triggerContent={mobileInlineValue(mobileProjectIcon, mobileSheetTargetLabel)}
         />
         {mobileBranchVisible ? (
-          <div className="flex min-w-0 items-start gap-2 px-1">
+          <div {...stylex.props(landingStyles.inlineBranchRow)}>
             {mobileLocalGitProject ? (
-              <div className="pt-1">
+              <div {...stylex.props(landingStyles.inlineWorktree)}>
                 <WorktreeCheckboxPill
                   checked={effectiveWorkdirMode === 'worktree'}
                   onCheckedChange={(checked) =>
@@ -6520,7 +6734,7 @@ function WorkspaceChatLanding({
                 />
               </div>
             ) : null}
-            <div className="min-w-0 flex-1">
+            <div {...stylex.props(landingStyles.inlineBranchBody)}>
               <MobileInlinePicker
                 id="new-branch"
                 value={currentBranch}
@@ -6532,13 +6746,15 @@ function WorkspaceChatLanding({
                 loading={contextType === 'local' && (loadingLocalGitState || runtimeInitializing)}
                 searchable
                 ariaLabel={t('chat.branchPlaceholder', 'Branch')}
-                triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
-                expansionPanelClassName={mobileInlinePanel}
+                triggerXstyle={landingStyles.inlineBranchTrigger}
+                expansionPanelXstyle={landingStyles.inlinePanel}
                 triggerContent={
                   <>
-                    <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">{mobileBranchLabel}</span>
-                    <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                    <GitBranch {...stylex.props(landingStyles.inlineBranchGlyph)} />
+                    <span {...stylex.props(landingStyles.inlineBranchLabel)}>
+                      {mobileBranchLabel}
+                    </span>
+                    <ChevronsUpDown {...stylex.props(landingStyles.inlineBranchChevron)} />
                   </>
                 }
               />
@@ -6553,20 +6769,22 @@ function WorkspaceChatLanding({
         variant="section"
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
-        <div className="flex min-h-0 flex-col">
+        <div {...stylex.props(landingStyles.inlineComposer)}>
           <input
             ref={attachmentInputRef}
             type="file"
             multiple
-            className="hidden"
+            {...stylex.props(landingStyles.hidden)}
             onChange={handleAttachmentInputChange}
           />
-          {composerNoticeNode ? <div className="px-4 pt-2">{composerNoticeNode}</div> : null}
+          {composerNoticeNode ? (
+            <div {...stylex.props(landingStyles.inlineNotice)}>{composerNoticeNode}</div>
+          ) : null}
           <ChatComposer
             tone={tone}
             variant="session"
             autoResize
-            className="min-h-0"
+            xstyle={landingStyles.minHeightZero}
             mentionSource={mentionSource}
             availableCommands={availableCommands}
             skillAgent={skillAgent}
@@ -6618,9 +6836,13 @@ function WorkspaceChatLanding({
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */
-                className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+                xstyle={landingStyles.mobileSend}
               >
-                {submitting ? <Spinner size="medium" /> : <ArrowUp className="h-5 w-5" />}
+                {submitting ? (
+                  <Spinner diameter="calc(var(--spacing) * 5)" />
+                ) : (
+                  <ArrowUp {...stylex.props(landingStyles.glyph20)} />
+                )}
               </Button>
             }
           />
@@ -7056,7 +7278,7 @@ function WorkspaceChatLanding({
         ref={attachmentInputRef}
         type="file"
         multiple
-        className="hidden"
+        {...stylex.props(landingStyles.hidden)}
         onChange={handleAttachmentInputChange}
       />
       <ChatLandingView
@@ -7096,7 +7318,7 @@ function WorkspaceChatLanding({
         onFileRemove={handleRemoveFile}
         onFileRetry={handleRetryFile}
         mcp={mcpSelection.menu}
-        topSelector={<div className="w-full min-w-0">{topSelectorNode}</div>}
+        topSelector={<div {...stylex.props(landingStyles.topSelector)}>{topSelectorNode}</div>}
         footerSelector={footerSelectorNode}
         bottomBar={bottomBarNode}
         composerNotice={composerNoticeNode}
@@ -7136,9 +7358,12 @@ function WorkspaceChatLanding({
               icon
               onClick={() => showNavigationSidebar()}
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
-              className="h-7 w-7 shrink-0 text-muted-foreground"
+              width="calc(var(--spacing) * 7)"
+              height="calc(var(--spacing) * 7)"
+              labelColor="hsl(var(--muted-foreground) / 1)"
+              xstyle={landingStyles.nonShrinking}
             >
-              <PanelLeft className="h-4 w-4" />
+              <PanelLeft {...stylex.props(landingStyles.glyph16)} />
             </Button>
           ) : null
         }

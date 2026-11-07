@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState, type CSSProperties } from 'react';
+import { PopupContainerProvider } from '@lody/ui/popup-container';
 import { getRateLimitEntryKey, getServerNow } from '@lody/shared';
 
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
@@ -146,3 +148,31 @@ export const ClaudeFableWeekly: Story = {
     },
   },
 };
+
+export const CompactingContextOnly: Story = {
+  args: {
+    contextWindowUsage: { size: 200_000, used: 168_000 },
+    rateLimits: null,
+    isContextCompacting: true,
+  },
+};
+
+function LocalUsageFixture() {
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  return (
+    <div
+      ref={setHost}
+      data-usage-local-surface
+      style={{ minHeight: 400, '--spacing': '6px', '--radius-xl': '19px' } as CSSProperties}
+    >
+      <PopupContainerProvider container={host}>
+        <SessionUsagePopover
+          agentType="codex"
+          contextWindowUsage={{ size: 200_000, used: 168_000 }}
+          rateLimits={null}
+        />
+      </PopupContainerProvider>
+    </div>
+  );
+}
+export const LocalSurface: Story = { render: () => <LocalUsageFixture /> };

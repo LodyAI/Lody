@@ -38,8 +38,10 @@ describe('SessionMentionDropLayer', () => {
           excludeSessionId="sess_open"
           onDropSessionId={() => undefined}
         >
-          <div className="absolute inset-0 hidden">hidden tab</div>
-          <div className="absolute inset-0">active tab</div>
+          <div hidden style={{ position: 'absolute', inset: 0 }}>
+            hidden tab
+          </div>
+          <div style={{ position: 'absolute', inset: 0 }}>active tab</div>
         </SessionMentionDropLayer>
       );
     });

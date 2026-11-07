@@ -87,11 +87,11 @@ Invariants in `AGENTS.md`.)
     stays standalone. `FileIcon` resolves an SVG via `new URL('./files/<name>.svg',
 import.meta.url)`; folders use a plain lucide icon. Re-sync `mappings.ts` and the
     `files/` set together if updated upstream.
-- `src/react/styles.css` is the Tailwind v4 entry and owns shadcn CSS variables, the
+- `src/react/styles.css` owns ordinary CSS defaults, base resets and theme variables, the
   three-column resizer styling (`.crh-resizer`), plus the small `@pierre/diffs`
   integration overrides. The 3 columns are drag-resizable on desktop (widths persisted
   to `localStorage`; the center stays `minmax(0,1fr)`).
-- `src/ui/` contains package-local shadcn components. Do not import `@lody/components`
+- `src/ui/` contains package-local Radix controls with StyleX. Do not import `@lody/components`
   here; this renderer must stay embeddable outside Lody.
 - `src/stories/` contains Storybook-only fixed review fixtures and thin wrappers around
   `ReviewRenderer`; keep sample `.review.md` files there when adding visual scenarios.

@@ -3,12 +3,15 @@ import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeSpace } from '../../style/theme-scale.stylex';
 
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
 export interface AttachmentAddMenuMcp {
@@ -22,7 +25,7 @@ export interface AttachmentAddMenuMcp {
 
 export interface AttachmentAddMenuProps {
   /** Larger trigger + roomier items for touch; desktop and mobile both use the
-   * same upward popover dropdown. */
+   *  same upward popover dropdown. */
   isMobile: boolean;
   /** Smaller trigger for the landing composer variant. */
   isLanding?: boolean;
@@ -38,6 +41,100 @@ export interface AttachmentAddMenuProps {
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
 }
+
+/**
+ * The pushed panel slides in from the right and the root returns from the
+ * left. These are the `tw-animate-css` `enter` keyframes, restated: the panel
+ * fades in while it slides half a spacing step.
+ */
+const enterFromRight = stylex.keyframes({
+  from: { opacity: 0, transform: 'translate3d(0.5rem, 0, 0)' },
+  to: { opacity: 1, transform: 'none' },
+});
+const enterFromLeft = stylex.keyframes({
+  from: { opacity: 0, transform: 'translate3d(-0.5rem, 0, 0)' },
+  to: { opacity: 1, transform: 'none' },
+});
+
+const styles = stylex.create({
+  trigger: {
+    [button.ghostHover]: 'hsl(var(--hover) / 1)',
+  },
+  sheetTrigger: { borderRadius: 'calc(infinity * 1px)' },
+  item: { cursor: 'pointer' },
+  itemMobile: {
+    gap: 'calc(var(--spacing) * 2.5)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+    fontSize: '15px',
+  },
+  checkboxMobile: { paddingBlock: 'calc(var(--spacing) * 2.5)' },
+  back: { fontWeight: 'var(--font-weight-medium)' },
+  content: { width: 'max-content' },
+  mcpContent: { width: 'min(20rem, calc(100vw - 2rem))' },
+  rowMono: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+  },
+  /** The pushed MCP panel enters from the right; the root returns from the left. */
+  panelFromRight: {
+    animationName: enterFromRight,
+    animationDuration: '150ms',
+    animationTimingFunction: 'ease',
+    animationDelay: '0s',
+    animationIterationCount: 1,
+    animationDirection: 'normal',
+    animationFillMode: 'none',
+  },
+  panelFromLeft: {
+    animationName: enterFromLeft,
+    animationDuration: '150ms',
+    animationTimingFunction: 'ease',
+    animationDelay: '0s',
+    animationIterationCount: 1,
+    animationDirection: 'normal',
+    animationFillMode: 'none',
+  },
+  plusLarge: { width: themeSpace[6], height: themeSpace[6] },
+  plusSmall: { width: themeSpace[4], height: themeSpace[4] },
+  chevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  /** The multi-select row's own column: the name over its detail. */
+  rowBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+  },
+  rowName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  rowNameMobile: { fontSize: '15px' },
+  rowDetail: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.xs,
+    lineHeight: '1.375',
+    color: themeColors.mutedForeground,
+  },
+  hint: {
+    userSelect: 'none',
+    paddingInline: themeSpace[2.5],
+    paddingBottom: themeSpace[1.5],
+    paddingTop: themeSpace[2],
+    fontSize: '11px',
+    lineHeight: '1.375',
+    color: themeColors.mutedForeground,
+  },
+});
 
 /**
  * The single bottom-left "+" entry point for the composer. One rounded "+" that
@@ -78,8 +175,9 @@ export function AttachmentAddMenu({
     return null;
   }
 
-  const triggerSize = !isLanding && isMobile ? 'size-9' : 'size-7';
-  const itemClass = cn('cursor-pointer', isMobile && 'gap-2.5 py-2.5 text-[15px]');
+  const triggerSize =
+    !isLanding && isMobile ? 'calc(var(--spacing) * 9)' : 'calc(var(--spacing) * 7)';
+  const plusClassName = stylex.props(isMobile ? styles.plusLarge : styles.plusSmall).className;
   const selectedCount = mcp
     ? mcp.selectedIds.filter((id) => mcpServers.some((server) => server.id === id)).length
     : 0;
@@ -94,7 +192,7 @@ export function AttachmentAddMenu({
       icon={Clock}
       onClick={onScheduleSend}
       disabled={scheduleDisabled}
-      className={itemClass}
+      xstyle={[styles.item, isMobile && styles.itemMobile]}
     >
       {scheduleFeatureReason ? (
         <WorkspaceFeatureReasonText reason={scheduleFeatureReason} />
@@ -134,39 +232,29 @@ export function AttachmentAddMenu({
         render={
           <Button
             type="button"
-            variant="ghost"
+            variant={isSheet ? 'secondary' : 'ghost'}
             icon
+            width={triggerSize}
+            height={triggerSize}
             disabled={disabled}
             aria-label={triggerLabel}
-            className={cn(
-              triggerSize,
-              isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-              // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-              // `bg-accent`/`bg-muted`) because those equal the background in the
-              // dark theme and paint nothing.
-              'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-            )}
+            xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
           >
-            <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+            <Plus strokeWidth={1.5} className={plusClassName} />
           </Button>
         }
       >
         <Button
           type="button"
-          variant="ghost"
+          variant={isSheet ? 'secondary' : 'ghost'}
           icon
+          width={triggerSize}
+          height={triggerSize}
           disabled={disabled}
           aria-label={triggerLabel}
-          className={cn(
-            triggerSize,
-            isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-            // `bg-accent`/`bg-muted`) because those equal the background in the
-            // dark theme and paint nothing.
-            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-          )}
+          xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
         >
-          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+          <Plus strokeWidth={1.5} className={plusClassName} />
         </Button>
       </Menu.Trigger>
       <Menu.Content
@@ -176,18 +264,15 @@ export function AttachmentAddMenu({
            leave a wide blank gutter; a small floor keeps it from
            collapsing too narrow. The pushed MCP panel needs room for server
            names, so it takes its own floor and ceiling. */
-        className={cn(
-          view === 'mcp'
-            ? 'w-[min(20rem,calc(100vw-2rem))]'
-            : cn('w-max', isMobile ? 'min-w-[160px]' : 'min-w-[140px]')
-        )}
+        minWidth={view === 'mcp' ? undefined : isMobile ? 160 : 140}
+        xstyle={view === 'mcp' ? styles.mcpContent : styles.content}
       >
         {view === 'mcp' && mcp ? (
           // Keyed so the panel swap replays the slide: the pushed level enters
           // from the right, the root returns from the left.
-          <div key="mcp" className="animate-in fade-in-0 slide-in-from-right-2 duration-150">
+          <div key="mcp" {...stylex.props(styles.panelFromRight)}>
             <Menu.Item
-              className={cn(itemClass, 'font-medium')}
+              xstyle={[styles.item, isMobile && styles.itemMobile, styles.back]}
               closeOnClick={false}
               onClick={() => setView('root')}
               icon={ChevronLeft}
@@ -198,13 +283,13 @@ export function AttachmentAddMenu({
             <McpServerItems mcp={mcp} isMobile={isMobile} />
           </div>
         ) : (
-          <div key="root" className="animate-in fade-in-0 slide-in-from-left-2 duration-150">
+          <div key="root" {...stylex.props(styles.panelFromLeft)}>
             {onAddAttachment ? (
               <Menu.Item
                 onClick={onAddAttachment}
                 disabled={attachmentDisabled || !!attachmentFeatureReason}
                 title={attachmentFeatureReason}
-                className={itemClass}
+                xstyle={[styles.item, isMobile && styles.itemMobile]}
                 icon={Paperclip}
               >
                 {attachmentFeatureReason ? (
@@ -220,21 +305,27 @@ export function AttachmentAddMenu({
                 {onAddAttachment ? <Menu.Separator /> : null}
                 {isMobile ? (
                   <Menu.Item
-                    className={itemClass}
+                    xstyle={[styles.item, isMobile && styles.itemMobile]}
                     disabled={mcp.disabled}
                     closeOnClick={false}
                     onClick={() => setView('mcp')}
                     icon={Plug}
-                    endContent={<ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+                    endContent={
+                      <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
+                    }
                   >
                     {mcpLabel}
                   </Menu.Item>
                 ) : (
                   <Menu.Submenu>
-                    <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled} icon={Plug}>
+                    <Menu.SubmenuTrigger
+                      xstyle={[styles.item, isMobile && styles.itemMobile]}
+                      disabled={mcp.disabled}
+                      icon={Plug}
+                    >
                       {mcpLabel}
                     </Menu.SubmenuTrigger>
-                    <Menu.Content className="w-[min(20rem,calc(100vw-2rem))]">
+                    <Menu.Content xstyle={styles.mcpContent}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>
@@ -276,18 +367,15 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
             // Stays `items-center` (the shared selection-item default): the check
             // indicator is absolutely positioned from its static spot, so the row's
             // own alignment is what centers it against the two-line label.
-            className={cn(isMobile && 'py-2.5')}
+            xstyle={isMobile && styles.checkboxMobile}
             closeOnClick={false}
             onCheckedChange={(checked) => toggle(server.id, checked === true)}
           >
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className={cn('truncate', isMobile && 'text-[15px]')}>{server.name}</span>
-              <span
-                className={cn(
-                  'truncate text-xs leading-snug text-muted-foreground',
-                  server.description ? undefined : 'font-mono'
-                )}
-              >
+            <span {...stylex.props(styles.rowBody)}>
+              <span {...stylex.props(styles.rowName, isMobile && styles.rowNameMobile)}>
+                {server.name}
+              </span>
+              <span {...stylex.props(styles.rowDetail, !server.description && styles.rowMono)}>
                 {detail}
               </span>
             </span>
@@ -295,9 +383,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
         );
       })}
       {mcp.existingSession ? (
-        <p className="select-none px-2.5 pb-1.5 pt-2 text-[11px] leading-snug text-muted-foreground">
-          {t('session.mcp.nextStartHint')}
-        </p>
+        <p {...stylex.props(styles.hint)}>{t('session.mcp.nextStartHint')}</p>
       ) : null}
     </>
   );

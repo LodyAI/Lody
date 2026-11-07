@@ -1,8 +1,130 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { settingsCard } from '@/components/settings/compact-layout';
 import { withClassName } from '@/lib/stylex';
-import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  card: {
+    overflow: 'hidden',
+    ':is(*) > :not(:last-child)': {
+      borderTopWidth: 0,
+      borderBottomWidth: '1px',
+      borderBottomStyle: 'solid',
+      borderColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    },
+  },
+  ghostValue: {
+    display: 'flex',
+    height: themeSpace[8],
+    marginRight: { default: null, ':last-child': 'calc(var(--spacing) * -2)' },
+    minWidth: 0,
+    maxWidth: { default: '100%', ':last-child': 'calc(100% + 0.5rem)' },
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    backgroundColor: {
+      default: 'transparent',
+      ':is([data-state=open])': 'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': {
+          default: 'hsl(var(--foreground) / 0.05)',
+          ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+            'color-mix(in oklab, var(--color-white) 8%, transparent)',
+        },
+      },
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)):is([data-state=open])':
+        'color-mix(in oklab, var(--color-white) 8%, transparent)',
+    },
+    paddingInline: themeSpace[2],
+    fontSize: '0.9em',
+    fontWeight: themeFontWeight.normal,
+    color: themeColors.foreground,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outlineStyle: { default: null, ':focus-visible': 'none' },
+    cursor: { default: null, ':disabled': 'not-allowed' },
+    opacity: { default: null, ':disabled': control.disabledOpacity },
+  },
+  row: {
+    display: { default: 'flex', '@media (min-width: 40rem)': 'grid' },
+    minHeight: themeSpace[11],
+    flexDirection: 'column',
+    gap: { default: themeSpace[1], '@media (min-width: 40rem)': themeSpace[3] },
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1],
+    gridTemplateColumns: {
+      default: null,
+      '@media (min-width: 40rem)': 'minmax(0,auto) minmax(0,1fr)',
+    },
+  },
+  rowTop: { alignItems: { default: null, '@media (min-width: 40rem)': 'flex-start' } },
+  rowCenter: { alignItems: { default: null, '@media (min-width: 40rem)': 'center' } },
+  label: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.9em',
+    color: themeColors.mutedForeground,
+  },
+  labelStart: { paddingTop: { default: null, '@media (min-width: 40rem)': themeSpace[1] } },
+  labelHint: { paddingTop: { default: null, '@media (min-width: 40rem)': themeSpace[1.5] } },
+  values: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: themeSpace[0.5],
+  },
+  controls: {
+    display: 'flex',
+    minHeight: themeSpace[8],
+    minWidth: 0,
+    maxWidth: '100%',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  hint: {
+    paddingBottom: themeSpace[1],
+    textAlign: 'right',
+    fontSize: '0.8em',
+    lineHeight: 'var(--leading-tight)',
+    color: themeColors.mutedForeground,
+  },
+  wideRow: {
+    display: { default: 'flex', '@media (min-width: 40rem)': 'grid' },
+    minHeight: 'calc(var(--spacing) * 11)',
+    flexDirection: 'column',
+    gap: {
+      default: 'calc(var(--spacing) * 1)',
+      '@media (min-width: 40rem)': 'calc(var(--spacing) * 3)',
+    },
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    paddingLeft: 'calc(var(--spacing) * 3)',
+    paddingRight: 'calc(var(--spacing) * 1)',
+    gridTemplateColumns: {
+      default: null,
+      '@media (min-width: 40rem)': 'minmax(0,auto) minmax(0,1fr)',
+    },
+    alignItems: { default: null, '@media (min-width: 40rem)': 'center' },
+  },
+  wideLabel: { color: 'hsl(var(--muted-foreground) / 1)' },
+  wideControls: {
+    display: 'flex',
+    minWidth: 0,
+    justifyContent: 'flex-end',
+    ':is(*) > *': { minWidth: 0, maxWidth: '100%' },
+  },
+});
 
 /**
  * The schedule editor's one layout primitive.
@@ -14,10 +136,7 @@ import { cn } from '@/lib/utils';
  */
 export function scheduleCardProps(className?: string) {
   // The settings card material (its edge is its shadow), plus layout only.
-  return withClassName(
-    stylex.props(settingsCard),
-    cn('divide-y divide-border/60 overflow-hidden', className)
-  );
+  return withClassName(stylex.props(settingsCard, styles.card), className);
 }
 
 /**
@@ -31,8 +150,7 @@ export function scheduleCardProps(className?: string) {
  * value truncates by exactly the bled 8px. Without this the chevrons, menu labels and switch each stopped at a
  * different x and the right edge read as ragged.
  */
-export const ghostValueClass =
-  'flex h-8 last:-mr-2 last:max-w-[calc(100%+0.5rem)] min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[0.9em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
+export const ghostValueStyles = styles.ghostValue;
 
 /**
  * Label left, control right.
@@ -69,27 +187,18 @@ export function PropertyRow({
   // `pt-1`.
   const top = align === 'start' || !!hint;
   return (
-    <div
-      className={cn(
-        'flex min-h-11 flex-col gap-1 px-3 py-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:gap-3',
-        top ? 'sm:items-start' : 'sm:items-center'
-      )}
-    >
+    <div {...stylex.props(styles.row, top ? styles.rowTop : styles.rowCenter)}>
       <span
-        className={cn(
-          'min-w-0 truncate text-[0.9em] text-muted-foreground',
-          align === 'start' ? 'sm:pt-1' : hint ? 'sm:pt-1.5' : undefined
+        {...stylex.props(
+          styles.label,
+          align === 'start' ? styles.labelStart : !!hint && styles.labelHint
         )}
       >
         {label}
       </span>
-      <div className="flex min-w-0 flex-col items-end gap-0.5">
-        <div className="flex min-h-8 min-w-0 max-w-full flex-wrap items-center justify-end">
-          {children}
-        </div>
-        {hint ? (
-          <p className="pb-1 text-right text-[0.8em] leading-tight text-muted-foreground">{hint}</p>
-        ) : null}
+      <div {...stylex.props(styles.values)}>
+        <div {...stylex.props(styles.controls)}>{children}</div>
+        {hint ? <p {...stylex.props(styles.hint)}>{hint}</p> : null}
       </div>
     </div>
   );
@@ -107,9 +216,9 @@ export function PropertyRowWide({ label, children }: { label: string; children: 
   // `pr-1`, not `pr-3`: the menu trigger's own `px-2` is the other 8px, so its
   // label and chevron end on the same line as every other row.
   return (
-    <div className="flex min-h-11 flex-col gap-1 py-1 pl-3 pr-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-center sm:gap-3">
-      <span className="min-w-0 truncate text-[0.9em] text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 justify-end [&>*]:min-w-0 [&>*]:max-w-full">{children}</div>
+    <div {...stylex.props(styles.wideRow)}>
+      <span {...stylex.props(styles.label, styles.wideLabel)}>{label}</span>
+      <div {...stylex.props(styles.wideControls)}>{children}</div>
     </div>
   );
 }

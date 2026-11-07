@@ -1,5 +1,7 @@
 'use client';
 
+import * as stylex from '@stylexjs/stylex';
+
 /**
  * The landing's product stage: a DISPLAY-ONLY replica of the Lody app driven by
  * scripted "ghost user" demos (one per feature tab). Every component comes from
@@ -76,7 +78,151 @@ import {
 } from './landing-replica/session-shell';
 import { ReplicaSidebar } from './landing-replica/sidebar';
 import type { ReplicaChatUser, ReplicaMessage, ReplicaSessionRow } from './landing-replica/types';
-import { cn } from './landing-replica/utils';
+import { clsx } from 'clsx';
+const landingAppPreviewStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'min-height': '0px',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background))',
+  },
+  frame: {
+    'min-height': '0px',
+    flex: '1',
+  },
+  surface: {
+    position: 'relative',
+    'flex-shrink': '0',
+    'background-color': 'hsl(var(--background))',
+    'padding-top': '0px',
+    'padding-bottom': 'calc(var(--spacing) * 3)',
+  },
+  frame2: {
+    'min-height': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  stack2: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    'min-height': '0px',
+    width: '100%',
+    'min-width': '0px',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background))',
+  },
+  surface2: {
+    position: 'relative',
+    'z-index': '40',
+    'flex-shrink': '0',
+    'background-color': 'hsl(var(--background))',
+    'padding-top': '0px',
+    'padding-bottom': 'calc(0.5rem + var(--landing-phone-safe-bottom,34px))',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '0px',
+    flex: '1',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  surface3: {
+    height: 'calc(var(--spacing) * 28)',
+    width: '100%',
+    'max-width': 'var(--container-xl)',
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 40%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--card)) 40%, transparent)',
+  },
+  section: {
+    display: 'contents',
+  },
+  row2: {
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'flex-wrap': 'nowrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+  section2: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  frame3: {
+    'min-height': '0px',
+    width: '100%',
+    flex: '1',
+  },
+  row3: {
+    display: 'flex',
+    height: '100%',
+    'min-height': '0px',
+  },
+  section3: {
+    'min-width': '0px',
+    flex: '1',
+  },
+  row4: {
+    display: 'flex',
+    width: '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  shell: {
+    position: 'relative',
+    overflow: 'hidden',
+    color: 'hsl(var(--foreground))',
+  },
+  mobile: {
+    'border-radius': '0',
+    'border-style': 'solid',
+    'border-width': '0px',
+    'background-color': 'transparent',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+  },
+  desktop: {
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': {
+      default: 'color-mix(in oklab, var(--color-slate-200) 80%, transparent)',
+      ':where(.dark, .dark *)': 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+    },
+    'background-color': 'hsl(var(--background))',
+    'box-shadow': {
+      default:
+        '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px color-mix(in oklab, color-mix(in oklab, var(--color-slate-400) 25%, transparent) 100%, transparent)',
+      ':where(.dark, .dark *)':
+        '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px color-mix(in oklab, color-mix(in oklab, var(--color-cyan-950) 30%, transparent) 100%, transparent)',
+    },
+  },
+  pending: {
+    overflow: 'hidden',
+    'border-style': 'solid',
+    'border-width': '0px',
+    'background-color': 'transparent',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+  },
+  scroll: {
+    height: '100%',
+    'overflow-y': 'auto',
+    'background-color': 'hsl(var(--background))',
+    padding: 'calc(var(--spacing) * 3)',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 3)',
+    },
+  },
+});
 
 /* Heavy images the LATER feature tabs need. Warm them on idle after the preview
    mounts so the phone frame does not materialise piece by piece, without
@@ -431,7 +577,7 @@ function DesktopSession({
     ) : viewer === 'skeleton' ? (
       <ReplicaDiffSkeleton />
     ) : viewer === 'shown' ? (
-      <div className="h-full space-y-3 overflow-y-auto bg-background p-3">
+      <div data-landing-scroll-region {...stylex.props(landingAppPreviewStyles.scroll)}>
         {MOCK_CHANGE_FILES.map((file) => (
           <ReplicaDiffViewer key={file.path} file={file} dark={dark} />
         ))}
@@ -455,8 +601,8 @@ function DesktopSession({
         />
       }
       chat={
-        <div className="flex h-full min-h-0 flex-col bg-background">
-          <div className="min-h-0 flex-1">
+        <div data-power-demo-layout="inset-fill" {...stylex.props(landingAppPreviewStyles.stack)}>
+          <div {...stylex.props(landingAppPreviewStyles.frame)}>
             <ReplicaChatStream
               messages={messages}
               user={CHAT_USER}
@@ -476,7 +622,7 @@ function DesktopSession({
             locale={locale}
             variant="desktop"
           />
-          <div className="relative shrink-0 bg-background pb-3 pt-0">
+          <div {...stylex.props(landingAppPreviewStyles.surface)}>
             <ConversationColumn>{composer}</ConversationColumn>
           </div>
         </div>
@@ -489,7 +635,7 @@ function DesktopSession({
             endSlot={<ReplicaPanelToggle locale={locale} panelOpen />}
             locale={locale}
           />
-          <div className="min-h-0 flex-1 overflow-hidden">{panelBody}</div>
+          <div {...stylex.props(landingAppPreviewStyles.frame2)}>{panelBody}</div>
         </>
       }
       panelOpen={panelOpen}
@@ -515,7 +661,8 @@ function MobileSession({
   const pr = task.prNumber ? { number: task.prNumber, status: task.prStatus ?? 'open' } : null;
   return (
     <div
-      className="relative flex h-full min-h-0 w-full min-w-0 flex-col bg-background"
+      data-power-demo-layout="inset-fill"
+      {...stylex.props(landingAppPreviewStyles.stack2)}
       style={{ '--conversation-top-inset': MOBILE_SESSION_HEADER_INSET } as CSSProperties}
     >
       <ReplicaMobileSessionHeader
@@ -524,7 +671,7 @@ function MobileSession({
         projectKind={isPlainChat ? null : isLocalSession ? 'local' : 'github'}
         locale={locale}
       />
-      <div className="min-h-0 flex-1">
+      <div {...stylex.props(landingAppPreviewStyles.frame)}>
         <ReplicaChatStream messages={messages} user={CHAT_USER} variant="mobile" locale={locale} />
       </div>
       <ReplicaSessionInfoBar
@@ -542,7 +689,7 @@ function MobileSession({
       {/* Home-indicator inset is simulated inside the device frame via
           `--landing-phone-safe-bottom`. No px-* here: ConversationColumn owns
           the gutter, so the composer lines up with the info bar. */}
-      <div className="relative z-40 shrink-0 bg-background pb-[calc(0.5rem+var(--landing-phone-safe-bottom,34px))] pt-0">
+      <div {...stylex.props(landingAppPreviewStyles.surface2)}>
         <ConversationColumn>{composer}</ConversationColumn>
       </div>
     </div>
@@ -1088,29 +1235,40 @@ export function LandingAppPreview({
 
   // On the underwater stage the card plate is dropped for the phone demo so
   // switching tabs never flashes a full-size background rect over the scene.
-  const shellClassName = cn(
-    'lody-app-preview relative overflow-hidden text-foreground',
-    isMobileDemo
-      ? 'rounded-none border-0 bg-transparent shadow-none'
-      : 'landing-app-preview--stage-demo rounded-lg border border-slate-200/80 bg-background shadow-2xl shadow-slate-400/25 dark:border-white/10 dark:shadow-cyan-950/30'
+  const shellProps = stylex.props(
+    landingAppPreviewStyles.shell,
+    isMobileDemo ? landingAppPreviewStyles.mobile : landingAppPreviewStyles.desktop
+  );
+  const shellClassName = clsx(
+    shellProps.className,
+    'lody-app-preview',
+    !isMobileDemo && 'landing-app-preview--stage-demo'
   );
 
   if (!isMounted) {
     return (
       <div
-        className={cn(
-          'lody-app-preview landing-app-preview--stage-demo overflow-hidden border-0 bg-transparent text-foreground shadow-none'
+        className={clsx(
+          stylex.props(landingAppPreviewStyles.pending).className,
+          'lody-app-preview landing-app-preview--stage-demo'
         )}
       >
-        <div className="landing-app-preview-stage flex min-h-0 flex-1 items-center justify-center">
-          <div className="h-28 w-full max-w-xl rounded-2xl border border-border/40 bg-card/40" />
+        <div
+          className={[
+            stylex.props(landingAppPreviewStyles.row).className,
+            'landing-app-preview-stage',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <div {...stylex.props(landingAppPreviewStyles.surface3)} />
         </div>
       </div>
     );
   }
 
   const runConfigFooter = (
-    <div className="contents">
+    <div {...stylex.props(landingAppPreviewStyles.section)}>
       <ReplicaRunConfigTrigger agent="codex" modelLabel={t.modelLabel} thinkLabel={t.thinkLabel} />
       <ReplicaPermissionModeTrigger label={t.permissionLabel} />
     </div>
@@ -1166,8 +1324,8 @@ export function LandingAppPreview({
                   variant="mobile-session"
                   value={reply}
                   footer={
-                    <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
-                      <div className="min-w-0 flex-1 overflow-hidden">
+                    <div {...stylex.props(landingAppPreviewStyles.row2)}>
+                      <div {...stylex.props(landingAppPreviewStyles.section2)}>
                         <ReplicaMobileRunConfigTrigger
                           agent="codex"
                           modelLabel={t.modelLabel}
@@ -1194,8 +1352,23 @@ export function LandingAppPreview({
     content = (
       /* Worktree / diff / design always use the DESKTOP shell, even on phone
          viewports: CSS contain-scales it into the reveal frame. */
-      <div className="landing-app-preview-stage min-h-0 w-full flex-1">
-        <div className="landing-desktop-demo-shell flex h-full min-h-0">
+      <div
+        className={[
+          stylex.props(landingAppPreviewStyles.frame3).className,
+          'landing-app-preview-stage',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <div
+          data-power-demo-layout="fill"
+          className={[
+            stylex.props(landingAppPreviewStyles.row3).className,
+            'landing-desktop-demo-shell',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
           <ReplicaSidebar
             locale={locale}
             workspace={{ name: 'Lody', logoUrl: WORKSPACE_LOGO }}
@@ -1212,7 +1385,7 @@ export function LandingAppPreview({
             selectedSessionId={selectedTaskId}
             homeActive={!selectedTask}
           />
-          <div className="min-w-0 flex-1">
+          <div {...stylex.props(landingAppPreviewStyles.section3)}>
             {selectedTask ? (
               <DesktopSession
                 // Each demo starts from the default split.
@@ -1257,7 +1430,7 @@ export function LandingAppPreview({
                     value={prompt}
                     placeholder={t.landing.placeholder}
                     topSelector={
-                      <div className="flex w-full min-w-0 items-center gap-2">
+                      <div {...stylex.props(landingAppPreviewStyles.row4)}>
                         <ReplicaMachineMenuTrigger label={t.machineName} />
                         <ReplicaProjectSelectorTrigger
                           label={DEMO_PROJECT_NAME}
@@ -1288,7 +1461,7 @@ export function LandingAppPreview({
   }
 
   return (
-    <div className={shellClassName} ref={shellRef}>
+    <div {...shellProps} className={shellClassName} ref={shellRef}>
       {cursorNode}
       {content}
     </div>

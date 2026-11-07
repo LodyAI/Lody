@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { DevicePreviewPlatformContext } from '@/components/sessions/ios-simulator/device-preview-platform';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
@@ -13,6 +14,43 @@ import {
   getIosSimulatorControlAvailability,
   getIosSimulatorHardware,
 } from '@/lib/ios-simulator/ios-simulator-hardware';
+const storyLayout = stylex.create({
+  popup: {
+    width: '100%',
+    maxWidth: 'none',
+    inset: 'calc(var(--spacing) * 0)',
+    borderRadius: 0,
+    borderStyle: 'solid',
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+  },
+  frame: {
+    height: '720px',
+    width: '460px',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  frame2: {
+    height: '720px',
+    width: '680px',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  frame3: {
+    height: '560px',
+    width: '300px',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
 
 const IOS_18 = 'com.apple.CoreSimulator.SimRuntime.iOS-18-2';
 const IOS_17 = 'com.apple.CoreSimulator.SimRuntime.iOS-17-5';
@@ -125,7 +163,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="h-[720px] w-[460px] border-l border-border bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -164,7 +202,7 @@ export const PreviewingRemote: Story = {
 export const WideControls: Story = {
   decorators: [
     (Story) => (
-      <div className="h-[720px] w-[680px] border-l border-border bg-background">
+      <div {...stylex.props(storyLayout.frame2)}>
         <Story />
       </div>
     ),
@@ -195,11 +233,8 @@ export const MobileControlsMenu: Story = {
   decorators: [
     (Story) => (
       <Drawer direction="right" open repositionInputs={false}>
-        <DrawerContent
-          className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
-          aria-describedby={undefined}
-        >
-          <DrawerTitle className="sr-only">iOS Simulator</DrawerTitle>
+        <DrawerContent xstyle={storyLayout.popup} aria-describedby={undefined}>
+          <DrawerTitle visuallyHidden>iOS Simulator</DrawerTitle>
           <VaulDrawerBody topInset="0px">
             <Story />
           </VaulDrawerBody>
@@ -281,7 +316,7 @@ export const UpdateLodyOnMac: Story = {
 export const Narrow: Story = {
   decorators: [
     (Story) => (
-      <div className="h-[560px] w-[300px] border-l border-border bg-background">
+      <div {...stylex.props(storyLayout.frame3)}>
         <Story />
       </div>
     ),

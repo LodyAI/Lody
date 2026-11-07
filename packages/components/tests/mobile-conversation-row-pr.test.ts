@@ -38,6 +38,12 @@ describe('mobile ConversationRow PR status', () => {
     vi.restoreAllMocks();
   });
 
+  /** The span that carries exactly this text. The row's own copy is what the
+      assertions are about; its class names are the surface's business. */
+  function findByText(scope: ParentNode, text: string): HTMLElement | undefined {
+    return Array.from(scope.querySelectorAll('span')).find((el) => el.textContent === text);
+  }
+
   function renderRow(conversation: MobileConversationItem, selected = false) {
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -66,7 +72,7 @@ describe('mobile ConversationRow PR status', () => {
 
     expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
     // The diff does not come back either — the slot stays quiet on the active row.
-    expect(row.querySelector('.text-github-addition')).toBeNull();
+    expect(findByText(row, '+12')).toBeUndefined();
     expect(row.querySelector('[data-pr-ci-verdict]')).not.toBeNull();
   });
 
@@ -74,11 +80,24 @@ describe('mobile ConversationRow PR status', () => {
     for (const prStatus of ['merged', 'closed'] as const) {
       const row = renderRow({ ...readyPr, id: `${prStatus}-session`, prStatus });
       expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
-      expect(row.querySelector('.text-github-addition')?.textContent).toBe('+12');
+      expect(findByText(row, '+12')).toBeDefined();
       flushSync(() => root?.unmount());
       root = undefined;
       container?.remove();
       container = undefined;
     }
+  });
+
+  it('falls back to the open glyph while a synced PR has no status yet', () => {
+    const row = renderRow({
+      id: 'session-pr-syncing',
+      title: 'PR without a synced status',
+      kind: 'github',
+      prUrl: 'https://github.com/loro-dev/lody/pull/77',
+      prStatus: null,
+    });
+
+    expect(row.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    expect(row.querySelector('[data-pr-ci-verdict]')).toBeNull();
   });
 });

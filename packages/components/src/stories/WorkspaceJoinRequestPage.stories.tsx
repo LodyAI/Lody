@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
+import { useState, type ComponentProps } from 'react';
 import { WorkspaceJoinRequestPage } from '@/components/pages/workspace-join-request-page';
 
 const meta = {
@@ -38,4 +39,29 @@ export const Rejected: Story = {
 export const Unavailable: Story = { args: { state: 'unavailable' } };
 export const Error: Story = {
   args: { state: 'error', errorMessage: 'Unable to load this request.' },
+};
+
+function InteractiveFormFixture(args: ComponentProps<typeof WorkspaceJoinRequestPage>) {
+  const [reason, setReason] = useState(args.reason);
+  const [submitted, setSubmitted] = useState(false);
+  return (
+    <WorkspaceJoinRequestPage
+      {...args}
+      reason={reason}
+      state={submitted ? 'submitting' : 'form'}
+      onReasonChange={(next) => {
+        setReason(next);
+        args.onReasonChange(next);
+      }}
+      onSubmit={() => {
+        setSubmitted(true);
+        args.onSubmit();
+      }}
+    />
+  );
+}
+
+export const InteractiveForm: Story = {
+  args: { state: 'form' },
+  render: (args) => <InteractiveFormFixture {...args} />,
 };

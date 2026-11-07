@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 /**
  * INTEGRATION HARNESS — not production, and NOT a place to change UI appearance.
@@ -126,7 +127,6 @@ import {
 import { StableSessionContext } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
 import type { SessionSharingState } from '@/lib/session-sharing';
-import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/providers/convex-provider';
 import readingPreviewImage from '@/assets/onboarding/intro/continuous-scroll.png';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
@@ -142,6 +142,149 @@ import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
 import type { MinimalVisualAnnotationAnchor } from '@lody/shared/visual-annotation-types';
 import type { PreviewVisualComment } from '@lody/shared/preview-comment-types';
 import type { PreviewVisualCommentDocState, PreviewVisualCommentDocStore } from '@/atoms/runtime';
+
+const mergedStoryLayout = stylex.create({
+  part1: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  part2: {
+    minHeight: 0,
+    flex: 1,
+  },
+  part3: {
+    height: '100%',
+  },
+  part4: {
+    position: 'absolute',
+    insetInline: 0,
+    top: 0,
+    zIndex: 30,
+    borderBottomWidth: 0,
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 55%, transparent)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+  part5: {
+    display: 'flex',
+    height: '100%',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingLeft: 'calc(var(--spacing) * 1)',
+    paddingRight: 'calc(var(--spacing) * 2)',
+  },
+  part6: {
+    height: '100%',
+  },
+});
+
+const previewFrameStyles = stylex.create({
+  outer: { color: 'hsl(var(--foreground) / 1)' },
+  embedded: {
+    height: '100%',
+    minHeight: 'calc(var(--spacing) * 0)',
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  fullViewport: { height: '100dvh', width: '100%', backgroundColor: 'hsl(var(--background) / 1)' },
+  desktop: {
+    height: '100dvh',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 35%, transparent)',
+    padding: {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 6)',
+    },
+  },
+  frame: {
+    overflow: 'hidden',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    height: '100%',
+    width: '100%',
+  },
+  desktopFrame: {
+    marginInline: 'auto',
+    maxWidth: '72rem',
+    borderInlineStyle: 'solid',
+    borderInlineWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    boxShadow:
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 3px 0 rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1)',
+  },
+  mobileTitle: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    lineHeight: 'var(--leading-tight)',
+  },
+  title: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '.95rem',
+    fontWeight: 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  subtitle: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  floatingHeader: {
+    position: 'absolute',
+    insetInline: 'calc(var(--spacing) * 0)',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    borderBottomWidth: 0,
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 55%, transparent)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+});
+
+const storyOverrides = stylex.create({ stream: { height: '100%' } });
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+  },
+  frame3: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  frame4: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row: {
+    display: 'flex',
+    height: '100%',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    'padding-left': 'calc(var(--spacing) * 1)',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook-session-page' as WorkspaceId;
 const STORY_WORKSPACE_SLUG = 'storybook';
@@ -1841,7 +1984,7 @@ function ReadingReviewDiffLayout({
       onSidebarCollapse={onClose}
       deleteConfirmDialog={null}
       secondaryPanel={
-        <div className="flex h-full min-h-0 flex-col">
+        <div {...stylex.props(mergedStoryLayout.part1)}>
           <SessionSidePanelTabBar
             tabs={[
               { id: 'reading-panel', label, kind: isPreview ? 'browser' : 'diff', closeable: true },
@@ -1853,7 +1996,7 @@ function ReadingReviewDiffLayout({
               t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
             }
           />
-          <div className="min-h-0 flex-1">{panel}</div>
+          <div {...stylex.props(mergedStoryLayout.part2)}>{panel}</div>
         </div>
       }
     />
@@ -2055,20 +2198,20 @@ export function SessionConversationStoryHarness({
   const mobileMenuInfoRows: MobileSessionMenuInfoRow[] = [
     {
       id: 'machine',
-      icon: <Monitor className="h-3.5 w-3.5" />,
+      icon: <Monitor {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Machine',
       value: machineInfo?.name ?? machineMeta.name,
     },
     {
       id: 'base',
-      icon: <GitBranch className="h-3.5 w-3.5" />,
+      icon: <GitBranch {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Base branch',
       value: 'main',
       onCopy: action,
     },
     {
       id: 'branch',
-      icon: <GitBranch className="h-3.5 w-3.5" />,
+      icon: <GitBranch {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Current branch',
       value: 'lody/solve-merge-conflicts-a1b2c3',
       onCopy: action,
@@ -2077,39 +2220,44 @@ export function SessionConversationStoryHarness({
   const mobileMenuActions: MobileSessionMenuAction[] = [
     {
       id: 'find',
-      icon: <Search className="h-3.5 w-3.5" />,
+      icon: <Search {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Find in session',
       onClick: action,
     },
     {
       id: 'fork',
-      icon: <GitFork className="h-3.5 w-3.5" />,
+      icon: <GitFork {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Fork session',
       onClick: action,
     },
     {
       id: 'rename',
-      icon: <Pencil className="h-3.5 w-3.5" />,
+      icon: <Pencil {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Rename Chat',
       onClick: action,
     },
     {
       id: 'copy-path',
-      icon: <Copy className="h-3.5 w-3.5" />,
+      icon: <Copy {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Copy path',
       onClick: action,
       separatorBefore: true,
     },
     {
       id: 'copy-md',
-      icon: <FileText className="h-3.5 w-3.5" />,
+      icon: <FileText {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Copy as Markdown',
       onClick: action,
     },
-    { id: 'copy-url', icon: <Link className="h-3.5 w-3.5" />, label: 'Copy URL', onClick: action },
+    {
+      id: 'copy-url',
+      icon: <Link {...stylex.props(storyLayoutStyles.frame)} />,
+      label: 'Copy URL',
+      onClick: action,
+    },
     {
       id: 'archive',
-      icon: <Archive className="h-3.5 w-3.5" />,
+      icon: <Archive {...stylex.props(storyLayoutStyles.frame)} />,
       label: 'Archive session',
       onClick: action,
       separatorBefore: true,
@@ -2118,13 +2266,11 @@ export function SessionConversationStoryHarness({
   // Mirrors production `MobileProjectInfo`: session title (primary) + repo /
   // project (muted subtitle).
   const mobileTitleNode = (
-    <span className="flex min-w-0 flex-col justify-center leading-tight">
-      <span className="truncate text-[0.95rem] font-semibold text-foreground">
-        {session.title ?? 'Session'}
-      </span>
-      <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        <Github className="h-3 w-3 shrink-0" />
-        <span className="truncate">{session.repoFullName ?? ''}</span>
+    <span {...stylex.props(previewFrameStyles.mobileTitle)}>
+      <span {...stylex.props(previewFrameStyles.title)}>{session.title ?? 'Session'}</span>
+      <span {...stylex.props(previewFrameStyles.subtitle)}>
+        <Github {...stylex.props(storyLayoutStyles.frame2)} />
+        <span {...stylex.props(storyLayout.label)}>{session.repoFullName ?? ''}</span>
       </span>
     </span>
   );
@@ -2138,19 +2284,13 @@ export function SessionConversationStoryHarness({
         label={translate('sessions.moreActions', 'More actions')}
         onClick={() => setMenuSheetOpen(true)}
       >
-        <Ellipsis className="h-4 w-4" />
+        <Ellipsis {...stylex.props(storyLayoutStyles.frame3)} />
       </GlassIconButton>
     </>
   );
   // Mobile renders full-bleed (fills the phone-width viewport) to match how the
   // app actually looks on a phone — no fake bezel or gray padding that could
   // clip content or misrepresent spacing. Desktop keeps the framed preview.
-  const frameClassName =
-    frame === 'mobile'
-      ? 'h-full w-full'
-      : // Fill the preview viewport height instead of a fixed 760px box, so the
-        // conversation area gets the real available height and doesn't clip.
-        'mx-auto h-full w-full max-w-6xl border-x border-border/70 shadow-sm';
 
   const headerMenuNode = (
     <SessionHeaderMenu
@@ -2190,21 +2330,19 @@ export function SessionConversationStoryHarness({
               data-stream-chunk={streamChunkCount}
               data-stream-total={STREAM_CHUNK_TOTAL}
               data-stream-phase={streamPhase}
-              className={cn(
-                'text-foreground',
-                // Desktop uses a definite h-dvh (not min-h-dvh) so the frame's
-                // h-full resolves and the conversation fills the real height.
+              {...stylex.props(
+                previewFrameStyles.outer,
                 embedded
-                  ? 'h-full min-h-0 w-full bg-background'
+                  ? previewFrameStyles.embedded
                   : frame === 'mobile' || shareImage
-                    ? 'h-dvh w-full bg-background'
-                    : 'h-dvh bg-muted/35 p-4 sm:p-6'
+                    ? previewFrameStyles.fullViewport
+                    : previewFrameStyles.desktop
               )}
             >
               <div
-                className={cn(
-                  'overflow-hidden bg-background',
-                  embedded || shareImage ? 'h-full w-full' : frameClassName
+                {...stylex.props(
+                  previewFrameStyles.frame,
+                  !embedded && !shareImage && frame !== 'mobile' && previewFrameStyles.desktopFrame
                 )}
                 style={
                   frame === 'mobile'
@@ -2221,7 +2359,7 @@ export function SessionConversationStoryHarness({
                   onClose={closeReadingPanel}
                 >
                   <SessionConversationPage
-                    className="h-full"
+                    xstyle={mergedStoryLayout.part3}
                     dropActive={dropActive}
                     dropKind="session-mention"
                     headerSlot={
@@ -2233,7 +2371,7 @@ export function SessionConversationStoryHarness({
                         // `--conversation-top-inset` var set on the frame below.
                         <BaseHeader
                           hideMenuButton
-                          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+                          xstyle={mergedStoryLayout.part4}
                           style={{ height: '3rem' }}
                           leading={<MobileSessionHeaderBackButton onBack={action} />}
                           title={mobileTitleNode}
@@ -2260,7 +2398,7 @@ export function SessionConversationStoryHarness({
                           onTabClose={action}
                           tabOrder={[childSession.id]}
                           rightSlot={
-                            <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
+                            <div {...stylex.props(mergedStoryLayout.part5)}>
                               <SessionAccessControl state={storySharing} onShareWithTeam={action} />
                               {headerMenuNode}
                             </div>
@@ -2279,7 +2417,7 @@ export function SessionConversationStoryHarness({
                               onFileDiffClick={isReadingState(state) ? openReadingDiff : undefined}
                               lastAssistantMessageId={lastReadingAssistant}
                               lastCompletedAssistantMessageId={lastCompletedReadingAssistant}
-                              className="h-full"
+                              xstyle={mergedStoryLayout.part6}
                               agentActivityLabel={
                                 isWorking
                                   ? translate('sessions.statusIndicator.thinking', 'Thinking')

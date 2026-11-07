@@ -496,8 +496,7 @@
 /* Nested scrollports: don't take the wheel/touch — page scroll owns the gesture. */
 .underwater-reveal__frame .lody-app-preview [data-slot='scroll-area'],
 .underwater-reveal__frame .lody-app-preview .chat-scrollbar,
-.underwater-reveal__frame .lody-app-preview .overflow-y-auto,
-.underwater-reveal__frame .lody-app-preview .overflow-auto {
+.underwater-reveal__frame .lody-app-preview [data-landing-scroll-region] {
   overflow: hidden !important;
   overscroll-behavior: none;
   touch-action: none;
@@ -2013,7 +2012,7 @@ html:not(.uw-motion-ready) .uw-agents__banner-track {
 /* The 7-day matrix has 24 columns. In this narrow preview its flex items can
    become narrower than the inline dot size, so let height follow the final
    constrained width instead of stretching circles into capsules. */
-.uw-power__demo--manual-scroll [role='gridcell'] > span.rounded-full {
+.uw-power__demo--manual-scroll [role='gridcell'] > span[data-usage-dot] {
   aspect-ratio: 1;
   height: auto !important;
   max-width: 100%;
@@ -2024,26 +2023,26 @@ html:not(.uw-motion-ready) .uw-agents__banner-track {
 }
 
 /* Children fill the frame; PR uses flex+ScrollArea, Usage scrolls the inner. */
-.uw-power__demo-inner > .flex.h-full,
-.uw-power__demo-inner > .flex.min-h-0 {
+.uw-power__demo-inner > [data-power-demo-layout='fill'],
+.uw-power__demo-inner > [data-power-demo-layout='inset-fill'] {
   height: 100%;
   min-height: 100%;
 }
 
 /* Usage stack inset — roomy enough that KPI tiles and charts don't feel glued. */
-.uw-power__demo-inner > .space-y-4 {
+.uw-power__demo-inner > [data-power-demo-layout='usage'] {
   padding: 1.1rem 1.15rem 1.35rem;
   box-sizing: border-box;
 }
 
 /* PR tab: extra outer breathing room (especially top) inside the shared frame. */
-.uw-power__demo-inner > .flex.h-full.min-h-0.flex-col {
+.uw-power__demo-inner > [data-power-demo-layout='inset-fill'] {
   padding: 0.65rem 0.55rem 0.55rem;
   box-sizing: border-box;
 }
 
 /* Compact the decorative PR composer so it fits under the thread. */
-.uw-power__demo textarea.min-h-\[72px\] {
+.uw-power__demo textarea[data-landing-compact-composer] {
   min-height: 3.25rem;
 }
 

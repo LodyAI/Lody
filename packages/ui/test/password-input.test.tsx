@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act, createRef } from 'react';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
 import { PasswordInput } from '../src/field/password-input';
@@ -8,6 +9,53 @@ const secret = () => one('input[type="password"], input[type="text"]') as HTMLIn
 const reveal = () => one('button') as HTMLButtonElement;
 
 describe('PasswordInput', () => {
+  test('resizing the shell preserves the input ref, native height, style callback and reveal state', async () => {
+    const ref = createRef<HTMLInputElement>();
+    const view = await mount(
+      <PasswordInput
+        ref={ref}
+        controlHeight={40}
+        height={17}
+        defaultValue="Retained secret"
+        style={() => ({ height: 23, letterSpacing: '1px' })}
+      />
+    );
+    const input = ref.current!;
+    expect(input.style.height).toBe('23px');
+    expect(input.getAttribute('height')).toBe('17');
+    await click(reveal());
+    input.focus();
+    await act(async () => {
+      view.root.render(
+        <PasswordInput
+          ref={ref}
+          controlHeight={0}
+          height={18}
+          defaultValue="Retained secret"
+          style={() => ({ height: 22 })}
+        />
+      );
+    });
+    expect(ref.current).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(input.type).toBe('text');
+    expect(input.value).toBe('Retained secret');
+    expect(input.style.height).toBe('22px');
+    expect(input.style.letterSpacing).toBe('');
+    expect(input.getAttribute('height')).toBe('18');
+    await act(async () => {
+      view.root.render(<PasswordInput ref={ref} defaultValue="Retained secret" />);
+    });
+    expect(ref.current).toBe(input);
+    expect(input.type).toBe('text');
+    expect(input.style.height).toBe('');
+    expect(input.getAttribute('height')).toBeNull();
+    await click(reveal());
+    expect(input.type).toBe('password');
+    expect(input.value).toBe('Retained secret');
+    await view.unmount();
+  });
+
   test('masks the value until somebody asks, and says which it will do next', async () => {
     const view = await mount(<PasswordInput />);
     expect(secret().type).toBe('password');

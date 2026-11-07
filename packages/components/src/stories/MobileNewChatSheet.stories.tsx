@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
@@ -68,6 +69,141 @@ import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { SettingsStoryProviders } from './settings-story-shell';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+
+const mergedStoryLayout = stylex.create({
+  projectTrigger: {
+    minHeight: 'calc(var(--spacing) * 11)',
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--foreground) / 1) 4%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
+  projectPanel: {
+    boxShadow: 'none',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 45%, transparent)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 30%, transparent)',
+  },
+  branchTrigger: {
+    height: 'calc(var(--spacing) * 8)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+    paddingInline: 'calc(var(--spacing) * 2)',
+  },
+  part1: {
+    display: 'flex',
+    minWidth: 0,
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    textAlign: 'start',
+  },
+  part2: {
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  part3: {
+    minWidth: 0,
+    flex: 1,
+    overflowWrap: 'anywhere',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  part4: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  part5: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  part6: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part7: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part8: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part9: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part10: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part11: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part12: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  part13: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+  },
+  part14: {
+    paddingTop: 'calc(var(--spacing) * 1)',
+  },
+  part15: {
+    minWidth: 0,
+    flex: 1,
+  },
+  part16: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  part17: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  part18: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  part19: {
+    boxShadow: 'var(--shadow-xs)',
+    transitionProperty: 'all',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      ':hover': {
+        default: 'hsl(var(--foreground) / 1)',
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+      },
+    },
+    color: 'hsl(var(--background) / 1)',
+    translate: {
+      default: null,
+      ':active': '0 1px',
+    },
+  },
+  part20: {
+    width: 'calc(var(--spacing) * 5)',
+    height: 'calc(var(--spacing) * 5)',
+  },
+});
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
@@ -423,16 +559,12 @@ export function InlinePageReview({
     updatedAt: 1,
   };
   const valueFace = (icon: ReactNode, value: string) => (
-    <span className="flex min-w-0 w-full items-center gap-2 text-start">
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
-      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm text-foreground">
-        {value}
-      </span>
-      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+    <span {...stylex.props(mergedStoryLayout.part1)}>
+      <span {...stylex.props(mergedStoryLayout.part2)}>{icon}</span>
+      <span {...stylex.props(mergedStoryLayout.part3)}>{value}</span>
+      <ChevronsUpDown {...stylex.props(mergedStoryLayout.part4)} />
     </span>
   );
-  const trigger = 'min-h-11 rounded-xl bg-foreground/[0.04] px-3 py-2';
-  const panel = 'shadow-none bg-muted/45 border-border/30';
   const localProject = projectFolders.find((entry) => entry.localProjectId === project);
   const isLocal = !!localProject;
   const projectGroup = projectGroups.find((entry) => `group:${entry.projectId}` === project);
@@ -456,7 +588,7 @@ export function InlinePageReview({
       targetNode="New chat"
       coordinator={MobileInlinePickerCoordinator}
       summary={
-        <div className="flex flex-col gap-2 py-3">
+        <div {...stylex.props(mergedStoryLayout.part5)}>
           <MobileInlinePicker
             id="preview-machine"
             value={machineId}
@@ -468,10 +600,10 @@ export function InlinePageReview({
               }
             }}
             ariaLabel="Machine"
-            triggerClassName={trigger}
-            expansionPanelClassName={panel}
+            triggerXstyle={mergedStoryLayout.projectTrigger}
+            expansionPanelXstyle={mergedStoryLayout.projectPanel}
             triggerContent={valueFace(
-              <Monitor className="size-4" />,
+              <Monitor {...stylex.props(mergedStoryLayout.part6)} />,
               longNames
                 ? 'MacBook-Pro-for-long-running-development-and-review.local'
                 : (projectMachines.find((x) => x.id === machineId)?.name ?? 'Machine')
@@ -498,15 +630,15 @@ export function InlinePageReview({
             ariaLabel="Project"
             searchable
             searchPlaceholder="Search projects"
-            triggerClassName={trigger}
-            expansionPanelClassName={panel}
+            triggerXstyle={mergedStoryLayout.projectTrigger}
+            expansionPanelXstyle={mergedStoryLayout.projectPanel}
             triggerContent={valueFace(
               isGroup ? (
-                <Folders className="size-4" />
+                <Folders {...stylex.props(mergedStoryLayout.part7)} />
               ) : project === 'none' ? (
-                <CircleSlash2 className="size-4" />
+                <CircleSlash2 {...stylex.props(mergedStoryLayout.part8)} />
               ) : isLocal ? (
-                <FolderOpen className="size-4" />
+                <FolderOpen {...stylex.props(mergedStoryLayout.part9)} />
               ) : (
                 <GitHubOwnerAvatarIcon repoFullName={project} />
               ),
@@ -521,7 +653,7 @@ export function InlinePageReview({
               {
                 value: 'none',
                 label: 'No project selected',
-                icon: <CircleSlash2 className="size-4" />,
+                icon: <CircleSlash2 {...stylex.props(mergedStoryLayout.part10)} />,
               },
               ...getMobileProjectOptions({
                 folders: projectFolders,
@@ -539,9 +671,9 @@ export function InlinePageReview({
                       : option.value,
                 icon:
                   option.selection.kind === 'group' ? (
-                    <Folders className="size-4" />
+                    <Folders {...stylex.props(mergedStoryLayout.part11)} />
                   ) : option.selection.kind === 'local' ? (
-                    <FolderOpen className="size-4" />
+                    <FolderOpen {...stylex.props(mergedStoryLayout.part12)} />
                   ) : (
                     <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
                   ),
@@ -549,13 +681,13 @@ export function InlinePageReview({
             ]}
           />
           {hasBranch ? (
-            <div className="flex min-w-0 items-start gap-2 px-1">
+            <div {...stylex.props(mergedStoryLayout.part13)}>
               {isGitLocal ? (
-                <div className="pt-1">
+                <div {...stylex.props(mergedStoryLayout.part14)}>
                   <WorktreeCheckboxPill checked={worktree} onCheckedChange={setWorktree} />
                 </div>
               ) : null}
-              <div className="min-w-0 flex-1">
+              <div {...stylex.props(mergedStoryLayout.part15)}>
                 <MobileInlinePicker
                   id="preview-branch"
                   value={selectedBranch}
@@ -580,13 +712,13 @@ export function InlinePageReview({
                   }
                   ariaLabel="Branch"
                   searchable
-                  triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
-                  expansionPanelClassName={panel}
+                  triggerXstyle={mergedStoryLayout.branchTrigger}
+                  expansionPanelXstyle={mergedStoryLayout.projectPanel}
                   triggerContent={
                     <>
-                      <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 truncate">{displayBranch}</span>
-                      <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                      <GitBranch {...stylex.props(mergedStoryLayout.part16)} />
+                      <span {...stylex.props(mergedStoryLayout.part17)}>{displayBranch}</span>
+                      <ChevronsUpDown {...stylex.props(mergedStoryLayout.part18)} />
                     </>
                   }
                 />
@@ -694,9 +826,13 @@ export function InlinePageReview({
                 images.some((item) => item.status !== 'uploaded') ||
                 files.some((item) => item.status !== 'uploaded')
               }
-              className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+              xstyle={mergedStoryLayout.part19}
             >
-              {submissionPending ? <Spinner size="medium" /> : <ArrowUp className="h-5 w-5" />}
+              {submissionPending ? (
+                <Spinner size="medium" />
+              ) : (
+                <ArrowUp {...stylex.props(mergedStoryLayout.part20)} />
+              )}
             </Button>
           }
         />

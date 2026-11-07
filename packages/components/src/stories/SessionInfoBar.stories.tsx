@@ -1,5 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
 import {
@@ -19,6 +20,56 @@ import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/
 import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
 import type { ContextChipAction, PrCiRun } from '@/components/sessions/session-info-chips';
 import type { SessionStatusStripState } from '@/components/sessions/session-status-strip';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 14)',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas: {
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-width': '100%',
+    'flex-direction': 'column',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 72)',
+  },
+  stack2: {
+    display: 'flex',
+    width: '760px',
+    'max-width': '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 56)',
+  },
+});
 
 const openPr: SessionPullRequestMeta = {
   url: 'https://github.com/loro-dev/lody/pull/2857',
@@ -173,9 +224,9 @@ function StoryHarness({
   ];
   const contextActions = actions.length > 0 ? actions : undefined;
   return (
-    <div className="flex max-w-full flex-col" style={{ width }}>
+    <div {...stylex.props(storyLayout.stack)} style={{ width }}>
       {/* Room above the bar so chip popovers (side=top) stay visible. */}
-      <div className="h-72" />
+      <div {...stylex.props(storyLayout.frame)} />
       <SessionInfoBar
         status={status}
         machine={machine}
@@ -208,9 +259,7 @@ function StoryHarness({
         diffStat={diffStat}
         syncing={syncing}
       />
-      <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        (composer placeholder)
-      </div>
+      <div {...stylex.props(storyLayoutStyles.frame)}>(composer placeholder)</div>
     </div>
   );
 }
@@ -671,32 +720,32 @@ function PeekPlayground() {
   const [goal, setGoal] = useState<SessionGoalMessage | null>(null);
   const [tasks, setTasks] = useState<PendingScheduledTask[]>([]);
   return (
-    <div className="flex w-[760px] max-w-full flex-col gap-3">
-      <div className="flex gap-2">
+    <div {...stylex.props(storyLayout.stack2)}>
+      <div {...stylex.props(storyLayout.row)}>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setGoal(makeGoal())}
         >
           + goal appears
         </button>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setGoal((g) => (g ? makeGoal({ status: 'paused' }) : g))}
         >
           pause goal (re-focus)
         </button>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setTasks([makeWakeup(9 * 60_000)])}
         >
           + schedule appears
         </button>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1 text-xs"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => {
             setGoal(null);
             setTasks([]);
@@ -705,7 +754,7 @@ function PeekPlayground() {
           reset
         </button>
       </div>
-      <div className="h-56" />
+      <div {...stylex.props(storyLayout.frame2)} />
       <SessionInfoBar
         status={null}
         goal={goal}
@@ -719,9 +768,7 @@ function PeekPlayground() {
         onOpenPr={fn()}
         diffStat={{ add: 128, del: 42 }}
       />
-      <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        (composer placeholder)
-      </div>
+      <div {...stylex.props(storyLayoutStyles.frame)}>(composer placeholder)</div>
     </div>
   );
 }
@@ -730,6 +777,111 @@ export const RecencyFocus: Story = {
   render: () => <PeekPlayground />,
 };
 
+const ownedPalette = {
+  '--input': '210 45% 70%',
+  '--input-border': '283 65% 42%',
+  '--composer': '165 25% 92%',
+  '--color-amber-300': 'oklch(75% 0.15 72)',
+  '--color-emerald-600': 'oklch(48% 0.12 162)',
+  '--color-emerald-400': 'oklch(78% 0.13 170)',
+} as CSSProperties;
+
+function OwnedColourScope({ root, children }: { root: boolean; children: ReactNode }) {
+  useLayoutEffect(() => {
+    if (!root) return undefined;
+    const element = document.documentElement;
+    const previous = Object.keys(ownedPalette).map((name) => [
+      name,
+      element.style.getPropertyValue(name),
+    ]);
+    for (const [name, value] of Object.entries(ownedPalette))
+      element.style.setProperty(name, value);
+    return () => {
+      for (const [name, value] of previous) {
+        if (value) element.style.setProperty(name, value);
+        else element.style.removeProperty(name);
+      }
+    };
+  }, [root]);
+  return children;
+}
+
+function OwnedInfoBarFixture({
+  compact = false,
+  scope,
+  nested = false,
+}: {
+  compact?: boolean;
+  scope?: 'root' | 'subtree';
+  nested?: boolean;
+}) {
+  const [action, setAction] = useState('Ready');
+  const [pointer, setPointer] = useState('none');
+  const renderBar = () => (
+    <SessionInfoBar
+      status={null}
+      machine={compact ? LOCAL_MACHINE : undefined}
+      compactMachineInfo={compact}
+      privateAccessStatus={{
+        label: 'Private · Only synthetic owner 中文长标签',
+        description: 'Only synthetic owner can access this session',
+        onAction: () => setAction('Privacy action'),
+      }}
+      onOpenBrowser={() => setAction('Browser action')}
+      onOpenIosSimulator={() => setAction('Simulator action')}
+    />
+  );
+  const themed = (outer: string, inner?: string) => (
+    <section className={outer} data-info-bar-owned-theme={`${outer}/${inner ?? 'none'}`}>
+      <p style={{ margin: '8px 0', fontSize: 12 }}>
+        {outer}
+        {inner ? ` → ${inner}` : ''}
+      </p>
+      {inner ? <div className={inner}>{renderBar()}</div> : renderBar()}
+    </section>
+  );
+  return (
+    <OwnedColourScope root={scope === 'root'}>
+      <main
+        data-info-bar-owned-fixture
+        data-info-bar-owned-scope={scope ?? 'default'}
+        onPointerDownCapture={(event) =>
+          setPointer(`${event.pointerType}:${String(event.isTrusted)}`)
+        }
+        onKeyDownCapture={(event) => setPointer(`keyboard:${event.key}:${String(event.isTrusted)}`)}
+        style={{
+          width: 'min(760px, calc(100vw - 32px))',
+          paddingBlock: 16,
+          ...(scope === 'subtree' ? ownedPalette : {}),
+        }}
+      >
+        <output
+          data-info-bar-owned-result
+          data-pointer={pointer}
+          style={{ display: 'block', marginBottom: 16 }}
+        >
+          {action}
+        </output>
+        {nested ? (
+          <>
+            {themed('dark-scope')}
+            {themed('light-scope')}
+            {themed('dark-scope', 'light-scope')}
+            {themed('light-scope', 'dark-scope')}
+          </>
+        ) : (
+          renderBar()
+        )}
+      </main>
+    </OwnedColourScope>
+  );
+}
+
+export const OwnedColours: Story = { render: () => <OwnedInfoBarFixture /> };
+export const OwnedCompactColours: Story = { render: () => <OwnedInfoBarFixture compact /> };
+export const OwnedRootPalette: Story = { render: () => <OwnedInfoBarFixture scope="root" /> };
+export const OwnedSubtreePalette: Story = { render: () => <OwnedInfoBarFixture scope="subtree" /> };
+export const OwnedNestedThemes: Story = { render: () => <OwnedInfoBarFixture nested /> };
 export const AndroidPreview: Story = {
   args: { simulatorPreview: 'android' },
 };

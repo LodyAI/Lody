@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+
 /**
  * The ONE panel treatment for framed conversation content: the plan-exit card's
  * command block, the worktree-script terminal, the permission card, and the
@@ -13,10 +15,6 @@
  * Import these instead of re-typing the tokens; a panel that hand-rolls its own
  * fill is the drift this module exists to prevent.
  */
-
-/** Outer frame. Carries the border, the base surface, and the clipping. */
-export const CONVERSATION_PANEL_FRAME_CLASS =
-  'overflow-hidden rounded-xl border border-border/60 bg-background/70 shadow-xs';
 
 /**
  * Header band — the raised fill. `border-b` belongs here only when a body
@@ -40,14 +38,44 @@ export const CONVERSATION_PANEL_FRAME_CLASS =
  * Measure the COMPOSITED pixel when changing this, never the token name (see
  * `sessions/AGENTS.md` on the surface ladder).
  */
-export const CONVERSATION_PANEL_HEADER_CLASS =
-  'flex items-center gap-2 bg-muted-foreground/[0.09] px-3 py-1.5 text-foreground';
-
-export const CONVERSATION_PANEL_HEADER_RULE_CLASS = 'border-b border-border/60';
-
-/** Header label: quiet next to the content it introduces. */
-export const CONVERSATION_PANEL_TITLE_CLASS =
-  'min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground';
-
-/** Body padding. No fill of its own — the frame already provides the surface. */
-export const CONVERSATION_PANEL_BODY_CLASS = 'px-3 py-2';
+export const conversationPanelStyles = stylex.create({
+  frame: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 70%, transparent)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  header: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 9%, transparent)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  headerRule: {
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  title: {
+    fontWeight: 'var(--font-weight-medium)',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  body: {
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
+});

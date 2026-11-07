@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { fn, userEvent, within } from 'storybook/test';
@@ -21,10 +22,44 @@ import {
   SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX,
 } from '@/components/sessions/session-conversation-page';
 import { SessionTabBar, type ViewerTabItem } from '@/components/sessions/session-tab-bar';
-import { cn } from '@/lib/utils';
 import type { PathLauncherOption } from '@/lib/session-path-launchers';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
 import type { SessionSharingState } from '@/lib/session-sharing';
+const migrationStyles = stylex.create({
+  pills: { alignItems: 'center' },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '100%',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    'padding-left': 'calc(var(--spacing) * 1)',
+  },
+  section: {
+    'max-width': '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const machineId = 'machine-1' as MachineId;
 const agentConfigId = 'agent-1' as AgentConfigId;
@@ -143,16 +178,23 @@ const vscodeLauncher: PathLauncherOption = {
 
 function ConversationToolbar() {
   return (
-    <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
-      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
-        <button
-          type="button"
-          className="inline-flex h-6 items-center rounded-md border border-border px-2 text-xs"
-        >
+    <div {...stylex.props(storyLayout.row)}>
+      <div
+        className={[
+          SESSION_PAGE_HEADER_PILLS_CLASS,
+          stylex.props(migrationStyles.pills).className,
+        ].join(' ')}
+      >
+        <button type="button" {...stylex.props(storyLayoutStyles.row)}>
           VS Code
         </button>
       </div>
-      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+      <div
+        className={[
+          SESSION_PAGE_HEADER_PILLS_CLASS,
+          stylex.props(migrationStyles.pills).className,
+        ].join(' ')}
+      >
         <SessionAccessControl state={toolbarSharing} onShareWithTeam={toolbarAction} />
       </div>
       <SessionHeaderMenu
@@ -418,7 +460,7 @@ function StoryShell({
   return (
     <Provider store={store}>
       <div
-        className="max-w-full overflow-hidden bg-background"
+        {...stylex.props(storyLayout.section)}
         style={{ width: frameWidth ?? '100%' }}
         data-testid="session-tab-bar-story-frame"
       >
@@ -813,5 +855,26 @@ export const ClosedTabUnread: Story = {
     await userEvent.click(
       within(canvasElement).getByRole('button', { name: /Closed conversations/ })
     );
+  },
+};
+
+export const SpinnerBusyHistory: Story = {
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions,
+    draftTabs: [],
+    archivedChildSessions: [
+      {
+        ...archivedChildSessions[0]!,
+        id: 'session-closed-running' as SessionId,
+        title: 'Closed running conversation',
+        isTabClosed: true,
+      },
+    ],
+    activeTabSessionId: screenshotParentSession.id,
+    presence: {
+      [childSessions[0]!.id]: 'running',
+      'session-closed-running': 'running',
+    },
   },
 };

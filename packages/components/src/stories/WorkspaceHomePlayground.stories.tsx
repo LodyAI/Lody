@@ -51,6 +51,18 @@ import {
   type HomeWeekFixtureKind,
 } from './fixtures/home-week';
 import { Default as SidebarDefault, WorkspaceSidebarHarness } from './LoroSidebar.stories';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    width: '100%',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  section: {
+    display: 'contents',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook-home' as WorkspaceId;
 const STORY_USER_ID = 'local:storybook-home-user';
@@ -456,7 +468,7 @@ function WorkspaceLandingHarness({
   };
 
   const topSelector = (
-    <div className="flex w-full min-w-0 items-center gap-2">
+    <div {...stylex.props(storyLayout.row)}>
       <DesktopMachineMenu
         value={machineId}
         visibleLocalMachineId={STORY_MACHINE_ID}
@@ -505,7 +517,7 @@ function WorkspaceLandingHarness({
   );
 
   const footerSelector = (
-    <div className="contents">
+    <div {...stylex.props(storyLayout.section)}>
       <DesktopRunConfigMenu
         agentSelection={agentSelection}
         allowedMachineIds={[machineId]}

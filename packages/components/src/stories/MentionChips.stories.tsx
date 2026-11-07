@@ -1,13 +1,86 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 
 import {
   getComposerMentionChip,
   wrapPastedTextChipLabel,
 } from '@/components/mentions/mention-chips';
-import { cn } from '@/lib/utils';
 import { Mention, MentionInput, MentionLabel } from '@/ui/mention';
-import type { Mention as MentionRange } from '@/ui/mention/index';
+import { Root as MentionRoot, type Mention as MentionRange } from '@/ui/mention/index';
+const chipStory = stylex.create({
+  surface: {
+    width: '100%',
+    borderRadius: 'var(--radius-xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab,hsl(var(--foreground) / 1) 10%,transparent)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab,hsl(var(--input-border) / 1) 70%,transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--background) / 1)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab,hsl(var(--input) / 1) 90%,transparent)',
+    },
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+    '--mention-chip-surface': {
+      default: 'hsl(var(--background))',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in srgb,hsl(var(--input)) 90%,hsl(var(--background)))',
+    },
+  },
+  input: {
+    resize: 'none',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 0,
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    boxShadow: {
+      default: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+      ':focus-visible':
+        '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 0px var(--lody-input-focus-ring, transparent), 0 0 #0000',
+    },
+  },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  hiddenLabel: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    margin: -1,
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  stack2: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '42rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 6)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * Prototype for icon chips in the plain-textarea composer.
@@ -70,47 +143,58 @@ function ComposerBox({
   label,
   fixture: initial,
   chips,
+  unwrapped = false,
 }: {
   label: string;
   fixture: Fixture;
   chips: boolean;
+  unwrapped?: boolean;
 }) {
   const [value, setValue] = useState(initial.text);
   const [mentions, setMentions] = useState(initial.mentions);
+  const Root = unwrapped ? MentionRoot : Mention;
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="font-medium text-muted-foreground text-xs">{label}</div>
-      <Mention
+    <div {...stylex.props(storyLayout.stack)} data-mention-fixture-box={label}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>{label}</div>
+      <Root
         inputValue={value}
         onInputValueChange={setValue}
         mentions={mentions}
         onMentionsChange={setMentions}
         getMentionChip={chips ? getComposerMentionChip : undefined}
         triggers={[]}
-        className={cn(
-          'w-full rounded-xl border border-foreground/[0.10] bg-background px-3 py-2.5',
-          'dark:border-input-border/70 dark:bg-input/90'
-        )}
+        // The real composer's surface, verbatim, including the
+        // `--mention-chip-surface` it sets. A decoration hides the textarea's
+        // glyphs by painting that colour, so a story on a *different* surface
+        // would hide the one bug this is most likely to have: the cover showing
+        // up as a rectangle.
+        className={stylex.props(chipStory.surface).className}
       >
-        <MentionLabel className="sr-only">Prototype composer</MentionLabel>
-        <MentionInput
-          value={value}
-          rows={3}
-          className="resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
-        />
-      </Mention>
+        <MentionLabel xstyle={storyLayout.hiddenLabel}>Prototype composer</MentionLabel>
+        <MentionInput value={value} rows={3} xstyle={chipStory.input} />
+      </Root>
     </div>
   );
 }
 
-function Board({ chips }: { chips: boolean }) {
+function Board({ chips, unwrapped = false }: { chips: boolean; unwrapped?: boolean }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 bg-background p-8">
-      <ComposerBox label="Mixed kinds" fixture={MIXED} chips={chips} />
-      <ComposerBox label="Short paths" fixture={SHORT} chips={chips} />
-      <ComposerBox label="Long paths (a chip has to wrap)" fixture={WRAPPING} chips={chips} />
-      <ComposerBox label="Slash command at offset 0" fixture={SLASH} chips={chips} />
+    <div {...stylex.props(storyLayout.stack2)}>
+      <ComposerBox label="Mixed kinds" fixture={MIXED} chips={chips} unwrapped={unwrapped} />
+      <ComposerBox label="Short paths" fixture={SHORT} chips={chips} unwrapped={unwrapped} />
+      <ComposerBox
+        label="Long paths (a chip has to wrap)"
+        fixture={WRAPPING}
+        chips={chips}
+        unwrapped={unwrapped}
+      />
+      <ComposerBox
+        label="Slash command at offset 0"
+        fixture={SLASH}
+        chips={chips}
+        unwrapped={unwrapped}
+      />
     </div>
   );
 }
@@ -137,4 +221,93 @@ export const IconChips: Story = {
 export const IconChipsDark: Story = {
   args: { chips: true },
   globals: { theme: 'dark' },
+};
+
+export const ScopeTokens: Story = {
+  args: { chips: false, unwrapped: true },
+  render: (args) => (
+    <div
+      data-mention-token-scope=""
+      style={
+        {
+          '--foreground': '153 43% 26%',
+          '--primary': '277 64% 41%',
+          '--radius-md': '13px',
+          '--radius-sm': '7px',
+        } as CSSProperties
+      }
+    >
+      <Board {...args} />
+    </div>
+  ),
+};
+
+const nativeControlStyles = stylex.create({
+  utility: {
+    display: 'block',
+    width: 'calc(var(--spacing) * 56)',
+    resize: 'vertical',
+    color: 'hsl(var(--destructive) / 1)',
+  },
+  opaque: { display: 'grid', width: 173, resize: 'vertical', color: 'rgb(17, 57, 89)', zIndex: 47 },
+});
+
+function NativeFieldControl({ caller = 'default' }: { caller?: 'default' | 'utility' | 'opaque' }) {
+  const [value, setValue] = useState(SHORT.text);
+  const [mentions, setMentions] = useState(SHORT.mentions);
+  const [disabled, setDisabled] = useState(false);
+  const [readonly, setReadonly] = useState(false);
+  const inputStyles =
+    caller === 'utility'
+      ? nativeControlStyles.utility
+      : caller === 'opaque'
+        ? nativeControlStyles.opaque
+        : undefined;
+  return (
+    <div data-native-mention-control={caller} style={{ padding: 20, maxWidth: 760 }}>
+      <button
+        type="button"
+        data-native-disabled
+        onClick={() => setDisabled((previous) => !previous)}
+      >
+        Toggle disabled
+      </button>
+      <button
+        type="button"
+        data-native-readonly
+        onClick={() => setReadonly((previous) => !previous)}
+      >
+        Toggle readonly
+      </button>
+      <Mention
+        inputValue={value}
+        onInputValueChange={setValue}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        getMentionChip={getComposerMentionChip}
+        triggers={[]}
+        disabled={disabled}
+        readonly={readonly}
+      >
+        <MentionLabel>Visible native composer</MentionLabel>
+        <MentionInput
+          value={value}
+          rows={3}
+          xstyle={inputStyles}
+          aria-label="Native mention control"
+        />
+      </Mention>
+      <output data-native-mention-state>
+        {JSON.stringify({ value, mentions, disabled, readonly })}
+      </output>
+    </div>
+  );
+}
+
+export const NativeFields: Pick<Story, 'render'> = { render: () => <NativeFieldControl /> };
+export const NativeFieldUtilityCaller: Pick<Story, 'render'> = {
+  render: () => <NativeFieldControl caller="utility" />,
+};
+export const NativeFieldOpaqueCaller: Pick<Story, 'render'> = {
+  render: () => <NativeFieldControl caller="opaque" />,
 };

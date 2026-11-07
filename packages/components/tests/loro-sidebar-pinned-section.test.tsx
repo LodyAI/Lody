@@ -314,8 +314,18 @@ describe('LoroSidebar pinned section', () => {
     expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
   });
 
-  it('collapses pinned conversations and keeps the folded chevron visible', () => {
-    const onTogglePinnedSection = vi.fn();
+  it('expands and collapses pinned conversations through the section control', () => {
+    let collapsed = true;
+    const onTogglePinnedSection = () => {
+      collapsed = !collapsed;
+      root?.render(
+        <LoroSidebar
+          {...baseProps}
+          pinnedSectionCollapsed={collapsed}
+          onTogglePinnedSection={onTogglePinnedSection}
+        />
+      );
+    };
     renderSidebar({
       pinnedSectionCollapsed: true,
       onTogglePinnedSection,
@@ -325,7 +335,32 @@ describe('LoroSidebar pinned section', () => {
     const header = container?.querySelector('[role="button"][aria-expanded="false"]');
     expect(header?.getAttribute('aria-label')).toBe('Pinned');
 
-    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(onTogglePinnedSection).toHaveBeenCalledOnce();
+    flushSync(() => header?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(header?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).not.toBeNull();
+
+    flushSync(() => header?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).toBeNull();
   });
+
+  it.each([false, true])(
+    'keeps the desktop collapse toggle directly actionable (Electron=%s)',
+    (isElectron) => {
+      let collapsed = false;
+      renderSidebar({
+        isElectron,
+        onRequestCollapse: () => {
+          collapsed = true;
+        },
+      });
+
+      const button = container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="Toggle Sidebar"]'
+      );
+      expect(button).not.toBeNull();
+      flushSync(() => button?.click());
+      expect(collapsed).toBe(true);
+    }
+  );
 });

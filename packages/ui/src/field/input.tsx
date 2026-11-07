@@ -1,8 +1,8 @@
 import { Input as BaseInput } from '@base-ui/react/input';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { space } from '../tokens/scales.stylex';
+import { space, text } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -14,6 +14,8 @@ type BaseProps = ComponentProps<typeof BaseInput>;
 export interface InputProps extends Omit<BaseProps, 'className' | 'size' | 'render'> {
   /** Control height and density. `size` is the token step, not the HTML attribute. */
   size?: InputSize;
+  /** Height of the well; density and the leading slot still follow `size`. */
+  controlHeight?: CSSProperties['height'];
   /**
    * What the value belongs with, inside the same well at its start: a Role's
    * emoji beside its name. It is part of the control, not a second one beside
@@ -21,14 +23,17 @@ export interface InputProps extends Omit<BaseProps, 'className' | 'size' | 'rend
    * own content and states no edge: the well rings on `:focus-within`.
    */
   leading?: ReactNode;
-  /** Lands on the control: the input, or the shell once there is a `leading`. */
+  /** Supplementary content at the end of the same well; keeps its intrinsic width. */
+  trailing?: ReactNode;
+  /** Lands on the control: the input, or the shell when either slot is present. */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Lands on the `<input>` inside the shell, for a constraint only the value takes. */
   inputClassName?: string;
 }
 
 const styles = stylex.create({
-  input: { display: 'block' },
+  input: { display: 'block', lineHeight: text.subheadlineLeading },
   small: {
     height: field.heightSmall,
     paddingInline: field.paddingXSmall,
@@ -50,16 +55,30 @@ const styles = stylex.create({
 });
 
 /**
- * A well holding something before the value. The slot is a square as tall as
- * the well less the inset a nested part keeps from its container, so a pressable
- * thing in it sits as far from the well's edge as a tab sits from its track, and
- * a character in it — a `/` — is centred where the value's padding would be.
+ * Contextual parts share the value's well. The leading square follows the named
+ * height less its inset; trailing status content keeps its own width. Each
+ * occupied edge takes the inset while an unoccupied value edge keeps its padding.
  */
 const INSET = space[1];
 const shellStyles = stylex.create({
   // The slot's content and the value are two things in one control: the gap
   // keeps a glyph from touching the first letter without splitting them apart.
-  shell: { gap: space[1.5], paddingInlineStart: INSET },
+  shell: {
+    gap: space[1.5],
+    fontFamily: 'inherit',
+    fontWeight: 500,
+    lineHeight: text.subheadlineLeading,
+    letterSpacing: text.controlTracking,
+  },
+  leadingInset: { paddingInlineStart: INSET },
+  trailingInset: { paddingInlineEnd: INSET },
+  trailing: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+    color: field.icon,
+  },
   leading: {
     display: 'flex',
     alignItems: 'center',
@@ -93,12 +112,26 @@ const sizeStyles = {
   large: styles.large,
 };
 
+const dimensions = stylex.create({
+  height: (height: string | number) => ({ height }),
+});
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { size = 'medium', leading, className, inputClassName, ...rest },
+  {
+    size = 'medium',
+    controlHeight,
+    leading,
+    trailing,
+    className,
+    xstyle,
+    inputClassName,
+    style,
+    ...rest
+  },
   ref
 ) {
   const ariaInvalid = rest['aria-invalid'];
-  if (leading != null) {
+  if (leading != null || trailing != null) {
     // Built from the input's own `render`, as `PasswordInput` builds its shell:
     // the input stays the field's one control, so a `Field.Label` still points
     // at it and its validity and disabled state are what the shell shows.
@@ -106,43 +139,75 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       <BaseInput
         ref={ref}
         {...rest}
+        style={style}
         render={(props, state) => {
           const shell = stylex.props(
             well.shell,
             sizeStyles[size],
             shellStyles.shell,
+            leading != null && shellStyles.leadingInset,
+            trailing != null && shellStyles.trailingInset,
             isInvalid(state.valid, ariaInvalid) && well.shellInvalid,
-            state.disabled && well.dimmed
+            state.disabled && well.dimmed,
+            controlHeight != null && dimensions.height(controlHeight),
+            xstyle
           );
           return (
             <div
+              data-slot="input-shell"
               data-size={size}
               className={appendClassName(shell.className, className)}
               style={shell.style}
             >
-              <span {...stylex.props(shellStyles.leading, leadingSizeStyles[size])}>{leading}</span>
+              {leading != null && (
+                <span
+                  {...stylex.props(shellStyles.leading, leadingSizeStyles[size])}
+                  data-slot="input-leading"
+                >
+                  {leading}
+                </span>
+              )}
               <input
                 {...props}
                 className={appendClassName(stylex.props(well.bare).className, inputClassName)}
               />
+              {trailing != null && (
+                <span {...stylex.props(shellStyles.trailing)} data-slot="input-trailing">
+                  {trailing}
+                </span>
+              )}
             </div>
           );
         }}
       />
     );
   }
+  const heightStyle = stylex.props(
+    controlHeight != null && dimensions.height(controlHeight),
+    xstyle
+  ).style;
   return (
     <BaseInput
       ref={ref}
       data-size={size}
       {...rest}
+      style={
+        heightStyle
+          ? (state) => ({
+              ...heightStyle,
+              ...(typeof style === 'function' ? style(state) : style),
+            })
+          : style
+      }
       className={(state) =>
         appendClassName(
           stylex.props(
             well.base,
             styles.input,
             sizeStyles[size],
-            isInvalid(state.valid, ariaInvalid) && well.invalid
+            isInvalid(state.valid, ariaInvalid) && well.invalid,
+            controlHeight != null && dimensions.height(controlHeight),
+            xstyle
           ).className,
           className
         )

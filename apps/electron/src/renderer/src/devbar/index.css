@@ -2,12 +2,8 @@ html[data-desktop-devbar] #root {
   height: calc(100% - 28px);
 }
 
-html[data-desktop-devbar] #root :is(.h-screen, .h-dvh, .h-svh) {
+html[data-desktop-devbar] #root .workspace-viewport {
   height: calc(100dvh - 28px);
-}
-
-html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
-  min-height: calc(100dvh - 28px);
 }
 
 .desktop-devbar {

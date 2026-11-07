@@ -81,9 +81,9 @@ const styles = stylex.create({
       },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
   },
   titleRow: {
     display: 'flex',
@@ -111,8 +111,7 @@ const styles = stylex.create({
     },
     boxShadow: {
       default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0 #0000',
+      ':focus-visible': 'none',
     },
   },
   separator: {
@@ -162,8 +161,7 @@ const styles = stylex.create({
     },
     boxShadow: {
       default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0 #0000',
+      ':focus-visible': 'none',
     },
   },
   promptIssueSpace: { paddingRight: 'calc(var(--spacing) * 6)' },

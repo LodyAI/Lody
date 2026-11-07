@@ -75,12 +75,12 @@ describe('mobile project settings', () => {
     const draft = upper.querySelector<HTMLInputElement>('input')!;
     expect(upper.style.flexBasis).toBe('355px');
     expect(lower.textContent).toContain('Project skills');
-    expect(lower.classList.contains('overflow-y-auto')).toBe(true);
     await act(async () => {
       document.documentElement.style.setProperty('--native-keyboard-height', '300px');
       window.dispatchEvent(new Event('lody:keyboard-resize'));
     });
-    expect(lower.classList.contains('overflow-y-auto')).toBe(false);
+    expect(container!.querySelector('[data-settings-fold-lower]')).toBe(lower);
+    expect(lower.textContent).toContain('Project skills');
     expect(upper.querySelector('input')).toBe(draft);
     expect(draft.value).toBe('unsaved');
   });

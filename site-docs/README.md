@@ -51,6 +51,9 @@ builds to `site-docs/out/client`. Binding rules live in
   hosted once by `components/site-root-provider.tsx`; its GLSL (single-pass and
   split field, temporal blend) is in `components/marketing-atmosphere-shaders.ts`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
+- [`components/docs-ui/`](components/docs-ui/README.md) — local StyleX skins for
+  docs layout, navigation, search and MDX parts; public Fumadocs and Base UI
+  primitives retain their behavior.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and
@@ -66,6 +69,32 @@ Edit `components/underwater-background.tsx` (scene/shaders) and
 panel, then bake copied values into `DEFAULT_PARAMS`. Verify with
 `pnpm --filter @lody/site-docs build` and a screenshot; WebGL renders in headless
 Chromium. There is no second legacy site tree.
+
+## Styling
+
+Site-owned components use local `stylex.create` declarations through
+[site-local options](stylex-options.ts), without importing product UI or its build
+configuration. Migrate a styled owner and its real callers together through typed
+composition. The SSR document loads StyleX's official virtual CSS/HMR runtime in
+development; production creates a plugin instance per Vite environment and extracts
+to the shared index stylesheet.
+
+The site has no Tailwind build plugin, utility safelist or typography compiler.
+The layer order is `theme`, `base`, `components`, `reading`, then `site-stylex`.
+Ordinary [theme defaults](app/theme-defaults.css), [normalization](app/reset.css)
+and [docs palette](app/docs-palette.css) preserve the variables and browser baseline.
+[Reading prose](app/reading-prose.css) and [Shiki integration](app/reading-code.css)
+use semantic content selectors; component StyleX follows prose defaults.
+`DocsBody` keeps structural article margin rules in StyleX so the layer split
+preserves their original precedence over component spacing.
+
+[Docs UI ownership](components/docs-ui/README.md) explains the local skins,
+upstream behavior boundaries and MIT attribution. Fumadocs still owns content,
+providers and selected behavior primitives. Its remaining utility class strings
+are not compiled or interpreted as styling inputs. Class joining uses plain
+`clsx`; physical overrides compose at their owner instead of relying on runtime
+Tailwind conflict resolution. Preserve static HTML, effective theme readers and
+interaction behavior when changing these boundaries.
 
 ## Local development
 

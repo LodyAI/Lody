@@ -16,7 +16,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 - `mobile-home-screen.tsx` — workspace home. `workspaceTabSpecs` builds the
   Inbox / Chat / Projects dock tabs. The header's connection/pull pill is
   absolutely centred on the h-9 chrome row, and the pill bar expands above the
-  scroll region.
+  scroll region. Its Add project and private-resource Help sheets opt into
+  [DrawerContent](../../ui/drawer.tsx)'s `bottomPadding="safeArea"`; the sheet owns
+  that local bottom clearance.
 - `mobile-project-screen.tsx`, `mobile-chat-landing-screen.tsx`,
   `mobile-archive-screen.tsx` — the other top-level screens.
 - `mobile-workspace-layout.tsx`, [`mobile-workspace-tabbar.tsx`](../../../../../specs/mobile-workspace-dock.md),
@@ -94,6 +96,9 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   conversation. Session HTML opens in preview with an eye toggle for source;
   WebKit uses the shared script-free HTML/CSS preview. The project file browser
   also previews complete HTML by default with the same source toggle.
+  Its [DrawerContent](../../ui/drawer.tsx) uses `width="full"` for 100% width without
+  directional width caps. Caller classes and inline styles retain normal cascade
+  precedence. Insets, borders, radii and keyboard handling keep their current owners.
   `glass-icon-button.tsx` — the frosted header's `GlassIconButton`
   (canvas-drawn glass disc; story `MobileFrostedHeader.stories.tsx`).
 

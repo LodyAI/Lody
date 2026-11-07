@@ -1,7 +1,8 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import {
@@ -22,6 +23,122 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+
+const offlineScope = stylex.create({
+  frame: {
+    display: 'flex',
+    minHeight: '100dvh',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 2)' },
+  context: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
+  },
+});
+
+const sceneStyles = stylex.create({
+  footer: {
+    containerType: 'inline-size',
+    containerName: 'composer-face',
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'align-items': 'center',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row2: {
+    'margin-bottom': 'calc(var(--spacing) * 6)',
+    display: 'flex',
+    width: '100%',
+    'max-width': '48rem',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  row3: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row4: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  stack: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'flex-direction': 'column',
+    'align-items': 'flex-start',
+    'justify-content': 'flex-end',
+    gap: 'calc(var(--spacing) * 4)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row5: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  frame: {
+    width: 'calc(var(--spacing) * 7)',
+    height: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
+  },
+});
 
 /**
  * The desktop composer's two consolidated footer buttons: the run-config
@@ -194,9 +311,11 @@ const grokSelectors: AcpConfigOptionSelector[] = [
 function StoryShell({
   isEmptyConversation,
   machineSelected = true,
+  configuredSelectors = selectors,
 }: {
   isEmptyConversation: boolean;
   machineSelected?: boolean;
+  configuredSelectors?: AcpConfigOptionSelector[];
 }) {
   const store = useMemo(() => {
     const s = createStore();
@@ -210,14 +329,14 @@ function StoryShell({
   const [model, setModel] = useState<string | null>(modelOptions[0]?.value ?? null);
   const [mode, setMode] = useState<string | null>(modeOptions[0]?.value ?? null);
   const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
-    Object.fromEntries(selectors.map((sel) => [sel.configId, sel.currentValue]))
+    Object.fromEntries(configuredSelectors.map((sel) => [sel.configId, sel.currentValue]))
   );
 
   return (
     <Provider store={store}>
-      <div className="flex min-h-dvh items-end bg-background p-8">
+      <div {...stylex.props(storyLayout.row)}>
         {/* Mimic the composer footer row the buttons live in. */}
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
+        <div {...stylex.props(storyLayout.row2)}>
           <DesktopRunConfigMenu
             agentSelection={machineSelected ? { agentId: codexId, machineId } : null}
             allowedMachineIds={machineSelected ? [machineId] : []}
@@ -228,7 +347,7 @@ function StoryShell({
             modelOptions={modelOptions}
             selectedModelId={model}
             onModelChange={setModel}
-            configOptionSelectors={selectors}
+            configOptionSelectors={configuredSelectors}
             configOptionValues={values}
             onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
           />
@@ -236,7 +355,7 @@ function StoryShell({
             modeOptions={modeOptions}
             selectedModeId={mode}
             onModeChange={setMode}
-            configOptionSelectors={selectors}
+            configOptionSelectors={configuredSelectors}
             configOptionValues={values}
             onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
           />
@@ -251,8 +370,8 @@ function MachineScopeShell() {
   const [selectedMachineId, setSelectedMachineId] = useState(machineId);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-background p-8">
-      <div className="flex items-center gap-2">
+    <div {...stylex.props(storyLayout.row3)}>
+      <div {...stylex.props(storyLayout.row4)}>
         <DesktopMachineMenu
           value={selectedMachineId}
           options={[
@@ -262,9 +381,7 @@ function MachineScopeShell() {
           onChange={setSelectedMachineId}
           onAddMachine={fn()}
         />
-        <div className="flex h-6 items-center rounded-md bg-foreground/[0.06] px-2 text-xs font-normal text-foreground/80">
-          lody
-        </div>
+        <div {...stylex.props(storyLayoutStyles.row)}>lody</div>
       </div>
     </div>
   );
@@ -272,9 +389,9 @@ function MachineScopeShell() {
 
 function OfflineMachineScopeShell() {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-background p-8">
+    <div {...stylex.props(offlineScope.frame)}>
       {['build-machine', 'ubuntu-gpu-workstation-shanghai-02'].map((name) => (
-        <div key={name} className="flex items-center gap-2">
+        <div key={name} {...stylex.props(offlineScope.row)}>
           <DesktopMachineMenu
             value={'machine-remote' as MachineId}
             selectedLabel={name}
@@ -283,9 +400,7 @@ function OfflineMachineScopeShell() {
             onChange={fn()}
             onAddMachine={fn()}
           />
-          <div className="flex h-6 items-center rounded-md bg-foreground/[0.06] px-2 text-xs font-normal text-foreground/80">
-            lody
-          </div>
+          <div {...stylex.props(offlineScope.context)}>lody</div>
         </div>
       ))}
     </div>
@@ -309,8 +424,8 @@ function GrokConfigShell() {
 
   return (
     <Provider store={store}>
-      <div className="flex min-h-dvh items-end bg-background p-8">
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
+      <div {...stylex.props(storyLayout.row)}>
+        <div {...stylex.props(storyLayout.row2)}>
           <DesktopRunConfigMenu
             agentSelection={{ agentId: grokId, machineId }}
             allowedMachineIds={[machineId]}
@@ -347,8 +462,8 @@ function DeepSeekConfigShell() {
 
   return (
     <Provider store={store}>
-      <div className="flex min-h-dvh items-end bg-background p-8">
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
+      <div {...stylex.props(storyLayout.row)}>
+        <div {...stylex.props(storyLayout.row2)}>
           <DesktopRunConfigMenu
             agentSelection={{ agentId: deepseekId, machineId }}
             availableAgentConfigs={agents}
@@ -404,15 +519,15 @@ function LongModelNameShell() {
 
   return (
     <Provider store={store}>
-      <div className="flex min-h-dvh flex-col items-start justify-end gap-4 bg-background p-8">
+      <div {...stylex.props(storyLayout.stack)}>
         {[720, 480, 360, 260].map((width) => (
           <div
             key={width}
             data-long-model-row={width}
             style={{ width }}
-            className="flex items-center gap-1.5 rounded-xl bg-input/90 px-2 py-1.5"
+            {...stylex.props(storyLayout.row5)}
           >
-            <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+            <div {...stylex.props(sceneStyles.footer)}>
               <DesktopRunConfigMenu
                 agentSelection={{ agentId: codexId, machineId }}
                 allowedMachineIds={[machineId]}
@@ -432,7 +547,7 @@ function LongModelNameShell() {
                 onConfigOptionChange={updateConfig}
               />
             </div>
-            <div className="size-7 shrink-0 rounded-full bg-foreground/80" />
+            <div {...stylex.props(storyLayout.frame)} />
           </div>
         ))}
       </div>
@@ -442,7 +557,7 @@ function LongModelNameShell() {
 
 function EmptyMachineScopeShell() {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-background p-8">
+    <div {...stylex.props(storyLayout.row3)}>
       <DesktopMachineMenu value={null} options={[]} onChange={fn()} onAddMachine={fn()} />
     </div>
   );
@@ -452,7 +567,6 @@ const meta = {
   title: 'Sessions/DesktopRunConfigMenu',
   component: StoryShell,
   parameters: { layout: 'fullscreen' },
-  globals: { theme: 'dark' },
   decorators: [
     (Story) => (
       <PlatformContext.Provider value={storyPlatform}>
@@ -498,4 +612,34 @@ export const MachineScopeEmpty: Story = {
 export const LongModelName: Story = {
   args: { isEmptyConversation: false },
   render: () => <LongModelNameShell />,
+};
+
+export const GenericSelect: Story = {
+  args: {
+    isEmptyConversation: true,
+    configuredSelectors: [
+      ...selectors,
+      {
+        type: 'select',
+        configId: 'workspace-format',
+        label: 'Workspace format',
+        currentValue: 'compact',
+        options: [
+          { value: 'compact', label: 'Compact' },
+          {
+            value: 'expanded',
+            label: 'Expanded workspace format with an intentionally long label',
+          },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const trigger = canvasElement.querySelector<HTMLButtonElement>('[data-run-config-trigger]');
+    if (!trigger) throw new Error('Run configuration trigger is missing');
+    await userEvent.click(trigger);
+    await userEvent.hover(
+      await within(document.body).findByRole('menuitem', { name: /Workspace format/ })
+    );
+  },
 };

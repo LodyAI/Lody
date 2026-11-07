@@ -4,6 +4,7 @@ import {
 } from '@/lib/workspace-feature';
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 // The action model is shared with the file tree context menu and the side
@@ -13,6 +14,11 @@ import { Button } from '@lody/ui/button';
 
 const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 const styles = stylex.create({
+  actionSpacing: {
+    justifyContent: 'flex-start',
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
+    [button.gap]: 'calc(var(--spacing) * 2)',
+  },
   frame: {
     display: 'flex',
     minHeight: '100%',
@@ -358,7 +364,6 @@ export function getSessionFileErrorPresentation(
 // One row per action, all the same width. A wrapping row of buttons sized by
 // their own labels was the previous layout, and in a side panel it produced
 // three ragged widths on three lines — the width difference read as meaning.
-const ACTION_BUTTON_CLASS = 'h-8 w-full justify-start gap-2 px-2.5 text-xs font-normal';
 
 export function SessionFileErrorState({
   message,
@@ -415,7 +420,12 @@ export function SessionFileNoticeCard({
               <Button
                 size="small"
                 variant="secondary"
-                className={ACTION_BUTTON_CLASS}
+                width="100%"
+                height="calc(var(--spacing) * 8)"
+                fontSize="var(--text-xs)"
+                lineHeight="var(--text-xs--line-height)"
+                fontWeight="var(--font-weight-normal)"
+                xstyle={styles.actionSpacing}
                 onClick={actions.onShare}
                 disabled={actions.sharing}
               >
@@ -432,7 +442,12 @@ export function SessionFileNoticeCard({
                 <Button
                   size="small"
                   variant="secondary"
-                  className={ACTION_BUTTON_CLASS}
+                  width="100%"
+                  height="calc(var(--spacing) * 8)"
+                  fontSize="var(--text-xs)"
+                  lineHeight="var(--text-xs--line-height)"
+                  fontWeight="var(--font-weight-normal)"
+                  xstyle={styles.actionSpacing}
                   onClick={localHost.onOpen}
                   data-testid="session-file-error-open"
                 >
@@ -444,7 +459,12 @@ export function SessionFileNoticeCard({
                 <Button
                   size="small"
                   variant="ghost"
-                  className={ACTION_BUTTON_CLASS}
+                  width="100%"
+                  height="calc(var(--spacing) * 8)"
+                  fontSize="var(--text-xs)"
+                  lineHeight="var(--text-xs--line-height)"
+                  fontWeight="var(--font-weight-normal)"
+                  xstyle={styles.actionSpacing}
                   onClick={localHost.onReveal}
                   data-testid="session-file-error-reveal"
                 >
@@ -458,7 +478,12 @@ export function SessionFileNoticeCard({
               // Without the local-host pair this is the only way out of the
               // card, so it leads instead of trailing them.
               variant={localHost || actions.onShare ? 'ghost' : 'secondary'}
-              className={ACTION_BUTTON_CLASS}
+              width="100%"
+              height="calc(var(--spacing) * 8)"
+              fontSize="var(--text-xs)"
+              lineHeight="var(--text-xs--line-height)"
+              fontWeight="var(--font-weight-normal)"
+              xstyle={styles.actionSpacing}
               onClick={actions.onCopyPath}
               data-testid="session-file-error-copy-path"
             >

@@ -1,8 +1,11 @@
+import { useState, type CSSProperties } from 'react';
+
 import { afterEach, describe, expect, test } from 'vitest';
 import { ModalContainerProvider, PopupContainerProvider } from '../src/popup/portal-container';
 import { Button } from '../src/button/button';
 import { AlertDialog } from '../src/dialog/alert-dialog';
 import { Dialog } from '../src/dialog/dialog';
+import { Drawer } from '../src/drawer/drawer';
 import { Select } from '../src/field/select';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, click, mount, one, press, step, type Mounted } from './dom';
@@ -16,8 +19,230 @@ afterEach(async () => {
 const panels = () => all('[role="dialog"]');
 const panel = () => panels()[0];
 const alerts = () => all('[role="alertdialog"]');
+const buttonNamed = (label: string) => {
+  const node = all('button').find((element) => element.textContent?.trim() === label);
+  if (!node) throw new Error(`no button named ${label}`);
+  return node;
+};
 
 describe('Dialog', () => {
+  for (const [name, Modal] of [
+    ['Dialog', Dialog],
+    ['Drawer', Drawer],
+  ] as const) {
+    test(`${name} updates optional title weight without replacing the accessible heading or draft`, async () => {
+      function Example() {
+        const [weight, setWeight] = useState<CSSProperties['fontWeight']>(380);
+        return (
+          <Modal.Root defaultOpen>
+            <Modal.Content data-weight-panel>
+              <Modal.Title fontWeight={weight}>Weight title</Modal.Title>
+              <Modal.Description>Weight description</Modal.Description>
+              <input aria-label="Weight draft" defaultValue="Original" />
+              <button onClick={() => setWeight('initial')}>Initial title weight</button>
+              <button onClick={() => setWeight(undefined)}>Default title weight</button>
+              <button onClick={() => setWeight(620)}>Custom title weight</button>
+            </Modal.Content>
+          </Modal.Root>
+        );
+      }
+      mounted = await mount(<Example />);
+      const popup = one('[data-weight-panel]');
+      const title = document.getElementById(popup.getAttribute('aria-labelledby')!)!;
+      const input = one('input') as HTMLInputElement;
+      await step(() => {
+        input.focus();
+        input.value = 'Edited draft';
+      });
+      for (const [action, weight] of [
+        ['Initial title weight', 'initial'],
+        ['Default title weight', ''],
+        ['Custom title weight', '620'],
+      ] as const) {
+        await click(buttonNamed(action));
+        expect(document.getElementById(popup.getAttribute('aria-labelledby')!)).toBe(title);
+        expect(title.style.fontWeight).toBe(weight);
+        expect(title.hasAttribute('fontWeight')).toBe(false);
+        expect(title.textContent).toBe('Weight title');
+        expect(input.value).toBe('Edited draft');
+      }
+    });
+    test(`${name} retains the rendered heading's explicit style above title typography`, async () => {
+      mounted = await mount(
+        <Modal.Root defaultOpen>
+          <Modal.Content>
+            <Modal.Title fontWeight={380} render={<h3 style={{ fontWeight: 760 }} />}>
+              Rendered weight title
+            </Modal.Title>
+            <Modal.Description>Rendered weight description</Modal.Description>
+          </Modal.Content>
+        </Modal.Root>
+      );
+      const title = document.getElementById(panel().getAttribute('aria-labelledby')!)!;
+      expect(title.tagName).toBe('H3');
+      expect(title.style.fontWeight).toBe('760');
+      expect(title.hasAttribute('fontWeight')).toBe(false);
+      expect(title.textContent).toBe('Rendered weight title');
+    });
+  }
+  for (const [name, Modal] of [
+    ['Dialog', Dialog],
+    ['AlertDialog', AlertDialog],
+    ['Drawer', Drawer],
+  ] as const) {
+    test(`${name} retains its named children and focus when a hidden header is shown`, async () => {
+      const title = { current: null as HTMLHeadingElement | null };
+      const description = { current: null as HTMLParagraphElement | null };
+      const view = (visuallyHidden?: boolean) => (
+        <Modal.Root defaultOpen>
+          <Modal.Content data-header-owner-panel>
+            <Modal.Header visuallyHidden={visuallyHidden} className="retained-header-class">
+              <Modal.Title ref={title}>Retained header name</Modal.Title>
+              <Modal.Description ref={description}>Retained header description</Modal.Description>
+            </Modal.Header>
+            <input aria-label="Retained header input" defaultValue="Original value" />
+          </Modal.Content>
+        </Modal.Root>
+      );
+      mounted = await mount(view(true));
+      const popup = one('[data-header-owner-panel]');
+      const titleNode = title.current!;
+      const descriptionNode = description.current!;
+      const header = titleNode.parentElement!;
+      const titleId = titleNode.id;
+      const descriptionId = descriptionNode.id;
+      const input = one('input') as HTMLInputElement;
+      await step(() => input.focus());
+      input.value = 'Edited value';
+      for (const hidden of [false, undefined, true]) {
+        await step(() => mounted!.root.render(view(hidden)));
+        expect(title.current).toBe(titleNode);
+        expect(description.current).toBe(descriptionNode);
+        expect(titleNode.parentElement).toBe(header);
+        expect(descriptionNode.parentElement).toBe(header);
+        expect(header.classList.contains('retained-header-class')).toBe(true);
+        expect(header.hasAttribute('visuallyHidden')).toBe(false);
+        expect(header.hasAttribute('aria-hidden')).toBe(false);
+        expect(titleNode.id).toBe(titleId);
+        expect(descriptionNode.id).toBe(descriptionId);
+        expect(popup.getAttribute('aria-labelledby')).toBe(titleId);
+        expect(popup.getAttribute('aria-describedby')).toBe(descriptionId);
+        expect(titleNode.textContent).toBe('Retained header name');
+        expect(descriptionNode.textContent).toBe('Retained header description');
+        expect(titleNode.hasAttribute('aria-hidden')).toBe(false);
+        expect(descriptionNode.hasAttribute('aria-hidden')).toBe(false);
+        expect(document.activeElement).toBe(input);
+        expect(input.value).toBe('Edited value');
+      }
+    });
+  }
+
+  test('hidden names retain their nodes, refs, ids and accessible relationships when shown again', async () => {
+    const title = { current: null as HTMLHeadingElement | null };
+    const description = { current: null as HTMLParagraphElement | null };
+    const view = (visuallyHidden?: boolean) => (
+      <Dialog.Root defaultOpen>
+        <Dialog.Content data-hidden-name-panel>
+          <Dialog.Title
+            ref={title}
+            render={<h3 style={{ color: 'rebeccapurple' }} />}
+            className="retained-title-class"
+            style={{ color: 'orange' }}
+            visuallyHidden={visuallyHidden}
+            data-hidden-name-title
+          >
+            The retained name
+          </Dialog.Title>
+          <Dialog.Description ref={description} visuallyHidden={visuallyHidden}>
+            The retained description
+          </Dialog.Description>
+          <input aria-label="Retained input" defaultValue="Original value" />
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+    mounted = await mount(view(true));
+    const popup = one('[data-hidden-name-panel]');
+    const originalTitle = title.current!;
+    const originalDescription = description.current!;
+    const input = one('input') as HTMLInputElement;
+    const titleId = originalTitle.id;
+    const descriptionId = originalDescription.id;
+    await step(() => input.focus());
+    input.value = 'Edited value';
+    for (const hidden of [false, undefined, true]) {
+      await step(() => mounted!.root.render(view(hidden)));
+      expect(title.current).toBe(originalTitle);
+      expect(description.current).toBe(originalDescription);
+      expect(originalTitle.tagName).toBe('H3');
+      expect(originalTitle.classList.contains('retained-title-class')).toBe(true);
+      expect(originalTitle.style.color).toBe('rebeccapurple');
+      expect(originalTitle.id).toBe(titleId);
+      expect(originalDescription.id).toBe(descriptionId);
+      expect(popup.getAttribute('aria-labelledby')).toBe(titleId);
+      expect(popup.getAttribute('aria-describedby')).toBe(descriptionId);
+      expect(originalTitle.textContent).toBe('The retained name');
+      expect(originalDescription.textContent).toBe('The retained description');
+      expect(originalTitle.hasAttribute('visuallyHidden')).toBe(false);
+      expect(originalTitle.hasAttribute('aria-hidden')).toBe(false);
+      expect(originalDescription.hasAttribute('aria-hidden')).toBe(false);
+      expect(document.activeElement).toBe(input);
+      expect(input.value).toBe('Edited value');
+    }
+  });
+
+  for (const [name, Modal] of [
+    ['Dialog', Dialog],
+    ['AlertDialog', AlertDialog],
+  ] as const) {
+    test(`${name} consumes spacing options without replacing its live panel or caller style`, async () => {
+      const ref = { current: null as HTMLDivElement | null };
+      const view = (spacing: { padding?: 'default' | 'none'; gap?: 'default' | 'none' }) => (
+        <Modal.Root defaultOpen>
+          <Modal.Trigger>Reopen spacing test</Modal.Trigger>
+          <Modal.Content
+            {...spacing}
+            ref={ref}
+            data-spacing-test="panel"
+            width="400px"
+            style={(state) => ({ padding: 7, gap: 9, opacity: state.open ? 1 : 0 })}
+          >
+            <Modal.Title>Spacing contract</Modal.Title>
+            <input aria-label="Retained spacing value" defaultValue="Original value" />
+            <Modal.Close>Close spacing test</Modal.Close>
+          </Modal.Content>
+        </Modal.Root>
+      );
+      mounted = await mount(view({}));
+      const node = one('[data-spacing-test="panel"]');
+      const input = one('input') as HTMLInputElement;
+      input.value = 'Edited value';
+      await step(() => input.focus());
+      for (const spacing of [
+        { padding: 'none', gap: 'default' },
+        { padding: 'default', gap: 'none' },
+        { padding: 'none', gap: 'none' },
+        {},
+      ] as const) {
+        await step(() => mounted!.root.render(view(spacing)));
+        expect(one('[data-spacing-test="panel"]')).toBe(node);
+        expect(ref.current).toBe(node);
+        expect(one('input')).toBe(input);
+        expect(input.value).toBe('Edited value');
+        expect(document.activeElement).toBe(input);
+        expect(node.hasAttribute('padding')).toBe(false);
+        expect(node.hasAttribute('gap')).toBe(false);
+        expect(node.style.padding).toBe('7px');
+        expect(node.style.gap).toBe('9px');
+        expect(node.style.width).toBe('400px');
+        expect(node.style.opacity).toBe('1');
+      }
+      await click(buttonNamed('Close spacing test'));
+      expect(all('[data-spacing-test="panel"]')).toHaveLength(0);
+      await click(buttonNamed('Reopen spacing test'));
+      expect(one('[data-spacing-test="panel"]')).toBe(ref.current);
+    });
+  }
+
   test('modal hosts are independent of floating hosts, and explicit containers win', async () => {
     const host = document.createElement('div');
     const floating = document.createElement('div');

@@ -1,5 +1,7 @@
 'use client';
 
+import * as stylex from '@stylexjs/stylex';
+
 /**
  * Live product demos for the landing "More power" section, rendered by the
  * display-only replicas in `landing-replica/` (Usage settings view + embedded PR
@@ -26,6 +28,30 @@ import {
   type StackedAreaSeries,
   type UsageRange,
 } from './landing-replica/power-usage';
+const landingPowerDemosStyles = stylex.create({
+  row: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 50%, transparent)',
+    ':is(*) svg': {
+      height: '100%',
+      width: '100%',
+    },
+  },
+  shell: {
+    color: 'hsl(var(--foreground))',
+  },
+  modelIcon: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 50%, transparent)',
+  },
+});
 
 const MARK_BY_ID = new Map(LANDING_AGENTS.map((agent) => [agent.id, agent]));
 
@@ -67,7 +93,7 @@ function PowerDemoShell({
   return (
     <div
       ref={sceneRef}
-      className={`uw-power__demo${manualScroll ? ' uw-power__demo--manual-scroll' : ''} lody-app-preview dark text-foreground`}
+      className={`uw-power__demo${manualScroll ? ' uw-power__demo--manual-scroll' : ''} lody-app-preview dark ${stylex.props(landingPowerDemosStyles.shell).className}`}
       data-power-scroll-scene={pageScroll ? '' : undefined}
       aria-hidden={manualScroll ? undefined : true}
       inert={manualScroll ? undefined : true}
@@ -100,21 +126,20 @@ function renderModelSeriesMarker(series: StackedAreaSeries) {
   );
 }
 
-const MODEL_ICON_CLASS = 'h-3 w-3 shrink-0 text-foreground/50';
-
 /** Monochrome provider mark for a day-breakdown model row (app `ModelBrandIcon`). */
 function renderModelIcon(modelId: string) {
   const id = modelId.toLowerCase().split(/[:/]/).pop() ?? '';
-  if (/^(claude|anthropic)/.test(id)) return <AnthropicIcon className={MODEL_ICON_CLASS} />;
+  if (/^(claude|anthropic)/.test(id))
+    return <AnthropicIcon {...stylex.props(landingPowerDemosStyles.modelIcon)} />;
   if (/^(gpt|codex|o[1-9]|chatgpt|openai)/.test(id)) {
-    return <OpenAIIcon className={MODEL_ICON_CLASS} />;
+    return <OpenAIIcon {...stylex.props(landingPowerDemosStyles.modelIcon)} />;
   }
   const markId = agentMarkIdForSeries(id);
   const mark = markId ? MARK_BY_ID.get(markId) : undefined;
-  if (!mark) return <Sparkles className={MODEL_ICON_CLASS} />;
+  if (!mark) return <Sparkles {...stylex.props(landingPowerDemosStyles.modelIcon)} />;
   return (
     <span
-      className="h-3 w-3 shrink-0 text-foreground/50 inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full"
+      {...stylex.props(landingPowerDemosStyles.row)}
       // Registry marks are trusted build-time assets.
       dangerouslySetInnerHTML={{ __html: mark.svg }}
     />

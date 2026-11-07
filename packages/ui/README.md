@@ -30,7 +30,69 @@ behavior.
 Consumers compile this package's source with `@stylexjs/unplugin` and its exported
 StyleX options. Visual choices use component props. `className` is available for
 layout and interaction constraints in product surfaces; it must not duplicate a
-primitive's visual rules.
+primitive's visual rules. Supported `xstyle` props merge caller-owned rules inside
+the primitive's `stylex.props` call and forward dynamic variables to its real
+styled element. Use this for migration overrides instead of competing atomic
+classes. Textarea's `focusRing={false}` keeps the resting well while letting its
+enclosing composer own focus feedback.
+
+The existing modal and floating-surface token groups are available at
+`@lody/ui/dialog/dialog.tokens.stylex` and `@lody/ui/popup/popup.tokens.stylex`.
+Tooltip chips use `@lody/ui/tooltip/tooltip.tokens.stylex` for their own geometry.
+Tabs, Accordion and Collapsible share the existing group exported at
+`@lody/ui/disclosure/disclosure.tokens.stylex`.
+Card's existing surface and title tokens are available at
+`@lody/ui/card/card.tokens.stylex`.
+
+`Card.Title` accepts optional `fontWeight` and `letterSpacing` for owned title
+typography. Omission keeps weight600 and the live `text.controlTracking` reader.
+Explicit values write those physical CSS fields with inline priority; CSS-wide
+keywords and invalid variable references keep their browser inheritance behavior.
+The Gallery measures550 and0.04em without changing other card titles.
+
+For a verified layout outside the named props, a surface can write the specific
+public token through a computed key in `stylex.create`; the other tokens keep
+inheriting. Keep those overrides local to the owned part and verify portals,
+local spacing, caller precedence and every descendant reader of the changed
+token. Physical appearance overrides do not establish the same inherited-token
+contract. These exports add no token or variant.
+
+`Button variant="solid"` uses the existing `button.primaryBackground` and
+`button.primaryLabel` pigments with a flat fill. A device that supports hover
+reduces the fill to 90% opacity on hover; the label stays constant. The variant
+adds no sheen, edge shadow or pressed translation, and retains the keyboard
+focus ring. Like `primary`, it ignores `tone="destructive"`; use the
+`destructive` variant for a destructive filled action. `ButtonGroup` keeps the
+same segment corners and spacing, including for solid buttons. Other variants
+and the default `primary` retain their existing behavior.
+
+`Button` accepts `width` and `height` for its outer box: numbers are pixels and
+strings can read local CSS variables. Explicit zero applies; omission restores
+the named size. The icon wrapper, ref, events and disabled behavior retain their
+existing contract. Use these props for owned dimensions; retain compatibility
+classes at public caller boundaries until their precedence is verified.
+`fontSize`, `lineHeight` and `fontWeight` are optional, CSS-typed label fields.
+Font-size numbers are pixels; line-height and weight numbers are unitless. The
+owner writes these actual CSS fields so CSS-wide keywords, variable fallbacks and relative values
+keep browser semantics. Explicit values take inline priority over ordinary
+classes; `!important` still follows CSS. Omission restores the existing component
+styles; `revert-layer` withdraws this API's inline override, retaining component
+and caller declarations. It is not a request to revert an arbitrary stylesheet
+layer. When replacing a text-size utility, pass its font size and complete
+line-height expression, including any local `--tw-leading` fallback. The existing
+`style` and rendered-element merge paths are preserved; the fields add no token,
+named size or generic style API.
+Invalid weight values keep native CSS assignment behavior: literal `0` is rejected,
+so an existing inline `550` remains. This differs from a syntactically valid `var()`
+whose resolved `0` is invalid at computed-value time and inherits the parent weight.
+Omitting the prop removes its inline field and restores the default `500`.
+
+`labelColor` is an optional CSS-typed constant foreground for the label and
+`currentColor` glyphs, across rest, hover and press. It follows the same actual-field
+and omission rules as typography. It does not write palette tokens: a secondary
+button's hover fill still mixes toward the palette's label, independently of this
+field. Use it for a fixed private ink override; keep controls whose ink changes
+between states on their existing variant or verified styling contract.
 
 The existing `text` tokens derive sizes and leading from document `--ui-font-size`
 (14px when unset), so body, controls, hints and headings scale once, including
@@ -42,7 +104,11 @@ Product integration and terminal preference behavior are specified in
 A field is a composition rather than one component: `Field.Root` owns the name,
 the disabled flag and validity, and `Field.Label`, `Input`, `Textarea`,
 `Checkbox`, `Radio`, `Switch`, `Field.Description` and `Field.Error` read that
-state from it.
+state from it. `Field.Label` reads `field.labelSize`, `field.labelLeading` and
+`field.labelWeight` from the existing field group. The default weight is 500;
+an override on the label itself can keep a local theme’s weight without changing
+the input or other field parts. The Gallery measures both default and local
+label weights on the rendered label.
 
 ```tsx
 <Field.Root name="title" invalid={!title}>
@@ -157,11 +223,19 @@ me the password". `className` lands on the shell, which is the control, and
 `Input` takes the same shell when something belongs with the value: a Role's
 emoji before its name, the `/` before a command. `leading` puts it inside the
 well at its start rather than beside it as a second control with a second edge.
-The slot is a square as tall as the well less its 4px inset, so a pressable
+The slot is a square based on the named height, with a 4px inset at each edge, so a pressable
 glyph fills it and a character is centred where the value's padding would be.
 Whatever goes there states no edge of its own, because the well rings on
 `:focus-within`. As with `PasswordInput`, `className` then lands on the shell and
 `inputClassName` on the value.
+
+`Input` and `PasswordInput` accept `controlHeight` when a surface needs a well
+outside the named 28 / 32 / 36 ladder. A CSS length or number overrides only the
+outer well's height; `size` still sets density and the leading slot, and the
+password reveal keeps its 16px box. Zero is explicit; omission restores the
+named height. The native `height` attribute and `style` object or state callback
+still reach the actual input, including inside a shell. For a plain Input,
+caller inline styles keep priority over `controlHeight`.
 
 ```tsx
 <Input
@@ -175,7 +249,11 @@ Whatever goes there states no edge of its own, because the well rings on
 A `Menu` is that same floating surface with commands on it. It is also the
 dropdown menu: Base UI has no separate part for one, so a second name would be a
 second thing to keep in step. A menu is opened by whatever the surface already
-had there, through Base UI's `render`:
+had there, through Base UI's `render`. `Menu.Content` keeps its named
+`width="regular" | "compact"` choice and accepts `minWidth`, `maxWidth` and
+`maxHeight` for the actual popup. Numbers are pixels, strings are CSS lengths,
+zero applies and omission restores defaults. The outer positioner still owns
+`style`, the forwarded ref and events:
 
 ```tsx
 <Menu.Root>
@@ -214,6 +292,9 @@ them, so a command looks and behaves the same wherever a person meets it. A row
 answers `onClick`; a row that should leave the menu up says `closeOnClick={false}`
 rather than cancelling the event. Where focus goes after a menu closes is the
 product's policy, passed as `finalFocus`.
+`ContextMenu.Content` accepts `minWidth`, `maxWidth` and `maxHeight` for its actual
+popup, with pixel numbers, CSS-length strings, explicit zero and omission reset.
+Its forwarded ref, `style` and events continue to address the positioner.
 
 When a menu row also opens a context menu, put `ContextMenu.Root` inside the
 row's `render` callback, passing the callback's props to the actual row element
@@ -232,6 +313,18 @@ A `Popover` is that same floating surface holding content instead of rows. It
 reads the popup group too, replacing the list's anchor-width and row-bleed inset
 with content layout, and taking body size, leading, weight and tracking rather
 than the command role. Its title and description keep control and footnote roles.
+`Popover.Content` keeps its default prose inset and gap unless `padding="none"`
+or `gap="none"` lets embedded content own them. These choices apply to the actual
+popup. `width`, `minWidth`, `maxWidth` and `maxHeight` also address that popup:
+numbers are pixels, strings are CSS lengths, explicit zero applies, and omission
+restores the default. Its forwarded ref, `style`, event handlers and positioning
+props still belong to the outer positioner. Keep nonzero layout needs explicit rather than
+competing with the primitive through another StyleX class.
+
+`Popover.Title visuallyHidden` keeps its accessible name while applying the popup
+owner's clipped 1px box. It defaults to false and preserves Base UI naming, refs
+and `render`; it does not use `aria-hidden` or `display: none`. This is separate
+from modal Dialog titles and the application's Vaul drawer wrapper.
 
 ```tsx
 <Popover.Root>
@@ -273,6 +366,31 @@ elevated background under the large shadow, over an overlay. They share one toke
 group and one surface, and differ only in how they arrive and in what may dismiss
 them. A dialog carries a cross and says so; an alert dialog is answered rather
 than dismissed, so a press beside it is not an answer, though Escape still is.
+
+`Dialog.Content` and `AlertDialog.Content` keep their theme-defined inset and
+spacing unless `padding="none"` or `gap="none"` lets embedded content own them.
+The choices are independent; `"default"` or removing either prop restores that
+part of the panel's layout. Existing inline `style` objects and popup-state
+callbacks keep their precedence, so an explicit caller padding or gap still
+applies. These props address the actual panel and are consumed there; Drawer
+continues to own its separate safe-area spacing.
+
+`Dialog.Title` and `Drawer.Title` accept an optional CSS-typed `fontWeight`.
+Omission preserves the default600 and original style object; an explicit value
+writes the physical heading property. Base UI `render` styles keep their priority,
+and updates preserve the heading node, accessible name and dialog draft.
+This does not add an `asChild` API or change `AlertDialog.Title`.
+
+`Dialog.Title` and `Dialog.Description` accept `visuallyHidden` (default false).
+The same owner composes the clipped 1px box with its normal styles, including
+clearing the title's logical close-control inset. Text, IDs, refs and Base UI
+labeling remain present; changing the option preserves the existing node.
+Their Title/Description counterparts in `AlertDialog` and Base UI `Drawer` do not
+expose this option. All three families share `Header visuallyHidden`, which clips
+the entire mounted name block while preserving child IDs, refs and focus across
+updates. `Footer` keeps its existing interface. The application's Vaul-backed
+`ui/drawer` provides its own opt-in on `DrawerTitle` and
+`DrawerDescription`, retaining the Vaul/Radix labeling context and inline styles.
 
 ```tsx
 <Dialog.Root>
@@ -574,13 +692,38 @@ tone, and one that measures rather than progresses takes `neutral`:
 A `Skeleton` takes a gray, which is what the rules reserve them for — a thing
 with no role yet — and it takes its room as props rather than classes, because a
 size passed as a class lands in a specificity fight with the shape's own height.
+`width` and `height` are independently optional: numbers are pixels and strings
+are CSS lengths. An omitted dimension keeps the shape's default sizing, so a
+width-only line keeps its text-line height; an explicit `0` is applied. Updating
+either prop replaces that dimension; removing it clears the previous size and
+restores the shape's default sizing.
+
+`shape="bar"` keeps the line’s default height and `radius.mini` bottom corners,
+with 3px top corners. `shape="tile"` uses 20% corners without a default height or
+aspect ratio; the caller states any square-cell constraint. Both use `corner.shape`.
+`inline={true}` makes the placeholder an inline block; false or omission adds no
+display override. Existing shape, dimension and animation behavior is unchanged.
+
+`shape="ring"` keeps a transparent centre, square aspect ratio and round contour.
+Its optional `strokeWidth` accepts pixels or a CSS length; omission uses 2px,
+explicit zero removes the contour and removal restores the default. It has no
+effect on other shapes. The contour reads the existing feedback Skeleton pigment;
+a local override inherits into descendants, so review every child reader before
+using it. The group is exported at `@lody/ui/feedback/feedback.tokens.stylex`.
+
 A `Spinner` is drawn in `currentColor`, so the one inside a ghost button takes
 the button's ink; it is called a spinner rather than a loading, because it is the
 mark and not the state, and where it goes is the surface's decision.
+Its `size` selects the named 16/20/24px steps. An optional `diameter` overrides
+both dimensions of the turning wrapper: numbers are pixels and strings are CSS
+lengths, including expressions that read the host's local spacing variables.
+An explicit `0` applies; removing the prop restores the named size. SVG `width`
+and `height` attributes still belong to the glyph, which fills that wrapper.
 
 ```tsx
 <Skeleton shape="circle" width={32} height={32} />
 <Skeleton width="60%" />
+<Spinner diameter="calc(var(--spacing) * 3.5)" label={null} />
 <Button variant="secondary" size="small">
   <Spinner size="small" label={null} />
   Saving
@@ -862,6 +1005,11 @@ the range that clamps itself, the shell an input builds out of its own `render`,
 and the two Base UI gaps they close are recorded in the
 [UI number and password fields note](../../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).
 
+The removed bridge's [cascade investigation](../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
+and [font writer investigation](../../.agents/notes/implemented/architecture/2026-11-03-stylex-font-writer-pair.md)
+retain historical precedence evidence. They describe a retired adapter, not the
+current styling API; present callers compose through the actual owner.
+
 ## Scroll area
 
 `ScrollArea` uses Base UI for native wheel/touch scrolling, thumb dragging,
@@ -887,6 +1035,11 @@ import { ScrollArea } from '@lody/ui/scroll-area';
 a narrow track for tab strips. The viewport ref remains the real native scroll
 element for virtualization, keyboard handling and scroll restoration. Root and
 viewport classes/styles carry caller layout, not thumb appearance.
+`contentFullHeight` lets the owned Content box fill the viewport for a full-height
+fold layout. It adds no wrapper; callers keep scrolling and measurement on the same
+native viewport. See the [integration decision](../../.agents/notes/implemented/architecture/2026-11-07-stylex-main-integration.md)
+for the ownership and verification boundary.
+
 `scrollbarClassName` carries layout or interaction constraints on both tracks,
 such as hiding them during a parent frame's animation; track appearance stays token-owned.
 

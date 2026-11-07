@@ -12,6 +12,8 @@ import { surface } from './surface';
 
 export { nativeScrollbar } from './surface';
 
+const contentStyles = stylex.create({ fill: { height: '100%' } });
+
 export type ScrollAreaAxis = 'vertical' | 'horizontal' | 'both';
 export type ScrollAreaVisibility = 'hover' | 'scroll' | 'always';
 export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'> {
@@ -20,11 +22,15 @@ export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'>
   visibility?: ScrollAreaVisibility;
   /** A 4px track for narrow horizontal tab strips. */
   compact?: boolean;
+  /** Let a full-height layout fill the content box inside the viewport. */
+  contentFullHeight?: boolean;
   viewportRef?: Ref<HTMLDivElement>;
   viewportClassName?: string;
+  viewportXstyle?: stylex.StyleXStyles;
   viewportStyle?: CSSProperties;
   /** Layout/interaction constraints for both tracks; appearance belongs to the tokens. */
   scrollbarClassName?: string;
+  scrollbarXstyle?: stylex.StyleXStyles;
 }
 
 /** The native viewport remains the public ref for virtualization and restoration. */
@@ -35,10 +41,13 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
     visibility = 'hover',
     compact = false,
     className,
+    contentFullHeight = false,
     viewportRef,
     viewportClassName,
+    viewportXstyle,
     viewportStyle,
     scrollbarClassName,
+    scrollbarXstyle,
     ...rest
   },
   ref
@@ -46,6 +55,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
   const track = (orientation: 'vertical' | 'horizontal') => (
     <BaseScrollArea.Scrollbar
       orientation={orientation}
+      style={stylex.props(scrollbarXstyle).style}
       className={(state) =>
         appendClassName(
           stylex.props(
@@ -57,7 +67,8 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
             visibility !== 'always' &&
               !state.scrolling &&
               !(visibility === 'hover' && state.hovering) &&
-              surface.hidden
+              surface.hidden,
+            scrollbarXstyle
           ).className,
           scrollbarClassName
         )
@@ -76,10 +87,11 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
         ref={viewportRef}
         data-scroll-area-viewport=""
         className={appendClassName(
-          stylex.props(surface.viewport).className,
+          stylex.props(surface.viewport, viewportXstyle).className,
           viewportClassName
         )}
         style={{
+          ...stylex.props(viewportXstyle).style,
           ...viewportStyle,
           ...(axis === 'vertical'
             ? { overflowX: 'hidden' }
@@ -89,7 +101,10 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
         }}
       >
         <BaseScrollArea.Content
-          {...stylex.props(axis === 'vertical' && surface.verticalContent)}
+          {...stylex.props(
+            axis === 'vertical' && surface.verticalContent,
+            contentFullHeight && contentStyles.fill
+          )}
           style={axis === 'vertical' ? { minWidth: 0 } : undefined}
         >
           {children}

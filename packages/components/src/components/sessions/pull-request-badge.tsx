@@ -7,61 +7,104 @@ import {
 import { GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type React from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 type PullRequestBadgeSize = 'sm' | 'md';
 
 type StatusMeta = {
   icon: LucideIcon;
-  className: string;
-  /** Bare text-color token for a badge-less icon (e.g. the sidebar row status slot). */
-  iconColorClassName: string;
+  iconXstyle: stylex.StyleXStyles;
   labelKey: string;
   labelFallback: string;
 };
+
+const styles = stylex.create({
+  badge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    fontWeight: themeFontWeight.normal,
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      },
+    },
+    // The old Tailwind `focus:ring-*` painted nothing — the app forces
+    // Tailwind's own ring transparent — but it still declared a `box-shadow`,
+    // and a utility-layer shadow beats the base layer's inset focus ring. So
+    // the badge showed NO focus indicator at all. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  badgeSm: {
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[0.5],
+    fontSize: '11px',
+  },
+  badgeMd: {
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  iconSm: { width: themeSpace[3], height: themeSpace[3] },
+  iconMd: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  open: { color: 'hsl(var(--github-open) / 1)' },
+  merged: { color: 'hsl(var(--github-merged))' },
+  closed: { color: 'hsl(var(--github-closed) / 1)' },
+  draft: { color: 'hsl(var(--github-draft) / 1)' },
+});
 
 /** Shared per-status icon/color/label meta (also used by the info-bar ContextChip). */
 export const PR_STATUS_META: Record<PrStatus, StatusMeta> = {
   open: {
     icon: GitPullRequest,
-    className: 'bg-foreground/[0.06] text-github-open hover:bg-foreground/[0.1]',
-    iconColorClassName: 'text-github-open',
+    iconXstyle: styles.open,
     labelKey: 'sessions.pr.statusOpen',
     labelFallback: 'Open',
   },
   merged: {
     icon: GitMerge,
-    className: 'bg-foreground/[0.06] text-pr-merged hover:bg-foreground/[0.1]',
-    iconColorClassName: 'text-pr-merged',
+    iconXstyle: styles.merged,
     labelKey: 'sessions.pr.statusMerged',
     labelFallback: 'Merged',
   },
   closed: {
     icon: GitPullRequestClosed,
-    className: 'bg-foreground/[0.06] text-github-closed hover:bg-foreground/[0.1]',
-    iconColorClassName: 'text-github-closed',
+    iconXstyle: styles.closed,
     labelKey: 'sessions.pr.statusClosed',
     labelFallback: 'Closed',
   },
   draft: {
     icon: GitPullRequestDraft,
-    className: 'bg-foreground/[0.06] text-github-draft hover:bg-foreground/[0.1]',
-    iconColorClassName: 'text-github-draft',
+    iconXstyle: styles.draft,
     labelKey: 'sessions.pr.statusDraft',
     labelFallback: 'Draft',
   },
-};
-
-const SIZE_META: Record<PullRequestBadgeSize, { wrapper: string; icon: string }> = {
-  sm: { wrapper: 'px-1.5 py-0.5 text-[11px]', icon: 'h-3 w-3' },
-  md: { wrapper: 'px-2 py-1 text-xs', icon: 'h-3.5 w-3.5' },
 };
 
 type PullRequestBadgeProps = {
   pr: SessionPullRequestMeta;
   size?: PullRequestBadgeSize;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
+  iconXstyle?: stylex.StyleXStyles;
   onClick?: React.MouseEventHandler<HTMLAnchorElement>;
   /**
    * When provided, the badge renders as a button and calls this callback
@@ -74,13 +117,14 @@ export const PullRequestBadge = ({
   pr,
   size = 'md',
   className,
+  xstyle,
+  iconXstyle,
   onClick,
   onOpenTab,
 }: PullRequestBadgeProps) => {
   const { t } = useTranslation();
   const statusMeta = PR_STATUS_META[pr.status ?? 'open'] ?? PR_STATUS_META.open;
   const Icon = statusMeta.icon;
-  const sizeMeta = SIZE_META[size];
   const legacy = getSessionPullRequestLegacyFields(pr);
   const prNumber =
     typeof legacy.number === 'number' && Number.isFinite(legacy.number)
@@ -89,17 +133,19 @@ export const PullRequestBadge = ({
   const prLabel = prNumber ? `#${prNumber}` : 'PR';
   const statusLabel = t(statusMeta.labelKey, statusMeta.labelFallback);
 
-  const sharedClassName = cn(
-    'inline-flex items-center gap-1 rounded-md font-normal transition',
-    sizeMeta.wrapper,
-    statusMeta.className,
-    'focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-primary/30',
-    className
+  const badgeProps = stylex.props(
+    styles.badge,
+    size === 'sm' ? styles.badgeSm : styles.badgeMd,
+    statusMeta.iconXstyle,
+    xstyle
   );
+  const iconProps = stylex.props(size === 'sm' ? styles.iconSm : styles.iconMd, iconXstyle);
+
+  const sharedClassName = clsx(badgeProps.className, className);
 
   const content = (
     <>
-      <Icon className={sizeMeta.icon} strokeWidth={2.25} />
+      <Icon {...iconProps} strokeWidth={2.25} />
       <span>{prLabel}</span>
     </>
   );
@@ -108,6 +154,7 @@ export const PullRequestBadge = ({
     return (
       <button
         type="button"
+        {...badgeProps}
         className={sharedClassName}
         title={`${statusLabel} ${prLabel}`}
         onClick={onOpenTab}
@@ -122,6 +169,7 @@ export const PullRequestBadge = ({
       href={pr.url}
       target="_blank"
       rel="noreferrer"
+      {...badgeProps}
       className={sharedClassName}
       title={`${statusLabel} ${prLabel}`}
       onClick={onClick}

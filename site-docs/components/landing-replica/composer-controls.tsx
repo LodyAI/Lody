@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import {
   Bot,
@@ -17,7 +18,437 @@ import {
 import { Button } from './button';
 import { AgentIcon } from './icons';
 import type { ReplicaAgent, ReplicaLocale } from './types';
-import { cn } from './utils';
+const composerControlsComposition = stylex.create({
+  part1: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': '0.9em',
+    'line-height': 'var(--leading-tight)',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    ':is(*) svg': {
+      color: 'currentcolor',
+      opacity: '100%',
+    },
+  },
+  part2: {
+    'border-style': 'solid',
+    'border-width': '0.5px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'var(--color-white)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0px 0.5px 1px 1px rgba(0,0,0,0.03)',
+    '@media (hover: hover)': {
+      ':is(*):hover': {
+        'background-color': 'hsl(var(--hover))',
+        color: 'hsl(var(--foreground))',
+      },
+      ':is(*):where(.dark, .dark *):hover': {
+        'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 12%, transparent)',
+      },
+    },
+    ':is(*):where(.dark, .dark *)': {
+      'border-color': 'transparent',
+      'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+    },
+  },
+  part3: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'max-width': '18rem',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': '0.9em',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    ':is(*) svg': {
+      color: 'currentcolor',
+      opacity: '100%',
+    },
+  },
+  part4: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  part5: {
+    'transition-property': 'opacity',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    ':is(*):is(:where(.group\\/project):focus-within *)': {
+      opacity: '0%',
+    },
+    '@media (hover: hover)': {
+      ':is(*):is(:where(.group\\/project):hover *)': {
+        opacity: '0%',
+      },
+    },
+  },
+  part6: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 7)',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': '4px',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': '0.9em',
+    'line-height': 'var(--leading-tight)',
+    color: 'hsl(var(--muted-foreground))',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    '@media (hover: hover)': {
+      ':is(*):hover': {
+        'background-color': 'hsl(var(--hover))',
+        color: 'hsl(var(--foreground))',
+      },
+    },
+    ':is(*):disabled': {
+      cursor: 'default',
+      opacity: '70%',
+    },
+    '@container composer-face (width < 280px)': {
+      width: 'calc(var(--spacing) * 7)',
+      'flex-shrink': '0',
+      'justify-content': 'center',
+      gap: '0px',
+      'padding-inline': '0px',
+    },
+  },
+  part7: {
+    display: 'block',
+    'max-width': 'calc(var(--spacing) * 40)',
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'left',
+    direction: 'rtl',
+  },
+  part8: {
+    '@container composer-face (width < 280px)': {
+      display: 'none',
+    },
+  },
+  part9: {
+    'flex-shrink': '0',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  part10: {
+    'flex-shrink': '0',
+  },
+  part11: {
+    'max-width': 'calc(var(--spacing) * 36)',
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+});
+
+const composerControlsStylesNative = stylex.create({
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    cursor: 'pointer',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': '0',
+    'background-color': 'transparent',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    '@media (hover: hover)': {
+      ':is(*):hover': {
+        'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 6%, transparent)',
+        color: 'hsl(var(--foreground))',
+      },
+    },
+  },
+  row2: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 8)',
+    'max-width': '100%',
+    'min-width': '0px',
+    'flex-wrap': 'nowrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--foreground))',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    '@media (hover: hover)': {
+      ':is(*):hover': {
+        'background-color': 'color-mix(in oklab, hsl(var(--muted)) 50%, transparent)',
+      },
+    },
+    ':is(*):active': {
+      'background-color': 'color-mix(in oklab, hsl(var(--muted)) 60%, transparent)',
+    },
+    ':is(*):disabled': {
+      cursor: 'not-allowed',
+      opacity: '60%',
+    },
+  },
+});
+
+const composerControlsStyles = stylex.create({
+  glyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+  },
+  label: {
+    'max-width': 'calc(var(--spacing) * 32)',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'border-radius': 'var(--radius-sm)',
+    'object-fit': 'cover',
+  },
+  glyph2: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    opacity: '70%',
+  },
+  row: {
+    position: 'relative',
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+  },
+  label2: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'left',
+  },
+  row2: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'max-width': '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--composer))',
+    ':is(*):where(.dark, .dark *)': {
+      'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+    },
+  },
+  row3: {
+    display: 'inline-flex',
+    'min-width': '0px',
+    'align-items': 'center',
+  },
+  surface: {
+    height: 'calc(var(--spacing) * 4)',
+    width: '1px',
+    'flex-shrink': '0',
+    'background-color': 'hsl(var(--border))',
+  },
+  row4: {
+    display: 'inline-flex',
+    'flex-shrink': '0',
+  },
+  surface2: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+    'border-radius': '3px',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 15%, transparent)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+    'outline-style': 'none',
+    'transition-property': 'box-shadow',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    ':is(*)[data-state="checked"]': {
+      'border-color': 'transparent',
+      'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 25%, transparent)',
+      color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+    },
+    ':is(*):where(.dark, .dark *)': {
+      'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 15%, transparent)',
+    },
+    ':is(*):where(.dark, .dark *)[data-state="checked"]': {
+      'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 25%, transparent)',
+    },
+    ':is(*) svg': {
+      width: 'calc(var(--spacing) * 3)',
+      height: 'calc(var(--spacing) * 3)',
+    },
+  },
+  row5: {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'center',
+    color: 'currentcolor',
+    'transition-property': 'none',
+  },
+  row6: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    ':is(*) svg': {
+      height: 'calc(var(--spacing) * 4)',
+      width: 'calc(var(--spacing) * 4)',
+      'stroke-width': '1.5',
+    },
+  },
+  glyph3: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--status-warning))',
+  },
+  row7: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    overflow: 'hidden',
+  },
+  row8: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    ':is(*) > *': {
+      height: 'calc(var(--spacing) * 4)',
+      width: 'calc(var(--spacing) * 4)',
+    },
+  },
+  label3: {
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'left',
+    direction: 'rtl',
+  },
+  label4: {
+    'flex-shrink': '0',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  label5: {
+    'flex-shrink': '0',
+    'white-space': 'nowrap',
+  },
+});
+
+const buttonChildStyles = stylex.create({
+  label: {
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  icon: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    opacity: '70%',
+  },
+  label2: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+});
+
+const buttonStyles = stylex.create({
+  chevron: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.6,
+  },
+  agent: { height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+  agentFixed: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+  },
+  branch: {
+    height: 'calc(var(--spacing) * 6)',
+    width: 'auto',
+    userSelect: 'none',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground))',
+  },
+});
 
 /* Resting triggers of the selectors in and around the composer. Sources:
    chat/unified-project-selector.tsx, chat/chat-landing-selectors.tsx,
@@ -27,8 +458,7 @@ import { cn } from './utils';
 
 // ---- Top row: machine / project / branch + worktree ---------------------------
 
-const CONTEXT_PILL_CLASS =
-  'border-[0.5px] border-border bg-white shadow-[0px_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:border-transparent dark:bg-foreground/[0.08] dark:shadow-none hover:bg-hover hover:text-foreground dark:hover:bg-foreground/[0.12]';
+const contextPillStyle = composerControlsComposition.part2;
 
 /** `DesktopMachineMenu` trigger. */
 export function ReplicaMachineMenuTrigger({ label }: { label: string }) {
@@ -36,13 +466,10 @@ export function ReplicaMachineMenuTrigger({ label }: { label: string }) {
     <button
       type="button"
       aria-label="Machine"
-      className={cn(
-        'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md px-2 text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-        CONTEXT_PILL_CLASS
-      )}
+      {...stylex.props([composerControlsComposition.part1, contextPillStyle])}
     >
-      <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="max-w-32 truncate">{label}</span>
+      <Monitor {...stylex.props(composerControlsStyles.glyph)} aria-hidden="true" />
+      <span {...stylex.props(composerControlsStyles.label)}>{label}</span>
     </button>
   );
 }
@@ -67,33 +494,33 @@ export function ReplicaProjectSelectorTrigger({
           src={avatarUrl}
           alt=""
           aria-hidden="true"
-          className="h-4 w-4 shrink-0 rounded-sm object-cover"
+          {...stylex.props(composerControlsStyles.frame)}
         />
       ) : (
-        <Github className="h-4 w-4 shrink-0 opacity-70" />
+        <Github {...stylex.props(composerControlsStyles.glyph2)} />
       )
     ) : (
-      <FolderOpen className="h-4 w-4 shrink-0 opacity-70" />
+      <FolderOpen {...stylex.props(composerControlsStyles.glyph2)} />
     );
   return (
-    <div className="group/project relative flex min-w-0 items-center">
+    <div
+      className={[stylex.props(composerControlsStyles.row).className, 'group/project']
+        .filter(Boolean)
+        .join(' ')}
+    >
       <button
         type="button"
-        className={cn(
-          'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2 text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-          CONTEXT_PILL_CLASS
-        )}
+        {...stylex.props([composerControlsComposition.part3, contextPillStyle])}
       >
         <span
-          className={cn(
-            'flex h-4 w-4 shrink-0 items-center justify-center',
-            kind !== 'none' &&
-              'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
-          )}
+          {...stylex.props([
+            composerControlsComposition.part4,
+            kind !== 'none' && composerControlsComposition.part5,
+          ])}
         >
           {icon}
         </span>
-        <span className="min-w-0 flex-1 truncate text-left">
+        <span {...stylex.props(composerControlsStyles.label2)}>
           {kind === 'none' ? (locale === 'zh' ? '选择项目' : 'Select a project') : label}
         </span>
       </button>
@@ -117,26 +544,23 @@ export function ReplicaBranchWorktreePill({
 }) {
   const state = worktree ? 'checked' : 'unchecked';
   return (
-    <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-[hsl(var(--composer))] dark:bg-foreground/[0.08]">
-      <span className="inline-flex min-w-0 items-center" data-demo="branch">
-        <Button
-          variant="ghost"
-          className="h-6 w-auto select-none justify-between gap-1 rounded-md border-none bg-transparent px-1 text-sm font-medium text-foreground [&_span]:text-xs [&_span]:leading-tight"
-        >
-          <span className="flex min-w-0 flex-1 items-center gap-2">
-            <GitBranch className="h-4 w-4 shrink-0 opacity-70" />
-            <span className="truncate font-medium">
+    <div {...stylex.props(composerControlsStyles.row2)}>
+      <span {...stylex.props(composerControlsStyles.row3)} data-demo="branch">
+        <Button variant="ghost" xstyle={buttonStyles.branch} compactLabel>
+          <span {...stylex.props(buttonChildStyles.label)}>
+            <GitBranch {...stylex.props(buttonChildStyles.icon)} />
+            <span {...stylex.props(buttonChildStyles.label2)}>
               {branch ?? (locale === 'zh' ? '分支' : 'Branch')}
             </span>
           </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          <ChevronDown data-replica-sized {...stylex.props(buttonStyles.chevron)} />
         </Button>
       </span>
       {showWorktree ? (
         <>
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
-          <span data-demo="workdir" className="inline-flex shrink-0">
-            <label className="flex h-6 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-none bg-transparent px-2 text-xs font-normal text-foreground/80 transition-colors hover:bg-foreground/[0.06] hover:text-foreground">
+          <span aria-hidden="true" {...stylex.props(composerControlsStyles.surface)} />
+          <span data-demo="workdir" {...stylex.props(composerControlsStyles.row4)}>
+            <label {...stylex.props(composerControlsStylesNative.row)}>
               <button
                 type="button"
                 role="checkbox"
@@ -144,13 +568,15 @@ export function ReplicaBranchWorktreePill({
                 aria-label="Use worktree"
                 data-state={state}
                 data-slot="checkbox"
-                className="peer size-3 shrink-0 rounded-[3px] border border-transparent bg-muted-foreground/15 shadow-none outline-hidden transition-shadow dark:bg-muted-foreground/15 data-[state=checked]:border-transparent data-[state=checked]:bg-muted-foreground/25 data-[state=checked]:text-foreground/80 dark:data-[state=checked]:bg-muted-foreground/25 [&_svg]:size-3"
+                className={[stylex.props(composerControlsStyles.surface2).className, 'peer']
+                  .filter(Boolean)
+                  .join(' ')}
               >
                 {worktree ? (
                   <span
                     data-state={state}
                     data-slot="checkbox-indicator"
-                    className="flex items-center justify-center text-current transition-none"
+                    {...stylex.props(composerControlsStyles.row5)}
                   >
                     <Check />
                   </span>
@@ -168,10 +594,9 @@ export function ReplicaBranchWorktreePill({
 // ---- Footer: run config + permission ------------------------------------------
 
 /** Hide face labels when the composer footer slot is this narrow. */
-const FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
+const faceLabelStyle = composerControlsComposition.part8;
 
-const TRIGGER_CLASS =
-  'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-[0.9em] leading-tight @max-[280px]/composer-face:w-7 @max-[280px]/composer-face:shrink-0 @max-[280px]/composer-face:justify-center @max-[280px]/composer-face:gap-0 @max-[280px]/composer-face:px-0 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-70';
+const selectorTriggerStyle = composerControlsComposition.part6;
 
 /** `DesktopRunConfigMenu` trigger: agent icon + model · reasoning. `agent: null`
     renders the generic Bot the app shows for an unresolved agent config. */
@@ -185,50 +610,49 @@ export function ReplicaRunConfigTrigger({
   thinkLabel?: string;
 }) {
   return (
-    <button type="button" className={TRIGGER_CLASS} aria-label="Run configuration">
+    <button type="button" {...stylex.props(selectorTriggerStyle)} aria-label="Run configuration">
       {agent ? (
-        <AgentIcon agent={agent} className="h-4 w-4 shrink-0" />
+        <AgentIcon agent={agent} xstyle={buttonStyles.agentFixed} />
       ) : (
-        <Bot className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+        <Bot {...stylex.props(composerControlsStyles.glyph)} strokeWidth={1.5} aria-hidden="true" />
       )}
-      <span
-        className={cn(
-          'block min-w-0 max-w-40 truncate text-left [direction:rtl]',
-          FACE_LABEL_CLASS
-        )}
-      >
+      <span {...stylex.props([composerControlsComposition.part7, faceLabelStyle])}>
         <span dir="ltr">{modelLabel}</span>
       </span>
       {thinkLabel ? (
         <>
           <span
             aria-hidden="true"
-            className={cn('shrink-0 select-none text-muted-foreground/60', FACE_LABEL_CLASS)}
+            {...stylex.props([composerControlsComposition.part9, faceLabelStyle])}
           >
             ·
           </span>
-          <span className={cn('shrink-0', FACE_LABEL_CLASS)}>{thinkLabel}</span>
+          <span {...stylex.props([composerControlsComposition.part10, faceLabelStyle])}>
+            {thinkLabel}
+          </span>
         </>
       ) : null}
     </button>
   );
 }
 
-const MODE_ICON_CLASS = 'h-3.5 w-3.5';
+const modeIconStyle = stylex.create({
+  glyph: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+});
 
 /** Permission-mode glyph (app `getModeIcon` from chat-landing-selectors). */
 export function getModeIcon(modeId: string | null): ReactNode {
   switch (modeId) {
     case 'plan':
-      return <Compass className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <Compass {...stylex.props(modeIconStyle.glyph)} strokeWidth={1.5} />;
     case 'acceptEdits':
-      return <PenLine className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <PenLine {...stylex.props(modeIconStyle.glyph)} strokeWidth={1.5} />;
     case 'dontAsk':
-      return <ShieldOff className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <ShieldOff {...stylex.props(modeIconStyle.glyph)} strokeWidth={1.5} />;
     case 'read-only':
-      return <Eye className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <Eye {...stylex.props(modeIconStyle.glyph)} strokeWidth={1.5} />;
     default:
-      return <ShieldCheck className={MODE_ICON_CLASS} strokeWidth={1.5} />;
+      return <ShieldCheck {...stylex.props(modeIconStyle.glyph)} strokeWidth={1.5} />;
   }
 }
 
@@ -251,15 +675,15 @@ export function ReplicaPermissionModeTrigger({
   modeId?: string;
 }) {
   return (
-    <button type="button" className={TRIGGER_CLASS} aria-label="Permission">
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.5]">
+    <button type="button" {...stylex.props(selectorTriggerStyle)} aria-label="Permission">
+      <span {...stylex.props(composerControlsStyles.row6)}>
         {WARNING_MODE_IDS.has(modeId) ? (
-          <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" strokeWidth={1.5} />
+          <ShieldAlert {...stylex.props(composerControlsStyles.glyph3)} strokeWidth={1.5} />
         ) : (
           getModeIcon(modeId)
         )}
       </span>
-      <span className={cn('min-w-0 max-w-36 truncate', FACE_LABEL_CLASS)}>{label}</span>
+      <span {...stylex.props([composerControlsComposition.part11, faceLabelStyle])}>{label}</span>
     </button>
   );
 }
@@ -278,22 +702,22 @@ export function ReplicaMobileRunConfigTrigger({
     <button
       type="button"
       aria-label="Run configuration"
-      className="inline-flex h-8 min-w-0 max-w-full select-none flex-nowrap items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-sm text-foreground transition-colors hover:bg-muted/50 active:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
+      {...stylex.props(composerControlsStylesNative.row2)}
     >
-      <span className="flex min-w-0 items-center gap-1 overflow-hidden">
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center [&>*]:h-4 [&>*]:w-4">
-          <AgentIcon agent={agent} className="h-4 w-4" />
+      <span {...stylex.props(composerControlsStyles.row7)}>
+        <span {...stylex.props(composerControlsStyles.row8)}>
+          <AgentIcon agent={agent} xstyle={buttonStyles.agent} />
         </span>
-        <span className="min-w-0 truncate text-left [direction:rtl]">
+        <span {...stylex.props(composerControlsStyles.label3)}>
           <span dir="ltr">{modelLabel}</span>
         </span>
       </span>
       {thinkLabel ? (
         <>
-          <span aria-hidden="true" className="shrink-0 select-none text-muted-foreground/70">
+          <span aria-hidden="true" {...stylex.props(composerControlsStyles.label4)}>
             ·
           </span>
-          <span className="shrink-0 whitespace-nowrap">{thinkLabel}</span>
+          <span {...stylex.props(composerControlsStyles.label5)}>{thinkLabel}</span>
         </>
       ) : null}
     </button>

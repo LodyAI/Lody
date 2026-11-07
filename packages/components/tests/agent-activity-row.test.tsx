@@ -210,7 +210,9 @@ describe('live agent status', () => {
     );
     const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
     expect(button).not.toBeNull();
-    expect(button!.querySelector('.animate-spin')).not.toBeNull();
+    expect(
+      button!.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')
+    ).not.toBeNull();
     expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
     await act(async () => button!.click());
     expect(container.querySelector('[data-scroll-to-latest]')).toBeNull();

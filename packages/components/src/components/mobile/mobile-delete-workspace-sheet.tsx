@@ -4,12 +4,16 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { cn } from '@/lib/utils';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import { sheetSurface } from './sheet-surface';
 
 export type MobileDeleteWorkspaceSheetProps = {
   open: boolean;
@@ -23,6 +27,85 @@ export type MobileDeleteWorkspaceSheetProps = {
   /** Remaining billing obligations, rendered above the type-to-confirm card. */
   warningText?: string | null;
 };
+
+const styles = stylex.create({
+  sheet: {
+    height: 'auto',
+    maxHeight: '92dvh',
+    bottom: 'var(--native-keyboard-height,0px)',
+  },
+  fieldSpacing: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+  },
+
+  destructiveTitle: { color: 'hsl(var(--destructive) / 1)' },
+  fieldLabel: {
+    [field.label]: 'hsl(var(--foreground) / 1)',
+    [field.labelSize]: '0.78rem',
+    [field.labelWeight]: 'var(--font-weight-medium)',
+  },
+  /** The title, with the warning mark in front of it. */
+  titleRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  /** The sheet's description, under the header. */
+  description: {
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[3],
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  /** The sheet's body. */
+  body: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[2],
+  },
+  /** The billing warning follows the app's explicit theme scopes. */
+  warning: {
+    marginBottom: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'oklch(76.9% 0.188 70.08 / 0.3)',
+    backgroundColor: 'oklch(76.9% 0.188 70.08 / 0.1)',
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.625,
+    color: {
+      default: 'oklch(27.9% 0.077 45.635)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-100)',
+    },
+  },
+  /** The type-to-confirm card. */
+  confirmCard: {
+    padding: themeSpace[3],
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--destructive) / 0.3)',
+    backgroundColor: 'hsl(var(--destructive) / 0.04)',
+    boxShadow: '0 0 0 3px hsl(var(--destructive) / 0.04)',
+  },
+  confirmationInput: { marginTop: 'calc(var(--spacing) * 2)' },
+  action: { flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  busyMark: {
+    marginRight: 'calc(var(--spacing) * 1.5)',
+  },
+});
 
 /**
  * Mobile-native bottom-sheet replacement for the centered `Dialog`
@@ -81,19 +164,27 @@ export function MobileDeleteWorkspaceSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'mobile-delete-workspace-sheet',
-          'h-auto! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        className="mobile-delete-workspace-sheet"
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
         style={{
           maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
-        <div className="flex max-h-full min-h-0 flex-col">
-          <header className="relative flex items-center px-4 pb-2 pt-2">
-            <DrawerTitle className="mx-auto inline-flex items-center gap-1.5 text-[0.95rem] font-semibold tracking-tight text-destructive">
-              <AlertTriangle className="h-4 w-4" aria-hidden="true" strokeWidth={2} />
+        <div {...stylex.props(sheetSurface.columnAuto)}>
+          <header {...stylex.props(sheetSurface.header)}>
+            <DrawerTitle
+              xstyle={[
+                sheetSurface.title,
+                sheetSurface.titleCentered,
+                styles.titleRow,
+                styles.destructiveTitle,
+              ]}
+            >
+              <AlertTriangle
+                {...stylex.props(sheetSurface.glyph16)}
+                aria-hidden="true"
+                strokeWidth={2}
+              />
               {t('workspace.danger.deleteWorkspace.confirmTitle', 'Delete workspace?')}
             </DrawerTitle>
             <DrawerClose asChild>
@@ -101,17 +192,17 @@ export function MobileDeleteWorkspaceSheet({
                 type="button"
                 aria-label={t('common.close', 'Close')}
                 disabled={isDeleting}
-                className={cn(
-                  'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
-                  'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
-                  'disabled:opacity-50 disabled:pointer-events-none'
+                {...stylex.props(
+                  sheetSurface.iconButton,
+                  sheetSurface.iconButtonRight,
+                  sheetSurface.iconButtonDisabled
                 )}
               >
-                <X className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+                <X {...stylex.props(sheetSurface.glyph20)} aria-hidden="true" strokeWidth={1.8} />
               </button>
             </DrawerClose>
           </header>
-          <DrawerDescription className="px-4 pb-3 text-[0.78rem] leading-relaxed text-muted-foreground">
+          <DrawerDescription {...stylex.props(styles.description)} fontSize="0.78rem">
             {t('workspace.danger.deleteWorkspace.confirmDescription', {
               workspace: workspaceName,
               defaultValue: 'Permanently delete "{{workspace}}". This action cannot be undone.',
@@ -121,22 +212,13 @@ export function MobileDeleteWorkspaceSheet({
           <div
             ref={keyboard.scrollRef}
             style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
-            className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+            {...stylex.props(styles.body)}
           >
-            {warningText ? (
-              <p className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[0.72rem] font-medium leading-relaxed text-amber-950 dark:text-amber-100">
-                {warningText}
-              </p>
-            ) : null}
-            <div
-              className={cn(
-                'rounded-xl border border-destructive/30 bg-destructive/[0.04] p-3',
-                'shadow-[0_0_0_3px_hsl(var(--destructive)/0.04)]'
-              )}
-            >
+            {warningText ? <p {...stylex.props(styles.warning)}>{warningText}</p> : null}
+            <div {...stylex.props(styles.confirmCard)}>
               <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
-                className="text-[0.78rem] font-medium text-foreground"
+                className={stylex.props(styles.fieldLabel).className}
               >
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: workspaceName,
@@ -156,7 +238,7 @@ export function MobileDeleteWorkspaceSheet({
                 autoCorrect="off"
                 spellCheck={false}
                 enterKeyHint="done"
-                className="mt-2"
+                {...stylex.props(styles.confirmationInput)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && canDelete) {
                     event.preventDefault();
@@ -167,20 +249,11 @@ export function MobileDeleteWorkspaceSheet({
             </div>
           </div>
 
-          <div
-            className={cn(
-              'flex shrink-0 items-center gap-2 border-t border-border/40 px-4 pt-3',
-              /* Same keyboard-aware bottom padding trick as the rest
-                 of the mobile sheet family — collapse the safe-area
-                 inset when the keyboard is up (it would otherwise be
-                 wasted space behind the keyboard). */
-              'pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))]'
-            )}
-          >
+          <div {...stylex.props(sheetSurface.footer, sheetSurface.footerPadKeyboard)}>
             <Button
               type="button"
               variant="secondary"
-              className="flex-1"
+              {...stylex.props(styles.action)}
               onClick={() => onOpenChange(false)}
               disabled={isDeleting}
             >
@@ -189,13 +262,16 @@ export function MobileDeleteWorkspaceSheet({
             <Button
               type="button"
               variant="destructive"
-              className="flex-1"
+              {...stylex.props(styles.action)}
               onClick={() => void handleDelete()}
               disabled={!canDelete}
             >
               {isDeleting ? (
                 <>
-                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 3.5)"
+                    {...stylex.props(styles.busyMark)}
+                  />
                   {t('common.processing', 'Processing...')}
                 </>
               ) : (

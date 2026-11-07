@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useRef, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PanelRight } from 'lucide-react';
@@ -10,10 +11,115 @@ import {
   type SidePanelTabSplit,
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { Button } from '@lody/ui/button';
+const storyLayoutStylesStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '520px',
+    width: '620px',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    flex: '1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  stack2: {
+    display: 'flex',
+    height: '520px',
+    width: '420px',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
+
+const storyOverrides = stylex.create({
+  border: {
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+  },
+  tall: { height: 'calc(var(--spacing) * 11)' },
+});
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame2: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+});
 import {
   SIDE_PANEL_SPLIT_RATIO_VAR,
   SidePanelSplitHandle,
 } from '@/components/sessions/side-panel-split-handle';
+
+const mergedStoryLayout = stylex.create({
+  part1: {
+    minHeight: '100vh',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  part2: {
+    display: 'flex',
+    height: 520,
+    width: 720,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: 1,
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  part3: {
+    borderBottomStyle: 'solid',
+    borderBottomWidth: 1,
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  part4: {
+    position: 'relative',
+    display: 'flex',
+    flex: 1,
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    ':is(*) > :not(:last-child)': {
+      borderInlineEndStyle: 'solid',
+      borderInlineEndWidth: 1,
+      borderInlineEndColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    },
+  },
+  part5: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
 
 const ALL_PANELS: SessionSidePanelOption[] = [
   { id: 'side-session', label: 'Side Chat', kind: 'session' },
@@ -49,8 +155,10 @@ const INITIAL_TABS: SessionSidePanelTabItem[] = [
   { id: 'diff:turn-1', label: 'Conversation Diff', kind: 'diff', closeable: true },
 ];
 
-function SidePanelTabBarStory() {
-  const [tabs, setTabs] = useState(INITIAL_TABS);
+function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
+  const [tabs, setTabs] = useState(() =>
+    INITIAL_TABS.map((tab, index) => (pending && index === 1 ? { ...tab, pending: true } : tab))
+  );
   const [activeTabId, setActiveTabId] = useState<string | null>('file:src/app.tsx');
   const sideSessionCountRef = useRef(2);
   const openedPanelIds = new Set(tabs.map((tab) => tab.id));
@@ -59,8 +167,8 @@ function SidePanelTabBarStory() {
   );
 
   return (
-    <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden border-l border-border/70 bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
+      <div {...stylex.props(storyLayoutStylesStyles.stack)}>
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -99,12 +207,12 @@ function SidePanelTabBarStory() {
           closeTabLabel={(label) => `Close ${label}`}
           endSlot={
             <Button variant="ghost" size="small" icon>
-              <PanelRight className="h-4 w-4" />
+              <PanelRight {...stylex.props(storyLayoutStyles.frame)} />
             </Button>
           }
-          className="border-b border-border/60"
+          xstyle={storyOverrides.border}
         />
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+        <div {...stylex.props(storyLayoutStylesStyles.row)}>
           {tabs.find((tab) => tab.id === activeTabId)?.label}
         </div>
       </div>
@@ -128,8 +236,8 @@ function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | 
   const shownIds = splitShown && split ? split : [activeTabId];
 
   return (
-    <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[720px] flex-col overflow-hidden border-l border-border/70 bg-background">
+    <div {...stylex.props(mergedStoryLayout.part1)}>
+      <div {...stylex.props(mergedStoryLayout.part2)}>
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -156,16 +264,16 @@ function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | 
             setSplit(null);
             setActiveTabId(tabId);
           }}
-          className="border-b border-border/60"
+          xstyle={mergedStoryLayout.part3}
         />
         <div
-          className="relative flex flex-1 divide-x divide-border/70 text-sm text-muted-foreground"
+          {...stylex.props(mergedStoryLayout.part4)}
           style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: ratio } as CSSProperties}
         >
           {shownIds.map((id, index) => (
             <div
               key={id}
-              className="flex items-center justify-center"
+              {...stylex.props(mergedStoryLayout.part5)}
               style={{
                 flexBasis:
                   shownIds.length > 1 ? `${(index === 0 ? ratio : 1 - ratio) * 100}%` : '100%',
@@ -210,6 +318,7 @@ export const UnifiedTabs: Story = {
   render: () => <SidePanelTabBarStory />,
 };
 
+export const PendingTab: Story = { render: () => <SidePanelTabBarStory pending /> };
 /** Drag one device tab onto the other to pair them; drag a member out to split them again. */
 export const DeviceTabs: Story = {
   render: () => <DeviceSplitStory initialSplit={null} />,
@@ -221,8 +330,8 @@ export const DeviceSplit: Story = {
 
 export const EmptyState: Story = {
   render: () => (
-    <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden border-l border-border/70 bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
+      <div {...stylex.props(storyLayoutStylesStyles.stack2)}>
         <SessionSidePanelTabBar
           tabs={[]}
           activeTabId={null}
@@ -234,12 +343,12 @@ export const EmptyState: Story = {
           closeTabLabel={(label) => `Close ${label}`}
           endSlot={
             <Button variant="ghost" size="small" icon>
-              <PanelRight className="h-4 w-4" />
+              <PanelRight {...stylex.props(storyLayoutStyles.frame)} />
             </Button>
           }
-          className="h-11 border-b border-border/60"
+          xstyle={[storyOverrides.border, storyOverrides.tall]}
         />
-        <div className="min-h-0 flex-1">
+        <div {...stylex.props(storyLayout.frame2)}>
           <SessionSidePanelEmptyState
             panels={ALL_PANELS}
             onPanelOpen={() => {}}

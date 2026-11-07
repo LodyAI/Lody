@@ -1,8 +1,18 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
+import type { CSSProperties } from 'react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { MessageRowView } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-block': 'calc(var(--spacing) * 4)',
+  },
+});
 
 /**
  * The `agent_warning` system notice, rendered through the real `MessageRowView`
@@ -21,7 +31,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[720px] max-w-[100vw] bg-background py-4">
+      <div {...stylex.props(storyLayout.frame)}>
         <ConversationColumn>
           <Story />
         </ConversationColumn>
@@ -98,5 +108,47 @@ export const MultiLine: Story = {
       'Two problems were found:\n  1. `pnpm-lock.yaml` is out of date\n  2. the managed runtime checksum does not match\n\nThe turn continued with the cached runtime.'
     ),
     sessionId,
+  },
+};
+
+export const ScopedPalette: StoryObj = {
+  render: () => (
+    <div
+      data-warning-palette=""
+      style={
+        {
+          '--color-amber-600': 'rgb(111 47 189)',
+          '--color-amber-400': 'rgb(20 142 107)',
+        } as CSSProperties
+      }
+    >
+      <div className="dark-scope" data-warning-scope="dark">
+        <MessageRowView message={warningMessage('Scoped warning text.')} sessionId={sessionId} />
+      </div>
+      <div className="dark-scope">
+        <div className="light-scope" data-warning-scope="light">
+          <MessageRowView message={warningMessage('Scoped warning text.')} sessionId={sessionId} />
+        </div>
+      </div>
+    </div>
+  ),
+};
+
+export const Neutral: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...warningMessage('Provider is currently at capacity.'),
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_provider_overloaded',
+            message: 'Provider is currently at capacity.',
+          },
+        },
+      ],
+    },
   },
 };

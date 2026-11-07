@@ -24,7 +24,15 @@ import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
 import { withClassName } from '@/lib/stylex';
 import {
@@ -153,7 +161,7 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
   },
-  selectDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  selectDisabled: { opacity: control.disabledOpacity, cursor: 'not-allowed' },
   statusSlot: { display: 'flex', flexShrink: 0, justifyContent: 'flex-end', minWidth: '5rem' },
   cluster: {
     display: 'flex',

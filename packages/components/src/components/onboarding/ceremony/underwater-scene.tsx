@@ -1,3 +1,6 @@
+import { withClassName } from '@/lib/stylex';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import jellyfishSheet from '@/assets/onboarding/lody-jellyfish-animation-8f.png';
 import pearlSheet from '@/assets/onboarding/session-pearl-animation-8f.png';
 import fishSheet from '@/assets/onboarding/agent-companion-fish-animation-8f.png';
@@ -22,7 +25,9 @@ import starfishDecoration00 from '@/assets/onboarding/decorations/starfish-stati
 import starfishDecoration03 from '@/assets/onboarding/decorations/starfish-static-03.png';
 import starfishDecoration06 from '@/assets/onboarding/decorations/starfish-static-06.png';
 import starfishDecoration07 from '@/assets/onboarding/decorations/starfish-static-07.png';
-import { cn } from '@/lib/utils';
+import { underwaterSurface } from './underwater-surface';
+
+const sceneStyles = stylex.create({ distantWeed: { opacity: 0.2 } });
 
 // The underwater world that lives at the bottom of the intro. It is a pure
 // overlay: it mounts nothing inside the shot system, intercepts no pointer
@@ -200,7 +205,8 @@ type SpriteProps = {
   duration: number;
   /** Negative delays desynchronise loops that share a duration. */
   delay?: number;
-  className?: string;
+  /** The caller's own placement of the sprite, in the world's coordinates. */
+  styles?: stylex.StyleXStyles;
   style?: React.CSSProperties;
 };
 
@@ -210,17 +216,18 @@ type SpriteProps = {
  * the trimmed padding. Positioning classes on the wrapper therefore place the
  * visible prop itself.
  */
-function Sprite({ sheet, duration, delay = 0, className, style }: SpriteProps): React.JSX.Element {
+function Sprite({ sheet, duration, delay = 0, styles, style }: SpriteProps): React.JSX.Element {
   const { src, frameAspect, trim } = sheet;
   return (
     <div
       aria-hidden
-      className={className}
+      {...stylex.props(styles)}
       style={{ aspectRatio: `${(trim.w * frameAspect) / trim.h}`, ...style }}
     >
-      <div className="relative size-full">
+      <div {...stylex.props(underwaterSurface.spriteFrame)}>
         <div
-          className="lody-sprite-8f absolute"
+          {...withClassName(stylex.props(underwaterSurface.spriteSheet), 'lody-sprite-8f')}
+
           style={{
             width: `${100 / trim.w}%`,
             height: `${100 / trim.h}%`,
@@ -245,7 +252,7 @@ function FloorSprite({
   sheet,
   duration,
   delay,
-  className,
+  styles,
 }: SpriteProps & {
   point: WorldPoint;
   size: number;
@@ -260,7 +267,7 @@ function FloorSprite({
       sheet={sheet}
       duration={duration}
       delay={delay}
-      className={cn('absolute', className)}
+      styles={[underwaterSurface.floorProp, styles]}
       style={{
         left: `${((projected.x - width / 2) / UNDERWATER_WORLD.width) * 100}%`,
         top: `${((projected.y - height) / UNDERWATER_WORLD.height) * 100}%`,
@@ -277,12 +284,12 @@ function GroundDecoration({
   src,
   point,
   size,
-  className,
+  styles,
 }: {
   src: string;
   point: WorldPoint;
   /** Visible width at z=0, in source-world pixels. */ size: number;
-  className?: string;
+  styles?: stylex.StyleXStyles;
 }): React.JSX.Element {
   const projected = projectWorldPoint(point);
   const width = size * projected.scale;
@@ -292,7 +299,11 @@ function GroundDecoration({
       src={src}
       alt=""
       draggable={false}
-      className={cn('lody-static-decoration absolute', className)}
+      {...withClassName(
+        stylex.props(underwaterSurface.staticDecoration, styles),
+        'lody-static-decoration'
+      )}
+
       style={{
         left: `${(projected.x / UNDERWATER_WORLD.width) * 100}%`,
         top: `${(projected.y / UNDERWATER_WORLD.height) * 100}%`,
@@ -310,20 +321,22 @@ function AmbientSheet({
   frames,
   duration,
   delay = 0,
-  className,
+  styles,
   style,
 }: {
   src: string;
   frames: 8 | 9;
   duration: number;
   delay?: number;
-  className?: string;
+  styles?: stylex.StyleXStyles;
   style?: React.CSSProperties;
 }): React.JSX.Element {
+  const props = stylex.props(styles);
   return (
     <div
       aria-hidden
-      className={cn(frames === 8 ? 'lody-sprite-8f' : 'lody-sprite-9f', className)}
+      {...props}
+      className={clsx(props.className, frames === 8 ? 'lody-sprite-8f' : 'lody-sprite-9f')}
       style={{
         backgroundImage: `url(${src})`,
         animationDuration: `${duration}s`,
@@ -336,10 +349,10 @@ function AmbientSheet({
 
 function StaticDecoration({
   src,
-  className,
+  styles,
 }: {
   src: string;
-  className: string;
+  styles: stylex.StyleXStyles;
 }): React.JSX.Element {
   return (
     <img
@@ -347,7 +360,10 @@ function StaticDecoration({
       src={src}
       alt=""
       draggable={false}
-      className={cn('lody-static-decoration absolute', className)}
+      {...withClassName(
+        stylex.props(underwaterSurface.staticDecoration, styles),
+        'lody-static-decoration'
+      )}
     />
   );
 }
@@ -370,7 +386,7 @@ function BubbleStream({
   seed?: number;
 }): React.JSX.Element {
   return (
-    <div className="absolute bottom-0 z-20" style={{ left }}>
+    <div {...stylex.props(underwaterSurface.bubbleColumn)} style={{ left }}>
       {Array.from({ length: count }, (_, i) => {
         const size = 4 + ((i * 7 + seed * 13) % 9);
         const drift = ((i * 11 + seed * 5) % 17) - 8;
@@ -435,7 +451,8 @@ function WorldCoordinateDebug(): React.JSX.Element {
   return (
     <svg
       aria-hidden
-      className="lody-underwater-debug-space pointer-events-none absolute inset-0 z-50 size-full overflow-visible"
+      {...withClassName(stylex.props(underwaterSurface.debugSpace), 'lody-underwater-debug-space')}
+
       viewBox={`0 0 ${UNDERWATER_WORLD.width} ${UNDERWATER_WORLD.height}`}
       preserveAspectRatio="none"
     >
@@ -518,15 +535,12 @@ export function UnderwaterScene({
   /** Temporary scene-asset gate. Debug geometry remains available when false. */
   showTextures?: boolean;
 }): React.JSX.Element {
+  const scene = stylex.props(underwaterSurface.scene);
   return (
     <div
       aria-hidden
-      className={cn(
-        // Its containing block is OnboardingCeremony's `fixed inset-0` stage,
-        // so this is exactly the viewport rather than content-height based.
-        'pointer-events-none absolute inset-0 size-full overflow-hidden',
-        !playing && 'lody-scene-paused'
-      )}
+      {...scene}
+      className={clsx(scene.className, playing ? undefined : 'lody-scene-paused')}
       style={{
         opacity: visible ? 1 : 0,
         transition: 'opacity 1600ms ease',
@@ -545,13 +559,17 @@ export function UnderwaterScene({
           src={underwaterBasePlate}
           alt=""
           draggable={false}
-          className="lody-underwater-base absolute inset-0 z-0 size-full"
+          {...withClassName(stylex.props(underwaterSurface.base), 'lody-underwater-base')}
         />
-        <div aria-hidden className="lody-underwater-depth absolute inset-0 z-0" />
-        <div className="lody-seabed absolute inset-x-0 bottom-0 z-10 h-[34%]" />
-        <div className="lody-seaglow absolute bottom-[-12%] left-[8%] z-10 h-[38%] w-[48%]" />
         <div
-          className="lody-seaglow absolute bottom-[-14%] right-[2%] z-10 h-[35%] w-[38%]"
+          aria-hidden
+          {...withClassName(stylex.props(underwaterSurface.depth), 'lody-underwater-depth')}
+        />
+        <div {...withClassName(stylex.props(underwaterSurface.seabed), 'lody-seabed')} />
+        <div {...withClassName(stylex.props(underwaterSurface.seaglowLeft), 'lody-seaglow')} />
+        <div
+          {...withClassName(stylex.props(underwaterSurface.seaglowRight), 'lody-seaglow')}
+
           style={{ opacity: 0.7 }}
         />
 
@@ -564,28 +582,38 @@ export function UnderwaterScene({
 
             {/* Distant layer — low contrast and small scale establishes the vanishing
           line instead of filling the screen with repeated foreground fish. */}
-            <div className="lody-distant-school-drift absolute bottom-[46%] left-[-12%] z-10 aspect-square w-[clamp(56px,6vw,94px)] opacity-40">
+            <div
+              {...withClassName(
+                stylex.props(underwaterSurface.distantSchoolDrift),
+                'lody-distant-school-drift'
+              )}
+            >
               <AmbientSheet
                 src={distantFishSchool}
                 frames={8}
                 duration={1.55}
                 delay={-0.8}
-                className="size-full"
+                styles={underwaterSurface.fill}
               />
             </div>
             <div
-              className="lody-jelly-bob absolute bottom-[55%] left-[58%] z-10 opacity-24"
+              {...withClassName(stylex.props(underwaterSurface.jellyHigh), 'lody-jelly-bob')}
+
               style={{ animationDuration: '13s', animationDelay: '-6s' }}
             >
               <Sprite
                 sheet={SHEETS.jellyfish}
                 duration={1.65}
                 delay={-1.2}
-                className="w-[clamp(22px,2.1vw,34px)]"
+                styles={underwaterSurface.jellyWidthSmall}
               />
             </div>
             <div
-              className="lody-distant-school-glide absolute bottom-[38%] left-[-16%] z-10 aspect-[0.625] w-[clamp(104px,11vw,168px)] opacity-35"
+              {...withClassName(
+                stylex.props(underwaterSurface.distantSchoolGlide),
+                'lody-distant-school-glide'
+              )}
+
               style={{ animationDuration: '68s', animationDelay: '-31s' }}
             >
               <AmbientSheet
@@ -593,56 +621,62 @@ export function UnderwaterScene({
                 frames={8}
                 duration={1.8}
                 delay={-0.9}
-                className="size-full"
+                styles={underwaterSurface.fill}
               />
             </div>
 
             {/* Midwater life: the two schools are distinct assets, while a few single
           fish read as nearer passers-by rather than repeated wallpaper. */}
             <div
-              className="lody-jelly-bob absolute bottom-[38%] right-[27%] z-20 opacity-58"
+              {...withClassName(stylex.props(underwaterSurface.jellyMid), 'lody-jelly-bob')}
+
               style={{ animationDuration: '9s', animationDelay: '-4s' }}
             >
               <Sprite
                 sheet={SHEETS.jellyfish}
                 duration={1.35}
                 delay={-0.4}
-                className="w-[clamp(42px,4.2vw,64px)]"
+                styles={underwaterSurface.jellyWidthMid}
               />
             </div>
-            <div className="lody-fish-sway absolute bottom-[22%] left-[58%] z-20">
+            <div {...withClassName(stylex.props(underwaterSurface.fishSwayLeft), 'lody-fish-sway')}>
               <Sprite
                 sheet={SHEETS.fish}
                 duration={1.05}
                 delay={-0.4}
-                className="w-[clamp(48px,4.6vw,72px)]"
+                styles={underwaterSurface.fishWidthLarge}
               />
             </div>
             <div
-              className="lody-fish-swim absolute bottom-[31%] left-0 z-20 opacity-65"
+              {...withClassName(stylex.props(underwaterSurface.fishSwimLeft), 'lody-fish-swim')}
+
               style={{ animationDuration: '42s', animationDelay: '-19s' }}
             >
               <Sprite
                 sheet={SHEETS.fish}
                 duration={1.25}
                 delay={-0.9}
-                className="w-[clamp(32px,3.2vw,50px)]"
+                styles={underwaterSurface.fishWidthMedium}
               />
             </div>
-            <div className="lody-fish-sway absolute bottom-[43%] right-[11%] z-20 opacity-52">
+            <div
+              {...withClassName(stylex.props(underwaterSurface.fishSwayRight), 'lody-fish-sway')}
+            >
               <Sprite
                 sheet={SHEETS.fish}
                 duration={1.4}
                 delay={-0.7}
-                className="w-[clamp(28px,2.8vw,42px)]"
+                styles={underwaterSurface.fishWidthSmall}
               />
             </div>
-            <div className="lody-fish-sway absolute bottom-[34%] left-[43%] z-20 opacity-66">
+            <div
+              {...withClassName(stylex.props(underwaterSurface.fishSwayMiddle), 'lody-fish-sway')}
+            >
               <Sprite
                 sheet={SHEETS.fish}
                 duration={1.2}
                 delay={-0.2}
-                className="w-[clamp(34px,3.5vw,52px)]"
+                styles={underwaterSurface.fishWidthMiddle}
               />
             </div>
 
@@ -653,13 +687,13 @@ export function UnderwaterScene({
               src={rockPileDecoration07}
               point={{ x: -0.18, z: 0.94 }}
               size={88}
-              className="z-10 opacity-22"
+              styles={underwaterSurface.reefFar}
             />
             <GroundDecoration
               src={seaweedDecoration06}
               point={{ x: 0.58, z: 0.88 }}
               size={106}
-              className="z-10 opacity-22"
+              styles={underwaterSurface.reefFar}
             />
             <FloorSprite
               point={{ x: -0.48, z: 0.96 }}
@@ -667,7 +701,7 @@ export function UnderwaterScene({
               sheet={SHEETS.coral}
               duration={2.1}
               delay={-1.1}
-              className="z-10 opacity-28"
+              styles={underwaterSurface.reefMid}
             />
             <FloorSprite
               point={{ x: 0.46, z: 0.91 }}
@@ -675,37 +709,37 @@ export function UnderwaterScene({
               sheet={SHEETS.coral}
               duration={2.45}
               delay={-0.3}
-              className="z-10 opacity-24"
+              styles={underwaterSurface.reefNear}
             />
             <GroundDecoration
               src={rockPileDecoration07}
               point={{ x: 0.08, z: 0.97 }}
               size={70}
-              className="z-10 opacity-22"
+              styles={underwaterSurface.reefFar}
             />
             <GroundDecoration
               src={kelpRockDecoration00}
               point={{ x: 0.3, z: 0.85 }}
               size={126}
-              className="z-10 opacity-24"
+              styles={underwaterSurface.reefNear}
             />
             <GroundDecoration
               src={seaweedDecoration01}
               point={{ x: -0.62, z: 0.86 }}
               size={92}
-              className="z-10 opacity-22"
+              styles={underwaterSurface.reefFar}
             />
             <GroundDecoration
               src={kelpRockDecoration07}
               point={{ x: -0.82, z: 0.78 }}
               size={136}
-              className="z-10 opacity-24"
+              styles={underwaterSurface.reefNear}
             />
             <GroundDecoration
               src={seaweedDecoration}
               point={{ x: 0.8, z: 0.84 }}
               size={94}
-              className="z-10 opacity-20"
+              styles={[underwaterSurface.reefFar, sceneStyles.distantWeed]}
             />
 
             {/* Flat-bottomed semantic props get their own middle plane. This is
@@ -717,7 +751,7 @@ export function UnderwaterScene({
               sheet={SHEETS.coral}
               duration={2.25}
               delay={-0.7}
-              className="z-[15] opacity-54"
+              styles={underwaterSurface.coralMid}
             />
             <FloorSprite
               point={{ x: 0.42, z: 0.65 }}
@@ -725,7 +759,7 @@ export function UnderwaterScene({
               sheet={SHEETS.coral}
               duration={2.55}
               delay={-1.4}
-              className="z-[15] opacity-44"
+              styles={underwaterSurface.coralFar}
             />
             <FloorSprite
               point={{ x: -0.03, z: 0.55 }}
@@ -733,7 +767,7 @@ export function UnderwaterScene({
               sheet={SHEETS.shell}
               duration={2.75}
               delay={-0.9}
-              className="z-[15] opacity-70"
+              styles={underwaterSurface.shellMid}
             />
             <FloorSprite
               point={{ x: -0.03, y: 56, z: 0.55 }}
@@ -741,90 +775,62 @@ export function UnderwaterScene({
               sheet={SHEETS.pearl}
               duration={1.95}
               delay={-1.2}
-              className="z-[16] opacity-78"
+              styles={underwaterSurface.pearlMid}
             />
 
             {/* Foreground seabed uses different static variants from the supplied
           prop library. Fish, jellyfish, bubbles and semantic props carry the
           motion; the environment itself does not pulse in lockstep. */}
-            <StaticDecoration
-              src={kelpRockDecoration00}
-              className="bottom-[-3%] left-[10%] z-20 w-[clamp(58px,6.4vw,98px)] opacity-58"
-            />
-            <StaticDecoration
-              src={seaweedDecoration01}
-              className="bottom-[-2%] left-[34%] z-20 w-[clamp(42px,4.8vw,72px)] opacity-68"
-            />
-            <StaticDecoration
-              src={kelpRockDecoration04}
-              className="bottom-[-3%] right-[27%] z-20 w-[clamp(64px,7.2vw,110px)] opacity-56"
-            />
+            <StaticDecoration src={kelpRockDecoration00} styles={underwaterSurface.propNearLeft} />
+            <StaticDecoration src={seaweedDecoration01} styles={underwaterSurface.weedNearLeft} />
+            <StaticDecoration src={kelpRockDecoration04} styles={underwaterSurface.rockNearLeft} />
 
             <StaticDecoration
               src={rockPileDecoration00}
-              className="bottom-[1%] left-[39%] z-30 w-[clamp(56px,6vw,90px)] opacity-74"
+              styles={underwaterSurface.rockNearMiddle}
             />
-            <StaticDecoration
-              src={rockPileDecoration}
-              className="bottom-[1%] right-[23%] z-30 w-[clamp(48px,5.2vw,80px)] opacity-78"
-            />
+            <StaticDecoration src={rockPileDecoration} styles={underwaterSurface.rockNearRight} />
             <StaticDecoration
               src={rockPileDecoration04}
-              className="bottom-[1%] left-[64%] z-30 w-[clamp(42px,4.8vw,72px)] opacity-72"
+              styles={underwaterSurface.shellNearRight}
             />
-            <StaticDecoration
-              src={rockPileDecoration06}
-              className="bottom-0 right-[31%] z-30 w-[clamp(48px,5.4vw,82px)] opacity-70"
-            />
+            <StaticDecoration src={rockPileDecoration06} styles={underwaterSurface.rockFarRight} />
             <StaticDecoration
               src={rockPileDecoration07}
-              className="bottom-[1%] left-[54%] z-30 w-[clamp(34px,3.8vw,58px)] opacity-74"
+              styles={underwaterSurface.weedNearMiddle}
             />
 
-            <StaticDecoration
-              src={starfishDecoration00}
-              className="bottom-[2%] left-[47%] z-30 w-[clamp(24px,2.7vw,40px)] opacity-86"
-            />
-            <StaticDecoration
-              src={starfishDecoration}
-              className="bottom-[2%] left-[57%] z-30 w-[clamp(25px,3vw,44px)] opacity-90"
-            />
-            <StaticDecoration
-              src={starfishDecoration03}
-              className="bottom-[2%] left-[73%] z-30 w-[clamp(24px,2.8vw,42px)] opacity-86"
-            />
-            <StaticDecoration
-              src={starfishDecoration06}
-              className="bottom-[9%] right-[18%] z-30 w-[clamp(20px,2.3vw,34px)] opacity-74"
-            />
-            <StaticDecoration
-              src={starfishDecoration07}
-              className="bottom-[1%] right-[41%] z-30 w-[clamp(21px,2.5vw,37px)] opacity-82"
-            />
+            <StaticDecoration src={starfishDecoration00} styles={underwaterSurface.starfishOne} />
+            <StaticDecoration src={starfishDecoration} styles={underwaterSurface.starfishTwo} />
+            <StaticDecoration src={starfishDecoration03} styles={underwaterSurface.starfishThree} />
+            <StaticDecoration src={starfishDecoration06} styles={underwaterSurface.starfishFour} />
+            <StaticDecoration src={starfishDecoration07} styles={underwaterSurface.starfishFive} />
 
             {/* Foreground anchors — the shell and low seabed props frame the near
           floor. Coral belongs in the middle-to-far reef layer above. */}
-            <div className="absolute bottom-[-1%] right-[4%] z-30 w-[clamp(138px,14vw,220px)]">
+            <div {...stylex.props(underwaterSurface.anchorShell)}>
               <Sprite sheet={SHEETS.shell} duration={2.6} delay={-0.4} />
-              <div className="absolute bottom-[24%] left-[30%] w-[38%]">
-                <div className="lody-pearl-glow absolute inset-[-45%]" />
-                <Sprite sheet={SHEETS.pearl} duration={1.85} delay={-1.1} className="relative" />
+              <div {...stylex.props(underwaterSurface.pearlInShell)}>
+                <div
+                  {...withClassName(stylex.props(underwaterSurface.pearlGlow), 'lody-pearl-glow')}
+                />
+                <Sprite sheet={SHEETS.pearl} duration={1.85} delay={-1.1} />
               </div>
             </div>
             <Sprite
               sheet={SHEETS.pearl}
               duration={2.35}
               delay={-0.5}
-              className="absolute bottom-[1%] left-[32%] z-30 w-[clamp(18px,1.8vw,28px)] opacity-72"
+              styles={underwaterSurface.pearlLoose}
             />
 
             {/* Lody is the hero in the nearest moving plane: large enough to lead,
           but lifted above the floor so the coral and shell keep their depth. */}
-            <div className="lody-jelly-bob absolute bottom-[25%] left-[18%] z-30">
+            <div {...withClassName(stylex.props(underwaterSurface.jellyNear), 'lody-jelly-bob')}>
               <Sprite
                 sheet={SHEETS.jellyfish}
                 duration={1.15}
-                className="w-[clamp(92px,8.4vw,132px)]"
+                styles={underwaterSurface.jellyWidthHero}
               />
             </div>
           </>

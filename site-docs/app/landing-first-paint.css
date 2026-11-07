@@ -32,15 +32,9 @@ body {
   font-family: var(--lody-docs-font-sans, ui-sans-serif, system-ui, sans-serif);
 }
 
-body.flex {
+body[data-site-body] {
   display: flex;
-}
-
-body.min-h-screen {
   min-height: 100vh;
-}
-
-body.flex-col {
   flex-direction: column;
 }
 
@@ -54,8 +48,8 @@ body.flex-col {
   color: hsl(205 100% 96%);
   --site-content-max: 1200px;
   --site-content-width: min(var(--site-content-max), 92vw);
-  --lody-docs-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
+  --lody-docs-font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --lody-docs-font-heading: var(--lody-docs-font-sans);
   --landing-ink: 205 100% 96%;
   --landing-ink-muted: 203 38% 78%;

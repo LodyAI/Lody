@@ -8,6 +8,7 @@ type BaseProps = ComponentProps<typeof BaseSeparator>;
 
 export interface SeparatorProps extends Omit<BaseProps, 'className'> {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -61,12 +62,13 @@ export const separatorStyles = stylex.create({
  * one place it is allowed is structural by definition.
  */
 export const Separator = forwardRef<HTMLDivElement, SeparatorProps>(function Separator(
-  { orientation = 'horizontal', className, ...rest },
+  { orientation = 'horizontal', className, xstyle, ...rest },
   ref
 ) {
   const sx = stylex.props(
     separatorStyles.base,
-    orientation === 'vertical' ? separatorStyles.vertical : separatorStyles.horizontal
+    orientation === 'vertical' ? separatorStyles.vertical : separatorStyles.horizontal,
+    xstyle
   );
   return (
     <BaseSeparator
@@ -74,7 +76,14 @@ export const Separator = forwardRef<HTMLDivElement, SeparatorProps>(function Sep
       orientation={orientation}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...sx.style,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+            })
+          : sx.style
+      }
     />
   );
 });

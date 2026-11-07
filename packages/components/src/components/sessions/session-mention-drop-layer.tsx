@@ -1,8 +1,18 @@
+import { clsx } from 'clsx';
 import { type ReactNode } from 'react';
 
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
 import { ConversationDropOverlay } from '@/components/shared/conversation-drop-overlay';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  layer: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 'calc(var(--spacing) * 0)',
+    overflow: 'hidden',
+  },
+});
 
 /**
  * One drop mask for a keep-alive tab stack (parent + child + draft tabs).
@@ -32,7 +42,7 @@ export function SessionMentionDropLayer({
 
   return (
     <div
-      className={cn('relative h-full min-h-0 overflow-hidden', className)}
+      className={clsx(stylex.props(styles.layer).className, className)}
       data-session-mention-drop-layer=""
       {...dropZone.handlers}
     >

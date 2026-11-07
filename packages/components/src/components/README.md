@@ -72,6 +72,14 @@ Decisions:
 [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md),
 and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sidebar-row-details-group.md).
 
+## Workspace sheets
+
+Mobile workspace creation and deletion use the Vaul-backed
+[`DrawerDescription`](../ui/drawer.tsx)'s optional physical `fontSize` to keep their
+0.78rem copy. Omitting it retains the description's original default; caller and
+slotted-child styles keep precedence. The sheet still owns validation, pending
+state and keyboard handling.
+
 ## Entry points and layout
 
 - Remote Add folder: `local-projects/use-remote-directory-picker.ts` owns navigation,
@@ -155,6 +163,11 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   beside the automatic navigation — a browser that refuses a custom-scheme
   navigation reports nothing back, so the link must already be on screen.
   [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-electron-browser-signin-account-choice.md).
+  The post-transfer Storybook states mount the real LoginPage in a same-origin
+  sandboxed iframe that blocks custom-protocol launch while the trusted fixture
+  keeps its sandbox intact. It is not an isolation boundary for hostile scripts.
+  Manual link activation is recorded without opening external software; these
+  states cover UI, not OS handoff.
 - Desktop update prompt: `sidebar-update-banner.tsx` and
   `update-changelog-dialog.tsx`, driven by the pure selectors in
   `lib/electron-update-banner.ts`.
@@ -163,6 +176,17 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
   `viewport-fit=cover`, which is why desktop top/side padding also matters there.
   The composer owns its bottom edge; a global bottom inset would double-pad it.
+  [`workspace-layout-utils.ts`](workspace-layout-utils.ts) owns the shared StyleX
+  root/content classes and the element-local safe-area and native-keyboard readers.
+  The root helper defaults to the page surface; the main workspace explicitly
+  selects `surface: 'sidebar'`, choosing one background in the same StyleX
+  composition. Settings and existing default callers keep the page surface.
+  Its retained `h-svh` hook also serves the old-browser fallback and Electron devbar;
+  it is not an unused utility.
+  The persistent
+  [`workspace inset browser suite`](../../tests/e2e/workspace-layout-insets.spec.ts)
+  checks the real composer fixtures, local inset readers, natural keyboard-padding
+  transition, focus and draft retention against a running Storybook build.
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact

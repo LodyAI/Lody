@@ -1,12 +1,178 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Archive, Hand } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { SidebarRowEndSlot } from '@/components/sidebar-row-shared';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { WorkingGrid, type WorkingGridProps } from '@/ui/working-grid';
 import { WorkingStatusMark } from '@/ui/working-status-mark';
+
+const hoverStyles = stylex.create({
+  muted: { color: 'hsl(var(--sidebar-foreground-muted) / 1)' },
+  primary: { color: 'hsl(var(--primary))' },
+  row: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    backgroundColor: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+  },
+  selected: {
+    backgroundColor: {
+      default: 'hsl(var(--sidebar-selection) / 1)',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+  },
+  status: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    opacity: { default: 1, '@media (hover: hover)': { ':is(:where(.group):hover *)': 0 } },
+  },
+  archive: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '0.25rem',
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 1)',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    opacity: { default: 0, '@media (hover: hover)': { ':is(:where(.group):hover *)': 1 } },
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '272px',
+    flexDirection: 'column',
+    overflowY: 'auto',
+    borderRightStyle: 'solid',
+    borderRightWidth: '1px',
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    paddingInline: 'calc(var(--spacing) * 1.5)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+  canvas: {
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingTop: 'calc(var(--spacing) * 3)',
+    paddingBottom: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--sidebar-foreground-muted) / 1)',
+  },
+  canvas2: {
+    flex: '1',
+    overflowY: 'auto',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row: {
+    display: 'flex',
+    width: '260px',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--status-warning) / 1)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 10)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--primary))',
+  },
+  row2: {
+    display: 'flex',
+    height: '100vh',
+  },
+  label: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row3: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    'min-width': 'calc(var(--spacing) * 5)',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  row4: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  row5: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 16)',
+    padding: 'calc(var(--spacing) * 10)',
+  },
+  caption: {
+    'transform-origin': 'center',
+    scale: '6',
+    color: 'hsl(var(--primary))',
+  },
+});
 
 const SUPERELLIPSE_OPTIONS = ['none', '6', '5', '4', '3', '2.6'] as const;
 
@@ -66,7 +232,10 @@ const meta = {
     className: {
       name: 'colour',
       options: ['muted', 'primary'],
-      mapping: { muted: 'text-sidebar-foreground-muted', primary: 'text-primary' },
+      mapping: {
+        muted: stylex.props(hoverStyles.muted).className,
+        primary: stylex.props(hoverStyles.primary).className,
+      },
       control: { type: 'inline-radio' },
       description: 'Primary is the sidebar default; muted is kept for comparison.',
     },
@@ -79,7 +248,7 @@ type Story = StoryObj<typeof meta>;
 /** One mark at sidebar size, plus a magnified one to judge tile shape and motion. */
 export const Playground: Story = {
   render: (args) => (
-    <div className="flex items-center gap-10 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <WorkingGrid {...args} />
       <WorkingGrid {...args} size={96} />
     </div>
@@ -129,8 +298,8 @@ const GROUPS: { name: string; rows: [string, RowStatus][] }[] = [
 
 function StatusMark({ status, grid }: { status: RowStatus; grid: WorkingGridProps }) {
   if (status === 'working') return <WorkingGrid {...grid} />;
-  if (status === 'waiting') return <Hand className="h-3 w-3 text-status-warning" />;
-  if (status === 'unread') return <span className="h-2 w-2 rounded-full bg-primary" />;
+  if (status === 'waiting') return <Hand {...stylex.props(storyLayoutStyles.frame)} />;
+  if (status === 'unread') return <span {...stylex.props(storyLayout.frame)} />;
   return null;
 }
 
@@ -142,26 +311,29 @@ function StatusMark({ status, grid }: { status: RowStatus; grid: WorkingGridProp
 export const SidebarSimulation: Story = {
   parameters: { layout: 'fullscreen' },
   render: (args) => (
-    <div className="flex h-screen">
-      <aside className="flex w-[272px] flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-2 text-sidebar-foreground">
+    <div {...stylex.props(storyLayout.row2)}>
+      <aside {...stylex.props(storyLayoutStylesStyles.stack)}>
         {GROUPS.map((group) => (
           <section key={group.name}>
-            <div className="px-2 pb-1 pt-3 text-xs text-sidebar-foreground-muted">{group.name}</div>
+            <div {...stylex.props(storyLayoutStylesStyles.canvas)}>{group.name}</div>
             {group.rows.map(([title, status], index) => (
               <div
                 key={title}
-                className={cn(
-                  'group relative flex h-7 items-center gap-1.5 rounded-md px-2 text-sm hover:bg-sidebar-hover',
-                  group.name === 'lody' && index === 0 && 'bg-sidebar-selection'
+                className={clsx(
+                  'group',
+                  stylex.props(
+                    hoverStyles.row,
+                    group.name === 'lody' && index === 0 && hoverStyles.selected
+                  ).className
                 )}
               >
-                <span className="min-w-0 flex-1 truncate">{title}</span>
-                <span className="relative flex h-5 min-w-5 items-center justify-center">
-                  <span className="flex h-3.5 w-3.5 items-center justify-center transition-opacity duration-100 group-hover:opacity-0">
+                <span {...stylex.props(storyLayout.label)}>{title}</span>
+                <span {...stylex.props(storyLayout.row3)}>
+                  <span {...stylex.props(hoverStyles.status)}>
                     <StatusMark status={status} grid={args} />
                   </span>
-                  <span className="absolute inset-0 flex items-center justify-center rounded text-sidebar-foreground-muted opacity-0 transition-opacity duration-100 hover:bg-sidebar-hover hover:text-sidebar-foreground group-hover:opacity-100">
-                    <Archive className="h-3.5 w-3.5" />
+                  <span {...stylex.props(hoverStyles.archive)}>
+                    <Archive {...stylex.props(storyLayoutStyles.frame2)} />
                   </span>
                 </span>
               </div>
@@ -169,8 +341,8 @@ export const SidebarSimulation: Story = {
           </section>
         ))}
       </aside>
-      <main className="flex-1 overflow-y-auto bg-background p-8 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
+      <main {...stylex.props(storyLayoutStylesStyles.canvas2)}>
+        <div {...stylex.props(storyLayout.row4)}>
           <WorkingGrid {...args} rowPitch={null} />
           <span>Working · 2m 13s</span>
         </div>
@@ -187,12 +359,12 @@ function CompletionDemo() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="flex items-center gap-16 p-10">
-      <div className="flex w-[260px] items-center gap-1.5 rounded-md bg-sidebar px-2 py-1 text-sm text-sidebar-foreground">
-        <span className="min-w-0 flex-1 truncate">Fix queue drain false failure</span>
+    <div {...stylex.props(storyLayout.row5)}>
+      <div {...stylex.props(storyLayoutStylesStyles.row)}>
+        <span {...stylex.props(storyLayout.label)}>Fix queue drain false failure</span>
         <SidebarRowEndSlot isWorking={working} hasUnreadMessages={!working} />
       </div>
-      <div className="origin-center scale-[6] text-primary">
+      <div {...stylex.props(storyLayout.caption)}>
         <WorkingStatusMark working={working} unread={!working} />
       </div>
     </div>

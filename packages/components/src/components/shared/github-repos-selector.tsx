@@ -161,7 +161,8 @@ export function GitHubReposSelector({
       autoFocusSearch={false}
       searchPlaceholder={t('repos.search', { defaultValue: 'Search repositories' })}
       emptyText={t('repos.none', { defaultValue: 'No repositories found' })}
-      contentClassName="min-w-[16rem] max-w-[min(28rem,calc(100vw-2rem))]"
+      contentMinWidth="16rem"
+      contentMaxWidth="min(28rem, calc(100vw - 2rem))"
       renderOption={(option) => (
         <>
           <span {...stylex.props(composerSurface.rowIcon)}>{option.startContent}</span>

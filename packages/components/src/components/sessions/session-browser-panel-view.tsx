@@ -13,6 +13,7 @@ import {
 } from './preview-connection-status';
 
 const styles = stylex.create({
+  dismiss: { marginLeft: 'auto' },
   root: {
     display: 'flex',
     flexDirection: 'column',
@@ -144,7 +145,7 @@ export function SessionBrowserPanelView({
             type="button"
             variant="ghost"
             size="mini"
-            className="ml-auto"
+            xstyle={styles.dismiss}
             onClick={onDismissError}
           >
             {t('common.dismiss', 'Dismiss')}

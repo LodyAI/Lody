@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Sparkles } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { AnthropicIcon } from './anthropic-icon';
 import { DeepSeekIcon } from './deepseek-icon';
 import { GlmIcon } from './glm-icon';
@@ -7,6 +9,7 @@ import { MinimaxIcon } from './minimax-icon';
 import { OpenAIIcon } from './openai-icon';
 import { InlineSvg } from './inline-svg';
 import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
+import { iconSurface } from './surface';
 
 /**
  * Model ids are free-form provider strings (`claude-sonnet-5`, `gpt-5-codex`,
@@ -16,7 +19,10 @@ import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
  * Every glyph here inherits `currentColor`, so callers get a monochrome mark by
  * setting a text colour.
  */
-const BRAND_MATCHERS: Array<{ test: RegExp; render: (className: string) => ReactNode }> = [
+const BRAND_MATCHERS: Array<{
+  test: RegExp;
+  render: (className: string | undefined) => ReactNode;
+}> = [
   { test: /^(claude|anthropic)/, render: (c) => <AnthropicIcon className={c} /> },
   { test: /^(gpt|codex|o[1-9]|chatgpt|openai)/, render: (c) => <OpenAIIcon className={c} /> },
   { test: /^deepseek/, render: (c) => <DeepSeekIcon className={c} /> },
@@ -32,20 +38,21 @@ const BRAND_MATCHERS: Array<{ test: RegExp; render: (className: string) => React
   },
 ];
 
-function RegistrySvg({ name, className }: { name: string; className: string }) {
+function RegistrySvg({ name, className }: { name: string; className: string | undefined }) {
   const raw = REGISTRY_AGENT_ICON_SVGS[name];
   if (!raw) return <Sparkles className={className} />;
   return (
     <InlineSvg
+      fillParent
       raw={raw}
-      className={`${className} inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full`}
+      className={clsx(stylex.props(iconSurface.glyphFill).className, className)}
     />
   );
 }
 
 /** Monochrome provider mark for a usage `modelId`. */
 export function ModelBrandIcon({ modelId, className }: { modelId: string; className?: string }) {
-  const cls = className ?? 'h-3.5 w-3.5';
+  const cls = className ?? stylex.props(iconSurface.glyphBoxSmall).className;
   // Ids arrive with vendor routing prefixes such as `anthropic/claude-...` or
   // `openrouter:google/gemini-...`; the last segment carries the model name.
   const normalized = modelId.toLowerCase().split(/[:/]/).pop() ?? '';

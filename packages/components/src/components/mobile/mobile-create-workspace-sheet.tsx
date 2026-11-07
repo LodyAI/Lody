@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import * as stylex from '@stylexjs/stylex';
 import { useCloudQuery, usePlatform } from '@lody/platform/react';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -28,12 +29,15 @@ import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } fr
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Switch } from '@lody/ui/switch';
 import { Alert } from '@lody/ui/alert';
 import { AlertDialog } from '@/ui/dialog';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
-import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeSpace, themeRadius } from '../../style/theme-scale.stylex';
+import { sheetSurface } from './sheet-surface';
 
 export type MobileCreateWorkspaceSheetProps = {
   open: boolean;
@@ -44,6 +48,97 @@ export type MobileCreateWorkspaceSheetProps = {
      its device/ledger control page instead of an ordinary chat route. */
   onCreated?: (slug: string, workspaceId?: string) => void;
 };
+
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  encryptedOption: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '16px',
+    borderRadius: themeRadius.xl,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    padding: '12px',
+  },
+  encryptedText: {
+    minWidth: 0,
+    ':is(*) > :not(:last-child)': { marginBlockStart: 0, marginBlockEnd: '4px' },
+  },
+  encryptedLabel: { fontSize: '0.78rem', fontWeight: 500 },
+  encryptedHint: { fontSize: '0.72rem', lineHeight: 1.375, color: themeColors.mutedForeground },
+
+  formAlert: { flexShrink: 0, paddingInline: '16px', paddingBottom: '12px' },
+  sheet: {
+    height: 'auto',
+    maxHeight: '92dvh',
+    bottom: 'var(--native-keyboard-height,0px)',
+  },
+  fieldSpacing: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+  },
+
+  fieldLabel: {
+    [field.labelSize]: '0.78rem',
+    [field.labelWeight]: 'var(--font-weight-medium)',
+  },
+  /** The sheet's description, under the header. */
+  description: {
+    whiteSpace: 'pre-line',
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[3],
+    color: themeColors.mutedForeground,
+  },
+  /** The sheet's body. */
+  body: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[2],
+  },
+  /** The form's fields, set apart from each other. */
+  fields: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[4],
+  },
+  /** The slug row: its label, and the action that restores the suggestion. */
+  slugHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  /** The action that restores the suggested slug. */
+  slugReset: {
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.medium,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    scale: { default: null, ':active': '0.97' },
+    ...TRANSITION_COLORS,
+  },
+  /** The slug's hint line. */
+  slugHint: {
+    fontSize: '0.72rem',
+  },
+  slugHintError: { color: themeColors.destructive },
+  slugHintChecking: { color: themeColors.mutedForeground },
+  slugHintAvailable: { color: themeColors.primary },
+  slugBorderError: { borderColor: 'hsl(var(--destructive) / 1)' },
+  action: { flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+});
 
 /**
  * Bottom-sheet workspace creation form on mobile. Replaces the old
@@ -233,18 +328,15 @@ export function MobileCreateWorkspaceSheet({
   return (
     <Drawer open={open} onOpenChange={handleClose} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'mobile-create-workspace-sheet',
-          'h-auto! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        className="mobile-create-workspace-sheet"
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
         style={{
           maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
-        <div className="flex max-h-full min-h-0 flex-col">
-          <header className="relative flex items-center px-4 pb-2 pt-2">
-            <DrawerTitle className="mx-auto text-[0.95rem] font-semibold tracking-tight">
+        <div {...stylex.props(sheetSurface.columnAuto)}>
+          <header {...stylex.props(sheetSurface.header)}>
+            <DrawerTitle {...stylex.props(sheetSurface.title, sheetSurface.titleCentered)}>
               {creationBlocked
                 ? t('organization.mobileWorkspaceLimitReachedTitle')
                 : t('organization.createNewWorkspace', 'Create New Workspace')}
@@ -253,16 +345,13 @@ export function MobileCreateWorkspaceSheet({
               <button
                 type="button"
                 aria-label={t('common.close', 'Close')}
-                className={cn(
-                  'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
-                  'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-                )}
+                {...stylex.props(sheetSurface.iconButton, sheetSurface.iconButtonRight)}
               >
-                <X className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+                <X {...stylex.props(sheetSurface.glyph20)} aria-hidden="true" strokeWidth={1.8} />
               </button>
             </DrawerClose>
           </header>
-          <DrawerDescription className="whitespace-pre-line px-4 pb-3 text-[0.78rem] text-muted-foreground">
+          <DrawerDescription {...stylex.props(styles.description)} fontSize="0.78rem">
             {creationBlocked
               ? t('organization.mobileWorkspaceLimitReachedDescription')
               : t('organization.createNewWorkspaceDescription')}
@@ -272,9 +361,9 @@ export function MobileCreateWorkspaceSheet({
             <div
               ref={keyboard.scrollRef}
               style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
-              className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+              {...stylex.props(styles.body)}
             >
-              <div className="flex flex-col gap-4">
+              <div {...stylex.props(styles.fields)}>
                 {showResumeNotice && pendingCreation ? (
                   <Alert.Root tone="neutral" data-testid="mobile-create-workspace-resume">
                     <Alert.Title>{t('e2ee.create.savedRequest')}</Alert.Title>
@@ -301,10 +390,10 @@ export function MobileCreateWorkspaceSheet({
                   </Alert.Root>
                 ) : null}
 
-                <div className="space-y-1.5">
+                <div {...stylex.props(styles.fieldSpacing)}>
                   <UiField.Label
                     htmlFor="mobile-create-workspace-name"
-                    className="text-[0.78rem] font-medium"
+                    className={stylex.props(styles.fieldLabel).className}
                   >
                     {t('organization.workspaceName', 'Workspace name')}
                   </UiField.Label>
@@ -319,11 +408,11 @@ export function MobileCreateWorkspaceSheet({
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
+                <div {...stylex.props(styles.fieldSpacing)}>
+                  <div {...stylex.props(styles.slugHead)}>
                     <UiField.Label
                       htmlFor="mobile-create-workspace-slug"
-                      className="text-[0.78rem] font-medium"
+                      className={stylex.props(styles.fieldLabel).className}
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
                     </UiField.Label>
@@ -332,10 +421,7 @@ export function MobileCreateWorkspaceSheet({
                         type="button"
                         onClick={resetSlug}
                         disabled={creating}
-                        className={cn(
-                          'text-[0.72rem] font-medium transition-colors',
-                          'text-muted-foreground hover:text-foreground active:scale-[0.97]'
-                        )}
+                        {...stylex.props(styles.slugReset)}
                       >
                         {t('organization.workspaceSlugReset', 'Use suggestion')}
                       </button>
@@ -347,7 +433,7 @@ export function MobileCreateWorkspaceSheet({
                     onChange={(event) => setSlug(event.target.value)}
                     placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
                     disabled={fieldsDisabled}
-                    className={showError ? 'border-destructive' : ''}
+                    {...stylex.props(showError && styles.slugBorderError)}
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
@@ -360,30 +446,30 @@ export function MobileCreateWorkspaceSheet({
                     }}
                   />
                   {showError ? (
-                    <p className="text-[0.72rem] text-destructive">
+                    <p {...stylex.props(styles.slugHint, styles.slugHintError)}>
                       {t(`organization.workspaceSlugError.${error}`)}
                     </p>
                   ) : showCheckingHint ? (
-                    <p className="text-[0.72rem] text-muted-foreground">
+                    <p {...stylex.props(styles.slugHint, styles.slugHintChecking)}>
                       {t('organization.workspaceSlugChecking', 'Checking availability...')}
                     </p>
                   ) : showAvailableHint ? (
-                    <p className="text-[0.72rem] text-primary">
+                    <p {...stylex.props(styles.slugHint, styles.slugHintAvailable)}>
                       {t('organization.workspaceSlugAvailable', 'Slug available')}
                     </p>
                   ) : null}
                 </div>
 
                 {creationEnabled ? (
-                  <div className="flex items-start justify-between gap-4 rounded-xl border border-border/60 p-3">
-                    <div className="min-w-0 space-y-1">
+                  <div {...stylex.props(styles.encryptedOption)}>
+                    <div {...stylex.props(styles.encryptedText)}>
                       <label
                         htmlFor="mobile-create-workspace-encrypted"
-                        className="text-[0.78rem] font-medium"
+                        {...stylex.props(styles.encryptedLabel)}
                       >
                         {t('e2ee.create.label', 'Encrypted workspace (developer preview)')}
                       </label>
-                      <p className="text-[0.72rem] leading-snug text-muted-foreground">
+                      <p {...stylex.props(styles.encryptedHint)}>
                         {encryptionSupported
                           ? t(
                               'e2ee.create.mobileDescription',
@@ -409,29 +495,18 @@ export function MobileCreateWorkspaceSheet({
           ) : null}
 
           {formAlert != null ? (
-            <div className="shrink-0 px-4 pb-3">
+            <div {...stylex.props(styles.formAlert)}>
               <Alert.Root tone="danger">
                 <Alert.Description>{formAlert}</Alert.Description>
               </Alert.Root>
             </div>
           ) : null}
 
-          <div
-            className={cn(
-              'flex shrink-0 items-center gap-2 border-t border-border/40 px-4 pt-3',
-              /* Keyboard-aware bottom padding: when the soft keyboard
-                 is up the home indicator is hidden behind it, so the
-                 safe-area inset is dead weight. Collapse it to 12px in
-                 that case while keeping the full safe-area when the
-                 keyboard is down. Mirrors the new-chat sheet's same
-                 trick. */
-              'pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))]'
-            )}
-          >
+          <div {...stylex.props(sheetSurface.footer, sheetSurface.footerPadKeyboard)}>
             <Button
               type="button"
               variant={creationBlocked ? 'primary' : 'secondary'}
-              className="flex-1"
+              {...stylex.props(styles.action)}
               onClick={() => handleClose(false)}
               disabled={creating}
             >
@@ -440,7 +515,7 @@ export function MobileCreateWorkspaceSheet({
             {creationAvailable ? (
               <Button
                 type="button"
-                className="flex-1"
+                {...stylex.props(styles.action)}
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
               >

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
@@ -11,6 +12,70 @@ import {
   type ConversationTabEntry,
   type ViewerTabEntry,
 } from '@/components/mobile/mobile-session-tab-sheet';
+const tabsStory = stylex.create({
+  header: {
+    borderRadius: 'var(--radius-2xl)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--background) / 1) 55%,transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+});
+const storyLayoutStyles = stylex.create({
+  label: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  label2: {
+    'max-width': '8rem',
+    'text-align': 'center',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 4)',
+    'background-color': 'var(--color-stone-950)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  stack2: {
+    display: 'flex',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row2: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'var(--color-stone-950)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  grid: {
+    display: 'grid',
+    'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+    gap: 'calc(var(--spacing) * 8)',
+    'border-radius': 'var(--radius-3xl)',
+    padding: 'calc(var(--spacing) * 10)',
+  },
+});
 
 const now = Date.now();
 const conversations: ConversationTabEntry[] = [
@@ -152,9 +217,9 @@ function Harness({ withViewers, crowded }: { withViewers: boolean; crowded?: boo
   const shownViewers = withViewers ? viewers : [];
   const shownConversations = crowded ? manyConversations : conversations;
   return (
-    <div className="flex min-h-dvh flex-col items-center gap-4 bg-stone-950 p-6">
-      <div className="flex items-center gap-3 rounded-full bg-background px-3 py-1.5">
-        <span className="text-sm text-muted-foreground">Header trigger:</span>
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
+        <span {...stylex.props(storyLayoutStyles.label)}>Header trigger:</span>
         <MobileSessionTabButton
           hasUnread={hasBackgroundUnread(shownConversations)}
           hasWorking={hasBackgroundWorking(shownConversations)}
@@ -204,21 +269,21 @@ function BadgeCell({
   hasWorking: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div {...stylex.props(storyLayout.stack2)}>
       {/* Frosted plate mimicking the floating session header the button sits on. */}
-      <div className="rounded-2xl bg-background/55 p-3 backdrop-blur-xl">
+      <div {...stylex.props(tabsStory.header)}>
         <MobileSessionTabButton hasUnread={hasUnread} hasWorking={hasWorking} onOpen={fn()} />
       </div>
-      <span className="max-w-[8rem] text-center text-xs text-muted-foreground">{caption}</span>
+      <span {...stylex.props(storyLayoutStyles.label2)}>{caption}</span>
     </div>
   );
 }
 
 export const BadgeStates: StoryObj = {
   render: () => (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-950 p-6">
+    <div {...stylex.props(storyLayout.row2)}>
       <div
-        className="grid grid-cols-2 gap-8 rounded-3xl p-10"
+        {...stylex.props(storyLayout.grid)}
         style={{
           backgroundImage: 'linear-gradient(135deg, oklch(0.55 0.15 260), oklch(0.6 0.14 20))',
         }}

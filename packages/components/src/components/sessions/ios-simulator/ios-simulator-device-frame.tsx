@@ -3,7 +3,7 @@ import { forwardRef, type CSSProperties, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { control, corner, duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import {
   getIosSimulatorDeviceGeometry,
   getIosSimulatorExteriorGeometry,
@@ -74,7 +74,7 @@ const styles = stylex.create({
     boxShadow: RIM,
     pointerEvents: 'auto',
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.5 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     transitionProperty: 'background-color, transform',
     transitionDuration: duration.fast,
     outlineStyle: 'none',

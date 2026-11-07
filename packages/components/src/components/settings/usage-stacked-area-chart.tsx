@@ -174,6 +174,7 @@ const styles = stylex.create({
   markerMedium: { width: '10px', height: '10px' },
   loadingSvg: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
   loadingPlot: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary) / 1) 6%, transparent)',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -423,12 +424,7 @@ function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
       <div {...stylex.props(styles.plotInset)}>
         {/* Same footprint as the real chart: a full-height plot with layered
            area silhouettes, gridlines, and axis tick placeholders. */}
-        <Skeleton
-          shape="block"
-          width="100%"
-          height={chartHeight}
-          {...withClassName(stylex.props(styles.loadingPlot), 'bg-primary/[0.06]')}
-        >
+        <Skeleton shape="block" width="100%" height={chartHeight} xstyle={styles.loadingPlot}>
           <svg
             aria-hidden="true"
             {...stylex.props(styles.loadingSvg)}

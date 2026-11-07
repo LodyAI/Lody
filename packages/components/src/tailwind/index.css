@@ -1,48 +1,18 @@
 @layer theme, base, stylex, components, utilities;
 @import './fonts.css';
 @import 'katex/dist/katex.min.css';
-@import 'tw-animate-css';
-@import 'tailwindcss';
-@import 'konsta/theme.css';
+@import './reset.css';
+@import './theme-defaults.css';
 @import './scrollbars.css';
-
-@config "../../tailwind.config.js";
-@source "../**/*.{ts,tsx}";
-/* Konsta is imported for its theme, safe-area utilities and the `safe-areas`
-   hook only; no Konsta component is rendered. Do NOT scan Konsta's sources:
-   that generates utilities such as `last-child-hairline-b-none`, whose
-   unanchored `:last-child … ::after` selectors make every portal open/close
-   restyle the whole app (~25ms per popover on a large workspace). */
 
 /* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
    of view. `auto` remembers each row's last rendered height; 50px is only the
    estimate for rows never on screen (two-line repo rows are 54px, child and
    chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
    See SIDEBAR_ROW_LIST_CLASS. */
-@utility sidebar-row-list {
-  & > * {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 50px;
-  }
-}
-
-@custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
-
-@theme inline {
-  --font-ios: var(--font-sans);
-  --font-material: var(--font-sans);
-
-  /* Re-claim `--color-primary` from konsta/theme.css. That stylesheet's
-     `@theme { --color-primary: var(--k-color-primary); }` block wins
-     over the legacy v3 JS preset's `colors.primary = hsl(var(--primary))`
-     under Tailwind v4 (CSS @theme > @config), which made every
-     `text-primary` / `bg-primary` utility — sidebar Button, mobile
-     tabbar active highlight, mobile filter pills — render as Konsta's
-     static iOS blue (#007aff) instead of the project's themed primary.
-     Konsta's own components keep working: they reference their
-     `--k-color-*` namespace directly, not the bare `--color-primary`. */
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
+.sidebar-row-list > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
 }
 
 /* Override @pierre/diffs italic font style */
@@ -102,8 +72,7 @@ body {
 
 /* Monospace font for code */
 code,
-pre,
-.font-mono {
+pre {
   font-family: var(--font-mono);
   font-variant-ligatures: var(--lody-font-ligatures, contextual);
 }
@@ -114,23 +83,13 @@ pre,
 }
 
 @layer utilities {
-  /* Links are jellyfish cyan (the brand accent, #7CC4E8 in dark themes).
-     Markdown anchors take it from the `.markdown-renderer a` rule: a
-     hand-written class has no `[&_a]:` variant in Tailwind v4, so the
-     renderer's `[&_a]:text-markdown-link` never applied and links inherited
-     the prose color. */
-  .text-markdown-link,
+  /* Markdown links and reference chips share the brand cyan. */
   .markdown-renderer a {
     color: hsl(200 72% 34%);
   }
-  .dark .text-markdown-link,
   .dark .markdown-renderer a {
     color: hsl(200 69% 70%);
   }
-  /* A link rendered as a reference label (GitHub PR / issue): a link-blue
-     tinted chip (no border) instead of the prose underline, so it reads as
-     clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
-     renderer's `[&_a]:` link variants in this same layer. */
   .markdown-renderer :is(a, button, span).markdown-reference-chip {
     --reference-chip-hue: 200 72% 34%;
     color: hsl(var(--reference-chip-hue));
@@ -142,42 +101,6 @@ pre,
   }
   .dark .markdown-renderer :is(a, button, span).markdown-reference-chip {
     --reference-chip-hue: 200 69% 70%;
-  }
-  .text-pr-merged {
-    color: hsl(var(--github-merged));
-  }
-  .text-balance {
-    text-wrap: balance;
-  }
-  .field-sizing-content {
-    field-sizing: content;
-    /* Set reasonable constraints to prevent UI breakage */
-    max-width: min(80vw, 600px);
-    min-width: 10ch;
-  }
-
-  /* Fallback for browsers that don't support field-sizing */
-  @supports not (field-sizing: content) {
-    .field-sizing-content {
-      /* JavaScript will handle the auto-sizing */
-      overflow: hidden;
-    }
-  }
-
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .text-modified-file {
-    color: hsl(var(--modified-file));
-  }
-
-  /* 防止移动端长按选择文本 - 特别是在 iOS Safari 上 */
-  .-webkit-touch-callout-none {
-    -webkit-touch-callout: none;
   }
 }
 
@@ -1204,16 +1127,19 @@ pre,
   }
 
   * {
-    @apply border-border outline-ring/50;
+    border-color: hsl(var(--border) / 1);
+    outline-color: color-mix(in oklab, hsl(var(--ring) / 1) 50%, transparent);
   }
 
   html {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
     overflow: hidden;
   }
 
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
   }
 
   /* Pro selection style */
@@ -1297,8 +1223,6 @@ pre,
   *:focus,
   *:focus-visible {
     outline: none !important;
-    --tw-ring-offset-shadow: 0 0 #0000 !important;
-    --tw-ring-shadow: 0 0 #0000 !important;
   }
 
   /* Global CodeMirror cursor visibility fixes */
@@ -1783,94 +1707,10 @@ pre,
   }
 }
 
-/*
- * dvh/svh fallbacks for browsers that don't support dynamic/small viewport units
- * (Safari < 15.4, Chrome < 108, Firefox < 101).
- * Tailwind utilities like h-dvh, min-h-svh, h-svh output dvh/svh values which are
- * silently ignored by older browsers, leaving elements with no height.
- * These @supports rules provide vh-based fallbacks.
- */
+/* The workspace keeps its viewport height on older embedded browsers. */
 @supports not (height: 1dvh) {
-  @layer utilities {
-    .h-dvh {
-      height: 100vh !important;
-    }
-    .min-h-\[100dvh\] {
-      min-height: 100vh !important;
-    }
-    .max-h-\[80dvh\] {
-      max-height: 80vh !important;
-    }
-    .max-h-\[90dvh\] {
-      max-height: 90vh !important;
-    }
-    .max-h-\[min\(40dvh\2c 20rem\)\] {
-      max-height: min(40vh, 20rem) !important;
-    }
-    .h-svh {
-      height: 100vh !important;
-    }
-    .min-h-svh {
-      min-height: 100vh !important;
-    }
-    .max-h-\[70svh\] {
-      max-height: 70vh !important;
-    }
-  }
-}
-
-/*
- ---break---
- */
-
-/* Spinners must rotate about their OWN center, not orbit a point.
-   `animate-spin` is `rotate(360deg)` with the default
-   `transform-origin: 50% 50%`, and `transform-box`'s initial value is
-   `view-box` — for an SVG that percentage resolves against the nearest
-   SVG viewport rather than the element's CSS box. A root `<svg>` has a
-   CSS layout box, so `view-box` is specified to act as `border-box`
-   there and modern engines land on the box center. But nothing in the
-   markup states that intent, so any element that loses its CSS layout
-   box, is sized asymmetrically, or is rotated by an engine resolving
-   the percentage against the 24-unit `viewBox` pivots off-center — the
-   glyph then sweeps a circle around a point beside it (measured: a
-   14px icon pivoting on the viewBox center orbits with a ~14px
-   diameter, i.e. wider than the icon itself) instead of turning in
-   place. Pinning both properties states the intent once, globally.
-
-   `flex-shrink: 0` belongs here for the same reason: in a tight flex
-   row (the mobile home status pill, whose label truncates) a spinner
-   without it is compressed to a non-square box, so the rotation
-   sweeps an ellipse and the glyph visibly wobbles. Measured 14×14 →
-   13.55×15.43 in the reconnecting pill before this rule.
-
-   Spinning an `<svg>` directly is no longer done anywhere in this
-   package: Chromium refuses to composite a transform animation on an SVG
-   target whose effective zoom is not 1 (crbug.com/1186312), which is every
-   SVG on a Retina display, so the rotation re-ran style, pre-paint and
-   layerize on the main thread at the refresh rate. `ui/spinner.tsx` puts
-   the animation on an HTML wrapper instead. The `svg` rule below stays as
-   a safety net for any stray `<svg class="animate-spin">`.
-
-   `@layer base` keeps this below utilities, so an explicit
-   `origin-*` / `shrink` utility at a call site still wins. */
-@layer base {
-  svg.animate-spin {
-    transform-box: border-box;
-    transform-origin: 50% 50%;
-    flex-shrink: 0;
-  }
-
-  /* `ui/spinner.tsx` animates an HTML wrapper instead of the glyph so
-     the rotation composites. A wrapper is only equivalent while its box
-     matches the glyph's: the moment anything else lands inside it (a
-     label, a gap) its box grows, its center moves off the glyph, and the
-     glyph orbits. It must therefore stay icon-only and explicitly sized;
-     centering the origin here makes that failure mode a wobble-free
-     no-op rather than an orbit. */
-  span.animate-spin {
-    transform-box: border-box;
-    transform-origin: 50% 50%;
+  .workspace-viewport {
+    height: 100vh !important;
   }
 }
 
@@ -2098,17 +1938,6 @@ pre,
 
 [data-sidebar-session-row][data-sidebar-title-swiping='true'] [data-sidebar-title-clip] {
   overflow: hidden;
-}
-
-/* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)
-   marks the document `pointer` until Tab or an arrow key moves focus, and zeroes
-   `focus.ringWidth` for every StyleX ring; this does the same for the legacy
-   Tailwind `focus-visible:ring-*` utilities. Unlayered, so it outranks them.
-   Text entry keeps its ring: whoever is typing needs to see where. */
-html[data-focus-modality='pointer']
-  :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
 }
 
 /* The new-chat page's typed transition (`components/chat/home/home-dashboard.tsx`). Keep

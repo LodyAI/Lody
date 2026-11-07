@@ -1,11 +1,12 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 
 import type { PreviewVisualComment } from '@lody/shared/preview-comment-types';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { VisualAnnotationDraftComposer } from '@/components/preview/visual-annotation-draft-composer';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
 import { TOUR_ANNOTATION_ANCHOR } from './tour-fixtures';
+import { browserPreviewSurface } from './browser-preview-surface';
 
 // The page is necessarily a fixture: onboarding has no dev server for the real
 // Managed Preview iframe to load. The annotation UI around it is production UI,
@@ -71,34 +72,30 @@ export function TourBrowserPreview({
   }, []);
 
   return (
-    <div data-tour-anchor="browser" className="flex h-full flex-col bg-background">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/50 px-2.5">
-        <span className="size-1.5 rounded-full bg-code-added" />
-        <span className="truncate rounded bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground">
-          localhost:5173/settings
-        </span>
+    <div data-tour-anchor="browser" {...stylex.props(browserPreviewSurface.page)}>
+      <div {...stylex.props(browserPreviewSurface.bar)}>
+        <span {...stylex.props(browserPreviewSurface.barDot)} />
+        <span {...stylex.props(browserPreviewSurface.address)}>localhost:5173/settings</span>
       </div>
 
-      <div ref={previewRef} className="relative min-h-0 flex-1 overflow-hidden p-4">
-        <div className="space-y-3">
-          <div className="h-3 w-24 rounded bg-muted-foreground/25" />
-          <div className="h-2 w-40 rounded bg-muted-foreground/15" />
-          <div className="mt-5 space-y-2 rounded-lg border border-border/60 p-3">
-            <div className="h-2.5 w-20 rounded bg-muted-foreground/20" />
-            <div className="h-2 w-full rounded bg-muted-foreground/10" />
-            <div className="h-2 w-2/3 rounded bg-muted-foreground/10" />
+      <div ref={previewRef} {...stylex.props(browserPreviewSurface.body)}>
+        <div {...stylex.props(browserPreviewSurface.rows)}>
+          <div {...stylex.props(browserPreviewSurface.headingLine)} />
+          <div {...stylex.props(browserPreviewSurface.subheadingLine)} />
+          <div {...stylex.props(browserPreviewSurface.card)}>
+            <div {...stylex.props(browserPreviewSurface.cardLineHead)} />
+            <div {...stylex.props(browserPreviewSurface.cardLineFull)} />
+            <div {...stylex.props(browserPreviewSurface.cardLineTwoThirds)} />
           </div>
 
           <div
             data-tour-anchor="browser.target"
-            className={cn(
-              'relative mt-4 flex h-20 items-center justify-center rounded-lg border border-dashed transition-colors duration-300',
-              clicked
-                ? 'border-primary/70 bg-primary/10'
-                : 'border-border/70 text-muted-foreground/50'
+            {...stylex.props(
+              browserPreviewSurface.target,
+              clicked ? browserPreviewSurface.targetActive : browserPreviewSurface.targetIdle
             )}
           >
-            <span className="text-[11px]">Nothing here yet</span>
+            <span {...stylex.props(browserPreviewSurface.targetLabel)}>Nothing here yet</span>
           </div>
         </div>
 
@@ -109,7 +106,7 @@ export function TourBrowserPreview({
             onChange={ignore}
             onCancel={ignore}
             onSubmit={ignore}
-            className="absolute bottom-[18px] left-5 z-30 w-[calc(100%-40px)] max-w-none"
+            className={stylex.props(browserPreviewSurface.composer).className}
           />
         ) : null}
         {submitted ? (

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
@@ -134,5 +135,35 @@ describe('VisualAnnotationCommentsOverlay', () => {
 
     expect(rendered.querySelector('[data-visual-comment-id="comment-1"]')).toBeNull();
     expect(rendered.querySelector('button[aria-label$="comment by Ada"]')).toBeNull();
+  });
+
+  it('stages a comment through its action and removes it when resolved', () => {
+    function Harness() {
+      const [staged, setStaged] = useState<string[]>([]);
+      const [resolved, setResolved] = useState(false);
+      return (
+        <VisualAnnotationCommentsOverlay
+          comments={resolved ? [{ ...comment, resolvedAt: 2, resolvedBy: 'user-1' }] : [comment]}
+          viewport={{ width: 600, height: 400 }}
+          stagedCommentIds={staged}
+          onSendToChat={(selected) => setStaged([selected.id])}
+          onToggleResolved={({ commentId, resolved: next }) => {
+            if (commentId === comment.id) setResolved(next);
+          }}
+        />
+      );
+    }
+    const rendered = render(<Harness />);
+    const button = (label: string) => {
+      const node = Array.from(rendered.querySelectorAll('button')).find(
+        (element) => element.textContent?.trim() === label
+      );
+      if (!node) throw new Error(`Missing ${label} action`);
+      return node;
+    };
+    flushSync(() => button('Send').click());
+    expect(button('Added').getAttribute('aria-pressed')).toBe('true');
+    flushSync(() => button('Resolve').click());
+    expect(rendered.querySelector('[data-visual-comment-id]')).toBeNull();
   });
 });

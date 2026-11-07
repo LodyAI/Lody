@@ -29,6 +29,7 @@ export type MobileBottomTabBarTabSpec<TabKey extends string = string> = {
   key: TabKey;
   ios: ReactNode;
   material: ReactNode;
+  iconSize?: string;
   /** Already-translated label rendered under the icon. */
   label: string;
 };
@@ -136,6 +137,10 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in srgb, ${colors.accent} 20%, transparent)`,
   },
   icon: {
+    ':is(*) > svg': {
+      width: 'var(--mobile-tab-icon-size, calc(var(--spacing) * 6))',
+      height: 'var(--mobile-tab-icon-size, calc(var(--spacing) * 6))',
+    },
     transitionProperty: 'none',
     position: 'absolute',
     top: 0,
@@ -147,6 +152,7 @@ const styles = stylex.create({
     width: 24,
     height: 24,
   },
+  iconSize: (size: string) => ({ '--mobile-tab-icon-size': size }),
   label: {
     transitionProperty: 'none',
     position: 'absolute',
@@ -204,6 +210,11 @@ function DockTab<TabKey extends string>({
   const height = useTransform(progress, [0, 1], [EXPANDED_PX, COLLAPSED_PX]);
   const iconY = useTransform(progress, [0, 1], [8, 12]);
   const labelY = useTransform(progress, [0, 1], [0, -5]);
+  const iconProps = stylex.props(
+    styles.icon,
+    active && styles.activeContent,
+    tab.iconSize != null && styles.iconSize(tab.iconSize)
+  );
 
   return (
     <Button
@@ -246,8 +257,8 @@ function DockTab<TabKey extends string>({
       )}
       <motion.span
         // Preserve the existing consumer-SVG sizing contract, including react-icons.
-        className={`${stylex.props(styles.icon, active && styles.activeContent).className} [&>svg]:h-6 [&>svg]:w-6`}
-        style={{ y: iconY }}
+        {...iconProps}
+        style={{ ...iconProps.style, y: iconY }}
       >
         {theme === 'ios' ? tab.ios : tab.material}
       </motion.span>

@@ -51,7 +51,7 @@ function projectButton(): HTMLButtonElement {
 }
 
 function panel(): HTMLElement {
-  return container.querySelector<HTMLElement>('.fixed.inset-0 > div')!;
+  return container.querySelector<HTMLElement>('[data-mobile-new-chat-panel]')!;
 }
 
 function touch(type: string, target: Element, x: number, y = 300) {

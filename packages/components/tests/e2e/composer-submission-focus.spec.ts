@@ -611,9 +611,10 @@ test.describe('attachment upload submission', () => {
           release(action === 'failure' ? 500 : 200);
           if (action === 'cancel' || action === 'failure') await expect(input).toBeEnabled();
           if (action === 'cancel')
-            await expect(
-              page.getByRole('img', { name: 'sample.png', exact: true })
-            ).not.toHaveClass(/grayscale/);
+            await expect(page.getByRole('img', { name: 'sample.png', exact: true })).toHaveCSS(
+              'filter',
+              'none'
+            );
           if (action === 'cancel' || action === 'failure') {
             await expect(input).toHaveValue('Inspect this image');
             expect(await submissions()).toEqual([]);

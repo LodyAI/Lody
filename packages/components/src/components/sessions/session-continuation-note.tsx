@@ -76,6 +76,7 @@ const DETAIL_COPY: Record<SessionContinuationDetail, { key: string; fallback: st
 };
 
 const styles = stylex.create({
+  popoverWidth: { width: '288px' },
   note: {
     display: 'flex',
     alignItems: 'center',
@@ -447,7 +448,13 @@ export function SessionContinuationNote({
     >
       <Popover.Root>
         <Popover.Trigger render={trigger} />
-        <Popover.Content anchor={noteRef} side="top" align="start" sideOffset={8} className="w-72">
+        <Popover.Content
+          anchor={noteRef}
+          side="top"
+          align="start"
+          sideOffset={8}
+          xstyle={styles.popoverWidth}
+        >
           <div {...stylex.props(styles.popoverBody)}>
             <div {...stylex.props(styles.popoverHeading)}>
               <span {...stylex.props(styles.popoverIcon, popoverIconToneStyle)} aria-hidden="true">

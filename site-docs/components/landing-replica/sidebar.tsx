@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useId, type ReactNode } from 'react';
 import {
   Archive,
@@ -20,7 +21,663 @@ import {
 } from 'lucide-react';
 import { Button } from './button';
 import type { ReplicaLocale, ReplicaPrStatus, ReplicaSessionRow } from './types';
-import { cn } from './utils';
+import { clsx } from 'clsx';
+const sidebarBehavior = stylex.create({
+  groupHeader: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: '100%',
+    'min-width': '0px',
+    flex: '1',
+    cursor: 'pointer',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'background-color': 'transparent',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'text-align': 'left',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  repoHeader: {
+    'font-size': '0.9em',
+    'font-weight': 'var(--font-weight-normal)',
+    color: 'hsl(var(--sidebar-foreground))',
+    ':is(*):where(.dark, .dark *)': {
+      color: 'color-mix(in oklab, hsl(var(--sidebar-foreground)) 75%, transparent)',
+    },
+  },
+  chatHeader: {
+    'font-size': '0.9em',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--sidebar-foreground-muted))',
+  },
+  navRow: {
+    display: 'flex',
+    width: '100%',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'text-align': 'left',
+    'font-size': '0.9em',
+    'outline-style': 'none',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  activeNav: {
+    'background-color': 'hsl(var(--sidebar-selection))',
+    color: 'hsl(var(--sidebar-selection-foreground))',
+  },
+  idleNav: {
+    color: 'hsl(var(--sidebar-foreground))',
+    ':is(*):where(.dark, .dark *)': {
+      color: 'color-mix(in oklab, hsl(var(--sidebar-foreground)) 75%, transparent)',
+    },
+  },
+});
+
+const sidebarStates = stylex.create({
+  prGlyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+  },
+  ciGlyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+  },
+  mergedOffset: {
+    translate: '1px 0',
+  },
+  sessionRow: {
+    position: 'relative',
+    width: '100%',
+    cursor: 'pointer',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'background-color': 'transparent',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'var(--spacing)',
+    'text-align': 'left',
+  },
+  selectedRow: {
+    'background-color': 'hsl(var(--sidebar-selection))',
+    color: 'hsl(var(--sidebar-selection-foreground))',
+  },
+  sessionTitle: {
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '0.9em',
+  },
+  selectedInk: {
+    color: 'hsl(var(--sidebar-selection-foreground))',
+  },
+  idleInk: {
+    color: 'hsl(var(--sidebar-foreground))',
+  },
+  compactGroup: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 0.5)',
+    },
+  },
+  projectRow: {
+    width: '100%',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'background-color': 'transparent',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'padding-right': 'calc(var(--spacing) * 3)',
+    'padding-left': 'calc(var(--spacing) * 2)',
+    'text-align': 'left',
+  },
+  sections: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 3)',
+    },
+  },
+  groups: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+  projects: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1)',
+    },
+  },
+});
+
+const sidebarStyles = stylex.create({
+  glyph: {
+    width: '100%',
+    height: '100%',
+  },
+  glyph2: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--status-warning))',
+  },
+  surface: {
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'hsl(var(--primary))',
+  },
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  row2: {
+    'pointer-events': 'none',
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    'min-width': 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  row3: {
+    display: 'flex',
+  },
+  row4: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--status-success)) 45%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--status-success)) 6%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'font-size': '10px',
+    'line-height': '1',
+    'font-weight': 'var(--font-weight-medium)',
+    'letter-spacing': '0.01em',
+    color: 'hsl(var(--status-success))',
+  },
+  row5: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  row6: {
+    display: 'inline-flex',
+    'align-items': 'center',
+    'justify-content': 'flex-end',
+    gap: 'var(--spacing)',
+    'font-size': '0.8em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  label: {
+    'font-variant-numeric': '   tabular-nums ',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  row7: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'font-size': '0.75em',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted)) 80%, transparent)',
+    'font-variant-numeric': '   tabular-nums ',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  row8: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  row9: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  label2: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-weight': 'var(--font-weight-normal)',
+  },
+  stack: {
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 0.5)',
+    ':is(*):last-child': {
+      'margin-bottom': '0px',
+    },
+  },
+  row10: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    'align-items': 'center',
+  },
+  row11: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 'calc(1 / 2 * 100%)',
+    left: '0px',
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    translate: '0 calc(calc(1 / 2 * 100%) * -1)',
+    'border-radius': 'var(--radius-sm)',
+    'object-fit': 'cover',
+    opacity: '80%',
+  },
+  label3: {
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'left',
+  },
+  label4: {
+    flex: '1',
+  },
+  stack2: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: '1px',
+  },
+  row12: {
+    display: 'flex',
+    'align-items': 'center',
+  },
+  row13: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    'min-width': '0px',
+    flex: '1',
+    cursor: 'pointer',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'background-color': 'transparent',
+    'padding-block': 'var(--spacing)',
+    'padding-right': 'calc(var(--spacing) * 3)',
+    'padding-left': 'calc(var(--spacing) * 2)',
+    'text-align': 'left',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted)) 65%, transparent)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  glyph3: {
+    position: 'absolute',
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    color: 'currentcolor',
+    opacity: '80%',
+  },
+  label5: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'left',
+  },
+  stack3: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'var(--spacing)',
+  },
+  row14: {
+    display: 'flex',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  row15: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  section: {
+    'min-width': '0px',
+    flex: '1',
+  },
+  row16: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  caption: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'currentcolor',
+  },
+  label6: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  label7: {
+    'margin-left': 'auto',
+    'flex-shrink': '0',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+    'font-variant-numeric': '   tabular-nums ',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  row17: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    'align-items': 'center',
+  },
+  row18: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    color: 'currentcolor',
+  },
+  row19: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    cursor: 'default',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted)) 40%, transparent)',
+    'outline-style': 'none',
+  },
+  surface2: {
+    'min-height': '0px',
+    'flex-shrink': '0',
+    'border-right-style': 'solid',
+    'border-right-width': '1px',
+    'border-color': 'hsl(var(--sidebar-border))',
+    'background-color': 'hsl(var(--sidebar-background))',
+  },
+  frame: {
+    position: 'relative',
+    height: '100%',
+    color: 'hsl(var(--sidebar-foreground))',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  stack4: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+  },
+  row20: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+  },
+  label8: {
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': '18px',
+    'line-height': '1',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': '-0.03em',
+    color: 'hsl(var(--sidebar-foreground))',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  row21: {
+    'margin-left': 'auto',
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+  },
+  glyph4: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  stack5: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: '1px',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+  },
+  glyph5: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  frame2: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    'min-height': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  section2: {
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-bottom': 'calc(var(--spacing) * 3)',
+  },
+  section3: {
+    position: 'relative',
+  },
+  section4: {
+    'padding-top': 'var(--spacing)',
+    'padding-bottom': 'var(--spacing)',
+  },
+  row22: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+  },
+  row23: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'background-color': 'transparent',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'text-align': 'left',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted)) 65%, transparent)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  label9: {
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  stack6: {
+    display: 'flex',
+    'flex-direction': 'column',
+  },
+  caption2: {
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted)) 65%, transparent)',
+  },
+  frame3: {
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+    width: '100%',
+    ':is(*):last-child': {
+      'margin-bottom': '0px',
+    },
+  },
+  row24: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    'border-top-style': 'solid',
+    'border-top-width': '0.5px',
+    'border-color': 'hsl(var(--sidebar-border))',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-block': 'var(--spacing)',
+  },
+  row25: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    width: '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'text-align': 'left',
+    'font-size': '0.9em',
+    color: 'hsl(var(--sidebar-foreground))',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    ':is(*):where(.dark, .dark *)': {
+      color: 'color-mix(in oklab, hsl(var(--sidebar-foreground)) 75%, transparent)',
+    },
+  },
+  row26: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    overflow: 'hidden',
+    'border-radius': 'calc(infinity * 1px)',
+    'font-size': '10px',
+  },
+  frame4: {
+    'aspect-ratio': '1 / 1',
+    width: '100%',
+    height: '100%',
+  },
+  row27: {
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  label10: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  row28: {
+    'margin-left': 'auto',
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
+
+const buttonChildStyles = stylex.create({
+  label: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: '0',
+    margin: '-1px',
+    overflow: 'hidden',
+    'clip-path': 'inset(50%)',
+    'white-space': 'nowrap',
+    'border-width': '0',
+  },
+});
+
+const buttonStyles = stylex.create({
+  footer: {
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    borderRadius: 'var(--radius-md)',
+    color: {
+      default: 'hsl(var(--sidebar-foreground))',
+      ':where(.dark, .dark *)': 'hsl(var(--sidebar-foreground-muted))',
+    },
+  },
+});
 
 /* Display-only replica of the desktop `LoroSidebar` in Workspace organize mode,
    as the landing composes it: nav rows, a Local Projects section, the Chats
@@ -61,21 +718,52 @@ const SIDEBAR_COPY: Record<
   },
 };
 
+const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+const statusStyles = stylex.create({
+  prOpen: { color: 'hsl(var(--github-open))' },
+  prMerged: { color: 'hsl(var(--github-merged))' },
+  prClosed: { color: 'hsl(var(--github-closed))' },
+  prDraft: { color: 'hsl(var(--github-draft))' },
+  success: { color: 'hsl(var(--status-success))' },
+  failure: { color: 'hsl(var(--destructive))' },
+  warning: { color: 'hsl(var(--status-warning))' },
+  spinner: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    willChange: 'transform',
+    animationName: spin,
+    animationDuration: '1s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+  working: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--primary))',
+  },
+  projectWorking: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    color: 'hsl(var(--primary))',
+  },
+});
+
 // ---- PR status icon (sidebar-row-shared `SessionPrIcon`) ---------------------
 
-const PR_STATUS_ICON: Record<ReplicaPrStatus, { icon: LucideIcon; className: string }> = {
-  open: { icon: GitPullRequest, className: 'text-github-open' },
-  // The app's `text-pr-merged` utility resolves to `--github-merged`.
-  merged: { icon: GitMerge, className: 'text-github-merged' },
-  closed: { icon: GitPullRequestClosed, className: 'text-github-closed' },
-  draft: { icon: GitPullRequestDraft, className: 'text-github-draft' },
-};
+export const REPLICA_PR_STATUS_STYLES = {
+  open: statusStyles.prOpen,
+  merged: statusStyles.prMerged,
+  closed: statusStyles.prClosed,
+  draft: statusStyles.prDraft,
+} satisfies Record<ReplicaPrStatus, stylex.StyleXStyles>;
 
-export const REPLICA_PR_STATUS_TEXT: Record<ReplicaPrStatus, string> = {
-  open: 'text-github-open',
-  merged: 'text-github-merged',
-  closed: 'text-github-closed',
-  draft: 'text-github-draft',
+const PR_STATUS_ICON: Record<ReplicaPrStatus, LucideIcon> = {
+  open: GitPullRequest,
+  merged: GitMerge,
+  closed: GitPullRequestClosed,
+  draft: GitPullRequestDraft,
 };
 
 type ReplicaCiState = NonNullable<ReplicaSessionRow['prCiState']>;
@@ -85,18 +773,21 @@ export function ReplicaPrIcon({
   status,
   ciState,
   className,
+  xstyle,
 }: {
   status: ReplicaPrStatus;
   ciState?: ReplicaCiState | null;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }) {
   const maskId = `pr-ci-${ciState ?? 'none'}-${useId().replaceAll(':', '')}`;
-  const meta = PR_STATUS_ICON[status];
-  const BaseIcon = meta.icon;
+  const ink = REPLICA_PR_STATUS_STYLES[status];
+  const BaseIcon = PR_STATUS_ICON[status];
   if (!ciState) {
     return (
       <BaseIcon
-        className={cn('h-3.5 w-3.5 shrink-0', meta.className, className)}
+        {...stylex.props(sidebarStates.prGlyph, ink, xstyle)}
+        className={clsx(stylex.props(sidebarStates.prGlyph, ink, xstyle).className, className)}
         strokeWidth={2.25}
         aria-hidden="true"
       />
@@ -104,18 +795,30 @@ export function ReplicaPrIcon({
   }
   const isRunning = ciState === 'pending';
   const VerdictIcon = ciState === 'success' ? Check : ciState === 'failure' ? X : null;
-  const verdictClassName =
+  const verdictXstyle =
     ciState === 'success'
-      ? 'text-status-success'
+      ? statusStyles.success
       : ciState === 'failure'
-        ? 'text-destructive'
-        : 'text-status-warning';
+        ? statusStyles.failure
+        : statusStyles.warning;
   return (
     <svg
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={cn('h-4 w-4 shrink-0', status === 'merged' && 'translate-x-px', className)}
+      {...stylex.props(
+        sidebarStates.ciGlyph,
+        status === 'merged' && sidebarStates.mergedOffset,
+        xstyle
+      )}
+      className={clsx(
+        stylex.props(
+          sidebarStates.ciGlyph,
+          status === 'merged' && sidebarStates.mergedOffset,
+          xstyle
+        ).className,
+        className
+      )}
       data-pr-ci-verdict={ciState}
       aria-hidden="true"
     >
@@ -132,13 +835,13 @@ export function ReplicaPrIcon({
         <circle cx="12" cy="12" r={isRunning ? 3.75 : 5} fill="black" />
       </mask>
       <g mask={`url(#${maskId})`}>
-        <BaseIcon width={14} height={14} strokeWidth={2.25} className={meta.className} />
+        <BaseIcon width={14} height={14} strokeWidth={2.25} {...stylex.props(ink)} />
       </g>
       <g transform="translate(7 7)">
         {isRunning ? (
-          <circle cx="5" cy="5" r="2.5" fill="currentColor" className={verdictClassName} />
+          <circle cx="5" cy="5" r="2.5" fill="currentColor" {...stylex.props(verdictXstyle)} />
         ) : VerdictIcon ? (
-          <VerdictIcon width={10} height={10} strokeWidth={3} className={verdictClassName} />
+          <VerdictIcon width={10} height={10} strokeWidth={3} {...stylex.props(verdictXstyle)} />
         ) : null}
       </g>
     </svg>
@@ -148,16 +851,18 @@ export function ReplicaPrIcon({
 // ---- Row building blocks -----------------------------------------------------
 
 /* The app's `Spinner`: the rotation runs on an HTML wrapper, because an
-   `<svg class="animate-spin">` falls off the compositor on DPR≠1 displays. */
-export function ReplicaSpinner({ className }: { className?: string }) {
+   SVG rotation falls off the compositor on DPR≠1 displays. */
+export function ReplicaSpinner({
+  className,
+  xstyle,
+}: {
+  className?: string;
+  xstyle?: stylex.StyleXStyles;
+}) {
+  const sx = stylex.props(statusStyles.spinner, xstyle);
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 animate-spin items-center justify-center will-change-transform',
-        className
-      )}
-    >
-      <Loader2 className="size-full" aria-hidden="true" />
+    <span {...sx} className={clsx(sx.className, className)}>
+      <Loader2 {...stylex.props(sidebarStyles.glyph)} aria-hidden="true" />
     </span>
   );
 }
@@ -165,17 +870,14 @@ export function ReplicaSpinner({ className }: { className?: string }) {
 /** ③ The row's single trailing status channel: waiting > working > unread > rest. */
 function RowEndSlot({ row, rest }: { row: ReplicaSessionRow; rest?: ReactNode }) {
   const status = row.isWaitingPermission ? (
-    <Hand className="h-3 w-3 text-status-warning" />
+    <Hand {...stylex.props(sidebarStyles.glyph2)} />
   ) : row.isWorking ? (
-    <ReplicaSpinner className="h-3 w-3 text-primary" />
+    <ReplicaSpinner xstyle={statusStyles.working} />
   ) : row.hasUnreadMessages ? (
-    <span className="h-2 w-2 rounded-full bg-primary" />
+    <span {...stylex.props(sidebarStyles.surface)} />
   ) : null;
   const content = status ? (
-    <div
-      data-session-row-indicator=""
-      className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
-    >
+    <div data-session-row-indicator="" {...stylex.props(sidebarStyles.row)}>
       {status}
     </div>
   ) : (
@@ -183,21 +885,15 @@ function RowEndSlot({ row, rest }: { row: ReplicaSessionRow; rest?: ReactNode })
   );
   // Desktop rows always reserve the (hover-only) archive target, hence min-w-5.
   return (
-    <div
-      data-session-row-end-slot=""
-      className="pointer-events-none relative flex h-5 min-w-5 shrink-0 items-center justify-center"
-    >
-      {content ? <span className="flex">{content}</span> : null}
+    <div data-session-row-end-slot="" {...stylex.props(sidebarStyles.row2)}>
+      {content ? <span {...stylex.props(sidebarStyles.row3)}>{content}</span> : null}
     </div>
   );
 }
 
 function MergeablePill({ label }: { label: string }) {
   return (
-    <span
-      data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/45 bg-status-success/[0.06] px-1.5 text-[10px] font-medium leading-none tracking-[0.01em] text-status-success"
-    >
+    <span data-session-mergeable-pill="" {...stylex.props(sidebarStyles.row4)}>
       {label}
     </span>
   );
@@ -225,13 +921,13 @@ function SessionListRowView({
     !selected;
   const rest =
     kind === 'chat' ? (
-      <span className="flex items-center gap-1.5">
-        <span className="inline-flex items-center justify-end gap-1 text-[0.8em] text-muted-foreground">
-          <span className="select-none tabular-nums">{row.ageLabel}</span>
+      <span {...stylex.props(sidebarStyles.row5)}>
+        <span {...stylex.props(sidebarStyles.row6)}>
+          <span {...stylex.props(sidebarStyles.label)}>{row.ageLabel}</span>
         </span>
       </span>
     ) : hasPr || showMergeablePill ? (
-      <span className="flex select-none items-center gap-1.5 text-[0.75em] tabular-nums text-sidebar-foreground-muted/80">
+      <span {...stylex.props(sidebarStyles.row7)}>
         {showMergeablePill ? <MergeablePill label={mergeableLabel} /> : null}
         {hasPr ? (
           // Same 20px reserve as the app's compact `SessionPrIcon`: the end slot
@@ -250,23 +946,20 @@ function SessionListRowView({
     <div
       aria-current={selected ? 'page' : undefined}
       data-sidebar-session-id={row.id}
-      className={cn(
-        'group relative w-full cursor-pointer rounded-md border border-transparent bg-transparent px-2 py-1 text-left',
-        selected && 'bg-sidebar-selection text-sidebar-selection-foreground'
+      className={clsx(
+        stylex.props(sidebarStates.sessionRow, selected && sidebarStates.selectedRow).className,
+        'group'
       )}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div {...stylex.props(sidebarStyles.row8)}>
+        <div data-session-row-leading-slot="" {...stylex.props(sidebarStyles.row9)} />
         <div
-          data-session-row-leading-slot=""
-          className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center"
-        />
-        <div
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-1 truncate text-[0.9em]',
-            selected ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
+          {...stylex.props(
+            sidebarStates.sessionTitle,
+            selected ? sidebarStates.selectedInk : sidebarStates.idleInk
           )}
         >
-          <span className="truncate font-normal">{row.title}</span>
+          <span {...stylex.props(sidebarStyles.label2)}>{row.title}</span>
         </div>
         <RowEndSlot row={row} rest={rest} />
       </div>
@@ -291,33 +984,33 @@ function SessionGroup({
   mergeableLabel: string;
 }) {
   return (
-    <div className="mb-3 flex flex-col gap-0.5 last:mb-0">
-      <div className="group flex h-7 items-center">
+    <div {...stylex.props(sidebarStyles.stack)}>
+      <div
+        className={[stylex.props(sidebarStyles.row10).className, 'group'].filter(Boolean).join(' ')}
+      >
         <div
-          className={cn(
-            'relative flex h-7 w-full min-w-0 flex-1 cursor-pointer select-none items-center gap-1 rounded-md border border-transparent bg-transparent px-2 text-left transition-colors',
-            kind === 'repo'
-              ? 'text-[0.9em] font-normal text-sidebar-foreground dark:text-sidebar-foreground/75'
-              : 'text-[0.9em] font-medium text-sidebar-foreground-muted'
+          {...stylex.props(
+            sidebarBehavior.groupHeader,
+            kind === 'repo' ? sidebarBehavior.repoHeader : sidebarBehavior.chatHeader
           )}
         >
           {kind === 'repo' ? (
-            <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+            <span {...stylex.props(sidebarStyles.row11)}>
               {ownerAvatarUrl ? (
                 <img
                   src={ownerAvatarUrl}
                   alt=""
                   aria-hidden="true"
-                  className="absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-sm object-cover opacity-80"
+                  {...stylex.props(sidebarStyles.overlay)}
                 />
               ) : null}
             </span>
           ) : null}
-          <span className="min-w-0 truncate text-left">{label}</span>
-          <span className="flex-1" aria-hidden="true" />
+          <span {...stylex.props(sidebarStyles.label3)}>{label}</span>
+          <span {...stylex.props(sidebarStyles.label4)} aria-hidden="true" />
         </div>
       </div>
-      <div className="flex flex-col gap-px">
+      <div {...stylex.props(sidebarStyles.stack2)}>
         {rows.map((row) => (
           <SessionListRowView
             key={row.id}
@@ -343,16 +1036,22 @@ function LocalProjectGroup({
   selectedSessionId: string | null;
 }) {
   return (
-    <div className="space-y-0.5">
-      <div className="group flex items-center">
-        <div className="group relative flex w-full min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-md border border-transparent bg-transparent py-1 pl-2 pr-3 text-left text-xs font-semibold text-sidebar-foreground-muted/65">
-          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-            <Folder className="absolute h-3.5 w-3.5 text-current opacity-80" />
+    <div {...stylex.props(sidebarStates.compactGroup)}>
+      <div
+        className={[stylex.props(sidebarStyles.row12).className, 'group'].filter(Boolean).join(' ')}
+      >
+        <div
+          className={[stylex.props(sidebarStyles.row13).className, 'group']
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <span {...stylex.props(sidebarStyles.row11)}>
+            <Folder {...stylex.props(sidebarStyles.glyph3)} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-left">{name}</span>
+          <span {...stylex.props(sidebarStyles.label5)}>{name}</span>
         </div>
       </div>
-      <div className="flex flex-col gap-1">
+      <div {...stylex.props(sidebarStyles.stack3)}>
         {sessions.map((row) => {
           const selected = row.id === selectedSessionId;
           return (
@@ -360,25 +1059,24 @@ function LocalProjectGroup({
               key={row.id}
               aria-current={selected ? 'page' : undefined}
               data-sidebar-session-id={row.id}
-              className={cn(
-                'group w-full rounded-md border border-transparent bg-transparent py-1.5 pl-2 pr-3 text-left',
-                selected
-                  ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-                  : 'text-sidebar-foreground'
+              className={clsx(
+                stylex.props(
+                  sidebarStates.projectRow,
+                  selected ? sidebarStates.selectedRow : sidebarStates.idleInk
+                ).className,
+                'group'
               )}
             >
-              <div className="flex items-start gap-2">
-                <div className="mt-0.5 flex h-4 w-4 items-center justify-center">
-                  {row.isWorking ? <ReplicaSpinner className="h-3.5 w-3.5 text-primary" /> : null}
+              <div {...stylex.props(sidebarStyles.row14)}>
+                <div {...stylex.props(sidebarStyles.row15)}>
+                  {row.isWorking ? <ReplicaSpinner xstyle={statusStyles.projectWorking} /> : null}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <div className="min-w-0 flex-1 truncate text-sm text-current">
-                      <span className="truncate">{row.title}</span>
+                <div {...stylex.props(sidebarStyles.section)}>
+                  <div {...stylex.props(sidebarStyles.row16)}>
+                    <div {...stylex.props(sidebarStyles.caption)}>
+                      <span {...stylex.props(sidebarStyles.label6)}>{row.title}</span>
                     </div>
-                    <span className="ml-auto shrink-0 select-none text-xs tabular-nums text-muted-foreground">
-                      {row.ageLabel}
-                    </span>
+                    <span {...stylex.props(sidebarStyles.label7)}>{row.ageLabel}</span>
                   </div>
                 </div>
               </div>
@@ -394,21 +1092,20 @@ function LocalProjectGroup({
 
 function NavRow({ active, label, icon }: { active: boolean; label: string; icon: ReactNode }) {
   return (
-    <div className="relative flex w-full items-center">
+    <div {...stylex.props(sidebarStyles.row17)}>
       <button
         type="button"
         tabIndex={-1}
-        className={cn(
-          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em] outline-hidden transition',
-          active
-            ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-            : 'text-sidebar-foreground dark:text-sidebar-foreground/75'
+        className={clsx(
+          stylex.props(
+            sidebarBehavior.navRow,
+            active ? sidebarBehavior.activeNav : sidebarBehavior.idleNav
+          ).className,
+          'group'
         )}
       >
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-current">
-          {icon}
-        </span>
-        <span className="truncate">{label}</span>
+        <span {...stylex.props(sidebarStyles.row18)}>{icon}</span>
+        <span {...stylex.props(sidebarStyles.label6)}>{label}</span>
       </button>
     </div>
   );
@@ -417,12 +1114,7 @@ function NavRow({ active, label, icon }: { active: boolean; label: string; icon:
 function HeaderNavButton({ label, children }: { label: string; children: ReactNode }) {
   // The landing has no navigation history, so back/forward render disabled.
   return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled
-      className="flex h-5 w-5 shrink-0 cursor-default items-center justify-center rounded-md text-sidebar-foreground-muted/40 outline-hidden"
-    >
+    <button type="button" aria-label={label} disabled {...stylex.props(sidebarStyles.row19)}>
       {children}
     </button>
   );
@@ -434,10 +1126,11 @@ function FooterIconButton({ label, children }: { label: string; children: ReactN
       variant="ghost"
       size="icon"
       tabIndex={-1}
-      className="h-6 w-6 rounded-md text-sidebar-foreground transition-colors dark:text-sidebar-foreground-muted [&_svg]:h-3.5 [&_svg]:w-3.5"
+      xstyle={buttonStyles.footer}
+      iconSize="calc(var(--spacing) * 3.5)"
     >
       {children}
-      <span className="sr-only">{label}</span>
+      <span {...stylex.props(buttonChildStyles.label)}>{label}</span>
     </Button>
   );
 }
@@ -480,53 +1173,67 @@ export function ReplicaSidebar({
   const hasGithubRows = github.some((repo) => repo.sessions.length > 0);
 
   return (
-    <div className="min-h-0 shrink-0 border-r border-sidebar-border bg-sidebar-background">
+    <div {...stylex.props(sidebarStyles.surface2)}>
       <div
-        className="relative h-full select-none text-sidebar-foreground"
+        {...stylex.props(sidebarStyles.frame)}
         style={{ width, minWidth: width, maxWidth: width }}
       >
-        <div className="relative flex h-full flex-col overflow-hidden">
-          <div className="group/sidebar-header relative flex h-11 items-center justify-between gap-2 px-1.5">
+        <div {...stylex.props(sidebarStyles.stack4)}>
+          <div
+            className={[stylex.props(sidebarStyles.row20).className, 'group/sidebar-header']
+              .filter(Boolean)
+              .join(' ')}
+          >
             <span
               aria-label="Lody"
-              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-sidebar-foreground"
+              {...stylex.props(sidebarStyles.label8)}
               style={{ fontFamily: 'var(--font-wordmark)' }}
             >
               Lody
             </span>
-            <div className="ml-auto flex shrink-0 items-center">
+            <div {...stylex.props(sidebarStyles.row21)}>
               <HeaderNavButton label={copy.back}>
-                <ChevronLeft className="h-3.5 w-3.5" />
+                <ChevronLeft {...stylex.props(sidebarStyles.glyph4)} />
               </HeaderNavButton>
               <HeaderNavButton label={copy.forward}>
-                <ChevronRight className="h-3.5 w-3.5" />
+                <ChevronRight {...stylex.props(sidebarStyles.glyph4)} />
               </HeaderNavButton>
             </div>
           </div>
 
-          <div className="flex flex-col gap-px px-1.5">
+          <div {...stylex.props(sidebarStyles.stack5)}>
             <NavRow
               active={homeActive}
               label={copy.home}
-              icon={<SquarePen className="h-4 w-4" />}
+              icon={<SquarePen {...stylex.props(sidebarStyles.glyph5)} />}
             />
-            <NavRow active={false} label={copy.search} icon={<Search className="h-4 w-4" />} />
+            <NavRow
+              active={false}
+              label={copy.search}
+              icon={<Search {...stylex.props(sidebarStyles.glyph5)} />}
+            />
           </div>
 
-          <div className="mt-2 min-h-0 flex-1 overflow-hidden">
-            <div className="px-1.5 pb-3">
-              <div className="relative">
-                <div className="pb-1 pt-1">
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <div className="space-y-0.5">
-                        <div className="group flex h-7 items-center gap-1 rounded-md pr-2">
-                          <div className="relative flex h-7 min-w-0 flex-1 select-none items-center gap-1 rounded-md border border-transparent bg-transparent px-2 text-left text-xs font-semibold text-sidebar-foreground-muted/65">
-                            <span className="min-w-0 truncate">{copy.localProjects}</span>
-                            <span className="flex-1" aria-hidden="true" />
+          <div {...stylex.props(sidebarStyles.frame2)}>
+            <div {...stylex.props(sidebarStyles.section2)}>
+              <div {...stylex.props(sidebarStyles.section3)}>
+                <div {...stylex.props(sidebarStyles.section4)}>
+                  <div {...stylex.props(sidebarStates.sections)}>
+                    <div {...stylex.props(sidebarStates.groups)}>
+                      <div {...stylex.props(sidebarStates.compactGroup)}>
+                        <div
+                          className={[stylex.props(sidebarStyles.row22).className, 'group']
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          <div {...stylex.props(sidebarStyles.row23)}>
+                            <span {...stylex.props(sidebarStyles.label9)}>
+                              {copy.localProjects}
+                            </span>
+                            <span {...stylex.props(sidebarStyles.label4)} aria-hidden="true" />
                           </div>
                         </div>
-                        <div className="space-y-1">
+                        <div {...stylex.props(sidebarStates.projects)}>
                           {projects.map((project) => (
                             <LocalProjectGroup
                               key={project.name}
@@ -539,7 +1246,7 @@ export function ReplicaSidebar({
                       </div>
                     </div>
                     {chats.length ? (
-                      <div className="flex flex-col">
+                      <div {...stylex.props(sidebarStyles.stack6)}>
                         <SessionGroup
                           kind="chat"
                           label={copy.chats}
@@ -550,19 +1257,17 @@ export function ReplicaSidebar({
                       </div>
                     ) : null}
                     {hasGithubRows ? (
-                      <div className="px-2 text-xs font-semibold text-sidebar-foreground-muted/65">
-                        {copy.githubRepos}
-                      </div>
+                      <div {...stylex.props(sidebarStyles.caption2)}>{copy.githubRepos}</div>
                     ) : null}
                   </div>
                 </div>
-                <div className="flex flex-col">
+                <div {...stylex.props(sidebarStyles.stack6)}>
                   {github
                     .filter((repo) => repo.sessions.length > 0)
                     .map((repo) => (
                       <div
                         key={repo.repoFullName}
-                        className="mb-3 w-full last:mb-0"
+                        {...stylex.props(sidebarStyles.frame3)}
                         data-repo-full-name={repo.repoFullName}
                       >
                         <SessionGroup
@@ -580,22 +1285,22 @@ export function ReplicaSidebar({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center justify-between border-t-[0.5px] border-sidebar-border px-1.5 py-1">
-            <div className="min-w-0 flex-1">
-              <div className="flex h-8 w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em] text-sidebar-foreground dark:text-sidebar-foreground/75">
-                <span className="relative flex h-5 w-5 shrink-0 overflow-hidden rounded-full text-[10px]">
+          <div {...stylex.props(sidebarStyles.row24)}>
+            <div {...stylex.props(sidebarStyles.section)}>
+              <div {...stylex.props(sidebarStyles.row25)}>
+                <span {...stylex.props(sidebarStyles.row26)}>
                   <img
                     src={workspace.logoUrl}
                     alt={workspace.name}
-                    className="aspect-square size-full"
+                    {...stylex.props(sidebarStyles.frame4)}
                   />
                 </span>
-                <span className="flex min-w-0 flex-1 items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate font-medium">{workspace.name}</span>
+                <span {...stylex.props(sidebarStyles.row27)}>
+                  <span {...stylex.props(sidebarStyles.label10)}>{workspace.name}</span>
                 </span>
               </div>
             </div>
-            <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div {...stylex.props(sidebarStyles.row28)}>
               <FooterIconButton label="Settings">
                 <Settings strokeWidth={1.5} />
               </FooterIconButton>

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Check, Copy, Download } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Dialog } from '@/ui/dialog';
 import { Field as UiField } from '@lody/ui/field';
+import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
@@ -36,6 +38,36 @@ import type {
 const BACKDROPS: Exclude<UsageShareCardBackdrop, 'none'>[] = ['lody', 'aurora', 'ocean', 'sunset'];
 
 const styles = stylex.create({
+  titleTypography: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
+  },
+  descriptionLeading: {
+    [dialog.descriptionLeading]: 'calc(var(--spacing) * 5)',
+  },
+  qrLabelInk: {
+    [fieldTokens.label]: 'hsl(var(--muted-foreground) / 1)',
+    [fieldTokens.labelWeight]: 'var(--font-weight-normal)',
+  },
+  header: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    },
+    paddingInline: {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (min-width: 40rem)': 'calc(var(--spacing) * 5)',
+    },
+    paddingBlock: 'calc(var(--spacing) * 3.5)',
+    paddingRight: {
+      default: 'calc(var(--spacing) * 12)',
+      '@media (min-width: 40rem)': 'calc(var(--spacing) * 12)',
+    },
+    textAlign: 'left',
+  },
   preview: {
     display: 'flex',
     width: '100%',
@@ -360,11 +392,11 @@ export function UsageShareImageDialog({
           padding: 0,
         }}
       >
-        <Dialog.Header className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
-          <Dialog.Title className="text-base">
+        <Dialog.Header {...stylex.props(styles.header)}>
+          <Dialog.Title className={stylex.props(styles.titleTypography).className}>
             {t('workspace.usage.shareImage.dialogTitle')}
           </Dialog.Title>
-          <Dialog.Description className="leading-5">
+          <Dialog.Description className={stylex.props(styles.descriptionLeading).className}>
             {t('workspace.usage.shareImage.dialogDescription')}
           </Dialog.Description>
         </Dialog.Header>
@@ -390,7 +422,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-metric"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -428,7 +460,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-aspect"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -465,7 +497,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-subject"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -505,7 +537,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-theme"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -541,7 +573,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-footer"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -608,7 +640,7 @@ export function UsageShareImageDialog({
               <div {...stylex.props(styles.qrRow)}>
                 <UiField.Label
                   htmlFor="usage-share-qr"
-                  className="font-normal text-muted-foreground"
+                  className={stylex.props(styles.qrLabelInk).className}
                 >
                   {t('workspace.usage.shareImage.showQr')}
                 </UiField.Label>

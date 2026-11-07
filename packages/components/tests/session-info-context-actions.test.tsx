@@ -265,8 +265,7 @@ describe('ContextChip actions', () => {
     const methodButton = buttons.find(
       (button) => button.getAttribute('aria-label') === 'Choose merge method'
     );
-    expect(mergeControl?.className).not.toContain('border');
-    expect(mergeControl?.className).toContain('bg-status-success/[0.08]');
+    expect(mergeControl).not.toBeNull();
     expect(mergeButton).toBeInstanceOf(HTMLButtonElement);
     expect(methodButton).toBeInstanceOf(HTMLButtonElement);
 

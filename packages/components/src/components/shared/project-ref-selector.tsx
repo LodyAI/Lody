@@ -6,7 +6,7 @@ import {
   type UnifiedLocalProjectOption,
   type UnifiedProjectSelection,
 } from '@/components/chat/unified-project-selector';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import {
   projectRefToUnifiedSelection,
   unifiedSelectionToProjectRef,
@@ -72,7 +72,7 @@ export function ProjectRefSelector({
       onConnectGitRepo={onConnectGitRepo}
       contentSide={contentSide}
       triggerVariant={triggerVariant}
-      className={cn(className)}
+      className={clsx(className)}
       contentClassName={menuClassName}
       contentStyle={menuStyle}
       renderLimit={latestMessageAtByRepo ? UNIFIED_PROJECT_OPTION_RENDER_LIMIT : undefined}

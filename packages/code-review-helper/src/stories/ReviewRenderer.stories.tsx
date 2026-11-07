@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 
 import { ReviewRenderer } from '../react';
 import type { ReviewUserComment } from '../types';
+import { validateParsedReviewDocument } from '../validation';
 import pr124GzUrl from './fixtures/pr-124-v2-format.review.json.gz?url';
 import budgetDiagnosticsReview from './fixtures/budget-diagnostics.review.md?raw';
 import fileStatusesReview from './fixtures/file-statuses.review.md?raw';
@@ -467,6 +468,63 @@ export const SplitView: Story = {
   },
 };
 
+const severityMarkerBundle = {
+  ...groupedRefactorBundle,
+  document: {
+    ...groupedRefactorBundle.document,
+    findings: (['p0', 'p1', 'p2', 'question', 'info'] as const).map((severity, index) => ({
+      id: `severity-${severity}`,
+      severity,
+      bodyMarkdown: `Synthetic ${severity} finding.`,
+      refs: [],
+      line: index + 1,
+    })),
+  },
+  groups: groupedRefactorBundle.groups.map((group, groupIndex) =>
+    groupIndex
+      ? group
+      : {
+          ...group,
+          blocks: group.blocks.map((block, blockIndex) =>
+            blockIndex
+              ? block
+              : {
+                  ...block,
+                  notes: [
+                    ...block.notes,
+                    ...(['p0', 'p1', 'p2', 'question'] as const).map((severity, index) => ({
+                      id: `severity-note-${severity}`,
+                      severity,
+                      path: block.path,
+                      blockId: block.id,
+                      side: 'new' as const,
+                      range: { start: 9 + index, end: 9 + index },
+                      line: 9 + index,
+                      body: `Synthetic ${severity} marker note.`,
+                    })),
+                  ],
+                }
+          ),
+        }
+  ),
+};
+
+export const SeverityMarkerCoverage: Story = {
+  args: {
+    bundle: severityMarkerBundle,
+    storageKey: 'storybook-severity-marker-coverage',
+    initialComments: [
+      {
+        ...existingComments[0]!,
+        id: 'severity-info-comment',
+        anchor: { ...existingComments[0]!.anchor, lineNumber: 11 },
+        body: 'Synthetic info marker comment.',
+        lineText: '  node: createNodeAdapter,',
+      },
+    ],
+  },
+};
+
 export const FileStatuses: Story = {
   args: {
     bundle: fileStatusesBundle,
@@ -560,5 +618,242 @@ export const LongGroupDescription: Story = {
   args: {
     bundle: longGroupDescriptionBundle,
     storageKey: 'storybook-long-group-description',
+  },
+};
+
+const commitOverflowBundle = createReviewFixtureBundle({
+  reviewFilePath: '/storybook/commit-overflow.review.md',
+  markdown: groupedRefactorReview.replace(
+    'Commits: `a11b22c`, `c33d44e`',
+    'Commits: `a11b22c`, `c33d44e`, `ee00003`, `ee00004`, `ee00005`, `ee00006`'
+  ),
+  files: Object.values(groupedRefactorBundle.files),
+  commits: [
+    ...Object.values(groupedRefactorBundle.commits ?? {}),
+    ...[0, 1, 2].map((index) => {
+      const ref = `ee0000${index + 3}`;
+      return {
+        ref,
+        sha: ref.padEnd(40, '0'),
+        authorName: index === 0 ? 'Synthetic Maintainer' : index === 1 ? '界面测试' : '',
+        authorEmail: `fixture-${index}@example.com`,
+        authorDate: '2026-05-23T10:00:00Z',
+        subject: `Synthetic commit ${index + 1}: verify a long commit subject stays within its row`,
+        body:
+          index === 0
+            ? ''
+            : 'Synthetic commit body.\n\nA second paragraph verifies expanded text wrapping.',
+      };
+    }),
+  ],
+});
+
+export const CommitOverflowCoverage: Story = {
+  args: {
+    bundle: commitOverflowBundle,
+    storageKey: 'storybook-commit-overflow-coverage',
+  },
+};
+
+export const ContextBlockCoverage: Story = {
+  args: {
+    bundle: createReviewFixtureBundle({
+      reviewFilePath: '/storybook/context-block.review.md',
+      markdown: source([
+        '---',
+        'review_version: 1',
+        'merge_base: 1111111111111111111111111111111111111111',
+        'current_commit: 2222222222222222222222222222222222222222',
+        '---',
+        '',
+        '# Read unchanged context',
+        '',
+        '## Group: Context around the selected source',
+        '',
+        '`context://src/unchanged.ts?range=L3-L6`',
+        '',
+        '`context://src/missing-context.ts?range=L3-L4`',
+      ]),
+      files: [
+        {
+          path: 'src/unchanged.ts',
+          status: 'unknown',
+          additions: 0,
+          deletions: 0,
+          oldText: '',
+          newText: source([
+            '// Unchanged source shown for context.',
+            'export const before = 1;',
+            'export function describeContext() {',
+            '',
+            '  const label = "Synthetic unchanged source";',
+            '  return `${label}: a deliberately long context line keeps the original horizontal overflow and selected-range background visible at narrow widths.`;',
+            '}',
+            '',
+            'export const after = 2;',
+            '// Last line lies outside the selected range.',
+          ]),
+        },
+      ],
+    }),
+    storageKey: 'storybook-context-block-coverage',
+  },
+};
+
+export const EmptyReview: Story = {
+  args: {
+    bundle: createReviewFixtureBundle({
+      reviewFilePath: '/storybook/empty-review.review.md',
+      markdown: source([
+        '---',
+        'review_version: 1',
+        'merge_base: 1111111111111111111111111111111111111111',
+        'current_commit: 2222222222222222222222222222222222222222',
+        '---',
+        '',
+        '# Empty review',
+      ]),
+      files: [],
+    }),
+    storageKey: 'storybook-empty-review',
+  },
+};
+
+export const OverviewAndNavigationCoverage: Story = {
+  args: {
+    bundle: createReviewFixtureBundle({
+      reviewFilePath: '/storybook/overview-navigation.review.md',
+      markdown: longGroupDescriptionReview.replace(
+        'base_ref: main',
+        'base_ref: main\npr_number: 1111\npr_url: https://example.test/pull/1111\npr_title: A different synthetic pull request title that exercises the original title truncation and subdued separator'
+      ),
+      files: Object.values(longGroupDescriptionBundle.files),
+      commits: Object.values(longGroupDescriptionBundle.commits ?? {}),
+    }),
+    storageKey: 'storybook-overview-navigation-coverage',
+  },
+};
+
+const markdownDiagnosticsBundle = createReviewFixtureBundle({
+  reviewFilePath: '/storybook/markdown-diagnostics.review.md',
+  markdown: source([
+    '---',
+    'review_version: 1',
+    'merge_base: 1111111111111111111111111111111111111111',
+    'current_commit: 2222222222222222222222222222222222222222',
+    'line_budget: 1',
+    '---',
+    '',
+    '# Markdown typography and genuine diagnostics',
+    '',
+    'Overview with **strong text** and `overviewCode`.',
+    '',
+    '## Review',
+    '',
+    '- P2: **A synthetic finding** keeps `findingCode` separate from `new://src/markdown-sample.ts:L1`.',
+    '',
+    '## Group: Markdown source and range validation',
+    '',
+    'Changed lines: 2',
+    '',
+    '# First heading',
+    '',
+    '## Second heading',
+    '',
+    '### Third heading',
+    '',
+    '#### Fourth heading',
+    '',
+    '##### Fifth heading',
+    '',
+    '###### Sixth heading',
+    '',
+    'Paragraph with **strong content** and `inlineCode`.',
+    '',
+    '- First **strong list item** with `firstCode`.',
+    '- Second list item.',
+    '',
+    '```ts',
+    'const fencedValue = "preserve existing code spacing";',
+    '```',
+    '',
+    'Final paragraph after the fenced code.',
+    '',
+    '`changes://src/markdown-sample.ts?new=L1-L2`',
+    '',
+    '- `new://L9`: INFO: This intentional range boundary produces a genuine validator error.',
+    '',
+    '## Group: Read-only Markdown context',
+    '',
+    'Context has **strong emphasis**, `contextCode` and two list entries.',
+    '',
+    '- Context first item.',
+    '- Context second item.',
+    '',
+    '`context://src/markdown-sample.ts?range=L1-L2`',
+  ]),
+  files: [
+    {
+      path: 'src/markdown-sample.ts',
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      oldText: source(['export const markdownValue = 1;', 'export const stableValue = true;']),
+      newText: source(['export const markdownValue = 2;', 'export const stableValue = true;']),
+    },
+  ],
+});
+const markdownDocumentDiagnostics = validateParsedReviewDocument(
+  markdownDiagnosticsBundle.document
+);
+
+export const MarkdownAndDiagnosticsCoverage: Story = {
+  args: {
+    bundle: {
+      ...markdownDiagnosticsBundle,
+      groups: markdownDiagnosticsBundle.groups.map((group) => ({
+        ...group,
+        diagnostics: markdownDocumentDiagnostics.filter(
+          (diagnostic) => diagnostic.line === group.line
+        ),
+      })),
+    },
+    storageKey: 'storybook-markdown-diagnostics-coverage',
+  },
+};
+
+// Only this synthetic fixture is malformed; reconciliation reaches the real boundary.
+export const RenderingErrorFallback: Story = {
+  args: {
+    bundle: {
+      ...groupedRefactorBundle,
+      document: {
+        ...groupedRefactorBundle.document,
+        title: { syntheticMalformedTitle: true } as unknown as string,
+      },
+    },
+    storageKey: 'storybook-rendering-error-fallback',
+  },
+};
+
+// The malformed text exists only here; the real parser catches its own failure.
+export const DiffParseErrorFallback: Story = {
+  args: {
+    bundle: {
+      ...groupedRefactorBundle,
+      groups: [
+        {
+          ...groupedRefactorBundle.groups[0],
+          blocks: [
+            {
+              ...groupedRefactorBundle.groups[0]!.blocks[0]!,
+              file: undefined,
+              displayOldText: { syntheticMalformedDiffText: true } as unknown as string,
+            },
+          ],
+        },
+      ],
+    },
+    storageKey: 'storybook-diff-parse-error-fallback',
   },
 };

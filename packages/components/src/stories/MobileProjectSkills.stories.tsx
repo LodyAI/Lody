@@ -1,5 +1,7 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, X } from 'lucide-react';
 import type { ProjectSkill, ProjectSkillScope } from '@lody/shared';
@@ -9,6 +11,113 @@ import {
 } from '@/components/mobile/mobile-project-skills-sheet';
 import { SkillDetailContent } from '@/components/settings/skill-detail';
 import type { ProjectSkillResolvedGroup } from '@/hooks/use-project-skills';
+const skillsStory = stylex.create({
+  sheet: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
+const storyLayoutStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-height': '88%',
+    width: '100%',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-top-left-radius': 'var(--radius-2xl)',
+    'border-top-right-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  label: {
+    'margin-inline': 'auto',
+    'max-width': '68%',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '0.95rem',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-tight)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '760px',
+    width: '390px',
+    'align-items': 'flex-end',
+    'justify-content': 'center',
+    'background-color': 'color-mix(in oklab, var(--color-black) 30%, transparent)',
+  },
+  row2: {
+    position: 'relative',
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-top': 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 2)',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * 1.5)',
+    left: 'calc(var(--spacing) * 2)',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  overlay2: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * 1.5)',
+    right: 'calc(var(--spacing) * 3)',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  stack: {
+    position: 'relative',
+    display: 'flex',
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'overflow-y': 'auto',
+    'padding-bottom': 'calc(var(--spacing) * 4)',
+  },
+  canvas: {
+    flex: '1',
+    'overflow-y': 'auto',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-top': 'calc(var(--spacing) * 1)',
+    'padding-bottom': 'calc(var(--spacing) * 4)',
+  },
+});
 
 const FETCHED_AT = new Date('2026-06-17T11:30:00Z').getTime() - 2 * 60 * 1000;
 
@@ -102,35 +211,67 @@ const LOADED_GROUPS: ProjectSkillResolvedGroup[] = [
 /* Renders the body inside a phone-width sheet shell + the same in-sheet detail
    slide-over the real sheet uses, so the Info-tap → detail → back flow is
    screenshot-verifiable without standing up the SWR hook. */
-function SheetFrame({ args }: { args: MobileProjectSkillsBodyProps }) {
+function SheetFrame({
+  args,
+  responsive = false,
+  spacing,
+}: {
+  args: MobileProjectSkillsBodyProps;
+  responsive?: boolean;
+  spacing?: string;
+}) {
   const [detail, setDetail] = useState<{ skill: ProjectSkill; scope: ProjectSkillScope } | null>(
     null
   );
+  const [lastAction, setLastAction] = useState('Ready');
+  const [refreshCount, setRefreshCount] = useState(0);
   return (
-    <div className="flex h-[760px] w-[390px] items-end justify-center bg-black/30">
-      <div className="flex max-h-[88%] w-full flex-col overflow-hidden rounded-t-2xl border border-border/60 bg-background">
-        <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
+    <div
+      {...stylex.props(storyLayout.row)}
+      data-owned-skills-fixture={responsive ? '' : undefined}
+      data-owned-skills-action={responsive ? lastAction : undefined}
+      data-owned-skills-refresh-count={responsive ? refreshCount : undefined}
+      style={
+        responsive
+          ? ({ width: 'min(390px, 100vw)', '--spacing': spacing } as CSSProperties)
+          : undefined
+      }
+    >
+      <div {...stylex.props(storyLayoutStyles.stack)}>
+        <header {...stylex.props(storyLayout.row2)}>
           {detail ? (
             <button
               type="button"
               onClick={() => setDetail(null)}
-              className="absolute left-2 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground"
+              {...stylex.props(storyLayout.overlay)}
             >
-              <ChevronLeft className="h-5 w-5" strokeWidth={1.8} />
+              <ChevronLeft {...stylex.props(storyLayoutStylesStyles.frame)} strokeWidth={1.8} />
             </button>
           ) : null}
-          <span className="mx-auto max-w-[68%] truncate text-[0.95rem] font-semibold tracking-tight">
+          <span {...stylex.props(storyLayoutStyles.label)}>
             {detail ? detail.skill.name : 'Skills'}
           </span>
-          <span className="absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground">
-            <X className="h-5 w-5" strokeWidth={1.8} />
+          <span {...stylex.props(storyLayout.overlay2)}>
+            <X {...stylex.props(storyLayoutStylesStyles.frame)} strokeWidth={1.8} />
           </span>
         </header>
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        <div {...stylex.props(storyLayout.stack)}>
+          <div {...stylex.props(storyLayout.frame)}>
             <MobileProjectSkillsBody
               {...args}
-              onViewDetail={(skill, scope) => setDetail({ skill, scope })}
+              onRefresh={
+                responsive
+                  ? () => {
+                      args.onRefresh();
+                      setLastAction('Refresh');
+                      setRefreshCount((count) => count + 1);
+                    }
+                  : args.onRefresh
+              }
+              onViewDetail={(skill, scope) => {
+                setDetail({ skill, scope });
+                if (responsive) setLastAction(`Detail ${skill.id}`);
+              }}
             />
           </div>
           <AnimatePresence>
@@ -141,9 +282,9 @@ function SheetFrame({ args }: { args: MobileProjectSkillsBodyProps }) {
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}
                 transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-                className="absolute inset-0 z-10 flex flex-col bg-background"
+                {...stylex.props(skillsStory.sheet)}
               >
-                <div className="scrollbar-pro flex-1 overflow-y-auto px-4 pb-4 pt-1">
+                <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
                   <SkillDetailContent skill={detail.skill} scope={detail.scope} />
                 </div>
               </motion.div>
@@ -214,4 +355,56 @@ export const ErrorNoData: Story = {
     error: 'Failed to reach the GitHub API (rate limited).',
     onRefresh: noop,
   },
+};
+
+const LONG_GROUPS: ProjectSkillResolvedGroup[] = [
+  {
+    ...LOADED_GROUPS[0]!,
+    skills: [
+      {
+        ...LOADED_GROUPS[0]!.skills[0]!,
+        description:
+          'Review a synthetic change while preserving layout, keyboard focus, local theme values and long descriptions. '.repeat(
+            4
+          ),
+      },
+      {
+        ...LOADED_GROUPS[0]!.skills[1]!,
+        description: '中文描述边界：长段落保持两行截断，作者与路径应继续显示。'.repeat(8),
+      },
+    ],
+  },
+];
+
+const ownedArgs: MobileProjectSkillsBodyProps = {
+  status: 'ready',
+  groups: LONG_GROUPS,
+  stale: false,
+  onRefresh: noop,
+};
+
+export const LongDescription: Story = {
+  args: ownedArgs,
+  render: (args) => <SheetFrame args={args} responsive />,
+};
+
+export const AbsentDescription: Story = {
+  args: {
+    ...ownedArgs,
+    groups: LONG_GROUPS.map((group) => ({
+      ...group,
+      skills: group.skills.map((skill) => ({ ...skill, description: undefined })),
+    })),
+  },
+  render: (args) => <SheetFrame args={args} responsive />,
+};
+
+export const SubtreeSpacing: Story = {
+  args: { ...ownedArgs, status: 'refreshing' },
+  render: (args) => <SheetFrame args={args} responsive spacing="0.3125rem" />,
+};
+
+export const OwnedLoading: Story = {
+  args: { ...ownedArgs, status: 'loading', groups: [] },
+  render: (args) => <SheetFrame args={args} responsive />,
 };

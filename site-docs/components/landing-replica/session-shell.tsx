@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ChevronDown,
@@ -14,9 +15,735 @@ import {
 } from 'lucide-react';
 import { Button } from './button';
 import { AgentIcon, WorktreeIcon } from './icons';
-import { REPLICA_PR_STATUS_TEXT, ReplicaPrIcon } from './sidebar';
+import { REPLICA_PR_STATUS_STYLES, ReplicaPrIcon } from './sidebar';
 import type { ReplicaAgent, ReplicaLocale, ReplicaPrStatus } from './types';
-import { cn } from './utils';
+const sessionShellCompositionNative = stylex.create({
+  part1: {
+    position: 'relative',
+    display: 'flex',
+    width: '1px',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'transparent',
+    'transition-property': 'opacity',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  part2: {
+    ':is(*)::after': {
+      content: '""',
+      position: 'absolute',
+      'inset-block': '0px',
+      left: '0px',
+      width: '2px',
+      translate: '0px 0',
+    },
+  },
+  part3: {
+    ':is(*)::after': {
+      content: '""',
+      'transition-property':
+        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+      'transition-timing-function': 'var(--default-transition-timing-function)',
+      'transition-duration': '150ms',
+    },
+  },
+  part4: {
+    ':is(*)[data-resize-handle-state="hover"]::after': {
+      content: '""',
+      'background-color': 'color-mix(in oklab, hsl(var(--sidebar-ring)) 50%, transparent)',
+    },
+  },
+  part5: {
+    ':is(*)[data-resize-handle-state="hover"]::after': {
+      'transition-delay': '150ms',
+      content: '""',
+      'animation-delay': '.15s',
+    },
+  },
+  part6: {
+    ':is(*)[data-resize-handle-state="drag"]::after': {
+      content: '""',
+      'background-color': 'color-mix(in oklab, hsl(var(--sidebar-ring)) 70%, transparent)',
+    },
+  },
+  part7: {
+    opacity: '100%',
+  },
+  part8: {
+    'pointer-events': 'none',
+    opacity: '0%',
+  },
+});
+
+const sessionStatus = stylex.create({
+  desktop: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+  mobile: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  worktree: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+});
+const sessionShellComposition = stylex.create({
+  part1: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  part2: {
+    'container-type': 'inline-size',
+  },
+  part3: {
+    'min-width': '0px',
+    overflow: 'hidden',
+  },
+  part4: {
+    '@container (width >= 366px)': {
+      'min-width': 'var(--tab-active-min-width)',
+    },
+  },
+  part5: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    width: '100%',
+    'min-width': '0px',
+    cursor: 'default',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'transparent',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'font-size': '0.9em',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  part6: {
+    color: 'hsl(var(--tab-active-foreground))',
+  },
+  part7: {
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+    color: 'hsl(var(--tab-active-foreground))',
+  },
+  part8: {
+    'background-color':
+      'color-mix(in oklab, hsl(var(--foreground)) 3.5000000000000004%, transparent)',
+    color: 'hsl(var(--tab-inactive-foreground))',
+  },
+  part9: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    color: 'hsl(var(--muted-foreground))',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  part10: {
+    position: 'relative',
+    display: 'flex',
+    width: '1px',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'background-color': 'transparent',
+    'transition-property': 'opacity',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  part11: {
+    ':is(*)::after': {
+      content: '""',
+      position: 'absolute',
+      'inset-block': '0px',
+      left: '0px',
+      width: '2px',
+      translate: '0px 0',
+    },
+  },
+  part12: {
+    ':is(*)::after': {
+      content: '""',
+      'transition-property':
+        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+      'transition-timing-function': 'var(--default-transition-timing-function)',
+      'transition-duration': '150ms',
+    },
+  },
+  part13: {
+    ':is(*)[data-resize-handle-state="hover"]::after': {
+      content: '""',
+      'background-color': 'color-mix(in oklab, hsl(var(--sidebar-ring)) 50%, transparent)',
+    },
+  },
+  part14: {
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background))',
+    '@media (prefers-reduced-motion: reduce)': {
+      'transition-property': 'none',
+    },
+  },
+  part15: {
+    'transition-property': 'flex-grow,min-width',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  part16: {
+    height: '100%',
+    'transition-property': 'transform, translate, scale, rotate',
+    'transition-timing-function': 'cubic-bezier(0.32,0.72,0,1)',
+    'transition-duration': '220ms',
+    '@media (prefers-reduced-motion: reduce)': {
+      'transition-property': 'none',
+    },
+  },
+  part17: {
+    'pointer-events': 'none',
+    visibility: 'hidden',
+    translate: '100% 0',
+  },
+  part18: {
+    position: 'relative',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    'max-width': '180px',
+    'flex-shrink': '0',
+    cursor: 'default',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-md)',
+    'font-size': '0.9em',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '@container side-tabs (width < 420px)': {
+      'max-width': '175px',
+    },
+  },
+  part19: {
+    'padding-inline': 'calc(var(--spacing) * 3)',
+  },
+  part20: {
+    'padding-inline': 'calc(var(--spacing) * 2)',
+  },
+  part21: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  part22: {
+    'font-family': 'var(--font-mono)',
+  },
+  part23: {
+    'margin-left': 'auto',
+    'flex-shrink': '0',
+    'border-radius': 'var(--radius-sm)',
+    padding: 'calc(var(--spacing) * 0.5)',
+    'transition-property': 'opacity,background-color,color',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  part24: {
+    opacity: '100%',
+  },
+  part25: {
+    opacity: '0%',
+  },
+  part26: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'var(--spacing)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  part27: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'padding-inline': 'var(--spacing)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  part28: {
+    width: '100%',
+    'flex-shrink': '0',
+    'background-color': 'hsl(var(--background))',
+    'padding-bottom': 'calc(var(--spacing) * 2)',
+  },
+  part29: {
+    position: 'relative',
+    'z-index': '40',
+  },
+  part30: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'var(--spacing)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  part31: {
+    color: 'var(--color-emerald-600)',
+    ':is(*):where(.dark, .dark *)': {
+      color: 'var(--color-emerald-400)',
+    },
+  },
+});
+
+const sessionShellStylesNative = stylex.create({
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    color: 'hsl(var(--muted-foreground))',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    ':is(*):disabled': {
+      cursor: 'default',
+      opacity: '35%',
+    },
+  },
+  row2: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground))',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    'outline-style': 'none',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    ':is(*):where(.dark, .dark *)': {
+      color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+    },
+  },
+  row3: {
+    position: 'relative',
+    display: 'flex',
+    width: 'calc(var(--spacing) * 5)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'align-self': 'stretch',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 75%, transparent)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    'outline-style': 'none',
+    ':is(*)::before': {
+      content: '""',
+      position: 'absolute',
+      left: '0px',
+      height: 'calc(var(--spacing) * 3)',
+      width: '1px',
+      'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    },
+    ':is(*):where(.dark, .dark *)::before': {
+      content: '""',
+      'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 15%, transparent)',
+    },
+  },
+  row4: {
+    'margin-inline': 'calc(var(--spacing) * -1)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'min-width': '0px',
+    'flex-shrink': '1',
+    'align-items': 'center',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'var(--spacing)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 85%, transparent)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  row5: {
+    'margin-inline': 'calc(var(--spacing) * -1)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'var(--spacing)',
+    'font-variant-numeric': '   tabular-nums ',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    ':is(*):disabled': {
+      'pointer-events': 'none',
+    },
+  },
+});
+
+const sessionShellStyles = stylex.create({
+  row: {
+    'container-type': 'inline-size',
+    'container-name': 'session-page',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    'min-width': '0px',
+    'align-items': 'center',
+    'background-color': 'hsl(var(--background))',
+  },
+  row2: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    'max-height': '100%',
+    width: '100%',
+    'align-items': 'center',
+  },
+  row3: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+  },
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  row4: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+  },
+  glyph: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  row5: {
+    display: 'flex',
+    height: '100%',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    'padding-left': 'var(--spacing)',
+  },
+  frame: {
+    position: 'relative',
+    height: '100%',
+    width: '100%',
+  },
+  row6: {
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+  },
+  section: {
+    'min-width': '280px',
+    overflow: 'hidden',
+  },
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background))',
+  },
+  stack2: {
+    display: 'flex',
+    'min-height': '0px',
+    flex: '1',
+    'flex-direction': 'column',
+  },
+  frame2: {
+    'min-height': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  stack3: {
+    display: 'flex',
+    height: '100%',
+    'min-width': '0px',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-left-style': 'solid',
+    'border-left-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    'background-color': 'hsl(var(--background))',
+  },
+  glyph2: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    opacity: '70%',
+  },
+  row7: {
+    'container-type': 'inline-size',
+    'container-name': 'side-tabs',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 11)',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 50%, transparent)',
+    'background-color': 'hsl(var(--background))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+  },
+  section2: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  row8: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 10)',
+    width: 'max-content',
+    'min-width': '100%',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  label2: {
+    'flex-shrink': '0',
+  },
+  glyph3: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+  row9: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 3%, transparent)',
+    ':is(*):where(.dark, .dark *)': {
+      'border-color': 'transparent',
+      'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 8%, transparent)',
+    },
+  },
+  glyph4: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  frame3: {
+    height: 'var(--spacing)',
+    width: '100%',
+    'flex-shrink': '0',
+  },
+  row10: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'padding-inline': 'var(--spacing)',
+    color: 'hsl(var(--muted-foreground))',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  label3: {
+    display: 'none',
+    'flex-shrink': '0',
+    'font-variant-numeric': '   tabular-nums ',
+    '@container (width >= 420px)': {
+      display: 'inline',
+    },
+  },
+  row11: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'padding-inline': 'var(--spacing)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  glyph5: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+  },
+  row12: {
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'font-weight': 'var(--font-weight-normal)',
+  },
+  label4: {
+    'min-width': '0px',
+    'flex-shrink': '2',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  label5: {
+    color: 'hsl(var(--code-added))',
+  },
+  label6: {
+    color: 'hsl(var(--code-removed))',
+  },
+  frame4: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '46rem',
+    'padding-inline': '14px',
+    '@media (width >= 40rem)': {
+      'padding-inline': '18px',
+    },
+  },
+  row13: {
+    'container-type': 'inline-size',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    width: '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '0.5px',
+    'border-color': 'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    'background-color': 'hsl(var(--composer))',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0.5px 1px 1px rgba(0,0,0,0.04)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+    ':is(*):where(.dark, .dark *)': {
+      'border-color': 'color-mix(in oklab, hsl(var(--input-border)) 45%, transparent)',
+      'background-color': 'color-mix(in oklab, hsl(var(--input)) 70%, transparent)',
+      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+    },
+  },
+  surface: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: '1px',
+    'flex-shrink': '0',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted-foreground)) 25%, transparent)',
+  },
+  row14: {
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+  },
+  row15: {
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+  },
+  row16: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    'min-width': '0px',
+    flex: '1',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'var(--spacing)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  label7: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'left',
+  },
+});
+
+const buttonStyles = stylex.create({
+  tabAgent: { height: 'calc(var(--spacing) * 3)', width: 'calc(var(--spacing) * 3)', opacity: 0.6 },
+  control: {
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  closedPanel: { marginRight: 9 },
+});
 
 /* Display-only replicas of the desktop session shell (`sessions/`): the merged
    top row (`SessionTabBar variant="session"` + toolbar), the resizable
@@ -65,10 +792,9 @@ const SHELL_COPY: Record<
 };
 
 // Shared by the session tabs and the right-panel tabs (`TAB_PILL_*_CLASS`).
-const TAB_PILL_ACTIVE_CLASS = 'bg-foreground/[0.08] text-tab-active-foreground';
-const TAB_PILL_INACTIVE_CLASS = 'bg-foreground/[0.035] text-tab-inactive-foreground';
-const TAB_BAR_ACTION_CLASS =
-  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors';
+const tabPillActiveStyle = sessionShellComposition.part7;
+const tabPillInactiveStyle = sessionShellComposition.part8;
+const tabBarActionStyle = sessionShellComposition.part9;
 
 // ---- Session tab bar ---------------------------------------------------------
 
@@ -89,15 +815,18 @@ export function ReplicaSessionTabBar({
   // A lone tab spans the whole row, so it drops the active fill.
   const solo = tabs.length === 1;
   return (
-    <div className="@container/session-page flex h-11 min-w-0 items-center bg-background">
+    <div {...stylex.props(sessionShellStyles.row)}>
       <div
-        className={cn('min-w-0 flex-1 overflow-hidden', tabs.length > 1 && '@container')}
+        {...stylex.props([
+          sessionShellComposition.part1,
+          tabs.length > 1 && sessionShellComposition.part2,
+        ])}
         data-adaptive-tab-strip-viewport=""
       >
         <div
           role="tablist"
           aria-label={copy.sessionTabs}
-          className="flex h-11 max-h-full w-full items-center"
+          {...stylex.props(sessionShellStyles.row2)}
           style={{ boxSizing: 'border-box', paddingLeft: 8, paddingRight: 8 }}
         >
           {tabs.map((tab, index) => {
@@ -105,10 +834,10 @@ export function ReplicaSessionTabBar({
             return (
               <div
                 key={tab.id}
-                className={cn(
-                  'min-w-0 overflow-hidden',
-                  active && !solo && '@[366px]:min-w-(--tab-active-min-width)'
-                )}
+                {...stylex.props([
+                  sessionShellComposition.part3,
+                  active && !solo && sessionShellComposition.part4,
+                ])}
                 style={{
                   flex: '1 1 0',
                   marginRight: index === tabs.length - 1 ? 0 : 6,
@@ -119,33 +848,38 @@ export function ReplicaSessionTabBar({
                   role="tab"
                   aria-selected={active}
                   aria-label={tab.title}
-                  className={cn(
-                    'group relative flex h-8 w-full min-w-0 cursor-default items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors',
-                    solo
-                      ? 'text-tab-active-foreground'
-                      : active
-                        ? TAB_PILL_ACTIVE_CLASS
-                        : TAB_PILL_INACTIVE_CLASS
-                  )}
+                  className={[
+                    stylex.props([
+                      sessionShellComposition.part5,
+                      solo
+                        ? sessionShellComposition.part6
+                        : active
+                          ? tabPillActiveStyle
+                          : tabPillInactiveStyle,
+                    ]).className,
+                    'group',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
-                  <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
-                    <AgentIcon agent={tab.agent} className="h-3 w-3 opacity-60" />
+                  <span {...stylex.props(sessionShellStyles.row3)}>
+                    <AgentIcon agent={tab.agent} xstyle={buttonStyles.tabAgent} />
                   </span>
-                  <span className="truncate">{tab.title}</span>
+                  <span {...stylex.props(sessionShellStyles.label)}>{tab.title}</span>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
-      <div className="flex shrink-0 items-center">
+      <div {...stylex.props(sessionShellStyles.row4)}>
         <button
           type="button"
           tabIndex={-1}
-          className={TAB_BAR_ACTION_CLASS}
+          {...stylex.props(tabBarActionStyle)}
           aria-label={copy.newTab}
         >
-          <Plus className="h-4 w-4" />
+          <Plus {...stylex.props(sessionShellStyles.glyph)} />
         </button>
         {rightSlot}
       </div>
@@ -171,9 +905,9 @@ export function ReplicaPanelToggle({
       tabIndex={-1}
       data-demo="toggle-panel"
       aria-label={panelOpen ? copy.hidePanel : copy.showPanel}
-      className={cn('h-7 w-7 shrink-0 text-muted-foreground', !panelOpen && 'mr-[9px]')}
+      xstyle={[buttonStyles.control, !panelOpen && buttonStyles.closedPanel]}
     >
-      <PanelRight className="h-4 w-4" />
+      <PanelRight />
     </Button>
   );
 }
@@ -188,24 +922,24 @@ export function ReplicaSessionToolbar({
 }) {
   const copy = SHELL_COPY[locale];
   return (
-    <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
+    <div data-power-demo-layout="fill" {...stylex.props(sessionShellStyles.row5)}>
       <Button
         variant="ghost"
         size="icon"
         tabIndex={-1}
-        className="h-7 w-7 shrink-0 text-muted-foreground"
+        xstyle={buttonStyles.control}
         aria-label={copy.openInEditor}
       >
-        <SquareTerminal className="h-4 w-4" />
+        <SquareTerminal />
       </Button>
       <Button
         variant="ghost"
         size="icon"
         tabIndex={-1}
-        className="h-7 w-7 shrink-0 text-muted-foreground"
+        xstyle={buttonStyles.control}
         aria-label={copy.moreActions}
       >
-        <Ellipsis className="h-4 w-4" />
+        <Ellipsis />
       </Button>
       {panelOpen ? null : <ReplicaPanelToggle locale={locale} panelOpen={false} />}
     </div>
@@ -333,22 +1067,28 @@ export function ReplicaSessionLayout({
   const size = panelOpen ? panelPercent : 0;
 
   return (
-    <div className="relative h-full w-full">
+    <div {...stylex.props(sessionShellStyles.frame)}>
       <div
         ref={groupRef}
         data-slot="resizable-panel-group"
         data-panel-group-direction="horizontal"
-        className="flex h-full w-full"
+        data-power-demo-layout="fill"
+        {...stylex.props(sessionShellStyles.row6)}
       >
         <div
           data-slot="resizable-panel"
-          className="min-w-[280px] overflow-hidden"
+          {...stylex.props(sessionShellStyles.section)}
           style={{ flex: `${100 - size} 1 0px` }}
         >
-          <div className="group/close-scope flex h-full flex-col bg-background">
+          <div
+            data-power-demo-layout="fill"
+            className={[stylex.props(sessionShellStyles.stack).className, 'group/close-scope']
+              .filter(Boolean)
+              .join(' ')}
+          >
             {topBar}
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-hidden">{chat}</div>
+            <div data-power-demo-layout="fill" {...stylex.props(sessionShellStyles.stack2)}>
+              <div {...stylex.props(sessionShellStyles.frame2)}>{chat}</div>
             </div>
           </div>
         </div>
@@ -359,24 +1099,24 @@ export function ReplicaSessionLayout({
           data-panel-group-direction="horizontal"
           data-resize-handle-state={handleState}
           aria-hidden="true"
-          className={cn(
-            'relative flex w-px items-center justify-center bg-transparent transition-opacity',
-            'after:absolute after:inset-y-0 after:left-0 after:w-[2px] after:translate-x-0',
-            'after:transition-colors after:duration-150',
-            'data-[resize-handle-state=hover]:after:bg-sidebar-ring/50',
-            'data-[resize-handle-state=hover]:after:delay-150',
-            'data-[resize-handle-state=drag]:after:bg-sidebar-ring/70',
-            panelOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
-          )}
+          {...stylex.props([
+            sessionShellCompositionNative.part1,
+            sessionShellCompositionNative.part2,
+            sessionShellCompositionNative.part3,
+            sessionShellCompositionNative.part4,
+            sessionShellCompositionNative.part5,
+            sessionShellCompositionNative.part6,
+            panelOpen ? sessionShellCompositionNative.part7 : sessionShellCompositionNative.part8,
+          ])}
           style={{ transitionDuration: '220ms' }}
         />
 
         <div
           data-slot="resizable-panel"
-          className={cn(
-            'overflow-hidden bg-background motion-reduce:transition-none',
-            !isDragging && 'transition-[flex-grow,min-width]'
-          )}
+          {...stylex.props([
+            sessionShellComposition.part14,
+            !isDragging && sessionShellComposition.part15,
+          ])}
           style={{
             flex: `${size} 1 0px`,
             minWidth: panelOpen ? PANEL_MIN_WIDTH_PX : 0,
@@ -386,12 +1126,17 @@ export function ReplicaSessionLayout({
         >
           <div
             aria-hidden={!panelOpen}
-            className={cn(
-              'h-full transition-transform duration-[220ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
-              !panelOpen && 'pointer-events-none invisible translate-x-full'
-            )}
+            {...stylex.props([
+              sessionShellComposition.part16,
+              !panelOpen && sessionShellComposition.part17,
+            ])}
           >
-            <div className="group/close-scope flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background">
+            <div
+              data-power-demo-layout="fill"
+              className={[stylex.props(sessionShellStyles.stack3).className, 'group/close-scope']
+                .filter(Boolean)
+                .join(' ')}
+            >
               {panel}
             </div>
           </div>
@@ -413,14 +1158,14 @@ export type ReplicaSidePanelTab = {
 function SidePanelTabIcon({ kind }: { kind: ReplicaSidePanelTab['kind'] }) {
   switch (kind) {
     case 'files':
-      return <Files className="h-3.5 w-3.5 opacity-70" />;
+      return <Files {...stylex.props(sessionShellStyles.glyph2)} />;
     case 'changes':
     case 'diff':
-      return <FileDiff className="h-3.5 w-3.5 opacity-70" />;
+      return <FileDiff {...stylex.props(sessionShellStyles.glyph2)} />;
     case 'pr':
-      return <GitPullRequest className="h-3.5 w-3.5 opacity-70" />;
+      return <GitPullRequest {...stylex.props(sessionShellStyles.glyph2)} />;
     case 'browser':
-      return <MonitorPlay className="h-3.5 w-3.5 opacity-70" />;
+      return <MonitorPlay {...stylex.props(sessionShellStyles.glyph2)} />;
     default:
       return null;
   }
@@ -439,9 +1184,9 @@ export function ReplicaSidePanelTabBar({
 }) {
   const copy = SHELL_COPY[locale];
   return (
-    <div className="@container/side-tabs flex h-11 min-w-0 items-center gap-1 border-b border-border/50 bg-background px-2">
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <div role="tablist" className="flex h-10 w-max min-w-full items-center gap-1.5">
+    <div {...stylex.props(sessionShellStyles.row7)}>
+      <div {...stylex.props(sessionShellStyles.section2)}>
+        <div role="tablist" {...stylex.props(sessionShellStyles.row8)}>
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
             return (
@@ -449,17 +1194,25 @@ export function ReplicaSidePanelTabBar({
                 key={tab.id}
                 role="tab"
                 aria-selected={active}
-                className={cn(
-                  'group relative flex h-7 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 rounded-md text-[0.9em] transition-colors @max-[420px]/side-tabs:max-w-[175px]',
-                  tab.closeable ? 'px-3' : 'px-2',
-                  active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS
-                )}
+                className={[
+                  stylex.props([
+                    sessionShellComposition.part18,
+                    tab.closeable ? sessionShellComposition.part19 : sessionShellComposition.part20,
+                    active ? tabPillActiveStyle : tabPillInactiveStyle,
+                  ]).className,
+                  'group',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
               >
-                <span className="shrink-0">
+                <span {...stylex.props(sessionShellStyles.label2)}>
                   <SidePanelTabIcon kind={tab.kind} />
                 </span>
                 <span
-                  className={cn('truncate', tab.closeable && tab.kind === 'diff' && 'font-mono')}
+                  {...stylex.props([
+                    sessionShellComposition.part21,
+                    tab.closeable && tab.kind === 'diff' && sessionShellComposition.part22,
+                  ])}
                 >
                   {tab.label}
                 </span>
@@ -468,12 +1221,12 @@ export function ReplicaSidePanelTabBar({
                     type="button"
                     tabIndex={-1}
                     aria-label={copy.closeTab(tab.label)}
-                    className={cn(
-                      'ml-auto shrink-0 rounded-sm p-0.5 transition-[opacity,background-color,color]',
-                      active ? 'opacity-100' : 'opacity-0'
-                    )}
+                    {...stylex.props([
+                      sessionShellComposition.part23,
+                      active ? sessionShellComposition.part24 : sessionShellComposition.part25,
+                    ])}
                   >
-                    <X className="h-3 w-3" />
+                    <X {...stylex.props(sessionShellStyles.glyph3)} />
                   </button>
                 ) : null}
               </div>
@@ -486,11 +1239,11 @@ export function ReplicaSidePanelTabBar({
         type="button"
         disabled
         aria-label={copy.addPanel}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors disabled:cursor-default disabled:opacity-35"
+        {...stylex.props(sessionShellStylesNative.row)}
       >
-        <Plus className="h-4 w-4" />
+        <Plus {...stylex.props(sessionShellStyles.glyph)} />
       </button>
-      {endSlot ? <div className="flex shrink-0 items-center">{endSlot}</div> : null}
+      {endSlot ? <div {...stylex.props(sessionShellStyles.row4)}>{endSlot}</div> : null}
     </div>
   );
 }
@@ -499,8 +1252,7 @@ export function ReplicaSidePanelTabBar({
 
 export type ReplicaInfoBarAction = { id: string; label: string };
 
-const CHIP_BUTTON_CLASS =
-  'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs transition-colors';
+const infoChipStyle = sessionShellComposition.part30;
 
 function InfoBarActions({
   actions,
@@ -512,14 +1264,14 @@ function InfoBarActions({
   const [primary, ...overflow] = actions;
   if (!primary) return null;
   return (
-    <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
+    <div {...stylex.props(sessionShellStyles.row9)}>
       <button
         type="button"
         tabIndex={-1}
         title={primary.label}
-        className="flex shrink-0 select-none items-center px-1.5 py-0.5 text-xs font-medium text-muted-foreground outline-none transition-colors dark:text-muted-foreground/80"
+        {...stylex.props(sessionShellStylesNative.row2)}
       >
-        <span className="truncate">{primary.label}</span>
+        <span {...stylex.props(sessionShellStyles.label)}>{primary.label}</span>
       </button>
       {overflow.length > 0 ? (
         <button
@@ -527,9 +1279,9 @@ function InfoBarActions({
           tabIndex={-1}
           aria-label={moreActionsLabel}
           title={moreActionsLabel}
-          className="relative flex w-5 shrink-0 items-center justify-center self-stretch text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 dark:before:bg-muted-foreground/15"
+          {...stylex.props(sessionShellStylesNative.row3)}
         >
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          <ChevronDown {...stylex.props(sessionShellStyles.glyph4)} aria-hidden="true" />
         </button>
       ) : null}
     </div>
@@ -578,20 +1330,20 @@ export function ReplicaSessionInfoBar({
 
   // No items and no standalone action: the bar hides and keeps a 4px gap.
   if (!hasContext && !showBrowserAction) {
-    return <div aria-hidden="true" className="h-1 w-full shrink-0" />;
+    return <div aria-hidden="true" {...stylex.props(sessionShellStyles.frame3)} />;
   }
 
   const locationGlyph =
     projectKind === 'local' && worktree ? (
-      <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
-        <WorktreeIcon className="h-3.5 w-3.5 shrink-0" />
+      <span {...stylex.props(sessionShellStyles.row10)}>
+        <WorktreeIcon {...stylex.props(sessionStatus.worktree)} />
       </span>
     ) : null;
 
   const prFace = pr ? (
     <>
       <ReplicaPrIcon status={pr.status} />
-      <span className="hidden shrink-0 tabular-nums @[420px]:inline">#{pr.number}</span>
+      <span {...stylex.props(sessionShellStyles.label3)}>#{pr.number}</span>
     </>
   ) : null;
   const prControl = pr ? (
@@ -599,43 +1351,29 @@ export function ReplicaSessionInfoBar({
       <button
         type="button"
         tabIndex={-1}
-        className={cn(
-          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-semibold transition-colors',
-          REPLICA_PR_STATUS_TEXT[pr.status]
-        )}
+        {...stylex.props(sessionStatus.desktop, REPLICA_PR_STATUS_STYLES[pr.status])}
       >
         {prFace}
       </button>
     ) : (
-      <span
-        className={cn(
-          'flex h-6 shrink-0 items-center gap-1 px-1 font-semibold',
-          REPLICA_PR_STATUS_TEXT[pr.status]
-        )}
-      >
+      <span {...stylex.props(sessionStatus.mobile, REPLICA_PR_STATUS_STYLES[pr.status])}>
         {prFace}
       </span>
     )
   ) : null;
 
   const iconBadge = prControl ?? locationGlyph ?? (
-    <span className="flex h-6 shrink-0 select-none items-center gap-1 px-1 text-xs text-muted-foreground">
-      <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <span {...stylex.props(sessionShellStyles.row11)}>
+      <GitBranch {...stylex.props(sessionShellStyles.glyph5)} aria-hidden="true" />
     </span>
   );
 
   const summary = (
-    <span className="flex min-w-0 items-center gap-2 font-normal">
-      {project ? (
-        <span className="min-w-0 shrink-[2] truncate text-muted-foreground">{project}</span>
-      ) : null}
+    <span {...stylex.props(sessionShellStyles.row12)}>
+      {project ? <span {...stylex.props(sessionShellStyles.label4)}>{project}</span> : null}
       {trimmedBranch ? (
-        <button
-          type="button"
-          tabIndex={-1}
-          className="-mx-1 flex h-6 min-w-0 shrink items-center rounded-md px-1 text-foreground/85 transition-colors"
-        >
-          <span className="truncate">{trimmedBranch}</span>
+        <button type="button" tabIndex={-1} {...stylex.props(sessionShellStylesNative.row4)}>
+          <span {...stylex.props(sessionShellStyles.label)}>{trimmedBranch}</span>
         </button>
       ) : null}
       {hasDiff ? (
@@ -644,19 +1382,24 @@ export function ReplicaSessionInfoBar({
           tabIndex={-1}
           disabled={!isDesktop}
           aria-label={copy.allChanges}
-          className="-mx-1 flex h-6 shrink-0 items-center gap-1 rounded-md px-1 tabular-nums transition-colors disabled:pointer-events-none"
+          {...stylex.props(sessionShellStylesNative.row5)}
         >
-          <span className="text-code-added">+{diffStat.add}</span>
-          <span className="text-code-removed">−{diffStat.del}</span>
+          <span {...stylex.props(sessionShellStyles.label5)}>+{diffStat.add}</span>
+          <span {...stylex.props(sessionShellStyles.label6)}>−{diffStat.del}</span>
         </button>
       ) : null}
     </span>
   );
 
   return (
-    <div className={cn('w-full shrink-0 bg-background pb-2', !isDesktop && 'relative z-40')}>
-      <div className="mx-auto w-full max-w-[46rem] px-[14px] sm:px-[18px]">
-        <div className="@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] dark:border-input-border/45 dark:bg-input/70 dark:shadow-none">
+    <div
+      {...stylex.props([
+        sessionShellComposition.part28,
+        !isDesktop && sessionShellComposition.part29,
+      ])}
+    >
+      <div {...stylex.props(sessionShellStyles.frame4)}>
+        <div {...stylex.props(sessionShellStyles.row13)}>
           {showBrowserAction ? (
             // The ghost demo targets `button[aria-label="Browser"]` in every locale.
             <button
@@ -664,21 +1407,21 @@ export function ReplicaSessionInfoBar({
               tabIndex={-1}
               aria-label="Browser"
               title={copy.browser}
-              className={cn(CHIP_BUTTON_CLASS, 'text-emerald-600 dark:text-emerald-400')}
+              {...stylex.props([infoChipStyle, sessionShellComposition.part31])}
             >
-              <MonitorPlay className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <MonitorPlay {...stylex.props(sessionShellStyles.glyph5)} aria-hidden="true" />
             </button>
           ) : null}
           {hasContext && showBrowserAction ? (
-            <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
+            <span aria-hidden="true" {...stylex.props(sessionShellStyles.surface)} />
           ) : null}
           {hasContext ? (
-            <div className="flex min-w-0 flex-1 items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-1">
+            <div {...stylex.props(sessionShellStyles.row14)}>
+              <div {...stylex.props(sessionShellStyles.row15)}>
                 {iconBadge}
                 {pr ? locationGlyph : null}
-                <span className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md px-1 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
+                <span {...stylex.props(sessionShellStyles.row16)}>
+                  <span {...stylex.props(sessionShellStyles.label7)}>{summary}</span>
                 </span>
                 {actions.length ? (
                   <InfoBarActions actions={actions} moreActionsLabel={copy.moreActions} />

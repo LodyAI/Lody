@@ -40,9 +40,8 @@ import {
 } from './share-attachments';
 import { SessionShareErrorBoundary } from './session-share-error-boundary';
 import { Button } from '@lody/ui/button';
-import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
+import { TabPillStrip, tabPillStyles } from '@/components/shared/tab-pill-strip';
 import { Drawer } from '@lody/ui/drawer';
-import { cn } from '@/lib/utils';
 import { shareSurface } from './surface';
 import { clamp } from '@/lib/clamp';
 import { useTheme } from '@/theme-provider';
@@ -77,6 +76,19 @@ const styles = stylex.create({
   },
   tabStrip: { minWidth: 0, overflowX: 'auto' },
   tabItem: { flexShrink: 0, maxWidth: '224px' },
+  soloTab: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    fontSize: '0.9em',
+    fontWeight: 'var(--font-weight-medium)',
+  },
   paneNote: {
     margin: 0,
     padding: space[8],
@@ -393,14 +405,8 @@ function ShareConversationPane({
             itemClassName={stylex.props(styles.tabItem).className}
           />
         ) : (
-          // A solo conversation is the strip's own active pill, so it keeps the
-          // strip's classes (still Tailwind in `tab-pill-strip.tsx`) to match it.
-          <span
-            className={cn(
-              'flex h-8 min-w-0 items-center rounded-md border border-transparent px-3 text-[0.9em] font-medium',
-              TAB_PILL_ACTIVE_CLASS
-            )}
-          >
+          // A solo conversation uses the strip's active surface and local spacing.
+          <span {...stylex.props(styles.soloTab, tabPillStyles.active)}>
             <span {...stylex.props(shareSurface.buttonLabel)}>{title}</span>
           </span>
         )}

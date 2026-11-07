@@ -1,8 +1,89 @@
 import type { ReactNode } from 'react';
 import { Archive, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeFontWeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** The screen: a column of a fixed header and a scrolling body. */
+  screen: {
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    minWidth: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+  },
+  /** The header: the safe-area height plus the bar's own height. */
+  header: {
+    display: 'flex',
+    height: 'calc(56px + var(--safe-area-top))',
+    width: '100%',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[3],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: themeColors.border,
+    backgroundColor: themeColors.background,
+    paddingLeft: 'calc(16px + var(--safe-area-left))',
+    paddingRight: 'calc(16px + var(--safe-area-right))',
+    paddingTop: 'var(--safe-area-top)',
+  },
+  /** The selection count, quiet beside the actions. */
+  count: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  /** The space between the count and the actions. */
+  spacer: { flexGrow: 1 },
+  /** The archive's name and its mark. */
+  titleGroup: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  title: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+  },
+  icon: { height: themeSpace[4], width: themeSpace[4] },
+  iconMuted: { height: themeSpace[4], width: themeSpace[4], color: themeColors.mutedForeground },
+  smallIcon: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  /** The body: the list the archive shows. */
+  body: {
+    display: 'flex',
+    minHeight: 0,
+    width: '100%',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  /** Said to a screen reader and to nobody else. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});
 
 export type MobileArchiveScreenProps = {
   isMultiSelectMode: boolean;
@@ -40,20 +121,22 @@ export function MobileArchiveScreen({
 
   return (
     <Tooltip.Provider>
-      <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-background">
-        <header className="flex h-[calc(56px+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]">
+      <div {...stylex.props(styles.screen)}>
+        <header {...stylex.props(styles.header)}>
           {isMultiSelectMode ? (
             <>
               <Button variant="ghost" size="large" icon onClick={onExitMultiSelect}>
-                <X className="h-4 w-4" />
-                <span className="sr-only">{t('archive.multiSelect.exit', 'Exit selection')}</span>
+                <X {...stylex.props(styles.icon)} />
+                <span {...stylex.props(styles.srOnly)}>
+                  {t('archive.multiSelect.exit', 'Exit selection')}
+                </span>
               </Button>
-              <span className="text-sm text-muted-foreground">
+              <span {...stylex.props(styles.count)}>
                 {t('archive.multiSelect.selected', '{{count}} selected', {
                   count: selectedCount,
                 })}
               </span>
-              <div className="flex-1" />
+              <div {...stylex.props(styles.spacer)} />
               <Button
                 variant="secondary"
                 size="small"
@@ -61,7 +144,7 @@ export function MobileArchiveScreen({
                 title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
                 onClick={onBulkRestore}
               >
-                <Undo2 className="h-3.5 w-3.5" />
+                <Undo2 {...stylex.props(styles.smallIcon)} />
                 {t('archive.multiSelect.restore', 'Restore')}
               </Button>
               <Button
@@ -70,27 +153,25 @@ export function MobileArchiveScreen({
                 disabled={selectedCount === 0 || isBulkActionBusy}
                 onClick={onRequestBulkDelete}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 {...stylex.props(styles.smallIcon)} />
                 {t('archive.multiSelect.delete', 'Delete')}
               </Button>
             </>
           ) : (
             <>
               <Button variant="ghost" size="large" icon onClick={onOpenMobileDrawer}>
-                <PanelLeft className="h-4 w-4" />
-                <span className="sr-only">Open sidebar</span>
+                <PanelLeft {...stylex.props(styles.icon)} />
+                <span {...stylex.props(styles.srOnly)}>Open sidebar</span>
               </Button>
-              <div className="flex items-center gap-2">
-                <Archive className="h-4 w-4 text-muted-foreground" />
-                <h1 className="text-sm font-semibold">{t('archive.title', 'Archive')}</h1>
+              <div {...stylex.props(styles.titleGroup)}>
+                <Archive {...stylex.props(styles.iconMuted)} />
+                <h1 {...stylex.props(styles.title)}>{t('archive.title', 'Archive')}</h1>
               </div>
             </>
           )}
         </header>
 
-        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-          {children}
-        </div>
+        <div {...stylex.props(styles.body)}>{children}</div>
         {dialogs}
       </div>
     </Tooltip.Provider>

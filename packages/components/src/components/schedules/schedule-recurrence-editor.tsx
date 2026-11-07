@@ -1,6 +1,8 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import * as stylex from '@stylexjs/stylex';
 import {
   SCHEDULE_CUSTOM_HOURS_MAX,
   SCHEDULE_CUSTOM_MINUTES_MAX,
@@ -18,17 +20,101 @@ import {
 } from '@lody/shared';
 import { NumberField } from '@lody/ui/number-field';
 import { Select } from '@lody/ui/select';
-import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
-import { PropertyRow, ghostValueClass } from './schedule-property-row';
+import { PropertyRow, ghostValueStyles } from './schedule-property-row';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
-/**
- * Time and date are typed, not picked: the browser's picker button is hidden,
- * so the field is only its editable segments (hours, minutes, …). Chromium is
- * the product runtime; its `calendar-picker-indicator` is also what opens the
- * popup on click, so hiding it removes the picker entirely.
- */
-const manualTimeInputClass = 'w-auto tabular-nums [&::-webkit-calendar-picker-indicator]:hidden';
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  stepRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[2],
+  },
+  stepField: { width: 'calc(var(--spacing) * 20)', flexShrink: 0 },
+  numeric: { fontVariantNumeric: 'tabular-nums' },
+  stepUnit: { flexShrink: 0, fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
+  days: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: themeSpace[1] },
+  dateGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+    justifyItems: 'end',
+  },
+  day: {
+    width: themeSpace[7],
+    height: themeSpace[7],
+    borderRadius: themeRadius.md,
+    fontSize: '0.8em',
+    fontWeight: themeFontWeight.normal,
+    fontVariantNumeric: 'tabular-nums',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: { default: null, ':disabled': control.disabledOpacity },
+  },
+  selectedDay: { backgroundColor: themeColors.primary, color: themeColors.primaryForeground },
+  unselectedDay: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.04)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 0.08)' },
+      [DARK_SCOPE]: {
+        default: '#ffffff0d',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, var(--color-white) 5%, transparent)',
+        ':hover': {
+          default: '#ffffff0d',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, var(--color-white) 5%, transparent)',
+          '@media (hover: hover)': {
+            default: '#ffffff1a',
+            '@supports (color: color-mix(in lab, red, red))':
+              'color-mix(in oklab, var(--color-white) 10%, transparent)',
+          },
+        },
+      },
+    },
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
+  },
+  reveal: { overflow: 'hidden' },
+  unsupported: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  unsupportedSummary: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.9em',
+    color: themeColors.foreground,
+  },
+  replace: {
+    flexShrink: 0,
+    fontSize: '0.9em',
+    color: themeColors.primary,
+    textUnderlineOffset: '2px',
+    '@media (hover: hover)': { ':hover': { textDecorationLine: 'underline' } },
+    ':disabled': { opacity: control.disabledOpacity },
+  },
+  // In Chromium the indicator also opens the picker; hiding it leaves only
+  // the editable segments for both time and date-time fields.
+  manualTimeInput: {
+    width: 'auto',
+    fontVariantNumeric: 'tabular-nums',
+    '::-webkit-calendar-picker-indicator': { display: 'none' },
+  },
+});
 
 /** The "Every" menu's last entry; selecting it reveals a typed number. */
 const CUSTOM_STEP = 'custom';
@@ -49,12 +135,7 @@ function DayToggles({
 }) {
   const selected = new Set(values);
   return (
-    <div
-      className={cn(
-        'flex flex-wrap justify-end gap-1',
-        grid && 'grid grid-cols-7 justify-items-end'
-      )}
-    >
+    <div {...stylex.props(styles.days, grid && styles.dateGrid)}>
       {options.map((option) => {
         const on = selected.has(option.value);
         return (
@@ -71,12 +152,7 @@ function DayToggles({
                   : [...values, option.value].sort((a, b) => a - b)
               )
             }
-            className={cn(
-              'size-7 rounded-md text-[0.8em] font-normal tabular-nums transition-colors disabled:opacity-50',
-              on
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground dark:bg-white/[0.05] dark:hover:bg-white/[0.10]'
-            )}
+            {...stylex.props(styles.day, on ? styles.selectedDay : styles.unselectedDay)}
           >
             {option.short}
           </button>
@@ -103,7 +179,7 @@ function Reveal({ id, children }: { id: string; children: React.ReactNode }) {
       animate={{ height: 'auto', opacity: 1 }}
       exit={reduce ? undefined : { height: 0, opacity: 0 }}
       transition={{ duration: 0.18, ease: 'easeOut' }}
-      className="overflow-hidden"
+      {...stylex.props(styles.reveal)}
     >
       {children}
     </motion.div>
@@ -186,14 +262,14 @@ export function ScheduleRecurrenceEditor({
           'This rule was created with an older version and can no longer be edited here. Replace it to change it.'
         )}
       >
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[0.9em] text-foreground">
+        <div {...stylex.props(styles.unsupported)}>
+          <span {...stylex.props(styles.unsupportedSummary)}>
             {describeRecurrence(value, t, i18n.language)}
           </span>
           <button
             type="button"
             disabled={disabled}
-            className="shrink-0 text-[0.9em] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+            {...stylex.props(styles.replace)}
             onClick={() => onChange(changeScheduleRecurrenceKind(value, 'daily', now, timeZone))}
           >
             {t('schedules.repeat.replace', 'Replace')}
@@ -245,11 +321,11 @@ export function ScheduleRecurrenceEditor({
         {value.kind === 'minutes' || value.kind === 'hours' ? (
           <Reveal key="every" id="every">
             <PropertyRow label={t('schedules.repeat.every', 'Every')}>
-              <div className="flex min-w-0 items-center justify-end gap-2">
+              <div {...stylex.props(styles.stepRow)}>
                 {isCustomStep ? (
                   <>
                     <NumberField.Root
-                      className="w-20 shrink-0"
+                      className={stylex.props(styles.stepField).className}
                       value={value.every}
                       min={1}
                       max={
@@ -268,7 +344,7 @@ export function ScheduleRecurrenceEditor({
                     >
                       <NumberField.Input
                         size="small"
-                        className="tabular-nums"
+                        className={stylex.props(styles.numeric).className}
                         aria-label={
                           value.kind === 'minutes'
                             ? t('schedules.repeat.customMinutes', 'Number of minutes')
@@ -276,7 +352,7 @@ export function ScheduleRecurrenceEditor({
                         }
                       />
                     </NumberField.Root>
-                    <span className="shrink-0 text-[0.9em] text-muted-foreground">
+                    <span {...stylex.props(styles.stepUnit)}>
                       {value.kind === 'minutes'
                         ? t('schedules.repeat.unitMinutes', 'minutes')
                         : t('schedules.repeat.unitHours', 'hours')}
@@ -365,7 +441,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.at', 'At')}
-                className={cn(ghostValueClass, manualTimeInputClass)}
+                {...stylex.props(ghostValueStyles, styles.manualTimeInput)}
                 value={timeValue}
                 onChange={(event) => {
                   const [hour, minute] = event.target.value.split(':');
@@ -385,7 +461,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.runAt', 'Run at')}
-                className={cn(ghostValueClass, manualTimeInputClass)}
+                {...stylex.props(ghostValueStyles, styles.manualTimeInput)}
                 value={instantToZonedLocalInput(Date.parse(value.at), timeZone)}
                 onChange={(event) => {
                   const at = zonedLocalInputToInstant(event.target.value, timeZone);

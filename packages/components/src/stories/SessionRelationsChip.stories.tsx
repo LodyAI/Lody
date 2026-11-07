@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useState } from 'react';
@@ -14,6 +15,32 @@ import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { SessionRelationsChip } from '@/components/sessions/session-relations-chip';
 import { buildSessionRelationTree } from '@/lib/session-relation-tree';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 14)',
+    borderRadius: 'var(--radius-lg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-width': '100%',
+    'flex-direction': 'column',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 60)',
+  },
+});
 
 const machineId = 'machine-1' as MachineId;
 const NOW = Date.parse('2026-09-25T08:00:00.000Z');
@@ -102,9 +129,9 @@ function StoryHarness({
   tree.session = { ...tree.session, collaborationStopped: stopped };
   return (
     <Provider store={store}>
-      <div className="flex max-w-full flex-col" style={{ width: 720 }}>
+      <div {...stylex.props(storyLayout.stack)} style={{ width: 720 }}>
         {/* Room above the bar so the popover (side=top) stays visible. */}
-        <div className="h-60" />
+        <div {...stylex.props(storyLayout.frame)} />
         <SessionInfoBar
           status={null}
           projectName="LodyAI/Lody"
@@ -121,9 +148,7 @@ function StoryHarness({
             />
           }
         />
-        <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          (composer placeholder)
-        </div>
+        <div {...stylex.props(storyLayoutStyles.frame)}>(composer placeholder)</div>
       </div>
     </Provider>
   );

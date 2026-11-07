@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * Docs-owned, display-only previews for the slash-command and mention reference
  * pages. These replace the static `_docs-assets/slash.png`,
@@ -49,15 +50,273 @@ import {
 } from '../landing-replica/composer-controls';
 import { FileIcon } from '../landing-replica/icons';
 import type { ReplicaLocale } from '../landing-replica/types';
-import { cn } from '../landing-replica/utils';
+const previewStyles = stylex.create({
+  section: {
+    'margin-block': 'calc(var(--spacing) * 6)',
+  },
+  text: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+    padding: 'calc(var(--spacing) * 4)',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+    '--composer': 'var(--muted)',
+    '@media (width >= 40rem)': {
+      padding: 'calc(var(--spacing) * 6)',
+    },
+  },
+  frame: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': 'var(--container-2xl)',
+  },
+  row: {
+    display: 'flex',
+    width: '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  stack: {
+    'container-type': 'inline-size',
+    'container-name': 'composer-box',
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    'background-color': 'hsl(var(--composer))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 3px 6px -2px lch(0% 0 0/0.02), 0 1px 1px lch(0% 0 0/0.04)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': '150ms',
+    '--mention-chip-surface': 'hsl(var(--composer))',
+    ':where(.dark, .dark *)': {
+      'border-color': 'color-mix(in oklab, hsl(var(--input-border)) 70%, transparent)',
+      'background-color': 'color-mix(in oklab, hsl(var(--input)) 90%, transparent)',
+      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+    },
+  },
+  section2: {
+    'margin-top': 'var(--spacing)',
+  },
+  text2: {
+    'min-height': 'calc(var(--spacing) * 8)',
+    'padding-inline': 'var(--spacing)',
+    'padding-top': 'var(--spacing)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--input-foreground))',
+  },
+  frame2: {
+    'margin-left': '1px',
+    display: 'inline-block',
+    height: 'calc(var(--spacing) * 4)',
+    width: '1.5px',
+    translate: '0 calc(var(--spacing) * 0.5)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 70%, transparent)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'padding-top': 'calc(var(--spacing) * 0.5)',
+  },
+  row3: {
+    'container-type': 'inline-size',
+    'container-name': 'composer-face',
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'flex-wrap': 'nowrap',
+    'align-items': 'center',
+    'column-gap': 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+  text3: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    'text-align': 'center',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section3: {
+    position: 'relative',
+    'margin-top': 'var(--spacing)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--popover))',
+    'padding-block': 'var(--spacing)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-lg)',
+  },
+  overlay: {
+    'pointer-events': 'none',
+    position: 'absolute',
+    top: 'calc(var(--spacing) * 2)',
+    right: 'var(--spacing)',
+    height: 'calc(1 / 3 * 100%)',
+    width: 'var(--spacing)',
+    'border-radius': 'calc(infinity * 1px)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground)) 15%, transparent)',
+  },
+  text4: {
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+  },
+  text5: {
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+  },
+  text6: {
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--primary))',
+  },
+  stack2: {
+    'margin-inline': 'var(--spacing)',
+    display: 'flex',
+    'flex-direction': 'column',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  section4: {
+    'background-color': 'hsl(var(--selection))',
+  },
+  text7: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground))',
+  },
+  text8: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '13px',
+    'line-height': 'calc(var(--spacing) * 5)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text9: {
+    color: 'hsl(var(--foreground))',
+  },
+  row4: {
+    'margin-inline': 'var(--spacing)',
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'var(--spacing)',
+  },
+  row5: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text10: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    color: 'hsl(var(--status-warning))',
+  },
+  frame3: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+  text11: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+  },
+  row6: {
+    'margin-inline': 'var(--spacing)',
+    display: 'flex',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  text12: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground))',
+  },
+  text13: {
+    'flex-shrink': '0',
+    'font-family': 'var(--font-mono)',
+    'font-size': '11px',
+    'line-height': '1',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text14: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text15: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--primary))',
+  },
+  text16: {
+    'flex-shrink': '0',
+    'font-size': '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  text17: {
+    'border-radius': '3px',
+    'background-color': 'color-mix(in oklab, hsl(var(--primary)) 15%, transparent)',
+    'padding-inline': '1px',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground))',
+  },
+  text18: {
+    'border-radius': '3px',
+    'background-color': 'color-mix(in oklab, hsl(var(--primary)) 15%, transparent)',
+    'padding-inline': '1px',
+    color: 'hsl(var(--foreground))',
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Shared composer shell
 // ---------------------------------------------------------------------------
 
 /** `ChatComposer`'s outer box, copied from the landing replica. */
-const COMPOSER_BOX_CLASS =
-  '@container/composer-box flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] shadow-[0_3px_6px_-2px_lch(0%_0_0/0.02),0_1px_1px_lch(0%_0_0/0.04)] dark:shadow-none dark:border-input-border/70 dark:bg-input/90 [--mention-chip-surface:hsl(var(--composer))]';
 
 const PERMISSION_COPY: Record<ReplicaLocale, string> = {
   en: 'Agent (full access)',
@@ -77,26 +336,23 @@ type ComposerPreviewProps = {
 
 function ComposerPreview({ locale, caption, typed, popup, topSelector }: ComposerPreviewProps) {
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview [--composer:var(--muted)] overflow-hidden rounded-xl border border-border bg-background p-4 text-foreground shadow-sm sm:p-6"
+        className={['lody-app-preview', stylex.props(previewStyles.text).className].join(' ')}
       >
-        <div className="mx-auto w-full max-w-2xl">
-          {topSelector ? (
-            <div className="flex w-full min-w-0 select-none items-center gap-1">{topSelector}</div>
-          ) : null}
-          <div className={cn(COMPOSER_BOX_CLASS, topSelector && 'mt-1')}>
-            <div className="min-h-8 px-1 pt-1 text-sm leading-6 text-input-foreground">
+        <div {...stylex.props(previewStyles.frame)}>
+          {topSelector ? <div {...stylex.props(previewStyles.row)}>{topSelector}</div> : null}
+          <div
+            {...stylex.props(previewStyles.stack, Boolean(topSelector) && previewStyles.section2)}
+          >
+            <div {...stylex.props(previewStyles.text2)}>
               {typed}
-              <span
-                aria-hidden="true"
-                className="ml-px inline-block h-4 w-[1.5px] translate-y-0.5 rounded-full bg-foreground/70"
-              />
+              <span aria-hidden="true" {...stylex.props(previewStyles.frame2)} />
             </div>
             {popup}
-            <div className="flex items-center gap-1 pt-0.5">
-              <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+            <div {...stylex.props(previewStyles.row2)}>
+              <div {...stylex.props(previewStyles.row3)}>
                 <ReplicaRunConfigTrigger
                   agent="codex"
                   modelLabel="gpt-5.3-codex"
@@ -109,7 +365,7 @@ function ComposerPreview({ locale, caption, typed, popup, topSelector }: Compose
           </div>
         </div>
       </div>
-      <div className="mt-2 text-center text-xs text-muted-foreground">{caption}</div>
+      <div {...stylex.props(previewStyles.text3)}>{caption}</div>
     </div>
   );
 }
@@ -124,14 +380,9 @@ function PopupList({
   scrollbar?: boolean;
 }) {
   return (
-    <div className="relative mt-1 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-lg">
+    <div {...stylex.props(previewStyles.section3)}>
       {children}
-      {scrollbar ? (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute right-1 top-2 h-1/3 w-1 rounded-full bg-foreground/15"
-        />
-      ) : null}
+      {scrollbar ? <span aria-hidden="true" {...stylex.props(previewStyles.overlay)} /> : null}
     </div>
   );
 }
@@ -143,12 +394,12 @@ function PopupList({
  */
 function HighlightedPath({ path, query }: { path: string; query: string }) {
   const index = query ? path.toLowerCase().indexOf(query.toLowerCase()) : -1;
-  if (index < 0) return <span className="text-foreground/90">{path}</span>;
+  if (index < 0) return <span {...stylex.props(previewStyles.text4)}>{path}</span>;
   return (
     <>
-      <span className="text-muted-foreground/80">{path.slice(0, index)}</span>
-      <span className="font-medium text-primary">{path.slice(index, index + query.length)}</span>
-      <span className="text-foreground/90">{path.slice(index + query.length)}</span>
+      <span {...stylex.props(previewStyles.text5)}>{path.slice(0, index)}</span>
+      <span {...stylex.props(previewStyles.text6)}>{path.slice(index, index + query.length)}</span>
+      <span {...stylex.props(previewStyles.text4)}>{path.slice(index + query.length)}</span>
     </>
   );
 }
@@ -194,16 +445,9 @@ const SLASH_CAPTION: Record<ReplicaLocale, string> = {
 /** One `/command` row: the name, then the description on its own quiet line. */
 function CommandRow({ command, selected }: { command: SlashCommand; selected?: boolean }) {
   return (
-    <div
-      className={cn(
-        'mx-1 flex flex-col rounded-md px-2 py-1.5',
-        selected ? 'bg-selection' : undefined
-      )}
-    >
-      <span className="truncate text-sm font-medium leading-6 text-foreground">{command.name}</span>
-      <span className="truncate text-[13px] leading-5 text-muted-foreground">
-        {command.description}
-      </span>
+    <div {...stylex.props(previewStyles.stack2, selected ? previewStyles.section4 : false)}>
+      <span {...stylex.props(previewStyles.text7)}>{command.name}</span>
+      <span {...stylex.props(previewStyles.text8)}>{command.description}</span>
     </div>
   );
 }
@@ -231,7 +475,7 @@ export function SlashCommandsPreview({ locale = 'en' }: { locale?: ReplicaLocale
       locale={locale}
       caption={SLASH_CAPTION[locale]}
       topSelector={topSelector}
-      typed={<span className="text-foreground">/</span>}
+      typed={<span {...stylex.props(previewStyles.text9)}>/</span>}
       popup={
         <PopupList scrollbar>
           {SLASH_COMMANDS.map((command, index) => (
@@ -320,24 +564,19 @@ const SKILL_ITEMS: readonly SkillItem[] = [
 /** `toFileCandidate` + `CandidateIcon` for both folder marks and file glyphs. */
 function FileRow({ item, selected }: { item: FileItem; selected?: boolean }) {
   return (
-    <div
-      className={cn(
-        'mx-1 flex min-w-0 items-center gap-2 rounded-md px-2 py-1',
-        selected ? 'bg-selection' : undefined
-      )}
-    >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
+    <div {...stylex.props(previewStyles.row4, selected ? previewStyles.section4 : false)}>
+      <span {...stylex.props(previewStyles.row5)}>
         {item.kind === 'dir' ? (
           item.code ? (
-            <FolderCode className="h-4 w-4 text-status-warning" strokeWidth={1.75} />
+            <FolderCode {...stylex.props(previewStyles.text10)} strokeWidth={1.75} />
           ) : (
-            <Folder className="h-4 w-4" strokeWidth={1.75} />
+            <Folder {...stylex.props(previewStyles.frame3)} strokeWidth={1.75} />
           )
         ) : (
-          <FileIcon path={item.path} className="h-4 w-4" />
+          <FileIcon path={item.path} xstyle={previewStyles.frame3} />
         )}
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm leading-6">
+      <span {...stylex.props(previewStyles.text11)}>
         <HighlightedPath path={item.path} query={FILE_QUERY} />
       </span>
     </div>
@@ -360,22 +599,13 @@ function MentionCategoryRow({
   selected?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        'mx-1 flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5',
-        selected ? 'bg-selection' : undefined
-      )}
-    >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
-        <Icon className="h-4 w-4" strokeWidth={1.75} />
+    <div {...stylex.props(previewStyles.row6, selected ? previewStyles.section4 : false)}>
+      <span {...stylex.props(previewStyles.row5)}>
+        <Icon {...stylex.props(previewStyles.frame3)} strokeWidth={1.75} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm leading-6 text-foreground">{label}</span>
-      {trailing ? (
-        <span className="shrink-0 font-mono text-[11px] leading-none text-muted-foreground">
-          {trailing}
-        </span>
-      ) : null}
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span {...stylex.props(previewStyles.text12)}>{label}</span>
+      {trailing ? <span {...stylex.props(previewStyles.text13)}>{trailing}</span> : null}
+      <ChevronRight {...stylex.props(previewStyles.text14)} aria-hidden="true" />
     </div>
   );
 }
@@ -392,17 +622,12 @@ function SkillRow({
 }) {
   const copy = MENTION_COPY[locale];
   return (
-    <div
-      className={cn(
-        'mx-1 flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5',
-        selected ? 'bg-selection' : undefined
-      )}
-    >
-      <Sparkles className="h-4 w-4 shrink-0 text-primary" strokeWidth={1.75} />
-      <span className="min-w-0 flex-1 truncate text-sm leading-6">
+    <div {...stylex.props(previewStyles.row6, selected ? previewStyles.section4 : false)}>
+      <Sparkles {...stylex.props(previewStyles.text15)} strokeWidth={1.75} />
+      <span {...stylex.props(previewStyles.text11)}>
         <HighlightedPath path={item.name} query={SKILL_QUERY} />
       </span>
-      <span className="shrink-0 text-[11px] text-muted-foreground">{copy.scope[item.scope]}</span>
+      <span {...stylex.props(previewStyles.text16)}>{copy.scope[item.scope]}</span>
     </div>
   );
 }
@@ -444,7 +669,7 @@ export function MentionPreview({
         locale={locale}
         caption={copy.caption.issue}
         topSelector={topSelector}
-        typed={<span className="text-foreground">@</span>}
+        typed={<span {...stylex.props(previewStyles.text9)}>@</span>}
         popup={
           <PopupList>
             <MentionCategoryRow icon={Folder} label={copy.category.file} />
@@ -465,10 +690,8 @@ export function MentionPreview({
         topSelector={topSelector}
         typed={
           <span>
-            <span className="text-foreground">$</span>
-            <span className="rounded-[3px] bg-primary/15 px-px font-medium text-foreground">
-              {SKILL_QUERY}
-            </span>
+            <span {...stylex.props(previewStyles.text9)}>$</span>
+            <span {...stylex.props(previewStyles.text17)}>{SKILL_QUERY}</span>
           </span>
         }
         popup={
@@ -489,8 +712,8 @@ export function MentionPreview({
       topSelector={topSelector}
       typed={
         <span>
-          <span className="text-foreground">@</span>
-          <span className="rounded-[3px] bg-primary/15 px-px text-foreground">{FILE_QUERY}</span>
+          <span {...stylex.props(previewStyles.text9)}>@</span>
+          <span {...stylex.props(previewStyles.text18)}>{FILE_QUERY}</span>
         </span>
       }
       popup={

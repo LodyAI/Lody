@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { E2eeRemoteMachinePairing } from '@/components/pages/e2ee-remote-machine-pairing';
 import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
 
@@ -56,6 +57,16 @@ import {
   e2eeControlDiagnostics,
   type E2eeControlFailure,
 } from '@/lib/e2ee-control-failure';
+
+const styles = stylex.create({
+  offline: {
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
   component: WorkspaceControlRoute,
@@ -650,7 +661,7 @@ function WorkspaceControlRoute() {
   return (
     <>
       {current?.offline && (
-        <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+        <p role="status" {...stylex.props(styles.offline)}>
           {t('sessions.offline')}
         </p>
       )}

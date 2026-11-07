@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { control, corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -793,10 +793,10 @@ const styles = stylex.create({
   },
   sessionRowDisabled: {
     cursor: 'default',
-    opacity: 0.7,
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
   },
   sessionText: { flexGrow: 1, minWidth: 0 },
+  sessionTextDisabled: { opacity: control.disabledOpacity },
   sessionTitle: {
     minWidth: 0,
     overflow: 'hidden',
@@ -3257,7 +3257,12 @@ export function ProjectHistoryImportPanel({
                       if (!selectionDisabled) toggleSession(session.acpSessionId);
                     }}
                   />
-                  <div {...stylex.props(styles.sessionText)}>
+                  <div
+                    {...stylex.props(
+                      styles.sessionText,
+                      selectionDisabled && styles.sessionTextDisabled
+                    )}
+                  >
                     <div {...stylex.props(styles.sessionTitle)}>{session.title}</div>
                     <div {...stylex.props(styles.sessionTime)} title={updatedAtTitle}>
                       {updatedAtLabel}

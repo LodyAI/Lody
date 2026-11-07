@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import stylex from '@stylexjs/unplugin';
 import { defineConfig } from 'vitest/config';
 import wasm from 'vite-plugin-wasm';
-import { stylexOptions } from '../ui/stylex-options';
+import { componentsStylexOptions as stylexOptions } from './stylex-options';
 import { loroCrdtWasmUrlWorkaround, VITEST_INLINE_WASM_DEPS } from './vite-wasm-workarounds';
 
 export default defineConfig({

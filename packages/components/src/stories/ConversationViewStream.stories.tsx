@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 /**
  * The conversation stream over a real doc-backed `ConversationView`: 3,000
  * turns written into a `LoroDoc` through `HistoryWriter`, read back through
@@ -20,6 +21,55 @@ import {
   createConversationDerivation,
   type ConversationView,
 } from '@/lib/conversation-view';
+const sceneStyles = stylex.create({
+  fill: { height: '100%' },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': '0.25rem',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  element: {
+    'border-style': 'solid',
+    'border-width': '1px',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    height: '720px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  stack: {
+    display: 'flex',
+    height: '100vh',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  frame2: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  row2: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 3)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const meta = {
   title: 'Sessions/ConversationView',
@@ -166,13 +216,13 @@ function WindowedStream({
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
-    <div className="h-[720px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         conversationView={view}
         initialWindowReady={initialWindowReady}
         items={items}
         sessionId={streamSessionId}
-        className="h-full"
+        xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
         lastAssistantMessageId={lastAssistantMessageId}
@@ -217,13 +267,13 @@ function OpenFlickerStory({
     return () => next.dispose();
   }, [rounds]);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         <button
           type="button"
           data-testid="open-conversation"
           disabled={!view}
-          className="rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setOpenId((n) => n + 1)}
         >
           Open conversation
@@ -231,7 +281,7 @@ function OpenFlickerStory({
         <button
           type="button"
           data-testid="close-conversation"
-          className="rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setOpenId(0)}
         >
           Close
@@ -239,7 +289,7 @@ function OpenFlickerStory({
         <span data-testid="view-ready">{view ? 'view-ready' : 'building'}</span>
         {backgroundFacts && view && <BackgroundFactControls view={view} />}
       </div>
-      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="conversation-slot">
         {view && openId > 0 && <OpenedStream key={openId} view={view} />}
       </div>
     </div>
@@ -274,7 +324,7 @@ function OpenedStream({
       initialWindowReady={initialWindowReady}
       items={items}
       sessionId={streamSessionId}
-      className="h-full"
+      xstyle={sceneStyles.fill}
       // The session page always supplies a non-null fragment here, even when it
       // renders no DOM, so it counts as a Virtua row. Anything deriving "is
       // there anything to virtualize" from the item count must survive that.
@@ -376,15 +426,15 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
     if (documentPending) setDocumentPending(false);
   }, [documentPending]);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         {[0, 1].map((index) => (
           <button
             key={index}
             type="button"
             data-testid={`select-conversation-${index}`}
             disabled={!views}
-            className="rounded border px-3 py-1 text-sm"
+            {...stylex.props(storyLayoutStyles.canvas)}
             onClick={() => {
               setDocumentPending(true);
               setCurrent(index);
@@ -395,7 +445,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
         ))}
         <span data-testid="view-ready">{views ? 'view-ready' : 'building'}</span>
       </div>
-      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="conversation-slot">
         {views && (
           <OpenedStream
             key={current}
@@ -535,8 +585,8 @@ function NativeTextSelectionStory() {
   }, []);
   const stream = useConversationStreamItems(session?.history ?? null, SELECTION_SESSION_ID);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex gap-3 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row2)}>
         <button
           data-testid="selection-start"
           onClick={() => streamRef.current?.scrollToIndex(0, false)}
@@ -576,9 +626,13 @@ function NativeTextSelectionStory() {
         >
           Finish first turn
         </button>
-        <textarea data-testid="selection-paste" aria-label="Paste copied text" className="border" />
+        <textarea
+          data-testid="selection-paste"
+          aria-label="Paste copied text"
+          {...stylex.props(storyLayoutStyles.element)}
+        />
       </div>
-      <div className="min-h-0 flex-1" data-testid="native-selection-story">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="native-selection-story">
         <SessionChatStreamView
           ref={streamRef}
           conversationView={session?.history}
@@ -592,7 +646,7 @@ function NativeTextSelectionStory() {
           onOutlinePreviewRound={stream.onOutlinePreviewRound}
           leadingContent={<div>Selection regression fixture</div>}
           renderMessageRow={renderMessageRow}
-          className="h-full"
+          xstyle={sceneStyles.fill}
         />
       </div>
     </div>

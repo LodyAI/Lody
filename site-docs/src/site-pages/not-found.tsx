@@ -1,6 +1,55 @@
+import * as stylex from '@stylexjs/stylex';
 import { SiteAnchor } from '@site/components/site-anchor';
 import { localeFromPathname, notFoundCopy, type NotFoundSeoLocale } from '@site/lib/not-found-seo';
 import { useLocation } from '@tanstack/react-router';
+
+const notFoundStyles = stylex.create({
+  page: {
+    display: 'flex',
+    minHeight: '100vh',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 4)',
+    paddingInline: 'calc(var(--spacing) * 6)',
+    textAlign: 'center',
+  },
+  status: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    textTransform: 'uppercase',
+    letterSpacing: '.22em',
+    color: 'var(--color-fd-muted-foreground)',
+  },
+  heading: {
+    fontSize: 'var(--text-3xl)',
+    lineHeight: 'var(--text-3xl--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  description: {
+    maxWidth: 'var(--container-md)',
+    color: 'var(--color-fd-muted-foreground)',
+  },
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 'calc(var(--spacing) * 4)',
+    rowGap: 'calc(var(--spacing) * 2)',
+  },
+  link: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'var(--color-fd-primary)',
+    textDecorationLine: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'underline' },
+    },
+  },
+});
 
 /**
  * Lives in its own module because `src/routes/__root.tsx` wires it as the global
@@ -18,23 +67,15 @@ export function NotFoundPage({ locale }: { locale?: NotFoundSeoLocale }) {
   const copy = notFoundCopy[resolved];
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-      <p className="text-sm font-medium uppercase tracking-[0.22em] text-fd-muted-foreground">
-        404
-      </p>
-      <h1 className="text-3xl font-semibold">{copy.heading}</h1>
-      <p className="max-w-md text-fd-muted-foreground">{copy.description}</p>
-      <p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-        <SiteAnchor
-          className="text-sm font-medium text-fd-primary hover:underline"
-          href={copy.homeHref}
-        >
+    <main {...stylex.props(notFoundStyles.page)}>
+      <p {...stylex.props(notFoundStyles.status)}>404</p>
+      <h1 {...stylex.props(notFoundStyles.heading)}>{copy.heading}</h1>
+      <p {...stylex.props(notFoundStyles.description)}>{copy.description}</p>
+      <p {...stylex.props(notFoundStyles.actions)}>
+        <SiteAnchor {...stylex.props(notFoundStyles.link)} href={copy.homeHref}>
           {copy.home}
         </SiteAnchor>
-        <SiteAnchor
-          className="text-sm font-medium text-fd-primary hover:underline"
-          href={copy.docsHref}
-        >
+        <SiteAnchor {...stylex.props(notFoundStyles.link)} href={copy.docsHref}>
           {copy.docs}
         </SiteAnchor>
       </p>

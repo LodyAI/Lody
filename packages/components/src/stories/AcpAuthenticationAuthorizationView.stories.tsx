@@ -1,13 +1,20 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { AcpAuthenticationAuthorizationView } from '@/components/settings/acp-authentication-panel';
+const storyLayout = stylex.create({
+  frame: {
+    width: '520px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+});
 
 const meta = {
   title: 'Settings/AcpAuthenticationAuthorizationView',
   component: AcpAuthenticationAuthorizationView,
   decorators: [
     (Story) => (
-      <div className="w-[520px] max-w-[calc(100vw-2rem)]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

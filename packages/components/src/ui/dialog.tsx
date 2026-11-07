@@ -1,3 +1,4 @@
+import type { StyleXStyles } from '@stylexjs/stylex';
 import * as React from 'react';
 import { Dialog as UiDialog, AlertDialog as UiAlertDialog } from '@lody/ui';
 import { Button, type ButtonVariant } from '@lody/ui/button';
@@ -105,15 +106,16 @@ const AlertDialogContent = React.forwardRef<HTMLDivElement, AlertDialogContentPr
 type AlertDialogAnswerProps = Omit<React.ComponentProps<typeof UiAlertDialog.Close>, 'render'> & {
   variant?: ButtonVariant;
   className?: string;
+  xstyle?: StyleXStyles;
 };
 
 /** The confirming answer: a `Close` rendered as a `Button` with a variant. */
 const AlertDialogAction = React.forwardRef<HTMLButtonElement, AlertDialogAnswerProps>(
-  function AlertDialogAction({ variant, className, children, ...props }, ref) {
+  function AlertDialogAction({ variant, className, xstyle, children, ...props }, ref) {
     return (
       <UiAlertDialog.Close
         ref={ref}
-        render={<Button variant={variant} className={className} />}
+        render={<Button variant={variant} className={className} xstyle={xstyle} />}
         {...props}
       >
         {children}
@@ -123,11 +125,11 @@ const AlertDialogAction = React.forwardRef<HTMLButtonElement, AlertDialogAnswerP
 );
 
 const AlertDialogCancel = React.forwardRef<HTMLButtonElement, AlertDialogAnswerProps>(
-  function AlertDialogCancel({ className, children, ...props }, ref) {
+  function AlertDialogCancel({ className, xstyle, children, ...props }, ref) {
     return (
       <UiAlertDialog.Close
         ref={ref}
-        render={<Button variant="secondary" className={className} />}
+        render={<Button variant="secondary" className={className} xstyle={xstyle} />}
         {...props}
       >
         {children}

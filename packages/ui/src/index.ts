@@ -72,7 +72,7 @@ export type {
   DialogTitleProps,
   ModalContentProps,
 } from './dialog/dialog';
-export type { DialogSectionProps } from './dialog/parts';
+export type { DialogHeaderProps, DialogSectionProps } from './dialog/parts';
 export { Drawer } from './drawer/drawer';
 export type {
   DrawerContentProps,

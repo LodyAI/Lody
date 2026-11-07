@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Wrench } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useGithubProjectWorktreeAdmin } from '@/hooks/use-github-project-worktree-admin';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
@@ -9,6 +10,12 @@ import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-c
 import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skills-sheet';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
+import { mobileSurface } from './surface';
+const styles = stylex.create({
+  tabbarClearance: {
+    paddingBottom: 'calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom,0px) + 1rem)',
+  },
+});
 
 export type MobileGithubProjectSettingsProps = {
   /** "owner/repo" — the workspace repo whose worktree scripts we're editing. */
@@ -42,8 +49,8 @@ export function MobileGithubProjectSettings({
       <>
         {intro}
         <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-          <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-            <Spinner className="h-4 w-4" />
+          <div {...stylex.props(mobileSurface.notice)}>
+            <Spinner diameter="calc(var(--spacing) * 4)" />
             {t('workspace.projects.loading', 'Loading')}
           </div>
         </MobileSettingsSection>
@@ -56,8 +63,8 @@ export function MobileGithubProjectSettings({
       <>
         {intro}
         <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-          <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-            <p className="text-sm text-muted-foreground">
+          <div {...stylex.props(mobileSurface.empty)}>
+            <p {...stylex.props(mobileSurface.emptyText)}>
               {t('workspace.projects.githubRepoNotAvailable', '此仓库在当前工作区不可用')}
             </p>
           </div>
@@ -69,24 +76,30 @@ export function MobileGithubProjectSettings({
   return (
     <>
       <MobileSettingsFoldPanels
-        lowerClassName="pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]"
+        lowerXstyle={styles.tabbarClearance}
         upper={
           <>
+            {' '}
             {intro}
             <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
               <MobileSettingsRow
                 label={
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Wrench className="h-[1.05rem] w-[1.05rem]" />
+                  <div {...stylex.props(mobileSurface.identity)}>
+                    <div {...stylex.props(mobileSurface.identityTile)}>
+                      <Wrench {...stylex.props(mobileSurface.identityGlyph)} />
                     </div>
-                    <span className="truncate text-[0.95rem] font-medium leading-tight">
+                    <span
+                      {...stylex.props(
+                        mobileSurface.identityLabel,
+                        mobileSurface.identityLabelTight
+                      )}
+                    >
                       {t('workspace.projects.worktreeConfigRow', 'Worktree setup & cleanup')}
                     </span>
                   </div>
                 }
                 onClick={() => setSheetOpen(true)}
-                trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+                trailing={<ChevronRight {...stylex.props(mobileSurface.chevron)} />}
               />
             </MobileSettingsSection>
           </>

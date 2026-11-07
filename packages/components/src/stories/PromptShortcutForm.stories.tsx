@@ -1,7 +1,19 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent } from 'storybook/test';
 import type { PromptShortcut } from '@lody/shared/prompt-shortcuts/model';
 import { PromptShortcutForm } from '@/components/settings/prompt-shortcut-form';
+
+const formFrameStyles = stylex.create({
+  frame: {
+    width: '520px',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+    boxShadow:
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1)',
+  },
+});
 
 const shortcut: PromptShortcut = {
   v: 1,
@@ -35,7 +47,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[520px] rounded-lg bg-background p-4 shadow-lg">
+      <div {...stylex.props(formFrameStyles.frame)}>
         <Story />
       </div>
     ),

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { ReactNode } from 'react';
 import { Provider } from 'jotai';
@@ -20,6 +21,10 @@ import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '@/atoms/sett
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { LodyAgentSetting } from '@/components/settings/lody-agent-setting';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
+
+const agentFrame = stylex.create({
+  frame: { padding: 'calc(var(--spacing) * 6)' },
+});
 
 const workspaceId = 'settings-story-workspace' as WorkspaceId;
 const machineId = 'settings-story-machine' as MachineId;
@@ -242,7 +247,7 @@ function PageStory({ supported, configured }: { supported: boolean; configured: 
       <RoutedStory>
         <Provider>
           <Hydrate supported={supported} configured={configured}>
-            <div className="p-6">
+            <div {...stylex.props(agentFrame.frame)}>
               <LodyAgentSetting />
             </div>
           </Hydrate>

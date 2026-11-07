@@ -1,5 +1,22 @@
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+
+const styles = stylex.create({
+  shell: {
+    position: 'relative',
+    height: '100%',
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+  },
+  content: {
+    position: 'relative',
+    height: '100%',
+  },
+});
 
 export function AppThemeShell({
   className,
@@ -8,14 +25,10 @@ export function AppThemeShell({
   className?: string;
   children: ReactNode;
 }) {
+  const shellProps = stylex.props(styles.shell);
   return (
-    <div
-      className={cn(
-        'relative h-full w-full overflow-hidden bg-background text-foreground',
-        className
-      )}
-    >
-      <div className="relative h-full">{children}</div>
+    <div {...shellProps} className={clsx(shellProps.className, className)}>
+      <div {...stylex.props(styles.content)}>{children}</div>
     </div>
   );
 }

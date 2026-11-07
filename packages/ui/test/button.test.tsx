@@ -1,0 +1,218 @@
+import * as stylex from '@stylexjs/stylex';
+
+import { act, createRef, useState } from 'react';
+import { afterEach, describe, expect, test } from 'vitest';
+import { Button, type ButtonVariant } from '../src/button/button';
+import { mount, type Mounted } from './dom';
+
+let mounted: Mounted | undefined;
+afterEach(async () => {
+  await mounted?.unmount();
+  mounted = undefined;
+});
+
+const extension = stylex.create({ offset: (offset: number) => ({ marginInlineStart: offset }) });
+
+describe('Button', () => {
+  test('box, typography and variant updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
+    const ref = createRef<HTMLElement>();
+    function Example() {
+      const [box, setBox] = useState<{
+        width?: number;
+        height?: number;
+        fontSize?: number;
+        fontWeight?: number | 'initial';
+        lineHeight?: number;
+        labelColor?: string;
+      }>({
+        width: 96,
+        height: 28,
+        fontSize: 18,
+        fontWeight: 380,
+        lineHeight: 1.25,
+        labelColor: '#b41428',
+      });
+      const [disabled, setDisabled] = useState(false);
+      const [variant, setVariant] = useState<ButtonVariant>('primary');
+      const [clicks, setClicks] = useState(0);
+      return (
+        <>
+          <button
+            data-zero
+            onClick={() => {
+              setBox({
+                width: 0,
+                height: 0,
+                fontSize: 0,
+                fontWeight: 'initial',
+                lineHeight: 0,
+                labelColor: 'initial',
+              });
+              setVariant('solid');
+            }}
+          >
+            Zero
+          </button>
+          <button
+            data-omit
+            onClick={() => {
+              setBox({});
+              setVariant('ghost');
+            }}
+          >
+            Omit
+          </button>
+          <button data-disable onClick={() => setDisabled(true)}>
+            Disable
+          </button>
+          <Button
+            ref={ref}
+            icon
+            width={box.width}
+            height={box.height}
+            fontSize={box.fontSize}
+            fontWeight={box.fontWeight}
+            lineHeight={box.lineHeight}
+            labelColor={box.labelColor}
+            disabled={disabled}
+            variant={variant}
+            className="caller-owned"
+            style={{ width: 999, height: 999 }}
+            data-target
+            onClick={() => setClicks((n) => n + 1)}
+            aria-label="Target"
+          >
+            <svg />
+          </Button>
+          <output>{clicks}</output>
+        </>
+      );
+    }
+    mounted = await mount(<Example />);
+    const target = mounted.container.querySelector<HTMLButtonElement>('[data-target]')!;
+    const glyph = target.firstElementChild;
+    expect(target.style.fontSize).toBe('18px');
+    expect(target.style.fontWeight).toBe('380');
+    expect(target.style.lineHeight).toBe('1.25');
+    expect(target.style.color).toBe('rgb(180, 20, 40)');
+    target.focus();
+    expect(ref.current).toBe(target);
+    for (const action of ['zero', 'omit']) {
+      await act(async () =>
+        mounted!.container.querySelector<HTMLButtonElement>(`[data-${action}]`)!.click()
+      );
+      expect(ref.current).toBe(target);
+      expect(target.firstElementChild).toBe(glyph);
+      expect(document.activeElement).toBe(target);
+      expect(target.classList.contains('caller-owned')).toBe(true);
+      expect(target.getAttribute('data-variant')).toBe(action === 'zero' ? 'solid' : 'ghost');
+      expect(target.hasAttribute('width')).toBe(false);
+      expect(target.hasAttribute('height')).toBe(false);
+      expect(target.hasAttribute('fontSize')).toBe(false);
+      expect(target.hasAttribute('fontWeight')).toBe(false);
+      expect(target.hasAttribute('lineHeight')).toBe(false);
+      expect(target.hasAttribute('labelColor')).toBe(false);
+      expect(target.style.width).toBe('');
+      expect(target.style.height).toBe('');
+      expect(target.style.fontSize).toBe(action === 'zero' ? '0px' : '');
+      expect(target.style.fontWeight).toBe(action === 'zero' ? 'initial' : '');
+      expect(target.style.lineHeight).toBe(action === 'zero' ? '0' : '');
+      expect(target.style.color).toBe(action === 'zero' ? 'initial' : '');
+      await act(async () => target.click());
+    }
+    expect(mounted.container.querySelector('output')?.textContent).toBe('2');
+    await act(async () =>
+      mounted!.container.querySelector<HTMLButtonElement>('[data-disable]')!.click()
+    );
+    expect(target.disabled).toBe(true);
+    await act(async () => target.click());
+    expect(mounted.container.querySelector('output')?.textContent).toBe('2');
+  });
+
+  test('a rendered anchor keeps its ref, inline dimensions and actual click state', async () => {
+    const ref = createRef<HTMLElement>();
+    function Example() {
+      const [clicks, setClicks] = useState(0);
+      return (
+        <Button
+          ref={ref}
+          nativeButton={false}
+          width={96}
+          height={28}
+          fontSize={12}
+          fontWeight={480}
+          lineHeight={1.3}
+          labelColor="#112233"
+          render={
+            <a
+              href="/x"
+              style={{
+                width: 105,
+                height: 31,
+                fontSize: 21,
+                fontWeight: 760,
+                lineHeight: '31px',
+                color: '#334455',
+              }}
+            />
+          }
+          onClick={(event) => {
+            event.preventDefault();
+            setClicks((n) => n + 1);
+          }}
+        >
+          Clicks: {clicks}
+        </Button>
+      );
+    }
+    mounted = await mount(<Example />);
+    const anchor = mounted.container.querySelector('a')!;
+    expect(ref.current).toBe(anchor);
+    expect(anchor.getAttribute('href')).toBe('/x');
+    expect(anchor.style.width).toBe('105px');
+    expect(anchor.style.height).toBe('31px');
+    expect(anchor.style.fontSize).toBe('21px');
+    expect(anchor.style.fontWeight).toBe('760');
+    expect(anchor.style.lineHeight).toBe('31px');
+    expect(anchor.style.color).toBe('rgb(51, 68, 85)');
+    await act(async () => anchor.click());
+    expect(ref.current).toBe(anchor);
+    expect(anchor.textContent).toBe('Clicks: 1');
+    expect(anchor.hasAttribute('width')).toBe(false);
+    expect(anchor.hasAttribute('height')).toBe(false);
+  });
+  test('composes dynamic xstyle variables with the real caller state callback', async () => {
+    function Example() {
+      const [disabled, setDisabled] = useState(false);
+      return (
+        <>
+          <button data-disable onClick={() => setDisabled(true)}>
+            Disable target
+          </button>
+          <Button
+            data-extension
+            disabled={disabled}
+            xstyle={extension.offset(disabled ? 0 : 13)}
+            style={(state) => ({ color: state.disabled ? '#ff0000' : '#0000ff' })}
+          >
+            Styled target
+          </Button>
+        </>
+      );
+    }
+    mounted = await mount(<Example />);
+    const target = mounted.container.querySelector<HTMLButtonElement>('[data-extension]')!;
+    expect(target.style.color).toBe('rgb(0, 0, 255)');
+    const vars = stylex.props(extension.offset(13)).style!;
+    expect(Object.keys(vars).length).toBeGreaterThan(0);
+    for (const [key, value] of Object.entries(vars))
+      expect(target.style.getPropertyValue(key)).toBe(String(value));
+    await act(async () =>
+      mounted!.container.querySelector<HTMLButtonElement>('[data-disable]')!.click()
+    );
+    expect(target.disabled).toBe(true);
+    expect(target.style.color).toBe('rgb(255, 0, 0)');
+    for (const [key, value] of Object.entries(stylex.props(extension.offset(0)).style!))
+      expect(target.style.getPropertyValue(key)).toBe(String(value));
+  });
+});

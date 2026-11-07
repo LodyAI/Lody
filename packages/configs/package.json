@@ -4,12 +4,7 @@
   "version": "0.0.1",
   "private": true,
   "exports": {
-    "./tsconfig.extend.json": "./tsconfig.extend.json",
-    "./tailwind-preset": "./tailwind-preset.cjs"
-  },
-  "peerDependencies": {
-    "@tailwindcss/container-queries": ">=0.1",
-    "tailwindcss": ">=4"
+    "./tsconfig.extend.json": "./tsconfig.extend.json"
   },
   "devDependencies": {}
 }

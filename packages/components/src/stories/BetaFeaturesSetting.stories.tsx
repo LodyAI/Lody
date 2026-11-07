@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider, useAtomValue } from 'jotai';
@@ -23,14 +24,16 @@ function GateReadout() {
   const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
   const semanticEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   return (
-    <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+    <div {...stylex.props(sceneStyles.readout)}>
       <p>
-        <span className="font-mono">inboxFeatureEnabledAtom</span> ={' '}
-        <span className="font-mono font-semibold">{String(inboxEnabled)}</span>
+        <span {...stylex.props(sceneStyles.code)}>inboxFeatureEnabledAtom</span> ={' '}
+        <span {...stylex.props(sceneStyles.code, sceneStyles.enabled)}>{String(inboxEnabled)}</span>
       </p>
       <p>
-        <span className="font-mono">roostHistoryFeatureEnabledAtom</span> ={' '}
-        <span className="font-mono font-semibold">{String(roostHistoryEnabled)}</span>
+        <span {...stylex.props(sceneStyles.code)}>roostHistoryFeatureEnabledAtom</span> ={' '}
+        <span {...stylex.props(sceneStyles.code, sceneStyles.enabled)}>
+          {String(roostHistoryEnabled)}
+        </span>
       </p>
       <p>Pointer-aware close shortcut: {String(semanticEnabled)}</p>
     </div>
@@ -71,6 +74,24 @@ function Harness({
     </Provider>
   );
 }
+
+const sceneStyles = stylex.create({
+  readout: {
+    marginTop: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1)',
+    },
+  },
+  code: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+  },
+  enabled: { fontWeight: 'var(--font-weight-semibold)' },
+});
 
 const meta = {
   title: 'Settings/BetaFeaturesSection',

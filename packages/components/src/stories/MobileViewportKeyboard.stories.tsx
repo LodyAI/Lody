@@ -1,8 +1,12 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Provider, createStore } from 'jotai';
 import { Monitor } from 'lucide-react';
 import { fn } from 'storybook/test';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 import type {
   AgentConfigId,
   MachineId,
@@ -20,20 +24,170 @@ import {
   getMobileMainLayoutRootClassName,
   getMobileMainLayoutContentClassName,
 } from '@/components/main-layout';
+import { getWebWorkspaceLayoutRootClassName } from '@/components/workspace-layout-utils';
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { OptionSelector } from '@/components/shared/option-selector';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
+const keyboardStory = stylex.create({
+  messages: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 3)',
+    },
+  },
+  options: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  optionMenu: { width: 'calc(var(--spacing) * 56)' },
+  device: {
+    position: 'relative',
+    marginInline: 'auto',
+    overflow: 'hidden',
+    borderRadius: '2rem',
+    borderWidth:"2px",borderStyle:"solid",borderColor:"var(--color-zinc-600)",
+    backgroundColor: 'var(--color-black)',
+  },
+  keyboard: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'var(--color-zinc-800)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'var(--color-zinc-500)',
+  },
+});
+const storyLayout = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  canvas2: {
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 12)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+  },
+  label: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  frame: {
+    position: 'relative',
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  frame2: {
+    height: '100%',
+    'overflow-y': 'auto',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  caption2: {
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  section: {
+    'text-align': 'center',
+  },
+  caption3: {
+    'margin-bottom': 'calc(var(--spacing) * 1)',
+    color: 'var(--color-zinc-400)',
+  },
+});
 
 // ─── Shared constants & helpers ─────────────────────────────────────────────
+
+const selectorStyles = stylex.create({
+  tag: {
+    width: 'auto',
+    height: 'calc(var(--spacing) * 6)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 4,
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: colors.wellBackground,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--muted) / 1) 60%, transparent)',
+      },
+    },
+  },
+  tagText: { fontSize: '0.9em', lineHeight: 1.25 },
+  machineValue: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  machineGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  machineLabel: {
+    fontSize: '0.9em',
+    lineHeight: 1.25,
+    fontWeight: 500,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
 const STORY_AGENT_CONFIG_ID = 'agent-storybook' as AgentConfigId;
 const STORY_SESSION_ID = 'session-storybook' as SessionId;
 const STORY_AUTH_TOKEN = 'storybook-token';
+
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: 'local:layout-story-user', name: 'Layout story user' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [
+      { id: STORY_WORKSPACE_ID, name: 'Layout Story Workspace', slug: 'storybook', role: 'owner' },
+    ],
+    activeWorkspaceId: STORY_WORKSPACE_ID,
+  }),
+});
 
 const DEVICE_WIDTH = 390;
 const DEVICE_HEIGHT = 844;
@@ -85,26 +239,25 @@ const machineOptions: OptionSelectorOption<string>[] = [
 /** Mock message bubbles for the session chat. */
 function MockMessages() {
   return (
-    <div className="space-y-3 text-sm">
-      <div className="rounded-lg bg-muted/40 px-3 py-2">
+    <div {...stylex.props(keyboardStory.messages)}>
+      <div {...stylex.props(storyLayout.canvas)}>
         Can you fix the mobile viewport issue where the keyboard covers the input?
       </div>
-      <div className="rounded-lg bg-primary/10 px-3 py-2">
-        I&apos;ll use <code className="text-xs">interactive-widget=resizes-content</code> with{' '}
-        <code className="text-xs">h-dvh</code> so the layout viewport shrinks when the keyboard
-        opens.
+      <div {...stylex.props(storyLayout.canvas2)}>
+        I&apos;ll use{' '}
+        <code {...stylex.props(storyLayout.caption)}>interactive-widget=resizes-content</code> with{' '}
+        <code {...stylex.props(storyLayout.caption)}>h-dvh</code> so the layout viewport shrinks
+        when the keyboard opens.
       </div>
-      <div className="rounded-lg bg-muted/40 px-3 py-2">
-        Sounds good, let me test it on my iPhone.
-      </div>
-      <div className="rounded-lg bg-primary/10 px-3 py-2">
+      <div {...stylex.props(storyLayout.canvas)}>Sounds good, let me test it on my iPhone.</div>
+      <div {...stylex.props(storyLayout.canvas2)}>
         The key difference from the reverted PR is keeping overflow-hidden. The layout stays
         constrained — only the height changes dynamically.
       </div>
-      <div className="rounded-lg bg-muted/40 px-3 py-2">
+      <div {...stylex.props(storyLayout.canvas)}>
         What about the scroll position after the keyboard dismisses?
       </div>
-      <div className="rounded-lg bg-primary/10 px-3 py-2">
+      <div {...stylex.props(storyLayout.canvas2)}>
         With resizes-content the browser handles that natively. No phantom scroll to fix.
       </div>
     </div>
@@ -120,12 +273,12 @@ function SessionChatContent() {
       <div className={getMobileMainLayoutRootClassName()}>
         <div className={getMobileMainLayoutContentClassName()}>
           {/* Header */}
-          <div className="flex h-12 shrink-0 items-center border-b border-border px-3">
-            <span className="text-sm font-medium">Fix viewport handling</span>
+          <div {...stylex.props(storyLayout.row)}>
+            <span {...stylex.props(storyLayout.label)}>Fix viewport handling</span>
           </div>
           {/* Message area — matches SessionChatInterface: flex-1 min-h-0 */}
-          <div className="relative flex-1 min-h-0">
-            <div className="h-full overflow-y-auto p-3">
+          <div {...stylex.props(storyLayout.frame)}>
+            <div {...stylex.props(storyLayout.frame2)}>
               <MockMessages />
             </div>
           </div>
@@ -156,7 +309,9 @@ function SessionChatContent() {
 }
 
 /** Chat landing content (shared between desktop preview & fullscreen). */
-function ChatLandingContent() {
+type WorkspaceRootFamily = 'mobile' | 'web' | 'settings';
+
+function ChatLandingContent({ rootFamily = 'mobile' }: { rootFamily?: WorkspaceRootFamily }) {
   const handleSubmit = fn();
   const handleOpenMobileDrawer = fn();
   const [prompt, setPrompt] = useState('');
@@ -164,7 +319,7 @@ function ChatLandingContent() {
   const [contextType, setContextType] = useState<SessionContextType>('local');
 
   const bottomBarNode = (
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div {...stylex.props(keyboardStory.options)}>
       <OptionSelector
         value={selectedMachine}
         options={machineOptions}
@@ -172,12 +327,14 @@ function ChatLandingContent() {
         placeholder="Machine"
         placeholderIcon={Monitor}
         tone="dark"
-        className={getSelectorTagClassName('dark')}
-        contentClassName="w-56"
+        xstyle={selectorStyles.tag}
+        valueXstyle={selectorStyles.tagText}
+        labelXstyle={selectorStyles.tagText}
+        contentXstyle={keyboardStory.optionMenu}
         renderTriggerValue={(option) => (
-          <div className="flex min-w-0 items-center gap-1.5">
-            <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span className="truncate text-sm font-medium">{option?.label ?? 'Machine'}</span>
+          <div {...stylex.props(selectorStyles.machineValue)}>
+            <Monitor {...stylex.props(selectorStyles.machineGlyph)} />
+            <span {...stylex.props(selectorStyles.machineLabel)}>{option?.label ?? 'Machine'}</span>
           </div>
         )}
       />
@@ -185,8 +342,15 @@ function ChatLandingContent() {
   );
 
   return (
-    <div className={getMobileMainLayoutRootClassName()}>
-      <div className={getMobileMainLayoutContentClassName()}>
+    <div
+      data-owned-workspace-root={rootFamily}
+      className={
+        rootFamily === 'mobile'
+          ? getMobileMainLayoutRootClassName()
+          : getWebWorkspaceLayoutRootClassName({ settingsRoute: rootFamily === 'settings' })
+      }
+    >
+      <div data-owned-workspace-content="" className={getMobileMainLayoutContentClassName()}>
         <ChatLandingView
           tone="dark"
           isMobile
@@ -249,11 +413,11 @@ function DesktopPreviewShell({ children }: { children: React.ReactNode }) {
   return (
     <div
       ref={shellRef}
-      className="relative mx-auto overflow-hidden rounded-[2rem] border-2 border-zinc-600 bg-black"
+      {...stylex.props(keyboardStory.device)}
       style={{ width: DEVICE_WIDTH + 4, height: DEVICE_HEIGHT + 4 }}
     >
       <div
-        className="overflow-hidden bg-background text-foreground"
+        {...stylex.props(storyLayout.caption2)}
         style={{
           width: DEVICE_WIDTH,
           height: viewportHeight,
@@ -264,15 +428,15 @@ function DesktopPreviewShell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
       <div
-        className="absolute bottom-0 left-0 right-0 flex items-center justify-center bg-zinc-800 text-xs text-zinc-500"
+        {...stylex.props(keyboardStory.keyboard)}
         style={{
           height: KEYBOARD_HEIGHT,
           transform: keyboardOpen ? 'translateY(0)' : `translateY(${KEYBOARD_HEIGHT}px)`,
           transition: `transform ${KEYBOARD_ANIM_MS}ms cubic-bezier(0.2, 0.9, 0.4, 1)`,
         }}
       >
-        <div className="text-center">
-          <div className="mb-1 text-zinc-400">Simulated Keyboard</div>
+        <div {...stylex.props(storyLayout.section)}>
+          <div {...stylex.props(storyLayout.caption3)}>Simulated Keyboard</div>
           <div>Click a text input to open / click outside to close</div>
         </div>
       </div>
@@ -284,6 +448,13 @@ function DesktopPreviewShell({ children }: { children: React.ReactNode }) {
 
 const meta = {
   title: 'Mobile/ViewportKeyboard',
+  decorators: [
+    (Story) => (
+      <PlatformContext value={storyPlatform}>
+        <Story />
+      </PlatformContext>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta;
 
@@ -340,4 +511,47 @@ export const ChatLandingDevice: Story = {
   parameters: { layout: 'fullscreen' },
   render: () => <ChatLandingContent />,
   globals: { theme: 'dark' },
+};
+
+/** Fixed CSS-variable inputs exercise the exported layout helpers with real landing controls. */
+function OwnedRootProbe({
+  family,
+  inset = false,
+}: {
+  family: WorkspaceRootFamily;
+  inset?: boolean;
+}) {
+  const variables = {
+    '--safe-area-top': inset ? '27px' : '0px',
+    '--safe-area-left': inset ? '11px' : '0px',
+    '--safe-area-right': inset ? '13px' : '0px',
+    '--native-keyboard-height': inset ? '260px' : '0px',
+    '--ease-out': 'cubic-bezier(0.2, 0.7, 0.3, 1)',
+    height: '100vh',
+  } as CSSProperties;
+  return (
+    <div data-layout-probe-input={inset ? 'native-inset' : 'zero'} style={variables}>
+      <ChatLandingContent rootFamily={family} />
+    </div>
+  );
+}
+
+export const OwnedRootMobileDefault: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="mobile" />,
+};
+
+export const OwnedRootMobileNativeInset: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="mobile" inset />,
+};
+
+export const OwnedRootWebNativeInset: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="web" inset />,
+};
+
+export const OwnedRootSettingsNativeInset: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <OwnedRootProbe family="settings" inset />,
 };

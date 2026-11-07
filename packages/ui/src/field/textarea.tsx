@@ -29,6 +29,9 @@ export interface TextareaProps extends Omit<
   appearance?: TextareaAppearance;
   render?: ReactElement;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
+  /** Suppress the focus edge when the enclosing composer owns focus feedback. */
+  focusRing?: boolean;
   /** Layout a caller owns, such as a surface's own font size. Not visual identity. */
   style?: CSSProperties;
 }
@@ -44,12 +47,21 @@ const styles = stylex.create({
     minHeight: field.textareaMinHeight,
   },
   bare: { display: 'block', width: '100%' },
+  quietFocus: { boxShadow: { default: field.well, ':focus-visible': 'none' } },
   resizeVertical: { resize: 'vertical' },
   resizeNone: { resize: 'none' },
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
-  { resize = 'vertical', appearance = 'well', className, render, ...rest },
+  {
+    resize = 'vertical',
+    appearance = 'well',
+    focusRing = true,
+    className,
+    xstyle,
+    render,
+    ...rest
+  },
   ref
 ) {
   // Base UI has no textarea part; `Input` is `Field.Control`, which renders
@@ -62,6 +74,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
       ref={ref as Ref<HTMLElement>}
       render={render ?? <textarea />}
       {...props}
+      style={{ ...stylex.props(xstyle).style, ...rest.style }}
       className={(state) =>
         appendClassName(
           stylex.props(
@@ -69,7 +82,9 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
             appearance === 'bare' ? well.bare : well.base,
             appearance === 'bare' ? styles.bare : styles.textarea,
             resize === 'none' ? styles.resizeNone : styles.resizeVertical,
-            appearance === 'well' && isInvalid(state.valid, ariaInvalid) && well.invalid
+            appearance === 'well' && !focusRing && styles.quietFocus,
+            appearance === 'well' && isInvalid(state.valid, ariaInvalid) && well.invalid,
+            xstyle
           ).className,
           className
         )

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider as JotaiProvider, createStore } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -14,6 +15,49 @@ import {
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { MessageRowView, type CapacityRetryControl } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+const storyLayoutStyles = stylex.create({
+  element: {
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-block': 'calc(var(--spacing) * 4)',
+  },
+  canvas: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'padding-inline': 'calc(var(--spacing) * 5)',
+    'font-size': '11px',
+    'font-weight': 'var(--font-weight-medium)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    'text-transform': 'uppercase',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '760px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+  frame2: {
+    'min-height': '100dvh',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 6)',
+    'padding-block': 'calc(var(--spacing) * 8)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    width: '100%',
+    'max-width': '920px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const meta = {
   title: 'Sessions/CapacityRetryNotice',
@@ -60,7 +104,7 @@ function renderRow(args: React.ComponentProps<typeof MessageRowView>) {
   store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: sessionMeta });
   return (
     <JotaiProvider store={store}>
-      <div className="w-[760px] max-w-[100vw] bg-background py-6">
+      <div {...stylex.props(storyLayout.frame)}>
         <ConversationColumn>
           <MessageRowView {...args} />
         </ConversationColumn>
@@ -158,13 +202,11 @@ function RetryStateGallery() {
 
   return (
     <JotaiProvider store={store}>
-      <main className="min-h-dvh bg-background px-6 py-8 text-foreground">
-        <div className="mx-auto flex w-full max-w-[920px] flex-col gap-4">
+      <main {...stylex.props(storyLayout.frame2)}>
+        <div {...stylex.props(storyLayout.stack)}>
           {galleryStates.map(({ key, control }, index) => (
-            <section key={key} className="rounded-xl border border-border/70 bg-background py-4">
-              <div className="mb-2 px-5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                {labels[index]}
-              </div>
+            <section key={key} {...stylex.props(storyLayoutStyles.element)}>
+              <div {...stylex.props(storyLayoutStyles.canvas)}>{labels[index]}</div>
               <ConversationColumn>
                 <MessageRowView
                   message={{ ...message, id: `${noticeId}-${key}` }}

@@ -28,6 +28,9 @@ const QUICK_OPEN_OVERSCAN = 8;
 const EMPTY_QUICK_OPEN_FALLBACK_PATHS: readonly string[] = [];
 
 const styles = stylex.create({
+  dialog: { overflow: 'hidden' },
+  listCap: { maxHeight: 420 },
+  group: { padding: 'calc(var(--spacing) * 0)' },
   fileIcon: { width: '1rem', height: '1rem', flexShrink: 0 },
   fileDetails: { minWidth: 0, flex: 1 },
   basename: {
@@ -54,6 +57,16 @@ const styles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   virtualContainer: { position: 'relative', width: '100%' },
+  /** A command row may shrink below its content, so a long path truncates. */
+  item: { minWidth: 0, paddingBlock: 'calc(var(--spacing) * 2)' },
+  /** The virtualized row is placed by the virtualizer. */
+  virtualItem: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    minWidth: 0,
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
 });
 
 export function mapSessionFileProviderEntriesToQuickOpenItems(
@@ -230,11 +243,11 @@ export function SessionFileQuickOpen({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content width="42rem" className="overflow-hidden p-0">
-        <Dialog.Title className="sr-only">
+      <Dialog.Content width="42rem" padding="none" xstyle={styles.dialog}>
+        <Dialog.Title visuallyHidden>
           {t('sessions.fileQuickOpen.title', 'Quick open file')}
         </Dialog.Title>
-        <Dialog.Description className="sr-only">
+        <Dialog.Description visuallyHidden>
           {t('sessions.fileQuickOpen.description', 'Search indexed files and open one.')}
         </Dialog.Description>
         <Command shouldFilter={false}>
@@ -244,8 +257,8 @@ export function SessionFileQuickOpen({
             placeholder={t('sessions.fileQuickOpen.placeholder', 'Search files…')}
           />
           <CommandList
-            containerClassName="max-h-[420px]"
-            viewportClassName="max-h-[420px]"
+            containerXstyle={styles.listCap}
+            viewportXstyle={styles.listCap}
             viewportRef={listViewportRef}
           >
             <CommandEmpty>
@@ -255,7 +268,7 @@ export function SessionFileQuickOpen({
               </div>
             </CommandEmpty>
             {items.length > 0 && shouldVirtualizeItems ? (
-              <CommandGroup className="p-0">
+              <CommandGroup xstyle={styles.group}>
                 <div
                   {...stylex.props(styles.virtualContainer)}
                   style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
@@ -268,7 +281,7 @@ export function SessionFileQuickOpen({
                         key={virtualItem.key}
                         value={item.path}
                         onSelect={() => handleSelect(item.path)}
-                        className="absolute left-0 top-0 min-w-0 py-2"
+                        xstyle={styles.virtualItem}
                         style={{
                           height: `${virtualItem.size}px`,
                           transform: `translateY(${virtualItem.start}px)`,
@@ -288,7 +301,7 @@ export function SessionFileQuickOpen({
                     key={item.fileId ?? item.path}
                     value={item.path}
                     onSelect={() => handleSelect(item.path)}
-                    className="min-w-0 py-2"
+                    xstyle={styles.item}
                   >
                     {renderItem(item)}
                   </CommandItem>

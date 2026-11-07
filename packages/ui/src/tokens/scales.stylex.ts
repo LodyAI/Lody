@@ -30,6 +30,7 @@ export const control = stylex.defineVars({
   small: '28px',
   medium: '32px',
   large: '36px',
+  disabledOpacity: '0.45',
 });
 
 export const text = stylex.defineVars({

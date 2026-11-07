@@ -184,6 +184,7 @@ export function McpConnectionForm({
   onSubmit,
   onCancel,
   className,
+  xstyle,
   authentication,
 }: {
   initialEntry?: WorkspaceMcpServerMeta;
@@ -192,6 +193,7 @@ export function McpConnectionForm({
   onSubmit: (value: McpConnectionFormValue) => void | Promise<void>;
   onCancel: () => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   authentication?: (dirty: boolean, transport: McpTransport) => ReactNode;
 }) {
   const { t } = useTranslation();
@@ -219,7 +221,7 @@ export function McpConnectionForm({
       );
 
   return (
-    <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
+    <form {...withClassName(stylex.props(catalog.editorForm, xstyle), className)} onSubmit={submit}>
       <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         <Section title={t('settings.mcp.form.sectionIdentity')}>
           <Field htmlFor={`${fieldId}-name`} label={t('settings.mcp.form.name')}>

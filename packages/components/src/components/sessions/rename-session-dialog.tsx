@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
+import { field as fieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type { SessionId } from '@lody/shared';
@@ -8,6 +11,49 @@ import { Textarea } from '@lody/ui/textarea';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
+import { themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  titleFieldLayout: {
+    [fieldTokens.textareaMinHeight]: 'calc(var(--spacing) * 9)',
+    [fieldTokens.paddingBlock]: 'calc(var(--spacing) * 2)',
+  },
+  titleTypography: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--text-base--line-height)',
+  },
+  content: { overflow: 'hidden', maxWidth: '24rem' },
+  description: { lineHeight: 'calc(var(--spacing) * 5)' },
+  field: {
+    lineHeight: 'calc(var(--spacing) * 5)',
+    boxShadow: {
+      default: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-visible': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-within': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    },
+  },
+  header: {
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    paddingLeft: { default: themeSpace[4], '@media (min-width: 40rem)': themeSpace[5] },
+    paddingRight: themeSpace[12],
+    paddingBlock: themeSpace[4],
+    textAlign: 'left',
+  },
+  body: {
+    paddingInline: { default: themeSpace[4], '@media (min-width: 640px)': themeSpace[5] },
+    paddingBlock: themeSpace[4],
+  },
+  footer: {
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: { default: themeSpace[4], '@media (min-width: 40rem)': themeSpace[5] },
+    paddingBlock: themeSpace[3],
+  },
+});
 
 const MAX_VISIBLE_TITLE_LINES = 4;
 
@@ -122,24 +168,26 @@ export function RenameSessionDialogView({
 
   return (
     <Dialog.Root open={target != null} onOpenChange={handleOpenChange}>
-      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
-          <Dialog.Title className="text-base">
+      <Dialog.Content padding="none" gap="none" xstyle={styles.content}>
+        <Dialog.Header xstyle={styles.header}>
+          <Dialog.Title xstyle={styles.titleTypography}>
             {t('sidebar.renameChat.title', 'Rename Chat')}
           </Dialog.Title>
-          <Dialog.Description className="leading-5">
+          <Dialog.Description xstyle={styles.description}>
             {t('sidebar.renameChat.description', 'Enter a new name for this chat.')}
           </Dialog.Description>
         </Dialog.Header>
 
-        <div className="px-4 py-4 sm:px-5">
+        <div {...stylex.props(styles.body)}>
           <Textarea
             ref={setTitleField}
             autoFocus
             rows={1}
             value={draft}
             disabled={saving}
-            className="min-h-9 resize-none overflow-y-hidden py-2 leading-5 shadow-xs focus-visible:ring-1 focus-visible:ring-ring"
+            resize="none"
+            style={{ overflowY: 'hidden' }}
+            xstyle={[styles.titleFieldLayout, styles.field]}
             onChange={(e) => setDraft(e.target.value.replace(/[\r\n]+/g, ' '))}
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {
@@ -151,7 +199,7 @@ export function RenameSessionDialogView({
           />
         </div>
 
-        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+        <Dialog.Footer xstyle={styles.footer}>
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>

@@ -1,6 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
 import { McpServerRow } from '@/components/settings/mcp-setting';
+const storyLayout = stylex.create({
+  frame: {
+    'margin-inline': 'auto',
+    width: '640px',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const base: WorkspaceMcpServerMeta = {
   id: 'files' as McpServerId,
@@ -28,7 +36,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="mx-auto w-[640px] p-4">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

@@ -1,8 +1,27 @@
 import { useLayoutEffect, useRef, type ComponentPropsWithoutRef } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  root: { position: 'relative', display: 'inline-block', flexShrink: 0 },
+  grid: { position: 'absolute', display: 'block' },
+  tile: {
+    position: 'absolute',
+    display: 'block',
+    borderRadius: '40%',
+    backgroundColor: 'currentColor',
+  },
+  dot: {
+    position: 'absolute',
+    display: 'block',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'currentColor',
+  },
+});
 
 export type WorkingGridCollapseProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & {
+  xstyle?: stylex.StyleXStyles;
   /** Box the animation plays in, px; the grid and dot are centred inside it. */
   size?: number;
   /** Edge of the 3×3 grid it starts from, px (match {@link WorkingGrid}). */
@@ -39,6 +58,7 @@ export function WorkingGridCollapse({
   dotSize = 8,
   onDone,
   className,
+  xstyle,
   style,
   ...props
 }: WorkingGridCollapseProps) {
@@ -120,18 +140,19 @@ export function WorkingGridCollapse({
   }, [pitch, size]);
 
   const inset = (size - gridSize) / 2;
+  const sx = stylex.props(styles.root, xstyle);
   return (
     <span
       ref={rootRef}
       data-working-grid-collapse=""
       aria-hidden="true"
-      className={cn('relative inline-block shrink-0', className)}
-      style={{ width: size, height: size, ...style }}
+      className={clsx(sx.className, className)}
+      style={{ ...sx.style, width: size, height: size, ...style }}
       {...props}
     >
       <span
         data-collapse-grid=""
-        className="absolute block"
+        className={stylex.props(styles.grid).className}
         style={{ left: inset, top: inset, width: gridSize, height: gridSize }}
       >
         {TILES.map(([row, col]) => (
@@ -140,7 +161,7 @@ export function WorkingGridCollapse({
             data-collapse-tile=""
             data-row={row}
             data-col={col}
-            className="absolute block rounded-[40%] bg-current"
+            className={stylex.props(styles.tile).className}
             style={{
               left: col * pitch + (cell - tile) / 2,
               top: row * pitch + (cell - tile) / 2,
@@ -152,7 +173,7 @@ export function WorkingGridCollapse({
       </span>
       <span
         data-collapse-dot=""
-        className="absolute block rounded-full bg-current"
+        className={stylex.props(styles.dot).className}
         style={{
           left: (size - dotSize) / 2,
           top: (size - dotSize) / 2,

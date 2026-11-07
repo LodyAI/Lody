@@ -1,9 +1,252 @@
+import * as stylex from '@stylexjs/stylex';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { ArrowUp, MousePointer2, Plus, X } from 'lucide-react';
 import { Button } from './button';
 import type { ReplicaLocale, ReplicaVisualAnnotation } from './types';
-import { cn } from './utils';
 import { ConversationColumn } from './chat-stream';
+const previewStyles = stylex.create({
+  stack: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flex: '1',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+  },
+  stack2: {
+    position: 'relative',
+    display: 'flex',
+    'min-height': '0px',
+    flex: '1',
+    'flex-direction': 'column',
+  },
+  stack3: {
+    display: 'flex',
+    'min-height': '0px',
+    flex: '1',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'center',
+    gap: 'calc(var(--spacing) * 5)',
+    overflow: 'auto',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+  },
+  text: {
+    'font-size': 'var(--text-4xl)',
+    'line-height': 'var(--text-4xl--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-tight)',
+    color: 'hsl(var(--foreground))',
+  },
+  section: {
+    position: 'relative',
+    'margin-bottom': 'var(--native-keyboard-height,0px)',
+    'flex-shrink': '0',
+    'background-color': 'hsl(var(--background))',
+    'padding-top': '0px',
+    'padding-bottom':
+      'calc(0.5rem + max(0px, env(safe-area-inset-bottom,0px) - var(--native-keyboard-height,0px)))',
+    'transition-property': 'margin-bottom',
+    'transition-timing-function': 'var(--ease-out)',
+    'transition-duration': '250ms',
+  },
+  section2: {
+    containerType: 'inline-size',
+  },
+  stack4: {
+    display: 'flex',
+    width: '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  stack5: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'var(--spacing)',
+  },
+  row: {
+    display: 'flex',
+    width: '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  stack6: {
+    'container-type': 'inline-size',
+    'container-name': 'composer-box',
+    position: 'relative',
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    'background-color': 'hsl(var(--composer))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 3px 6px -2px lch(0% 0 0/0.02), 0 1px 1px lch(0% 0 0/0.04)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': '150ms',
+    '--mention-chip-surface': 'hsl(var(--composer))',
+    ':where(.dark, .dark *)': {
+      'border-color': 'color-mix(in oklab, hsl(var(--input-border)) 70%, transparent)',
+      'background-color': 'color-mix(in oklab, hsl(var(--input)) 90%, transparent)',
+      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+      '--mention-chip-surface': 'color-mix(in srgb,hsl(var(--input)) 90%,hsl(var(--background)))',
+    },
+  },
+  row2: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'var(--spacing)',
+  },
+  text2: {
+    resize: 'none',
+    'border-color': 'transparent',
+    'background-color': 'transparent',
+    'padding-inline': 'var(--spacing)',
+    'padding-block': '0px',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--input-foreground))',
+    'transition-property': 'box-shadow',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+    '::placeholder': {
+      color: 'color-mix(in oklab, hsl(var(--input-placeholder)) 40%, transparent)',
+    },
+    ':focus-visible': {
+      'box-shadow':
+        '0 0 #0000, 0 0 #0000, 0 0 0 0px #fff, 0 0 0 calc(0px + 0px) currentcolor, 0 0 #0000',
+      'outline-style': 'none',
+    },
+  },
+  section3: {
+    'min-height': '24px',
+  },
+  section4: {
+    'min-height': '48px',
+  },
+  row3: {
+    display: 'flex',
+    'align-items': 'center',
+    'column-gap': 'calc(var(--spacing) * 1.5)',
+    'padding-top': 'calc(var(--spacing) * 0.5)',
+    '-webkit-user-select': 'none',
+    'user-select': 'none',
+  },
+  row4: {
+    'container-type': 'inline-size',
+    'container-name': 'composer-face',
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'flex-wrap': 'nowrap',
+    'align-items': 'center',
+    'column-gap': 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+  row5: {
+    'margin-left': 'auto',
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  stack7: {
+    position: 'relative',
+    display: 'flex',
+    'max-width': 'calc(var(--spacing) * 64)',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 0.5)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 50%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  row6: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    'flex-shrink': '0',
+  },
+  section5: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  row7: {
+    'pointer-events': 'none',
+    'margin-left': 'auto',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-xs)',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)',
+    opacity: '0%',
+    'transition-property': 'opacity',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': 'var(--default-transition-duration)',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+  },
+  text3: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 70%, transparent)',
+  },
+  text4: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-family': 'var(--font-mono)',
+    'font-size': '10px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
+
+const buttonStyles = stylex.create({
+  attachment: {
+    borderRadius: 'calc(infinity * 1px)',
+    color: {
+      default: 'hsl(var(--foreground))',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--hover))' },
+    },
+  },
+  desktopAttach: { height: 'calc(var(--spacing) * 7)', width: 'calc(var(--spacing) * 7)' },
+  mobileAttach: { height: 'calc(var(--spacing) * 9)', width: 'calc(var(--spacing) * 9)' },
+  send: { transitionProperty: 'all', translate: { default: null, ':active': '0 1px' } },
+});
 
 /* Display-only replica of the app's chat composer, desktop chat landing and the
    selector triggers around them (triggers live in ./composer-controls).
@@ -17,8 +260,6 @@ export type ReplicaComposerVariant = 'landing' | 'session' | 'mobile-session' | 
 // ---- Layout shells ------------------------------------------------------------
 
 /** `getSessionChatInputAreaShellClassName()`: the docked composer band. */
-const COMPOSER_SHELL_CLASS =
-  'relative shrink-0 pt-0 mb-[var(--native-keyboard-height,0px)] transition-[margin-bottom] duration-[250ms] ease-out pb-[calc(0.5rem+max(0px,env(safe-area-inset-bottom,0px)-var(--native-keyboard-height,0px)))] bg-background';
 
 /** Desktop chat landing (`WebChatLandingScreen`, non-Electron path). */
 export function ReplicaChatLandingView({
@@ -29,13 +270,13 @@ export function ReplicaChatLandingView({
   composer: ReactNode;
 }) {
   return (
-    <div className="relative flex h-full w-full flex-1 flex-col overflow-hidden bg-background text-foreground">
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-auto px-4">
-          <h2 className="text-4xl font-semibold tracking-tight text-foreground">{title}</h2>
+    <div data-power-demo-layout="fill" {...stylex.props(previewStyles.stack)}>
+      <div {...stylex.props(previewStyles.stack2)}>
+        <div data-landing-scroll-region {...stylex.props(previewStyles.stack3)}>
+          <h2 {...stylex.props(previewStyles.text)}>{title}</h2>
         </div>
-        <div className={COMPOSER_SHELL_CLASS}>
-          <ConversationColumn className="@container">{composer}</ConversationColumn>
+        <div {...stylex.props(previewStyles.section)}>
+          <ConversationColumn xstyle={previewStyles.section2}>{composer}</ConversationColumn>
         </div>
       </div>
     </div>
@@ -69,12 +310,6 @@ const DEFAULT_PLACEHOLDER: Record<ReplicaComposerVariant, Record<ReplicaLocale, 
   'mobile-session': { en: 'Ask anything', zh: '随便问点什么' },
   'mobile-sheet': { en: 'Ask anything', zh: '随便问点什么' },
 };
-
-const TEXTAREA_CLASS =
-  'input-scrollbar resize-none text-sm leading-6 transition-shadow border-transparent bg-transparent px-1 py-0 focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0 text-input-foreground placeholder:text-input-placeholder/40';
-
-const BOX_CLASS =
-  '@container/composer-box flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] shadow-[0_3px_6px_-2px_lch(0%_0_0/0.02),0_1px_1px_lch(0%_0_0/0.04)] dark:shadow-none dark:border-input-border/70 dark:bg-input/90 [--mention-chip-surface:hsl(var(--composer))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))] group relative';
 
 export type ReplicaComposerProps = {
   variant: ReplicaComposerVariant;
@@ -129,14 +364,12 @@ export function ReplicaComposer({
   }, [config.maxRows, config.rows, value]);
 
   return (
-    <div className="flex w-full flex-col gap-2">
-      <div className="flex flex-col gap-1">
-        {topSelector ? (
-          <div className="flex w-full min-w-0 select-none items-center gap-1">{topSelector}</div>
-        ) : null}
-        <div className={BOX_CLASS}>
+    <div {...stylex.props(previewStyles.stack4)}>
+      <div {...stylex.props(previewStyles.stack5)}>
+        {topSelector ? <div {...stylex.props(previewStyles.row)}>{topSelector}</div> : null}
+        <div className={['group', stylex.props(previewStyles.stack6).className].join(' ')}>
           {annotations.length > 0 ? (
-            <div className="flex flex-wrap gap-2 pb-1">
+            <div {...stylex.props(previewStyles.row2)}>
               {annotations.map((annotation, index) => (
                 <ReplicaVisualAnnotationChip key={index} annotation={annotation} />
               ))}
@@ -149,27 +382,32 @@ export function ReplicaComposer({
             value={value}
             rows={config.rows}
             placeholder={placeholder ?? DEFAULT_PLACEHOLDER[variant][locale]}
-            className={cn(TEXTAREA_CLASS, config.mobile ? 'min-h-[24px]' : 'min-h-[48px]')}
+            className={[
+              'input-scrollbar',
+              stylex.props(
+                previewStyles.text2,
+                config.mobile ? previewStyles.section3 : previewStyles.section4
+              ).className,
+            ].join(' ')}
             data-keyboard-nav="composer"
           />
-          <div className="flex select-none items-center gap-x-1.5 pt-0.5">
+          <div {...stylex.props(previewStyles.row3)}>
             {showAttachmentButton ? (
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label="Add attachment"
-                className={cn(
-                  config.mobile ? 'size-9' : 'size-7',
-                  'rounded-full text-foreground transition-colors hover:bg-hover hover:text-foreground'
-                )}
+                xstyle={[
+                  buttonStyles.attachment,
+                  config.mobile ? buttonStyles.mobileAttach : buttonStyles.desktopAttach,
+                ]}
+                iconSize={config.mobile ? 'calc(var(--spacing) * 6)' : 'calc(var(--spacing) * 4)'}
               >
-                <Plus strokeWidth={1.5} className={config.mobile ? 'size-6' : 'size-4'} />
+                <Plus strokeWidth={1.5} />
               </Button>
             ) : null}
-            <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-              {footer}
-            </div>
-            <div className="ml-auto flex shrink-0 items-center gap-2">{primaryAction}</div>
+            <div {...stylex.props(previewStyles.row4)}>{footer}</div>
+            <div {...stylex.props(previewStyles.row5)}>{primaryAction}</div>
           </div>
         </div>
       </div>
@@ -180,16 +418,78 @@ export function ReplicaComposer({
 /* Per-surface send chips as the landing wires them: the chat landing's filled
    disc, the session composer's tinted square, the mobile session's larger disc
    and the new-chat sheet's larger tinted square. */
-const SEND_CLASS: Record<ReplicaComposerVariant, string> = {
-  landing:
-    'h-7 w-7 rounded-full shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px] focus-visible:ring-ring focus-visible:ring-offset-background',
-  session:
-    'h-7 w-7 rounded-md border shadow-xs transition-all border-primary/[0.28] bg-primary/[0.14] text-foreground hover:bg-primary/[0.22] hover:text-foreground active:translate-y-[1px]',
-  'mobile-session':
-    'h-8 w-8 rounded-full shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]',
-  'mobile-sheet':
-    'h-8 w-8 rounded-md border shadow-xs transition-all border-primary/[0.25] bg-primary/[0.15] text-foreground hover:bg-primary/[0.25] hover:text-foreground active:translate-y-[1px]',
-};
+const sendStyles = stylex.create({
+  landing: {
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab,hsl(var(--foreground)) 90%,transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--background))',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--background))' },
+    },
+  },
+  session: {
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--primary)) 28%,transparent)',
+    backgroundColor: {
+      default: 'color-mix(in oklab,hsl(var(--primary)) 14%,transparent)',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab,hsl(var(--primary)) 22%,transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--foreground))',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
+  },
+  'mobile-session': {
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab,hsl(var(--foreground)) 90%,transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--background))',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--background))' },
+    },
+  },
+  'mobile-sheet': {
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--primary)) 25%,transparent)',
+    backgroundColor: {
+      default: 'color-mix(in oklab,hsl(var(--primary)) 15%,transparent)',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab,hsl(var(--primary)) 25%,transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--foreground))',
+      ':hover': { default: null, '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
+  },
+});
 
 export function ReplicaSendButton({
   variant,
@@ -205,9 +505,11 @@ export function ReplicaSendButton({
       size="icon"
       disabled={disabled}
       aria-label="Send"
-      className={SEND_CLASS[variant]}
+      xstyle={[buttonStyles.send, sendStyles[variant]]}
+      iconSize={large ? 'calc(var(--spacing) * 5)' : 'calc(var(--spacing) * 4)'}
+      shadow="xs"
     >
-      <ArrowUp className={large ? 'h-5 w-5' : 'h-4 w-4'} />
+      <ArrowUp />
     </Button>
   );
 }
@@ -219,24 +521,22 @@ function ReplicaVisualAnnotationChip({ annotation }: { annotation: ReplicaVisual
   return (
     <div
       data-visual-annotation-ref
-      className="group/chip relative flex max-w-64 flex-col gap-0.5 rounded-lg border bg-muted/50 px-2.5 py-1.5 text-xs"
+      className={['group/chip', stylex.props(previewStyles.stack7).className].join(' ')}
     >
-      <div className="flex items-center gap-1.5 text-muted-foreground">
-        <MousePointer2 className="h-3 w-3 shrink-0" />
+      <div {...stylex.props(previewStyles.row6)}>
+        <MousePointer2 {...stylex.props(previewStyles.frame)} />
         {/* The demo annotates the preview's root page, so the app's pathname is `/`. */}
-        <span className="truncate font-medium">/ · {annotation.tag.toLowerCase()}</span>
+        <span {...stylex.props(previewStyles.section5)}>/ · {annotation.tag.toLowerCase()}</span>
         <button
           type="button"
           aria-label="Remove visual annotation reference"
-          className="pointer-events-none ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground/60 opacity-0 transition-opacity"
+          {...stylex.props(previewStyles.row7)}
         >
-          <X className="h-3 w-3" />
+          <X {...stylex.props(previewStyles.frame2)} />
         </button>
       </div>
-      <div className="truncate text-foreground/70">&ldquo;{preview}&rdquo;</div>
-      <div className="truncate font-mono text-[10px] text-muted-foreground">
-        {annotation.selector}
-      </div>
+      <div {...stylex.props(previewStyles.text3)}>&ldquo;{preview}&rdquo;</div>
+      <div {...stylex.props(previewStyles.text4)}>{annotation.selector}</div>
     </div>
   );
 }

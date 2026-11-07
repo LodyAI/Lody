@@ -1,0 +1,8 @@
+diff --git a/dist/utils/cn.js b/dist/utils/cn.js
+index d212ae455692c48d497e98a4ff5e962e87a4639f..2e934d5e03bd87ff9c0037d05d5a6665dcf2e330 100644
+--- a/dist/utils/cn.js
++++ b/dist/utils/cn.js
+@@ -1,2 +1,2 @@
+-import { twMerge as cn } from "tailwind-merge";
++import { clsx as cn } from "clsx";
+ export { cn };

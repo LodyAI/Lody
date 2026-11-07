@@ -1,7 +1,12 @@
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { ScheduleDocument, ScheduleRuntimeRow } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
+
+const styles = stylex.create({
+  content: { maxHeight: '85dvh', overflowY: 'auto' },
+});
 
 /**
  * The in-conversation editor for a pending scheduled message. It edits the
@@ -31,7 +36,7 @@ export function ScheduledMessageEditDialog({
         if (!open) onClose();
       }}
     >
-      <Dialog.Content width="42rem" className="max-h-[85dvh] overflow-y-auto">
+      <Dialog.Content width="42rem" xstyle={styles.content}>
         <Dialog.Header>
           <Dialog.Title>{t('scheduledMessage.editTitle', 'Edit scheduled message')}</Dialog.Title>
         </Dialog.Header>

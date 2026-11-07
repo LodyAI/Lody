@@ -1,8 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import type { SessionPlanEntry } from '@lody/shared';
 
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
+
+const storyStyles = stylex.create({
+  planFrame: { width: '520px', maxWidth: 'calc(100vw - 2rem)' },
+});
 
 const meta = {
   title: 'Sessions/SessionPlanBar',
@@ -29,7 +34,7 @@ export const Collapsed: Story = {
     defaultOpen: false,
   },
   render: (args) => (
-    <div className="w-[520px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyStyles.planFrame)}>
       <SessionPlanBar {...args} />
     </div>
   ),
@@ -41,7 +46,7 @@ export const Expanded: Story = {
     defaultOpen: true,
   },
   render: (args) => (
-    <div className="w-[520px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyStyles.planFrame)}>
       <SessionPlanBar {...args} />
     </div>
   ),

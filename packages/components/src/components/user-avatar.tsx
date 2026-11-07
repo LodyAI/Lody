@@ -1,6 +1,11 @@
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { UserIcon } from 'lucide-react';
 import { useStableAvatarSrc } from '@/hooks/use-stable-avatar-src';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  fallbackGlyph: { width: '100%', height: '100%' },
+});
 
 interface UserAvatarProps {
   /**
@@ -58,7 +63,7 @@ export function UserAvatar({ user, size = 'medium', className, showIcon = false 
           // The glyph box is the primitive's and follows the rung; the icon
           // states 100% of it, the way every caller's icon does in that package.
           <Avatar.Glyph>
-            <UserIcon className="size-full" />
+            <UserIcon {...stylex.props(styles.fallbackGlyph)} />
           </Avatar.Glyph>
         ) : (
           initials

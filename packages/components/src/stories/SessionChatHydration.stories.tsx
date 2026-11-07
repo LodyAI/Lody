@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState, type ComponentProps, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
@@ -10,6 +11,29 @@ import {
 } from '@/components/ai-gui/view';
 import { Button } from '@lody/ui/button';
 import { clearSavedScrollStates, saveScrollState } from '@/lib/conversation-scroll/saved-state';
+
+const migrationStyles = stylex.create({
+  cachedOffset: { height: '400px', flexShrink: 0 },
+  flexibleOffset: { minHeight: 0, flex: '1' },
+});
+
+const storyOverrides = stylex.create({ stream: { height: '100%' } });
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100vh',
+    'flex-direction': 'column',
+  },
+  canvas: {
+    'flex-shrink': '0',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+});
 
 const sessionId = 'hydration-regression' as SessionId;
 const platform = createLocalPlatformProvider({
@@ -58,8 +82,8 @@ function HydrationStory({
   const [active, setActive] = useState(true);
   return (
     <PlatformContext.Provider value={platform}>
-      <div className="flex h-screen flex-col" data-testid="chat-hydration-story">
-        <div className="shrink-0 p-2">
+      <div {...stylex.props(storyLayout.stack)} data-testid="chat-hydration-story">
+        <div {...stylex.props(storyLayout.canvas)}>
           <Button onClick={() => setLoaded(true)} disabled={loaded}>
             Load history
           </Button>
@@ -68,13 +92,13 @@ function HydrationStory({
           )}
         </div>
         <div
-          className="min-h-0 flex-1"
+          {...stylex.props(storyLayout.frame)}
           data-testid="chat-hydration-viewport"
           style={{ '--conversation-top-inset': `${topInset}px` } as CSSProperties}
         >
           <SessionChatStreamView
             sessionId={sessionId}
-            className="h-full"
+            xstyle={storyOverrides.stream}
             items={loaded ? loadedItems : emptyHistory}
             agentActivityLabel={active ? agentActivityLabel : null}
             agentActivityTone={agentActivityTone}
@@ -147,7 +171,7 @@ function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
   );
   return (
     <PlatformContext.Provider value={platform}>
-      <div className="flex h-screen flex-col">
+      <div {...stylex.props(storyLayout.stack)}>
         <Button
           onClick={() => {
             // Every open is cold: saved sizes would already count as measured.
@@ -175,12 +199,16 @@ function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
         >
           Open conversation
         </Button>
-        <div className={cachedOffset ? 'h-[400px] shrink-0' : 'min-h-0 flex-1'}>
+        <div
+          {...stylex.props(
+            cachedOffset ? migrationStyles.cachedOffset : migrationStyles.flexibleOffset
+          )}
+        >
           {opened > 0 && (
             <SessionChatStreamView
               key={opened}
               sessionId={sessionId}
-              className="h-full"
+              xstyle={storyOverrides.stream}
               items={items}
               showScrollToLatest={false}
               renderMessageRow={({ message }) => (

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   RouterProvider,
   createMemoryHistory,
@@ -65,30 +65,38 @@ const localStoryPlatform = createLocalPlatformProvider({
   }),
 });
 
-const storyAuthClient = {
-  useSession: () => ({
-    data: settingsStorySession,
-    isPending: false,
-    error: null,
-    refetch: async () => ({ data: settingsStorySession, error: null }),
-  }),
-  useListOrganizations: () => ({
-    data: [settingsStoryOrganization],
-    isPending: false,
-    error: null,
-    refetch: async () => ({ data: [settingsStoryOrganization], error: null }),
-  }),
-  useActiveOrganization: () => ({
-    data: settingsStoryOrganization,
-    isPending: false,
-    error: null,
-    refetch: async () => ({ data: settingsStoryOrganization, error: null }),
-  }),
-  organization: {
-    setActive: async () => ({ data: settingsStoryOrganization, error: null }),
-  },
-  signOut: async () => undefined,
-} as unknown as LodyAuthClient;
+function createStoryAuthClient(role: 'owner' | 'member') {
+  const organization = {
+    ...settingsStoryOrganization,
+    role,
+    members: settingsStoryOrganization.members.map((member) => ({ ...member, role })),
+  };
+  const organizations = [organization];
+  return {
+    useSession: () => ({
+      data: settingsStorySession,
+      isPending: false,
+      error: null,
+      refetch: async () => ({ data: settingsStorySession, error: null }),
+    }),
+    useListOrganizations: () => ({
+      data: organizations,
+      isPending: false,
+      error: null,
+      refetch: async () => ({ data: organizations, error: null }),
+    }),
+    useActiveOrganization: () => ({
+      data: organization,
+      isPending: false,
+      error: null,
+      refetch: async () => ({ data: organization, error: null }),
+    }),
+    organization: {
+      setActive: async () => ({ data: organization, error: null }),
+    },
+    signOut: async () => undefined,
+  } as unknown as LodyAuthClient;
+}
 
 const storyStableSessionValue = {
   data: settingsStorySession,
@@ -111,11 +119,14 @@ const storyStableSessionValue = {
  */
 export function SettingsStoryProviders({
   capabilities = [],
+  role = 'owner',
   children,
 }: {
   capabilities?: readonly PlatformCapability[];
+  role?: 'owner' | 'member';
   children: ReactNode;
 }) {
+  const storyAuthClient = useMemo(() => createStoryAuthClient(role), [role]);
   const [platform] = useState(() => ({
     ...localStoryPlatform,
     capabilities: createCapabilitySet([...localStoryPlatform.capabilities.list(), ...capabilities]),

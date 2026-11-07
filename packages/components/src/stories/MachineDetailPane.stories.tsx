@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -15,6 +16,18 @@ import {
 import { MachineDetailPane } from '@/components/settings/machine-detail-pane';
 import { lodyPresenceStatesAtom, lodyPresenceSyncStateAtom } from '@/atoms/presence';
 
+const storyStyles = stylex.create({
+  panel: {
+    height: 620,
+    width: 720,
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-lg)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--border) / 1) 60%,transparent)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--card) / 1) 40%,transparent)',
+  },
+});
 const machineId = 'machine-story' as MachineId;
 const resetIn = (seconds: number) => Math.floor(getServerNow() / 1000) + seconds;
 
@@ -105,7 +118,7 @@ function StoryWrapper({
   });
   return (
     <Provider store={store}>
-      <div className="h-[620px] w-[720px] overflow-hidden rounded-lg border border-border/60 bg-card/40">
+      <div {...stylex.props(storyStyles.panel)}>
         <MachineDetailPane
           machine={machine}
           configs={storyConfigs}

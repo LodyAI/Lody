@@ -40,6 +40,8 @@ import { Select } from '@lody/ui/select';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, space } from '@lody/ui/tokens/scales.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight } from '../../style/theme-scale.stylex';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -73,6 +75,13 @@ const styles = stylex.create({
   },
   titleHint: { marginTop: '2px' },
   success: { fontSize: '12px', lineHeight: 1.375, color: colors.success },
+  /** The managed-runtime note under the sign-in actions, in the theme's own ink. */
+  runtimeNote: {
+    margin: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
   error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
   url: {
     display: 'block',
@@ -124,7 +133,7 @@ const styles = stylex.create({
     minHeight: control.large,
     paddingBlock: space[1.5],
   },
-  methodDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  methodDisabled: { opacity: control.disabledOpacity, cursor: 'not-allowed' },
   methodBody: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
   methodName: { fontSize: '13px', lineHeight: 1.375, color: colors.label },
   methodDescription: { fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
@@ -1024,7 +1033,7 @@ export function AcpAuthenticationPanel({
         </p>
       ) : null}
       {runtimeDownloadText ? (
-        <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
+        <p {...stylex.props(styles.runtimeNote)}>{runtimeDownloadText}</p>
       ) : null}
       {showAdvertisedMethods && !methodRows && layout !== 'action' ? (
         <AcpAuthenticationInteractionView

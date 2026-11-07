@@ -1,10 +1,50 @@
+import { clsx } from 'clsx';
 import { useCallbackRef, useComposedRefs } from '@diceui/shared';
 import * as React from 'react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { badge } from '@lody/ui/badge/badge.tokens.stylex';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { type Mention, type MentionChip, useMentionContext } from './mention-root';
 
 const HIGHLIGHTER_NAME = 'MentionHighlighter';
+
+const styles = stylex.create({
+  hidden: { visibility: 'hidden' },
+  chip: {
+    boxDecorationBreak: 'clone',
+    backgroundColor: `var(--mention-chip-surface,${colors.background})`,
+    backgroundImage: 'var(--mention-chip-overlay,none)',
+  },
+  selectedChip: {
+    backgroundImage: 'linear-gradient(Highlight,Highlight)',
+    color: 'HighlightText !important',
+  },
+  iconSlot: { position: 'relative' },
+  icon: {
+    ':is(*) > *': { maxWidth: '100%' },
+    visibility: 'visible',
+    position: 'absolute',
+    insetBlock: 'calc(var(--spacing) * 0)',
+    left: 'calc(var(--spacing) * 0)',
+    right: '1px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  pastedHighlight: {
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: badge.neutralFill,
+    WebkitBoxDecorationBreak: 'clone',
+    boxDecorationBreak: 'clone',
+  },
+  highlight: {
+    borderRadius: 'var(--radius-sm)',
+    backgroundColor: colors.wellBackground,
+    WebkitBoxDecorationBreak: 'clone',
+    boxDecorationBreak: 'clone',
+  },
+});
 
 type HighlighterElement = HTMLDivElement;
 
@@ -97,9 +137,31 @@ export function getMentionHighlightSegments(
   return segments;
 }
 
-const CHIP_CLASS_NAME = 'box-decoration-clone';
-const CHIP_SELECTED_CLASS_NAME =
-  'bg-[image:linear-gradient(Highlight,Highlight)] !text-[HighlightText]';
+/**
+ * A decorated range paints no visible background — the mention reads as
+ * coloured text, and `chip.className` supplies only that colour.
+ *
+ * It does still paint the *surface* colour, and that is not a contradiction: a
+ * native textarea cannot colour a sub-range of its own value, so the only way
+ * to recolour one is to cover its glyphs and redraw them. The cover has to be
+ * opaque or the original shows through underneath. Painting the surface colour
+ * makes the cover invisible while it does that job.
+ *
+ * `--mention-chip-surface` is therefore whatever sits behind the textarea. It
+ * is an opaque backdrop. A translucent well also publishes its fill as
+ * `--mention-chip-overlay`; native background layers reproduce the well without
+ * painting the underlying glyphs through a second translucent cover.
+ */
+const CHIP_CLASS_NAME = stylex.props(styles.chip).className;
+
+/**
+ * Selection is the one case that still needs a fill: the surface cover also
+ * hides the textarea's own selection highlight, so the range has to repaint it.
+ * The system colour goes on as a background *image* over the opaque surface
+ * *colour*, because `Highlight` is `rgba(0, 65, 198, 0.8)` in Chrome — used
+ * alone it would be translucent enough to let the covered glyphs back through.
+ */
+const CHIP_SELECTED_CLASS_NAME = stylex.props(styles.selectedChip).className;
 
 /** The mirror paints selection too; the textarea keeps its native selection state. */
 function useInputSelection(
@@ -168,7 +230,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
   return (
     <>
       {iconText ? (
-        <span className="invisible relative">
+        <span {...stylex.props(styles.hidden, styles.iconSlot)}>
           {iconText}
           {chip.icon ? (
             <span
@@ -179,7 +241,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
               // mention can wrap to the start of a line, where the space that
               // was supposed to absorb the overflow has been eaten by the break.
               // Neither is visible to CSS, so the icon simply stays inside.
-              className="visible absolute inset-y-0 left-0 right-px flex items-center justify-end [&>*]:max-w-full"
+              {...stylex.props(styles.icon)}
             >
               {chip.icon}
             </span>
@@ -187,7 +249,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
         </span>
       ) : null}
       {labelText ? <span>{labelText}</span> : null}
-      {trailingText ? <span className="invisible">{trailingText}</span> : null}
+      {trailingText ? <span {...stylex.props(styles.hidden)}>{trailingText}</span> : null}
     </>
   );
 }
@@ -339,7 +401,7 @@ const MentionHighlighter = React.memo(
                 key={segment.key}
                 {...rangeProps}
                 data-selected={selected ? '' : undefined}
-                className={cn(
+                className={clsx(
                   CHIP_CLASS_NAME,
                   chip.className,
                   selected && CHIP_SELECTED_CLASS_NAME
@@ -356,11 +418,9 @@ const MentionHighlighter = React.memo(
               data-tag=""
               {...rangeProps}
               data-selected={selected ? '' : undefined}
-              className={cn(
-                segment.mention.kind === 'pasted_text'
-                  ? 'rounded-md bg-foreground/10 box-decoration-clone'
-                  : 'rounded-sm bg-primary/15 box-decoration-clone',
-                selected && CHIP_SELECTED_CLASS_NAME
+              {...stylex.props(
+                segment.mention.kind === 'pasted_text' ? styles.pastedHighlight : styles.highlight,
+                selected && styles.selectedChip
               )}
             >
               {segment.text}

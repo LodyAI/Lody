@@ -1,10 +1,20 @@
 import { ChevronDown, GitMerge } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
-import { cn } from '@/lib/utils';
-import { Button } from '@lody/ui/button';
+import { Button, ButtonGroup } from '@lody/ui/button';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { Menu } from '@/ui/menu';
+import { themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  fullMainGap: { [buttonTokens.gap]: 'calc(var(--spacing) * 1)' },
+  fullTriggerPadding: { [buttonTokens.paddingXSmall]: 'calc(var(--spacing) * 1.5)' },
+  compactMain: { gap: themeSpace[1], paddingInline: themeSpace[1.5] },
+  compactTrigger: { paddingInline: 0 },
+  icon: { width: themeSpace[3.5], height: themeSpace[3.5] },
+});
 
 const MERGE_METHODS: Array<{
   value: GitHubMergeMethod;
@@ -63,83 +73,47 @@ export function PrMergeButton({
 }) {
   const { t } = useTranslation();
   const isDisabled = disabled || isMerging || !onMerge;
-  const buttonVariant =
-    tone === 'ready' ? 'primary' : tone === 'conflict' ? 'destructive' : 'secondary';
-  // The full (non-compact) ready button uses GitHub's green so "merge" reads as
-  // the positive terminal action, matching the compact info-bar merge control.
-  const readyGreen = tone === 'ready' && !compact;
-  // Dark themes brighten the green, where white text drops to ~2:1; use the
-  // canvas color on it there, as the PR tab's merge button does.
-  const greenClasses =
-    'bg-status-success text-white hover:bg-status-success/90 dark:text-background';
-
+  // A compact action is secondary in the info bar; a standalone ready action is primary.
+  const buttonVariant = tone === 'ready' && !compact ? 'primary' : 'secondary';
   const mainContent = (
     <>
-      {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
+      {isMerging ? (
+        <Spinner diameter="calc(var(--spacing) * 3.5)" />
+      ) : (
+        <GitMerge {...stylex.props(styles.icon)} />
+      )}
       {isMerging ? t('sessions.prTab.merging', 'Merging…') : <PrMergeMethodLabel method={method} />}
     </>
   );
 
   return (
-    <div
-      className={cn(
-        'flex shrink-0 items-stretch overflow-hidden rounded-md',
-        compact && 'h-5 bg-status-success/[0.08]'
-      )}
-      data-pr-merge-control=""
-    >
-      {compact ? (
-        <button
-          type="button"
-          disabled={isDisabled}
-          onClick={() => void onMerge?.(method)}
-          className="flex min-w-0 items-center gap-1 px-1.5 text-xs font-medium text-status-success outline-none transition-colors enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
-        >
-          {mainContent}
-        </button>
-      ) : (
-        <Button
-          type="button"
-          size="small"
-          variant={buttonVariant}
-          disabled={isDisabled}
-          onClick={() => void onMerge?.(method)}
-          className={cn(
-            'h-8 gap-1 rounded-r-none',
-            buttonVariant === 'secondary' ? 'border-r-0' : 'border-transparent',
-            readyGreen && greenClasses
-          )}
-        >
-          {mainContent}
-        </Button>
-      )}
+    <ButtonGroup data-pr-merge-control="">
+      <Button
+        type="button"
+        size={compact ? 'mini' : 'small'}
+        height={compact ? themeSpace[5] : themeSpace[8]}
+        variant={buttonVariant}
+        disabled={isDisabled}
+        onClick={() => void onMerge?.(method)}
+        xstyle={compact ? styles.compactMain : styles.fullMainGap}
+      >
+        {mainContent}
+      </Button>
       <Menu.Root>
         <Menu.Trigger
           render={
-            compact ? (
-              <button
-                type="button"
-                disabled={isMerging || !onSelectMethod}
-                aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                className="relative flex w-5 items-center justify-center text-status-success outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-status-success/25 enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
-              >
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <Button
-                type="button"
-                size="small"
-                variant={buttonVariant}
-                disabled={isMerging || !onSelectMethod}
-                aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                className={cn(
-                  'h-8 rounded-l-none border-l border-black/10 px-1.5',
-                  readyGreen && cn(greenClasses, 'border-l-white/25')
-                )}
-              >
-                <ChevronDown className="h-3.5 w-3.5" />
-              </Button>
-            )
+            <Button
+              type="button"
+              size={compact ? 'mini' : 'small'}
+              height={compact ? themeSpace[5] : themeSpace[8]}
+              width={compact ? themeSpace[5] : undefined}
+              variant={buttonVariant}
+              disabled={isMerging || !onSelectMethod}
+              aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
+              xstyle={compact ? styles.compactTrigger : styles.fullTriggerPadding}
+            >
+              <ChevronDown {...stylex.props(styles.icon)} />
+            </Button>
           }
         />
         <Menu.Content align="end" side={compact ? 'top' : 'bottom'}>
@@ -155,6 +129,6 @@ export function PrMergeButton({
           </Menu.RadioGroup>
         </Menu.Content>
       </Menu.Root>
-    </div>
+    </ButtonGroup>
   );
 }

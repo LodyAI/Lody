@@ -1,6 +1,9 @@
+import { clsx } from 'clsx';
 import { createContext, useContext, useMemo, type ReactNode, Fragment } from 'react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { buildSessionSearchTextParts } from '@/lib/session-chat-search';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeRadius } from '../../style/theme-scale.stylex';
 
 export type SessionSearchBlockMatch = {
   blockId: string;
@@ -21,16 +24,51 @@ type SessionSearchContextValue = {
 
 const SessionSearchContext = createContext<SessionSearchContextValue | null>(null);
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  mark: {
+    borderRadius: themeRadius.xs,
+    backgroundColor: {
+      default: 'color-mix(in oklab, var(--color-amber-200) 75%, transparent)',
+      [DARK_SCOPE]: 'color-mix(in oklab, var(--color-amber-400) 25%, transparent)',
+      ':is(.lody-session-search-active)': {
+        default: 'var(--color-amber-300)',
+        [DARK_SCOPE]: 'color-mix(in oklab, var(--color-amber-300) 55%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: 'inset 0 -1px 0 rgba(0, 0, 0, 0.12)',
+      ':is(.lody-session-search-active)': {
+        default:
+          '0 0 0 1px color-mix(in oklab, var(--color-amber-400) 80%, transparent), inset 0 -1px 0 rgba(0, 0, 0, 0.12)',
+        [DARK_SCOPE]:
+          '0 0 0 1px color-mix(in oklab, var(--color-amber-200) 60%, transparent), inset 0 -1px 0 rgba(0, 0, 0, 0.12)',
+        ':focus-visible': 'inset 0 -1px 0 rgba(0, 0, 0, 0.12)',
+      },
+    },
+  },
+  ink: { color: themeColors.foreground },
+  activeContainer: {
+    boxShadow: {
+      default:
+        '0 0 0 1px color-mix(in oklab, hsl(var(--primary) / 1) 25%, transparent), 0 0 0 1px rgba(15, 23, 42, 0.04)',
+      [DARK_SCOPE]: '0 0 0 1px color-mix(in oklab, var(--color-white) 15%, transparent)',
+      ':focus-visible': { default: '0 0 0 1px rgba(15, 23, 42, 0.04)', [DARK_SCOPE]: 'none' },
+    },
+  },
+});
+
+// Markdown inserts the same mark classes as the React text renderer. The active
+// hook selects the palette inside the mark's one StyleX declaration.
 export const SEARCH_HIGHLIGHT_MARK_CLASS_NAME =
-  'rounded-xs bg-amber-200/75 text-foreground shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:bg-amber-400/25';
-
-export const SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME =
-  'bg-amber-300 text-foreground ring-1 ring-amber-400/80 dark:bg-amber-300/55 dark:ring-amber-200/60';
-
+  stylex.props(styles.mark, styles.ink).className ?? '';
+export const SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME = 'lody-session-search-active';
 export const SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME = '';
-
-export const SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME =
-  'ring-1 ring-primary/25 shadow-[0_0_0_1px_rgba(15,23,42,0.04)] dark:ring-white/15 dark:shadow-none';
+export const SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME = stylex.props(
+  styles.activeContainer
+).className;
 
 export function SessionSearchProvider({
   value,
@@ -98,7 +136,7 @@ export const SearchHighlightedText = ({
           <mark
             key={`mark-${part.resultId ?? index}`}
             data-search-result-id={part.resultId ?? undefined}
-            className={cn(
+            className={clsx(
               SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
               part.isActive && SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME
             )}

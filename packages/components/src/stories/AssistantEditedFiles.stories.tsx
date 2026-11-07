@@ -1,7 +1,15 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
 
 import { AssistantEditedFiles } from '@/components/ai-gui/assistant-edited-files';
+
+const sceneStyles = stylex.create({
+  ancestorState: {
+    color: { default: null, ':hover': 'rgb(211 24 151)', ':focus-visible': 'rgb(20 134 190)' },
+  },
+});
 
 const hundredFiles = Array.from({ length: 100 }, (_, index) => ({
   filePath: `packages/components/src/${index % 3 === 0 ? 'components' : 'lib'}/feature-${String(index + 1).padStart(3, '0')}.tsx`,
@@ -96,4 +104,28 @@ export const UncountedChanges: Story = {
       { filePath: 'src/app.ts', add: 12, del: 3 },
     ],
   },
+};
+
+function InteractiveFiles({ rowXstyle }: { rowXstyle?: stylex.StyleXStyles }) {
+  const [selected, setSelected] = useState('None');
+  return (
+    <div data-edited-files-fixture>
+      <AssistantEditedFiles
+        files={hundredFiles.slice(0, 6)}
+        rowXstyle={rowXstyle}
+        onFileClick={setSelected}
+      />
+      <output data-edited-files-selected>{selected}</output>
+    </div>
+  );
+}
+
+export const InteractiveExpansion: Story = {
+  args: { files: hundredFiles.slice(0, 6) },
+  render: () => <InteractiveFiles />,
+};
+
+export const AncestorStateOverride: Story = {
+  args: { files: hundredFiles.slice(0, 6) },
+  render: () => <InteractiveFiles rowXstyle={sceneStyles.ancestorState} />,
 };

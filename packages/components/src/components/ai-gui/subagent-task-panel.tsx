@@ -162,7 +162,7 @@ function GroupTab({ group, tasks }: { group: TaskGroup; tasks: readonly Subagent
       : t('sessions.subagentTasks.tasksTab', 'Tasks');
   return (
     <Tabs.Tab value={group} data-subagent-task-tab={group}>
-      {running ? <Spinner size="small" label={null} className="size-3" /> : null}
+      {running ? <Spinner size="small" diameter="calc(var(--spacing) * 3)" label={null} /> : null}
       <span>{label}</span>
     </Tabs.Tab>
   );

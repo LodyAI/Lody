@@ -8,6 +8,7 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import {
   cameraAtRest,
   centreFromPose,
@@ -21,6 +22,7 @@ import {
 } from './camera';
 import { TourApp, type TourAppTracks, type TourConfigurationState } from './tour-app';
 import { DEFAULT_TOUR_IDENTITY, type TourIdentity } from './tour-fixtures';
+import { tourSurface } from './surface';
 
 // The setup screens' right-hand panel: the same window the film is about,
 // standing still.
@@ -252,9 +254,9 @@ export const TourStill = memo(function TourStill({
   );
 
   return (
-    <div ref={viewportRef} className="relative h-full w-full overflow-clip">
+    <div ref={viewportRef} {...stylex.props(tourSurface.cameraViewport)}>
       <div
-        className="absolute left-0 top-0 origin-top-left"
+        {...stylex.props(tourSurface.cameraWindow)}
         style={{
           width: windowSize?.width ?? WINDOW_WIDTH,
           height: windowSize?.height ?? WINDOW_HEIGHT,
@@ -359,23 +361,23 @@ function TourAnchorDebugOverlay({
   }, [cameraRef, contentRef]);
 
   return (
-    <div ref={overlayRef} className="pointer-events-none absolute inset-0 z-[100]">
+    <div ref={overlayRef} {...stylex.props(tourSurface.debugOverlay)}>
       {DEBUG_ANCHORS.map((anchor) => {
         const active = activeAnchor === anchor;
         return (
           <div
             key={anchor}
             data-debug-anchor={anchor}
-            className={`absolute left-0 top-0 rounded-sm border ${
-              active
-                ? 'border-amber-300 bg-amber-300/15 shadow-[0_0_0_2px_rgba(251,191,36,0.22)]'
-                : 'border-cyan-300/70 bg-cyan-300/5'
-            }`}
+            {...stylex.props(
+              tourSurface.debugMarker,
+              active ? tourSurface.debugMarkerActive : tourSurface.debugMarkerIdle
+            )}
           >
             <span
-              className={`absolute -top-5 left-0 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] leading-none ${
-                active ? 'bg-amber-300 text-slate-950' : 'bg-cyan-300 text-slate-950'
-              }`}
+              {...stylex.props(
+                tourSurface.debugLabel,
+                active ? tourSurface.debugLabelActive : tourSurface.debugLabelIdle
+              )}
             >
               {anchor}
             </span>

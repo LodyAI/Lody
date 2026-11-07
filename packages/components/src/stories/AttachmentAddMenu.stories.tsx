@@ -2,10 +2,48 @@ import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
 import { AttachmentAddMenu } from '@/components/chat/attachment-add-menu';
 import { VaulDrawerEdgeBackZone } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { getSessionChatInputAreaShellClassName } from '@/components/sessions/session-chat-input-area';
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    width: '100%',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--input-border) / 1)',
+    'background-color': 'color-mix(in oklab, hsl(var(--input) / 1) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  label: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '420px',
+    'align-items': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  stack: {
+    position: 'relative',
+    display: 'flex',
+    'min-height': '420px',
+    'flex-direction': 'column',
+    'justify-content': 'flex-end',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const meta = {
   title: 'Chat/AttachmentAddMenu',
@@ -64,26 +102,26 @@ function WithMcp(args: React.ComponentProps<typeof AttachmentAddMenu>) {
 // menu opens against a realistic anchor.
 const Frame = ({ children, dark }: { children: React.ReactNode; dark?: boolean }) => (
   <div className={dark ? 'dark' : ''}>
-    <div className="flex min-h-[420px] items-end bg-background p-4">
-      <div className="flex w-full items-center gap-2 rounded-xl border border-input-border bg-input/40 p-2">
+    <div {...stylex.props(storyLayout.row)}>
+      <div {...stylex.props(storyLayoutStyles.row)}>
         {children}
-        <span className="text-sm text-muted-foreground">Message…</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>Message…</span>
       </div>
     </div>
   </div>
 );
 
 const NativeSessionFrame = ({ children }: { children: React.ReactNode }) => (
-  <div className="relative flex min-h-[420px] flex-col justify-end bg-background">
+  <div {...stylex.props(storyLayout.stack)}>
     <VaulDrawerEdgeBackZone isNativeApp topInset="0px" />
     <div
       className={getSessionChatInputAreaShellClassName({
         protectFromEdgeBackZone: true,
       })}
     >
-      <div className="flex w-full items-center gap-2 rounded-xl border border-input-border bg-input/40 p-2">
+      <div {...stylex.props(storyLayoutStyles.row)}>
         {children}
-        <span className="text-sm text-muted-foreground">Message…</span>
+        <span {...stylex.props(storyLayoutStyles.label)}>Message…</span>
       </div>
     </div>
   </div>
@@ -177,6 +215,64 @@ export const McpOnly: Story = {
   ),
 };
 
+const scopedStyles = stylex.create({
+  scope: { '--spacing': '5px' },
+  receipt: { display: 'block', paddingInline: 16, fontSize: 12 },
+});
+const ScopedFrame = ({ children }: { children: React.ReactNode }) => (
+  <div {...stylex.props(scopedStyles.scope)}>
+    <Frame>{children}</Frame>
+  </div>
+);
+
+function ScopedMcpFixture(args: React.ComponentProps<typeof AttachmentAddMenu>) {
+  const [selectedIds, setSelectedIds] = useState<McpServerId[]>([mcpServers[0].id]);
+  const [attachments, setAttachments] = useState(0);
+  return (
+    <div data-attachment-fixture data-attachment-requests={attachments}>
+      <ScopedFrame>
+        <AttachmentAddMenu
+          {...args}
+          onAddAttachment={
+            args.onAddAttachment
+              ? () => {
+                  args.onAddAttachment?.();
+                  setAttachments((count) => count + 1);
+                }
+              : undefined
+          }
+          mcp={{ ...args.mcp!, selectedIds, onSelectedIdsChange: setSelectedIds }}
+        />
+      </ScopedFrame>
+      <output {...stylex.props(scopedStyles.receipt)}>Attachment requests: {attachments}</output>
+    </div>
+  );
+}
+
+export const ScopedDesktopWithMcp: Story = {
+  args: { ...DesktopWithMcp.args },
+  render: (args) => <ScopedMcpFixture {...args} />,
+};
+
+export const ScopedMobileWithMcp: Story = {
+  args: { ...MobileWithMcp.args },
+  render: (args) => <ScopedMcpFixture {...args} />,
+};
+
+export const ScopedMobileLandingWithMcp: Story = {
+  args: { ...MobileWithMcp.args, isLanding: true },
+  render: (args) => <ScopedMcpFixture {...args} />,
+};
+
+export const ScopedDisabled: Story = {
+  args: { isMobile: true, disabled: true, onAddAttachment: noop },
+  render: (args) => (
+    <ScopedFrame>
+      <AttachmentAddMenu {...args} />
+    </ScopedFrame>
+  ),
+};
+
 export const EncryptedWorkspace: Story = {
   render: (args) => (
     <Frame>
@@ -204,12 +300,12 @@ export const EncryptedWorkspace: Story = {
     },
   ],
 };
+
 export const EncryptedWorkspaceMobile: Story = {
   ...EncryptedWorkspace,
   args: { ...EncryptedWorkspace.args, isMobile: true },
 };
 
-/** Open the menu and hover the disabled row to see the reason. */
 export const ScheduledSendUnavailable: Story = {
   args: {
     isMobile: false,

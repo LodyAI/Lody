@@ -22,6 +22,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 
 const styles = stylex.create({
+  detailPane: { height: 'auto', minHeight: 0, maxHeight: '14rem' },
   root: {
     display: 'flex',
     maxHeight: '14rem',
@@ -258,7 +259,7 @@ export function ComposerAgentRolePanel({
           machine={machine}
           availability={previewItem.availability}
           onEdit={onEdit}
-          className="h-auto min-h-0 max-h-[14rem]"
+          xstyle={styles.detailPane}
         />
       )}
     </div>

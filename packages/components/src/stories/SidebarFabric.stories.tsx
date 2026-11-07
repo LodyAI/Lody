@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { SidebarFabricBackdrop, SidebarFabricBand } from '@/components/fabric/sidebar-fabric';
@@ -7,7 +8,20 @@ import { SidebarFabricBackdrop, SidebarFabricBand } from '@/components/fabric/si
  * story only demonstrates layout/stacking; theme-following is exercised in
  * the LoroSidebar story with real theme tokens.
  */
-function Panel({ label }: { label: string }) {
+const migrationStyles = stylex.create({
+  layer: { zIndex: 10 },
+  interactiveCanvas: { pointerEvents: 'auto' },
+});
+
+function Panel({
+  label,
+  raised = false,
+  interactiveCanvas = false,
+}: {
+  label: string;
+  raised?: boolean;
+  interactiveCanvas?: boolean;
+}) {
   return (
     <div
       style={{
@@ -22,7 +36,10 @@ function Panel({ label }: { label: string }) {
         flexDirection: 'column',
       }}
     >
-      <SidebarFabricBackdrop />
+      <SidebarFabricBackdrop
+        xstyle={raised ? migrationStyles.layer : undefined}
+        canvasXstyle={interactiveCanvas ? migrationStyles.interactiveCanvas : undefined}
+      />
       <div style={{ flex: 1, padding: 16, fontSize: 13 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{label}</div>
         <div style={{ opacity: 0.65 }}>
@@ -41,7 +58,10 @@ function Panel({ label }: { label: string }) {
           borderTop: '1px solid hsl(var(--sidebar-border))',
         }}
       >
-        <SidebarFabricBand />
+        <SidebarFabricBand
+          xstyle={raised ? migrationStyles.layer : undefined}
+          canvasXstyle={interactiveCanvas ? migrationStyles.interactiveCanvas : undefined}
+        />
         <span style={{ fontSize: 12, opacity: 0.8 }}>⚙</span>
         <span style={{ fontSize: 12, opacity: 0.8 }}>?</span>
         <span style={{ fontSize: 12, opacity: 0.8 }}>▣</span>
@@ -78,3 +98,21 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const PublicCanvasPointerVariants: Story = {
+  render: () => (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 24,
+        padding: 24,
+        minHeight: '100dvh',
+        background: 'hsl(var(--background))',
+      }}
+    >
+      <Panel label="Zero-specificity public canvas selector" raised />
+      <Panel label="Higher-specificity public canvas selector" raised interactiveCanvas />
+    </div>
+  ),
+};

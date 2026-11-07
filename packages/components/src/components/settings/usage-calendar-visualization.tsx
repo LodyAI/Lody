@@ -552,6 +552,12 @@ const styles = stylex.create({
     backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
     padding: space[4],
   },
+  detailCloseOffset: {
+    position: 'absolute',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    right: 'calc(var(--spacing) * 2)',
+    top: 'calc(var(--spacing) * 2)',
+  },
   detailCloseIcon: {
     width: '14px',
     height: '14px',
@@ -2308,7 +2314,9 @@ function UsageDayDetailPanel({
           icon
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          height="calc(var(--spacing) * 6)"
+          width="calc(var(--spacing) * 6)"
+          xstyle={styles.detailCloseOffset}
           onClick={onClose}
         >
           <X {...stylex.props(styles.detailCloseIcon)} />

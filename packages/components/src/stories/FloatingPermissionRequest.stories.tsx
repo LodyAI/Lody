@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -15,6 +16,27 @@ import {
   type PermissionOutcome,
   type MessageContent,
 } from '@lody/shared';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    padding: 'calc(var(--spacing) * 4)',
+    'text-align': 'center',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    width: 'min(500px, calc(100vw - 16px))',
+  },
+  frame2: {
+    width: '280px',
+  },
+  frame3: {
+    width: '200px',
+  },
+});
 
 // Stub runtime so usePermissionResponse reports isReady=true in stories;
 // click handlers throw if exercised, but screenshots show the active design.
@@ -33,7 +55,7 @@ const meta = {
   decorators: [
     (Story) => (
       <Provider store={storyStore}>
-        <div className="w-[min(500px,calc(100vw-16px))]">
+        <div {...stylex.props(storyLayout.frame)}>
           <Story />
         </div>
       </Provider>
@@ -328,7 +350,7 @@ export const HiddenWhenIdle: Story = {
   render: (args: FloatingPermissionRequestProps) => (
     <div>
       <FloatingPermissionRequest {...args} />
-      <p className="text-sm text-muted-foreground p-4 text-center">
+      <p {...stylex.props(storyLayoutStyles.canvas)}>
         (Component returns null when session is not in requestPermission state)
       </p>
     </div>
@@ -355,7 +377,7 @@ export const LongOptionText: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[280px]">
+      <div {...stylex.props(storyLayout.frame2)}>
         <Story />
       </div>
     ),
@@ -370,7 +392,7 @@ export const NarrowContainer: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[200px]">
+      <div {...stylex.props(storyLayout.frame3)}>
         <Story />
       </div>
     ),
@@ -469,7 +491,7 @@ export const NoHistory: Story = {
   render: (args: FloatingPermissionRequestProps) => (
     <div>
       <FloatingPermissionRequest {...args} />
-      <p className="text-sm text-muted-foreground p-4 text-center">
+      <p {...stylex.props(storyLayoutStyles.canvas)}>
         (Component returns null when no pending permission found in history)
       </p>
     </div>

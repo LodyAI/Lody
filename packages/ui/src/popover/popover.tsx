@@ -16,6 +16,29 @@ type TriggerBaseProps = ComponentProps<typeof BasePopover.Trigger>;
 type TitleBaseProps = ComponentProps<typeof BasePopover.Title>;
 type DescriptionBaseProps = ComponentProps<typeof BasePopover.Description>;
 
+const layout = stylex.create({
+  noPadding: { padding: 0 },
+  noGap: { gap: 0 },
+  visuallyHidden: {
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+    width: 1,
+    height: 1,
+    margin: -1,
+    padding: 0,
+    position: 'absolute',
+    overflow: 'hidden',
+  },
+});
+
+const dimensions = stylex.create({
+  width: (value: string | number) => ({ width: value }),
+  minWidth: (value: string | number) => ({ minWidth: value }),
+  maxWidth: (value: string | number) => ({ maxWidth: value }),
+  maxHeight: (value: string | number) => ({ maxHeight: value }),
+});
+
 export interface PopoverContentProps extends Omit<
   PositionerBaseProps,
   'className' | 'children' | 'render'
@@ -27,7 +50,17 @@ export interface PopoverContentProps extends Omit<
   initialFocus?: PopupBaseProps['initialFocus'];
   /** Where focus goes when it closes; the product's policy, not this package's. */
   finalFocus?: PopupBaseProps['finalFocus'];
+  /** Keep the prose inset, or let embedded content reach the panel's edges. */
+  padding?: 'default' | 'none';
+  /** Space direct content blocks, or let embedded content own their spacing. */
+  gap?: 'default' | 'none';
+  /** Panel dimensions: numbers are pixels; strings are CSS lengths. Omission restores its defaults. */
+  width?: string | number;
+  minWidth?: string | number;
+  maxWidth?: string | number;
+  maxHeight?: string | number;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -40,6 +73,8 @@ export interface PopoverContentProps extends Omit<
 export type PopoverTriggerProps = TriggerBaseProps;
 
 export interface PopoverTitleProps extends Omit<TitleBaseProps, 'className'> {
+  /** Clip the painted heading while keeping it as the popup's accessible name. */
+  visuallyHidden?: boolean;
   className?: string;
 }
 export interface PopoverDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
@@ -58,7 +93,22 @@ export interface PopoverHeaderProps {
  */
 export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
   function PopoverContent(
-    { className, children, container, initialFocus, finalFocus, sideOffset = POPUP_GAP, ...rest },
+    {
+      className,
+      xstyle,
+      children,
+      container,
+      initialFocus,
+      finalFocus,
+      padding = 'default',
+      gap = 'default',
+      width,
+      minWidth,
+      maxWidth,
+      maxHeight,
+      sideOffset = POPUP_GAP,
+      ...rest
+    },
     ref
   ) {
     const inheritedContainer = usePopupContainer();
@@ -74,6 +124,12 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
     // viewport relative to that panel instead. The absolute strategy resolves
     // against the offset parent, which is the panel, so the two agree again.
     const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
+    const panelDimensions = [
+      width != null && dimensions.width(width),
+      minWidth != null && dimensions.minWidth(minWidth),
+      maxWidth != null && dimensions.maxWidth(maxWidth),
+      maxHeight != null && dimensions.maxHeight(maxHeight),
+    ] as const;
     return (
       <BasePopover.Portal container={mountPoint} className={portalClassName}>
         <BasePopover.Positioner
@@ -88,6 +144,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
           <BasePopover.Popup
             initialFocus={initialFocus}
             finalFocus={finalFocus}
+            style={stylex.props(...panelDimensions, xstyle).style}
             className={(state) => {
               // StyleX cannot express `[data-starting-style]`, so the two ends
               // of the rise are read off Base UI's transition status here, and
@@ -99,6 +156,10 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
                   surface.popup,
                   nativeScrollbar,
                   surface.popupPanel,
+                  padding === 'none' && layout.noPadding,
+                  gap === 'none' && layout.noGap,
+                  ...panelDimensions,
+                  xstyle,
                   hidden && hiddenSurfaceForSide(state.side)
                 ).className,
                 className
@@ -128,10 +189,10 @@ export function PopoverHeader({ children, className }: PopoverHeaderProps) {
  * that has one announces it rather than reading its whole body out.
  */
 export const PopoverTitle = forwardRef<HTMLHeadingElement, PopoverTitleProps>(function PopoverTitle(
-  { className, ...rest },
+  { className, visuallyHidden = false, ...rest },
   ref
 ) {
-  const sx = stylex.props(surface.panelTitle);
+  const sx = stylex.props(surface.panelTitle, visuallyHidden && layout.visuallyHidden);
   return (
     <BasePopover.Title
       ref={ref}

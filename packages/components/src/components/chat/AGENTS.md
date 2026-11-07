@@ -27,10 +27,9 @@ project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
   suppresses that user's notice for the workspace across future revisions.
-- The composer box border is 1px. Light fill is `--composer`, dark fill is
-  `bg-input/90`; it stays `rounded-2xl` with a soft wide lift
-  (`COMPOSER_ELEVATION_CLASS`). The session info bar shares the light fill and
-  uses `INFO_BAR_ELEVATION_CLASS`.
+- Composer uses the DS card material without a border; its textarea is bare
+  inside that surface, which owns the accent focus/drop ring. Shared material
+  lives in `chat/composer-surface.ts`; the info bar uses the region rung.
 - Desktop footer order: run config → permission → usage. Provider interaction mode
   belongs inside run config; the standalone button is explicit permission mode,
   falling back to legacy ACP modes. Plus / model / mode share `gap-x-1.5`; when

@@ -1,6 +1,40 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 72)',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    gap: 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const meta = {
   title: 'Shared/AgentReadinessMark',
@@ -13,8 +47,8 @@ type Story = StoryObj<typeof meta>;
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex w-72 items-center justify-between gap-6 rounded-lg border border-border/60 px-4 py-3">
-      <span className="text-xs text-muted-foreground">{label}</span>
+    <div {...stylex.props(storyLayoutStyles.row)}>
+      <span {...stylex.props(storyLayoutStyles.label)}>{label}</span>
       {children}
     </div>
   );
@@ -28,7 +62,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export const Vocabulary: Story = {
   args: { cliType: 'builtin', agentType: 'codex', readiness: 'ready' },
   render: () => (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(storyLayout.stack)}>
       <Row label="cold — nothing prepared yet">
         <AgentReadinessMark cliType="builtin" agentType="codex" readiness="cold" />
       </Row>
@@ -57,7 +91,7 @@ export const Vocabulary: Story = {
 export const InventoryFillingIn: Story = {
   args: { cliType: 'builtin', agentType: 'kimi', readiness: 'ready' },
   render: () => (
-    <div className="flex items-center gap-4">
+    <div {...stylex.props(storyLayout.row)}>
       <AgentReadinessMark cliType="builtin" agentType="kimi" readiness="ready" size="sm" />
       <AgentReadinessMark
         cliType="builtin"
@@ -74,7 +108,7 @@ export const InventoryFillingIn: Story = {
 export const Sizes: Story = {
   args: { cliType: 'builtin', agentType: 'claude', readiness: 'arriving', percent: 40 },
   render: () => (
-    <div className="flex items-center gap-4">
+    <div {...stylex.props(storyLayout.row)}>
       <AgentReadinessMark
         cliType="builtin"
         agentType="claude"
@@ -104,7 +138,7 @@ export const Sizes: Story = {
 export const AvatarSurface: Story = {
   args: { cliType: 'builtin', agentType: 'codex', readiness: 'ready' },
   render: () => (
-    <div className="flex items-center gap-4">
+    <div {...stylex.props(storyLayout.row)}>
       <AgentReadinessMark
         cliType="builtin"
         agentType="codex"

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
@@ -10,6 +11,86 @@ import {
 
 type Row = { id: string; title: string; subtitle: string; pinned?: boolean };
 
+const storyStyles = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'var(--color-stone-200, oklch(92.3% 0.003 48.717))',
+    padding: { default: 0, '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflowY: 'auto',
+    paddingBottom: 'calc(var(--spacing) * 12)',
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  avatar: {
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    flexShrink: 0,
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'hsl(var(--muted) / 1)',
+  },
+  content: { minWidth: 0, flex: '1' },
+  titleRow: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1)' },
+  pin: {
+    height: 'calc(var(--spacing) * 3)',
+    width: 'calc(var(--spacing) * 3)',
+    flexShrink: 0,
+    color: 'hsl(var(--primary))',
+  },
+  title: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+  },
+  dimmed: { color: 'hsl(var(--muted-foreground) / 1)' },
+  caption: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  list: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-2xl)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--border) / 1) 40%,transparent)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+  },
+  divider: {
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--border) / 1) 40%,transparent)',
+  },
+  heading: {
+    paddingInline: 'calc(var(--spacing) * 5)',
+    paddingBottom: 'calc(var(--spacing) * 1)',
+    paddingTop: 'calc(var(--spacing) * 6)',
+    fontSize: 'var(--text-xl)',
+    lineHeight: 'var(--text-xl--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  hint: { paddingInline: 'calc(var(--spacing) * 5)', paddingBottom: 'calc(var(--spacing) * 3)' },
+  listInset: { paddingInline: 'calc(var(--spacing) * 3)' },
+});
 const initialRows: Row[] = [
   { id: '1', title: '重构评估 UI', subtitle: 'feat/eval-ui · 30m', pinned: true },
   { id: '2', title: '同步进度提示', subtitle: 'feat/sync-progress · 5h' },
@@ -20,22 +101,21 @@ const initialRows: Row[] = [
 
 function RowContent({ row, dimmed }: { row: Row; dimmed?: boolean }) {
   return (
-    <div className="flex items-center gap-3 bg-card px-4 py-3">
-      <div className="h-9 w-9 shrink-0 rounded-lg bg-muted" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1">
+    <div {...stylex.props(storyStyles.row)}>
+      <div {...stylex.props(storyStyles.avatar)} />
+      <div {...stylex.props(storyStyles.content)}>
+        <div {...stylex.props(storyStyles.titleRow)}>
           {row.pinned ? (
-            <Pin className="h-3 w-3 shrink-0 text-primary" />
+            <Pin {...stylex.props(storyStyles.pin)} />
           ) : null}
-          <span
-            className={`truncate text-sm font-medium ${dimmed ? 'text-muted-foreground' : ''}`}
+          <span {...stylex.props(storyStyles.title, dimmed && storyStyles.dimmed)}
           >
             {row.title}
           </span>
         </div>
-        <div className="truncate text-xs text-muted-foreground">{row.subtitle}</div>
+        <div {...stylex.props(storyStyles.caption, storyStyles.truncate)}>{row.subtitle}</div>
       </div>
-      <span className="text-xs text-muted-foreground">›</span>
+      <span {...stylex.props(storyStyles.caption)}>›</span>
     </div>
   );
 }
@@ -59,9 +139,9 @@ function StoryShell({
   };
 
   const list = (
-    <div className="overflow-hidden rounded-2xl border border-border/40 bg-card">
+    <div {...stylex.props(storyStyles.list)}>
       {rows.map((row, i) => (
-        <div key={row.id} className={i > 0 ? 'border-t border-border/40' : ''}>
+        <div key={row.id} {...stylex.props(i > 0 && storyStyles.divider)}>
           {archived ? (
             <MobileSwipeableRow
               variant="archived"
@@ -90,19 +170,19 @@ function StoryShell({
   );
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-y-auto bg-background pb-12 shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
-        <div className="px-5 pb-1 pt-6 text-xl font-semibold">
+    <div {...stylex.props(storyStyles.canvas)}>
+      <div {...stylex.props(storyStyles.frame)}>
+        <div {...stylex.props(storyStyles.heading)}>
           {archived ? '归档对话 — 左滑恢复 / 删除' : 'Swipe a row left'}
         </div>
-        <p className="px-5 pb-3 text-xs text-muted-foreground">
+        <p {...stylex.props(storyStyles.caption, storyStyles.hint)}>
           {archived
             ? '归档列表：左滑漏出「恢复」和「删除」,没有 super-swipe(删除不可逆,需走确认)。'
             : grouped
               ? '所有 row 共享 group — 滑开一行,其它会自动收回(iOS Mail 行为)。'
               : '没有 group — 每一行独立,可以同时打开多行 drawer。'}
         </p>
-        <div className="px-3">
+        <div {...stylex.props(storyStyles.listInset)}>
           {grouped ? <MobileSwipeableRowGroup>{list}</MobileSwipeableRowGroup> : list}
         </div>
       </div>

@@ -1,13 +1,62 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import {
   conversationReadingFontSizeStyle,
   userTextCollapsedStyle,
 } from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
+const textStory = stylex.create({
+  bubble: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  text: { minWidth: 0, maxWidth: '100%', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  collapsed: { overflow: 'hidden' },
+  path: { maxWidth: '20rem', alignSelf: 'flex-end' },
+  narrow: { maxWidth: '16rem', alignSelf: 'flex-end' },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  canvas: {
+    'max-width': '100%',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+  },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '42rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  stack2: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '48rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * Chips in a sent message.
@@ -79,7 +128,7 @@ function Bubble({
   text,
   spans,
   collapsed = false,
-  className,
+  xstyle,
   fontSize = 14,
 }: {
   title: string;
@@ -88,7 +137,7 @@ function Bubble({
   /** Runs the production collapse: its real slice helper and its real height. */
   collapsed?: boolean;
   /** Narrows the column, the way a phone or a split pane does. */
-  className?: string;
+  xstyle?: stylex.StyleXStyles;
   fontSize?: number;
 }) {
   // `getUserTextRenderSlice` is what production truncates with, so the story
@@ -97,14 +146,11 @@ function Bubble({
   // never exercised the character budget that dropped the span.
   const slice = collapsed ? getUserTextRenderSlice(text, spans) : undefined;
   return (
-    <div className={cn('flex flex-col items-end gap-1.5', className)}>
-      <div className="font-medium text-muted-foreground text-xs">{title}</div>
-      <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
+    <div {...stylex.props(textStory.bubble, xstyle)}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>
+      <div {...stylex.props(storyLayout.canvas)}>
         <div
-          className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]',
-            collapsed && 'overflow-hidden'
-          )}
+          {...stylex.props(textStory.text, collapsed && textStory.collapsed)}
           style={{
             ...conversationReadingFontSizeStyle(fontSize),
             ...(collapsed ? userTextCollapsedStyle(fontSize) : {}),
@@ -163,7 +209,7 @@ const LONG_PATH = applyTextRewrites(LONG_PATH_SOURCE, [
 
 function Board({ withSpans }: { withSpans: boolean }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-8 bg-background p-8">
+    <div {...stylex.props(storyLayout.stack)}>
       <Bubble
         title={withSpans ? 'With chips' : 'Raw text the agent receives'}
         text={SENT.text}
@@ -179,7 +225,7 @@ function Board({ withSpans }: { withSpans: boolean }) {
         title="A path wider than the column"
         text={LONG_PATH.text}
         spans={withSpans ? LONG_PATH.spans : undefined}
-        className="max-w-[20rem] self-end"
+        xstyle={textStory.path}
       />
     </div>
   );
@@ -222,7 +268,7 @@ export const PastedTextAlignment: Story = {
       },
     ]);
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 bg-background p-8">
+      <div {...stylex.props(storyLayout.stack2)}>
         {[12, 14, 18].map((fontSize) => (
           <Bubble
             key={fontSize}
@@ -236,7 +282,7 @@ export const PastedTextAlignment: Story = {
           title="Narrow column"
           text={pasted.text}
           spans={pasted.spans}
-          className="max-w-[16rem] self-end"
+          xstyle={textStory.narrow}
         />
       </div>
     );

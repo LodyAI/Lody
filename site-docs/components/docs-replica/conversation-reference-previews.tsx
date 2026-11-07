@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, Copy, Folder, PanelRight, Plus, X } from 'lucide-react';
 import { ReplicaBrowserToolbar } from '../landing-replica/browser-toolbar';
 import { Button } from '../landing-replica/button';
@@ -9,7 +10,677 @@ import {
 } from '../landing-replica/composer-controls';
 import { AgentIcon, FileIcon } from '../landing-replica/icons';
 import type { ReplicaChangeFile, ReplicaLocale } from '../landing-replica/types';
-import { cn } from '../landing-replica/utils';
+const previewStyles = stylex.create({
+  text: {
+    'margin-left': 'auto',
+    'flex-shrink': '0',
+    'font-size': '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  row: {
+    'margin-left': 'auto',
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'font-family': 'var(--font-mono)',
+    'font-size': '11px',
+    'font-variant-numeric': 'tabular-nums',
+  },
+  text2: {
+    color: 'hsl(var(--code-added))',
+  },
+  text3: {
+    color: 'hsl(var(--code-removed))',
+  },
+  frame: {
+    width: '100%',
+    'text-align': 'left',
+  },
+  section: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+  },
+  row2: {
+    display: 'flex',
+    'min-height': 'calc(var(--spacing) * 8)',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  text4: {
+    'min-width': '0px',
+    flex: '1',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+  },
+  row3: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'font-family': 'var(--font-mono)',
+    'font-size': '11px',
+    'font-variant-numeric': 'tabular-nums',
+  },
+  section2: {
+    ':is(*) > :not(:last-child)': {
+      'border-bottom-style': 'solid',
+      'border-top-style': 'solid',
+      'border-top-width': 'calc(1px * 0)',
+      'border-bottom-width': 'calc(1px * calc(1 - 0))',
+      'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    },
+  },
+  section3: {
+    'border-top-style': 'solid',
+    'border-top-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+  },
+  row4: {
+    display: 'flex',
+    width: '100%',
+    'min-width': '0px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'text-align': 'left',
+  },
+  section4: {
+    'min-height': 'calc(var(--spacing) * 10)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  section5: {
+    'min-height': 'calc(var(--spacing) * 9)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  text5: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+  },
+  text6: {
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+  },
+  text7: {
+    'margin-left': 'calc(var(--spacing) * 1.5)',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+  },
+  section6: {
+    'margin-block': 'calc(var(--spacing) * 6)',
+  },
+  text8: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+    padding: 'calc(var(--spacing) * 4)',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+    '@media (width >= 40rem)': {
+      padding: 'calc(var(--spacing) * 5)',
+    },
+  },
+  row5: {
+    display: 'flex',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row6: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'calc(infinity * 1px)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 50%, transparent)',
+  },
+  section7: {
+    'min-width': '0px',
+    flex: '1',
+  },
+  row7: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'font-size': '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section8: {
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  section9: {
+    'font-variant-numeric': 'tabular-nums',
+  },
+  text9: {
+    'max-width': '760px',
+    'border-radius': 'var(--radius-2xl)',
+    'border-top-left-radius': 'var(--radius-sm)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--card))',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--card-foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  section10: {
+    'margin-top': 'calc(var(--spacing) * 2.5)',
+    'max-width': '760px',
+  },
+  text10: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+    padding: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+    '@media (width >= 40rem)': {
+      padding: 'calc(var(--spacing) * 4)',
+    },
+  },
+  overlay: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: '0',
+    margin: '-1px',
+    overflow: 'hidden',
+    'clip-path': 'inset(50%)',
+    'white-space': 'nowrap',
+    'border-width': '0',
+  },
+  section11: {
+    display: 'none',
+    ':where(.dark, .dark *)': {
+      display: 'block',
+    },
+  },
+  section12: {
+    ':where(.dark, .dark *)': {
+      display: 'none',
+    },
+  },
+  row8: {
+    display: 'flex',
+    height: '22px',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'border-radius': 'var(--radius-md)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-size': '13px',
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+  },
+  text11: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+  },
+  text12: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section13: {
+    'min-width': '0px',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    'flex-shrink': '0',
+  },
+  section14: {
+    'min-width': '0px',
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  text13: {
+    'flex-shrink': '0',
+    'font-size': '10px',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+    color: 'hsl(var(--primary))',
+    'text-transform': 'uppercase',
+  },
+  text14: {
+    'margin-inline': 'auto',
+    width: '100%',
+    'max-width': '320px',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  row9: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 10)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+  },
+  row10: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    'align-items': 'center',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    padding: 'calc(var(--spacing) * 0.5)',
+    'font-size': '11px',
+  },
+  row11: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    'align-items': 'center',
+    'border-radius': '0.25rem',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  row12: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    'align-items': 'center',
+    'border-radius': '0.25rem',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  section15: {
+    padding: 'calc(var(--spacing) * 1.5)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: '1px',
+  },
+  row13: {
+    'margin-block': 'calc(var(--spacing) * 6)',
+    display: 'flex',
+    'justify-content': 'center',
+  },
+  text15: {
+    width: '100%',
+    'max-width': '560px',
+    color: 'hsl(var(--foreground))',
+    '--composer': 'var(--muted)',
+  },
+  stack2: {
+    'container-type': 'inline-size',
+    'container-name': 'composer-box',
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'var(--spacing)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    'background-color': 'hsl(var(--composer))',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'box-shadow':
+      '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 3px 6px -2px lch(0% 0 0/0.02), 0 1px 1px lch(0% 0 0/0.04)',
+    'transition-property':
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    'transition-timing-function': 'var(--default-transition-timing-function)',
+    'transition-duration': '150ms',
+    '--mention-chip-surface': 'hsl(var(--composer))',
+    ':where(.dark, .dark *)': {
+      'border-color': 'color-mix(in oklab, hsl(var(--input-border)) 70%, transparent)',
+      'background-color': 'color-mix(in oklab, hsl(var(--input)) 90%, transparent)',
+      'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000',
+    },
+  },
+  row14: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 2)',
+    'overflow-x': 'auto',
+    'padding-bottom': 'var(--spacing)',
+  },
+  frame3: {
+    position: 'relative',
+    height: 'calc(var(--spacing) * 20)',
+    width: 'calc(var(--spacing) * 20)',
+    'flex-shrink': '0',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+  },
+  frame4: {
+    height: '100%',
+    width: '100%',
+    'object-fit': 'cover',
+  },
+  text16: {
+    'min-height': 'calc(var(--spacing) * 12)',
+    'padding-inline': 'var(--spacing)',
+    'padding-top': 'var(--spacing)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--input-foreground))',
+  },
+  row15: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'var(--spacing)',
+    'padding-top': 'calc(var(--spacing) * 0.5)',
+  },
+  row16: {
+    'container-type': 'inline-size',
+    'container-name': 'composer-face',
+    display: 'flex',
+    'min-width': '0px',
+    flex: '1',
+    'flex-wrap': 'nowrap',
+    'align-items': 'center',
+    'column-gap': 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+  stack3: {
+    display: 'inline-flex',
+    'max-width': '100%',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+  },
+  row17: {
+    display: 'inline-flex',
+    'max-width': '100%',
+  },
+  section16: {
+    display: 'block',
+    'max-height': '280px',
+    'max-width': '100%',
+    'object-fit': 'contain',
+  },
+  row18: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'font-size': '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  frame5: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  text17: {
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, var(--shadow-sm)',
+  },
+  text18: {
+    position: 'relative',
+    'min-height': '310px',
+    overflow: 'hidden',
+    'background-image': 'linear-gradient(160deg,#071a2c 0%,#03090f 78%,#02060b 100%)',
+    'padding-inline': 'calc(var(--spacing) * 5)',
+    'padding-block': 'calc(var(--spacing) * 5)',
+    color: 'var(--color-slate-100)',
+    '@media (width >= 40rem)': {
+      'padding-inline': 'calc(var(--spacing) * 8)',
+    },
+  },
+  row19: {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  row20: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'font-weight': 'var(--font-weight-semibold)',
+    'letter-spacing': 'var(--tracking-wide)',
+  },
+  row21: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'var(--color-sky-400)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'var(--color-slate-950)',
+  },
+  text19: {
+    display: 'none',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    color: 'color-mix(in oklab, var(--color-slate-300) 90%, transparent)',
+    '@media (width >= 40rem)': {
+      display: 'flex',
+    },
+  },
+  section17: {
+    'margin-inline': 'auto',
+    'margin-top': 'calc(var(--spacing) * 10)',
+    'max-width': '360px',
+    'text-align': 'center',
+  },
+  section18: {
+    position: 'relative',
+    display: 'inline-block',
+  },
+  text20: {
+    'font-size': 'var(--text-2xl)',
+    'line-height': 'var(--leading-tight)',
+    'font-weight': 'var(--font-weight-bold)',
+    'letter-spacing': 'var(--tracking-tight)',
+    'text-wrap': 'balance',
+    color: 'var(--color-white)',
+    '@media (width >= 40rem)': {
+      'font-size': 'var(--text-3xl)',
+      'line-height': 'var(--leading-tight)',
+    },
+  },
+  overlay2: {
+    'pointer-events': 'none',
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * -2)',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '2px',
+    'border-color': 'rgba(37,99,235,0.9)',
+    'background-color': 'rgba(37,99,235,0.08)',
+  },
+  text21: {
+    'margin-top': 'calc(var(--spacing) * 4)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'calc(var(--spacing) * 6)',
+    color: 'var(--color-slate-300)',
+  },
+  row22: {
+    'margin-top': 'calc(var(--spacing) * 5)',
+    display: 'flex',
+    'justify-content': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  text22: {
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'var(--color-sky-400)',
+    'padding-inline': 'calc(var(--spacing) * 3.5)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'var(--color-slate-950)',
+  },
+  text23: {
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, var(--color-slate-500) 60%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 3.5)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'var(--color-slate-200)',
+  },
+  overlay3: {
+    position: 'absolute',
+    right: 'calc(var(--spacing) * 4)',
+    bottom: 'calc(var(--spacing) * 4)',
+    'z-index': '10',
+    width: 'min(240px, calc(100% - 2rem))',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border))',
+    'background-color': 'hsl(var(--popover))',
+    padding: 'calc(var(--spacing) * 3)',
+    'text-align': 'left',
+    color: 'hsl(var(--popover-foreground))',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+  },
+  row23: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  text24: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  text25: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-family': 'var(--font-mono)',
+    'font-size': '10px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  row24: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-md)',
+    color: 'hsl(var(--muted-foreground))',
+    '@media (hover: hover)': {
+      ':hover': {
+        'background-color': 'hsl(var(--hover))',
+        color: 'hsl(var(--hover-foreground))',
+      },
+    },
+  },
+  text26: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--input-border))',
+    'background-color': 'hsl(var(--background))',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  row25: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    'justify-content': 'flex-end',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+});
+
+const buttonStyles = stylex.create({
+  glyph: { height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+  collapse: {
+    marginLeft: 'auto',
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  removeImage: {
+    position: 'absolute',
+    right: 'calc(var(--spacing) * 1)',
+    top: 'calc(var(--spacing) * 1)',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    minWidth: 0,
+    borderRadius: 'var(--radius-md)',
+    padding: 0,
+    color: 'hsl(var(--foreground))',
+  },
+  attach: {
+    height: 'calc(var(--spacing) * 7)',
+    width: 'calc(var(--spacing) * 7)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  comment: {
+    height: 'calc(var(--spacing) * 7)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
 
 /* Display-only docs previews for the conversation reference pages. They copy
    the current app's markup and tokens (`assistant-edited-files.tsx`,
@@ -113,15 +784,13 @@ function splitFilePath(filePath: string): { directory: string; name: string } {
 function SummaryStats({ add, del, locale }: { add: number; del: number; locale: ReplicaLocale }) {
   const copy = FILE_SUMMARY_COPY[locale];
   if (add === 0 && del === 0) {
-    return (
-      <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{copy.changed}</span>
-    );
+    return <span {...stylex.props(previewStyles.text)}>{copy.changed}</span>;
   }
 
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
-      <span className="text-code-added">+{add}</span>
-      <span className="text-code-removed">-{del}</span>
+    <span {...stylex.props(previewStyles.row)}>
+      <span {...stylex.props(previewStyles.text2)}>+{add}</span>
+      <span {...stylex.props(previewStyles.text3)}>-{del}</span>
     </span>
   );
 }
@@ -141,37 +810,33 @@ function AssistantEditedFilesSummary({
   const isSingleFile = files.length === 1;
 
   return (
-    <div className="w-full text-left">
-      <div className="overflow-hidden rounded-xl border border-border bg-background">
+    <div {...stylex.props(previewStyles.frame)}>
+      <div {...stylex.props(previewStyles.section)}>
         {!isSingleFile ? (
-          <div className="flex min-h-8 items-center gap-3 bg-muted/30 px-2.5 py-1.5">
-            <span className="min-w-0 flex-1 text-xs font-medium text-foreground/80">
-              {copy.summary(files.length)}
-            </span>
-            <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
-              <span className="text-code-added">+{totals.add}</span>
-              <span className="text-code-removed">-{totals.del}</span>
+          <div {...stylex.props(previewStyles.row2)}>
+            <span {...stylex.props(previewStyles.text4)}>{copy.summary(files.length)}</span>
+            <span {...stylex.props(previewStyles.row3)}>
+              <span {...stylex.props(previewStyles.text2)}>+{totals.add}</span>
+              <span {...stylex.props(previewStyles.text3)}>-{totals.del}</span>
             </span>
           </div>
         ) : null}
-        <div
-          className={cn('divide-y divide-border/70', !isSingleFile && 'border-t border-border/70')}
-        >
+        <div {...stylex.props(previewStyles.section2, !isSingleFile && previewStyles.section3)}>
           {files.map((file) => {
             const { directory, name } = splitFilePath(file.filePath);
             return (
               <div
                 key={file.filePath}
-                className={cn(
-                  'flex w-full min-w-0 items-center gap-2 px-2.5 text-left',
-                  isSingleFile ? 'min-h-10 py-2' : 'min-h-9 py-1.5'
+                {...stylex.props(
+                  previewStyles.row4,
+                  isSingleFile ? previewStyles.section4 : previewStyles.section5
                 )}
                 title={file.filePath}
               >
-                <span className="min-w-0 flex-1 truncate text-sm leading-6">
-                  <span className="text-foreground/90">{name}</span>
+                <span {...stylex.props(previewStyles.text5)}>
+                  <span {...stylex.props(previewStyles.text6)}>{name}</span>
                   {directory ? (
-                    <span className="ml-1.5 text-muted-foreground/70">{directory}</span>
+                    <span {...stylex.props(previewStyles.text7)}>{directory}</span>
                   ) : null}
                 </span>
                 <SummaryStats add={file.add} del={file.del} locale={locale} />
@@ -188,25 +853,23 @@ export function ConversationDiffPreview({ locale = 'en' }: { locale?: ReplicaLoc
   const copy = CONVERSATION_DIFF_COPY[locale];
 
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section6)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview overflow-hidden rounded-xl border border-border bg-background p-4 text-foreground shadow-sm sm:p-5"
+        className={['lody-app-preview', stylex.props(previewStyles.text8).className].join(' ')}
       >
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted/50">
-            <AgentIcon agent="codex" className="h-4 w-4" />
+        <div {...stylex.props(previewStyles.row5)}>
+          <span {...stylex.props(previewStyles.row6)}>
+            <AgentIcon agent="codex" xstyle={buttonStyles.glyph} />
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="font-medium">{copy.finished}</span>
+          <div {...stylex.props(previewStyles.section7)}>
+            <div {...stylex.props(previewStyles.row7)}>
+              <span {...stylex.props(previewStyles.section8)}>{copy.finished}</span>
               <span aria-hidden="true">·</span>
-              <span className="tabular-nums">11m 19s</span>
+              <span {...stylex.props(previewStyles.section9)}>11m 19s</span>
             </div>
-            <div className="max-w-[760px] rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-3 text-sm leading-6 text-card-foreground shadow-sm">
-              {copy.assistantText}
-            </div>
-            <div className="mt-2.5 max-w-[760px]">
+            <div {...stylex.props(previewStyles.text9)}>{copy.assistantText}</div>
+            <div {...stylex.props(previewStyles.section10)}>
               <AssistantEditedFilesSummary files={CONVERSATION_DIFF_FILES} locale={locale} />
             </div>
           </div>
@@ -254,18 +917,18 @@ const DIFF_PREVIEW_FILE: ReplicaChangeFile = {
 
 export function DiffViewerPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section6)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview overflow-hidden rounded-xl border border-border bg-background p-3 text-foreground shadow-sm sm:p-4"
+        className={['lody-app-preview', stylex.props(previewStyles.text10).className].join(' ')}
       >
-        <span className="sr-only">
+        <span {...stylex.props(previewStyles.overlay)}>
           {locale === 'zh' ? '差异查看器预览' : 'Diff viewer preview'}
         </span>
-        <div className="hidden dark:block">
+        <div {...stylex.props(previewStyles.section11)}>
           <ReplicaDiffViewer file={DIFF_PREVIEW_FILE} dark />
         </div>
-        <div className="dark:hidden">
+        <div {...stylex.props(previewStyles.section12)}>
           <ReplicaDiffViewer file={DIFF_PREVIEW_FILE} dark={false} />
         </div>
       </div>
@@ -319,14 +982,10 @@ const SESSION_TREE_ENTRIES: readonly TreeEntry[] = [
 
 function FolderTreeRow({ name }: { name: string }) {
   return (
-    <div
-      role="treeitem"
-      aria-expanded={false}
-      className="flex h-[22px] items-center gap-1.5 rounded-md px-2 text-[13px] text-foreground/90"
-    >
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
-      <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="min-w-0 truncate">{name}</span>
+    <div role="treeitem" aria-expanded={false} {...stylex.props(previewStyles.row8)}>
+      <ChevronRight {...stylex.props(previewStyles.text11)} aria-hidden="true" />
+      <Folder {...stylex.props(previewStyles.text12)} aria-hidden="true" />
+      <span {...stylex.props(previewStyles.section13)}>{name}</span>
     </div>
   );
 }
@@ -337,16 +996,12 @@ function FileTreeRow({ entry, locale }: { entry: FileTreeEntry; locale: ReplicaL
     <div
       role="treeitem"
       title={entry.modified ? copy.modified : entry.name}
-      className="flex h-[22px] items-center gap-1.5 rounded-md px-2 text-[13px] text-foreground/90"
+      {...stylex.props(previewStyles.row8)}
     >
-      <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <FileIcon path={entry.name} className="h-4 w-4" />
-      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-      {entry.modified ? (
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-primary">
-          M±
-        </span>
-      ) : null}
+      <span {...stylex.props(previewStyles.frame2)} aria-hidden="true" />
+      <FileIcon path={entry.name} xstyle={buttonStyles.glyph} />
+      <span {...stylex.props(previewStyles.section14)}>{entry.name}</span>
+      {entry.modified ? <span {...stylex.props(previewStyles.text13)}>M±</span> : null}
     </div>
   );
 }
@@ -355,32 +1010,29 @@ export function SessionFilesPreview({ locale = 'en' }: { locale?: ReplicaLocale 
   const copy = SESSION_TREE_COPY[locale];
 
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section6)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview mx-auto w-full max-w-[320px] overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-sm"
+        className={['lody-app-preview', stylex.props(previewStyles.text14).className].join(' ')}
       >
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 px-2">
-          <div className="inline-flex h-6 items-center rounded-md border border-border/60 bg-muted/40 p-0.5 text-[11px]">
-            <span className="flex h-5 items-center rounded px-2 font-medium text-foreground shadow-sm">
-              {copy.files}
-            </span>
-            <span className="flex h-5 items-center rounded px-2 text-muted-foreground">
-              {copy.changes}
-            </span>
+        <div {...stylex.props(previewStyles.row9)}>
+          <div {...stylex.props(previewStyles.row10)}>
+            <span {...stylex.props(previewStyles.row11)}>{copy.files}</span>
+            <span {...stylex.props(previewStyles.row12)}>{copy.changes}</span>
           </div>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             aria-label={locale === 'zh' ? '收起侧边栏' : 'Collapse sidebar'}
-            className="ml-auto h-6 w-6 text-muted-foreground"
+            xstyle={buttonStyles.collapse}
+            iconSize="calc(var(--spacing) * 3.5)"
           >
-            <PanelRight className="h-3.5 w-3.5" />
+            <PanelRight />
           </Button>
         </div>
-        <div role="tree" className="p-1.5">
-          <div className="flex flex-col gap-px">
+        <div role="tree" {...stylex.props(previewStyles.section15)}>
+          <div {...stylex.props(previewStyles.stack)}>
             {SESSION_TREE_ENTRIES.map((entry) =>
               entry.kind === 'folder' ? (
                 <FolderTreeRow key={entry.name} name={entry.name} />
@@ -421,51 +1073,50 @@ const IMAGE_INPUT_COPY: Record<
   },
 };
 
-const COMPOSER_BOX_CLASS =
-  '@container/composer-box flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] shadow-[0_3px_6px_-2px_lch(0%_0_0/0.02),0_1px_1px_lch(0%_0_0/0.04)] dark:shadow-none dark:border-input-border/70 dark:bg-input/90 [--mention-chip-surface:hsl(var(--composer))]';
-
 export function ImageInputPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
   const copy = IMAGE_INPUT_COPY[locale];
 
   return (
-    <div className="my-6 flex justify-center">
+    <div {...stylex.props(previewStyles.row13)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview [--composer:var(--muted)] w-full max-w-[560px] text-foreground"
+        className={['lody-app-preview', stylex.props(previewStyles.text15).className].join(' ')}
       >
-        <div className={COMPOSER_BOX_CLASS}>
-          <div className="input-scrollbar flex gap-2 overflow-x-auto pb-1">
-            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-border">
+        <div {...stylex.props(previewStyles.stack2)}>
+          <div
+            className={['input-scrollbar', stylex.props(previewStyles.row14).className].join(' ')}
+          >
+            <div {...stylex.props(previewStyles.frame3)}>
               <img
                 src={ATTACHMENT_PREVIEW_IMAGE}
                 alt={copy.attachmentAlt}
-                className="h-full w-full object-cover"
+                {...stylex.props(previewStyles.frame4)}
               />
               <Button
                 type="button"
                 variant="secondary"
                 size="icon"
                 aria-label={copy.removeImage}
-                className="absolute right-1 top-1 h-5 w-5 min-w-0 rounded-md p-0 text-foreground shadow-sm"
+                xstyle={buttonStyles.removeImage}
+                iconSize="calc(var(--spacing) * 3)"
+                shadow="sm"
               >
-                <X className="h-3 w-3" />
+                <X />
               </Button>
             </div>
           </div>
-          <div className="min-h-12 px-1 pt-1 text-sm leading-6 text-input-foreground">
-            {copy.prompt}
-          </div>
-          <div className="flex items-center gap-1 pt-0.5">
+          <div {...stylex.props(previewStyles.text16)}>{copy.prompt}</div>
+          <div {...stylex.props(previewStyles.row15)}>
             <Button
               type="button"
               variant="ghost"
               size="icon"
               aria-label={copy.addAttachment}
-              className="h-7 w-7 shrink-0 text-muted-foreground"
+              xstyle={buttonStyles.attach}
             >
-              <Plus className="h-4 w-4" strokeWidth={1.5} />
+              <Plus strokeWidth={1.5} />
             </Button>
-            <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+            <div {...stylex.props(previewStyles.row16)}>
               <ReplicaRunConfigTrigger agent="codex" modelLabel="5.4" thinkLabel="Medium" />
               <ReplicaPermissionModeTrigger label={copy.permission} />
             </div>
@@ -497,23 +1148,23 @@ export function ImageOutputPreview({ locale = 'en' }: { locale?: ReplicaLocale }
   const copy = IMAGE_OUTPUT_COPY[locale];
 
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section6)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview overflow-hidden rounded-xl border border-border bg-background p-4 text-foreground shadow-sm sm:p-5"
+        className={['lody-app-preview', stylex.props(previewStyles.text8).className].join(' ')}
       >
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted/50">
-            <AgentIcon agent="codex" className="h-4 w-4" />
+        <div {...stylex.props(previewStyles.row5)}>
+          <span {...stylex.props(previewStyles.row6)}>
+            <AgentIcon agent="codex" xstyle={buttonStyles.glyph} />
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="tabular-nums">2026/5/6 12:55</span>
+          <div {...stylex.props(previewStyles.section7)}>
+            <div {...stylex.props(previewStyles.row7)}>
+              <span {...stylex.props(previewStyles.section9)}>2026/5/6 12:55</span>
               <span aria-hidden="true">·</span>
               <span>{copy.metadata}</span>
             </div>
-            <div className="inline-flex max-w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-muted/20">
-              <div className="inline-flex max-w-full">
+            <div {...stylex.props(previewStyles.stack3)}>
+              <div {...stylex.props(previewStyles.row17)}>
                 {/* Use the tracked brand mark instead of a synthetic screenshot as the
                     representative generated image. */}
                 <img
@@ -521,13 +1172,13 @@ export function ImageOutputPreview({ locale = 'en' }: { locale?: ReplicaLocale }
                   alt={copy.alt}
                   width={180}
                   height={180}
-                  className="block max-h-[280px] max-w-full object-contain"
+                  {...stylex.props(previewStyles.section16)}
                 />
               </div>
             </div>
-            <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="tabular-nums">{copy.duration}</span>
+            <div {...stylex.props(previewStyles.row18)}>
+              <Copy {...stylex.props(previewStyles.frame5)} aria-hidden="true" />
+              <span {...stylex.props(previewStyles.section9)}>{copy.duration}</span>
             </div>
           </div>
         </div>
@@ -578,10 +1229,10 @@ export function BrowserPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
   const copy = BROWSER_COPY[locale];
 
   return (
-    <div className="my-6">
+    <div {...stylex.props(previewStyles.section6)}>
       <div
         aria-hidden="true"
-        className="lody-app-preview overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-sm"
+        className={['lody-app-preview', stylex.props(previewStyles.text17).className].join(' ')}
       >
         <ReplicaBrowserToolbar
           address="http://127.0.0.1:5173/dashboard"
@@ -589,63 +1240,44 @@ export function BrowserPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
           annotating
           locale={locale}
         />
-        <div className="relative min-h-[310px] overflow-hidden bg-[linear-gradient(160deg,#071a2c_0%,#03090f_78%,#02060b_100%)] px-5 py-5 text-slate-100 sm:px-8">
-          <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-2 font-semibold tracking-wide">
-              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-sky-400 text-sm text-slate-950">
-                L
-              </span>
+        <div {...stylex.props(previewStyles.text18)}>
+          <div {...stylex.props(previewStyles.row19)}>
+            <span {...stylex.props(previewStyles.row20)}>
+              <span {...stylex.props(previewStyles.row21)}>L</span>
               Lody
             </span>
-            <span className="hidden items-center gap-3 text-slate-300/90 sm:flex">
+            <span {...stylex.props(previewStyles.text19)}>
               <span>{copy.viewDocs}</span>
               <span>{copy.getStarted}</span>
             </span>
           </div>
-          <div className="mx-auto mt-10 max-w-[360px] text-center">
-            <div className="relative inline-block">
-              <h2 className="text-balance text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl">
-                {copy.heading}
-              </h2>
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute -inset-2 rounded-md border-2 border-[rgba(37,99,235,0.9)] bg-[rgba(37,99,235,0.08)]"
-              />
+          <div {...stylex.props(previewStyles.section17)}>
+            <div {...stylex.props(previewStyles.section18)}>
+              <h2 {...stylex.props(previewStyles.text20)}>{copy.heading}</h2>
+              <span aria-hidden="true" {...stylex.props(previewStyles.overlay2)} />
             </div>
-            <p className="mt-4 text-sm leading-6 text-slate-300">{copy.body}</p>
-            <div className="mt-5 flex justify-center gap-2">
-              <span className="rounded-lg bg-sky-400 px-3.5 py-2 text-xs font-semibold text-slate-950">
-                {copy.getStarted}
-              </span>
-              <span className="rounded-lg border border-slate-500/60 px-3.5 py-2 text-xs font-medium text-slate-200">
-                {copy.viewDocs}
-              </span>
+            <p {...stylex.props(previewStyles.text21)}>{copy.body}</p>
+            <div {...stylex.props(previewStyles.row22)}>
+              <span {...stylex.props(previewStyles.text22)}>{copy.getStarted}</span>
+              <span {...stylex.props(previewStyles.text23)}>{copy.viewDocs}</span>
             </div>
           </div>
-          <div className="absolute bottom-4 right-4 z-10 w-[min(240px,calc(100%-2rem))] rounded-xl border border-border bg-popover p-3 text-left text-popover-foreground shadow-2xl">
-            <div className="mb-2 flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold">{copy.commentTitle}</div>
-                <div className="truncate font-mono text-[10px] text-muted-foreground">
-                  {copy.commentTarget}
-                </div>
+          <div {...stylex.props(previewStyles.overlay3)}>
+            <div {...stylex.props(previewStyles.row23)}>
+              <div {...stylex.props(previewStyles.section7)}>
+                <div {...stylex.props(previewStyles.text24)}>{copy.commentTitle}</div>
+                <div {...stylex.props(previewStyles.text25)}>{copy.commentTarget}</div>
               </div>
-              <button
-                type="button"
-                aria-label={copy.cancel}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-hover-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
+              <button type="button" aria-label={copy.cancel} {...stylex.props(previewStyles.row24)}>
+                <X {...stylex.props(previewStyles.frame5)} />
               </button>
             </div>
-            <div className="rounded-md border border-input-border bg-background px-2.5 py-2 text-xs text-muted-foreground">
-              {copy.commentBody}
-            </div>
-            <div className="mt-2 flex justify-end gap-1.5">
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs">
+            <div {...stylex.props(previewStyles.text26)}>{copy.commentBody}</div>
+            <div {...stylex.props(previewStyles.row25)}>
+              <Button type="button" variant="ghost" size="sm" xstyle={buttonStyles.comment}>
                 {copy.cancel}
               </Button>
-              <Button type="button" variant="default" size="sm" className="h-7 px-2 text-xs">
+              <Button type="button" variant="default" size="sm" xstyle={buttonStyles.comment}>
                 {copy.addComment}
               </Button>
             </div>

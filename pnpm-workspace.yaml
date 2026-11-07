@@ -270,6 +270,9 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # The site owns its StyleX skin; the patched Fumadocs runtime only joins class names.
+  '@fumadocs/base-ui@16.8.12>@fumadocs/tailwind': '-'
+  '@fumadocs/base-ui@16.8.12>tailwind-merge': '-'
   # The quote converters exchange HAST nodes and must share their augmented types.
   'hast-util-from-dom>@types/hast': 3.0.5
   'hast-util-to-mdast>@types/hast': 3.0.5
@@ -295,6 +298,9 @@ overrides:
   zod: 4.3.6
 
 packageExtensions:
+  '@fumadocs/base-ui@16.8.12':
+    dependencies:
+      clsx: 2.1.1
   konsta@4.0.1:
     peerDependencies:
       react: '*'
@@ -302,6 +308,7 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  '@fumadocs/base-ui@16.8.12': patches/@fumadocs__base-ui@16.8.12.patch
   # Backport isaacs/node-glob 4682e8c9; remove when compatible parents adopt the fix.
   glob@13.0.1: patches/glob@13.0.1.patch
   '@hpke/common@1.10.1': patches/@hpke__common@1.10.1.patch

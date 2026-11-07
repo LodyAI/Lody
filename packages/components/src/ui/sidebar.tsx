@@ -1,12 +1,15 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
-import { cva, VariantProps } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
 import { Drawer } from '@lody/ui/drawer';
 import { Skeleton } from '@lody/ui/skeleton';
@@ -17,6 +20,453 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = '16rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
 const SIDEBAR_WIDTH_ICON = '3rem';
+
+const styles = stylex.create({
+  wrapper: {
+    display: 'flex',
+    width: '100%',
+    minHeight: { default: '100svh', '@supports not (height: 1dvh)': '100vh' },
+    backgroundColor: {
+      default: null,
+      ':has([data-variant="inset"])': 'hsl(var(--sidebar-background) / 1)',
+    },
+  },
+  uncollapsed: {
+    display: 'flex',
+    height: '100%',
+    width: 'var(--sidebar-width)',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+  },
+  mobilePanel: {
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    width: 'var(--sidebar-width)',
+    padding: 0,
+    paddingInlineStart: 0,
+    paddingInlineEnd: 0,
+    paddingBlockStart: 0,
+    paddingBlockEnd: 0,
+  },
+  mobileColumn: { display: 'flex', height: '100%', width: '100%', flexDirection: 'column' },
+  desktopFrame: {
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+    display: { default: 'none', '@media (width >= 48rem)': 'block' },
+  },
+  gap: {
+    position: 'relative',
+    backgroundColor: 'transparent',
+    width: 'var(--sidebar-width)',
+    transitionProperty: 'width',
+    transitionDuration: '.2s',
+    transitionTimingFunction: 'linear',
+  },
+  gapClosed: { width: 0 },
+  gapIcon: { width: 'var(--sidebar-width-icon)' },
+  gapIconPadded: { width: 'calc(var(--sidebar-width-icon) + var(--spacing) * 4)' },
+  gapRight: { rotate: '180deg' },
+  container: {
+    position: 'fixed',
+    insetBlock: 0,
+    zIndex: 10,
+    display: { default: 'none', '@media (width >= 48rem)': 'flex' },
+    height: {
+      default: '100svh',
+      '@supports not (height: 1dvh)': '100vh',
+      ':is(html[data-desktop-devbar] #root *)': 'calc(100dvh - 28px)',
+    },
+    width: 'var(--sidebar-width)',
+    transitionProperty: 'left,right,width',
+    transitionDuration: '.2s',
+    transitionTimingFunction: 'linear',
+  },
+  leading: { left: 0 },
+  trailing: { right: 0 },
+  offcanvasLeading: { left: 'calc(var(--sidebar-width) * -1)' },
+  offcanvasTrailing: { right: 'calc(var(--sidebar-width) * -1)' },
+  padding: { padding: 'calc(var(--spacing) * 2)' },
+  containerIcon: { width: 'var(--sidebar-width-icon)' },
+  containerIconPadded: { width: 'calc(var(--sidebar-width-icon) + var(--spacing) * 4 + 2px)' },
+  borderLeading: { borderRightWidth: 1 },
+  borderTrailing: { borderLeftWidth: 1 },
+  inner: {
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+  },
+  floating: {
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    borderWidth: 1,
+    borderRadius: 'var(--radius-lg)',
+    boxShadow: 'var(--shadow-xs)',
+  },
+  triggerGlyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  accessibleLabel: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  rail: {
+    position: 'absolute',
+    insetBlock: 0,
+    zIndex: 20,
+    display: { default: 'none', '@media (width >= 40rem)': 'flex' },
+    width: 'calc(var(--spacing) * 4)',
+    translate: '-50% 0',
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'linear',
+    right: {
+      default: null,
+      ':is([data-side="left"] *)': 'calc(var(--spacing) * -4)',
+      ':is([data-side="left"][data-collapsible="offcanvas"] *)': 'calc(var(--spacing) * -2)',
+    },
+    left: {
+      default: null,
+      ':is([data-side="right"] *)': 0,
+      ':is([data-side="right"][data-collapsible="offcanvas"] *)': 'calc(var(--spacing) * -2)',
+    },
+    cursor: {
+      default: null,
+      ':is([data-side="left"] *)': 'w-resize',
+      ':is([data-side="right"] *)': 'e-resize',
+      ':is([data-side="left"][data-state="collapsed"] *)': 'e-resize',
+      ':is([data-side="right"][data-state="collapsed"] *)': 'w-resize',
+    },
+    backgroundColor: {
+      default: null,
+      ':is([data-collapsible="offcanvas"] *):hover': {
+        '@media (hover: hover)': 'hsl(var(--sidebar-background) / 1)',
+      },
+    },
+    '::after': {
+      content: '""',
+      position: 'absolute',
+      insetBlock: 0,
+      left: '50%',
+      width: 2,
+      backgroundColor: {
+        default: null,
+        ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-border) / 1)' },
+      },
+    },
+  },
+  railOffcanvas: {
+    ':is([data-collapsible="offcanvas"] *)': { translate: '0 0' },
+    '::after': { left: { default: null, ':is([data-collapsible="offcanvas"] *)': '100%' } },
+  },
+  inset: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    flex: 1,
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    '@media (width >= 48rem)': {
+      margin: { default: null, ':is([data-variant="inset"] ~ *)': 'calc(var(--spacing) * 2)' },
+      marginLeft: {
+        default: null,
+        ':is([data-variant="inset"] ~ *)': 0,
+        ':is([data-variant="inset"][data-state="collapsed"] ~ *)': 'calc(var(--spacing) * 2)',
+      },
+      borderRadius: { default: null, ':is([data-variant="inset"] ~ *)': 'var(--radius-xl)' },
+      boxShadow: { default: null, ':is([data-variant="inset"] ~ *)': 'var(--shadow-xs)' },
+    },
+  },
+  input: {
+    height: 'calc(var(--spacing) * 8)',
+    width: '100%',
+    [field.background]: 'hsl(var(--input-field) / 1)',
+    [field.well]: 'none',
+    [field.ringWidth]: '0px',
+  },
+  stack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  separator: { marginInline: 'calc(var(--spacing) * 2)', width: 'auto' },
+  content: {
+    display: 'flex',
+    minHeight: 0,
+    flex: 1,
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    overflow: { default: 'auto', ':is([data-collapsible="icon"] *)': 'hidden' },
+  },
+  group: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    flexDirection: 'column',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  label: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    flexShrink: 0,
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: colors.tertiaryLabel,
+    transitionProperty: 'margin,opacity',
+    transitionDuration: '.2s',
+    transitionTimingFunction: 'linear',
+    marginTop: { default: null, ':is([data-collapsible="icon"] *)': 'calc(var(--spacing) * -8)' },
+    opacity: { default: null, ':is([data-collapsible="icon"] *)': 0 },
+  },
+  focus: {
+    outlineStyle: 'none',
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  glyphs: {
+    ':is(*) > svg': {
+      flexShrink: 0,
+      width: 'calc(var(--spacing) * 4)',
+      height: 'calc(var(--spacing) * 4)',
+    },
+  },
+  action: {
+    position: 'absolute',
+    aspectRatio: '1 / 1',
+    width: 'calc(var(--spacing) * 5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-md)',
+    padding: 0,
+    color: {
+      default: 'hsl(var(--sidebar-foreground) / 1)',
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
+    '::after': {
+      content: '""',
+      position: 'absolute',
+      inset: 'calc(var(--spacing) * -2)',
+      display: { default: null, '@media (width >= 48rem)': 'none' },
+    },
+  },
+  groupAction: { top: 'calc(var(--spacing) * 3.5)', right: 'calc(var(--spacing) * 3)' },
+  groupContent: {
+    width: '100%',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  menu: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  relative: { position: 'relative' },
+  menuButton: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-md)',
+    padding: 'calc(var(--spacing) * 2)',
+    textAlign: 'left',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    transitionProperty: 'width,height,padding',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    backgroundColor: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+      ':active': 'hsl(var(--sidebar-hover) / 1)',
+      ':is([data-active="true"])': 'hsl(var(--sidebar-selection) / 1)',
+    },
+    color: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+      ':active': 'hsl(var(--sidebar-hover-foreground) / 1)',
+      ':is([data-active="true"])': 'hsl(var(--sidebar-selection-foreground) / 1)',
+    },
+    fontWeight: { default: null, ':is([data-active="true"])': 'var(--font-weight-medium)' },
+    paddingRight: {
+      default: null,
+      ':is([data-sidebar="menu-item"]:has([data-sidebar="menu-action"]) *):not(:is([data-collapsible="icon"] *))':
+        'calc(var(--spacing) * 8)',
+    },
+    ':is(*) > span:last-child': {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+  },
+  disabled: {
+    pointerEvents: { default: null, ':disabled': 'none', ':is([aria-disabled="true"])': 'none' },
+    opacity: {
+      default: null,
+      ':disabled': control.disabledOpacity,
+      ':is([aria-disabled="true"])': control.disabledOpacity,
+    },
+  },
+  buttonDefault: { height: 'calc(var(--spacing) * 8)' },
+  buttonSmall: {
+    height: 'calc(var(--spacing) * 7)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+  buttonLarge: { height: 'calc(var(--spacing) * 12)' },
+  buttonIcon: {
+    ':is([data-collapsible="icon"] *)': {
+      width: 'calc(var(--spacing) * 8)',
+      height: 'calc(var(--spacing) * 8)',
+      padding: 'calc(var(--spacing) * 2)',
+    },
+  },
+  buttonLargeIcon: { ':is([data-collapsible="icon"] *)': { padding: 0 } },
+  outline: {
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: {
+      default: '0 0 0 1px hsl(var(--sidebar-border))',
+      ':focus-visible': '0 0 0 1px hsl(var(--sidebar-border))',
+      ':hover': { '@media (hover: hover)': '0 0 0 1px hsl(var(--sidebar-hover))' },
+    },
+  },
+  menuAction: {
+    top: {
+      default: 'calc(var(--spacing) * 1.5)',
+      ':is([data-size="sm"] ~ *)': 'calc(var(--spacing) * 1)',
+      ':is([data-size="lg"] ~ *)': 'calc(var(--spacing) * 2.5)',
+    },
+    right: 'calc(var(--spacing) * 1)',
+    color: {
+      default: null,
+      ':is([data-sidebar="menu-button"]:hover ~ *)': {
+        '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)',
+      },
+    },
+  },
+  menuPosition: {
+    top: {
+      default: 'calc(var(--spacing) * 1.5)',
+      ':is([data-size="sm"] ~ *)': 'calc(var(--spacing) * 1)',
+      ':is([data-size="lg"] ~ *)': 'calc(var(--spacing) * 2.5)',
+    },
+    right: 'calc(var(--spacing) * 1)',
+  },
+  showOnHover: {
+    opacity: {
+      default: null,
+      '@media (width >= 48rem)': {
+        default: 0,
+        ':is([data-sidebar="menu-item"]:focus-within *)': 1,
+        ':is([data-sidebar="menu-item"]:hover *)': 1,
+        ':is([data-state="open"])': 1,
+      },
+    },
+    color: {
+      default: null,
+      ':is([data-active="true"] ~ *)': 'hsl(var(--sidebar-selection-foreground) / 1)',
+    },
+  },
+  badge: {
+    position: 'absolute',
+    right: 'calc(var(--spacing) * 1)',
+    display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
+    pointerEvents: 'none',
+    height: 'calc(var(--spacing) * 5)',
+    minWidth: 'calc(var(--spacing) * 5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    fontVariantNumeric: 'tabular-nums',
+    userSelect: 'none',
+    color: {
+      default: 'hsl(var(--sidebar-foreground) / 1)',
+      ':is([data-sidebar="menu-button"]:hover ~ *)': {
+        '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)',
+      },
+      ':is([data-active="true"] ~ *)': 'hsl(var(--sidebar-selection-foreground) / 1)',
+    },
+  },
+  skeleton: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+  },
+  skeletonText: { maxWidth: 'var(--skeleton-width)', flex: 1 },
+  sub: {
+    display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
+    minWidth: 0,
+    flexDirection: 'column',
+    marginInline: 'calc(var(--spacing) * 3.5)',
+    translate: '1px 0',
+    gap: 'calc(var(--spacing) * 1)',
+    borderLeftWidth: 1,
+    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    paddingInline: 'calc(var(--spacing) * 2.5)',
+    paddingBlock: 'calc(var(--spacing) * .5)',
+  },
+  subButton: {
+    display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
+    height: 'calc(var(--spacing) * 7)',
+    minWidth: 0,
+    translate: '-1px 0',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    color: {
+      default: 'hsl(var(--sidebar-foreground) / 1)',
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+      ':active': 'hsl(var(--sidebar-hover-foreground) / 1)',
+      ':is([data-active="true"])': 'hsl(var(--sidebar-selection-foreground) / 1)',
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+      ':active': 'hsl(var(--sidebar-hover) / 1)',
+      ':is([data-active="true"])': 'hsl(var(--sidebar-selection) / 1)',
+    },
+    ':is(*) > svg': { color: 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    ':is(*) > span:last-child': {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+  },
+  textSmall: { fontSize: 'var(--text-sm)', lineHeight: 'var(--text-sm--line-height)' },
+  textExtraSmall: { fontSize: 'var(--text-xs)', lineHeight: 'var(--text-xs--line-height)' },
+});
+
+type SidebarStyleProps = {
+  /** Additional styles compose after this part's defaults and variants. */
+  xstyle?: stylex.StyleXStyles;
+};
 
 type SidebarContextProps = {
   state: 'expanded' | 'collapsed';
@@ -40,6 +490,7 @@ function useSidebar() {
 }
 
 function SidebarProvider({
+  xstyle,
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
@@ -47,11 +498,12 @@ function SidebarProvider({
   style,
   children,
   ...props
-}: React.ComponentProps<'div'> & {
-  defaultOpen?: boolean;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}) {
+}: React.ComponentProps<'div'> &
+  SidebarStyleProps & {
+    defaultOpen?: boolean;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+  }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
 
@@ -87,7 +539,7 @@ function SidebarProvider({
   // (currently unused) shadcn sidebar can't double-register the shortcut.
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
-  // This makes it easier to style the sidebar with Tailwind classes.
+  // Descendants observe the same expanded/collapsed state.
   const state = open ? 'expanded' : 'collapsed';
 
   const contextValue = React.useMemo<SidebarContextProps>(
@@ -115,10 +567,7 @@ function SidebarProvider({
               ...style,
             } as React.CSSProperties
           }
-          className={cn(
-            'group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex min-h-svh w-full',
-            className
-          )}
+          className={clsx(stylex.props(styles.wrapper, xstyle).className, className)}
           {...props}
         >
           {children}
@@ -129,27 +578,26 @@ function SidebarProvider({
 }
 
 function Sidebar({
+  xstyle,
   side = 'left',
   variant = 'sidebar',
   collapsible = 'offcanvas',
   className,
   children,
   ...props
-}: React.ComponentProps<'div'> & {
-  side?: 'left' | 'right';
-  variant?: 'sidebar' | 'floating' | 'inset';
-  collapsible?: 'offcanvas' | 'icon' | 'none';
-}) {
+}: React.ComponentProps<'div'> &
+  SidebarStyleProps & {
+    side?: 'left' | 'right';
+    variant?: 'sidebar' | 'floating' | 'inset';
+    collapsible?: 'offcanvas' | 'icon' | 'none';
+  }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
   if (collapsible === 'none') {
     return (
       <div
         data-slot="sidebar"
-        className={cn(
-          'bg-sidebar text-sidebar-foreground flex h-full w-(--sidebar-width) flex-col',
-          className
-        )}
+        className={clsx(stylex.props(styles.uncollapsed, xstyle).className, className)}
         {...props}
       >
         {children}
@@ -173,7 +621,7 @@ function Sidebar({
           // scrolling column, so it takes the panel without the panel's padding
           // and without the cross: the way out is the overlay or the trigger.
           closeButton={false}
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0"
+          xstyle={styles.mobilePanel}
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
@@ -181,11 +629,11 @@ function Sidebar({
           }
           side={side === 'left' ? 'start' : 'end'}
         >
-          <Drawer.Header className="sr-only">
+          <Drawer.Header visuallyHidden>
             <Drawer.Title>Sidebar</Drawer.Title>
             <Drawer.Description>Displays the mobile sidebar.</Drawer.Description>
           </Drawer.Header>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          <div {...stylex.props(styles.mobileColumn)}>{children}</div>
         </Drawer.Content>
       </Drawer.Root>
     );
@@ -193,7 +641,7 @@ function Sidebar({
 
   return (
     <div
-      className="group peer text-sidebar-foreground hidden md:block"
+      className={stylex.props(styles.desktopFrame).className}
       data-state={state}
       data-collapsible={state === 'collapsed' ? collapsible : ''}
       data-variant={variant}
@@ -203,26 +651,38 @@ function Sidebar({
       {/* This is what handles the sidebar gap on desktop */}
       <div
         data-slot="sidebar-gap"
-        className={cn(
-          'relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear',
-          'group-data-[collapsible=offcanvas]:w-0',
-          'group-data-[side=right]:rotate-180',
-          variant === 'floating' || variant === 'inset'
-            ? 'group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]'
-            : 'group-data-[collapsible=icon]:w-(--sidebar-width-icon)'
-        )}
+        className={
+          stylex.props(
+            styles.gap,
+            side === 'right' && styles.gapRight,
+            state === 'collapsed' &&
+              (collapsible === 'offcanvas'
+                ? styles.gapClosed
+                : variant === 'floating' || variant === 'inset'
+                  ? styles.gapIconPadded
+                  : styles.gapIcon)
+          ).className
+        }
       />
       <div
         data-slot="sidebar-container"
-        className={cn(
-          'fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex',
-          side === 'left'
-            ? 'left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]'
-            : 'right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]',
-          // Adjust the padding for floating and inset variants.
-          variant === 'floating' || variant === 'inset'
-            ? 'p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]'
-            : 'group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l',
+        className={clsx(
+          stylex.props(
+            styles.container,
+            side === 'left' ? styles.leading : styles.trailing,
+            state === 'collapsed' &&
+              collapsible === 'offcanvas' &&
+              (side === 'left' ? styles.offcanvasLeading : styles.offcanvasTrailing),
+            (variant === 'floating' || variant === 'inset') && styles.padding,
+            state === 'collapsed' &&
+              collapsible === 'icon' &&
+              (variant === 'floating' || variant === 'inset'
+                ? styles.containerIconPadded
+                : styles.containerIcon),
+            variant === 'sidebar' &&
+              (side === 'left' ? styles.borderLeading : styles.borderTrailing),
+            xstyle
+          ).className,
           className
         )}
         {...props}
@@ -230,7 +690,9 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-xs"
+          className={
+            stylex.props(styles.inner, variant === 'floating' && styles.floating).className
+          }
         >
           {children}
         </div>
@@ -249,20 +711,24 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       variant="ghost"
       size="small"
       icon
-      className={cn(className)}
+      className={clsx(className)}
       onClick={(event) => {
         onClick?.(event);
         toggleSidebar();
       }}
       {...props}
     >
-      <PanelLeftIcon className="size-4" />
-      <span className="sr-only">Toggle Sidebar</span>
+      <PanelLeftIcon {...stylex.props(styles.triggerGlyph)} />
+      <span {...stylex.props(styles.accessibleLabel)}>Toggle Sidebar</span>
     </Button>
   );
 }
 
-function SidebarRail({ className, ...props }: React.ComponentProps<'button'>) {
+function SidebarRail({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'button'> & SidebarStyleProps) {
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -273,62 +739,64 @@ function SidebarRail({ className, ...props }: React.ComponentProps<'button'>) {
       tabIndex={-1}
       onClick={toggleSidebar}
       title="Toggle Sidebar"
-      className={cn(
-        'hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex',
-        'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',
-        '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
-        'hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full',
-        '[[data-side=left][data-collapsible=offcanvas]_&]:-right-2',
-        '[[data-side=right][data-collapsible=offcanvas]_&]:-left-2',
-        className
-      )}
+      className={clsx(stylex.props(styles.rail, styles.railOffcanvas, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarInset({ className, ...props }: React.ComponentProps<'main'>) {
+function SidebarInset({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'main'> & SidebarStyleProps) {
   return (
     <main
       data-slot="sidebar-inset"
-      className={cn(
-        'bg-background relative flex w-full flex-1 flex-col',
-        'md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-xs md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2',
-        className
-      )}
+      className={clsx(stylex.props(styles.inset, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarInput({ className, ...props }: React.ComponentProps<typeof Input>) {
+function SidebarInput({ className, xstyle, ...props }: React.ComponentProps<typeof Input>) {
   return (
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
-      className={cn('h-8 w-full bg-input-field shadow-none', className)}
+      controlHeight="calc(var(--spacing) * 8)"
+      className={className}
+      xstyle={[styles.input, xstyle]}
       {...props}
     />
   );
 }
 
-function SidebarHeader({ className, ...props }: React.ComponentProps<'div'>) {
+function SidebarHeader({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & SidebarStyleProps) {
   return (
     <div
       data-slot="sidebar-header"
       data-sidebar="header"
-      className={cn('flex flex-col gap-2 p-2', className)}
+      className={clsx(stylex.props(styles.stack, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarFooter({ className, ...props }: React.ComponentProps<'div'>) {
+function SidebarFooter({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & SidebarStyleProps) {
   return (
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={cn('flex flex-col gap-2 p-2', className)}
+      className={clsx(stylex.props(styles.stack, xstyle).className, className)}
       {...props}
     />
   );
@@ -339,51 +807,57 @@ function SidebarSeparator({ className, ...props }: React.ComponentProps<typeof S
     <Separator
       data-slot="sidebar-separator"
       data-sidebar="separator"
-      className={cn('mx-2 w-auto', className)}
+      xstyle={styles.separator}
+      className={className}
       {...props}
     />
   );
 }
 
-function SidebarContent({ className, ...props }: React.ComponentProps<'div'>) {
+function SidebarContent({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & SidebarStyleProps) {
   return (
     <div
       data-slot="sidebar-content"
       data-sidebar="content"
-      className={cn(
-        'flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden',
-        className
-      )}
+      className={clsx(stylex.props(styles.content, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarGroup({ className, ...props }: React.ComponentProps<'div'>) {
+function SidebarGroup({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & SidebarStyleProps) {
   return (
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={cn('relative flex w-full min-w-0 flex-col p-2', className)}
+      className={clsx(stylex.props(styles.group, xstyle).className, className)}
       {...props}
     />
   );
 }
 
 function SidebarGroupLabel({
+  xstyle,
   className,
   asChild = false,
   ...props
-}: React.ComponentProps<'div'> & { asChild?: boolean }) {
+}: React.ComponentProps<'div'> & SidebarStyleProps & { asChild?: boolean }) {
   const Comp = asChild ? Slot : 'div';
 
   return (
     <Comp
       data-slot="sidebar-group-label"
       data-sidebar="group-label"
-      className={cn(
-        "text-sidebar-foreground/70 ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
-        'group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0',
+      className={clsx(
+        stylex.props(styles.label, styles.focus, styles.glyphs, xstyle).className,
         className
       )}
       {...props}
@@ -392,21 +866,20 @@ function SidebarGroupLabel({
 }
 
 function SidebarGroupAction({
+  xstyle,
   className,
   asChild = false,
   ...props
-}: React.ComponentProps<'button'> & { asChild?: boolean }) {
+}: React.ComponentProps<'button'> & SidebarStyleProps & { asChild?: boolean }) {
   const Comp = asChild ? Slot : 'button';
 
   return (
     <Comp
       data-slot="sidebar-group-action"
       data-sidebar="group-action"
-      className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
-        'after:absolute after:-inset-2 md:after:hidden',
-        'group-data-[collapsible=icon]:hidden',
+      className={clsx(
+        stylex.props(styles.action, styles.groupAction, styles.focus, styles.glyphs, xstyle)
+          .className,
         className
       )}
       {...props}
@@ -414,62 +887,53 @@ function SidebarGroupAction({
   );
 }
 
-function SidebarGroupContent({ className, ...props }: React.ComponentProps<'div'>) {
+function SidebarGroupContent({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & SidebarStyleProps) {
   return (
     <div
       data-slot="sidebar-group-content"
       data-sidebar="group-content"
-      className={cn('w-full text-sm', className)}
+      className={clsx(stylex.props(styles.groupContent, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarMenu({ className, ...props }: React.ComponentProps<'ul'>) {
+function SidebarMenu({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'ul'> & SidebarStyleProps) {
   return (
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn('flex w-full min-w-0 flex-col gap-1', className)}
+      className={clsx(stylex.props(styles.menu, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarMenuItem({ className, ...props }: React.ComponentProps<'li'>) {
+function SidebarMenuItem({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'li'> & SidebarStyleProps) {
   return (
     <li
       data-slot="sidebar-menu-item"
       data-sidebar="menu-item"
-      className={cn('group/menu-item relative', className)}
+      className={clsx(stylex.props(styles.relative, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-hidden ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-2 active:bg-sidebar-hover active:text-sidebar-hover-foreground disabled:pointer-events-none disabled:opacity-50 group-has-data-[sidebar=menu-action]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-selection data-[active=true]:font-medium data-[active=true]:text-sidebar-selection-foreground data-[state=open]:hover:bg-sidebar-hover data-[state=open]:hover:text-sidebar-hover-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
-  {
-    variants: {
-      variant: {
-        default: 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-        outline:
-          'bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-hover hover:text-sidebar-hover-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-hover))]',
-      },
-      size: {
-        default: 'h-8 text-sm',
-        sm: 'h-7 text-xs',
-        lg: 'h-12 text-sm group-data-[collapsible=icon]:p-0!',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-      size: 'default',
-    },
-  }
-);
-
 function SidebarMenuButton({
+  xstyle,
   asChild = false,
   isActive = false,
   variant = 'default',
@@ -477,11 +941,14 @@ function SidebarMenuButton({
   tooltip,
   className,
   ...props
-}: React.ComponentProps<'button'> & {
-  asChild?: boolean;
-  isActive?: boolean;
-  tooltip?: string | React.ComponentProps<typeof Tooltip.Content>;
-} & VariantProps<typeof sidebarMenuButtonVariants>) {
+}: React.ComponentProps<'button'> &
+  SidebarStyleProps & {
+    asChild?: boolean;
+    isActive?: boolean;
+    tooltip?: string | React.ComponentProps<typeof Tooltip.Content>;
+    variant?: 'default' | 'outline' | null;
+    size?: 'default' | 'sm' | 'lg' | null;
+  }) {
   const Comp = asChild ? Slot : 'button';
   const { isMobile, state } = useSidebar();
 
@@ -491,7 +958,26 @@ function SidebarMenuButton({
       data-sidebar="menu-button"
       data-size={size}
       data-active={isActive}
-      className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+      className={clsx(
+        stylex.props(
+          styles.menuButton,
+          styles.focus,
+          styles.glyphs,
+          styles.disabled,
+          variant === 'outline' && styles.outline,
+          size === 'sm'
+            ? styles.buttonSmall
+            : size === 'lg'
+              ? styles.buttonLarge
+              : size === null
+                ? null
+                : styles.buttonDefault,
+          styles.buttonIcon,
+          size === 'lg' && styles.buttonLargeIcon,
+          xstyle
+        ).className,
+        className
+      )}
       {...props}
     />
   );
@@ -520,30 +1006,31 @@ function SidebarMenuButton({
 }
 
 function SidebarMenuAction({
+  xstyle,
   className,
   asChild = false,
   showOnHover = false,
   ...props
-}: React.ComponentProps<'button'> & {
-  asChild?: boolean;
-  showOnHover?: boolean;
-}) {
+}: React.ComponentProps<'button'> &
+  SidebarStyleProps & {
+    asChild?: boolean;
+    showOnHover?: boolean;
+  }) {
   const Comp = asChild ? Slot : 'button';
 
   return (
     <Comp
       data-slot="sidebar-menu-action"
       data-sidebar="menu-action"
-      className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground peer-hover/menu-button:text-sidebar-hover-foreground absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
-        'after:absolute after:-inset-2 md:after:hidden',
-        'peer-data-[size=sm]/menu-button:top-1',
-        'peer-data-[size=default]/menu-button:top-1.5',
-        'peer-data-[size=lg]/menu-button:top-2.5',
-        'group-data-[collapsible=icon]:hidden',
-        showOnHover &&
-          'peer-data-[active=true]/menu-button:text-sidebar-selection-foreground group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 md:opacity-0',
+      className={clsx(
+        stylex.props(
+          styles.action,
+          styles.menuAction,
+          styles.focus,
+          styles.glyphs,
+          showOnHover && styles.showOnHover,
+          xstyle
+        ).className,
         className
       )}
       {...props}
@@ -551,32 +1038,30 @@ function SidebarMenuAction({
   );
 }
 
-function SidebarMenuBadge({ className, ...props }: React.ComponentProps<'div'>) {
+function SidebarMenuBadge({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'div'> & SidebarStyleProps) {
   return (
     <div
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
-      className={cn(
-        'text-sidebar-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none',
-        'peer-hover/menu-button:text-sidebar-hover-foreground peer-data-[active=true]/menu-button:text-sidebar-selection-foreground',
-        'peer-data-[size=sm]/menu-button:top-1',
-        'peer-data-[size=default]/menu-button:top-1.5',
-        'peer-data-[size=lg]/menu-button:top-2.5',
-        'group-data-[collapsible=icon]:hidden',
-        className
-      )}
+      className={clsx(stylex.props(styles.badge, styles.menuPosition, xstyle).className, className)}
       {...props}
     />
   );
 }
 
 function SidebarMenuSkeleton({
+  xstyle,
   className,
   showIcon = false,
   ...props
-}: React.ComponentProps<'div'> & {
-  showIcon?: boolean;
-}) {
+}: React.ComponentProps<'div'> &
+  SidebarStyleProps & {
+    showIcon?: boolean;
+  }) {
   // Random width between 50 to 90%.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`;
@@ -586,13 +1071,13 @@ function SidebarMenuSkeleton({
     <div
       data-slot="sidebar-menu-skeleton"
       data-sidebar="menu-skeleton"
-      className={cn('flex h-8 items-center gap-2 rounded-md px-2', className)}
+      className={clsx(stylex.props(styles.skeleton, xstyle).className, className)}
       {...props}
     >
       {showIcon && <Skeleton width={16} height={16} data-sidebar="menu-skeleton-icon" />}
       <Skeleton
         height={16}
-        className="max-w-(--skeleton-width) flex-1"
+        className={stylex.props(styles.skeletonText).className}
         data-sidebar="menu-skeleton-text"
         style={
           {
@@ -604,43 +1089,49 @@ function SidebarMenuSkeleton({
   );
 }
 
-function SidebarMenuSub({ className, ...props }: React.ComponentProps<'ul'>) {
+function SidebarMenuSub({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'ul'> & SidebarStyleProps) {
   return (
     <ul
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
-      className={cn(
-        'border-sidebar-border mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l px-2.5 py-0.5',
-        'group-data-[collapsible=icon]:hidden',
-        className
-      )}
+      className={clsx(stylex.props(styles.sub, xstyle).className, className)}
       {...props}
     />
   );
 }
 
-function SidebarMenuSubItem({ className, ...props }: React.ComponentProps<'li'>) {
+function SidebarMenuSubItem({
+  xstyle,
+  className,
+  ...props
+}: React.ComponentProps<'li'> & SidebarStyleProps) {
   return (
     <li
       data-slot="sidebar-menu-sub-item"
       data-sidebar="menu-sub-item"
-      className={cn('group/menu-sub-item relative', className)}
+      className={clsx(stylex.props(styles.relative, xstyle).className, className)}
       {...props}
     />
   );
 }
 
 function SidebarMenuSubButton({
+  xstyle,
   asChild = false,
   size = 'md',
   isActive = false,
   className,
   ...props
-}: React.ComponentProps<'a'> & {
-  asChild?: boolean;
-  size?: 'sm' | 'md';
-  isActive?: boolean;
-}) {
+}: React.ComponentProps<'a'> &
+  SidebarStyleProps & {
+    asChild?: boolean;
+    size?: 'sm' | 'md';
+    isActive?: boolean;
+  }) {
   const Comp = asChild ? Slot : 'a';
 
   return (
@@ -649,12 +1140,15 @@ function SidebarMenuSubButton({
       data-sidebar="menu-sub-button"
       data-size={size}
       data-active={isActive}
-      className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-hover hover:text-sidebar-hover-foreground active:bg-sidebar-hover active:text-sidebar-hover-foreground [&>svg]:text-sidebar-hover-foreground flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 outline-hidden focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&>svg]:shrink-0",
-        'data-[active=true]:bg-sidebar-selection data-[active=true]:text-sidebar-selection-foreground',
-        size === 'sm' && 'text-xs',
-        size === 'md' && 'text-sm',
-        'group-data-[collapsible=icon]:hidden',
+      className={clsx(
+        stylex.props(
+          styles.subButton,
+          styles.focus,
+          styles.glyphs,
+          styles.disabled,
+          size === 'sm' ? styles.textExtraSmall : styles.textSmall,
+          xstyle
+        ).className,
         className
       )}
       {...props}

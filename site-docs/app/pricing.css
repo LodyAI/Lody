@@ -122,7 +122,11 @@
   right: -10rem;
   width: 38rem;
   height: 38rem;
-  background: radial-gradient(circle at 60% 30%, hsl(var(--landing-glow-1) / 0.65), transparent 70%);
+  background: radial-gradient(
+    circle at 60% 30%,
+    hsl(var(--landing-glow-1) / 0.65),
+    transparent 70%
+  );
   animation-delay: -8s;
 }
 
@@ -131,7 +135,11 @@
   left: 35%;
   width: 30rem;
   height: 30rem;
-  background: radial-gradient(circle at 50% 50%, hsl(var(--landing-primary) / 0.32), transparent 72%);
+  background: radial-gradient(
+    circle at 50% 50%,
+    hsl(var(--landing-primary) / 0.32),
+    transparent 72%
+  );
   animation-delay: -14s;
   opacity: 0.35;
 }
@@ -214,7 +222,8 @@
 }
 
 @keyframes pricing-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 4px hsl(var(--landing-primary) / 0.14);
   }
   50% {
@@ -996,16 +1005,16 @@
   animation: pricing-reveal 720ms var(--pricing-ease) both;
 }
 
-.pricing-page .delay-1 {
+.pricing-page .reveal-delay-1 {
   animation-delay: 90ms;
 }
-.pricing-page .delay-2 {
+.pricing-page .reveal-delay-2 {
   animation-delay: 180ms;
 }
-.pricing-page .delay-3 {
+.pricing-page .reveal-delay-3 {
   animation-delay: 270ms;
 }
-.pricing-page .delay-4 {
+.pricing-page .reveal-delay-4 {
   animation-delay: 360ms;
 }
 

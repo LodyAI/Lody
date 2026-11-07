@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
@@ -20,6 +21,10 @@ import {
 } from '@/components/chat/submission/use-composer-navigation-focus';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
+
+const drawerScene = stylex.create({
+  fullPage: { width: '100%', maxWidth: 'none', inset: 0, borderWidth: 0, borderRadius: 0 },
+});
 
 /** Real page/composer/message renderers, with synthetic workspace data. The
  * route handoff uses the production navigation and presentation hooks. */
@@ -87,9 +92,10 @@ function TransitionSurface({ deferred = false }: { deferred?: boolean }) {
           {ready && (
             <DrawerContent
               skipOpenAnimation={!!params.sessionId && presentation.skipOpenAnimation}
-              className="safe-areas w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+              className="safe-areas"
+              xstyle={drawerScene.fullPage}
             >
-              <DrawerTitle className="sr-only">Conversation</DrawerTitle>
+              <DrawerTitle visuallyHidden>Conversation</DrawerTitle>
               <VaulDrawerBody topInset="3rem">
                 <SessionConversationStoryHarness
                   claimNavigationFocus={claimNavigationFocus}

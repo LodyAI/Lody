@@ -1,6 +1,8 @@
 import { memo } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 /**
  * The row a turn renders while it is not hydrated: a quiet block whose height
@@ -13,6 +15,27 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
 
 const LINE_PX = 22;
 const CHARS_PER_LINE = 88;
+
+const styles = stylex.create({
+  column: {
+    paddingBlock: themeSpace[2],
+    '@media (min-width: 640px)': { paddingBlock: themeSpace[3] },
+  },
+  block: {
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+  },
+  head: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '13px',
+    lineHeight: '1.375',
+    color: 'hsl(var(--muted-foreground) / 0.6)',
+  },
+});
 
 export function estimatePlaceholderHeight(row: TurnIndexRow): number {
   const summary = row.summary;
@@ -32,16 +55,14 @@ export function estimatePlaceholderHeight(row: TurnIndexRow): number {
 export const TurnPlaceholderRow = memo(function TurnPlaceholderRow({ row }: { row: TurnIndexRow }) {
   const head = row.summary?.headText.replace(/\s+/g, ' ').trim().slice(0, 140) ?? '';
   return (
-    <ConversationColumn className="py-2 sm:py-3">
+    <ConversationColumn className={stylex.props(styles.column).className}>
       <div
         data-turn-placeholder={row.role}
         aria-hidden
-        className="rounded-md border border-transparent"
+        {...stylex.props(styles.block)}
         style={{ minHeight: estimatePlaceholderHeight(row) }}
       >
-        {head ? (
-          <div className="truncate text-[13px] leading-snug text-muted-foreground/60">{head}</div>
-        ) : null}
+        {head ? <div {...stylex.props(styles.head)}>{head}</div> : null}
       </div>
     </ConversationColumn>
   );

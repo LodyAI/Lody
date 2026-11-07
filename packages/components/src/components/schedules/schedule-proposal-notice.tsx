@@ -73,10 +73,8 @@ const styles = stylex.create({
     fontSize: '0.9em',
     color: 'hsl(var(--muted-foreground) / 1)',
     boxShadow: {
-      default:
-        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0.5px 1px 1px var(--tw-shadow-color, rgba(0, 0, 0, 0.03))',
-      [DARK]:
-        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0 #0000',
+      default: '0 0.5px 1px 1px rgba(0, 0, 0, 0.03)',
+      [DARK]: 'none',
     },
   },
   receiptTitle: {

@@ -47,6 +47,8 @@ import {
 } from './tiles';
 
 const styles = stylex.create({
+  focusViewport: { overscrollBehavior: 'contain' },
+  movingScrollbar: { display: { default: 'flex', ':is([data-focus-moving] *)': 'none' } },
   /* The board is two stacked columns, or one spanning both (a lone card). */
   columns: {
     display: 'grid',
@@ -487,9 +489,9 @@ function NowFocus({
       <ScrollArea
         {...stylex.props(styles.focusScroll)}
         viewportRef={rowsRef}
-        viewportClassName="overscroll-contain"
+        viewportXstyle={styles.focusViewport}
         // Hidden while the frame moves (`focus-motion.ts` marks it), so no bar slides with it.
-        scrollbarClassName="[[data-focus-moving]_&]:hidden"
+        scrollbarXstyle={styles.movingScrollbar}
       >
         <ul {...stylex.props(styles.rows, styles.focusRowsFoot)}>
           {list.items.map((item, index) => (

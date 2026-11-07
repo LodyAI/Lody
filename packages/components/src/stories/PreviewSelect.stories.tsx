@@ -1,8 +1,39 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Moon, Sun, Monitor } from 'lucide-react';
 import { PreviewSelect } from '@/components/settings/preview-select';
 import type { PreviewSelectOption } from '@/components/settings/preview-select';
+const storyLayoutStylesStyles = stylex.create({
+  caption: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyOverrides = stylex.create({
+  trigger: { width: '220px' },
+  triggerSpace: {
+    marginBlockStart: 'calc(var(--spacing) * 0)',
+    marginBlockEnd: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const meta = {
   title: 'Settings/PreviewSelect',
@@ -26,8 +57,8 @@ const themeOptions: PreviewSelectOption<string>[] = [
   {
     value: 'light',
     label: (
-      <div className="flex items-center gap-2">
-        <Sun className="h-4 w-4" />
+      <div {...stylex.props(storyLayout.row)}>
+        <Sun {...stylex.props(storyLayoutStyles.frame)} />
         <span>Light</span>
       </div>
     ),
@@ -35,8 +66,8 @@ const themeOptions: PreviewSelectOption<string>[] = [
   {
     value: 'dark',
     label: (
-      <div className="flex items-center gap-2">
-        <Moon className="h-4 w-4" />
+      <div {...stylex.props(storyLayout.row)}>
+        <Moon {...stylex.props(storyLayoutStyles.frame)} />
         <span>Dark</span>
       </div>
     ),
@@ -44,8 +75,8 @@ const themeOptions: PreviewSelectOption<string>[] = [
   {
     value: 'system',
     label: (
-      <div className="flex items-center gap-2">
-        <Monitor className="h-4 w-4" />
+      <div {...stylex.props(storyLayout.row)}>
+        <Monitor {...stylex.props(storyLayoutStyles.frame)} />
         <span>System</span>
       </div>
     ),
@@ -69,7 +100,7 @@ export const WithIcons: Story = {
     onPreview: () => {},
     onCommit: () => {},
     onCancel: () => {},
-    triggerClassName: 'w-[220px]',
+    triggerXstyle: storyOverrides.trigger,
   },
 };
 
@@ -78,7 +109,7 @@ function InteractiveDemo() {
   const [previewValue, setPreviewValue] = useState<string | null>(null);
 
   return (
-    <div className="space-y-4">
+    <div>
       <PreviewSelect
         value={value}
         options={themeOptions}
@@ -88,9 +119,9 @@ function InteractiveDemo() {
           setPreviewValue(null);
         }}
         onCancel={() => setPreviewValue(null)}
-        triggerClassName="w-[220px]"
+        triggerXstyle={[storyOverrides.trigger, storyOverrides.triggerSpace]}
       />
-      <div className="text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStylesStyles.caption)}>
         <div>Committed: {value}</div>
         {previewValue && <div>Previewing: {previewValue}</div>}
       </div>

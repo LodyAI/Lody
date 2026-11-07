@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { canUseWASM } from '@pierre/diffs';
 import {
   memo,
@@ -71,7 +72,7 @@ import {
   type ReviewCheckState,
 } from '../review-checklist';
 import { FileIcon } from '../file-icons';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { Alert, AlertDescription, AlertTitle } from '@/ui/alert';
 import { Button } from '@/ui/button';
 import {
@@ -179,6 +180,344 @@ export interface ReviewRendererProps {
   readonly diffStyle?: ReviewDiffStyle;
   readonly onDiffStyleChange?: (diffStyle: ReviewDiffStyle) => void;
 }
+
+const explicitGlyphStyles = stylex.create({
+  standard: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  small: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+});
+
+const privateButtonStyles = stylex.create({
+  gutter: {
+    marginRight: 'calc(var(--spacing) * 1.5)',
+    marginTop: 'calc(var(--spacing) * .5)',
+    width: 'calc(var(--spacing) * 5)',
+    height: 'calc(var(--spacing) * 5)',
+    borderRadius: '5px',
+    boxShadow: '0 1px 3px 0 rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1)',
+  },
+  mutedInk: {
+    '--crh-muted-button-label': {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+  },
+});
+
+const rootLayoutStyles = stylex.create({
+  sidebarDivider: { backgroundColor: 'hsl(var(--sidebar-border))' },
+  toolbarNoShrink: { flexShrink: 0 },
+  diffControlHeight: { height: 'calc(var(--spacing) * 8)' },
+  resizerVisibility: {
+    display: { default: null, '@media not all and (width >= 64rem)': 'none' },
+  },
+  shell: {
+    position: 'relative',
+    display: 'grid',
+    maxWidth: '100vw',
+    overflowX: 'hidden',
+    overflowY: { default: null, '@media (width >= 64rem)': 'hidden' },
+    backgroundColor: 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+  },
+  columnsBoth: {
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 64rem)': '232px minmax(0,1fr) 300px',
+      '@media (width >= 80rem)': '264px minmax(0,1fr) minmax(336px,388px)',
+    },
+  },
+  columnsSidebar: {
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 64rem)': '232px minmax(0,1fr)',
+      '@media (width >= 80rem)': '264px minmax(0,1fr)',
+    },
+  },
+  columnsPanel: {
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 64rem)': 'minmax(0,1fr) 300px',
+      '@media (width >= 80rem)': 'minmax(0,1fr) minmax(336px,388px)',
+    },
+  },
+  columnsMain: {
+    gridTemplateColumns: { default: null, '@media (width >= 64rem)': 'minmax(0,1fr)' },
+  },
+  sidebar: {
+    zIndex: 10,
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 4)',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    borderRightStyle: 'solid',
+    borderRightWidth: { default: '1px', '@media (width < 64rem)': '0px' },
+    borderBottomStyle: { default: null, '@media (width < 64rem)': 'solid' },
+    borderBottomWidth: { default: null, '@media (width < 64rem)': '1px' },
+    borderColor: 'hsl(var(--sidebar-border))',
+    backgroundColor: 'hsl(var(--sidebar))',
+    padding: 'calc(var(--spacing) * 3)',
+    color: 'hsl(var(--sidebar-foreground))',
+    position: { default: 'relative', '@media (width >= 64rem)': 'sticky' },
+    height: { default: 'auto', '@media (width >= 64rem)': '100vh' },
+    top: { default: null, '@media (width >= 64rem)': 'calc(var(--spacing) * 0)' },
+  },
+  hidden: { display: 'none' },
+  brand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    'padding-inline': 'calc(var(--spacing) * 1)',
+  },
+  logo: {
+    width: 'calc(var(--spacing) * 7)',
+    height: 'calc(var(--spacing) * 7)',
+    flexShrink: 0,
+    borderRadius: 'var(--radius)',
+  },
+  brandTitle: {
+    '--crh-leading': 'var(--leading-tight)',
+    lineHeight: 'var(--leading-tight)',
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: 'var(--tracking-tight)',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '15px',
+  },
+  navigation: {
+    'margin-inline': 'calc(var(--spacing) * -1)',
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  group: { display: 'flex', width: '100%', flexDirection: 'column' },
+  groupRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'padding-left': 'calc(var(--spacing) * 2.5)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --crh-gradient-from, --crh-gradient-via, --crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration, var(--default-transition-duration))',
+  },
+  groupActive: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    },
+    color: 'hsl(var(--foreground))',
+  },
+  groupInactive: {
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--sidebar-foreground))',
+  },
+  groupButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  groupText: { minWidth: 'calc(var(--spacing) * 0)', flex: '1' },
+  pullRequestNumber: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    fontWeight: 'var(--font-weight-medium)',
+  },
+  groupTitle: {
+    '--crh-leading': 'var(--leading-snug)',
+    lineHeight: 'var(--leading-snug)',
+    fontWeight: 'var(--font-weight-medium)',
+    display: 'block',
+    overflowWrap: 'break-word',
+    fontSize: '13px',
+  },
+  groupStats: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'block',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+  },
+  additions: { color: 'hsl(var(--github-addition))' },
+  deletions: { color: 'hsl(var(--github-deletion))' },
+  fileCount: { 'margin-left': 'calc(var(--spacing) * 1.5)', color: 'hsl(var(--muted-foreground))' },
+  descriptionButton: {
+    flexShrink: 0,
+    borderRadius: 'calc(var(--radius) - 2px)',
+    padding: 'calc(var(--spacing) * 0.5)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --crh-gradient-from, --crh-gradient-via, --crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration, var(--default-transition-duration))',
+  },
+  descriptionActive: { color: 'hsl(var(--foreground))' },
+  descriptionInactive: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+  },
+  descriptionIcon: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+  },
+  description: {
+    'margin-top': 'calc(var(--spacing) * 1.5)',
+    maxHeight: 'calc(var(--spacing) * 80)',
+    overflowY: 'auto',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '13px',
+  },
+  main: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    overflowX: 'hidden',
+    height: { default: null, '@media (width >= 64rem)': '100vh' },
+  },
+  toolbar: {
+    position: 'sticky',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 3)',
+    rowGap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    backgroundColor: 'hsl(var(--background))',
+    'padding-inline': {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 5)',
+    },
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  totalStats: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  mono: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  },
+  content: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    'padding-inline': {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 6)',
+    },
+    'padding-block': 'calc(var(--spacing) * 5)',
+  },
+  empty: {
+    borderRadius: 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    backgroundColor: 'hsl(var(--card))',
+    padding: 'calc(var(--spacing) * 5)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--crh-leading, var(--text-sm--line-height))',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  groups: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    maxWidth: '1100px',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 6)',
+  },
+  summary: { minWidth: 'calc(var(--spacing) * 0)' },
+  titleBlock: {
+    'margin-bottom': 'calc(var(--spacing) * 4)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  title: {
+    '--crh-leading': 'var(--leading-snug)',
+    lineHeight: 'var(--leading-snug)',
+    fontWeight: 'var(--font-weight-bold)',
+    letterSpacing: 'var(--tracking-tight)',
+    fontSize: '22px',
+  },
+  pullRequest: {
+    display: 'inline-flex',
+    width: 'fit-content',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '12px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+    textUnderlineOffset: '4px',
+    textDecorationLine: { default: null, '@media (hover: hover)': { ':hover': 'underline' } },
+  },
+  externalIcon: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+    flexShrink: 0,
+  },
+  pullRequestSeparator: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground)) 50%, transparent)',
+    },
+  },
+  pullRequestTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+    },
+  },
+});
 
 export function ReviewRenderer({
   bundle: bundleInput,
@@ -1044,16 +1383,18 @@ export function ReviewRenderer({
     <ErrorBoundary fallback={<ReviewRenderError />}>
       <div
         ref={shellRef}
-        className={cn(
-          'crh-shell dark relative grid max-w-[100vw] overflow-x-hidden bg-background text-foreground',
-          'lg:overflow-hidden',
-          sidebarVisible && showPanel
-            ? 'lg:grid-cols-[232px_minmax(0,1fr)_300px] xl:grid-cols-[264px_minmax(0,1fr)_minmax(336px,388px)]'
-            : sidebarVisible
-              ? 'lg:grid-cols-[232px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)]'
-              : showPanel
-                ? 'lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_minmax(336px,388px)]'
-                : 'lg:grid-cols-[minmax(0,1fr)]'
+        className={clsx(
+          'crh-shell dark',
+          stylex.props(
+            rootLayoutStyles.shell,
+            sidebarVisible && showPanel
+              ? rootLayoutStyles.columnsBoth
+              : sidebarVisible
+                ? rootLayoutStyles.columnsSidebar
+                : showPanel
+                  ? rootLayoutStyles.columnsPanel
+                  : rootLayoutStyles.columnsMain
+          ).className
         )}
         style={gridTemplateColumns}
       >
@@ -1076,20 +1417,19 @@ export function ReviewRenderer({
           />
         )}
         <aside
-          className={cn(
-            'crh-sidebar z-10 flex min-w-0 flex-col gap-4 overflow-y-auto overflow-x-hidden border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground max-lg:relative max-lg:h-auto max-lg:border-b max-lg:border-r-0 lg:sticky lg:top-0 lg:h-screen',
-            !sidebarVisible && 'hidden'
+          className={clsx(
+            'crh-sidebar',
+            stylex.props(rootLayoutStyles.sidebar, !sidebarVisible && rootLayoutStyles.hidden)
+              .className
           )}
           aria-label="Review groups"
         >
-          <div className="flex items-center gap-2.5 px-1">
-            <img src={lodyIconUrl} alt="Lody" className="size-7 shrink-0 rounded-md" />
-            <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight tracking-tight">
-              Lody Review
-            </h1>
+          <div {...stylex.props(rootLayoutStyles.brand)}>
+            <img src={lodyIconUrl} alt="Lody" {...stylex.props(rootLayoutStyles.logo)} />
+            <h1 {...stylex.props(rootLayoutStyles.brandTitle)}>Lody Review</h1>
           </div>
 
-          <nav className="-mx-1 grid gap-0.5" aria-label="Review group navigation">
+          <nav {...stylex.props(rootLayoutStyles.navigation)} aria-label="Review group navigation">
             {bundle.groups.map((group) => {
               const isActive = group.id === highlightedGroupId;
               const stats = groupStatsById.get(group.id);
@@ -1097,30 +1437,37 @@ export function ReviewRenderer({
               const descriptionExpanded = expandedDescriptionIds.has(group.id);
               const description = stripGroupMetadataMarkdown(group.bodyMarkdown);
               return (
-                <div key={group.id} className="flex w-full flex-col">
+                <div key={group.id} {...stylex.props(rootLayoutStyles.group)}>
                   <div
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-md py-1.5 pl-2.5 pr-2 transition-colors',
-                      isActive
-                        ? 'bg-foreground/10 text-foreground'
-                        : 'text-sidebar-foreground hover:bg-foreground/5'
+                    className={clsx(
+                      stylex.props(
+                        rootLayoutStyles.groupRow,
+                        isActive ? rootLayoutStyles.groupActive : rootLayoutStyles.groupInactive
+                      ).className
                     )}
                   >
                     <button
                       type="button"
                       aria-current={isActive ? 'true' : undefined}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+                      {...stylex.props(
+                        rootLayoutStyles.groupButton,
+                        treeCommitStyles.commitControlFocus
+                      )}
                       onClick={() => navigateToGroup(group.id)}
                     >
-                      <span className="min-w-0 flex-1">
-                        <span className="block break-words text-[13px] font-medium leading-snug">
-                          {group.title}
-                        </span>
+                      <span {...stylex.props(rootLayoutStyles.groupText)}>
+                        <span {...stylex.props(rootLayoutStyles.groupTitle)}>{group.title}</span>
                         {stats ? (
-                          <span className="mt-0.5 block font-mono text-[11px] tabular-nums">
-                            <span className="text-addition">+{stats.additions}</span>{' '}
-                            <span className="text-deletion">−{stats.deletions}</span>
-                            <span className="ml-1.5 text-muted-foreground">{fileCount} files</span>
+                          <span {...stylex.props(rootLayoutStyles.groupStats)}>
+                            <span {...stylex.props(rootLayoutStyles.additions)}>
+                              +{stats.additions}
+                            </span>{' '}
+                            <span {...stylex.props(rootLayoutStyles.deletions)}>
+                              −{stats.deletions}
+                            </span>
+                            <span {...stylex.props(rootLayoutStyles.fileCount)}>
+                              {fileCount} files
+                            </span>
                           </span>
                         ) : null}
                       </span>
@@ -1132,18 +1479,21 @@ export function ReviewRenderer({
                         aria-label={
                           descriptionExpanded ? 'Hide group description' : 'Show group description'
                         }
-                        className={cn(
-                          'shrink-0 rounded-sm p-0.5 outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45',
-                          isActive ? 'text-foreground' : 'text-muted-foreground'
+                        {...stylex.props(
+                          rootLayoutStyles.descriptionButton,
+                          isActive
+                            ? rootLayoutStyles.descriptionActive
+                            : rootLayoutStyles.descriptionInactive,
+                          treeCommitStyles.commitControlFocus
                         )}
                         onClick={() => toggleDescription(group.id)}
                       >
-                        <Info className="size-4 shrink-0" />
+                        <Info {...stylex.props(rootLayoutStyles.descriptionIcon)} />
                       </button>
                     )}
                   </div>
                   {descriptionExpanded && description.length > 0 && (
-                    <div className="mt-1.5 max-h-80 overflow-y-auto px-2.5 py-1 text-[13px]">
+                    <div {...stylex.props(rootLayoutStyles.description)}>
                       <SimpleMarkdown markdown={description} compact />
                     </div>
                   )}
@@ -1152,7 +1502,7 @@ export function ReviewRenderer({
             })}
           </nav>
 
-          <Separator className="bg-sidebar-border" />
+          <Separator xstyle={rootLayoutStyles.sidebarDivider} />
 
           <FileTree
             nodes={fileTree}
@@ -1165,27 +1515,34 @@ export function ReviewRenderer({
 
         <main
           ref={mainRef}
-          className="crh-main flex min-w-0 flex-col overflow-x-hidden lg:h-screen"
+          className={clsx('crh-main', stylex.props(rootLayoutStyles.main).className)}
         >
           <div
             ref={toolbarRef}
-            className="crh-toolbar sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background px-4 py-2 sm:px-5"
+            className={clsx('crh-toolbar', stylex.props(rootLayoutStyles.toolbar).className)}
           >
             <Button
               type="button"
               size="icon"
               variant={sidebarVisible ? 'secondary' : 'ghost'}
-              className="size-8 shrink-0"
+              width="calc(var(--spacing) * 8)"
+              height="calc(var(--spacing) * 8)"
+              {...stylex.props(rootLayoutStyles.toolbarNoShrink)}
               onClick={() => setSidebarVisible((v) => !v)}
               aria-pressed={sidebarVisible}
               title={sidebarVisible ? 'Hide review map' : 'Show review map'}
             >
-              <PanelLeft className="size-4" />
+              <PanelLeft
+                className={clsx(
+                  'crh-size-explicit',
+                  stylex.props(explicitGlyphStyles.standard).className
+                )}
+              />
             </Button>
-            <div className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="font-mono tabular-nums" title="Total added / removed lines">
-                <span className="text-addition">+{totalStats.additions}</span>{' '}
-                <span className="text-deletion">−{totalStats.deletions}</span>
+            <div {...stylex.props(rootLayoutStyles.totalStats)}>
+              <span {...stylex.props(rootLayoutStyles.mono)} title="Total added / removed lines">
+                <span {...stylex.props(rootLayoutStyles.additions)}>+{totalStats.additions}</span>{' '}
+                <span {...stylex.props(rootLayoutStyles.deletions)}>−{totalStats.deletions}</span>
               </span>
             </div>
             <DiffStyleControl diffStyle={activeDiffStyle} onDiffStyleChange={setActiveDiffStyle} />
@@ -1193,11 +1550,26 @@ export function ReviewRenderer({
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 gap-1.5 px-2.5"
+              gap="calc(var(--spacing) * 1.5)"
+              paddingInline="calc(var(--spacing) * 2.5)"
               onClick={() => void copyComments()}
               aria-label={`Copy ${comments.length} comments as markdown`}
             >
-              {copyState === 'copied' ? <Check className="size-4" /> : <Copy className="size-4" />}
+              {copyState === 'copied' ? (
+                <Check
+                  className={clsx(
+                    'crh-size-explicit',
+                    stylex.props(explicitGlyphStyles.standard).className
+                  )}
+                />
+              ) : (
+                <Copy
+                  className={clsx(
+                    'crh-size-explicit',
+                    stylex.props(explicitGlyphStyles.standard).className
+                  )}
+                />
+              )}
               {copyState === 'copied'
                 ? 'Copied'
                 : copyState === 'failed'
@@ -1209,48 +1581,53 @@ export function ReviewRenderer({
                 type="button"
                 size="icon"
                 variant={panelVisible ? 'secondary' : 'ghost'}
-                className="size-8 shrink-0"
+                width="calc(var(--spacing) * 8)"
+                height="calc(var(--spacing) * 8)"
+                {...stylex.props(rootLayoutStyles.toolbarNoShrink)}
                 onClick={() => setPanelVisible((v) => !v)}
                 aria-pressed={panelVisible}
                 title={panelVisible ? 'Hide review thread' : 'Show review thread'}
               >
-                <PanelRight className="size-4" />
+                <PanelRight
+                  className={clsx(
+                    'crh-size-explicit',
+                    stylex.props(explicitGlyphStyles.standard).className
+                  )}
+                />
               </Button>
             )}
           </div>
 
-          <div className="min-w-0 px-4 py-5 sm:px-6">
+          <div {...stylex.props(rootLayoutStyles.content)}>
             {bundle.groups.length === 0 ? (
-              <div className="rounded-md border bg-card p-5 text-sm text-muted-foreground">
-                No review groups found.
-              </div>
+              <div {...stylex.props(rootLayoutStyles.empty)}>No review groups found.</div>
             ) : (
-              <div className="mx-auto flex min-w-0 max-w-[1100px] flex-col gap-6">
+              <div {...stylex.props(rootLayoutStyles.groups)}>
                 {bundle.document.title ||
                 bundle.document.frontmatter.pr ||
                 bundle.document.overview ? (
-                  <section aria-label="Review summary" className="min-w-0">
+                  <section aria-label="Review summary" {...stylex.props(rootLayoutStyles.summary)}>
                     {bundle.document.title ? (
-                      <div className="mb-4 flex flex-col gap-2">
-                        <h1 className="text-[22px] font-bold leading-snug tracking-tight">
-                          {bundle.document.title}
-                        </h1>
+                      <div {...stylex.props(rootLayoutStyles.titleBlock)}>
+                        <h1 {...stylex.props(rootLayoutStyles.title)}>{bundle.document.title}</h1>
                         {bundle.document.frontmatter.pr ? (
                           <a
                             href={bundle.document.frontmatter.pr.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex w-fit items-center gap-1.5 text-[12px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                            {...stylex.props(rootLayoutStyles.pullRequest)}
                           >
-                            <ExternalLink className="size-3 shrink-0" />
-                            <span className="font-medium tabular-nums">
+                            <ExternalLink {...stylex.props(rootLayoutStyles.externalIcon)} />
+                            <span {...stylex.props(rootLayoutStyles.pullRequestNumber)}>
                               PR #{bundle.document.frontmatter.pr.number}
                             </span>
                             {bundle.document.frontmatter.pr.title &&
                             bundle.document.frontmatter.pr.title !== bundle.document.title ? (
                               <>
-                                <span className="text-muted-foreground/50">·</span>
-                                <span className="truncate text-muted-foreground/80">
+                                <span {...stylex.props(rootLayoutStyles.pullRequestSeparator)}>
+                                  ·
+                                </span>
+                                <span {...stylex.props(rootLayoutStyles.pullRequestTitle)}>
                                   {bundle.document.frontmatter.pr.title}
                                 </span>
                               </>
@@ -1311,14 +1688,40 @@ export function ReviewRenderer({
   );
 }
 
+const renderErrorStyles = stylex.create({
+  root: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'hsl(var(--background))',
+    padding: 'calc(var(--spacing) * 8)',
+    color: 'hsl(var(--foreground))',
+  },
+  content: { maxWidth: 'var(--container-md)', textAlign: 'center' },
+  title: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--crh-leading, var(--text-sm--line-height))',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  description: {
+    marginTop: 'calc(var(--spacing) * 1.5)',
+    fontSize: '13px',
+    '--crh-leading': 'var(--leading-relaxed)',
+    lineHeight: 'var(--leading-relaxed)',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
+
 // Last-resort fallback if anything in the review subtree throws, so the viewer shows a
 // message instead of a blank white page.
 function ReviewRenderError() {
   return (
-    <div className="crh-shell dark flex min-h-screen items-center justify-center bg-background p-8 text-foreground">
-      <div className="max-w-md text-center">
-        <p className="text-sm font-semibold">Something went wrong rendering this review.</p>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+    <div className={clsx('crh-shell dark', stylex.props(renderErrorStyles.root).className)}>
+      <div {...stylex.props(renderErrorStyles.content)}>
+        <p {...stylex.props(renderErrorStyles.title)}>
+          Something went wrong rendering this review.
+        </p>
+        <p {...stylex.props(renderErrorStyles.description)}>
           Try reloading the page. If it keeps happening, the <code>.review.md</code> may reference
           lines that no longer exist in the diff.
         </p>
@@ -1344,19 +1747,169 @@ function DiffStyleControl({
         }
       }}
       aria-label="Diff view"
-      className="h-8 gap-0.5 p-0.5"
+      className={stylex.props(rootLayoutStyles.diffControlHeight).className}
+      gap="calc(var(--spacing) * 0.5)"
+      padding="calc(var(--spacing) * 0.5)"
     >
-      <ToggleGroupItem value="unified" aria-label="Unified diff" size="sm" className="h-7 gap-1.5">
-        <Rows3 className="size-3.5" />
+      <ToggleGroupItem
+        value="unified"
+        aria-label="Unified diff"
+        size="sm"
+        gap="calc(var(--spacing) * 1.5)"
+      >
+        <Rows3
+          className={clsx('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+        />
         Unified
       </ToggleGroupItem>
-      <ToggleGroupItem value="split" aria-label="Split diff" size="sm" className="h-7 gap-1.5">
-        <Columns2 className="size-3.5" />
+      <ToggleGroupItem
+        value="split"
+        aria-label="Split diff"
+        size="sm"
+        gap="calc(var(--spacing) * 1.5)"
+      >
+        <Columns2
+          className={clsx('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+        />
         Split
       </ToggleGroupItem>
     </ToggleGroup>
   );
 }
+
+const findingsStyles = stylex.create({
+  section: { minWidth: 0 },
+  headingRow: {
+    marginBottom: 'calc(var(--spacing) * 2.5)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-inline': 'calc(var(--spacing) * 0.5)',
+  },
+  heading: {
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: '0.16em',
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  separator: {
+    height: '1px',
+    flex: '1',
+    backgroundColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    },
+  },
+  list: { display: 'grid', gap: 'calc(var(--spacing) * 2)' },
+  item: {
+    borderRadius: 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'hsl(var(--card))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--card)) 60%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    paddingBottom: 'calc(var(--spacing) * 2.5)',
+    paddingTop: 'calc(var(--spacing) * 2)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --crh-gradient-from, --crh-gradient-via, --crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration, var(--default-transition-duration))',
+  },
+  badge: {
+    '--crh-leading': 1,
+    lineHeight: 1,
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: 'var(--tracking-wide)',
+    marginBottom: 'calc(var(--spacing) * 1.5)',
+    display: 'inline-flex',
+    height: '17px',
+    alignItems: 'center',
+    borderRadius: '0.25rem',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+  },
+  body: {
+    '--crh-leading': 1.7,
+    lineHeight: 1.7,
+    minWidth: 0,
+    fontSize: '13px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  bodyBlocks: { display: 'grid', gap: 'calc(var(--spacing) * 1.5)' },
+  refGlyph: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  refChip: {
+    '--crh-translate-y': '.18em',
+    translate: 'var(--crh-translate-x) var(--crh-translate-y)',
+    '--crh-leading': 1,
+    lineHeight: 1,
+    'margin-inline': '1px',
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: '0.25rem',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--primary))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--primary)) 40%, transparent)',
+        },
+      },
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted))' },
+    },
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    'padding-block': '1px',
+    verticalAlign: 'baseline',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 85%, transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --crh-gradient-from, --crh-gradient-via, --crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration, var(--default-transition-duration))',
+  },
+  refLabel: { textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' },
+  oldRefLabel: {
+    letterSpacing: 'var(--tracking-wide)',
+    fontSize: '8.5px',
+    textTransform: 'uppercase',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+    },
+  },
+});
 
 // Top-level `## Review` findings: cross-cutting P0/P1/P2 conclusions, each with
 // clickable file-label chips that jump the center diff to the referenced location.
@@ -1373,14 +1926,12 @@ function ReviewFindingsSection({
     return null;
   }
   return (
-    <section aria-label="Review findings" className="min-w-0">
-      <div className="mb-2.5 flex items-center gap-2 px-0.5">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          Review
-        </span>
-        <span className="h-px flex-1 bg-border/70" />
+    <section aria-label="Review findings" {...stylex.props(findingsStyles.section)}>
+      <div {...stylex.props(findingsStyles.headingRow)}>
+        <span {...stylex.props(findingsStyles.heading)}>Review</span>
+        <span {...stylex.props(findingsStyles.separator)} />
       </div>
-      <ul className="grid gap-2">
+      <ul {...stylex.props(findingsStyles.list)}>
         {findings.map((finding) => (
           <FindingItem key={finding.id} finding={finding} files={files} onJump={onJump} />
         ))}
@@ -1405,17 +1956,12 @@ function FindingItem({
   return (
     <li
       id={findingDomId(finding.id)}
-      className="crh-finding rounded-md border border-border bg-card/60 px-3 pb-2.5 pt-2 transition-colors"
+      className={clsx('crh-finding', stylex.props(findingsStyles.item).className)}
     >
-      <span
-        className={cn(
-          'mb-1.5 inline-flex h-[17px] items-center rounded border px-1.5 text-[10px] font-semibold uppercase leading-none tracking-wide',
-          SEVERITY_MARKER[finding.severity]
-        )}
-      >
+      <span {...stylex.props(findingsStyles.badge, SEVERITY_MARKER[finding.severity])}>
         {findingSeverityLabel(finding.severity)}
       </span>
-      <div className="min-w-0 text-[13px] leading-[1.7] text-foreground/90">
+      <div {...stylex.props(findingsStyles.body)}>
         <FindingBody markdown={finding.bodyMarkdown} files={files} onJump={onJump} />
       </div>
     </li>
@@ -1621,6 +2167,70 @@ function parseLightMarkdownBlocks(
   return blocks;
 }
 
+const markdownStyles = stylex.create({
+  strong: {
+    fontWeight: 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground))',
+  },
+  heading: {
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+  compactHeading: {
+    '--crh-leading': 'calc(var(--spacing) * 5)',
+    fontSize: '13px',
+    lineHeight: 'calc(var(--spacing) * 5)',
+  },
+  headingText: {
+    '--crh-leading': 'calc(var(--spacing) * 6)',
+    fontSize: { default: '15px', '@media (min-width: 48rem)': '16px' },
+    lineHeight: 'calc(var(--spacing) * 6)',
+  },
+  list: { listStyleType: 'disc' },
+  compactList: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingLeft: 'calc(var(--spacing) * 4)',
+  },
+  listInset: { paddingLeft: 'calc(var(--spacing) * 5)' },
+  listSpace: {
+    '--crh-space-y-reverse': 0,
+    'margin-block-start': 'calc(calc(var(--spacing) * 1) * var(--crh-space-y-reverse))',
+    'margin-block-end': 'calc(calc(var(--spacing) * 1) * calc(1 - var(--crh-space-y-reverse)))',
+  },
+  blockSpace: {
+    '--crh-space-y-reverse': 0,
+    'margin-block-start': 'calc(calc(var(--spacing) * 2) * var(--crh-space-y-reverse))',
+    'margin-block-end': 'calc(calc(var(--spacing) * 2) * calc(1 - var(--crh-space-y-reverse)))',
+  },
+  findingCode: {
+    borderRadius: '0.25rem',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 70%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12px',
+  },
+  body: {
+    '--crh-leading': '1.6',
+    fontSize: '13px',
+    lineHeight: '1.6',
+  },
+  foreground: {
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  muted: { color: 'hsl(var(--muted-foreground))' },
+  diagnostics: { display: 'grid', gap: 'calc(var(--spacing) * 2)' },
+  diagnosticTitle: { textTransform: 'capitalize' },
+});
+
 function renderMarkdownInline(
   text: string,
   context: InlineRendererContext,
@@ -1638,7 +2248,7 @@ function renderMarkdownInline(
     }
     if (match[1] !== undefined) {
       parts.push(
-        <strong key={`${keyPrefix}-${key}-b`} className="font-semibold text-foreground">
+        <strong key={`${keyPrefix}-${key}-b`} {...stylex.props(markdownStyles.strong)}>
           {match[1]}
         </strong>
       );
@@ -1675,6 +2285,7 @@ function renderLightMarkdownBlock(
   options: {
     readonly compact?: boolean;
     readonly codeClassName?: string;
+    readonly blockClassName?: string;
   } = {}
 ): ReactNode {
   switch (block.type) {
@@ -1683,9 +2294,12 @@ function renderLightMarkdownBlock(
       return (
         <Tag
           key={key}
-          className={cn(
-            'font-semibold',
-            options.compact ? 'text-[13px] leading-5' : 'text-[15px] leading-6 md:text-[16px]'
+          className={clsx(
+            options.blockClassName,
+            stylex.props(
+              markdownStyles.heading,
+              options.compact ? markdownStyles.compactHeading : markdownStyles.headingText
+            ).className
           )}
         >
           {renderMarkdownInline(block.text, context, `${key}-h`, {
@@ -1698,10 +2312,21 @@ function renderLightMarkdownBlock(
       return (
         <ul
           key={key}
-          className={cn('list-disc', options.compact ? 'grid gap-1 pl-4' : 'space-y-1 pl-5')}
+          className={clsx(
+            options.blockClassName,
+            stylex.props(
+              markdownStyles.list,
+              options.compact ? markdownStyles.compactList : markdownStyles.listInset
+            ).className
+          )}
         >
           {block.items.map((item, itemIndex) => (
-            <li key={itemIndex}>
+            <li
+              key={itemIndex}
+              {...stylex.props(
+                !options.compact && itemIndex < block.items.length - 1 && markdownStyles.listSpace
+              )}
+            >
               {renderMarkdownInline(item, context, `${key}-${itemIndex}`, {
                 className: options.codeClassName,
               })}
@@ -1714,7 +2339,7 @@ function renderLightMarkdownBlock(
     case 'p':
     default:
       return (
-        <p key={key}>
+        <p key={key} className={options.blockClassName}>
           {renderMarkdownInline(block.text, context, key, { className: options.codeClassName })}
         </p>
       );
@@ -1732,7 +2357,7 @@ function FindingBody({
 }) {
   const blocks = parseLightMarkdownBlocks(markdown, { headings: false });
   return (
-    <div className="grid gap-1.5">
+    <div {...stylex.props(findingsStyles.bodyBlocks)}>
       {blocks.map((block, index) =>
         renderLightMarkdownBlock(
           block,
@@ -1740,7 +2365,7 @@ function FindingBody({
           { finding: { files, onJump } },
           {
             compact: true,
-            codeClassName: 'rounded bg-muted/70 px-1 font-mono text-[12px]',
+            codeClassName: stylex.props(markdownStyles.findingCode).className,
           }
         )
       )}
@@ -1765,19 +2390,98 @@ function FindingRefChip({
       type="button"
       onClick={() => onJump(refItem)}
       title={`Jump to ${refItem.path}${refItem.range ? ` line ${refItem.range.start}` : ''}`}
-      className="crh-ref-chip mx-[1px] inline-flex max-w-full translate-y-[0.18em] items-center gap-1 rounded border border-border/70 bg-muted/40 px-1 py-px align-baseline font-mono text-[11px] leading-none text-foreground/85 transition-colors hover:border-primary/40 hover:bg-muted hover:text-foreground"
+      className={clsx('crh-ref-chip', stylex.props(findingsStyles.refChip).className)}
     >
-      <FileIcon filePath={refItem.path} className="size-3 shrink-0" />
-      <span className="truncate">
+      <FileIcon filePath={refItem.path} {...stylex.props(findingsStyles.refGlyph)} />
+      <span {...stylex.props(findingsStyles.refLabel)}>
         {fileBaseName(refItem.path)}
         {lineLabel}
       </span>
       {refItem.side === 'old' ? (
-        <span className="text-[8.5px] uppercase tracking-wide text-muted-foreground/80">old</span>
+        <span {...stylex.props(findingsStyles.oldRefLabel)}>old</span>
       ) : null}
     </button>
   );
 }
+
+const groupSectionStyles = stylex.create({
+  section: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 3.5)',
+    borderTopStyle: 'solid',
+    borderTopWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    paddingTop: 'calc(var(--spacing) * 6)',
+  },
+  header: {
+    position: 'sticky',
+    top: 'var(--crh-toolbar-h)',
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+    backgroundColor: 'hsl(var(--background))',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+  },
+  headingRow: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+  },
+  index: {
+    fontWeight: 'var(--font-weight-semibold)',
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    width: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+    },
+    fontSize: '13px',
+    color: 'hsl(var(--foreground))',
+  },
+  heading: {
+    '--crh-leading': 'var(--leading-snug)',
+    lineHeight: {
+      default: 'var(--leading-snug)',
+      '@media (width >= 48rem)': 'var(--crh-leading,var(--text-lg--line-height))',
+    },
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: 'var(--tracking-tight)',
+    minWidth: 0,
+    overflowWrap: 'break-word',
+    fontSize: { default: '17px', '@media (width >= 48rem)': 'var(--text-lg)' },
+  },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  stats: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12px',
+  },
+  additions: { color: 'hsl(var(--github-addition))' },
+  deletions: { color: 'hsl(var(--github-deletion))' },
+  fileCount: { fontSize: '12px', color: 'hsl(var(--muted-foreground))' },
+  body: { display: 'grid', minWidth: 0, gap: 'calc(var(--spacing) * 3.5)' },
+  files: { display: 'grid', gap: 'calc(var(--spacing) * 3)' },
+});
 
 const ReviewGroupSection = memo(function ReviewGroupSection({
   index,
@@ -1872,29 +2576,24 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
       id={groupDomId(group.id)}
       data-group-id={group.id}
       aria-labelledby={headingId}
-      className="crh-group-section flex min-w-0 flex-col gap-3.5 border-t border-border pt-6"
+      className={clsx('crh-group-section', stylex.props(groupSectionStyles.section).className)}
     >
       <header
         ref={headerRef}
-        className="crh-group-header sticky top-[var(--crh-toolbar-h)] z-20 flex items-center justify-between gap-3 bg-background py-2.5"
+        className={clsx('crh-group-header', stylex.props(groupSectionStyles.header).className)}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-[13px] font-semibold text-foreground">
-            {index + 1}
-          </span>
-          <span
-            id={headingId}
-            className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight md:text-lg"
-          >
+        <div {...stylex.props(groupSectionStyles.headingRow)}>
+          <span {...stylex.props(groupSectionStyles.index)}>{index + 1}</span>
+          <span id={headingId} {...stylex.props(groupSectionStyles.heading)}>
             {group.title}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="font-mono text-[12px] tabular-nums">
-            <span className="text-addition">+{groupStats.additions}</span>{' '}
-            <span className="text-deletion">−{groupStats.deletions}</span>
+        <div {...stylex.props(groupSectionStyles.actions)}>
+          <span {...stylex.props(groupSectionStyles.stats)}>
+            <span {...stylex.props(groupSectionStyles.additions)}>+{groupStats.additions}</span>{' '}
+            <span {...stylex.props(groupSectionStyles.deletions)}>−{groupStats.deletions}</span>
           </span>
-          <span className="text-[12px] text-muted-foreground">{groupFiles.length} files</span>
+          <span {...stylex.props(groupSectionStyles.fileCount)}>{groupFiles.length} files</span>
           <GroupMenu
             reviewState={reviewState}
             onMarkAllViewed={() => onReviewedChange(true)}
@@ -1905,7 +2604,7 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
         </div>
       </header>
 
-      <div className="grid min-w-0 gap-3.5">
+      <div {...stylex.props(groupSectionStyles.body)}>
         {summaryMarkdown.length > 0 && (
           <SimpleMarkdown markdown={summaryMarkdown} tone="foreground" />
         )}
@@ -1914,7 +2613,7 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
 
         {group.diagnostics.length > 0 && <Diagnostics diagnostics={group.diagnostics} />}
 
-        <div className="grid gap-3">
+        <div {...stylex.props(groupSectionStyles.files)}>
           {group.blocks.map((block) => (
             <ReviewDiffBlock
               key={block.id}
@@ -1938,6 +2637,89 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
   );
 });
 
+const checkboxStyles = stylex.create({
+  focus: {
+    '--crh-ring-shadow': {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--crh-ring-inset,) 0 0 0 calc(2px + var(--crh-ring-offset-width)) var(--crh-ring-color,currentcolor)',
+    },
+    '--crh-ring-color': {
+      default: null,
+      ':has(:focus-visible)': {
+        default: 'hsl(var(--ring))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--ring)) 50%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--crh-inset-shadow), var(--crh-inset-ring-shadow), var(--crh-ring-offset-shadow), var(--crh-ring-shadow), var(--crh-shadow)',
+    },
+    '--crh-ring-offset-width': {
+      default: null,
+      ':has(:focus-visible)': '1px',
+    },
+    '--crh-ring-offset-color': {
+      default: null,
+      ':has(:focus-visible)': 'hsl(var(--background))',
+    },
+    '--crh-ring-offset-shadow': {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--crh-ring-inset,) 0 0 0 var(--crh-ring-offset-width) var(--crh-ring-offset-color)',
+    },
+  },
+  base: {
+    position: 'relative',
+    display: 'inline-flex',
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '4px',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--crh-gradient-from,--crh-gradient-via,--crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration,var(--default-transition-duration))',
+  },
+  checked: {
+    borderColor: 'hsl(var(--foreground))',
+    backgroundColor: 'hsl(var(--foreground))',
+    color: 'hsl(var(--background))',
+  },
+  unchecked: {
+    borderColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 30%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 60%, transparent)',
+        },
+      },
+    },
+    backgroundColor: 'transparent',
+  },
+  input: {
+    position: 'absolute',
+    inset: 'calc(var(--spacing) * 0)',
+    margin: 'calc(var(--spacing) * 0)',
+    cursor: 'pointer',
+    opacity: 0,
+  },
+  glyph: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+  },
+});
+
 function Checkbox({
   state,
   onChange,
@@ -1959,12 +2741,12 @@ function Checkbox({
   }, [indeterminate]);
   return (
     <span
-      className={cn(
-        'relative inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors',
-        checked || indeterminate
-          ? 'border-foreground bg-foreground text-background'
-          : 'border-foreground/30 bg-transparent hover:border-foreground/60',
-        'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50 has-[:focus-visible]:ring-offset-1 has-[:focus-visible]:ring-offset-background',
+      className={clsx(
+        stylex.props(
+          checkboxStyles.base,
+          checked || indeterminate ? checkboxStyles.checked : checkboxStyles.unchecked,
+          checkboxStyles.focus
+        ).className,
         className
       )}
     >
@@ -1975,16 +2757,88 @@ function Checkbox({
         aria-label={ariaLabel}
         onChange={(event) => onChange(event.currentTarget.checked)}
         onClick={(event) => event.stopPropagation()}
-        className="absolute inset-0 m-0 cursor-pointer opacity-0"
+        className={stylex.props(checkboxStyles.input).className}
       />
       {indeterminate ? (
-        <Minus className="size-3" strokeWidth={3.5} />
+        <Minus className={stylex.props(checkboxStyles.glyph).className} strokeWidth={3.5} />
       ) : checked ? (
-        <Check className="size-3" strokeWidth={3.5} />
+        <Check className={stylex.props(checkboxStyles.glyph).className} strokeWidth={3.5} />
       ) : null}
     </span>
   );
 }
+
+const reviewCheckStyles = stylex.create({
+  focus: {
+    '--crh-ring-shadow': {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--crh-ring-inset,) 0 0 0 calc(2px + var(--crh-ring-offset-width)) var(--crh-ring-color,currentcolor)',
+    },
+    '--crh-ring-color': {
+      default: null,
+      ':has(:focus-visible)': {
+        default: 'hsl(var(--ring))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--ring)) 45%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':has(:focus-visible)':
+        'var(--crh-inset-shadow), var(--crh-inset-ring-shadow), var(--crh-ring-offset-shadow), var(--crh-ring-shadow), var(--crh-shadow)',
+    },
+  },
+  base: {
+    display: 'flex',
+    flexShrink: 0,
+    cursor: 'pointer',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      ':has(:checked)': {
+        default: 'hsl(var(--foreground))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--foreground)) 30%, transparent)',
+      },
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':has(:checked)': {
+        default: 'hsl(var(--foreground))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--foreground)) 10%, transparent)',
+      },
+      '@media (hover: hover)': {
+        ':hover:not(:has(:checked))': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '11px',
+    fontWeight: 'var(--font-weight-medium)',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':has(:checked)': 'hsl(var(--foreground))',
+      '@media (hover: hover)': {
+        ':hover:not(:has(:checked))': 'hsl(var(--foreground))',
+      },
+    },
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--crh-gradient-from,--crh-gradient-via,--crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration,var(--default-transition-duration))',
+  },
+});
 
 function ReviewCheck({
   state,
@@ -1996,7 +2850,7 @@ function ReviewCheck({
   readonly label: string;
 }) {
   return (
-    <label className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border border-border bg-transparent px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground has-[:checked]:border-foreground/30 has-[:checked]:bg-foreground/10 has-[:checked]:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/45">
+    <label className={stylex.props(reviewCheckStyles.base, reviewCheckStyles.focus).className}>
       <Checkbox state={state} onChange={onChange} ariaLabel={label} />
       {label}
     </label>
@@ -2024,10 +2878,18 @@ function GroupMenu({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-7 text-muted-foreground hover:text-foreground"
+          width="calc(var(--spacing) * 7)"
+          height="calc(var(--spacing) * 7)"
+          labelColor="var(--crh-muted-button-label)"
+          className={stylex.props(privateButtonStyles.mutedInk).className}
           aria-label="Group actions"
         >
-          <MoreHorizontal className="size-4" />
+          <MoreHorizontal
+            className={clsx(
+              'crh-size-explicit',
+              stylex.props(explicitGlyphStyles.standard).className
+            )}
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -2079,8 +2941,9 @@ function ColumnResizer({
       aria-label={label}
       tabIndex={0}
       style={side === 'left' ? { left: `${offset}px` } : { right: `${offset}px` }}
-      className={cn(
-        'crh-resizer max-lg:hidden',
+      className={clsx(
+        'crh-resizer',
+        stylex.props(rootLayoutStyles.resizerVisibility).className,
         side === 'left' ? 'crh-resizer-left' : 'crh-resizer-right',
         active && 'crh-resizer-active'
       )}
@@ -2125,6 +2988,443 @@ function ColumnResizer({
   );
 }
 
+const treeCommitStyles = stylex.create({
+  tooltipPopup: {
+    width: 'calc(var(--spacing) * 72)',
+    maxWidth: '18rem',
+    padding: 'calc(var(--spacing) * 0)',
+  },
+  tree: {
+    'margin-inline': 'calc(var(--spacing) * -1)',
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  heading: {
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: '0.14em',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-bottom': 'calc(var(--spacing) * 1)',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  dirContainer: {
+    minWidth: 'calc(var(--spacing) * 0)',
+  },
+  treeRow: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'padding-right': 'calc(var(--spacing) * 2)',
+    backgroundColor: {
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+  },
+  dirToggle: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  fileGlyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  treeChevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+  folderButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    textAlign: 'left',
+  },
+  folderGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  folderLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '13px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 85%, transparent)',
+    },
+  },
+  leafSpacer: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+  },
+  fileButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    textAlign: 'left',
+  },
+  fileLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '13px',
+  },
+  fileLabelChecked: {
+    color: 'hsl(var(--muted-foreground))',
+  },
+  fileLabelUnchecked: {
+    color: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+    },
+  },
+  stats: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    '--crh-leading': '1',
+    lineHeight: '1',
+    'margin-left': 'auto',
+    flexShrink: 0,
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10px',
+  },
+  additions: {
+    color: 'hsl(var(--github-addition))',
+  },
+  deletions: {
+    color: 'hsl(var(--github-deletion))',
+  },
+  commitsToggle: {
+    fontWeight: 'var(--font-weight-semibold)',
+    letterSpacing: '0.1em',
+    'margin-bottom': 'calc(var(--spacing) * 1.5)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  commitsChevron: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+  },
+  commitList: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    },
+  },
+  showMore: {
+    fontWeight: 'var(--font-weight-medium)',
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderTopStyle: 'solid',
+    borderTopWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '11px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  summary: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  subject: {
+    '--crh-leading': 'var(--leading-tight)',
+    lineHeight: 'var(--leading-tight)',
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12.5px',
+    color: 'hsl(var(--foreground))',
+  },
+  author: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  commitFrame: {
+    borderBottomStyle: 'solid',
+    borderBottomWidth: {
+      default: '1px',
+      ':last-child': 0,
+    },
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--card))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--card)) 40%, transparent)',
+    },
+  },
+  commitRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    backgroundColor: {
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--foreground))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+        },
+      },
+    },
+  },
+  summaryButton: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  commitChevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  bodylessSummary: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+    textAlign: 'left',
+  },
+  summarySpacer: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+  tooltipBody: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  tooltipSubject: {
+    '--crh-leading': 'var(--leading-snug)',
+    lineHeight: 'var(--leading-snug)',
+    fontWeight: 'var(--font-weight-medium)',
+    fontSize: '12.5px',
+    color: 'hsl(var(--foreground))',
+  },
+  tooltipMetadata: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  tooltipAuthor: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  tooltipMessage: {
+    '--crh-leading': 'calc(var(--spacing) * 5)',
+    lineHeight: 'calc(var(--spacing) * 5)',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 6,
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    fontSize: '11.5px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  tooltipSha: {
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10.5px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  copyButton: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground))',
+      },
+    },
+  },
+  commitControlFocus: {
+    '--crh-outline-style': 'none',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    '--crh-ring-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--crh-ring-inset,) 0 0 0 calc(2px + var(--crh-ring-offset-width)) var(--crh-ring-color,currentcolor)',
+    },
+    '--crh-ring-color': {
+      default: null,
+      ':focus-visible': {
+        default: 'hsl(var(--ring))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--ring)) 45%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--crh-inset-shadow), var(--crh-inset-ring-shadow), var(--crh-ring-offset-shadow), var(--crh-ring-shadow), var(--crh-shadow)',
+    },
+  },
+  commitControlInset: {
+    '--crh-ring-inset': { default: null, ':focus-visible': 'inset' },
+  },
+  commitTransitionColors: {
+    transitionProperty:
+      'color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--crh-gradient-from,--crh-gradient-via,--crh-gradient-to',
+    transitionTimingFunction: 'var(--crh-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration,var(--default-transition-duration))',
+  },
+  collapsedChevron: { rotate: '-90deg' },
+  commitTransitionTransform: {
+    transitionProperty: 'transform,translate,scale,rotate',
+    transitionTimingFunction: 'var(--crh-ease,var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration,var(--default-transition-duration))',
+  },
+  copiedGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    color: 'hsl(var(--primary))',
+  },
+  copyGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+  expandedBody: {
+    '--crh-leading': 'calc(var(--spacing) * 5)',
+    lineHeight: 'calc(var(--spacing) * 5)',
+    whiteSpace: 'pre-wrap',
+    borderTopStyle: 'solid',
+    borderTopWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--border))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border)) 40%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    fontSize: '12px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  avatar: {
+    fontWeight: 'var(--font-weight-semibold)',
+    display: 'flex',
+    width: 'calc(var(--spacing) * 6)',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '3.40282e38px',
+    fontSize: '10px',
+    color: 'var(--color-white)',
+  },
+});
+
 function FileTree({
   nodes,
   reviewed,
@@ -2142,10 +3442,8 @@ function FileTree({
     return null;
   }
   return (
-    <nav className="-mx-1 grid gap-0.5" aria-label="Changed files">
-      <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        Files
-      </p>
+    <nav {...stylex.props(treeCommitStyles.tree)} aria-label="Changed files">
+      <p {...stylex.props(treeCommitStyles.heading)}>Files</p>
       {nodes.map((node) => (
         <FileTreeRow
           key={node.path}
@@ -2182,19 +3480,34 @@ function FileTreeRow({
 
   if (node.type === 'dir') {
     return (
-      <div className="min-w-0">
+      <div {...stylex.props(treeCommitStyles.dirContainer)}>
         <div
           style={{ paddingLeft: `${indent + 8}px` }}
-          className="flex min-w-0 items-center gap-1.5 rounded-md py-1 pr-2 transition-colors hover:bg-foreground/5"
+          className={
+            stylex.props(treeCommitStyles.treeRow, treeCommitStyles.commitTransitionColors)
+              .className
+          }
         >
           <button
             type="button"
             onClick={() => setOpen((current) => !current)}
             aria-expanded={open}
             aria-label={`${open ? 'Collapse' : 'Expand'} ${node.name}`}
-            className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+            {...stylex.props(
+              treeCommitStyles.dirToggle,
+              treeCommitStyles.commitControlFocus,
+              treeCommitStyles.commitTransitionColors
+            )}
           >
-            <ChevronDown className={cn('size-3.5 transition-transform', !open && '-rotate-90')} />
+            <ChevronDown
+              className={clsx(
+                stylex.props(
+                  treeCommitStyles.treeChevron,
+                  treeCommitStyles.commitTransitionTransform,
+                  !open && treeCommitStyles.collapsedChevron
+                ).className
+              )}
+            />
           </button>
           <Checkbox
             state={state}
@@ -2204,10 +3517,10 @@ function FileTreeRow({
           <button
             type="button"
             onClick={() => setOpen((current) => !current)}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+            {...stylex.props(treeCommitStyles.folderButton, treeCommitStyles.commitControlFocus)}
           >
-            <Folder className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate font-mono text-[13px] text-foreground/85">{node.name}</span>
+            <Folder {...stylex.props(treeCommitStyles.folderGlyph)} />
+            <span {...stylex.props(treeCommitStyles.folderLabel)}>{node.name}</span>
           </button>
         </div>
         {open &&
@@ -2231,9 +3544,11 @@ function FileTreeRow({
   return (
     <div
       style={{ paddingLeft: `${indent + 8}px` }}
-      className="flex min-w-0 items-center gap-1.5 rounded-md py-1 pr-2 transition-colors hover:bg-foreground/5"
+      className={
+        stylex.props(treeCommitStyles.treeRow, treeCommitStyles.commitTransitionColors).className
+      }
     >
-      <span aria-hidden className="size-4 shrink-0" />
+      <span aria-hidden {...stylex.props(treeCommitStyles.leafSpacer)} />
       <Checkbox
         state={state}
         onChange={(checked) => onToggle(node, checked)}
@@ -2243,21 +3558,23 @@ function FileTreeRow({
         type="button"
         onClick={() => onNavigate(node.path)}
         title={node.path}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+        {...stylex.props(treeCommitStyles.fileButton, treeCommitStyles.commitControlFocus)}
       >
-        <FileIcon filePath={node.path} className="size-4 shrink-0" />
+        <FileIcon filePath={node.path} {...stylex.props(treeCommitStyles.fileGlyph)} />
         <span
-          className={cn(
-            'truncate font-mono text-[13px]',
-            state === 'checked' ? 'text-muted-foreground' : 'text-foreground/90'
+          className={clsx(
+            stylex.props(treeCommitStyles.fileLabel).className,
+            state === 'checked'
+              ? stylex.props(treeCommitStyles.fileLabelChecked).className
+              : stylex.props(treeCommitStyles.fileLabelUnchecked).className
           )}
         >
           {node.name}
         </span>
         {stats ? (
-          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums leading-none">
-            <span className="text-addition">+{stats.additions}</span>{' '}
-            <span className="text-deletion">−{stats.deletions}</span>
+          <span {...stylex.props(treeCommitStyles.stats)}>
+            <span {...stylex.props(treeCommitStyles.additions)}>+{stats.additions}</span>{' '}
+            <span {...stylex.props(treeCommitStyles.deletions)}>−{stats.deletions}</span>
           </span>
         ) : null}
       </button>
@@ -2288,14 +3605,28 @@ function GroupCommits({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="mb-1.5 flex items-center gap-1 rounded-sm font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+        className={clsx(
+          stylex.props(
+            treeCommitStyles.commitsToggle,
+            treeCommitStyles.commitControlFocus,
+            treeCommitStyles.commitTransitionColors
+          ).className
+        )}
       >
-        <ChevronDown className={cn('size-3 transition-transform', !open && '-rotate-90')} />
+        <ChevronDown
+          className={clsx(
+            stylex.props(
+              treeCommitStyles.commitsChevron,
+              treeCommitStyles.commitTransitionTransform,
+              !open && treeCommitStyles.collapsedChevron
+            ).className
+          )}
+        />
         {refs.length} {refs.length === 1 ? 'commit' : 'commits'}
       </button>
       {open && (
         <TooltipProvider delayDuration={250} disableHoverableContent>
-          <div className="overflow-hidden rounded-md border border-border/70">
+          <div {...stylex.props(treeCommitStyles.commitList)}>
             {visibleRefs.map((commitRef) => (
               <CommitRow key={commitRef} commitRef={commitRef} commit={commits?.[commitRef]} />
             ))}
@@ -2303,7 +3634,14 @@ function GroupCommits({
               <button
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
-                className="flex w-full items-center justify-center gap-1 border-t border-border/60 bg-muted/30 px-2 py-1 text-[11px] font-medium text-muted-foreground outline-hidden transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45"
+                className={clsx(
+                  stylex.props(
+                    treeCommitStyles.showMore,
+                    treeCommitStyles.commitControlFocus,
+                    treeCommitStyles.commitControlInset,
+                    treeCommitStyles.commitTransitionColors
+                  ).className
+                )}
               >
                 {expanded
                   ? 'Show fewer commits'
@@ -2340,12 +3678,10 @@ function CommitRow({
   const summary = (
     <>
       <CommitAvatar name={author} seed={seed} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12.5px] leading-tight text-foreground">
-          {subject}
-        </span>
+      <span {...stylex.props(treeCommitStyles.summary)}>
+        <span {...stylex.props(treeCommitStyles.subject)}>{subject}</span>
         {author ? (
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+          <span {...stylex.props(treeCommitStyles.author)}>
             {author}
             {date ? ` · ${date}` : ''}
           </span>
@@ -2365,8 +3701,8 @@ function CommitRow({
   }, [sha]);
 
   return (
-    <div className="border-b border-border/60 bg-card/40 last:border-b-0">
-      <div className="flex w-full min-w-0 items-center gap-2.5 px-2.5 py-1.5 transition-colors hover:bg-foreground/5">
+    <div {...stylex.props(treeCommitStyles.commitFrame)}>
+      <div {...stylex.props(treeCommitStyles.commitRow, treeCommitStyles.commitTransitionColors)}>
         <Tooltip>
           <TooltipTrigger asChild>
             {hasBody ? (
@@ -2374,40 +3710,42 @@ function CommitRow({
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
                 aria-expanded={expanded}
-                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+                {...stylex.props(
+                  treeCommitStyles.summaryButton,
+                  treeCommitStyles.commitControlFocus
+                )}
               >
                 <ChevronDown
-                  className={cn(
-                    'size-3.5 shrink-0 text-muted-foreground transition-transform',
-                    !expanded && '-rotate-90'
+                  className={clsx(
+                    stylex.props(
+                      treeCommitStyles.commitChevron,
+                      treeCommitStyles.commitTransitionTransform,
+                      !expanded && treeCommitStyles.collapsedChevron
+                    ).className
                   )}
                 />
                 {summary}
               </button>
             ) : (
-              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+              <div {...stylex.props(treeCommitStyles.bodylessSummary)}>
                 {/* Spacer keeps the avatar/subject aligned with collapsible rows. */}
-                <span aria-hidden className="size-3.5 shrink-0" />
+                <span aria-hidden {...stylex.props(treeCommitStyles.summarySpacer)} />
                 {summary}
               </div>
             )}
           </TooltipTrigger>
-          <TooltipContent side="left" align="start" className="w-72 max-w-[18rem] p-0">
-            <div className="grid gap-2 p-3">
-              <p className="text-[12.5px] font-medium leading-snug text-foreground">{subject}</p>
-              <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <TooltipContent side="left" align="start" xstyle={treeCommitStyles.tooltipPopup}>
+            <div {...stylex.props(treeCommitStyles.tooltipBody)}>
+              <p {...stylex.props(treeCommitStyles.tooltipSubject)}>{subject}</p>
+              <p {...stylex.props(treeCommitStyles.tooltipMetadata)}>
                 <CommitAvatar name={author} seed={seed} />
-                <span className="truncate">
+                <span {...stylex.props(treeCommitStyles.tooltipAuthor)}>
                   {author || 'Unknown author'}
                   {date ? ` · ${date}` : ''}
                 </span>
               </p>
-              {body ? (
-                <p className="line-clamp-6 whitespace-pre-wrap text-[11.5px] leading-5 text-muted-foreground">
-                  {body}
-                </p>
-              ) : null}
-              <code className="font-mono text-[10.5px] text-muted-foreground">{sha}</code>
+              {body ? <p {...stylex.props(treeCommitStyles.tooltipMessage)}>{body}</p> : null}
+              <code {...stylex.props(treeCommitStyles.tooltipSha)}>{sha}</code>
             </div>
           </TooltipContent>
         </Tooltip>
@@ -2416,17 +3754,21 @@ function CommitRow({
           onClick={() => void copy()}
           aria-label={`Copy commit id ${shortSha}`}
           title="Copy commit id"
-          className="flex shrink-0 items-center gap-1 rounded-sm font-mono text-[11px] tabular-nums text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+          {...stylex.props(
+            treeCommitStyles.copyButton,
+            treeCommitStyles.commitControlFocus,
+            treeCommitStyles.commitTransitionColors
+          )}
         >
           {shortSha}
-          {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
+          {copied ? (
+            <Check {...stylex.props(treeCommitStyles.copiedGlyph)} />
+          ) : (
+            <Copy {...stylex.props(treeCommitStyles.copyGlyph)} />
+          )}
         </button>
       </div>
-      {hasBody && expanded && (
-        <div className="whitespace-pre-wrap border-t border-border/40 bg-muted/20 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
-          {body}
-        </div>
-      )}
+      {hasBody && expanded && <div {...stylex.props(treeCommitStyles.expandedBody)}>{body}</div>}
     </div>
   );
 }
@@ -2437,13 +3779,169 @@ function CommitAvatar({ name, seed }: { readonly name: string; readonly seed: st
   return (
     <span
       aria-hidden
-      className="flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+      {...stylex.props(treeCommitStyles.avatar)}
       style={{ backgroundColor: `hsl(${hue} 42% 40%)` }}
     >
       {initials}
     </span>
   );
 }
+
+const diffBlockStyles = stylex.create({
+  block: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    borderRadius: 'var(--radius)',
+    transitionProperty: 'opacity',
+    transitionTimingFunction: 'var(--crh-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration, var(--default-transition-duration))',
+  },
+  collapsed: { overflow: 'hidden' },
+  reviewed: { opacity: 0.65 },
+  header: {
+    position: 'sticky',
+    top: 'calc(var(--crh-toolbar-h) + var(--crh-group-header-h,0px))',
+    zIndex: 10,
+  },
+  headerInner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 2.5)',
+    'border-top-left-radius': 'var(--radius)',
+    'border-top-right-radius': 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  bottomCorners: {
+    'border-bottom-right-radius': 'var(--radius)',
+    'border-bottom-left-radius': 'var(--radius)',
+  },
+  toggle: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  fileGlyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  chevron: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':is(:where(.group):hover *)': { '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionTimingFunction: 'var(--crh-ease, var(--default-transition-timing-function))',
+    transitionDuration: 'var(--crh-duration, var(--default-transition-duration))',
+  },
+  path: {
+    fontWeight: 'var(--font-weight-medium)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12.5px',
+    color: 'hsl(var(--foreground))',
+  },
+  tools: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2.5)',
+  },
+  stats: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  additions: { color: 'hsl(var(--github-addition))' },
+  deletions: { color: 'hsl(var(--github-deletion))' },
+  body: {
+    overflow: 'hidden',
+    'border-inline-style': 'solid',
+    'border-inline-width': '1px',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+  },
+  parseErrorPadding: { padding: 'calc(var(--spacing) * 3)' },
+  diagnostics: {
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+    },
+    padding: 'calc(var(--spacing) * 2.5)',
+  },
+});
+
+const contextBlockStyles = stylex.create({
+  root: { borderTopStyle: 'solid', borderTopWidth: '1px' },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 2.5)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  icon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  scroll: { overflowX: 'auto', padding: 'calc(var(--spacing) * 2)' },
+  table: {
+    '--crh-leading': 'calc(var(--spacing) * 5)',
+    lineHeight: 'calc(var(--spacing) * 5)',
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '12.5px',
+  },
+  range: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground)) 5%, transparent)',
+    },
+  },
+  lineNumber: {
+    width: 'calc(var(--spacing) * 12)',
+    minWidth: 'calc(var(--spacing) * 12)',
+    userSelect: 'none',
+    'padding-right': 'calc(var(--spacing) * 3)',
+    textAlign: 'right',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  source: { whiteSpace: 'pre', color: 'hsl(var(--foreground))' },
+  status: {
+    letterSpacing: 'var(--tracking-wide)',
+    flexShrink: 0,
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '10px',
+    textTransform: 'uppercase',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
 
 const ReviewDiffBlock = memo(function ReviewDiffBlock({
   block,
@@ -2720,12 +4218,14 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           type="button"
           size="icon"
           variant="default"
-          className="mr-1.5 mt-0.5 size-5 rounded-[5px] shadow-sm"
+          xstyle={privateButtonStyles.gutter}
           aria-label="Add review comment"
           title="Add review comment"
           onClick={() => onStartDraft(block.path, fromPierreSide(hovered.side), hovered.lineNumber)}
         >
-          <Plus className="size-3.5" />
+          <Plus
+            className={clsx('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+          />
         </Button>
       );
     },
@@ -2735,27 +4235,34 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
   return (
     <div
       ref={blockRef}
-      className={cn(
+      className={clsx(
         // Rounded card. The border lives on the header + body (not the block) so the
         // sticky header carries its own complete border and never doubles with the
         // block frame while pinned. overflow-hidden is only applied while collapsed
         // (header is then the lone child and nothing scrolls).
-        'crh-block min-w-0 rounded-md bg-card transition-opacity',
-        collapsed && 'overflow-hidden',
-        reviewed && 'opacity-65'
+        'crh-block',
+        stylex.props(
+          diffBlockStyles.block,
+          collapsed && diffBlockStyles.collapsed,
+          reviewed && diffBlockStyles.reviewed
+        ).className
       )}
       data-block-path={block.path}
     >
-      <div className="crh-block-header sticky top-[calc(var(--crh-toolbar-h)+var(--crh-group-header-h,0px))] z-10">
+      <div className={clsx('crh-block-header', stylex.props(diffBlockStyles.header).className)}>
         <div
-          className={cn(
-            'crh-block-header-inner flex items-center justify-between gap-2.5 rounded-t-md border px-2.5 py-1.5',
-            collapsed && 'rounded-b-md'
+          className={clsx(
+            'crh-block-header-inner',
+            stylex.props(diffBlockStyles.headerInner, collapsed && diffBlockStyles.bottomCorners)
+              .className
           )}
         >
           <button
             type="button"
-            className="group flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+            className={clsx(
+              'group',
+              stylex.props(diffBlockStyles.toggle, treeCommitStyles.commitControlFocus).className
+            )}
             aria-expanded={!collapsed}
             aria-controls={bodyId}
             onClick={() => {
@@ -2767,34 +4274,42 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
             }}
           >
             <ChevronDown
-              className={cn(
-                'size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:text-foreground',
-                collapsed && '-rotate-90'
+              className={clsx(
+                stylex.props(
+                  diffBlockStyles.chevron,
+                  collapsed && treeCommitStyles.collapsedChevron
+                ).className
               )}
             />
-            <FileIcon filePath={block.path} className="size-3.5" />
-            <span className="truncate font-mono text-[12.5px] font-medium text-foreground">
-              {block.path}
-            </span>
+            <FileIcon filePath={block.path} {...stylex.props(diffBlockStyles.fileGlyph)} />
+            <span {...stylex.props(diffBlockStyles.path)}>{block.path}</span>
             <FileStatusBadge file={block.file} kind={block.kind} />
           </button>
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div {...stylex.props(diffBlockStyles.tools)}>
             {block.file && block.kind === 'change' && (
-              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                <span className="text-addition">+{block.file.additions}</span>{' '}
-                <span className="text-deletion">−{block.file.deletions}</span>
+              <span {...stylex.props(diffBlockStyles.stats)}>
+                <span {...stylex.props(diffBlockStyles.additions)}>+{block.file.additions}</span>{' '}
+                <span {...stylex.props(diffBlockStyles.deletions)}>−{block.file.deletions}</span>
               </span>
             )}
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
+              width="calc(var(--spacing) * 6)"
+              height="calc(var(--spacing) * 6)"
+              labelColor="var(--crh-muted-button-label)"
+              className={stylex.props(privateButtonStyles.mutedInk).className}
               onClick={() => onStartDraft(block.path, commentAnchor.side, commentAnchor.line)}
               aria-label={`Add a review comment to ${block.path}`}
               title="Add a review comment"
             >
-              <MessageSquarePlus className="size-3.5" />
+              <MessageSquarePlus
+                className={clsx(
+                  'crh-size-explicit',
+                  stylex.props(explicitGlyphStyles.small).className
+                )}
+              />
             </Button>
             <ReviewCheck
               state={reviewed ? 'checked' : 'unchecked'}
@@ -2806,9 +4321,9 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
       </div>
 
       {isExpanded && (
-        <div id={bodyId} className="overflow-hidden rounded-b-md border-x border-b">
+        <div id={bodyId} {...stylex.props(diffBlockStyles.body, diffBlockStyles.bottomCorners)}>
           {block.diagnostics.length > 0 && (
-            <div className="border-b bg-muted/30 p-2.5">
+            <div {...stylex.props(diffBlockStyles.diagnostics)}>
               <Diagnostics diagnostics={block.diagnostics} />
             </div>
           )}
@@ -2818,9 +4333,9 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           ) : block.kind === 'context' ? (
             <ContextBody block={block} />
           ) : parsed?.status === 'error' ? (
-            <div className="p-3">
+            <div {...stylex.props(diffBlockStyles.parseErrorPadding)}>
               <Alert variant="destructive">
-                <CircleAlert className="size-4" />
+                <CircleAlert />
                 <AlertTitle>Diff render failed</AlertTitle>
                 <AlertDescription>{parsed.message}</AlertDescription>
               </Alert>
@@ -2871,23 +4386,21 @@ function ContextBody({ block }: { readonly block: ReviewResolvedBlock }) {
   const end = Math.min(lineCount, range.end + CONTEXT_BODY_CONTEXT_LINES);
   const displayLines = allLines.slice(start - 1, end);
   return (
-    <div className="crh-context-body border-t">
-      <div className="flex items-center gap-2 border-b bg-muted/20 px-2.5 py-1 text-[11px] text-muted-foreground">
-        <Info className="size-3" />
+    <div className={clsx('crh-context-body', stylex.props(contextBlockStyles.root).className)}>
+      <div {...stylex.props(contextBlockStyles.header)}>
+        <Info {...stylex.props(contextBlockStyles.icon)} />
         <span>Context from current commit</span>
       </div>
-      <div className="overflow-x-auto p-2">
-        <table className="w-full border-collapse font-mono text-[12.5px] leading-5">
+      <div {...stylex.props(contextBlockStyles.scroll)}>
+        <table {...stylex.props(contextBlockStyles.table)}>
           <tbody>
             {displayLines.map((line, index) => {
               const lineNumber = start + index;
               const inRange = lineNumber >= range.start && lineNumber <= range.end;
               return (
-                <tr key={lineNumber} className={inRange ? 'bg-foreground/5' : undefined}>
-                  <td className="w-12 min-w-12 select-none pr-3 text-right text-muted-foreground">
-                    {lineNumber}
-                  </td>
-                  <td className="whitespace-pre text-foreground">{line || ' '}</td>
+                <tr key={lineNumber} {...stylex.props(inRange && contextBlockStyles.range)}>
+                  <td {...stylex.props(contextBlockStyles.lineNumber)}>{lineNumber}</td>
+                  <td {...stylex.props(contextBlockStyles.source)}>{line || ' '}</td>
                 </tr>
               );
             })}
@@ -2909,14 +4422,64 @@ function FileStatusBadge({
   const detail =
     kind === 'context' ? 'Unchanged file referenced for context' : formatFileStatus(file);
   return (
-    <span
-      className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
-      title={detail}
-    >
+    <span {...stylex.props(contextBlockStyles.status)} title={detail}>
       {shortLabel}
     </span>
   );
 }
+
+const annotationStyles = stylex.create({
+  marker: {
+    '--crh-shadow':
+      '0 1px 3px 0 var(--crh-shadow-color,#0000001a), 0 1px 2px -1px var(--crh-shadow-color,#0000001a)',
+    boxShadow:
+      'var(--crh-inset-shadow), var(--crh-inset-ring-shadow), var(--crh-ring-offset-shadow), var(--crh-ring-shadow), var(--crh-shadow)',
+
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+    borderRadius: '0.25rem',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    'padding-inline': 'calc(var(--spacing) * 1)',
+    '--crh-annotation-font-literal':
+      'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", sans-serif',
+    fontFamily: 'var(--crh-annotation-font-literal)',
+    fontSize: '10px',
+    fontWeight: 'var(--font-weight-semibold)',
+    '--crh-leading': '1.4',
+    lineHeight: '1.4',
+  },
+  markerGlyph: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  count: {
+    '--crh-numeric-spacing': 'tabular-nums',
+    fontVariantNumeric:
+      'var(--crh-ordinal,) var(--crh-slashed-zero,) var(--crh-numeric-figure,) var(--crh-numeric-spacing,) var(--crh-numeric-fraction,)',
+  },
+  note: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '13px',
+    '--crh-leading': 'calc(var(--spacing) * 6)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground))',
+  },
+  noteGlyph: {
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+  question: { color: 'hsl(var(--primary))' },
+  minor: {
+    color: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 70%, transparent)',
+    },
+  },
+});
 
 // Annotation content rendered below a diff line via @pierre/diffs slots.
 // Info-level review notes are shown inline so they keep their line context;
@@ -2963,7 +4526,7 @@ function InlineAnnotation({
       : 'info';
 
   return (
-    <div className={cn('crh-line-annotation', hasInline && 'crh-line-annotation--inline')}>
+    <div className={clsx('crh-line-annotation', hasInline && 'crh-line-annotation--inline')}>
       {hasFinding && !hasPanel && (
         <span data-anno={metadata.key} aria-hidden className="crh-finding-anchor" />
       )}
@@ -2974,28 +4537,34 @@ function InlineAnnotation({
           onClick={() => onFocus(metadata.key)}
           title="View in review thread"
           aria-label="View in review thread"
-          className={cn(
-            'crh-anno inline-flex items-center gap-0.5 rounded border px-1 font-sans text-[10px] font-semibold leading-[1.4] shadow-sm transition-colors',
-            SEVERITY_MARKER[markerSeverity]
+          className={clsx(
+            'crh-anno',
+            stylex.props(
+              annotationStyles.marker,
+              SEVERITY_MARKER[markerSeverity],
+              treeCommitStyles.commitTransitionColors
+            ).className
           )}
         >
           {markerSeverity === 'info' ? (
-            <MessageSquare className="size-3" />
+            <MessageSquare {...stylex.props(annotationStyles.markerGlyph)} />
           ) : (
-            <AlertTriangle className="size-3" />
+            <AlertTriangle {...stylex.props(annotationStyles.markerGlyph)} />
           )}
-          {panelCount > 1 ? <span className="tabular-nums">{panelCount}</span> : null}
+          {panelCount > 1 ? (
+            <span {...stylex.props(annotationStyles.count)}>{panelCount}</span>
+          ) : null}
         </button>
       )}
       {inlineNotes.map((note) => (
         <div
           key={note.id}
-          className="crh-inline-note flex items-start gap-1.5 text-[13px] leading-6 text-foreground"
+          className={clsx('crh-inline-note', stylex.props(annotationStyles.note).className)}
         >
           {note.severity === 'question' ? (
-            <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-primary" />
+            <HelpCircle {...stylex.props(annotationStyles.noteGlyph, annotationStyles.question)} />
           ) : note.severity === 'p2' ? (
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning/70" />
+            <AlertTriangle {...stylex.props(annotationStyles.noteGlyph, annotationStyles.minor)} />
           ) : null}
           {note.body}
         </div>
@@ -3004,13 +4573,104 @@ function InlineAnnotation({
   );
 }
 
-const SEVERITY_MARKER: Record<ReviewNoteSeverity, string> = {
-  info: 'border-border bg-muted/60 text-muted-foreground hover:text-foreground',
-  question: 'border-primary/35 bg-primary/10 text-primary hover:bg-primary/15',
-  p2: 'border-warning/30 bg-warning/8 text-warning/80 hover:bg-warning/15',
-  p1: 'border-warning/45 bg-warning/12 text-warning hover:bg-warning/20',
-  p0: 'border-danger/45 bg-danger/12 text-danger hover:bg-danger/20',
-};
+const SEVERITY_MARKER = stylex.create({
+  info: {
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 60%, transparent)',
+    },
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground))' },
+    },
+  },
+  question: {
+    borderColor: {
+      default: 'hsl(var(--primary))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--primary)) 35%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--primary))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--primary))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--primary)) 15%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--primary))',
+  },
+  p2: {
+    borderColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 30%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 8%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--status-warning))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-warning)) 15%, transparent)',
+        },
+      },
+    },
+    color: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 80%, transparent)',
+    },
+  },
+  p1: {
+    borderColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 12%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--status-warning))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-warning)) 20%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--status-warning))',
+  },
+  p0: {
+    borderColor: {
+      default: 'hsl(var(--status-danger))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-danger)) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--status-danger))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-danger)) 12%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': {
+          default: 'hsl(var(--status-danger))',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-danger)) 20%, transparent)',
+        },
+      },
+    },
+    color: 'hsl(var(--status-danger))',
+  },
+});
 
 function severityRank(severity: ReviewNoteSeverity): number {
   switch (severity) {
@@ -3146,6 +4806,255 @@ function buildLineAnnotations(
   }));
 }
 
+const commentStyles = stylex.create({
+  panel: {
+    zIndex: 10,
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexDirection: 'column',
+    borderColor: 'hsl(var(--sidebar-border))',
+    backgroundColor: 'hsl(var(--sidebar))',
+    color: 'hsl(var(--sidebar-foreground))',
+    borderTopStyle: {
+      default: null,
+      '@media not all and (width >= 64rem)': 'solid',
+    },
+    borderTopWidth: {
+      default: null,
+      '@media not all and (width >= 64rem)': '1px',
+    },
+    position: {
+      default: null,
+      '@media (width >= 64rem)': 'sticky',
+    },
+    top: {
+      default: null,
+      '@media (width >= 64rem)': 'calc(var(--spacing) * 0)',
+    },
+    height: {
+      default: null,
+      '@media (width >= 64rem)': '100vh',
+    },
+    borderLeftStyle: {
+      default: null,
+      '@media (width >= 64rem)': 'solid',
+    },
+    borderLeftWidth: {
+      default: null,
+      '@media (width >= 64rem)': '1px',
+    },
+  },
+  scroll: {
+    flex: '1',
+    overflowY: 'auto',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  findings: {
+    marginBottom: 'calc(var(--spacing) * 4)',
+  },
+  threadList: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+  fileThreads: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  pathButton: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    'padding-inline': 'calc(var(--spacing) * 0.5)',
+    textAlign: 'left',
+  },
+  pathLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11.5px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':is(:where(.group):hover *)': { '@media (hover: hover)': 'hsl(var(--foreground))' },
+    },
+  },
+  threadItems: {
+    display: 'grid',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  composer: {
+    '--crh-shadow':
+      '0 1px 3px 0 var(--crh-shadow-color,#0000001a), 0 1px 2px -1px var(--crh-shadow-color,#0000001a)',
+    boxShadow:
+      'var(--crh-inset-shadow), var(--crh-inset-ring-shadow), var(--crh-ring-offset-shadow), var(--crh-ring-shadow), var(--crh-shadow)',
+
+    marginBottom: 'calc(var(--spacing) * 4)',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--card))',
+  },
+  composerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  composerTitle: {
+    '--crh-leading': 1,
+    lineHeight: 1,
+    fontWeight: 'var(--font-weight-semibold)',
+    fontSize: '12px',
+    color: 'hsl(var(--foreground))',
+  },
+  composerPath: {
+    'margin-left': 'auto',
+    minWidth: 'calc(var(--spacing) * 0)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily:
+      '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, "Berkeley Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  textarea: {
+    '--crh-leading': 'calc(var(--spacing) * 6)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    '--crh-outline-style': 'none',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    display: 'block',
+    minHeight: 'calc(var(--spacing) * 24)',
+    width: '100%',
+    resize: 'vertical',
+    borderStyle: 'solid',
+    borderWidth: 0,
+    backgroundColor: 'hsl(var(--card))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    '--crh-composer-font-literal':
+      'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", sans-serif',
+    fontFamily: 'var(--crh-composer-font-literal)',
+    fontSize: '13px',
+    color: {
+      default: 'hsl(var(--foreground))',
+      '::placeholder': 'hsl(var(--muted-foreground))',
+    },
+  },
+  composerFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 2)',
+    borderTopStyle: 'solid',
+    borderTopWidth: '1px',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+  },
+  threadCard: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--card))',
+  },
+  threadHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomStyle: 'solid',
+    borderBottomWidth: '1px',
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'hsl(var(--muted))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  threadJump: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: '1',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'calc(var(--radius) - 2px)',
+    textAlign: 'left',
+  },
+  dangerGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--status-danger))',
+  },
+  warningGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  mutedWarningGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: {
+      default: 'hsl(var(--status-warning))',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--status-warning)) 70%, transparent)',
+    },
+  },
+  questionGlyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--primary))',
+  },
+  threadDeleteOffset: { marginRight: 'calc(var(--spacing) * -1)' },
+  threadLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  glyph: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+  },
+  threadBody: {
+    '--crh-leading': 'calc(var(--spacing) * 6)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+    fontSize: '13px',
+    color: 'hsl(var(--foreground))',
+  },
+});
+
 function CommentPanel({
   threads,
   total: _total,
@@ -3175,15 +5084,14 @@ function CommentPanel({
   readonly onNavigate: (path: string) => void;
   readonly onJumpToRef: (ref: ReviewFindingRef) => void;
 }) {
-  const isEmpty = threads.length === 0 && draft === null && findings.length === 0;
   return (
     <aside
-      className="crh-panel z-10 flex min-w-0 flex-col border-sidebar-border bg-sidebar text-sidebar-foreground max-lg:border-t lg:sticky lg:top-0 lg:h-screen lg:border-l"
+      className={clsx('crh-panel', stylex.props(commentStyles.panel).className)}
       aria-label="Review comments"
     >
-      <div data-cr-panel-scroll className="flex-1 overflow-y-auto p-3">
+      <div data-cr-panel-scroll {...stylex.props(commentStyles.scroll)}>
         {findings.length > 0 && (
-          <div className="mb-4">
+          <div {...stylex.props(commentStyles.findings)}>
             <ReviewFindingsSection findings={findings} files={files} onJump={onJumpToRef} />
           </div>
         )}
@@ -3197,38 +5105,42 @@ function CommentPanel({
           />
         )}
 
-        {isEmpty ? (
-          <EmptyThread />
-        ) : (
-          <div className="grid gap-4">
-            {threads.map((thread) => (
-              <section key={thread.path} data-thread-path={thread.path} className="grid gap-2">
-                <button
-                  type="button"
-                  className="group flex w-full min-w-0 items-center gap-1.5 rounded-sm px-0.5 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
-                  onClick={() => onNavigate(thread.path)}
-                  title={`Jump to ${thread.path}`}
-                >
-                  <FileIcon filePath={thread.path} className="size-3.5" />
-                  <span className="truncate font-mono text-[11.5px] text-muted-foreground group-hover:text-foreground">
-                    {thread.path}
-                  </span>
-                </button>
-                <div className="grid gap-2">
-                  {thread.items.map((item) => (
-                    <ThreadCard
-                      key={item.id}
-                      item={item}
-                      focused={focusedAnchor === item.anchor}
-                      onDelete={onDeleteComment}
-                      onFocus={onFocus}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
+        <div {...stylex.props(commentStyles.threadList)}>
+          {threads.map((thread) => (
+            <section
+              key={thread.path}
+              data-thread-path={thread.path}
+              {...stylex.props(commentStyles.fileThreads)}
+            >
+              <button
+                type="button"
+                className={clsx(
+                  'group',
+                  stylex.props(commentStyles.pathButton, treeCommitStyles.commitControlFocus)
+                    .className
+                )}
+                onClick={() => onNavigate(thread.path)}
+                title={`Jump to ${thread.path}`}
+              >
+                <FileIcon filePath={thread.path} {...stylex.props(commentStyles.glyph)} />
+                <span className={clsx(stylex.props(commentStyles.pathLabel).className)}>
+                  {thread.path}
+                </span>
+              </button>
+              <div {...stylex.props(commentStyles.threadItems)}>
+                {thread.items.map((item) => (
+                  <ThreadCard
+                    key={item.id}
+                    item={item}
+                    focused={focusedAnchor === item.anchor}
+                    onDelete={onDeleteComment}
+                    onFocus={onFocus}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
     </aside>
   );
@@ -3257,22 +5169,17 @@ function PanelComposer({
   }, [anchorKey]);
 
   return (
-    <div
-      ref={containerRef}
-      className="mb-4 overflow-hidden rounded-md border border-border bg-card shadow-sm"
-    >
-      <header className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5">
-        <span className="text-[12px] font-semibold leading-none text-foreground">New comment</span>
-        <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-          {fileBaseName(draft.path)}
-        </span>
+    <div ref={containerRef} {...stylex.props(commentStyles.composer)}>
+      <header {...stylex.props(commentStyles.composerHeader)}>
+        <span {...stylex.props(commentStyles.composerTitle)}>New comment</span>
+        <span {...stylex.props(commentStyles.composerPath)}>{fileBaseName(draft.path)}</span>
       </header>
       <textarea
         ref={textareaRef}
         value={draft.body}
         placeholder="Leave a comment…"
         aria-label={`Comment on ${fileBaseName(draft.path)} line ${draft.lineNumber}`}
-        className="block min-h-24 w-full resize-y border-0 bg-card px-3 py-2.5 font-sans text-[13px] leading-6 text-foreground outline-hidden placeholder:text-muted-foreground"
+        {...stylex.props(commentStyles.textarea)}
         onChange={(event) => onChange(event.currentTarget.value)}
         onInput={(event) => onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -3285,17 +5192,19 @@ function PanelComposer({
           }
         }}
       />
-      <div className="flex items-center justify-end gap-2 border-t bg-muted/40 px-3 py-2">
+      <div {...stylex.props(commentStyles.composerFooter)}>
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className="h-7 text-muted-foreground"
+          height="calc(var(--spacing) * 7)"
+          labelColor="var(--crh-muted-button-label)"
+          className={stylex.props(privateButtonStyles.mutedInk).className}
           onClick={onCancel}
         >
           Cancel
         </Button>
-        <Button type="button" size="sm" className="h-7" onClick={onSave}>
+        <Button type="button" size="sm" height="calc(var(--spacing) * 7)" onClick={onSave}>
           Save comment
         </Button>
       </div>
@@ -3319,23 +5228,27 @@ function ThreadCard({
   return (
     <article
       data-anchor={item.anchor}
-      className={cn(
-        'overflow-hidden rounded-md border border-border bg-card transition-colors',
+      className={clsx(
+        stylex.props(commentStyles.threadCard, treeCommitStyles.commitTransitionColors).className,
         focused && 'crh-thread-focused'
       )}
     >
-      <header className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5">
+      <header {...stylex.props(commentStyles.threadHeader)}>
         <button
           type="button"
           onClick={() => onFocus(item.anchor, item.path)}
           title="Jump to this line in the diff"
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/45"
+          className={clsx(
+            stylex.props(commentStyles.threadJump, treeCommitStyles.commitControlFocus).className
+          )}
         >
-          {severity === 'p0' && <CircleAlert className="size-3.5 shrink-0 text-danger" />}
-          {severity === 'p1' && <AlertTriangle className="size-3.5 shrink-0 text-warning" />}
-          {severity === 'p2' && <AlertTriangle className="size-3.5 shrink-0 text-warning/70" />}
-          {severity === 'question' && <HelpCircle className="size-3.5 shrink-0 text-primary" />}
-          <span className="truncate text-[11px] text-muted-foreground">
+          {severity === 'p0' && <CircleAlert {...stylex.props(commentStyles.dangerGlyph)} />}
+          {severity === 'p1' && <AlertTriangle {...stylex.props(commentStyles.warningGlyph)} />}
+          {severity === 'p2' && (
+            <AlertTriangle {...stylex.props(commentStyles.mutedWarningGlyph)} />
+          )}
+          {severity === 'question' && <HelpCircle {...stylex.props(commentStyles.questionGlyph)} />}
+          <span {...stylex.props(commentStyles.threadLabel)}>
             {isNote
               ? severity === 'question'
                 ? 'question'
@@ -3350,40 +5263,37 @@ function ThreadCard({
             type="button"
             variant="ghost"
             size="icon"
-            className="-mr-1 size-6 text-muted-foreground hover:text-foreground"
+            width="calc(var(--spacing) * 6)"
+            height="calc(var(--spacing) * 6)"
+            labelColor="var(--crh-muted-button-label)"
+            className={
+              stylex.props(privateButtonStyles.mutedInk, commentStyles.threadDeleteOffset).className
+            }
             onClick={() => onDelete(item.id)}
             aria-label="Delete comment"
             title="Delete comment"
           >
-            <Trash2 className="size-3.5" />
+            <Trash2
+              className={clsx(
+                'crh-size-explicit',
+                stylex.props(explicitGlyphStyles.small).className
+              )}
+            />
           </Button>
         )}
       </header>
-      <div className="crh-line-annotation px-3 py-2.5 text-[13px] leading-6 text-foreground">
+      <div
+        className={clsx('crh-line-annotation', stylex.props(commentStyles.threadBody).className)}
+      >
         {item.body}
       </div>
     </article>
   );
 }
 
-function EmptyThread() {
-  return (
-    <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border/70 px-4 py-10 text-center">
-      <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <MessageSquarePlus className="size-4" />
-      </span>
-      <p className="text-[13px] font-medium text-foreground">No comments yet</p>
-      <p className="max-w-[16rem] text-[12px] leading-5 text-muted-foreground">
-        Click a line in the diff — or the <span className="font-semibold">+</span> on hover — to
-        start a review comment.
-      </p>
-    </div>
-  );
-}
-
 function Diagnostics({ diagnostics }: { readonly diagnostics: readonly ReviewDiagnostic[] }) {
   return (
-    <div className="grid gap-2">
+    <div {...stylex.props(markdownStyles.diagnostics)}>
       {diagnostics.map((diagnostic, index) => {
         const Icon = diagnostic.severity === 'info' ? CircleAlert : AlertTriangle;
         return (
@@ -3397,8 +5307,8 @@ function Diagnostics({ diagnostics }: { readonly diagnostics: readonly ReviewDia
                   : 'info'
             }
           >
-            <Icon className="size-4" />
-            <AlertTitle className="capitalize">
+            <Icon />
+            <AlertTitle {...stylex.props(markdownStyles.diagnosticTitle)}>
               {diagnostic.severity}
               {diagnostic.code ? `: ${diagnostic.code}` : ''}
             </AlertTitle>
@@ -3423,13 +5333,25 @@ function SimpleMarkdown({
 
   return (
     <div
-      className={cn(
-        'crh-markdown space-y-2 text-[13px] leading-[1.6]',
-        tone === 'foreground' ? 'text-foreground/90' : 'text-muted-foreground'
+      className={clsx(
+        'crh-markdown',
+        stylex.props(
+          markdownStyles.body,
+          tone === 'foreground' ? markdownStyles.foreground : markdownStyles.muted
+        ).className
       )}
     >
       {blocks.map((block, index) =>
-        renderLightMarkdownBlock(block, String(index), {}, { compact })
+        renderLightMarkdownBlock(
+          block,
+          String(index),
+          {},
+          {
+            compact,
+            blockClassName: stylex.props(index < blocks.length - 1 && markdownStyles.blockSpace)
+              .className,
+          }
+        )
       )}
     </div>
   );

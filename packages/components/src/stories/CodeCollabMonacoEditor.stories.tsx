@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -21,6 +22,86 @@ import {
 import { machineMetaCacheAtom } from '@/atoms/doc-meta';
 import { fileViewerWordWrapAtom } from '@/atoms/settings';
 import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+const sceneStyles = stylex.create({
+  editorFrame: {
+    height: '520px',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  terminal: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    backgroundColor: '#1e1e1e',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: '13px',
+    lineHeight: 'calc(var(--spacing) * 6)',
+    color: '#d4d4d4',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '300px',
+    width: '560px',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame: {
+    height: '520px',
+    width: '900px',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  grid: {
+    display: 'grid',
+    height: '640px',
+    width: '1180px',
+    'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+    gap: 'calc(var(--spacing) * 3)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  stack2: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'flex-direction': 'column',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  caption: {
+    'padding-left': 'calc(var(--spacing) * 4)',
+    color: '#9cdcfe',
+  },
+});
 
 const meta: Meta = {
   title: 'Sessions/CodeCollabMonacoEditor',
@@ -141,10 +222,7 @@ function StatusBarFrame({
   );
   return (
     <Provider store={store}>
-      <div
-        className="h-[520px] overflow-hidden rounded-md border border-border bg-background"
-        style={{ width }}
-      >
+      <div {...stylex.props(sceneStyles.editorFrame)} style={{ width }}>
         <SessionFileContentView
           sessionId={storySession.id}
           session={storySession}
@@ -166,10 +244,10 @@ function t(key: string, defaultValue: string): string {
 
 function StaticConflictStatusFrame() {
   return (
-    <div className="flex h-[300px] w-[560px] flex-col overflow-hidden rounded-md border border-border bg-background">
-      <div className="min-h-0 flex-1 overflow-hidden bg-[#1e1e1e] px-4 py-3 font-mono text-[13px] leading-6 text-[#d4d4d4]">
+    <div {...stylex.props(storyLayoutStyles.stack)}>
+      <div {...stylex.props(sceneStyles.terminal)}>
         <div>export function saveSnapshot() {' {'}</div>
-        <div className="pl-4 text-[#9cdcfe]">return writeFile(snapshot);</div>
+        <div {...stylex.props(storyLayout.caption)}>return writeFile(snapshot);</div>
         <div>{'}'}</div>
       </div>
       <SessionFileConflictActionRow onResolveConflict={async () => undefined} t={t} />
@@ -221,7 +299,7 @@ export const DeletedOpenFile: Story = {
       files: [deletedProviderEntry],
     });
     return (
-      <div className="h-[520px] w-[900px] overflow-hidden rounded-md border border-border bg-background">
+      <div {...stylex.props(storyLayoutStyles.frame)}>
         <SessionFileContentView
           sessionId={storySession.id}
           session={storySession}
@@ -253,8 +331,8 @@ export const RecreatedSamePath: Story = {
       },
     });
     return (
-      <div className="grid h-[640px] w-[1180px] grid-cols-2 gap-3 overflow-hidden rounded-md border border-border bg-background p-3">
-        <section className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border">
+      <div {...stylex.props(storyLayoutStyles.grid)}>
+        <section {...stylex.props(storyLayoutStyles.stack2)}>
           <SessionFileContentView
             sessionId={storySession.id}
             session={storySession}
@@ -264,7 +342,7 @@ export const RecreatedSamePath: Story = {
             fileProviderPending={false}
           />
         </section>
-        <section className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border">
+        <section {...stylex.props(storyLayoutStyles.stack2)}>
           <SessionFileContentView
             sessionId={storySession.id}
             session={storySession}
@@ -291,7 +369,7 @@ export const RenamedOpenFile: Story = {
       },
     });
     return (
-      <div className="h-[520px] w-[900px] overflow-hidden rounded-md border border-border bg-background">
+      <div {...stylex.props(storyLayoutStyles.frame)}>
         <SessionFileContentView
           sessionId={storySession.id}
           session={storySession}

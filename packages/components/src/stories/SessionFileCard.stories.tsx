@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { Provider, createStore } from 'jotai';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms';
@@ -7,6 +8,25 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
 import { SESSION_FILE_RETENTION_MS } from '@/lib/session-file-presentation';
 import { SessionFileCard, SessionFileCardList } from '@/components/ai-gui/session-file-card';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: '28rem',
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'dashed',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const baseFile = (overrides: Partial<SessionFilePayload>): SessionFilePayload => ({
   type: 'file',
@@ -32,9 +52,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const wrap = (content: React.ReactNode) => (
-  <div className="w-[28rem] rounded-xl border border-dashed border-border/60 bg-muted/20 p-4">
-    {content}
-  </div>
+  <div {...stylex.props(storyLayoutStyles.frame)}>{content}</div>
 );
 
 export const DownloadablePdf: Story = {
@@ -127,7 +145,7 @@ export const IconsByExtension: Story = {
   args: { file: baseFile({}) },
   render: () =>
     wrap(
-      <div className="flex flex-col gap-2">
+      <div {...stylex.props(storyLayout.stack)}>
         {[
           { fileName: 'notes.txt', mimeType: 'text/plain', textPreview: true },
           { fileName: 'main.ts', mimeType: 'text/x-typescript', textPreview: true },

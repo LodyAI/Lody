@@ -1,5 +1,7 @@
 'use client';
 
+import * as stylex from '@stylexjs/stylex';
+
 import { SiteAnchor } from '@site/components/site-anchor';
 
 /**
@@ -20,6 +22,11 @@ import { founderCallUrl } from '@site/lib/founder-call';
 import { LandingEffects } from './landing-interactions';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
+
+const styles = stylex.create({
+  firstReveal: { transitionDelay: '1ms' },
+  secondReveal: { transitionDelay: '2ms' },
+});
 
 /** Spring-ish easing matched to pricing card motion tokens. */
 const PRICE_NUMBER_TIMING = {
@@ -533,8 +540,20 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
         </div>
 
         <section className="pricing-hero">
-          <h1 className="pricing-hero-title reveal delay-1">{page.title}</h1>
-          <p className="pricing-hero-lead reveal delay-2">
+          <h1
+            className={[
+              'pricing-hero-title reveal reveal-delay-1',
+              stylex.props(styles.firstReveal).className,
+            ].join(' ')}
+          >
+            {page.title}
+          </h1>
+          <p
+            className={[
+              'pricing-hero-lead reveal reveal-delay-2',
+              stylex.props(styles.secondReveal).className,
+            ].join(' ')}
+          >
             <span className="pricing-hero-lead-emphasis">{page.leadEmphasis}</span>{' '}
             <span className="pricing-hero-lead-rest">{page.leadRest}</span>
           </p>

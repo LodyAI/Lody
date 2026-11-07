@@ -25,7 +25,7 @@ import {
   runImagePreviewContextMenu,
   type ImagePreviewExportOutcome,
 } from '@/lib/image-preview-export';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import 'react-photo-view/dist/react-photo-view.css';
 import './zoomable-image-viewer.css';
 
@@ -486,7 +486,7 @@ function OpenZoomableImageViewer({
   // `--mac-controls`/`--win-controls` rules in the CSS). Both hide themselves
   // in native fullscreen.
   const reservesWindowControls = !isElectronFullscreen;
-  const sliderClassName = cn(
+  const sliderClassName = clsx(
     'lody-photo-slider',
     !isMobile && 'lody-photo-slider--desktop',
     // A single image has nothing to count; "1 / 1" is only noise.
@@ -563,14 +563,14 @@ function OpenZoomableImageViewer({
         )}
         {menu && <TouchImageMenu target={menu} close={closeMenu} finalFocus={closeRef} />}
         <div
-          className={cn(
+          className={clsx(
             sliderClassName,
             stylex.props(styles.controls).className,
             ...forcedThemeClassNames('dark')
           )}
         >
           <div
-            className={cn('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
+            className={clsx('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
           >
             <span className="PhotoView-Slider__Counter" aria-live="polite">
               {index + 1} / {images.length}
