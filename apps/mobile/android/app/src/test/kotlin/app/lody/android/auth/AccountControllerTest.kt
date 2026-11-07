@@ -44,6 +44,35 @@ class AccountControllerTest {
   val cancellation=controller.cancel();runCurrent();late.complete(TokenPoll.Authorized(Credential("late")));cancellation.join()
   assertNull(store.saved);assertNull(controller.state.value.account);assertNull(controller.state.value.verification)
  }
+ @Test fun successorAccountSurvivesLogoutWhenAnIntermediateOperationIsCancelled()=runTest {
+  for (startIntermediate in listOf(true,false)) {
+   val store=Store(Credential("old"));val cache=Context()
+   val entered=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
+   var suspendTeardown=false
+   val api=object:Api(){override suspend fun account(credential:Credential)=
+    Account(if(credential.token=="old") "old-user" else "successor","Fixture",listOf(Workspace("workspace","Fixture")))}
+   val controller=AccountController(api,store,backgroundScope,cache){
+    if(suspendTeardown){suspendTeardown=false;entered.complete(Unit);release.await()}
+   }
+   controller.restore().join()
+   suspendTeardown=true
+   val logout=controller.logout();runCurrent();entered.await()
+   val intermediate=controller.cancel()
+   if(startIntermediate) runCurrent()
+   val successor=controller.login()
+   // Let a broken successor overtake the suspended logout, including Device Flow polling.
+   runCurrent();advanceTimeBy(1001);runCurrent()
+   release.complete(Unit)
+   logout.join();intermediate.join()
+   advanceTimeBy(1001);runCurrent();successor.join()
+   assertEquals("successor",controller.state.value.account?.id)
+   assertTrue(controller.state.value.verified)
+   assertFalse(controller.state.value.busy)
+   assertEquals("fixture-secret",store.saved?.token)
+   assertEquals("successor",cache.saved?.account?.id)
+   assertEquals("fixture-secret",controller.withVerifiedIdentity("successor"){it.token})
+  }
+ }
  @Test fun revokedSavedCredentialRequiresFreshAuthorization()=runTest {
   val store=Store(Credential("expired"))
   val api=object:Api(){override suspend fun account(credential:Credential):Account=throw AuthFailure("auth_expired")}

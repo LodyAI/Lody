@@ -7,6 +7,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     LodyApplication.shared.launch(application, options: options)
     return true
   }
+  func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    LodyApplication.shared.pushToken(deviceToken)
+  }
+  func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+    LodyApplication.shared.pushRegistrationFailed()
+  }
   func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                    options: UIScene.ConnectionOptions) -> UISceneConfiguration {
     let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: session.role)

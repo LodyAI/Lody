@@ -11,6 +11,8 @@ activity = "1.13.0"
 webkit = "1.18.0"
 
 [libraries]
+onesignal = { module = "com.onesignal:OneSignal", version = "5.7.6" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging", version = "25.0.1" }
 # AGP 9 ships Kotlin 2.2; this newer plugin on the build classpath drives built-in Kotlin.
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 quickjs = { module = "io.github.dokar3:quickjs-kt", version.ref = "quickjs" }

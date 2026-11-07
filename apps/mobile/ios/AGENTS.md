@@ -79,12 +79,14 @@
 
 - Native OneSignal SDK ownership stays in LodyKit `Notifications/PushNotifications.swift`;
   `PushLifecycle` initializes at app launch, retains SDK listeners and caches
-  clicks until `LodyApplication` resolves and acknowledges them.
+  clicks until `LodyApplication` resolves and acknowledges them. `PushRegistration` serializes
+  session-bound APNs writes; only the exact `configuration.selfHostedEnabled` Boolean
+  selects direct APNs. OneSignal uses `lody-push-v2:<userId>`; native ownership stays raw.
 - `project.yml` and `App` persist the NSE, App Group,
   SDK pin and entitlements across prebuild. Never fix only generated `ios/` files.
 - Notification navigation accepts only the legacy workspace/session route and resolves
   against the signed-in user's catalog. `recipientUserId` fences clicks after an
-  account switch; old payloads use the SDK's current external ID as a compatibility fallback.
+  account switch; payloads without a raw recipient are rejected (SDK external IDs are namespaced).
 - Debug's offline notification fixture never initializes OneSignal or requests real
   permission. See `apps/ios/PUSH_NOTIFICATIONS.md` for setup and verification limits.
 

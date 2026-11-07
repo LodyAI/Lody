@@ -1,4 +1,4 @@
-# Native OneSignal integration
+# Native push integration
 
 The iOS-only app keeps bundle ID `ai.lody.mobile` and uses the public OneSignal App
 ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`. `LODY_ONESIGNAL_APP_ID` can override it at
@@ -25,14 +25,42 @@ SDK version and App Group `group.ai.lody.mobile`.
 
 ## Runtime behavior
 
-The native SDK requests notification permission immediately after OneSignal
-initialization during app launch. iOS displays the system prompt only while the
-authorization status is undetermined; after a denial, Settings → Notifications is the
-manual entry. After account restoration, the SDK uses the Better Auth user ID as its
-external ID. Login does not trigger another permission request. Logout detaches and
-opts out the current subscription, clears delivered notifications, and drops buffered
-clicks. Offline logout cannot synchronously revoke a remote provider binding; use
-neutral lock-screen previews.
+The app requests system notification permission at launch, independently of the
+provider. Login never prompts. Auth restoration supplies the raw account ID and
+its native login credential to the process-owned registration lifecycle.
+
+`pushSubscriptions:configuration` currently returns **`selfHostedEnabled`**, not
+`selfHosted`. Only a decoded Boolean selects the provider: true uses direct APNs,
+false uses OneSignal. Missing/malformed responses and network errors do not select
+a default; a previously confirmed provider is retained and the next foreground or
+permission refresh retries. OneSignal initializes lazily and logs in with
+`lody-push-v2:<userId>`. Native account IDs and notification recipients stay raw.
+
+Direct APNs registration sends platform `ios`, purpose `notification`, the token,
+language, a persistent random installation ID, and the running app's actual Bundle
+ID. The backend owns APNs environment selection and requires a live auth session.
+No APNs key, JWT, token or installation ID is logged. There is no ActivityKit path.
+
+Registration, provider retirement and logout cleanup use a serial process-owned
+queue with the captured login credential. Each HTTP operation has a 15-second
+request timeout. Pending client writes settle before retirement and successor writes;
+stale configuration, permission and success callbacks cannot revive local state.
+A transport timeout does not prove that a server operation stopped: an ambiguous
+registration or unregister can still race later server operations. This is local
+serialization, not server-side registration-generation ordering.
+Logout detaches OneSignal and clears local notification state immediately without
+waiting for network cleanup. Cleanup failure is reported as unconfirmed, never as
+success; foreground refresh can retry, and backend session revocation is the final
+delivery fence. Offline logout cannot promise immediate remote revocation; use
+neutral lock-screen previews. The queue protects push writes only, not app startup,
+navigation, runtime teardown or sign-out completion.
+
+Provider transitions opt out/logout OneSignal for direct APNs, retire direct APNs
+when returning to OneSignal, and restore the appropriate notification-center delegate.
+Direct APNs payloads use top-level `route` and `recipientUserId`; OneSignal uses
+additional data. Both require an explicit raw recipient (legacy payloads without
+one are rejected rather than attributed to whichever account is currently open).
+Foreground delivery suppresses signed-out, wrong-account and visible-session pushes.
 
 The SDK's Web launch URL is suppressed. `LodyApplication` handles `data.route` after auth and
 navigation become ready, checks the recipient and workspace, selects the workspace,
@@ -46,3 +74,15 @@ subscription (nonempty, not `local-`) and shows the official integration dialog 
 per process; the button can request permission. This developer-only scaffolding is
 kept out of product flows. Only subscription readiness is exposed, not token/ID data.
 In-app messages, email/SMS, and tags are not enabled by this integration.
+
+## Verification
+
+`pnpm verify:native --case notifications` exercises the production lifecycle with a
+deterministic backend boundary: permission gating, exact capability decoding,
+Bundle-ID binding, provider transitions, retryable failures and a suspended old
+registration completing across logout and same-user re-login. The existing click
+buffer checks cover cold restoration, account replacement and stale acknowledgement.
+
+A simulator build checks SDK/delegate integration, not APNs delivery. Physical-device
+acceptance still requires both provider configurations, token rotation, cold clicks,
+permission changes in Settings, foreground suppression and logout while offline.

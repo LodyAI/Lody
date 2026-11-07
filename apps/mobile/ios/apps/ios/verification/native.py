@@ -49,7 +49,7 @@ checks = {
     'session-rows': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift', 'Sessions/SessionTabSelection.swift', 'Sessions/HomeGrouping.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
     'ai-usage': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/AIUsageModels.swift', 'Settings/AIUsageSections.swift'],
     'settings-roles': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/PromptShortcutSections.swift', 'Settings/AgentRoleSections.swift'],
-    'notifications': ['Notifications/PushPermissionLaunchRequest.swift', 'Notifications/PushClickBuffer.swift'],
+    'notifications': ['Notifications/PushRegistration.swift', 'Notifications/PushPermissionLaunchRequest.swift', 'Notifications/PushClickBuffer.swift'],
     'diagnostics': ['Diagnostics/DiagnosticsStore.swift'],
     'photo-cache': ['List/PhotoDiskCache.swift'],
     'file-link': ['Chat/ChatFileLink.swift'],
