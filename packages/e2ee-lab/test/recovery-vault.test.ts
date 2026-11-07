@@ -1361,7 +1361,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
     expect(await ledger([page(other.records)])).toMatchObject({ _tag: 'Failure' });
     expect(await ledger([])).toMatchObject({ _tag: 'Failure' });
   });
-  it('keeps restored keys usable after core releases its own, for a real SQLite install', () =>
+  it('installs recovered keys in SQLite and wipes temporary copies when the restore cache closes', () =>
     inDir(async (dir) => {
       await Effect.runPromise(
         Effect.scoped(
@@ -1386,7 +1386,11 @@ describe('encrypted recovery vault and genuine workflow', () => {
             const entries = keys.entries();
             expect(entries.length).toBeGreaterThan(0);
             for (const [epoch, key] of entries) yield* installed.saveAndReload(epoch, key);
+            const borrowed = yield* keys.read(0);
             keys.dispose();
+            for (const [epoch, key] of entries)
+              expect(Result.isFailure(commitEpochKey(r.f.initial.genesis, epoch, key))).toBe(true);
+            expect(Result.isFailure(commitEpochKey(r.f.initial.genesis, 0, borrowed))).toBe(true);
             const read = yield* installed.read(0);
             expect(
               ok(commitEpochKey(r.f.initial.genesis, 0, read)).equals(
