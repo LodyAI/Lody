@@ -123,10 +123,8 @@ processCell.configure(processRow, text: NSAttributedString(string: processRow.te
 processCell.layoutIfNeeded()
 let railCenter = LodyDesign.Rail.center - ChatReadingColumn.cellMargin
 let railText = LodyDesign.Rail.text - ChatReadingColumn.cellMargin
-precondition(!processCell.processGlyph.isHidden && abs(processCell.processGlyph.frame.midX - railCenter) < 0.5,
-  "The process glyph must sit on the rail center")
-precondition(processCell.processGlyph.kind == .done, "A finished process must draw the done glyph")
-precondition(abs(processCell.processTitle.frame.minX - railText) < 0.5, "Process line one must start at the rail text column")
+precondition(processCell.processGlyph.isHidden, "A finished process must hide the done glyph")
+precondition(processCell.processTitle.frame.minX == 0, "A completed process without a glyph starts at the text edge")
 precondition(processCell.label.isHidden && processCell.numericText.isHidden, "The rail row replaces the plain duration label")
 precondition(processCell.processDetail.text == processRow.detail && processCell.processDetail.numberOfLines == 1,
   "Line two must show the process summary on one line")
@@ -136,9 +134,10 @@ precondition(processCell.processDetail.frame.minX == processCell.processTitle.fr
 let titleText = processCell.processTitle.attributedText!
 let titleFont = titleText.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
 let titleWeight = (titleFont.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat ?? 0
-let titleSize = LodyDesign.font(.subheadline, size: 14.5, compatibleWith: processCell.traitCollection).pointSize
-precondition(abs(titleFont.pointSize - titleSize) < 0.1 && titleWeight >= UIFont.Weight.semibold.rawValue - 0.01,
-  "Line one uses 14.5 pt semibold, got \(titleFont.pointSize) weight \(titleWeight)")
+let titleSize = LodyDesign.mono(12, compatibleWith: processCell.traitCollection).pointSize
+precondition(abs(titleFont.pointSize - titleSize) < 0.1 && abs(titleWeight) < 0.01
+  && titleFont.fontDescriptor.symbolicTraits.contains(.traitMonoSpace),
+  "The whole process title uses regular 12 pt mono")
 let durationLabel = ChatWorkDuration.label(64_000)
 let durationRange = (titleText.string as NSString).range(of: durationLabel, options: .backwards)
 precondition(durationRange.location != NSNotFound, "Line one must carry the duration")
@@ -147,15 +146,14 @@ precondition(durationRunFont.fontDescriptor.symbolicTraits.contains(.traitMonoSp
   "The duration uses 12 pt mono")
 precondition(!processCell.processChevron.isHidden && processCell.processChevron.frame.maxX <= 358,
   "An actionable process row shows a trailing chevron")
-precondition(processCell.processTitle.frame.maxX <= processCell.processChevron.frame.minX, "Text must clear the chevron")
+let titleWidth = ceil(titleText.boundingRect(with: CGSize(width: processCell.processTitle.bounds.width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).width)
+precondition(abs(processCell.processChevron.frame.minX - min(342, processCell.processTitle.frame.minX + titleWidth + 2)) < 1,
+  "The chevron follows the title rather than the row edge: \(processCell.processChevron.frame) title \(processCell.processTitle.frame), measured \(titleWidth)")
 let separatorColor = UIColor.separator.resolvedColor(with: processCell.traitCollection).cgColor
 precondition(!processCell.contentView.subviews.contains {
   !$0.isHidden && $0.backgroundColor?.resolvedColor(with: processCell.traitCollection).cgColor == separatorColor
 }, "The process row draws no hairline")
-let trunk = processCell.processTree.path?.boundingBoxOfPath ?? .null
-precondition(!trunk.isNull && abs(trunk.midX - railCenter) < 0.5 && abs(trunk.maxY - processHeight) < 0.5
-  && trunk.minY >= processCell.processGlyph.frame.maxY,
-  "A process row with sub-agents draws a trunk from below its glyph to the row bottom")
+precondition(processCell.processTree.path == nil, "A completed process without a glyph has no rail trunk")
 precondition(processCell.accessibilityLabel == processRow.text + ", " + processRow.detail,
   "VoiceOver reads both process lines")
 
@@ -175,6 +173,29 @@ var waitingRow = processRow
 waitingRow.attention = true
 liveCell.configure(waitingRow, text: NSAttributedString(string: waitingRow.text))
 precondition(liveCell.processGlyph.kind == .attention, "A process that needs attention draws the attention glyph")
+for style in [UIUserInterfaceStyle.light, .dark] {
+  for category in [UIContentSizeCategory.large, .accessibilityLarge] {
+    let traits = UITraitCollection(traitsFrom: [UITraitCollection(userInterfaceStyle: style), UITraitCollection(preferredContentSizeCategory: category)])
+    for row in [processRow, durationRow, waitingRow] {
+      let title = ChatCell.processTitle(row, traits: traits)
+      title.enumerateAttributes(in: NSRange(location: 0, length: title.length)) { attributes, _, _ in
+        let font = attributes[.font] as! UIFont
+        precondition(font == LodyDesign.mono(12, compatibleWith: traits), "Every status and duration run uses the same regular mono face")
+        let color = attributes[.foregroundColor] as! UIColor
+        precondition(color.resolvedColor(with: traits) == UIColor.lodySecondary.resolvedColor(with: traits))
+      }
+      let cell = ChatCell(frame: CGRect(x: 0, y: 0, width: 358, height: ChatCell.processHeight(for: row, width: 358, traits: traits)))
+      window.addSubview(cell)
+      cell.traitOverrides.preferredContentSizeCategory = category
+      cell.overrideUserInterfaceStyle = style
+      cell.configure(row, text: title)
+      cell.setNeedsLayout()
+      cell.layoutIfNeeded()
+      precondition(cell.processTitle.frame.height == ceil(LodyDesign.mono(12, compatibleWith: cell.traitCollection).lineHeight),
+        "Process layout measures the same font it renders")
+    }
+  }
+}
 print("Chat render: process rows draw the rail glyph, two lines, chevron and sub-agent trunk")
 
 let answerRow = ChatRow(id: "reply:answer", entryID: "reply", kind: "text", text: "计时完成。")
@@ -311,8 +332,7 @@ precondition(
 )
 precondition(resolved(failedLiveSummary.icon.tintColor, traits: traits) == resolved(.secondaryLabel, traits: traits),
   "The warning mark stays neutral")
-precondition((runningSummary.icon.image?.size.width ?? .greatestFiniteMagnitude) < (thoughtCell.icon.image?.size.width ?? 0),
-  "The process status pip must be smaller than thought and tool icons")
+
 precondition((failedLiveSummary.icon.image?.size.width ?? .greatestFiniteMagnitude) < (thoughtCell.icon.image?.size.width ?? 0),
   "The warning mark must stay in the process pip scale")
 precondition(ChatCell.leading(failedSummary.row!) == railText, "A summary with a mark starts at the rail text column")
@@ -320,8 +340,8 @@ precondition(abs(failedSummary.icon.frame.midX - railCenter) < 0.5, "The summary
 precondition(failedSummary.icon.frame.width == 8, "The process mark slot stays 8 points")
 precondition(abs(doneSummary.icon.frame.midY - doneSummary.label.frame.midY) <= 0.5,
   "The process pip must sit on the text baseline")
-precondition(doneSummary.label.frame.minX == railText, "Summary text must start at the rail text column")
-precondition(!doneSummary.processChevron.isHidden && doneSummary.label.frame.maxX <= doneSummary.processChevron.frame.minX,
+precondition(doneSummary.label.frame.minX == 0, "A summary without a mark starts at the text edge")
+precondition(!doneSummary.processChevron.isHidden && doneSummary.processChevron.frame.minX > doneSummary.label.frame.minX,
   "Summary rows open the activity through a trailing chevron")
 precondition(ChatCell.messageFont(for: doneSummary.row!, compatibleWith: traits).pointSize == 12.5 * UIFont.dynamicScale(compatibleWith: traits),
   "Summary rows use 12.5 pt text")
@@ -360,18 +380,8 @@ let warningSwapText = NSAttributedString(string: warningSwap.text, attributes: [
 ])
 markSwap.configure(warningSwap, text: warningSwapText)
 markSwap.layoutIfNeeded()
-if UIAccessibility.isReduceMotionEnabled {
-  precondition(!markSwap.icon.lastReplaceAnimated, "Reduce Motion must keep the process mark swap instant")
-} else {
-  precondition(markSwap.icon.lastReplaceAnimated, "Replacing the process pip with a warning mark must use a symbol replace")
-}
+// A healthy summary has no image to replace; adding attention must show the mark.
 markSwap.configure(warningSwap, text: warningSwapText)
-if !UIAccessibility.isReduceMotionEnabled {
-  precondition(
-    markSwap.icon.lastReplaceAnimated,
-    "A later process update must not cancel the pip-to-warning replace"
-  )
-}
 precondition(
   markSwap.icon.image?.pngData() == warnMark?.pngData(),
   "The leading mark must finish on the warning symbol"

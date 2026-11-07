@@ -167,7 +167,7 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   @objc private func refreshAccent() {
-    let accent = LodyAccentChoice.current.color.resolvedColor(with: traitCollection)
+    let accent = LodyAccent.color.resolvedColor(with: traitCollection)
     layoutToggle.accentColor = accent
     confirm.accentColor = accent
     for case let cell as ChatPhotoCell in grid.visibleCells {

@@ -523,9 +523,9 @@ private enum ChatComposerActionMode {
 
   var color: UIColor {
     switch self {
-    case .send: LodyAccentChoice.current.color
+    case .send: LodyAccent.color
     case .loading: .systemGray
-    case .stop: .systemRed
+    case .stop: LodyAccent.color
     }
   }
 
@@ -585,14 +585,14 @@ private final class ChatComposerActionVisual: UIView {
 
   @objc private func refreshAccent() {
     backgroundColor = mode?.color
-    symbol.tintColor = mode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = mode == .loading ? .white : LodyAccent.foregroundColor
   }
 
   func render(_ nextMode: ChatComposerActionMode) {
     guard mode != nextMode else { return }
     let shouldAnimate = mode != nil && window != nil
     mode = nextMode
-    symbol.tintColor = nextMode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = nextMode == .loading ? .white : LodyAccent.foregroundColor
     guard shouldAnimate else {
       backgroundColor = nextMode.color
       applyContent(nextMode)

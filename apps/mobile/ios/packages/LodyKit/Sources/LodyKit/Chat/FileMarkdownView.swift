@@ -323,6 +323,41 @@ enum ChatContextViewProbe {
     try? JSONSerialization.data(withJSONObject: checks, options: .sortedKeys).write(to: url, options: .atomic)
   }
 
+  static func checkInlineCode() {
+    guard LodyUIVerify.enabled else { return }
+    let store = ChatMarkdownStore(traits: .current)
+    var checks: [String: Bool] = [:]
+    for secondary in [false, true] {
+      for streaming in [false, true] {
+        let rendered = store.view(id: "inline-\(secondary)-\(streaming)",
+          text: "Body `inline` and **`boldcode`** and [`linkedcode`](https://example.com)",
+          secondary: secondary, streaming: streaming, width: 300)
+        let text = (rendered.subviews.first as! FileMarkdownView).textLabelView.attributedText
+        let bodyRange = (text.string as NSString).range(of: "Body")
+        let bodyFont = text.attribute(.font, at: bodyRange.location, effectiveRange: nil) as? UIFont
+        for token in ["inline", "boldcode", "linkedcode"] {
+          let range = (text.string as NSString).range(of: token)
+          let key = "inline-\(token)-\(secondary)-\(streaming)"
+          guard range.location != NSNotFound else { checks[key] = false; continue }
+          let font = text.attribute(.font, at: range.location, effectiveRange: nil) as? UIFont
+          let color = text.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor
+          checks[key + "-bodySize"] = font != nil && font?.pointSize == bodyFont?.pointSize
+          checks[key + "-monospaced"] = font?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) == true
+          checks[key + "-color"] = color == (token == "linkedcode" ? .systemBlue : .secondaryLabel)
+        }
+      }
+    }
+    let rendered = store.view(id: "fenced", text: "```\nfenced\n```", secondary: false, streaming: false, width: 300)
+    func labels(_ view: UIView) -> [TextLabelView] {
+      (view as? TextLabelView).map { [$0] } ?? view.subviews.flatMap { labels($0) }
+    }
+    let code = labels(rendered).first { $0.attributedText.string.contains("fenced") }?.attributedText
+    checks["fencedColor"] = code?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .lodyInk
+    checks["fencedSize"] = (code?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)?.pointSize == store.theme.fonts.code.pointSize
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("lody-inline-code.json")
+    try? JSONSerialization.data(withJSONObject: checks, options: .sortedKeys).write(to: url, options: .atomic)
+  }
+
   static func record(_ markdown: UIView) {
     guard LodyUIVerify.enabled else { return }
     var grown: [String] = []

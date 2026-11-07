@@ -92,7 +92,8 @@ for index, scenario in enumerate(scenarios):
         assert ui.element('queued-message-behavior').get('AXValue') == original
         back()
         tap('appearance')
-        ui.element('accent-color')
+        assert 'accent-color' not in identifiers(ui.state())
+        ui.element('app-icon')
         ui.capture('appearance-opened')
         previous = ui.element('appearance')['AXValue']
         ui.axe('tap', '--id', 'appearance', '--post-delay', '.3')
@@ -106,7 +107,8 @@ for index, scenario in enumerate(scenarios):
         ui.element('app-icon-default')
         ui.capture('app-icons-opened')
         back()
-        ui.element('accent-color')
+        assert 'accent-color' not in identifiers(ui.state())
+        ui.element('app-icon')
         back()
         tap('about')
         version = ui.element('app-version')

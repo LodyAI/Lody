@@ -1,7 +1,15 @@
 import ChatKit
+import LodyCore
 import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
+
+// Keep the standalone composer host offline; shortcut service behavior has its own suite.
+@MainActor enum PromptShortcutsController {
+  static func body(id: String) async throws -> RuntimeContract.PromptShortcut {
+    throw NSError(domain: "ComposerOfflineFixture", code: 1)
+  }
+}
 
 @MainActor func descendants(_ view: UIView) -> [UIView] {
   [view] + view.subviews.flatMap(descendants)
@@ -225,46 +233,40 @@ precondition(
   actionVisual?.backgroundColor?.resolvedColor(with: actionComposer.traitCollection).isEqual(UIColor.lodyAccent.resolvedColor(with: actionComposer.traitCollection)) == true,
   "An actionable Send must render as an accent circular control"
 )
-let originalAccent = LodyAccentChoice.current.rawValue
-LodyAccentChoice.save("purple")
-RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-for host in [composer, actionComposer] {
-  let visual = descendants(host).first { $0.accessibilityIdentifier == "session-action-visual" }!
-  precondition(visual.backgroundColor?.resolvedColor(with: host.traitCollection).isEqual(UIColor.systemPurple.resolvedColor(with: host.traitCollection)) == true,
-    "Existing chat and sheet composers must recolor when the accent changes")
-}
-LodyAccentChoice.save("unknown")
-precondition(LodyAccentChoice.current == .purple, "An unknown accent must not replace the saved choice")
-for value in ["#FFFFAA", "#123abc"] {
-  LodyAccentChoice.save(value)
-  RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-  precondition(UserDefaults.standard.string(forKey: "accentColor") == value.uppercased())
-  precondition(LodyAccentChoice.hex(LodyAccentChoice.current.rawValue, dark: false) == value.uppercased())
-  precondition(LodyAccentChoice.hex(LodyAccentChoice.current.rawValue, dark: true) == value.uppercased())
-  for host in [composer, actionComposer] {
-    let visual = descendants(host).first { $0.accessibilityIdentifier == "session-action-visual" }!
-    precondition(visual.backgroundColor?.isEqual(LodyAccentChoice.current.color) == true,
-      "A custom accent must update existing chat and sheet send controls")
-    let symbol = descendants(visual).compactMap { $0 as? UIImageView }.first!
-    precondition(symbol.tintColor.isEqual(value == "#FFFFAA" ? UIColor.black : UIColor.white),
-      "Bright custom colors need a readable send glyph")
+let originalAccent = UserDefaults.standard.object(forKey: "accentColor")
+for legacy in ["purple", "#FFFFAA", "#123ABC"] {
+  UserDefaults.standard.set(legacy, forKey: "accentColor")
+  for style in [UIUserInterfaceStyle.light, .dark] {
+    for host in [composer, actionComposer] {
+      host.overrideUserInterfaceStyle = style
+      host.setComposerState(ready)
+      let visual = descendants(host).first { $0.accessibilityIdentifier == "session-action-visual" }!
+      let traits = host.traitCollection
+      precondition(visual.backgroundColor?.resolvedColor(with: traits) == UIColor.lodyInk.resolvedColor(with: traits),
+        "Legacy accent preferences cannot recolor Send in either host")
+      let symbol = descendants(visual).compactMap { $0 as? UIImageView }.first!
+      precondition(symbol.tintColor.resolvedColor(with: traits) == UIColor.lodyGround.resolvedColor(with: traits),
+        "Send uses contrasting Ground in light and dark mode")
+    }
   }
-  for invalid in ["#123", "#GGFFFF", "#12345678", "#123456\n", "unknown"] { LodyAccentChoice.save(invalid) }
-  precondition(LodyAccentChoice.current.rawValue == value.uppercased(), "Invalid values cannot overwrite a custom color")
 }
-LodyAccentChoice.save(originalAccent)
-RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-print("Composer: persisted accent changes update existing hosts and reject unknown choices")
+UserDefaults.standard.set(originalAccent, forKey: "accentColor")
+print("Composer: fixed Ink ignores legacy preferences in both hosts and appearances")
 
 actionInput.text = ""
 actionComposer.textViewDidChange(actionInput)
 actionComposer.setComposerState(
   #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 )
-precondition(
-  actionVisual?.backgroundColor?.isEqual(UIColor.systemRed) == true,
-  "Stop must render as a red circular control"
-)
+for style in [UIUserInterfaceStyle.light, .dark] {
+  actionComposer.overrideUserInterfaceStyle = style
+  let traits = actionComposer.traitCollection
+  precondition(actionVisual?.backgroundColor?.resolvedColor(with: traits) == UIColor.lodyInk.resolvedColor(with: traits),
+    "Stop must render as an Ink circular control in both appearances")
+  let symbol = descendants(actionVisual!).compactMap { $0 as? UIImageView }.first!
+  precondition(symbol.tintColor.resolvedColor(with: traits) == UIColor.lodyGround.resolvedColor(with: traits),
+    "Stop uses the same contrasting Ground glyph as Send")
+}
 actionComposer.setComposerState(
   #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"stopping":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 )

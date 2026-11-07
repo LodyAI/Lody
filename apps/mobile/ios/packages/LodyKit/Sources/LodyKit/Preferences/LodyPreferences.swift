@@ -11,7 +11,7 @@ enum LodyPreferences {
 
   static var snapshot: PreferencesSnapshot {
     PreferencesSnapshot(
-      accentColor: LodyAccentChoice.current.rawValue,
+      accentColor: "ink",
       darkBackground: LodyDarkBackground.current.rawValue,
       queuedMessageBehavior: queuedMessageBehavior
     )

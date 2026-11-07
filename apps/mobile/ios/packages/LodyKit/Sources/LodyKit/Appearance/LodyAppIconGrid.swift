@@ -23,7 +23,7 @@ private final class AppIconCell: UICollectionViewCell {
     label.textAlignment = .center
     label.numberOfLines = 2
     label.textColor = .label
-    check.tintColor = .systemBlue
+    check.tintColor = .lodyAccent
     check.backgroundColor = .systemBackground
     check.layer.cornerRadius = 11
     for view in [image, label, check, progress] { contentView.addSubview(view) }

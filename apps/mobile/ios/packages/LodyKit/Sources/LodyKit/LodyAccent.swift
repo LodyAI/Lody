@@ -7,7 +7,6 @@ final class LodyAccentLifecycle {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     lodyApplyWindowAccent()
-    LodyAccentChoice.mirror()
     LodyVerifyWidth.install()
     return true
   }

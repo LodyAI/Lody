@@ -120,6 +120,7 @@ for files in checks.values():
         files.append('Appearance/LodyDesign.swift')
     if 'Chat/ChatComposerView.swift' in files:
         files.append('Chat/ChatActionBar.swift')
+        files.extend(['Projects/RepositoryIcon.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift'])
         files.append('Chat/ChatComposerFormatBar.swift')
         files.append('Chat/ChatShortcutInsertion.swift')
     if 'Chat/ChatTranscript.swift' in files:
@@ -224,6 +225,27 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             command += ['-framework', 'SwiftUI']
         main = checks_root / name / 'main.swift'
         package_sources = [kit / 'Sources/LodyKit' / file for file in files] + [main]
+        if any('import LodyDesignSystem' in source.read_text() for source in package_sources):
+            directory = Path(output) / 'design-system-ios'
+            if not directory.exists():
+                directory.mkdir(exist_ok=True)
+                design = root / 'packages/LodyAppearance/Sources/LodyDesignSystem'
+                resources = directory / 'LodyAppearance_LodyDesignSystem.bundle'
+                resources.mkdir()
+                subprocess.run(['xcrun', 'actool', str(design / 'Resources/LodyIcons.xcassets'),
+                    '--compile', str(resources), '--platform', 'iphonesimulator',
+                    '--minimum-deployment-target', '26.0', '--target-device', 'iphone',
+                    '--target-device', 'ipad'], check=True, timeout=120)
+                # SwiftPM normally generates this accessor; these checks compile directly.
+                accessor = directory / 'resource_bundle_accessor.swift'
+                accessor.write_text('import Foundation\nextension Bundle { static let module = Bundle(path: '
+                                    + '"' + str(resources) + '")! }\n')
+                subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-sdk', sdk,
+                    '-target', f'{arch}-apple-ios26.0-simulator', '-emit-module', '-emit-library', '-static',
+                    '-module-name', 'LodyDesignSystem', '-emit-module-path', str(directory / 'LodyDesignSystem.swiftmodule'),
+                    *map(str, sorted(design.glob('*.swift'))), str(accessor),
+                    '-o', str(directory / 'libLodyDesignSystem.a')], check=True, timeout=240)
+            command += ['-I', str(directory), '-L', str(directory), '-lLodyDesignSystem']
         if any('import LodyCore' in source.read_text() for source in package_sources):
             directory = Path(output) / ('lody-core-ios' if simulator else 'lody-core-host')
             if not directory.exists():

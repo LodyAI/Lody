@@ -18,86 +18,9 @@ enum LodyDarkBackground: String {
   }
 }
 
-enum LodyAccentChoice: Equatable, RawRepresentable {
-  case ink, blue, indigo, purple, pink
-  case custom(String)
-
-  init?(rawValue: String) {
-    switch rawValue {
-    case "ink": self = .ink
-    case "blue": self = .blue
-    case "indigo": self = .indigo
-    case "purple": self = .purple
-    case "pink": self = .pink
-    default:
-      guard rawValue.utf8.count == 7, rawValue.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil else { return nil }
-      self = .custom(rawValue.uppercased())
-    }
-  }
-
-  var rawValue: String {
-    switch self {
-    case .ink: "ink"
-    case .blue: "blue"
-    case .indigo: "indigo"
-    case .purple: "purple"
-    case .pink: "pink"
-    case .custom(let hex): hex
-    }
-  }
-
-  // The Share Extension has its own standard defaults; the app mirrors the accent here.
-  static var shared: UserDefaults? { UserDefaults(suiteName: "group.ai.lody.mobile") }
-
-  static var current: Self {
-    #if LODY_SHARE_EXTENSION
-    let defaults = shared ?? .standard
-    #else
-    let defaults = UserDefaults.standard
-    #endif
-    return Self(rawValue: defaults.string(forKey: "accentColor") ?? "") ?? .ink
-  }
-
-  static func mirror() {
-    shared?.set(current.rawValue, forKey: "accentColor")
-  }
-
-  var color: UIColor {
-    switch self {
-    case .ink: .lodyInk
-    case .blue: .systemBlue
-    case .indigo: .systemIndigo
-    case .purple: .systemPurple
-    case .pink: .systemPink
-    case .custom(let hex): lodyTint(hex) ?? .systemBlue
-    }
-  }
-
-  var foregroundColor: UIColor {
-    if self == .ink { return .lodyGround }
-    guard case .custom = self else { return .white }
-    var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-    color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-    func linear(_ value: CGFloat) -> CGFloat {
-      value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-    }
-    let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-    return luminance > 0.179 ? .black : .white
-  }
-
-  static func save(_ value: String) {
-    guard let next = Self(rawValue: value), next != current else { return }
-    UserDefaults.standard.set(next.rawValue, forKey: "accentColor")
-    mirror()
-    DispatchQueue.main.async {
-      lodyApplyWindowAccent()
-      NotificationCenter.default.post(name: .lodyAppearanceDidChange, object: nil)
-    }
-  }
-
-  static func hex(_ value: String, dark: Bool) -> String {
-    hex((Self(rawValue: value) ?? .ink).color.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light)))
-  }
+enum LodyAccent {
+  static let color = UIColor.lodyInk
+  static let foregroundColor = UIColor.lodyGround
 
   static func hex(_ color: UIColor) -> String {
     var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
@@ -179,7 +102,7 @@ extension UIColor {
   }
 
   static let lodyAccent = UIColor { traits in
-    LodyAccentChoice.current.color.resolvedColor(with: traits)
+    LodyAccent.color.resolvedColor(with: traits)
   }
 
   static let lodyUserBubble = UIColor { traits in
@@ -219,7 +142,7 @@ func lodyApplyWindowAccent() {
   for scene in UIApplication.shared.connectedScenes {
     guard let scene = scene as? UIWindowScene else { continue }
     for window in scene.windows {
-      window.tintColor = LodyAccentChoice.current.color
+      window.tintColor = LodyAccent.color
     }
   }
   #endif
@@ -228,14 +151,13 @@ func lodyApplyWindowAccent() {
 extension UIButton.Configuration {
   // Prominent glass draws white titles whatever the foreground, and Ink resolves near-white in dark mode.
   @MainActor static func lodyProminent(font: UIFont? = nil) -> UIButton.Configuration {
-    let accent = LodyAccentChoice.current
-    var configuration: UIButton.Configuration = accent == .ink ? .filled() : .prominentGlass()
-    configuration.baseBackgroundColor = accent.color
-    configuration.baseForegroundColor = accent.foregroundColor
+    var configuration: UIButton.Configuration = .filled()
+    configuration.baseBackgroundColor = LodyAccent.color
+    configuration.baseForegroundColor = LodyAccent.foregroundColor
     configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
       var attributes = attributes
       if let font { attributes.font = font }
-      attributes.foregroundColor = accent.foregroundColor
+      attributes.foregroundColor = LodyAccent.foregroundColor
       return attributes
     }
     return configuration
