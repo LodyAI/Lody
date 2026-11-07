@@ -206,3 +206,5 @@ Ordinary `not_visible` and `project_not_shared` verdicts remain definitive denia
 snapshot signed by another device, delayed original availability without terminal
 writes, original expiry, the actual Streams HTTP backward parser, bounded aborted
 reads and watcher stop cancellation. These tests do not claim deployment acceptance.
+
+Replacing the retained-update reconstruction: [execution origin without forkAt](2026-11-05-e2ee-execution-origin-without-forkat.md) (proposed).
