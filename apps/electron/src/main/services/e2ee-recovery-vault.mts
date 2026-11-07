@@ -381,6 +381,22 @@ const openVault = (unlock: RecoveryUnlock) =>
     })
   })
 
+/** The name a user gives a passkey, as stored in the encrypted index. */
+export function passkeyLabel(input: unknown): string {
+  const label = typeof input === 'string' ? input.trim().replace(/\s+/g, ' ') : ''
+  if (!label || label.length > 64) throw new Error('e2ee_recovery_invalid-input')
+  return label
+}
+
+/** A readable default that names the device, never its host name. */
+export function defaultPasskeyLabel(input: {
+  readonly platform: string
+  readonly systemVersion: string
+}): string {
+  if (input.platform !== 'darwin') return 'This device'
+  return input.systemVersion ? `Mac · macOS ${input.systemVersion}` : 'Mac'
+}
+
 /** Add a passkey to the account's vault. Adding one needs V, so the file opens it. */
 export const enrollRecoveryPasskey = (
   io: RecoveryVaultIo & {
@@ -392,8 +408,13 @@ export const enrollRecoveryPasskey = (
   Effect.scoped(
     Effect.gen(function* () {
       const vault = yield* openVault({ file: io.file })
-      yield* enrollVaultPasskey({ port: io.port, vault, label: io.label })
-      return { passkeys: (yield* vault.listPasskeys()).length }
+      const label = yield* Effect.try({
+        try: () => passkeyLabel(io.label),
+        catch: () => ({ code: 'invalid-input' })
+      })
+      yield* enrollVaultPasskey({ port: io.port, vault, label })
+      const passkeys = yield* vault.listPasskeys()
+      return { passkeys: passkeys.length, labels: passkeys.map((row) => row.label) }
     }).pipe(Effect.provide(vaults(io)))
   )
 
