@@ -7,6 +7,13 @@ import org.junit.Test
 
 /** The sign-in page refuses what web `/login` refuses before any request leaves the device. */
 class LoginFormTest {
+    @Test fun authenticationFailuresUseLocalizedSafeMessages() {
+        assertEquals(app.lody.android.R.string.auth_invalid_credentials, authError("invalid_credentials"))
+        assertEquals(app.lody.android.R.string.auth_verify_notice, authError("email_not_verified"))
+        assertEquals(app.lody.android.R.string.auth_unsupported_local_reset, authError("unsupported_local_reset"))
+        assertEquals(app.lody.android.R.string.auth_failed, authError("unrecognized-server-detail"))
+    }
+
     @Test fun signInNeedsAnEmailAndAnyPassword() {
         assertEquals(Problem.EmailInvalid, LoginForm.problem(false, "", "person", "secret"))
         assertEquals(Problem.EmailInvalid, LoginForm.problem(false, "", "person@example", "secret"))

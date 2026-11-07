@@ -1,4 +1,5 @@
 import Foundation
+import MetalKit
 import UIKit
 
 // Compile the production AuthSession against deterministic external boundaries.
@@ -53,6 +54,23 @@ final class LocalStore: @unchecked Sendable {
 
 @main struct AuthSessionCheck {
   @MainActor static func main() async throws {
+    let visual = LoginDitherView(frame: CGRect(x: 0, y: 0, width: 378, height: 360))
+    visual.layoutIfNeeded()
+    let metal = visual.subviews.compactMap { $0 as? MTKView }.first
+    precondition(metal != nil, "The login Metal shader must compile on the simulator")
+    let drawableSize = metal!.drawableSize
+    precondition(drawableSize == CGSize(width: 126, height: 120), "Login dither uses 3 pt cells")
+    visual.frame.size.height = 0
+    visual.setNeedsLayout()
+    visual.layoutIfNeeded()
+    precondition(metal!.drawableSize == drawableSize,
+                 "Folding to email must retain the drawable until the visible surface finishes clipping")
+    visual.frame.size.height = 300
+    visual.setNeedsLayout()
+    visual.layoutIfNeeded()
+    precondition(metal!.drawableSize == CGSize(width: 126, height: 100),
+                 "Reopening the login visual must resize to its new visible bounds")
+    print("PASS: login Metal compiles and folding retains whole-cell rendering")
     let session = AuthSession()
     session.api.loginTransport = { _ in AuthAPI.Reply(data: Data("{\"token\":\"synthetic-session\"}".utf8), status: 200, token: "synthetic-session.synthetic-signature") }
     session.api.transport = { request in

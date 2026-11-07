@@ -138,6 +138,10 @@ internal class LoginDitherView(context: Context) : GLSurfaceView(context) {
             // Pass 2: whole cells from the top-left, the sliver left over is paper, the
             // rounded corners are page.
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            // During the fold, the surface buffer can resize before the renderer receives
+            // its new viewport. Clear the whole buffer (not just that viewport) to page.
+            GLES20.glClearColor(page[0], page[1], page[2], 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glViewport(0, 0, width, height)
             GLES20.glUseProgram(blit)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)

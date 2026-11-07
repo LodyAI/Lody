@@ -70,7 +70,10 @@ final class LoginDitherView: UIView, MTKViewDelegate {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    guard let metal else { return }
+    guard let metal, bounds.width >= Self.cell, bounds.height >= Self.cell else { return }
+    // Auto Layout applies the folded model height before its presentation layer
+    // finishes collapsing. Keep the full drawable while that layer clips it;
+    // resizing to one row here stretches a vertical ink stripe through the fold.
     let nextColumns = max(1, Int(floor(bounds.width / Self.cell)))
     let nextRows = max(1, Int(floor(bounds.height / Self.cell)))
     metal.frame = CGRect(x: 0, y: 0, width: CGFloat(nextColumns) * Self.cell, height: CGFloat(nextRows) * Self.cell)

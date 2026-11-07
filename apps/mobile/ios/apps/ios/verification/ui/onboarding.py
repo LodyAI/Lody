@@ -13,15 +13,28 @@ assert all(a['y'] < b['y'] for a, b in zip(frames, frames[1:])), frames
 assert len({round(frame['width']) for frame in frames}) == 1, frames
 assert any(item.get('AXLabel') == catalog.text('auth.login.title') for item in ui.state()), 'Missing web sign-in title'
 assert not any(item.get('AXUniqueId') == 'onboarding-code' for item in ui.state())
+def assert_legal_visible():
+    page = ui.element('onboarding-sheet')['frame']
+    legal = ui.element('auth-legal')['frame']
+    assert legal['y'] >= page['y'], legal
+    assert legal['y'] + legal['height'] <= page['y'] + page['height'] - 34, (page, legal)
+
+assert_legal_visible()
 ui.capture('native-login')
 # The email view slides in with the form; Back returns to the providers.
 ui.axe('tap', '--id', 'auth-email-entry')
 for identifier in ('auth.native.email', 'auth.native.password', 'auth-email-submit', 'auth-registration-toggle'):
     control = ui.element(identifier)
     assert control['frame']['height'] >= 44, (identifier, control['frame'])
+ui.capture('email-keyboard')
+# Use the page's native interactive keyboard dismissal, not fixture-only state.
+ui.axe('drag', '--start-x', '380', '--start-y', '300', '--end-x', '380', '--end-y', '800', '--duration', '.6')
+ui.wait(lambda items: not any(item.get('type') == 'Keyboard' for item in items), 'Keyboard did not dismiss')
+assert_legal_visible()
 ui.capture('email')
 ui.axe('tap', '--id', 'auth-registration-toggle')
 ui.element('auth.native.name')
+assert_legal_visible()
 ui.capture('create-account')
 ui.axe('tap', '--id', 'auth-email-back')
 ui.element('auth.native.google')

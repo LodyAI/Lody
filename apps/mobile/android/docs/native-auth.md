@@ -28,11 +28,13 @@ are never displayed or logged.
 and stays in step with iOS `OnboardingController`: the dithered jellyfish surface on top
 (`auth/LoginDitherView`, web's WebGL fragment shader unchanged on OpenGL ES 2, drawn into a
 framebuffer of 3 dp cells and magnified without filtering; the blit pass paints the rounded corners
-and the fold-away fade because a SurfaceView ignores Compose clipping; one still frame when system
+and the fold-away fade because a SurfaceView ignores Compose clipping; the full output buffer is
+cleared to the page colour before each blit to cover viewport lag during resizing; one still frame when system
 animations are off), then a bottom-anchored column: title and description, one group of equal
 GitHub / Google / Apple / Discord buttons, "Continue with email", and the legal notice. The method
 that last installed an account (`LastLoginMethod`, SharedPreferences) carries "Last used". The
-email view slides in beside the providers and folds the visual away; it holds web's sign-in /
+email view slides in beside the providers, clipped to the form column so outgoing controls cannot
+paint over the page margins, and folds the visual away; it holds web's sign-in /
 create-account form (`LoginForm`, `LoginFormTest`: create account applies web's letters-and-digits,
 8-character rule), and a sent verification link shows web's "Next steps" panel. Colours and
 geometry are `designsystem/LodyLoginColors.kt`; controls keep 44 dp touch targets where web uses

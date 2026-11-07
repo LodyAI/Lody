@@ -25,6 +25,7 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
 
   private let visual = LoginDitherView()
   private var visualHeight: NSLayoutConstraint?
+  private var visualMinimumHeight: NSLayoutConstraint?
   private var visualTop: NSLayoutConstraint?
   private let scroll = UIScrollView()
   private var columnBottom: NSLayoutConstraint?
@@ -137,14 +138,20 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
     scroll.addSubview(column)
     let top = visual.topAnchor.constraint(equalTo: view.topAnchor, constant: 12)
     let height = visual.heightAnchor.constraint(equalToConstant: 0)
+    // Prefer web's 42vh / 360 pt surface, but reserve room for the native
+    // 44 pt controls and legal notice before allowing the column to scroll.
+    height.priority = UILayoutPriority(249)
+    let minimumHeight = visual.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+    minimumHeight.priority = UILayoutPriority(251)
     let bottom = column.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -12)
     let fill = scroll.contentLayoutGuide.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
     fill.priority = .defaultLow
     visualTop = top
     visualHeight = height
+    visualMinimumHeight = minimumHeight
     columnBottom = bottom
     NSLayoutConstraint.activate([
-      top, height,
+      top, height, minimumHeight,
       visual.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
       visual.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
       scroll.topAnchor.constraint(equalTo: visual.bottomAnchor),
@@ -164,12 +171,14 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
   }
 
   /// Web: `clamp(200px, 42svh, 360px)`, folded away in the email view and absent
-  /// when a phone on its side leaves no room above the form.
+  /// when a phone on its side leaves no room above the form. The preferred
+  /// height yields toward 200 pt to keep native controls and legal copy visible.
   private func layoutVisual() {
     let bounds = view.bounds.height
     let folded = screen == .email || (bounds < 600 && traitCollection.verticalSizeClass == .compact)
     let target: CGFloat = folded ? 0 : min(360, max(200, bounds * 0.42))
     if visualHeight?.constant != target { visualHeight?.constant = target }
+    visualMinimumHeight?.constant = folded ? 0 : 200
     visual.alpha = folded ? 0 : 1
   }
 

@@ -30,6 +30,6 @@ enum NativeLastLoginMethod: String, CaseIterable, Sendable {
   }
 
   func write(_ defaults: UserDefaults = .standard) {
-    defaults.set(rawValue, forKey: key)
+    defaults.set(rawValue, forKey: Self.key)
   }
 }

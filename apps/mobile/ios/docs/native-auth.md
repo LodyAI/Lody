@@ -114,17 +114,17 @@ Apple/Google consent, signed ID-token verification, deployed GitHub/Discord
 callbacks, email verification policy and custom-link delivery require configured
 providers and an authorized test account.
 
-Current verification: both native cases, bundle, prebuild, native source checks
-and TypeScript/contract checks pass. `pnpm check` stops at existing hardcoded-copy
-violations in `Shell/NativeDebug.swift` and `Sessions/ChatListView.swift`.
-`pnpm format:check` reports existing drift in 11 unchanged protocol/tooling files.
-The public repository's `pnpm run docs check` passes. Full app
-build stops at GoogleSignIn-iOS SwiftPM clone access denial (HTTP 403 from the
-workspace GitHub credential helper); it also reports a LodyDataChannel artifact
-mapping error during failed resolution. Signing was not disabled. SDK compilation,
-full-app screenshots and real-provider acceptance remain unverified. Once SDK
-access is authorized, resolve its transitive dependencies and add their upstream
-license notices to the existing native license inventory before distribution.
+Offline validation covers the signed simulator app and the production onboarding
+Debug scene in English, light and dark: provider order and touch targets,
+email/create-account switching, cancellation, error recovery and account-owned
+completion. The provider visual yields from its preferred height toward 200 pt
+before the column scrolls, keeping legal copy visible without reducing 44 pt
+controls. UI checks assert legal visibility and capture email/create-account
+resting states after native keyboard dismissal. Screenshots and recordings exercise the runtime-compiled Metal dither
+and its entrance reveal; native session checks cover credential installation.
+These checks do not establish real-provider acceptance. The license inventory
+check includes the resolved SDK dependencies. `pnpm check` validates TypeScript,
+contracts, localization, native sources, licenses and repository formatting.
 
 Password reset is supported only when `CONVEX_SITE_URL` is exactly the canonical
 production origin `https://backend.lody.ai`. Other auth/site origins are rejected

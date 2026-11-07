@@ -68,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -237,6 +238,7 @@ internal fun NativeSignInScreen(state: AuthState, account: AccountController, ac
                         if (error != null) Banner(error, colors.danger, colors.danger.copy(alpha = 0.06f), colors.danger.copy(alpha = 0.3f))
                         if (notice != null) Banner(notice, colors.secondaryLabel, colors.badgeFill, colors.separator)
                         AnimatedContent(
+                            modifier = Modifier.clipToBounds(),
                             targetState = view, label = "panel",
                             transitionSpec = {
                                 val spec = tween<androidx.compose.ui.unit.IntOffset>(M.transitionMillis, easing = M.transitionEasing)
@@ -652,4 +654,21 @@ private fun LoginField(
             },
         )
     }
+}
+
+internal fun authError(code: String): Int = when (code) {
+    "unsupported_local_reset" -> R.string.auth_unsupported_local_reset
+    "invalid_credentials" -> R.string.auth_invalid_credentials
+    "email_not_verified" -> R.string.auth_verify_notice
+    "email_in_use" -> R.string.auth_email_in_use
+    "invalid_email" -> R.string.auth_invalid_email
+    "invalid_password" -> R.string.auth_invalid_password
+    "rate_limited" -> R.string.auth_rate_limited
+    "network_unavailable" -> R.string.auth_network
+    "not_configured" -> R.string.auth_not_configured
+    "login_cancelled", "access_denied" -> R.string.auth_cancelled
+    "browser_unavailable" -> R.string.auth_browser_unavailable
+    "google_unavailable" -> R.string.auth_google_unavailable
+    "auth_expired", "credentials_unavailable" -> R.string.auth_expired
+    else -> R.string.auth_failed
 }
