@@ -952,7 +952,12 @@ export const abandonWorkspaceRecovery = Effect.fnUntraced(function* (
  * key it hands over, so this keeps independent bytes and returns a fresh key each read. */
 export const memoryRecoveryEpochKeys = () => {
   const held = new Map<number, Uint8Array>();
-  const fresh = (bytes: Uint8Array) => Result.getOrThrow(Bytes.epochKey(bytes));
+  const issued = new Set<Bytes.EpochKey>();
+  const fresh = (bytes: Uint8Array) => {
+    const key = Result.getOrThrow(Bytes.epochKey(bytes));
+    issued.add(key);
+    return key;
+  };
   return {
     saveAndReload: (epoch: number, key: Bytes.EpochKey) =>
       Effect.sync(() => {
@@ -963,11 +968,13 @@ export const memoryRecoveryEpochKeys = () => {
       const bytes = held.get(epoch);
       return bytes ? Effect.succeed(fresh(bytes)) : Effect.fail(vaultError('missing'));
     },
-    /** Fresh keys, owned by the caller. */
+    /** Fresh copies, releasable by the caller and wiped when this cache closes. */
     entries: () => [...held.entries()].map(([epoch, bytes]) => [epoch, fresh(bytes)] as const),
     dispose: () => {
       for (const bytes of held.values()) bytes.fill(0);
+      for (const key of issued) disposeEpochKey(key);
       held.clear();
+      issued.clear();
     },
   };
 };
