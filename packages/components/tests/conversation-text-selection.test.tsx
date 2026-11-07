@@ -5,6 +5,7 @@ import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToString } from 'katex';
+import { selectedMessageMarkdown } from '../src/components/ai-gui/message-quote-markdown';
 import 'katex/contrib/copy-tex';
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import type { ConversationView } from '../src/lib/conversation-view';
@@ -312,4 +313,50 @@ it('keeps selected stream bodies rendered after the reading window moves, then r
   expect(viewport.querySelector('[data-conversation-row-key="a-10"]')!.textContent).toBe(
     'placeholder'
   );
+});
+
+it('keeps formatting and link targets across selected text regions', () => {
+  const area = document.createElement('div');
+  area.innerHTML = `<div data-message-quote-text><p>Before <strong>important</strong> <a href="https://example.com/path">guide</a></p><ul><li>first</li><li>second</li></ul></div><div data-message-quote-text><p>After <em>emphasis</em></p></div>`;
+  host.append(area);
+  const first = area.querySelector('strong')!.firstChild!;
+  const last = area.querySelector('em')!.firstChild!;
+  const range = document.createRange();
+  range.setStart(first, 3);
+  range.setEnd(last, 4);
+  expect(selectedMessageMarkdown(range, area)).toBe(
+    '**ortant** [guide](https://example.com/path)\n\n* first\n* second\n\nAfter *emph*'
+  );
+});
+
+it('retains code lines, table structure and selected math source', () => {
+  const area = document.createElement('div');
+  area.innerHTML = `<div data-message-quote-text><div data-streamdown="code-block" data-language="ts"><div data-streamdown="code-block-toolbar">TypeScript<button>Copy</button></div><pre><code><span data-markdown-code-line>const a = 1;</span><span data-markdown-code-line>const b = 2;</span></code></pre></div><table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>A</td><td>B</td></tr></tbody></table><p>${renderToString('\\frac{x}{2}', { output: 'htmlAndMathml' })}</p></div>`;
+  host.append(area);
+  const range = document.createRange();
+  range.selectNodeContents(area.querySelector('[data-message-quote-text]')!);
+  const markdown = selectedMessageMarkdown(range, area);
+  expect(markdown).toContain('```ts\nconst a = 1;\nconst b = 2;\n```');
+  expect(markdown).toContain('| Name | Value |');
+  expect(markdown).toContain('| A    | B     |');
+  expect(markdown).toContain('$\\frac{x}{2}$');
+  expect(markdown).not.toContain('TypeScript');
+  const secondLine = area.querySelectorAll('[data-markdown-code-line]')[1]!.firstChild!;
+  range.setStart(secondLine, 0);
+  range.setEnd(secondLine, 7);
+  expect(selectedMessageMarkdown(range, area)).toBe('```ts\nconst b\n```');
+});
+
+it('preserves numbered list positions and expands a partial formula selection', () => {
+  const area = document.createElement('div');
+  area.innerHTML = `<div data-message-quote-text><ol start="4"><li>first</li><li>second</li></ol><p>${renderToString('\\frac{x}{2}', { output: 'htmlAndMathml' })}</p></div>`;
+  host.append(area);
+  const range = document.createRange();
+  const second = area.querySelectorAll('li')[1]!.firstChild!;
+  range.setStart(second, 0);
+  range.setEnd(second, second.textContent!.length);
+  expect(selectedMessageMarkdown(range, area)).toBe('5. second');
+  const mathText = area.querySelector('.katex-html .mord')!.firstChild!;
+  range.selectNodeContents(mathText);
+  expect(selectedMessageMarkdown(range, area)).toBe('$\\frac{x}{2}$');
 });

@@ -54,6 +54,8 @@ to sender, target and generation; cancellation belongs to its source request.
 Expire unclaimed views and destroy them on source close. Claim adopts identity and
 reload target without remounting; activate renderer effects only after native show.
 The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contract.
+Background ownership uses Web Locks rather than leader-election IPC:
+[decision](../../../../.agents/notes/implemented/feature/2026-09-10-desktop-windows.md).
 
 ## Startup theme
 
@@ -109,6 +111,12 @@ packaging result; native safeStorage assurance needs an isolated platform run.
 `e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
 It grants no renderer reader/status/content capability. Preserve existing readers;
 release a cold temporary host before replying. `status` still requires a window reader.
+
+The post-MVP recovery vault (`services/e2ee-recovery-vault.mts`) stays off unless
+main starts with `LODY_E2EE_RECOVERY_VAULT=on`; the renderer switch alone never enables it.
+Main owns the recovery file dialogs and bytes, writes the file only to the user's
+chosen path, and returns outcomes or `e2ee_recovery_*` codes, never file contents.
+Its account journal holds pins and intents only. Proposal: [recovery vault](../../../../specs/e2ee/recovery-vault.md).
 
 Team-member joining uses `services/e2ee-member-join.mts`: retain exact KeyPackages
 and every signed admission before I/O. Unknown outcomes cannot replace them;

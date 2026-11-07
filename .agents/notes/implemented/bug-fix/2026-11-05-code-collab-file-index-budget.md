@@ -94,6 +94,11 @@ length are inferred, not observed.
 - **Deletion semantics.** Only a change recording `del: true` becomes `deleted`. Git
   binary deletions and diff-store missing files now record `del`. Any other changed
   path missing from the tree is an existing `file` row with `lazy` ancestors.
+- **Diff invalidation metadata.** The [remote diff transport](../architecture/2026-10-31-remote-diff-transport.md)
+  stores opaque generation siblings. Every changed path reserves a second physical row
+  and the estimated JSON cost of a token up to 64 encoded bytes. The publisher renews
+  larger tokens. Generation sets and orphan deletions share the file-row commit plan,
+  so metadata cannot bypass either the whole-index or per-append budget.
 - **Bounded commits.** The publisher plans the write as batches of at most 100 KiB
   each, with sets before deletes. After every batch it runs flush plus sync, which
   is the barrier that makes each batch its own Streams append. A failed batch goes

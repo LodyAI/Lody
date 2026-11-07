@@ -11,8 +11,8 @@ not admit it. Each installation owns independent Ed25519/X25519 keys; tabs and
 workers in one profile share one controlled installation. This Spec extends the
 platform boundary without changing ledger v1, HPKE, signed bytes or content formats.
 It does not enable a product composition. The [owner approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
-identifies the exact approved revision and its scope. Recovery vault remains
-draft and outside this work.
+identifies the exact approved revision and its scope. The recovery vault has
+its own approval and is outside this work.
 
 ## Trust and protection
 

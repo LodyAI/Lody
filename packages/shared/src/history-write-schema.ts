@@ -42,6 +42,7 @@ export const HistoryEntryWriteSchema = z.object({
     })
     .strict()
     .optional(),
+  queuedInput: z.literal(true).optional(),
   cancellationReason: z.literal('user_stop').optional(),
   inputConfig: z
     .preprocess(normalizeLegacyAcpSessionConfig, SessionHistoryInputConfigSchema)

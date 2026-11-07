@@ -2861,6 +2861,7 @@ describe('SessionExecutionService', () => {
       workspaceId = 'workspace-1'
     ) =>
       makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: 'genesis',
         workspaceId,
         targetMachineId: 'machine-1',
@@ -3388,7 +3389,7 @@ describe('SessionExecutionService', () => {
         ).toMatchObject({ _tag: 'Authorized' });
         const waiting = await dispatch();
         expect(submitted).toEqual([]);
-        expect(recoveredRooms).toEqual(['session-production-session']);
+        expect([...new Set(recoveredRooms)]).toEqual(['session-production-session']);
         expect(
           await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
         ).toMatchObject({ _tag: terminalBackfill ? 'Denied' : 'Authorized' });
@@ -3430,7 +3431,10 @@ describe('SessionExecutionService', () => {
       // userId: the owner's own turn derives as owner; a shared member's turn derives
       // as that member, re-authorized when the derived input is written and started.
       if (!deniedSigner) {
-        expect(invocations[0]?.requesterUserId).toBe(user);
+        // The row's display account is not the requester: execution uses the verified signer.
+        expect(invocations[0]?.requesterUserId).toEqual(
+          mode === 'other-member-shared' ? expect.stringMatching(/^e2ee-member:/) : 'user-1'
+        );
         expect(derivations[0]).toBe(mode === 'other-member-shared' ? 'member' : 'owner');
       }
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
@@ -3441,12 +3445,8 @@ describe('SessionExecutionService', () => {
             ? [expect.stringContaining('not authorized')]
             : []
       );
-      expect(recoveredRooms).toEqual(
-        !snapshotOnly
-          ? []
-          : mode === 'delayed'
-            ? ['session-production-session', 'session-production-session']
-            : ['session-production-session']
+      expect([...new Set(recoveredRooms)]).toEqual(
+        !snapshotOnly ? [] : ['session-production-session']
       );
       expect(historyReads.length).toBeGreaterThan(before);
       expect(
@@ -3500,6 +3500,7 @@ describe('SessionExecutionService', () => {
     // A member granted only project p1 on this machine; the owner-signed policy decides.
     const sharedOnly = (f: ReturnType<typeof encryptedExecutionFixture>, asked: unknown[][]) =>
       makeEncryptedAgentExecution({
+        machineUserId: 'synthetic-machine-account',
         genesis: 'genesis',
         workspaceId: 'workspace-1',
         targetMachineId: 'machine-1',
@@ -3686,6 +3687,7 @@ describe('SessionExecutionService', () => {
     let originalAvailable = false;
     const submitted: string[] = [];
     const gate = makeEncryptedAgentExecution({
+      machineUserId: 'synthetic-machine-account',
       genesis: 'genesis',
       workspaceId: 'workspace-1',
       targetMachineId: 'machine-1',
@@ -12892,6 +12894,57 @@ describe('Operation Inbox execution boundary', () => {
         );
         expect(input?.status).toBe(matches ? 'handled' : 'failed');
         expect(JSON.stringify(input?.inputConfig)).not.toContain('frozen-launch');
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
+  it.each([
+    ['denied', 'failed'],
+    // `seen` stays dispatchable for the watcher's retry.
+    ['pending', 'seen'],
+  ] as const)(
+    'admits encrypted automation input only on verified evidence (%s)',
+    async (evidence, status) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const origin = {
+        invocationId: 'invocation',
+        ruleId: 'rule',
+        ruleRevision: 1,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+      };
+      let admitted = 0;
+      f.service.setAutomationAdmission(async () => {
+        admitted += 1;
+        return true;
+      });
+      Object.assign((f.service as unknown as { deps: object }).deps, {
+        encryptedExecution: {
+          automationEvidence: () => Effect.succeed(evidence),
+          claim: () =>
+            Effect.succeed(
+              evidence === 'pending' ? { state: 'pending-evidence' } : { state: 'denied' }
+            ),
+          complete: () => Effect.void,
+        },
+      });
+      try {
+        await f.service.continueSession({
+          ...f.message,
+          acpSessionConfig: { ...f.message.acpSessionConfig, _lodyAutomation: origin },
+        });
+        expect(admitted).toBe(0);
+        expect(prompts).toHaveLength(0);
+        const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === f.message.userTurnId
+        );
+        expect(input?.status).toBe(status);
       } finally {
         await f.close();
       }

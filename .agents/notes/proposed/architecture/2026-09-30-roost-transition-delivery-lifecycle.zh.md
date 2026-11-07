@@ -8,11 +8,11 @@ Translation: current
 
 ## 摘要
 
-Lody 现在通过自己的 session backend 边界同时承载 Loro 和 Roost 两种 history 实现。新会话选择 Roost，没有持久 discriminator 的旧会话继续固定在 Loro。queue promotion、steer reconcile、history 读取、assistant 写入、renderer composition 和 backend 生命周期都根据会话保存的选择解析；Roost 的存储与 projection 留在 adapter 内部，调用方只消费相同的逻辑 history 契约。完整 directory lease、按目标补页的阅读位置恢复及 renderer 持久读取副本现已覆盖发现的体验缺口。合成 benchmark 测得 10,000 条历史的最新窗口就绪约快 7.8 倍，但短历史启动和翻页成本更高；完整产品体验等价性仍未验收。
+Lody 现在通过自己的 session backend 边界同时承载 Loro 和 Roost 两种 history 实现。新会话默认使用 Loro，只有通过 Developer mode 的 [feature gate](../../implemented/feature/2026-10-08-roost-history-feature-gate.zh.md) 才选择 Roost，没有持久 discriminator 的旧会话继续固定在 Loro。queue promotion、steer reconcile、history 读取、assistant 写入、renderer composition 和 backend 生命周期都根据会话保存的选择解析；Roost 的存储与 projection 留在 adapter 内部，调用方只消费相同的逻辑 history 契约。完整 directory lease、按目标补页的阅读位置恢复及 renderer 持久读取副本现已覆盖发现的体验缺口。合成 benchmark 测得 10,000 条历史的最新窗口就绪约快 7.8 倍，但短历史启动和翻页成本更高；完整产品体验等价性仍未验收。
 
 ## 决策与范围
 
-产品边界已经启用，但不迁移历史。没有 discriminator 的已有会话继续使用 Loro；新会话在接受首条 turn 前写入 `historyBackend: 'roost'`。打开后的会话 backend 选择不可变，重启时从持久 metadata 重新解析。之后所有 history、queue、steer 和 assistant 输出操作都通过绑定的 backend 执行，调用方不分别判断 Roost 或 Loro。
+产品边界已经启用，但不迁移历史。没有 discriminator 的已有会话继续使用 Loro；新会话在接受首条 turn 前写入自己的 `historyBackend` 选择；只有在 Developer mode gate 后才会是 Roost。打开后的会话 backend 选择不可变，重启时从持久 metadata 重新解析。之后所有 history、queue、steer 和 assistant 输出操作都通过绑定的 backend 执行，调用方不分别判断 Roost 或 Loro。
 
 过渡必须保持现在的产品契约：
 
@@ -61,7 +61,7 @@ Loro 实现委托给 `SessionDocument`、`HistoryWriter`、现有 activation met
 | 会话                         | Roost 上线前     | Roost 上线后                                           |
 | ---------------------------- | ---------------- | ------------------------------------------------------ |
 | 已有 Loro 会话               | Loro             | Loro                                                   |
-| 新建会话                     | Loro             | Roost                                                  |
+| 新建会话                     | Loro             | 默认 Loro；仅在 Developer mode gate 后使用 Roost       |
 | backend 初始化失败时的新会话 | 不创建半成品会话 | 不静默切换为混合 backend；创建操作返回普通失败，可重试 |
 
 不存在单条消息从 Roost fallback 到 Loro 的路径。那会把同一个逻辑会话拆到两个历史中，使 queue、steer 和晚到输出的恢复无法判定。未来若需要迁移 backend，应当另行定义显式 snapshot 和校验协议。
@@ -237,7 +237,7 @@ Phase 3 的 adapter fixture 可直接复用 queue 契约。这些 Lody 测试不
 - 在同一契约后实现 Roost history acceptance、持久 delivery operation record、assistant segment projection 和 recovery。
 - 验证 `businessId` 分组、sealed primary 加晚到 segment、每个 queue phase 的重启恢复以及 steer settlement 幂等。
 - 通过生产 factory 绑定 Node owner 和 renderer bridge。
-- 新会话使用 Roost；没有 discriminator 的旧会话继续固定在 Loro。
+- 新会话默认使用 Loro，仅在 Developer mode gate 后使用 Roost；没有 discriminator 的旧会话继续固定在 Loro。
 - runtime artifact 缺失、owner 启动失败或 backend 操作不支持时明确失败；不存在按消息回退到 Loro。
 
 ## 验证计划
@@ -311,7 +311,7 @@ activation、steer ledger 与 runtime configuration 仍在 Loro control plane。
 owner seed 必须由 host 配置（`LODY_ROOST_SEED_HEX`），adapter 不会从用户秘密
 推导它。本地 Node client、owner binary 和数据库路径可以分别通过
 `LODY_ROOST_NODE_CLIENT`、`LODY_ROOST_NODE_OWNER`、`LODY_ROOST_DB_PATH` 覆盖。
-新 session 创建选择 Roost，没有 discriminator 的旧 session 继续使用 Loro。
+新 session 创建默认使用 Loro，仅在 Developer mode gate 后选择 Roost，没有 discriminator 的旧 session 继续使用 Loro。
 选中的 Roost runtime 无法启动时不会静默回退。
 
 桌面 renderer 通过 Electron local-control bridge 组合 Roost `SessionData`；浏览器
@@ -334,13 +334,13 @@ Roost `forkAndActivate`。
 
 ### 现在就固定的所有权
 
-| 责任 | 所有者 |
-| --- | --- |
-| session metadata、backend discriminator、queue row、activation pointer、runtime configuration、session status、fork-operation control 和唤醒 | Lody control plane（现有 Loro session document 与 metadata） |
-| 逻辑消息历史、Roost 物理 segment、segment seal、branch view、history projection、permission response 和 history-local recovery | Roost history adapter |
-| 跨两个存储的 queue/steer operation identity 与 recovery phase | `SessionBackend` delivery ledger；必须持久化且由 backend 所有，不能放在 MessageHandler 内存 map |
-| provider 是否接受 steer | ACP/AgentClient；history 接受不能证明 provider 已投递 |
-| 对话窗口、MCP history 和 session orchestration | 现有 Lody reader/service，通过 `SessionBackend`/`SessionData` 访问，绝不检查 segment ID |
+| 责任                                                                                                                                         | 所有者                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| session metadata、backend discriminator、queue row、activation pointer、runtime configuration、session status、fork-operation control 和唤醒 | Lody control plane（现有 Loro session document 与 metadata）                                    |
+| 逻辑消息历史、Roost 物理 segment、segment seal、branch view、history projection、permission response 和 history-local recovery               | Roost history adapter                                                                           |
+| 跨两个存储的 queue/steer operation identity 与 recovery phase                                                                                | `SessionBackend` delivery ledger；必须持久化且由 backend 所有，不能放在 MessageHandler 内存 map |
+| provider 是否接受 steer                                                                                                                      | ACP/AgentClient；history 接受不能证明 provider 已投递                                           |
+| 对话窗口、MCP history 和 session orchestration                                                                                               | 现有 Lody reader/service，通过 `SessionBackend`/`SessionData` 访问，绝不检查 segment ID         |
 
 账本由 adapter 持有，是因为 Loro 和 Roost 必须运行同一套 queue/steer
 状态机，但持久化方式可以不同。它的写入契约必须按 operation 独立且可恢复。
@@ -545,10 +545,10 @@ SQLite owner，Loro 使用内存 Repo。`Older` 加载前一页 40 条逻辑 tur
 没有完整 branch read。
 
 | 逻辑 turn 数 | Loro 首屏 | Roost 首屏 | Loro 翻页 | Roost 翻页 | Loro 流式 | Roost 流式 |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 8.20 | 43.47 | 0.29 | 31.18 | 0.19 | 3.90 |
-| 1,000 | 68.85 | 61.82 | 0.29 | 35.39 | 0.16 | 4.30 |
-| 10,000 | 795.21 | 101.53 | 0.36 | 41.96 | 0.16 | 4.50 |
+| -----------: | --------: | ---------: | --------: | ---------: | --------: | ---------: |
+|          100 |      8.20 |      43.47 |      0.29 |      31.18 |      0.19 |       3.90 |
+|        1,000 |     68.85 |      61.82 |      0.29 |      35.39 |      0.16 |       4.30 |
+|       10,000 |    795.21 |     101.53 |      0.36 |      41.96 |      0.16 |       4.50 |
 
 10,000 条时，有界 Roost 路径到达可读最新窗口约快 7.8 倍；只看 view hydration，
 Roost 为 3.01 ms，Loro 导入完成后为 74.26 ms。短历史仍会承担 owner/SQLite 启动
@@ -694,8 +694,8 @@ control marker 是应用 generation，不能证明服务 stream 从未被重新�
 ### 2026-10-08 feature gate 后续修订
 
 前面的过渡决策曾把 Roost 设为新会话的无条件默认值。这个默认值已由
-[Roost history feature gate 记录](../feature/2026-10-08-roost-history-feature-gate.zh.md)
-修订：现在共享默认值是 Loro，只有 Experimental features 总开关和 Roost history
-开关同时打开时，renderer 才写入 `historyBackend: 'roost'`。已保存的会话选择保持不可变，
+[Roost history feature gate 记录](../../implemented/feature/2026-10-08-roost-history-feature-gate.zh.md)
+修订：现在共享默认值是 Loro，只有 Developer mode 和 Roost history 开关同时打开时
+（事实更正：[#1578](https://github.com/LodyAI/Lody/pull/1578) 已把 gate 移出 Experimental features），renderer 才写入 `historyBackend: 'roost'`。已保存的会话选择保持不可变，
 所以开关变化不会改变已有会话。这里只修改创建策略，上文的 backend 所有权、逻辑历史、
 同步和生命周期边界保持不变。

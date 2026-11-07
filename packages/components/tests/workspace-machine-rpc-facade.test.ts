@@ -26,6 +26,104 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('negotiates blob persistence while retaining writer-only encrypted diff authority', async () => {
+    for (const [plane, protectedContent, supported, persist] of [
+      ['local', false, true, false],
+      ['cloud', false, true, true],
+      ['cloud', true, true, false],
+      ['cloud', false, false, true],
+    ] as const) {
+      let role: 'read' | 'write' = 'read';
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent,
+        protectedCodeCollabRole: () => role,
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Plaintext fallback opened.');
+        },
+        requestEncryptedFeature: async (request) => {
+          expect(request.ownerSessionId).toBe('parent');
+          expect(request.params).toHaveProperty('sessionId', sessionId);
+          if (request.method === 'code-collab/open-diff-manifest')
+            return { ok: true, result: { status: 'ok', entries: [], nextCursor: null } };
+          if (request.method === 'code-collab/read-blob')
+            return {
+              ok: true,
+              result: { offset: 0, length: 0, totalBytes: 0, encoding: 'gzip-base64', data: '' },
+            };
+          throw new Error('Unexpected action.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        persist,
+        scope: workspaceId,
+      });
+      if (protectedContent) {
+        expect(
+          await facade.requestCodeCollabOpenDiffManifest(remoteMachineId, {
+            sessionId,
+            path: 'a.ts',
+          })
+        ).toMatchObject({ status: 'error', code: 'permission_denied' });
+        expect(
+          await facade.requestCodeCollabReadBlob(remoteMachineId, {
+            sessionId,
+            key: `sha256:${'1'.repeat(64)}`,
+            offset: 0,
+            length: 100,
+          })
+        ).toMatchObject({ status: 'error', code: 'permission_denied' });
+        role = 'write';
+        expect(
+          await facade.requestCodeCollabOpenDiffManifest(
+            remoteMachineId,
+            { sessionId, path: 'a.ts' },
+            { ownerSessionId: 'parent' }
+          )
+        ).toEqual({ status: 'ok', entries: [], nextCursor: null });
+        expect(
+          await facade.requestCodeCollabReadBlob(
+            remoteMachineId,
+            { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
+            { ownerSessionId: 'parent' }
+          )
+        ).toMatchObject({ offset: 0, length: 0, totalBytes: 0 });
+      }
+    }
+  });
+
+  it.each([true, false])(
+    'does not wait for cold routing to classify the optional blob cache (supported=%s)',
+    async (supported) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => null,
+          resolvePlaneForMachine: async () => {
+            throw new Error('workspace_target_pending');
+          },
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('No body RPC expected.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        scope: workspaceId,
+        persist: false,
+      });
+    }
+  );
+
   it('retrieves every remote wait page using a separately authorized cursor', async () => {
     const claims: unknown[] = [];
     const uninstall = installCloudHttpPort({
@@ -1582,7 +1680,7 @@ describe('encrypted remote files from a browser or mobile device', () => {
     });
   });
 
-  it('refuses Guest writes and diffs before signing, while reads stay available', async () => {
+  it('refuses Guest writes and legacy diff actions before signing, while reads stay available', async () => {
     let role: 'read' | 'write' = 'write';
     const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
     const facade = encryptedFacade(machine, () => role);

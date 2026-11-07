@@ -77,16 +77,20 @@ async function load(relative, dependencies, console = globalThis.console, env = 
                   ? { PersonalPairingOfferSchema }
                   : id === '../../services/e2ee-account-pairing-host.mjs'
                     ? { makeDesktopAccountPairingHost }
-                    : id === '../../services/e2ee-client-loss-probe'
-                      ? // Production default: the E2E probe is disabled and forwards work.
-                        { observeClientLossOperation: (_kind, _workspace, _sender, work) => work() }
-                      : require(id)
+                    : id === '../../services/e2ee-recovery-vault.mjs'
+                      ? {}
+                      : id === '../../services/e2ee-client-loss-probe'
+                        ? // Production default: the E2E probe is disabled and forwards work.
+                          {
+                            observeClientLossOperation: (_kind, _workspace, _sender, work) => work()
+                          }
+                        : require(id)
     }
   )
   return exports
 }
 async function account(options = {}) {
-  const identity = { userId: 'account', generation: 1 }
+  const identity = { userId: 'acc1', generation: 1 }
   let identityListener = () => {}
   const auth = {
     subscribeCachedSessionIdentity: (listener) => {
@@ -171,7 +175,7 @@ void test('passive account inspection never reopens an absent or closed owner', 
         }
       })
   })
-  const inspect = () => api.inspectDesktopE2eeCachedState('account', 'team', 'machine')
+  const inspect = () => api.inspectDesktopE2eeCachedState('acc1', 'team', 'machine')
   assert.equal((await inspect()).ownerPresent, false)
   assert.deepEqual([leases, custody, hosts], [0, 0, 0])
   await api.withDesktopE2eeAccount(
@@ -295,7 +299,7 @@ void test('uncertain admission preserves append and reconciliation failures, the
   const submitted = []
   let committed = false
   const owner = {
-    accountId: 'account',
+    accountId: 'acc1',
     bootstrap: { deviceCredential: () => Effect.succeed('synthetic-credential') },
     readers: new Map([['workspace', new Set([sender.id])]]),
     host: {
@@ -335,7 +339,7 @@ void test('uncertain admission preserves append and reconciliation failures, the
       '../../services/e2ee-account-runtime': {
         withDesktopE2eeAccount: (work) => Effect.runPromise(work(owner)),
         desktopE2eeCloudClient: async () => ({
-          accountId: 'account',
+          accountId: 'acc1',
           client: {
             appendRecord: (value) => {
               submitted.push(structuredClone(value))
@@ -497,7 +501,7 @@ void test('cached identity admits offline work and replaces or closes owners on 
         owner.accountId
       )
     ),
-    'account'
+    'acc1'
   )
   identity.userId = 'second'
   identity.generation++
@@ -589,10 +593,7 @@ void test('only unavailable custody exposes the availability fallback code', asy
   const original = new Error('synthetic private native failure')
   for (const [source, operation] of [
     ['account-operation', () => native.api.withDesktopE2eeAccount(() => Effect.fail(original))],
-    [
-      'runtime-operation',
-      () => native.api.runDesktopE2eeOperation('account', Effect.fail(original))
-    ]
+    ['runtime-operation', () => native.api.runDesktopE2eeOperation('acc1', Effect.fail(original))]
   ]) {
     await assert.rejects(operation(), (error) => {
       assert.equal(error.message, 'e2ee_host_operation_failed')
@@ -614,7 +615,7 @@ void test('confirmed identity reopens offline after restart, matches bearer or c
   })
   let cookie = 'better-auth.session_token=synthetic-token'
   let cookieUnavailable = false
-  let response = { data: { user: { id: 'account' }, session: { token: 'synthetic-token' } } }
+  let response = { data: { user: { id: 'acc1' }, session: { token: 'synthetic-token' } } }
   let offline = false
   const { AuthService } = await load(
     './auth-service.ts',
@@ -652,35 +653,32 @@ void test('confirmed identity reopens offline after restart, matches bearer or c
   // New service has no resolved session or auth request. The disk binding has
   // no timestamp and survives any wall-clock change, including an eight-day gap.
   const reopened = new AuthService()
-  assert.equal(reopened.getCachedSessionIdentity().userId, 'account')
+  assert.equal(reopened.getCachedSessionIdentity().userId, 'acc1')
   assert.equal(reopened.getCachedSessionIdentity().source, 'offline')
   const bearer = (token) => ({ fetchOptions: { headers: { Authorization: `Bearer ${token}` } } })
   assert.equal(reopened.getCachedSessionIdentity(bearer('wrong-token')).userId, null)
   cookie = ''
   const bearerOnly = new AuthService()
   assert.equal(bearerOnly.getCachedSessionIdentity().userId, null)
-  assert.equal(bearerOnly.getCachedSessionIdentity(bearer('synthetic-token')).userId, 'account')
-  assert.equal(bearerOnly.getCachedSessionIdentity().userId, 'account')
+  assert.equal(bearerOnly.getCachedSessionIdentity(bearer('synthetic-token')).userId, 'acc1')
+  assert.equal(bearerOnly.getCachedSessionIdentity().userId, 'acc1')
   cookieUnavailable = true
-  assert.equal(bearerOnly.getCachedSessionIdentity().userId, 'account')
-  assert.equal(
-    new AuthService().getCachedSessionIdentity(bearer('synthetic-token')).userId,
-    'account'
-  )
+  assert.equal(bearerOnly.getCachedSessionIdentity().userId, 'acc1')
+  assert.equal(new AuthService().getCachedSessionIdentity(bearer('synthetic-token')).userId, 'acc1')
   cookieUnavailable = false
   const observed = []
   bearerOnly.subscribeCachedSessionIdentity(() =>
     observed.push(bearerOnly.getCachedSessionIdentity().userId)
   )
   offline = false
-  response = { data: { user: { id: 'other-account' }, session: { token: 'other-token' } } }
+  response = { data: { user: { id: 'acc2' }, session: { token: 'other-token' } } }
   await bearerOnly.getSession()
-  assert.deepEqual(observed, ['other-account'])
+  assert.deepEqual(observed, ['acc2'])
   offline = true
   await bearerOnly.getSession()
-  assert.deepEqual(observed, ['other-account'])
+  assert.deepEqual(observed, ['acc2'])
   await bearerOnly.signOut()
-  assert.deepEqual(observed, ['other-account', null])
+  assert.deepEqual(observed, ['acc2', null])
   assert.equal(new AuthService().getCachedSessionIdentity(bearer('other-token')).userId, null)
 })
 
@@ -716,7 +714,7 @@ async function personalJoinFixture(t) {
     for (const owner of owners) await owner.close()
     await rm(directory, { recursive: true, force: true })
   })
-  const accountId = 'synthetic-personal-account'
+  const accountId = 'acc3'
   const workspaceId = 'synthetic-personal-workspace'
   const wrapping = Buffer.alloc(32, 93)
   const safeStorage = {
@@ -825,7 +823,6 @@ async function personalJoinFixture(t) {
           safeStorage
         })
         const bootstrap = yield* makeDesktopE2eeBootstrap({ directory: path, accountId, custody })
-        yield* bootstrap.recordAccountIdentity({ accountId, cryptoUserId: 'aa'.repeat(32) })
         const host = yield* makeDesktopE2eeRuntimeHost({ directory: path, custody, bootstrap })
         return { custody, bootstrap, host }
       }).pipe(Effect.provideService(Scope.Scope, scope))
@@ -1158,7 +1155,7 @@ void test('cold renderer marker recovery reads the real IPC boundary without gra
   )
   assert.deepEqual([...owner.readers.get(f.workspaceId)], readers)
   await assert.rejects(
-    owner.ipc.readIdentity({ accountId: 'other-account', workspaceId: f.workspaceId }),
+    owner.ipc.readIdentity({ accountId: 'acc2', workspaceId: f.workspaceId }),
     /e2ee_account_mismatch/
   )
   assert.deepEqual([...owner.readers.get(f.workspaceId)], readers)
@@ -1316,75 +1313,18 @@ void test('confirmed cancellation survives real SQLite archival failure and the 
   )
 })
 
-for (const change of ['account switch', 'same-account logout/login'])
-  void test(`D03 registration waits outside the account lock and rejects a late response after ${change}`, async () => {
-    const entered = Promise.withResolvers()
-    const response = Promise.withResolvers()
-    let signatures = 0
-    let cached = 0
-    const { api, publishIdentity } = await account({
-      bootstrap: () =>
-        Effect.succeed({
-          creationNeedsAccountIdentity: () => Effect.succeed(true),
-          recordAccountIdentity: () =>
-            Effect.sync(() => {
-              cached++
-            }),
-          prepareCreation: () =>
-            Effect.sync(() => {
-              signatures++
-              return 'signed'
-            })
-        }),
-      cloud: () =>
-        Effect.succeed({
-          accountIdentity: () =>
-            Effect.promise(async () => {
-              entered.resolve()
-              return response.promise
-            })
-        })
-    })
-    const creation = api.prepareDesktopE2eeCreation({
-      accountId: 'account',
-      requestId: 'request-0123456789',
-      name: 'Synthetic',
-      slug: 'synthetic'
-    })
-    await entered.promise
-    assert.equal(
-      await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.accountId)),
-      'account'
-    )
-    if (change === 'account switch') publishIdentity('other-account')
-    else {
-      publishIdentity(null)
-      publishIdentity('account')
-    }
-    response.resolve({ accountId: 'account', cryptoUserId: 'aa'.repeat(32) })
-    await assert.rejects(creation, /e2ee_/)
-    assert.equal(signatures, 0)
-    assert.equal(cached, 0)
-    assert.equal(
-      await api.withDesktopE2eeAccount((owner) => Effect.succeed(owner.accountId)),
-      change === 'account switch' ? 'other-account' : 'account'
-    )
-    await api.closeDesktopE2eeAccount()
-  })
-
-void test('D03 exact signed retry and registered local identity do not acquire a cloud client', async () => {
+void test('creation signing and exact retry do not acquire a cloud client', async () => {
   const original = Object.freeze({ genesisRecordHex: 'synthetic-original' })
   const { api } = await account({
     bootstrap: () =>
       Effect.succeed({
-        creationNeedsAccountIdentity: () => Effect.succeed(false),
         prepareCreation: () => Effect.succeed(original)
       }),
     cloud: () => Effect.die(new Error('unexpected cloud call'))
   })
   assert.equal(
     await api.prepareDesktopE2eeCreation({
-      accountId: 'account',
+      accountId: 'acc1',
       requestId: 'request-0123456789',
       name: 'Synthetic',
       slug: 'synthetic'
@@ -1659,11 +1599,7 @@ async function nativeAccountFixture(t, storage = identityStorage, clock) {
     custody: (path) => makeDesktopE2eeCustody({ directory: path, platform: 'linux', safeStorage }),
     bootstrap: makeDesktopE2eeBootstrap,
     host: makeDesktopE2eeRuntimeHost,
-    cloud: () =>
-      Effect.succeed({
-        accountIdentity: () =>
-          Effect.succeed({ accountId: 'account', cryptoUserId: 'aa'.repeat(32) })
-      })
+    cloud: () => Effect.succeed({})
   })
   t.after(async () => {
     await native.api.closeDesktopE2eeAccount()
@@ -1682,10 +1618,6 @@ async function createAccountWorkspace(api, workspaceId) {
   return api.withDesktopE2eeAccount(
     (owner) =>
       Effect.gen(function* () {
-        yield* owner.bootstrap.recordAccountIdentity({
-          accountId: owner.accountId,
-          cryptoUserId: 'aa'.repeat(32)
-        })
         const creation = yield* owner.bootstrap.prepareCreation({
           accountId: owner.accountId,
           requestId: `creation-${workspaceId}-request`,
@@ -1714,7 +1646,7 @@ void test('isolated desktop workspace reset archives real custody and journals, 
   const { api, setLocked } = await nativeAccountFixture(t)
   const create = (workspaceId) => createAccountWorkspace(api, workspaceId)
   const intent = {
-    accountId: 'account',
+    accountId: 'acc1',
     requestId: 'synthetic-creation-request',
     name: 'Created',
     slug: 'created'
@@ -1811,10 +1743,10 @@ for (const phase of ['queued', 'draining'])
       void test(`confirmed ${scope} reset rejects ${change} while ${phase}`, async (t) => {
         const { api, identity } = await nativeAccountFixture(t)
         const first = await createAccountWorkspace(api, 'workspace')
-        identity.userId = 'other-account'
+        identity.userId = 'acc2'
         identity.generation++
         const other = await createAccountWorkspace(api, 'workspace')
-        identity.userId = 'account'
+        identity.userId = 'acc1'
         identity.generation++
         await api.withDesktopE2eeAccount(() => Effect.void, 'workspace')
         const original = await readFile(join(first.directory, 'creations.sqlite'))
@@ -1843,7 +1775,7 @@ for (const phase of ['queued', 'draining'])
           /e2ee_account_unavailable/
         )
         if (phase === 'draining') await entered.promise
-        if (change === 'account switch') identity.userId = 'other-account'
+        if (change === 'account switch') identity.userId = 'acc2'
         identity.generation++
         finish.resolve()
         await blocker
@@ -1874,7 +1806,7 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
     '../../services/e2ee-account-runtime': {
       ...api,
       desktopE2eeCloudClient: async () => ({
-        accountId: 'account',
+        accountId: 'acc1',
         client: {
           history: () =>
             Effect.succeed({
@@ -1910,17 +1842,14 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
   })
   const ipc = new E2eeIpc()
   assert.deepEqual(
-    { ...(await ipc.readIdentity({ accountId: 'account', workspaceId: 'workspace' })) },
+    { ...(await ipc.readIdentity({ accountId: 'acc1', workspaceId: 'workspace' })) },
     {
       workspaceId: 'workspace',
       genesisHash: first.creation.genesisHashHex
     }
   )
   await assert.rejects(ipc.status('workspace'), /e2ee_/)
-  await assert.rejects(
-    ipc.readIdentity({ accountId: 'other-account', workspaceId: 'workspace' }),
-    /e2ee_/
-  )
+  await assert.rejects(ipc.readIdentity({ accountId: 'acc2', workspaceId: 'workspace' }), /e2ee_/)
   assert.equal(
     await api.withDesktopE2eeAccount(
       (owner) => Effect.succeed(owner.readers.has('workspace')),
@@ -1939,7 +1868,7 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
   assert.equal(management.devices.find((entry) => entry.self).key, first.signingPublicKey)
   await ipc.updateKeys('workspace')
   await ipc.revokeDevice('workspace', sibling.signingPublicKey)
-  await ipc.readIdentity({ accountId: 'account', workspaceId: 'workspace' })
+  await ipc.readIdentity({ accountId: 'acc1', workspaceId: 'workspace' })
   assert.equal((await ipc.status('workspace')).genesisHash, first.creation.genesisHashHex)
   await ipc.close('workspace')
 })
@@ -2088,7 +2017,7 @@ void test('prepareDispatch confirms access loss after its reader closes through 
         '../../services/e2ee-account-runtime': {
           ...api,
           desktopE2eeCloudClient: async () => ({
-            accountId: 'account',
+            accountId: 'acc1',
             client: {
               contentStreamsToken: ({ workspaceId, credential }) =>
                 Effect.gen(function* () {
@@ -2096,7 +2025,7 @@ void test('prepareDispatch confirms access loss after its reader closes through 
                   assert.equal(credential, retainedCredential)
                   // Response delivery is explicit; no clock or scheduler race.
                   if (name === 'account-switch') {
-                    identity.userId = 'other-account'
+                    identity.userId = 'acc2'
                     identity.generation++
                   }
                   if (name.startsWith('credential-change')) {
@@ -2205,7 +2134,7 @@ void test('prepareDispatch confirms access loss after its reader closes through 
           await readFile(join(first.directory, 'creations.sqlite')),
           replacementBytes ?? original
         )
-        identity.userId = 'account'
+        identity.userId = 'acc1'
         identity.generation++
         const cached = await api.withDesktopE2eeAccount(
           (owner) => owner.host.inspectCachedState('workspace', 'synthetic-machine'),
@@ -2344,7 +2273,7 @@ void test('prepareDispatch isolates JWT, transport and parse failures from crede
                     cleanupDone.resolve()
                   }
                 },
-                desktopE2eeCloudClient: async () => ({ accountId: 'account', client })
+                desktopE2eeCloudClient: async () => ({ accountId: 'acc1', client })
               }
             },
             { ...console, warn: (...args) => diagnostics.push(args) }
@@ -2572,7 +2501,7 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
         '../../services/e2ee-account-runtime': {
           ...api,
           desktopE2eeCloudClient: async () => ({
-            accountId: 'account',
+            accountId: 'acc1',
             client: {
               contentStreamsToken: () => {
                 server.checks += 1
@@ -2661,7 +2590,7 @@ void test('a live reader is cut at prepareDispatch after server-side access loss
         new RegExp(`^Error: e2ee_${reason}$`)
       )
       assert.equal(
-        api.countDesktopE2eeReaders('account', 'workspace', sender.id),
+        api.countDesktopE2eeReaders('acc1', 'workspace', sender.id),
         0,
         'the original reader is closed'
       )
@@ -2738,7 +2667,7 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
             return value
           },
           desktopE2eeCloudClient: async () => ({
-            accountId: 'account',
+            accountId: 'acc1',
             client: {
               contentStreamsToken: () =>
                 Effect.gen(function* () {
@@ -2797,7 +2726,7 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
       const dispatch = ipc.prepareDispatch('workspace', 'machine', {
         sessionId: 'session',
         userTurnId: 'turn',
-        userId: 'account',
+        userId: 'acc1',
         timestamp: new Date(0).toISOString(),
         inputConfig: {}
       })
@@ -2826,7 +2755,7 @@ void test('dispatch confirmation fences its reader and bounds only the waiter', 
         await ipc.open('workspace')
       }
       if (scenario === 'account-switch' || scenario === 'reauthenticated') {
-        publishIdentity(scenario === 'account-switch' ? 'other-account' : 'account')
+        publishIdentity(scenario === 'account-switch' ? 'acc2' : 'acc1')
         await api.closeDesktopE2eeAccount()
       }
       if (scenario === 'loss-during-binding-read') {
@@ -2920,7 +2849,7 @@ void test('30ms local dispatch stays fast with an 800ms credential reply', async
         return value
       },
       desktopE2eeCloudClient: async () => ({
-        accountId: 'account',
+        accountId: 'acc1',
         client: {
           contentStreamsToken: () =>
             Effect.gen(function* () {
@@ -2947,7 +2876,7 @@ void test('30ms local dispatch stays fast with an 800ms credential reply', async
   const input = {
     sessionId: 'session',
     userTurnId: 'turn',
-    userId: 'account',
+    userId: 'acc1',
     timestamp: new Date(0).toISOString(),
     inputConfig: {}
   }
@@ -3215,7 +3144,7 @@ void test('automatic removal retries the exclusive native identity lease and pre
   )
   await Effect.runPromise(drain)
   await assert.rejects(
-    api.cleanupRemovedDesktopWorkspace({ accountId: 'account', workspaceId: 'removed' }),
+    api.cleanupRemovedDesktopWorkspace({ accountId: 'acc1', workspaceId: 'removed' }),
     /e2ee_identity-busy/
   )
   const original = join(
@@ -3226,7 +3155,7 @@ void test('automatic removal retries the exclusive native identity lease and pre
   assert.ok((await readFile(original)).length > 0)
   await Effect.runPromise(Scope.close(scope, Exit.void))
   assert.equal(
-    await api.cleanupRemovedDesktopWorkspace({ accountId: 'account', workspaceId: 'removed' }),
+    await api.cleanupRemovedDesktopWorkspace({ accountId: 'acc1', workspaceId: 'removed' }),
     true
   )
   await assert.rejects(readFile(original), (error) => error.code === 'ENOENT')
@@ -3276,7 +3205,7 @@ void test('slow terminal deletion fences only that workspace and never holds the
   )
   await Effect.runPromise(drain)
   const removal = api.cleanupRemovedDesktopWorkspace({
-    accountId: 'account',
+    accountId: 'acc1',
     workspaceId: 'removed'
   })
   try {
@@ -3320,7 +3249,7 @@ void test('remote commands use workspace custody and never create an account con
       '../../services/e2ee-account-runtime': {
         ...api,
         desktopE2eeCloudClient: async () => ({
-          accountId: 'account',
+          accountId: 'acc1',
           client: {
             machineBegin: ({ workspaceId, offer }) =>
               Effect.sync(() => {
@@ -4193,7 +4122,7 @@ async function accountPairingFixture(t, options = {}) {
   // Real custody, bootstrap, ledger hosts and SQLite journals on both devices; the
   // cloud is an in-memory relay plus the approver's own ledger as the history source.
   const f = await personalJoinFixture(t)
-  const approver = await f.open('approver')
+  const approver = await f.open('apprvr')
   await approver.create()
   const newDevice = await f.open('new-device')
   const { genesisHash } = await Effect.runPromise(approver.host.status(f.workspaceId))
@@ -4234,8 +4163,6 @@ async function accountPairingFixture(t, options = {}) {
           history: () => (request) => Effect.promise(() => ledgerPage(request))
         }
       }),
-    accountIdentity: () =>
-      Effect.succeed({ accountId: approver.accountId, cryptoUserId: 'aa'.repeat(32) }),
     history: (request) => Effect.promise(() => ledgerPage(request)),
     appendRecord: (request) =>
       Effect.promise(async () => {
@@ -4716,6 +4643,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
   const owner = await nativeAccountFixture(t)
   const member = await nativeAccountFixture(t)
   member.identity.userId = 'member'
+  member.identity.userId = 'member'
   const created = await createAccountWorkspace(owner.api, 'team')
   const hexOf = (bytes) => Buffer.from(bytes).toString('hex')
   const genesisHash = created.creation.genesisHashHex
@@ -4810,7 +4738,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
   const relayed = (device, name, value) =>
     Effect.andThen(latency(name, { device }), Effect.sync(value))
   const ownerCloud = {
-    accountId: 'account',
+    accountId: 'acc1',
     client: {
       memberPending: () =>
         relayed('owner', 'memberPending', () => ({
@@ -4857,11 +4785,9 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
       staging
     }
   }
-  const memberCloudFor = (accountId, cryptoUserId, mailboxPort) => ({
+  const memberCloudFor = (accountId, mailboxPort) => ({
     accountId,
     client: {
-      accountIdentity: () =>
-        relayed('member', 'accountIdentity', () => ({ accountId, cryptoUserId })),
       memberSubmit: ({ keyPackageHex }) =>
         relayed('member', 'memberSubmit', () => {
           const proof = memberJoining.decodeMemberKeyPackage(keyPackageHex)
@@ -4897,7 +4823,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
       staging
     }
   })
-  const memberCloud = memberCloudFor('member', 'bb'.repeat(32), () => memberPort)
+  const memberCloud = memberCloudFor('member', () => memberPort)
   const ipc = async (fixture, cloud, id) => {
     const sender = Object.assign(new EventEmitter(), {
       id,
@@ -4945,13 +4871,13 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
       return submitted
     },
     /** Another account's member, joining through the same relay. */
-    async addMember(accountId, cryptoUserId, senderId) {
+    async addMember(accountId, senderId) {
       const fixture = await nativeAccountFixture(t)
       fixture.identity.userId = accountId
       let ownPort
       const other = await ipc(
         fixture,
-        memberCloudFor(accountId, cryptoUserId, () => ownPort),
+        memberCloudFor(accountId, () => ownPort),
         senderId
       )
       const submitted = await other.prepareMemberJoin(offer)
@@ -4981,7 +4907,7 @@ void test(
     const submitted = await f.submit()
     await f.approver.memberJoinRequests('team')
     await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
-    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
     const trail = f.logs.map(([event, fields]) => `${event}:${fields.state}:${fields.phase ?? ''}`)
     assert.deepEqual(trail, [
@@ -5051,7 +4977,6 @@ async function newDesktopAccountPairing(t, pairingSubmit) {
   }
   const desktop = await nativeAccountFixture(t)
   const client = {
-    accountIdentity: () => Effect.succeed({ accountId: 'account', cryptoUserId: 'aa'.repeat(32) }),
     history: () => Effect.promise(ledgerPage),
     pairingSubmit,
     pairingClaim: () => Effect.succeed({ status: 'pending', approvals: [] })
@@ -5066,7 +4991,7 @@ async function newDesktopAccountPairing(t, pairingSubmit) {
     e2eeIpcDependencies(
       {
         ...desktop.api,
-        desktopE2eeCloudClient: async () => ({ accountId: 'account', client }),
+        desktopE2eeCloudClient: async () => ({ accountId: 'acc1', client }),
         desktopAccountPairingDatabase: (accountId) =>
           join(desktop.directory, `account-pairing-${accountId}.sqlite`)
       },
@@ -5153,7 +5078,7 @@ void test(
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
     const missed = calls.member.length
     held.resolve()
-    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
     calls.member = []
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, true)
     const installing = claimCalls(calls.member)
@@ -5252,7 +5177,7 @@ async function rotatedTeam(t, latency) {
   const joined = async (joiner, submitted, accountId) => {
     await f.approver.memberJoinRequests('team')
     await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
-    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
     let claimed = await joiner.claimMemberJoin('team', submitted.requestId)
     for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)
       claimed = await joiner.claimMemberJoin('team', submitted.requestId)
@@ -5262,7 +5187,7 @@ async function rotatedTeam(t, latency) {
   await joined(f.joiner, await f.submit(), 'member')
   const others = []
   for (const [index, name] of ['m2', 'm3', 'm4', 'm5', 'm6'].entries()) {
-    const other = await f.addMember(name, `${index + 1}${index + 1}`.repeat(32), 10 + index)
+    const other = await f.addMember(name, 10 + index)
     await joined(other.ipc, other.submitted, name)
     others.push(other)
   }
@@ -5345,13 +5270,13 @@ void test(
     const release = held
     held = undefined
     release.resolve()
-    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
     // Before the member's next claim, another member joins and is removed, and the
     // required rotation publishes epoch 1.
-    const other = await f.addMember('other', 'cc'.repeat(32), 3)
+    const other = await f.addMember('thr', 3)
     await f.approver.memberJoinRequests('team')
     await f.approver.approveMemberJoin('team', other.submitted.requestId, 'automatic')
-    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
     await f.approver.removeMember('team', other.submitted.requestId)
     await f.approver.updateKeys('team')
     const epoch = async (api) =>
@@ -5414,7 +5339,7 @@ void test(
     assert.equal((await f.joiner.claimMemberJoin('team', submitted.requestId)).ready, false)
     held.resolve()
     held = undefined
-    await f.approver.keyDeliveryIdle('account', 'team')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
     // The member is removed before its next claim; only its credential can confirm it.
     f.relay.memberRemoved = true
     await assert.rejects(

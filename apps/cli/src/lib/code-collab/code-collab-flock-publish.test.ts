@@ -1,10 +1,11 @@
 import { Flock } from '@loro-dev/flock-wasm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   CODE_COLLAB_FILE_INDEX_LIMITS,
   buildCodeCollabFileIndexState,
   readCodeCollabFileIndexFromFlock,
+  readCodeCollabFileGenerations,
   type CodeCollabFileIndexWritableFlock,
   type CodeCollabV2FileTreeState,
 } from '@lody/shared';
@@ -19,14 +20,28 @@ function makeFlock(
   readonly snapshot: () => Record<string, unknown>;
 } {
   const values = new Map(Object.entries(initial));
+  const generations = new Map<string, unknown>();
   return {
     flock: {
-      scan: () => [...values].map(([key, value]) => ({ key: [key], value })),
-      set: ([key], value) => {
+      scan: () => [
+        ...[...values].map(([key, value]) => ({ key: [key], value })),
+        ...[...generations].map(([key, value]) => ({ key: [key, 'v'], value })),
+      ],
+      set: (keys, value) => {
+        const key = keys[0];
+        if (keys.length === 2) {
+          generations.set(key, value);
+          return;
+        }
         events.push(`set:${key}`);
         values.set(key, value);
       },
-      delete: ([key]) => {
+      delete: (keys) => {
+        const key = keys[0];
+        if (keys.length === 2) {
+          generations.delete(key);
+          return;
+        }
         events.push(`delete:${key}`);
         values.delete(key);
       },
@@ -45,6 +60,48 @@ function makeFlock(
 }
 
 describe('Code Collab Flock publication', () => {
+  it('bumps only changed paths and invalidates unchanged rows when the comparison base changes', async () => {
+    const local = makeFlock({}, []);
+    const repo = {
+      openFlockDoc: async () => ({ flock: local.flock, syncOnce: async () => undefined }),
+      flush: async () => undefined,
+    };
+    const files = {
+      'a.ts': { kind: 'text' as const, change: { diff: [1, 0] as [number, number] } },
+      'b.ts': { kind: 'text' as const, change: { diff: [2, 0] as [number, number] } },
+    };
+    const publish = (
+      fileIndex: typeof files,
+      resetDiffGenerations = false,
+      bumpDiffPaths?: readonly string[]
+    ) =>
+      publishCodeCollabFileIndexFlock({
+        repo,
+        flockDocId: 'workspace:fi:owner',
+        fileIndex,
+        updatedAtMs: 1,
+        reconcileRemote: false,
+        resetDiffGenerations,
+        bumpDiffPaths,
+      });
+    await publish(files);
+    const first = readCodeCollabFileGenerations(local.flock);
+    await publish({ ...files, 'a.ts': { ...files['a.ts'], change: { diff: [3, 0] } } });
+    const second = readCodeCollabFileGenerations(local.flock);
+    expect(second['a.ts']).not.toBe(first['a.ts']);
+    expect(second['b.ts']).toBe(first['b.ts']);
+    const current = readCodeCollabFileIndexFromFlock(local.flock);
+    await publish(current as typeof files, false, ['a.ts']);
+    const sameStats = readCodeCollabFileGenerations(local.flock);
+    expect(sameStats['a.ts']).not.toBe(second['a.ts']);
+    expect(sameStats['b.ts']).toBe(second['b.ts']);
+    await publish(current as typeof files, true);
+    const third = readCodeCollabFileGenerations(local.flock);
+    expect(third['a.ts']).not.toBe(second['a.ts']);
+    expect(third['b.ts']).not.toBe(second['b.ts']);
+    expect(readCodeCollabFileIndexFromFlock(local.flock)).toEqual(current);
+  });
+
   it('does not apply a stale file index when cancellation wins a pending pre-sync', async () => {
     const events: string[] = [];
     const local = makeFlock({ 'old.ts': true }, events);
@@ -93,7 +150,10 @@ describe('Code Collab Flock publication', () => {
       legacy[`.pnpm-store/v10/index/${String(index).padStart(6, '0')}-缓存-"q"\\name@1.0.0.json`] =
         true;
     }
-    for (const [key, value] of Object.entries(legacy)) flock.set([key], value);
+    for (const [key, value] of Object.entries(legacy)) {
+      flock.set([key], value);
+      flock.set([key, 'v'], { g: 'legacy' });
+    }
     flock.commit();
 
     const tree: CodeCollabV2FileTreeState = { src: { kind: 'lazy' } };
@@ -123,6 +183,8 @@ describe('Code Collab Flock publication', () => {
 
     expect(result.changed).toBe(true);
     expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(target);
+    const generations = readCodeCollabFileGenerations(flock);
+    expect(Object.keys(generations).sort()).toEqual(['src/file-1.ts', 'src/removed.ts']);
     expect(target['src/removed.ts']).toEqual({
       kind: 'deleted',
       change: { diff: [0, 4], del: true },
@@ -136,6 +198,26 @@ describe('Code Collab Flock publication', () => {
     expect(full - countTombstoneBytes(flock)).toBeLessThanOrEqual(
       CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes
     );
+    // A generation-only reset still commits and syncs, without rewriting file rows.
+    const lastExport = exportedBundleBytes.length;
+    const reset = await publishCodeCollabFileIndexFlock({
+      repo: {
+        openFlockDoc: async () => ({ flock, syncOnce: recordExport }),
+        flush: async () => undefined,
+      },
+      flockDocId: 'workspace:fi:owner',
+      fileIndex: target,
+      updatedAtMs: 1_800_000_000_001,
+      reconcileRemote: false,
+      resetDiffGenerations: true,
+    });
+    expect(reset.changed).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(target);
+    for (const path of Object.keys(generations))
+      expect(readCodeCollabFileGenerations(flock)[path]).not.toBe(generations[path]);
+    expect(exportedBundleBytes.slice(lastExport).length).toBeGreaterThan(0);
+    for (const bytes of exportedBundleBytes.slice(lastExport))
+      expect(bytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
   });
 });
 

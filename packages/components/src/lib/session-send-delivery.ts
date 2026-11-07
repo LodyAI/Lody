@@ -1,10 +1,13 @@
 import {
+  getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isSessionHistoryStatusAwaitingStart,
   isSessionHistoryPendingForDispatch,
   normalizeSessionTurnInputConfig,
+  queuedInputEvidence,
   type MachineId,
+  type MessageQueueItem,
   type SessionHistory,
   type SessionId,
   type SessionMeta,
@@ -12,8 +15,9 @@ import {
 } from '@lody/shared';
 import debug from 'debug';
 import i18next from 'i18next';
+import { v4 as uuidv4 } from 'uuid';
 import type { SessionDocDraft, WorkspaceRuntime } from '@/atoms/runtime';
-import { SessionInputNotSentError } from './session-accepted-inputs';
+import { QueueSignalError, SessionInputNotSentError } from './session-accepted-inputs';
 import {
   EncryptedPrepareTimeout,
   isKnownMachineWithdrawal,
@@ -121,15 +125,202 @@ export async function writeUserTurn(
   send: UserTurnSend,
   signal?: AbortSignal
 ): Promise<void> {
-  const late = (await refuseKnownWithdrawnTarget(runtime, send))?.late;
+  // The machine writes a promoted row, so a queued input carries its own signed original.
+  const queuedOriginal =
+    send.queue && runtime.contentMode === 'e2ee'
+      ? await prepareQueuedOriginal(runtime, send.sessionId, {
+          ...send.entry,
+          machineId: send.creation?.machineId as MachineId | undefined,
+          signal,
+        })
+      : undefined;
+  const late = queuedOriginal ? undefined : (await refuseKnownWithdrawnTarget(runtime, send))?.late;
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
-  if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
+  if (queuedOriginal) {
+    await storeQueuedOriginal(runtime, send.sessionId, send.entry.id, queuedOriginal);
+    try {
+      throwIfSendAborted(signal);
+      await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue!);
+    } catch (error) {
+      // A committed row can run, so a failed signal still means the send happened.
+      if (!(error instanceof QueueSignalError)) {
+        await releaseQueuedOriginal(runtime, send.sessionId, send.entry.id);
+        throw error;
+      }
+      log('queue signal failed after %s/%s was written: %o', send.sessionId, send.entry.id, error);
+    }
+    // No abort check follows: from here the row exists, so the send cannot be reported as stopped.
+  } else if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
   if (late && !send.queue) settleOnLateWithdrawal(runtime, send, late);
   if (send.delivery.kind === 'dispatch')
     await activateUserTurn(runtime, send.sessionId, send.entry.id);
+}
+
+/** How long a queued send waits for its original past the shared preparation deadline. */
+export const QUEUED_ORIGINAL_DEADLINE_MS = 10_000;
+
+async function awaitQueuedOriginal(
+  prepare: Promise<PreparedEncryptedDispatch>,
+  signal?: AbortSignal
+): Promise<PreparedEncryptedDispatch> {
+  const answer = prepare.catch((error: unknown) => {
+    if (error instanceof EncryptedPrepareTimeout) return error.late;
+    throw error;
+  });
+  // A late answer stays observed after this send stops waiting; a retry reuses the original.
+  answer.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('e2ee_rpc_prepare_timeout')),
+      QUEUED_ORIGINAL_DEADLINE_MS
+    );
+    onAbort = () => reject(new Error('e2ee_rpc_prepare_aborted'));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([answer, stopped]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** A queue row with no original cannot start, so an unsigned input is not sent at all. */
+async function prepareQueuedOriginal(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  input: Pick<SessionHistory, 'id' | 'userId' | 'timestamp' | 'inputConfig'> & {
+    machineId?: MachineId;
+    signal?: AbortSignal;
+  }
+): Promise<string> {
+  const notSent = (key: string) => new SessionInputNotSentError(i18next.t(key));
+  const inputConfig = normalizeSessionTurnInputConfig(input.inputConfig);
+  const userId = input.userId?.trim();
+  const machineId = input.machineId ?? (await readMachineId(runtime, sessionId));
+  if (!runtime.prepareEncryptedDispatch || !machineId || !inputConfig || !userId)
+    throw notSent('sessions.sendError');
+  if (!input.timestamp) throw notSent('sessions.sendError');
+  try {
+    const prepared = await awaitQueuedOriginal(
+      runtime.prepareEncryptedDispatch(machineId, {
+        sessionId,
+        userTurnId: input.id,
+        userId,
+        timestamp: input.timestamp,
+        inputConfig,
+      }),
+      input.signal
+    );
+    return prepared.original.frameHex;
+  } catch (error) {
+    throw notSent(
+      isKnownMachineWithdrawal(error) ? 'e2ee.machineSharing.issue.notShared' : 'sessions.sendError'
+    );
+  }
+}
+
+async function storeQueuedOriginal(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  userTurnId: string,
+  frameHex: string
+) {
+  await runtime.sendResources.withSessionStore(sessionId, (store) => {
+    store.setState((draft: SessionDocDraft) => {
+      const existing = draft.queueDispatchOriginals?.[userTurnId];
+      if (existing !== undefined && existing !== frameHex)
+        throw new Error('e2ee_rpc_original_conflict');
+      draft.queueDispatchOriginals ??= {};
+      draft.queueDispatchOriginals[userTurnId] = frameHex;
+    });
+  });
+}
+
+/** Drops a Turn's original once no queue row or history row in this replica uses it. */
+export async function removeQueuedOriginal(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  userTurnId: string
+) {
+  if (runtime.contentMode !== 'e2ee') return;
+  await runtime.sendResources.withSessionStore(sessionId, async (store) => {
+    const state = store.getState();
+    if (state.queueDispatchOriginals?.[userTurnId] === undefined) return;
+    if ((state.mq ?? []).some((item) => item.userTurnId === userTurnId)) return;
+    if ((await store.sessionData.history.readTurn(userTurnId)).state === 'ready') return;
+    store.setState((draft: SessionDocDraft) => {
+      if (draft.queueDispatchOriginals) delete draft.queueDispatchOriginals[userTurnId];
+    });
+  });
+}
+
+/** Cleanup after a failed or finished write must not replace that write's own outcome. */
+async function releaseQueuedOriginal(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  userTurnId: string
+) {
+  await removeQueuedOriginal(runtime, sessionId, userTurnId).catch((error: unknown) => {
+    log('queued original cleanup failed for %s/%s: %o', sessionId, userTurnId, error);
+  });
+}
+
+/** Writes a queue edit; each original's cleanup follows what the row ends up naming. */
+export async function replaceQueueItem(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  cid: string,
+  current: MessageQueueItem,
+  next: MessageQueueItem
+): Promise<void> {
+  const sealed = await sealEditedQueueItem(runtime, sessionId, current, next);
+  try {
+    await runtime.writer.updateSessionMessage(
+      sessionId,
+      cid,
+      sealed as unknown as Record<string, unknown>
+    );
+  } finally {
+    if (sealed.userTurnId !== current.userTurnId) {
+      if (sealed.userTurnId) await releaseQueuedOriginal(runtime, sessionId, sealed.userTurnId);
+      if (current.userTurnId) await releaseQueuedOriginal(runtime, sessionId, current.userTurnId);
+    }
+  }
+}
+
+/**
+ * Originals are immutable per Turn, so an encrypted edit that changes the input
+ * becomes a new Turn with its own original. Editing flags keep the row's identity.
+ */
+export async function sealEditedQueueItem(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  current: MessageQueueItem,
+  next: MessageQueueItem
+): Promise<MessageQueueItem> {
+  if (
+    runtime.contentMode !== 'e2ee' ||
+    queuedInputEvidence(current.acpSessionConfig) === queuedInputEvidence(next.acpSessionConfig)
+  )
+    return next;
+  const userTurnId = uuidv4();
+  const timestamp = new Date(getServerNow()).toISOString();
+  const frameHex = await prepareQueuedOriginal(runtime, sessionId, {
+    id: userTurnId,
+    userId: next.userId,
+    timestamp,
+    inputConfig: next.acpSessionConfig as SessionHistory['inputConfig'],
+  });
+  await persistHumanInputReceipt(runtime, sessionId, { id: userTurnId, userId: next.userId });
+  await storeQueuedOriginal(runtime, sessionId, userTurnId, frameHex);
+  return { ...next, userTurnId, operationId: `queue:${userTurnId}`, timestamp };
 }
 
 /**

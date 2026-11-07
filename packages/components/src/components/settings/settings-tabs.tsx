@@ -1,5 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import type { PlatformCapability } from '@lody/platform';
+import { useAtomValue } from 'jotai';
+import { lodyAgentFeatureEnabledAtom } from '../../atoms/settings';
 import { useAppCapabilityCheck } from '../../lib/app-platform';
 import {
   Brain,
@@ -17,6 +19,7 @@ import {
   FileText,
   SlidersHorizontal,
   Share2,
+  Sparkles,
   UserRound,
   UserRoundCog,
 } from 'lucide-react';
@@ -33,6 +36,7 @@ export type SettingsTabId =
   | 'people'
   | 'machines'
   | 'agents'
+  | 'lody-agent'
   | 'memory'
   | 'agent-roles'
   | 'prompt-shortcuts'
@@ -53,6 +57,7 @@ export type SettingsPath =
   | '/$workspaceName/settings/people'
   | '/$workspaceName/settings/machines'
   | '/$workspaceName/settings/agents'
+  | '/$workspaceName/settings/lody-agent'
   | '/$workspaceName/settings/memory'
   | '/$workspaceName/settings/agent-roles'
   | '/$workspaceName/settings/prompt-shortcuts'
@@ -75,6 +80,8 @@ export type SettingsTabConfig = {
   multiMemberOnly?: boolean;
   /** Keyboard-centric surfaces are hidden from the mobile settings list. */
   desktopOnly?: boolean;
+  /** Shown only while Developer mode and the Lody Agent beta are both on. */
+  lodyAgent?: boolean;
   path: SettingsPath;
 };
 
@@ -140,6 +147,15 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     descriptionKey: 'settings.categories.agents.description',
     icon: Bot,
     path: '/$workspaceName/settings/agents',
+  },
+  {
+    id: 'lody-agent',
+    section: 'workspace',
+    labelKey: 'settings.tabs.lodyAgent',
+    descriptionKey: 'settings.categories.lodyAgent.description',
+    icon: Sparkles,
+    lodyAgent: true,
+    path: '/$workspaceName/settings/lody-agent',
   },
   {
     // Beside Agents on purpose: a provider says how an agent starts, a Role
@@ -233,11 +249,13 @@ export function useVisibleSettingsTabs(options?: {
   includeMultiMemberOnly?: boolean;
 }): SettingsTabConfig[] {
   const hasCapability = useAppCapabilityCheck();
+  const lodyAgentEnabled = useAtomValue(lodyAgentFeatureEnabledAtom);
   const includeMultiMemberOnly = options?.includeMultiMemberOnly ?? true;
   return SETTINGS_TAB_CONFIGS.filter(
     (tab) =>
       (tab.capability === undefined || hasCapability(tab.capability)) &&
-      (!tab.multiMemberOnly || includeMultiMemberOnly)
+      (!tab.multiMemberOnly || includeMultiMemberOnly) &&
+      (!tab.lodyAgent || lodyAgentEnabled)
   );
 }
 
@@ -256,6 +274,7 @@ export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
     ['/settings/devices', 'machines'],
     ['/settings/agents', 'agents'],
     ['/settings/agent-config', 'agents'],
+    ['/settings/lody-agent', 'lody-agent'],
     ['/settings/memory', 'memory'],
     ['/settings/agent-roles', 'agent-roles'],
     ['/settings/prompt-shortcuts', 'prompt-shortcuts'],

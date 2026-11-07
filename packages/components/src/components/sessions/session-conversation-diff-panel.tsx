@@ -35,6 +35,9 @@ import {
   captureDiffCommentSentToChat,
   classifyGithubThreadError,
 } from './diff-pr-analytics';
+import { Button } from '@lody/ui/button';
+import { DiffBlobReadError } from '@/lib/diff-blob-client';
+import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { ScrollArea } from '@lody/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
@@ -341,6 +344,7 @@ export type SessionConversationDiffPanelProps = {
 
 type DiffFileBlockProps = {
   renderContent: boolean;
+  onReload: (path: string) => void;
   filePath: string;
   data: FileDiffData | undefined;
   defaultOpen: boolean;
@@ -386,13 +390,58 @@ const DiffFileBlock = memo(function DiffFileBlock({
   commentReferenceKeys,
   onCommentError,
   onOpenFile,
+  onReload,
 }: DiffFileBlockProps) {
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
+  const [open, setOpen] = useState(defaultOpen);
+  const [viewerRevision, setViewerRevision] = useState(0);
+  useEffect(() => setOpen(defaultOpen), [defaultOpen]);
+  const retry = useCallback(() => {
+    setHydrationError(null);
+    setViewerRevision((value) => value + 1);
+    onReload(filePath);
+  }, [filePath, onReload]);
+  useEffect(() => setHydrationError(null), [data]);
+  const hydration = useRef<AbortController | null>(null);
+  const visible = useRef(renderContent);
+  visible.current = renderContent;
+  useEffect(() => {
+    if (!renderContent) hydration.current?.abort();
+    return () => hydration.current?.abort();
+  }, [data, renderContent]);
+  const loadDiffFiles = useMemo(() => {
+    const load = data?.status === 'ready-parsed' ? data.loadDiffFiles : undefined;
+    if (!load) return undefined;
+    return async (diff: Parameters<typeof load>[0]) => {
+      if (!visible.current) throw new DOMException('Diff hidden.', 'AbortError');
+      hydration.current?.abort();
+      const controller = new AbortController();
+      hydration.current = controller;
+      try {
+        setHydrationError(null);
+        return await load(diff, controller.signal);
+      } catch (error) {
+        if (!controller.signal.aborted && visible.current) {
+          if (error instanceof DiffBlobReadError && error.code === 'diff_changed')
+            onReload(filePath);
+          else setHydrationError(getSessionDiffErrorMessage(error));
+        }
+        throw error;
+      } finally {
+        if (hydration.current === controller) hydration.current = null;
+      }
+    };
+  }, [data, filePath, onReload]);
   const { t } = useTranslation();
-  const diffViewerParseCacheKey = createConversationDiffViewerParseCacheKey({
-    mode,
-    cacheKey,
-    filePath,
-  });
+  const diffViewerParseCacheKey =
+    (data && 'contentKey' in data && data.contentKey
+      ? `${data.contentKey}:${filePath}`
+      : undefined) ??
+    createConversationDiffViewerParseCacheKey({
+      mode,
+      cacheKey,
+      filePath,
+    });
 
   if (!data) {
     return (
@@ -411,31 +460,45 @@ const DiffFileBlock = memo(function DiffFileBlock({
 
   if (data.status === 'ready-parsed') {
     return (
-      <DiffViewer
-        preferParseWorker
-        renderContent={renderContent}
-        key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
-        path={filePath}
-        oldText=""
-        newText=""
-        preparsedDiff={data.fileDiff}
-        preparsedOldTextLength={data.oldTextLength}
-        preparsedNewTextLength={data.newTextLength}
-        commentsEnabled={commentsEnabled}
-        currentUser={currentUser}
-        githubThreads={githubThreads}
-        prLinked={prLinked}
-        turnId={turnId}
-        mode={mode}
-        commentCallbacks={commentCallbacks}
-        commentReferenceKeys={commentReferenceKeys}
-        onCommentError={onCommentError}
-        onOpenFile={onOpenFile}
-        defaultOpen={defaultOpen}
-        deferRenderUntilOpen
-        parseCacheKey={diffViewerParseCacheKey}
-        cachePrerenderedHtml={false}
-      />
+      <>
+        {hydrationError && (
+          <div role="alert" {...stylex.props(styles.errorMessage)}>
+            {hydrationError}
+            <Button variant="secondary" size="small" onClick={retry}>
+              {t('common.retry', 'Retry')}
+            </Button>
+          </div>
+        )}
+        <DiffViewer
+          preferParseWorker
+          renderContent={renderContent}
+          key={`${mode}:${viewerRevision}`}
+          path={filePath}
+          oldText=""
+          newText=""
+          preparsedDiff={data.fileDiff}
+          responsiveSplit
+          options={loadDiffFiles ? { loadDiffFiles } : undefined}
+          preparsedOldTextLength={data.oldTextLength}
+          preparsedNewTextLength={data.newTextLength}
+          commentsEnabled={commentsEnabled}
+          currentUser={currentUser}
+          githubThreads={githubThreads}
+          prLinked={prLinked}
+          turnId={turnId}
+          mode={mode}
+          commentCallbacks={commentCallbacks}
+          commentReferenceKeys={commentReferenceKeys}
+          onCommentError={onCommentError}
+          onOpenFile={onOpenFile}
+          defaultOpen={defaultOpen}
+          open={open}
+          onOpenChange={setOpen}
+          deferRenderUntilOpen
+          parseCacheKey={diffViewerParseCacheKey}
+          cachePrerenderedHtml={false}
+        />
+      </>
     );
   }
 
@@ -444,7 +507,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
       <DiffViewer
         preferParseWorker
         renderContent={renderContent}
-        key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
+        key={`${mode}:${viewerRevision}`}
         path={filePath}
         oldText=""
         newText=""
@@ -460,6 +523,8 @@ const DiffFileBlock = memo(function DiffFileBlock({
         onCommentError={onCommentError}
         onOpenFile={onOpenFile}
         defaultOpen={defaultOpen}
+        open={open}
+        onOpenChange={setOpen}
         deferRenderUntilOpen
         parseCacheKey={diffViewerParseCacheKey}
         cachePrerenderedHtml={false}
@@ -507,7 +572,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
     <DiffViewer
       preferParseWorker
       renderContent={renderContent}
-      key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
+      key={`${mode}:${viewerRevision}`}
       path={filePath}
       oldText={data.oldSnapshot.kind === 'text' ? data.oldSnapshot.text : ''}
       newText={data.newSnapshot.kind === 'text' ? data.newSnapshot.text : ''}
@@ -522,6 +587,8 @@ const DiffFileBlock = memo(function DiffFileBlock({
       onCommentError={onCommentError}
       onOpenFile={onOpenFile}
       defaultOpen={defaultOpen}
+      open={open}
+      onOpenChange={setOpen}
       deferRenderUntilOpen
       responsiveSplit
       cachePrerenderedHtml={false}
@@ -631,18 +698,19 @@ function SessionConversationDiffPanelImpl({
     () => getMatchingPath(normalizedInputPaths, focusFilePath),
     [focusFilePath, normalizedInputPaths]
   );
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const { loadPaths, registerPath, anchorTarget } = useDiffViewport({
-    active,
+  const [viewportNode, setViewportNode] = useState<HTMLDivElement | null>(null);
+  const isBaseMode = mode === 'base';
+  const [diffReloadSeq, setDiffReloadSeq] = useState(0);
+  const diffRequestScope = useMemo(() => ({ revision: diffReloadSeq }), [diffReloadSeq]);
+  const conversationViewport = useDiffViewport({
+    active: active && !isBaseMode,
     paths: normalizedInputPaths,
     priorityPath: focusedLoadPath,
-    scrollContainerRef: viewportRef,
+    scrollContainer: viewportNode,
   });
-  const visiblePaths = useMemo(() => new Set(loadPaths), [loadPaths]);
   // "All Changes" (base) mode loads every file's diff with one batched RPC; conversation/turn
   // mode keeps the per-file loader. Both hooks are called (rules of hooks) but only the active
   // one fetches — the other is gated inert via `enabled`.
-  const isBaseMode = mode === 'base';
   const conversationDiffData = useSessionConversationDiffData({
     sessionId,
     turnId,
@@ -651,22 +719,48 @@ function SessionConversationDiffPanelImpl({
     fileDiffsPending,
     mode,
     priorityFilePath: focusedLoadPath,
-    loadFilePaths: loadPaths,
+    loadFilePaths: conversationViewport.loadPaths,
     loadPaused: isUserScrolling,
     fileProvider,
     fileProviderPending,
     enabled: active && !isBaseMode,
+    requestScope: diffRequestScope,
   });
   const allChangesDiffData = useSessionAllChangesDiffData({
     sessionId,
     filePaths: normalizedInputPaths,
-    loadFilePaths: loadPaths,
     focusPath: focusedLoadPath,
     fileProvider,
     fileProviderPending,
     enabled: active && isBaseMode,
     scope: allChangesScope ?? 'branch',
+    viewport: { scrollContainer: viewportNode, priorityPath: focusFilePath ?? null },
   });
+  const { loadPaths, registerPath, anchorTarget } = isBaseMode
+    ? allChangesDiffData.viewport
+    : conversationViewport;
+  const reloadDiff = useCallback(
+    (changedPath: string) => {
+      // Capture reading intent before any refresh can shrink or remove a card.
+      // Prefer another visible file because the triggering file may disappear.
+      if (viewportNode) {
+        const bounds = viewportNode.getBoundingClientRect();
+        const candidates = Array.from(
+          viewportNode.querySelectorAll<HTMLDivElement>('[data-diff-path]')
+        ).filter((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.bottom > bounds.top && rect.top < bounds.bottom;
+        });
+        const anchor =
+          candidates.find((node) => node.dataset.diffPath !== changedPath) ?? candidates[0];
+        if (anchor) anchorTarget(anchor);
+      }
+      setDiffReloadSeq((value) => value + 1);
+      if (isBaseMode) allChangesDiffData.reload();
+    },
+    [isBaseMode, allChangesDiffData.reload, anchorTarget, viewportNode]
+  );
+  const visiblePaths = useMemo(() => new Set(loadPaths), [loadPaths]);
   const { cacheKey, normalizedPaths, resolvedByPath, isDiffUnavailable } = isBaseMode
     ? allChangesDiffData
     : conversationDiffData;
@@ -768,7 +862,7 @@ function SessionConversationDiffPanelImpl({
   );
   const setConversationScroll = useCallback(
     (node: HTMLDivElement | null) => {
-      viewportRef.current = node;
+      setViewportNode(node);
       scrollContainerRef.current = node;
     },
     [scrollContainerRef]
@@ -790,11 +884,11 @@ function SessionConversationDiffPanelImpl({
       if (mode !== 'base') return;
       if (!viewport) {
         scrollContainerRef.current = null;
-        viewportRef.current = null;
+        setViewportNode(null);
         return;
       }
       scrollContainerRef.current = viewport instanceof HTMLDivElement ? viewport : null;
-      viewportRef.current = scrollContainerRef.current;
+      setViewportNode(scrollContainerRef.current);
       if (viewport instanceof HTMLDivElement) {
         viewport.addEventListener('scroll', handleDiffScroll, { passive: true });
         baseViewportScrollCleanupRef.current = () => {
@@ -954,30 +1048,38 @@ function SessionConversationDiffPanelImpl({
         {t('sessions.fileDiff.baseLabel', 'Compared with')}
       </span>
       <span {...stylex.props(styles.baseHeaderValue)}>{allChangesBaseLabel}</span>
+      {allChangesDiffData.refreshing && (
+        <span role="status">{t('sessions.fileDiff.loadingChanges', 'Loading changes…')}</span>
+      )}
     </div>
   ) : null;
 
-  const baseEmptyText =
-    !isBaseMode || effectiveScope !== 'uncommitted'
-      ? null
-      : allChangesUnavailableScopeReason !== null || allChangesUnavailableMessage !== null
-        ? allChangesUnavailableScopeReason === 'not_a_git_worktree'
+  const baseEmptyText = !isBaseMode
+    ? null
+    : allChangesUnavailableScopeReason !== null || allChangesUnavailableMessage !== null
+      ? allChangesUnavailableScopeReason === 'not_a_git_worktree'
+        ? t(
+            'sessions.fileDiff.scopeUnavailableNotGit',
+            'Uncommitted comparison requires a Git worktree.'
+          )
+        : allChangesUnavailableScopeReason === 'no_commits'
           ? t(
-              'sessions.fileDiff.scopeUnavailableNotGit',
-              'Uncommitted comparison requires a Git worktree.'
+              'sessions.fileDiff.scopeUnavailableNoCommits',
+              'This worktree has no commits yet, so there is no HEAD to compare against.'
             )
-          : allChangesUnavailableScopeReason === 'no_commits'
-            ? t(
-                'sessions.fileDiff.scopeUnavailableNoCommits',
-                'This worktree has no commits yet, so there is no HEAD to compare against.'
-              )
-            : (allChangesUnavailableMessage ??
-              t('sessions.fileDiff.unavailable', 'Diff unavailable'))
-        : normalizedPaths.length === 0
-          ? allChangesBatchReady
+          : (allChangesUnavailableMessage ?? t('sessions.fileDiff.unavailable', 'Diff unavailable'))
+      : normalizedPaths.length === 0
+        ? allChangesBatchReady
+          ? effectiveScope === 'uncommitted'
             ? t('sessions.fileDiff.noUncommittedChanges', 'No uncommitted changes.')
-            : t('sessions.fileDiff.loadingChanges', 'Loading changes…')
-          : null;
+            : focusFilePath
+              ? t(
+                  'sessions.fileDiff.focusNoBranchChanges',
+                  'This file has no changes against the branch base.'
+                )
+              : t('sessions.fileDiff.noChanges', 'No changes.')
+          : t('sessions.fileDiff.loadingChanges', 'Loading changes…')
+        : null;
 
   if (baseEmptyText !== null) {
     return (
@@ -1020,6 +1122,7 @@ function SessionConversationDiffPanelImpl({
       {...stylex.props(styles.fileBlock)}
     >
       <DiffFileBlock
+        onReload={reloadDiff}
         renderContent={visiblePaths.has(filePath)}
         filePath={filePath}
         data={resolvedByPath[filePath]}
@@ -1040,9 +1143,8 @@ function SessionConversationDiffPanelImpl({
     </div>
   );
 
-  const focusPathOutsideUncommittedScope =
+  const focusPathOutsideAllChangesScope =
     isBaseMode &&
-    effectiveScope === 'uncommitted' &&
     allChangesBatchReady &&
     focusFilePath !== null &&
     focusFilePath !== undefined &&
@@ -1050,12 +1152,17 @@ function SessionConversationDiffPanelImpl({
 
   const panelContent = (
     <div {...stylex.props(styles.panelContent)}>
-      {focusPathOutsideUncommittedScope ? (
+      {focusPathOutsideAllChangesScope ? (
         <div {...stylex.props(styles.emptyMessage)}>
-          {t(
-            'sessions.fileDiff.focusNoUncommittedChanges',
-            'This file has no uncommitted changes.'
-          )}
+          {effectiveScope === 'uncommitted'
+            ? t(
+                'sessions.fileDiff.focusNoUncommittedChanges',
+                'This file has no uncommitted changes.'
+              )
+            : t(
+                'sessions.fileDiff.focusNoBranchChanges',
+                'This file has no changes against the branch base.'
+              )}
         </div>
       ) : null}
       {githubReviewComments.error && (

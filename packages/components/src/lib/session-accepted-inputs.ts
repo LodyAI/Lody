@@ -7,6 +7,9 @@ import { SessionHistoryRequestError } from './roost-history-error';
 
 /** Proven source-side refusal before owner history is invoked. */
 export class SessionInputNotSentError extends Error {}
+
+/** The queue row committed locally; only the signal that wakes its machine failed. */
+export class QueueSignalError extends Error {}
 const refusalCodes = new Set([
   'session_metadata_pending',
   'session_owner_mismatch',

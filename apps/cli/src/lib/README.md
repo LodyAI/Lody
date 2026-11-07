@@ -101,7 +101,9 @@ settles. A lost response does not authorize repeating an uncertain execution.
 
 - `usage/usage-tracking-service.ts` — cumulative usage snapshot staging and
   acknowledgement-based retry retention; deltas are never added again.
-  Scope and limits: [usage delivery](../../../../specs/usage-delivery.md).
+  Scope and limits: [usage delivery](../../../../specs/usage-delivery.md). Codex
+  attributes each turn's new tokens to its submitted model:
+  [decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-codex-per-model-attribution.md).
 
 - `message-handler.ts` — the CLI's central message hub (largest file): session chat
   handling (`handleSessionChat`), ACP update buffering/flush, Code Collab v2 machine

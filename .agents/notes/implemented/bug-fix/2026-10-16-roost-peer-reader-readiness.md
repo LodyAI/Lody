@@ -258,4 +258,4 @@ remains draft; implementation does not approve it.
 Related decisions: [incremental recovery](2026-10-16-roost-incremental-history.md),
 [write amplification](2026-10-16-roost-storage-write-amplification.md),
 [native runtime](../../proposed/architecture/2026-10-09-roost-native-runtime.md),
-[creation feature gate](../../proposed/feature/2026-10-08-roost-history-feature-gate.md).
+[creation feature gate](../feature/2026-10-08-roost-history-feature-gate.md).

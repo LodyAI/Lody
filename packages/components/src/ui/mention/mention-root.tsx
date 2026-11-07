@@ -120,10 +120,8 @@ interface MentionChip {
   /**
    * Chip body classes — colour only, per the width rule above.
    *
-   * The primitive supplies the opaque cover that hides the textarea's own
-   * glyphs, painted in `--mention-chip-surface`. That variable must be set on
-   * whatever container actually paints the background behind the textarea, or
-   * the cover reads as a rectangle instead of disappearing into the surface.
+   * The mirror is the only visible text source; chip backgrounds are optional
+   * decoration, never a cover for a second copy of the glyphs.
    */
   className?: string;
   /** Leading characters of the range surrendered to the icon. @default 1 */

@@ -50,6 +50,11 @@ Nightly CLI 主线程持续约 100% CPU，本地 Supervisor 反复进入 reconne
 - All Changes 的 diff 统计仍计入超出读取预算的未跟踪文件，但不含行数。
 - 旧 diff-store 快照为 `too_large`、如今已缺失的变更路径仍然没有 `del`，所以显示为文件。
 
+远程 diff 的[不透明 generation 兄弟行](../architecture/2026-10-31-remote-diff-transport.zh.md)
+也包含在预算内：每个变更路径预留第二个物理行和最多 64 字节编码 token 的 JSON 成本，
+发布器重新签发超长 token。generation 写入及孤立行清理与文件行共用提交计划，不能绕过
+完整索引或单次追加预算。
+
 ## 验证
 
 - `apps/cli/tests/streams-crdt-flock-local-export.test.ts` 用真实 Flock 测试合并导出、定时器公平性、待导出期间的写入、失败重试和退订。它在未打补丁的适配器上会失败。

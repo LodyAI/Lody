@@ -1,3 +1,13 @@
+import { randomUUID } from 'node:crypto';
+import {
+  readCodeCollabFileGenerations,
+  CODE_COLLAB_FILE_GENERATION_MAX_BYTES,
+  readCodeCollabFileIndexFromFlock,
+  codeCollabFileIndexValuesEqual,
+  type CodeCollabFileGenerations,
+} from '@lody/shared';
+const diffGenerationEpoch = randomUUID();
+let diffGenerationCounter = 0;
 import { waitForCodeCollabTask } from './code-collab-task';
 import {
   readCodeCollabFileIndexSignalFromFlock,
@@ -48,21 +58,38 @@ export async function publishCodeCollabFileIndexFlock(args: {
   readonly fileIndex: CodeCollabV2FileIndexState;
   readonly updatedAtMs: number;
   readonly reconcileRemote: boolean;
-}): Promise<{ readonly changed: boolean }> {
+  readonly resetDiffGenerations?: boolean;
+  readonly bumpDiffPaths?: readonly string[];
+}): Promise<{ readonly changed: boolean; readonly generations: CodeCollabFileGenerations }> {
   args.signal?.throwIfAborted();
   const handle = await waitForCodeCollabTask(args.repo.openFlockDoc(args.flockDocId), args.signal);
   if (args.reconcileRemote) {
     await syncFlock(args.repo, handle, args.flockDocId, args.signal);
   }
   args.signal?.throwIfAborted();
-  // Each batch is one Flock commit within CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes.
-  // Flush + sync between batches is the barrier that makes each commit its own
-  // Streams export, so cleaning up an oversized legacy index never becomes one
-  // multi-megabyte append. A failure mid-way leaves the new rows already written
-  // and the repair loop re-plans from the replica, finishing the cleanup.
-  const batches = planCodeCollabFileIndexFlockWrite(handle.flock, args.fileIndex);
+  const previous = readCodeCollabFileIndexFromFlock(handle.flock);
+  const previousGenerations = readCodeCollabFileGenerations(handle.flock);
+  const generations: Record<string, string> = {};
+  const bumped = new Set(args.bumpDiffPaths);
+  for (const [path, value] of Object.entries(args.fileIndex)) {
+    const changed = value !== true && 'change' in value && value.change !== undefined;
+    if (!changed) continue;
+    generations[path] =
+      !args.resetDiffGenerations &&
+      !bumped.has(path) &&
+      previousGenerations[path] &&
+      Buffer.byteLength(JSON.stringify(previousGenerations[path])) <=
+        CODE_COLLAB_FILE_GENERATION_MAX_BYTES + 2 &&
+      codeCollabFileIndexValuesEqual(previous[path], value)
+        ? previousGenerations[path]
+        : `${diffGenerationEpoch}.${++diffGenerationCounter}`;
+  }
+  // File rows and generation siblings share the same bounded commit plan.
+  // Flush + sync keeps legacy cleanup and generation-only updates within the
+  // Streams append budget. Repair re-plans from the replica after a failed batch.
+  const batches = planCodeCollabFileIndexFlockWrite(handle.flock, args.fileIndex, { generations });
   if (batches.length === 0) {
-    return { changed: false };
+    return { changed: false, generations };
   }
   try {
     for (const batch of batches) {
@@ -75,7 +102,7 @@ export async function publishCodeCollabFileIndexFlock(args: {
   } catch (error) {
     throw new CodeCollabFileIndexChangedPublishError(error);
   }
-  return { changed: true };
+  return { changed: true, generations };
 }
 
 export async function publishCodeCollabFileIndexSignalFlock(args: {

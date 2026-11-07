@@ -1,6 +1,6 @@
-import { Effect, Exit, Fiber } from 'effect';
+import { Effect, Exit, Fiber, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { hashRecordBytes } from '@lody/e2ee-core/protocol';
+import { accountUserId, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
 import {
   makeAccountE2eeRuntime,
@@ -15,7 +15,7 @@ const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 
 /** A real signed ledger: the owner's genesis, then the owner admitting a personal phone. */
 function fixture() {
-  const f = envelopeFixture();
+  const f = envelopeFixture(0, 100, Result.getOrThrow(accountUserId('acc1')).toBytes());
   const genesisHash = hex(f.context.genesis.toBytes());
   const page = {
     workspaceId: 'w1',
@@ -26,7 +26,7 @@ function fixture() {
     position: 'opaque/final',
     nextCursor: null,
   };
-  const [[membershipId, member]] = [...f.view().inspectState().members.entries()];
+  const [[membershipId]] = [...f.view().inspectState().members.entries()];
   const calls: { kind: string; value?: unknown }[] = [];
   let pending: { pairingSessionId: string } | null = null;
   const host: AccountPairingIdentityHost = {
@@ -47,12 +47,12 @@ function fixture() {
       Effect.sync(() => void calls.push({ kind: 'accept', value })),
     activate: () => Effect.sync(() => void calls.push({ kind: 'activate' })),
   };
-  const requester = (cryptoUserId = hex(member!.userId.toBytes())) =>
+  const requester = (accountId = 'acc1') =>
     makePortableAccountPairingRequester({
       workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash }],
       host: () => Effect.succeed(host),
       history: () => Effect.succeed(page),
-      accountIdentity: () => Effect.succeed({ cryptoUserId }),
+      accountId,
     });
   return {
     f,
@@ -71,8 +71,8 @@ describe('portable account pairing requester', () => {
     expect(calls).toEqual([
       { kind: 'prepare', value: { genesisRecordHex: hex(f.genesisRecord), membershipId } },
     ]);
-    // A service naming another crypto user finds no membership and prepares nothing.
-    const [other] = await Effect.runPromise(requester('ff'.repeat(32))());
+    // Another account finds no membership and prepares nothing.
+    const [other] = await Effect.runPromise(requester('acc2')());
     const refused = await Effect.runPromiseExit(other!.identity());
     expect(Exit.isFailure(refused)).toBe(true);
     expect(calls).toHaveLength(1);

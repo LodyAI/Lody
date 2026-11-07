@@ -14,6 +14,8 @@
 // Foundation
 /** Validated, copy-owning protocol byte values and their parsers; parsing does not establish authority. */
 export * as Bytes from '../internal/foundation/bytes';
+/** The frozen, reversible mapping between account IDs and the ledger's 32-byte user IDs. */
+export { accountIdFromUserId, accountUserId } from '../internal/foundation/account-user-id';
 export {
   ValidationError,
   ContentError,
@@ -227,6 +229,10 @@ export {
   parseRecoveryFile,
   wipeRecoveryPackage,
   verifiedPasskeyPrf,
+  verifiedPasskeyRegistration,
+  vaultPrfInput,
+  passkeyUserHandle,
+  vaultIdFromPasskeyUserHandle,
   disposePrf,
   ownVaultCiphertext,
   vaultCiphertextDigest,
@@ -236,5 +242,6 @@ export {
   type RecoveryIdentity,
   type RecoveryPrivatePackage,
   type VerifiedPasskeyPrf,
+  type VerifiedPasskeyRegistration,
   type VaultCiphertext,
 } from '../internal/recovery';

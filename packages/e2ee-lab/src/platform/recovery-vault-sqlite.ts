@@ -42,11 +42,11 @@ export const makeLabRecoveryVaultStore = Effect.fnUntraced(function* (input: {
     path: input.path,
     mode: input.mode,
     applicationId: app,
-    version: 1,
+    version: 2,
     error,
     initialize: (connection) =>
       connection.exec(
-        `CREATE TABLE vault_entries(vault TEXT NOT NULL,entryId TEXT NOT NULL,revision INTEGER NOT NULL,body BLOB NOT NULL,PRIMARY KEY(vault,entryId)) STRICT;CREATE TABLE vault_index(vault TEXT PRIMARY KEY,entryId TEXT NOT NULL,revision INTEGER NOT NULL,body BLOB NOT NULL) STRICT;CREATE TABLE vault_local(key TEXT PRIMARY KEY,body BLOB NOT NULL) STRICT;`
+        `CREATE TABLE vault_entries(vault TEXT NOT NULL,entryId TEXT NOT NULL,revision INTEGER NOT NULL,body BLOB NOT NULL,PRIMARY KEY(vault,entryId)) STRICT;CREATE TABLE vault_index(vault TEXT PRIMARY KEY,entryId TEXT NOT NULL,revision INTEGER NOT NULL,body BLOB NOT NULL,refs TEXT NOT NULL) STRICT;CREATE TABLE vault_local(key TEXT PRIMARY KEY,body BLOB NOT NULL) STRICT;`
       ),
   });
   let closed = false;
@@ -93,6 +93,12 @@ export const makeLabRecoveryVaultStore = Effect.fnUntraced(function* (input: {
         )
         .get(vault)
     );
+  };
+  const references = (vault: string): readonly string[] => {
+    const row = db.prepare('SELECT refs FROM vault_index WHERE vault=?').get(vault) as
+      | { refs: string }
+      | undefined;
+    return row ? (JSON.parse(row.refs) as string[]) : [];
   };
   const entriesBefore = (vault: string) =>
     db
@@ -188,13 +194,16 @@ export const makeLabRecoveryVaultStore = Effect.fnUntraced(function* (input: {
               validId(id);
               if (!entry(vault, id)) return 'Conflict' as const;
             }
+            const refs = JSON.stringify(referencedEntryIds);
             const changed = before
               ? db
-                  .prepare('UPDATE vault_index SET entryId=?,revision=?,body=? WHERE vault=?')
-                  .run(next.entryId, next.revision, next.body, vault).changes
+                  .prepare(
+                    'UPDATE vault_index SET entryId=?,revision=?,body=?,refs=? WHERE vault=?'
+                  )
+                  .run(next.entryId, next.revision, next.body, refs, vault).changes
               : db
-                  .prepare('INSERT INTO vault_index VALUES(?,?,?,?)')
-                  .run(vault, next.entryId, next.revision, next.body).changes;
+                  .prepare('INSERT INTO vault_index VALUES(?,?,?,?,?)')
+                  .run(vault, next.entryId, next.revision, next.body, refs).changes;
             const read = index(vault);
             if (changed !== 1 || !read || !sameVaultCiphertext(next, read)) throw error('storage');
             assertEntries(vault, allBefore);
@@ -214,7 +223,8 @@ export const makeLabRecoveryVaultStore = Effect.fnUntraced(function* (input: {
               vaultCiphertextDigest(current) !== expected.digest ||
               !target ||
               id === vault ||
-              id === current.entryId
+              id === current.entryId ||
+              references(vault).includes(id)
             )
               throw error('conflict');
             db.prepare('DELETE FROM vault_entries WHERE vault=? AND entryId=?').run(vault, id);

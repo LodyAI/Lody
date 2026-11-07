@@ -38,13 +38,32 @@ class MemoryStorage implements Storage {
   }
 }
 
+function readJsdomStorage(name: 'localStorage' | 'sessionStorage'): Storage | undefined {
+  const jsdomWindow = (globalThis as { jsdom?: { window: Window } }).jsdom?.window;
+  try {
+    return jsdomWindow?.[name];
+  } catch {
+    // A jsdom origin without storage access throws here; tests still need the
+    // same deterministic browser boundary as Node-only suites.
+    return undefined;
+  }
+}
+
 function installStorage(name: 'localStorage' | 'sessionStorage'): void {
+  // Node 26 ships its own Web Storage globals, which Vitest's jsdom environment
+  // leaves in place. They are not jsdom `Storage` instances, so StorageEvent,
+  // `Storage.prototype` spies and quota behavior break unless jsdom's own wins.
+  const jsdomStorage = readJsdomStorage(name);
+  if (jsdomStorage !== undefined) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: jsdomStorage });
+    return;
+  }
+
   let storage: Storage | undefined;
   try {
     storage = globalThis[name];
   } catch {
-    // A jsdom origin without storage access throws here; tests still need the
-    // same deterministic browser boundary as Node-only suites.
+    // Accessing Node's localStorage without a backing file can throw.
   }
   if (storage != null) return;
 

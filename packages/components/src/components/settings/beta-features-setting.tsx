@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
+  e2eeRecoveryVaultEnabledAtom,
   e2eeWorkspaceCreationEnabledAtom,
   inboxBetaEnabledAtom,
   lodyAgentBetaEnabledAtom,
@@ -31,6 +32,7 @@ export function BetaFeaturesSection() {
   const [lodyAgentEnabled, setLodyAgentEnabled] = useAtom(lodyAgentBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [e2eeCreationEnabled, setE2eeCreationEnabled] = useAtom(e2eeWorkspaceCreationEnabledAtom);
+  const [recoveryVaultEnabled, setRecoveryVaultEnabled] = useAtom(e2eeRecoveryVaultEnabledAtom);
 
   const [semanticShortcutsEnabled, setSemanticShortcutsEnabled] = useAtom(
     semanticShortcutsBetaEnabledAtom
@@ -43,7 +45,7 @@ export function BetaFeaturesSection() {
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
       <CompactRow
         label={t('settings.beta.lodyAgent', 'Lody Agent')}
-        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent when adding a provider.')}
+        helper={t('settings.beta.lodyAgentHelper', 'Show Lody Agent in Settings.')}
       >
         <Switch
           checked={lodyAgentEnabled}
@@ -62,6 +64,19 @@ export function BetaFeaturesSection() {
           checked={e2eeCreationEnabled}
           onCheckedChange={setE2eeCreationEnabled}
           aria-label={t('settings.beta.e2eeWorkspace', 'Encrypted workspace creation')}
+        />
+      </CompactRow>
+      <CompactRow
+        label={t('settings.beta.e2eeRecoveryVault', 'Encrypted workspace recovery file')}
+        helper={t(
+          'settings.beta.e2eeRecoveryVaultHelper',
+          'Show recovery file controls in encrypted workspace security settings. The desktop must also be started with LODY_E2EE_RECOVERY_VAULT=on.'
+        )}
+      >
+        <Switch
+          checked={recoveryVaultEnabled}
+          onCheckedChange={setRecoveryVaultEnabled}
+          aria-label={t('settings.beta.e2eeRecoveryVault', 'Encrypted workspace recovery file')}
         />
       </CompactRow>
       <CompactRow

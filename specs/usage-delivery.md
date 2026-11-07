@@ -98,7 +98,7 @@ a provider bill or adapter estimate, not an invoice.
 - [DSH tests](../packages/acp-extension-dsh/src/usage.test.ts)
 - [Grok tests](../packages/acp-extension-grok/test/proxy.test.js)
 - [Delivery tests](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
-- [Scope decision](../.agents/notes/proposed/bug-fix/2026-09-25-usage-accounting-scopes.md)
+- [Scope decision](../.agents/notes/implemented/bug-fix/2026-09-25-usage-accounting-scopes.md)
 - [Research correction](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md)
 
 Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release

@@ -17,7 +17,7 @@ import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/e
 import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/staging';
 import { openEpochKeyHpke } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
-import { canonical, parseCanonical, attempt, random, hex, vaultError } from './crypto';
+import { canonical, fromHex, parseCanonical, attempt, random, hex, vaultError } from './crypto';
 import { deriveRecoveryAccessCredential } from './credential';
 import { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 import {
@@ -491,10 +491,17 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           ref.membershipId === hex(membership.toBytes())
       );
     if (!reference) return yield* vaultError('missing');
-    return yield* useIdentity(reference, (identity) =>
+    return yield* useIdentity(reference, (identity, bundle) =>
       Effect.gen(function* () {
         const view = yield* current();
         if (!active(view, identity)) return yield* vaultError('unauthorized');
+        // The genesis anchors the replay; the package's checkpoint stops a fork from it.
+        const checkpoint = yield* attempt(() => ({
+          head: Result.getOrThrow(Bytes.recordHash(fromHex(bundle.trust.head))),
+          length: bundle.trust.length,
+        }));
+        if (!(yield* Effect.fromResult(hasVerifiedCheckpoint(view, checkpoint))))
+          return yield* vaultError('authentication');
         const epoch = yield* openCurrent(identity),
           personal = request.personal;
         if (
@@ -560,6 +567,97 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           personal: personal.publicKey,
           role: after.inspectState().members.get(hex(membership.toBytes()))!.role,
         };
+      })
+    );
+  });
+  const RevokeIntentSchema = Schema.Struct({
+    target: Schema.String,
+    record: Schema.Uint8Array,
+    position: Schema.Number,
+  });
+  /** Whole-vault replacement: with this vault's R proven, revoke every other active
+   * recovery device of this membership. It needs no V from any older vault, because
+   * the verified ledger names them. Each original is journaled and never re-signed. */
+  const revokeOtherRecoveryDevices = Effect.fnUntraced(function* () {
+    const status = yield* checkedStatus();
+    if (!status.recoverable) return yield* vaultError('pending');
+    const prefix = `${key}/revoke-other/`,
+      reference = (yield* load()).value?.reference;
+    if (!reference) return yield* vaultError('missing');
+    return yield* useIdentity(reference, (identity) =>
+      Effect.gen(function* () {
+        const self = hex(identity.publicKey.toBytes()),
+          view = yield* current(),
+          others = [...view.inspectState().devices]
+            .filter(
+              ([id, device]) =>
+                id !== self && device.kind === 'recovery' && device.membershipId.equals(membership)
+            )
+            .map(([id]) => id),
+          journaled = (yield* local.list(prefix)).map((row) => row.key.slice(prefix.length));
+        const signRevocation = Effect.fnUntraced(function* (target: string) {
+          const latest = yield* current(),
+            targetKey = yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(target))),
+            proposal = yield* Effect.fromResult(
+              prepareLedgerCommand(latest, personalSigner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: targetKey,
+              })
+            );
+          return {
+            target,
+            record: yield* signLedgerRecord(proposal, personalSigner),
+            position: latest.length + 1,
+          };
+        });
+        for (const target of new Set([...journaled, ...others])) {
+          const journalKey = `${prefix}${target}`;
+          let raw = yield* local.read(journalKey);
+          let intent: typeof RevokeIntentSchema.Type;
+          if (raw) {
+            const stored = raw;
+            intent = yield* attempt(() =>
+              Result.getOrThrow(
+                Schema.decodeUnknownResult(RevokeIntentSchema)(parseCanonical(stored))
+              )
+            );
+          } else {
+            intent = yield* signRevocation(target);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(journalKey, null, next)) !== 'Committed')
+              return yield* vaultError('conflict');
+            raw = next;
+          }
+          for (let attempts = 0; ; attempts++) {
+            const outcome = yield* submit(new Uint8Array(intent.record), null);
+            if (!bytesEqual(outcome.record, intent.record))
+              return yield* vaultError('authentication');
+            if (outcome.outcome === 'Pending') return { outcome: outcome.outcome };
+            const after = yield* current(),
+              landed = yield* Effect.fromResult(
+                hasVerifiedCheckpoint(after, {
+                  head: hashRecordBytes(intent.record),
+                  length: intent.position,
+                })
+              );
+            if (outcome.outcome === 'Committed') {
+              if (after.inspectState().devices.has(target) || !landed)
+                return yield* vaultError('authentication');
+              break;
+            }
+            // Only the ledger proves this original can never commit: a different record
+            // holds its position. Until then it is resent unchanged, never re-signed.
+            if (landed || !after.inspectState().devices.has(target)) break;
+            if (after.length < intent.position || attempts >= 3)
+              return { outcome: outcome.outcome };
+            intent = yield* signRevocation(target);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(journalKey, raw, next)) !== 'Committed')
+              return yield* vaultError('conflict');
+            raw = next;
+          }
+        }
+        return { outcome: 'Committed' as const };
       })
     );
   });
@@ -723,6 +821,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
   });
   return Object.freeze({
     replace: (request: Parameters<typeof replace>[0]) => own(replace(request)),
+    revokeOtherRecoveryDevices: () => own(revokeOtherRecoveryDevices()),
     setup: () => own(setup()),
     test: () => own(runTest()),
     status: () => own(checkedStatus()),

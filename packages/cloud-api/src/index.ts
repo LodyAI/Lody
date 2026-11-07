@@ -487,7 +487,6 @@ export type CloudApi = {
     complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
   };
   e2eeWorkspaces: {
-    accountIdentity: Action<Record<string, never>, { accountId: string; cryptoUserId: string }>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
@@ -496,6 +495,7 @@ export type CloudApi = {
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   e2eeRecoveryVault: {
+    hasAccountVault: Query<Record<string, never>, { exists: boolean }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;

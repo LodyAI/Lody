@@ -386,21 +386,29 @@ describe('trusted-host encrypted dispatch originals', () => {
     }
   );
 
-  it("separates a verified sharing denial from an unverifiable policy before signing another member's dispatch", async () => {
+  it("withholds another member's dispatch only on a verified sharing denial", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);
-    const prepare = (authorize: (machineId: string) => Effect.Effect<boolean, unknown>) =>
+    const prepare = (authorize?: (machineId: string) => Effect.Effect<boolean, unknown>) =>
       Effect.runPromise(
         f.native('teammate', 'teammate', authorize).prepareDispatch(f.machineId, f.input)
       );
     await expect(prepare(() => Effect.succeed(false))).rejects.toThrow(/^e2ee_machine_not_shared$/);
-    await expect(prepare(() => Effect.fail(new Error('offline')))).rejects.toThrow(
-      /^e2ee_machine_sharing_unavailable$/
-    );
-    // Neither refusal retained an original, so a permitted retry signs the first one.
-    const original = await prepare(() => Effect.succeed(true));
+    // Refusal retained no original, so an unverifiable policy signs the first one;
+    // the receiving machine still decides.
+    const original = await prepare(() => Effect.fail(new Error('offline')));
     const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.requesterDevice).not.toBe(Buffer.from(f.ledger.owner.raw).toString('hex'));
+    expect(opened.args).toEqual(f.input);
+  });
+
+  it("signs another member's dispatch on a host with no sharing policy reader", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const original = await Effect.runPromise(
+      f.native('teammate', 'teammate').prepareDispatch(f.machineId, f.input)
+    );
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.args).toEqual(f.input);
   });
 
@@ -669,6 +677,81 @@ it('protects feature requests and chunked results with workspace signatures and 
       })
     )
   ).rejects.toThrow('intent_conflict');
+});
+
+it.each([true, false])('retains diff manifest/blob writer authority (guest=%s)', async (guest) => {
+  const f = encryptedRpcFixture({ guest });
+  fixtures.push(f);
+  const requests = [
+    {
+      method: 'code-collab/open-diff-manifest' as const,
+      params: { sessionId: f.input.sessionId, path: 'private.ts' },
+    },
+    {
+      method: 'code-collab/read-blob' as const,
+      params: {
+        sessionId: f.input.sessionId,
+        key: `sha256:${'1'.repeat(64)}`,
+        offset: 0,
+        length: 3,
+      },
+    },
+  ];
+  for (const [index, request] of requests.entries()) {
+    const input = {
+      requestId: (index + 40).toString(16).padStart(32, '0'),
+      request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
+    };
+    if (guest) {
+      await expect(Effect.runPromise(f.sender.prepareFeature(input))).rejects.toThrow();
+      continue;
+    }
+    const original = await Effect.runPromise(f.sender.prepareFeature(input));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    expect(opened?.input).toEqual(input);
+    if (!opened) throw new Error('Missing diff read.');
+    const outcome = {
+      ok: true as const,
+      result:
+        index === 0
+          ? { status: 'ok' as const, entries: [], nextCursor: null }
+          : {
+              offset: 0,
+              length: 3,
+              totalBytes: 3,
+              encoding: 'gzip-base64' as const,
+              data: 'UFJJVkFURV9ESUZG',
+            },
+    };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, outcome)
+    );
+    expect(
+      await Effect.runPromise(
+        f.sender.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(outcome);
+  }
+  if (guest)
+    await expect(
+      Effect.runPromise(
+        f.sender.prepareFeature({
+          requestId: 'ab'.repeat(16),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            method: 'code-collab/save-text',
+            params: {
+              sessionId: f.input.sessionId,
+              requestedByUserId: 'guest',
+              path: 'private.ts',
+              baseDigest: `sha256:${'1'.repeat(64)}`,
+              text: { encoding: 'plain', text: 'write', rawBytes: 5 },
+            },
+          },
+        })
+      )
+    ).rejects.toThrow();
 });
 
 it('reassembles a large save from signed chunks and rejects a response from another request', async () => {

@@ -33,7 +33,7 @@ and mention ranges into the same entry.
 This fix implements the workspace draft isolation required by the
 [desktop multi-window Spec](../../../../specs/desktop-windows.zh.md), and covers the landing
 composer state that the
-[multi-window implementation proposal](../../proposed/feature/2026-09-10-desktop-windows.md)
+[multi-window implementation proposal](../feature/2026-09-10-desktop-windows.md)
 left out.
 
 ## Verification
