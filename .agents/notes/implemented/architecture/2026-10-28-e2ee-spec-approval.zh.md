@@ -170,6 +170,20 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 - **旧文件还能做什么。** 对已换新的工作区，旧文件不能再接纳设备或收到新密钥，但持有旧文件和账号的人在换钥发布前仍能打开其中已有的密钥。换新不会抹掉副本。passkey 需要重新登记。
 - **限制。** 流程需要一台能用的个人设备；仍可用的 passkey 可以先恢复一台设备。设备处理不了的工作区会被列出，其旧 R 可能继续有效。账本格式和 `formatVersion: 1` 不变，流程默认关闭，恢复保险库仍不在 MVP 内。批准只记录意图，不代表已实现、已部署或真机验收。
 
+## 后端故障期间的执行新鲜度
+
+2026-11-07，owner Zixuan Chen（zxch3n）在其本人会话 `b12f1597-06ba-4a6e-944c-0395a7d58542` 的消息 `d1041859-25c8-47de-9dbc-96a8bd4e81f1` 中，回答了 [PR #2381](https://github.com/LodyAI/Lody/pull/2381) head `eb0bb74d66905b59be7745ccf2386ce00bc49cfd` 的开放问题。收尾提交把这些答复写入 [`specs/e2ee/execution-freshness-outage.zh.md`](../../../../specs/e2ee/execution-freshness-outage.zh.md)（英文版在该 head 的 blob 为 `4d74fbbdf51b89def934b1f052870f4b68ee4c32`），新增中文版并设置状态。
+
+批准范围如下：
+
+- **窗口。** 读取最新账本没有答复时，机器继续用本地已验证账本判定：所属成员的读取 24 小时，所属成员的执行 4 小时。其他成员的请求保持 15 分钟。
+- **故障与拒绝。** 无回复、超时、5xx、429、没有业务错误码的服务端错误算故障。已移除、已撤销、未授权立刻结束窗口。看不懂的回复按拒绝处理。
+- **登录过期。** 算故障。窗口内继续工作，并提示用户重新登录。
+- **可见性。** 窗口使用期间用户能看到提示。
+- **后果。** 更长的上限替换同成员读取和执行的 15 分钟最坏情况，如 Spec"上限的变化"一节所述。实现时按本批准把白皮书和基础边界里的 15 分钟段落更新为同一含义。
+
+这里不实现改动，也不批准实现。
+
 ## 机器共享
 
 2026-11-02，owner Zixuan Chen（zxch3n）通过合入 [PR #2228](https://github.com/LodyAI/Lody/pull/2228)（merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`）批准[机器共享 Spec](../../../../specs/e2ee/machine-sharing.zh.md)。获批[英文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md)的 Git blob 为 `37ce21f8e5a3db433b38ac0d2701fcacf6408080`；获批[中文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md)的 Git blob 为 `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`。之后仅记录本次批准的修改属于编辑性修改。范围包括 owner 的决定：撤回后不能启动新任务、不能做需要授权的后续动作，但不强制终止已在运行的命令；以及 2026-10-28 接受的风险：服务端持续扣住更新策略时，撤回生效没有严格上限。批准只记录意图，不代表部署或双成员产品验收。
