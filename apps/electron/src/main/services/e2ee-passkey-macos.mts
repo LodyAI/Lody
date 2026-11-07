@@ -53,7 +53,7 @@ export function makeMacosPasskeyPort(input: {
     if (!loaded) throw new Error('e2ee_passkey_unavailable')
     return loaded
   }
-  const ceremony = async <A>(work: () => Promise<A>) => {
+  async function ceremony<A>(work: () => Promise<A>) {
     try {
       return await work()
     } catch (error) {
