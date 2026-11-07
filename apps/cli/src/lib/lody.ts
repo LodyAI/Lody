@@ -702,6 +702,11 @@ export class Lody {
     return await this.runtime.resolveSessionWorkdir(sessionId);
   }
 
+  async resolveAutomationWorkdir(sessionId: SessionId): Promise<string | null> {
+    const manager = this.runtime.getSessionManager();
+    return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
+  }
+
   onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
     return this.runtime.onSessionTerminated(handler);
   }
