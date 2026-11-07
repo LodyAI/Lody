@@ -12,6 +12,7 @@ import {
   type RecoveryVault,
   type RecoverySubmitResult,
 } from '@lody/e2ee-core';
+import { recoveryLedger } from '@lody/e2ee-client/recovery-restore';
 import {
   abandonVaultReplacement,
   planVaultReplacement,
@@ -1314,6 +1315,24 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('replays served history from the package genesis and refuses a partial or other ledger', async () => {
+    const [f, other] = await Effect.runPromise(Effect.all([fixture(), fixture()]));
+    const page = (records: readonly Uint8Array[], startIndex = 0) => ({
+      startIndex,
+      recordsHex: records.map(hex),
+      nextCursor: null,
+    });
+    const ledger = (pages: readonly ReturnType<typeof page>[]) =>
+      Effect.runPromise(
+        Effect.result(
+          recoveryLedger({ genesis: f.initial.genesis, pages: () => Effect.succeed(pages) })()
+        )
+      );
+    expect(await ledger([page(f.records)])).toMatchObject({ _tag: 'Success' });
+    expect(await ledger([page(f.records, 1)])).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([page(other.records)])).toMatchObject({ _tag: 'Failure' });
+    expect(await ledger([])).toMatchObject({ _tag: 'Failure' });
+  });
   it('names the workspaces a device cannot act on', () => {
     expect(
       planVaultReplacement(

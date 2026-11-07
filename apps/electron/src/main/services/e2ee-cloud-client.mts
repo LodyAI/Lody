@@ -915,7 +915,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     recoveryVaultAccountWorkspaces: (signal?: AbortSignal) =>
       request(
         (client) => client.query(api.e2eeMembers.workspaces, {}),
-        z.array(z.object({ id: z.string(), name: z.string() })),
+        z.array(z.object({ id: z.string(), name: z.string(), genesisHash: hash })),
         signal
       ),
     /** Whether this account already has a vault. One account has one vault. */

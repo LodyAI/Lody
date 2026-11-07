@@ -35,8 +35,10 @@ type Result =
         | 'e2ee.recovery.replaceBegun'
         | 'e2ee.recovery.replaceAbandoned'
         | 'e2ee.recovery.replaceFinished'
-        | 'e2ee.recovery.replacePending';
+        | 'e2ee.recovery.replacePending'
+        | 'e2ee.recovery.setupDone';
     }
+  | { kind: 'restored'; results: readonly { name: string; outcome: string }[] }
   | { kind: 'created'; vaultId: string }
   | { kind: 'opened'; vaultId: string; count: number }
   | { kind: 'error'; code: string };
@@ -126,7 +128,71 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.replace')}
             </Button>
           )}
+          {!!plan?.uncovered.length && (
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const restored = await e2ee.restoreFromRecoveryFile();
+                  return restored.outcome === 'restored'
+                    ? { kind: 'restored', results: restored.results }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.restore')}
+            </Button>
+          )}
         </div>
+        {!!plan?.covered.length && (
+          <div {...stylex.props(styles.body)}>
+            <p>{t('e2ee.recovery.workspaces')}</p>
+            {plan.covered.map((workspace) => (
+              <div key={workspace.id} {...stylex.props(styles.actions)}>
+                <span>{workspace.name}</span>
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const done = await e2ee.setupWorkspaceRecovery(workspace.id);
+                      if (done.outcome === 'cancelled') return undefined;
+                      return {
+                        kind: 'notice',
+                        key:
+                          done.outcome === 'Committed' && done.recoverable
+                            ? 'e2ee.recovery.setupDone'
+                            : 'e2ee.recovery.replacePending',
+                      };
+                    })
+                  }
+                >
+                  {t('e2ee.recovery.setup')}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {result?.kind === 'restored' &&
+          (result.results.length === 0 ? (
+            <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
+          ) : (
+            <ul aria-live="polite">
+              {result.results.map((row) => (
+                <li key={row.name}>
+                  {t(
+                    row.outcome === 'Committed'
+                      ? 'e2ee.recovery.restoreDone'
+                      : row.outcome === 'Pending'
+                        ? 'e2ee.recovery.restoreWaiting'
+                        : 'e2ee.recovery.restoreFailed',
+                    { name: row.name }
+                  )}
+                </li>
+              ))}
+            </ul>
+          ))}
         {plan?.replacing && (
           <>
             <p aria-live="polite">{t('e2ee.recovery.replacing')}</p>

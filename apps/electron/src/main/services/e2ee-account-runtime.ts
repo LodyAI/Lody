@@ -97,9 +97,20 @@ const accountDirectory = (accountId: string) =>
 /** The account-wide pairing journal; it holds no secret and no private key. */
 export const desktopAccountPairingDatabase = (accountId: string) =>
   join(accountDirectory(accountId), 'account-pairing.sqlite')
-/** Whether this device holds an identity for the workspace. */
-export const desktopE2eeHasWorkspaceIdentity = (accountId: string, workspaceId: string) =>
-  existsSync(identityDirectory(accountId, workspaceId))
+/** Whether this device has a completed identity for the workspace. An unfinished restore
+ * leaves a directory behind, so the directory alone does not count. */
+export const desktopE2eeHasWorkspaceIdentity = async (accountId: string, workspaceId: string) => {
+  if (!existsSync(identityDirectory(accountId, workspaceId))) return false
+  return withDesktopE2eeAccount(
+    (owner) =>
+      owner.bootstrap.creationFor(workspaceId).pipe(
+        Effect.as(true),
+        Effect.catch(() => Effect.succeed(false))
+      ),
+    workspaceId,
+    false
+  )
+}
 /** Account-scoped recovery-vault journal (pins and intents only, never secrets). */
 export const desktopE2eeRecoveryJournalPath = (accountId: string) =>
   join(accountDirectory(accountId), 'recovery-vault.sqlite')

@@ -52,9 +52,12 @@ import {
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recoveryReplacementPlan,
+  recoveryRestoreTarget,
   recoveryVaultEnabled,
   recoveryVaultFailure,
+  restoreAccountWorkspaces,
   saveRecoveryFile,
+  setupWorkspaceRecovery,
   type RecoveryVaultReplacement,
   type RecoveryWorkspaceTarget
 } from '../../services/e2ee-recovery-vault.mjs'
@@ -3221,7 +3224,11 @@ export class E2eeIpc extends IpcService {
       exists: Effect.Effect<boolean, unknown>
       replacement: RecoveryVaultReplacement
       accountWorkspaces: Effect.Effect<
-        readonly { readonly id: string; readonly name: string }[],
+        readonly {
+          readonly id: string
+          readonly name: string
+          readonly genesisHash: string
+        }[],
         unknown
       >
     }) => Effect.Effect<A, unknown>
@@ -3290,7 +3297,8 @@ export class E2eeIpc extends IpcService {
       recoveryReplacementPlan({
         replacement,
         accountWorkspaces,
-        hasIdentity: (workspaceId) => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId)
+        hasIdentity: (workspaceId) =>
+          Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId))
       })
     )
   }
@@ -3324,6 +3332,19 @@ export class E2eeIpc extends IpcService {
     )
     return { outcome: 'begun' as const, vaultId: begun.vaultId }
   }
+  /** Ask for a recovery file and read it, or null when the user cancels. */
+  private async chooseRecoveryFile() {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      properties: ['openFile' as const],
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const chosen = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = chosen.filePaths[0]
+    return chosen.canceled || !path ? null : this.readRecoveryFile(path)
+  }
   /** Read a chosen recovery file, bounded before any parsing. */
   private async readRecoveryFile(path: string) {
     const handle = await openFile(path, 'r')
@@ -3347,7 +3368,7 @@ export class E2eeIpc extends IpcService {
   ) {
     const targets: RecoveryWorkspaceTarget[] = []
     for (const { id, name } of workspaces) {
-      if (!desktopE2eeHasWorkspaceIdentity(accountId, id)) continue
+      if (!(await desktopE2eeHasWorkspaceIdentity(accountId, id))) continue
       const { host, credential } = await withDesktopE2eeAccount(
         (owner) =>
           Effect.map(owner.bootstrap.deviceCredential(id), (credential) => ({
@@ -3385,17 +3406,8 @@ export class E2eeIpc extends IpcService {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
     const compromised = input?.compromised === true
-    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
-    const options = {
-      properties: ['openFile' as const],
-      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
-    }
-    const chosen = owner
-      ? await dialog.showOpenDialog(owner, options)
-      : await dialog.showOpenDialog(options)
-    const path = chosen.filePaths[0]
-    if (chosen.canceled || !path) return { outcome: 'cancelled' as const }
-    const file = await this.readRecoveryFile(path)
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
     try {
       return await this.recoveryOperation(
         ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
@@ -3414,6 +3426,107 @@ export class E2eeIpc extends IpcService {
             )
           )
       )
+    } finally {
+      file.fill(0)
+    }
+  }
+  /** Default-off: set up recovery for one workspace from the account's recovery file. */
+  @IpcMethod()
+  async setupWorkspaceRecovery(workspaceId: string) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
+    try {
+      return await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              Effect.promise(() =>
+                this.recoveryTargets(
+                  accountId,
+                  client,
+                  rows.filter((row) => row.id === workspaceId)
+                )
+              ),
+              ([target]) =>
+                target
+                  ? setupWorkspaceRecovery({ store, journalPath, replacement, target, file })
+                  : Effect.fail({ code: 'missing' })
+            )
+          )
+      )
+    } finally {
+      file.fill(0)
+    }
+  }
+  /** Default-off: restore every workspace a chosen file covers onto this device. */
+  @IpcMethod()
+  async restoreFromRecoveryFile() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
+    try {
+      const results = await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, accountWorkspaces }) =>
+          Effect.flatMap(
+            Effect.flatMap(accountWorkspaces, (rows) =>
+              Effect.filter(rows, (row) =>
+                Effect.map(
+                  Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
+                  (has) => !has
+                )
+              )
+            ),
+            (rows) =>
+              restoreAccountWorkspaces({
+                store,
+                journalPath,
+                file,
+                workspaces: rows.map((row) =>
+                  recoveryRestoreTarget({
+                    ...row,
+                    append: (request) => client.appendRecord(request),
+                    history: (cursor) =>
+                      client.history({ workspaceId: row.id, ...(cursor ? { cursor } : {}) }),
+                    mailbox: (credential) => client.mailbox({ workspaceId: row.id, credential }),
+                    stagedGroup: (credential, key) =>
+                      client.staging({ workspaceId: row.id, credential }).readGroup(key),
+                    identity: (pin) =>
+                      Effect.tryPromise(() =>
+                        withDesktopE2eeAccount(
+                          (owner) => owner.bootstrap.recoveryIdentity(pin),
+                          row.id
+                        )
+                      ),
+                    adopt: (join) =>
+                      Effect.tryPromise(() =>
+                        withDesktopE2eeAccount(
+                          (owner) =>
+                            Effect.gen(function* () {
+                              yield* owner.bootstrap.preparePersonalJoin({
+                                version: 1,
+                                workspaceId: row.id,
+                                genesisHash: row.genesisHash,
+                                genesisRecordHex: join.genesisRecordHex,
+                                endorser: join.endorser,
+                                membershipId: join.membershipId,
+                                pairingSessionId: join.pairingSessionId
+                              })
+                              yield* owner.bootstrap.acceptPersonalHistory(row.id, join.pages)
+                              yield* owner.host.open(row.id)
+                              yield* owner.host.installRecoveredKeys(row.id, join.recovered)
+                            }),
+                          row.id
+                        )
+                      )
+                  })
+                )
+              })
+          )
+      )
+      return { outcome: 'restored' as const, results }
     } finally {
       file.fill(0)
     }

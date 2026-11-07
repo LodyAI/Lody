@@ -4,6 +4,7 @@ import { Effect } from 'effect';
 import {
   Bytes,
   type RecoveryCredentialRegistration,
+  type EpochStagedGroup,
   type RecoverySubmitResult,
   type WorkspaceRecoveryInput,
 } from '@lody/e2ee-core';
@@ -135,6 +136,11 @@ export const recoveryFetchEnvelope =
       >;
     };
     readonly deliver: () => Effect.Effect<void, unknown>;
+    /** The committed staged group, when no envelope waits in the mailbox. */
+    readonly staged?: (
+      credential: string,
+      epoch: number
+    ) => Effect.Effect<EpochStagedGroup | null, unknown>;
   }): WorkspaceRecoveryInput['fetchCurrentEnvelope'] =>
   (_recipient, epoch, _identity, credential) =>
     Effect.gen(function* () {
@@ -145,7 +151,10 @@ export const recoveryFetchEnvelope =
         page = yield* mailbox.fetch(epoch, null, 100);
       }
       const row = page.items[0];
-      if (!row) return { pending: true } as const;
+      if (!row) {
+        const staged = input.staged ? yield* input.staged(toHex(credential), epoch) : null;
+        return staged ? { staged } : ({ pending: true } as const);
+      }
       return {
         sender: yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(row.sender))),
         frame: row.frame,

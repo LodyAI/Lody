@@ -87,7 +87,9 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'recoveryReplacementPlan',
       'beginRecoveryReplacement',
       'continueRecoveryReplacement',
-      'abandonRecoveryReplacement'
+      'abandonRecoveryReplacement',
+      'setupWorkspaceRecovery',
+      'restoreFromRecoveryFile'
     ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }

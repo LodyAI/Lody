@@ -241,6 +241,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     const entries = new Map<
       string,
       {
+        installRecoveredKeys: (
+          recovered: readonly (readonly [number, Bytes.EpochKey])[]
+        ) => Effect.Effect<void, unknown>
         recoveryOwner: (
           ports: DesktopWorkspaceRecoveryPorts
         ) => Effect.Effect<
@@ -1595,7 +1598,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             genesisRecord: creation.record
           })
         })
+        const installRecoveredKeys = Effect.fnUntraced(function* (
+          recovered: readonly (readonly [number, Bytes.EpochKey])[]
+        ) {
+          for (const [epoch, key] of recovered) yield* keys.saveAndReload(epoch, key)
+        })
         return {
+          installRecoveredKeys,
           recoveryOwner,
           abandonRecovery,
           manage,
@@ -2138,6 +2147,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     ),
                     Effect.catch(() => Effect.succeed('e2ee_key_status_unavailable'))
                   )
+        ),
+      /** Default-off: install the keys a restore read through R into this device. */
+      installRecoveredKeys: (
+        workspaceId: string,
+        recovered: readonly (readonly [number, Bytes.EpochKey])[]
+      ) =>
+        run(openWorkspace(workspaceId)).pipe(
+          Effect.flatMap((entry) => entry.installRecoveredKeys(recovered))
         ),
       /** Default-off: a recovery owner for one workspace, in the caller's Scope. */
       workspaceRecovery: (workspaceId: string, ports: DesktopWorkspaceRecoveryPorts) =>

@@ -1,5 +1,25 @@
-import { RecoveryVaults, type RecoveryVault, type WorkspaceRecoveryInput } from '@lody/e2ee-core'
-import { parseRecoveryFile } from '@lody/e2ee-core/protocol'
+import {
+  Bytes,
+  makeWorkspaceRecovery,
+  RecoveryVaults,
+  type EpochStagedGroup,
+  type RecoveryVault,
+  type WorkspaceRecoveryInput
+} from '@lody/e2ee-core'
+import {
+  getCommittedEpochStagingKey,
+  hashRecordBytes,
+  parseRecoveryFile,
+  type DeviceSigner
+} from '@lody/e2ee-core/protocol'
+import {
+  listVaultWorkspaces,
+  prepareVaultRestore,
+  recoveryLedger,
+  type RecoveryHistoryPage,
+  type VaultRestoreAnchor,
+  type VaultRestorePorts
+} from '@lody/e2ee-client/recovery-restore'
 import {
   abandonVaultReplacement,
   planVaultReplacement,
@@ -13,7 +33,7 @@ import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/ser
 import { randomUUID } from 'node:crypto'
 import { open, rename, rm, type FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { Effect, Layer, type Scope } from 'effect'
+import { Effect, Exit, Layer, Result, type Scope } from 'effect'
 
 /** Default-off gate for the post-MVP recovery vault. Proposal: specs/e2ee/recovery-vault.md. */
 export const RECOVERY_VAULT_ENV = 'LODY_E2EE_RECOVERY_VAULT'
@@ -197,7 +217,7 @@ export const recoveryReplacementPlan = (io: {
     readonly { readonly id: string; readonly name: string }[],
     unknown
   >
-  readonly hasIdentity: (workspaceId: string) => boolean
+  readonly hasIdentity: (workspaceId: string) => Effect.Effect<boolean, unknown>
 }) =>
   Effect.gen(function* () {
     const state = yield* io.replacement.state()
@@ -207,7 +227,12 @@ export const recoveryReplacementPlan = (io: {
       replacing: state.replacing !== null,
       ...planVaultReplacement(
         workspaces,
-        new Set(workspaces.map((row) => row.id).filter(io.hasIdentity))
+        new Set(
+          yield* Effect.filter(
+            workspaces.map((row) => row.id),
+            io.hasIdentity
+          )
+        )
       )
     }
   })
@@ -221,10 +246,12 @@ export interface RecoveryWorkspaceTarget {
     readonly requestId: string
     readonly recordHex: string
     readonly credentialHash?: string
+    readonly signerCredential?: string
   }) => Effect.Effect<{ readonly status: 'committed' | 'conflict' }, unknown>
   readonly refresh: () => Effect.Effect<void, unknown>
   readonly mailbox: Parameters<typeof recoveryFetchEnvelope>[0]['mailbox']
   readonly deliver: () => Effect.Effect<void, unknown>
+  readonly staged?: Parameters<typeof recoveryFetchEnvelope>[0]['staged']
   readonly owner: (ports: {
     readonly vault: RecoveryVault
     readonly local: RecoveryVaultLocalStore['Service']
@@ -320,6 +347,238 @@ export const abandonAccountVaultReplacement = (
         workspaces,
         abandon: () => io.replacement.abandon(replacing)
       })
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
+/** Set up recovery for one workspace from the account's recovery file. */
+export const setupWorkspaceRecovery = (
+  io: RecoveryVaultIo & {
+    readonly file: Uint8Array
+    readonly replacement: Pick<RecoveryVaultReplacement, 'state'>
+    readonly target: RecoveryWorkspaceTarget
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: new Uint8Array(io.file) })
+      const { current } = yield* io.replacement.state()
+      if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
+      const owner = yield* io.target.owner({
+        vault,
+        local: yield* RecoveryVaultLocalStore,
+        submitOriginal: submitFor(io.target),
+        fetchCurrentEnvelope: recoveryFetchEnvelope(io.target)
+      })
+      const result = yield* owner.setup()
+      return { outcome: result.outcome, recoverable: result.status.recoverable }
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
+/** Hold epoch keys read through R only until the new device installs them. */
+export const memoryEpochKeys = () => {
+  const keys = new Map<number, Bytes.EpochKey>()
+  return {
+    entries: () => [...keys.entries()],
+    saveAndReload: (epoch: number, key: Bytes.EpochKey) =>
+      Effect.sync(() => {
+        keys.set(epoch, key)
+      }),
+    read: (epoch: number) => {
+      const key = keys.get(epoch)
+      return key ? Effect.succeed(key) : Effect.fail({ code: 'missing' })
+    }
+  }
+}
+
+/** One workspace a recovery file can restore onto this device. */
+export interface RecoveryRestoreTarget {
+  readonly id: string
+  readonly name: string
+  readonly genesisHash: string
+  /** Connect only once the authenticated package names the workspace. */
+  readonly connect: (anchor: VaultRestoreAnchor) => Effect.Effect<
+    VaultRestorePorts & {
+      readonly personal: VaultRestorePorts['personalSigner'] & {
+        readonly encryptionPublicKey: Bytes.EncryptionPublicKey
+      }
+      readonly adopt: (
+        recovered: readonly (readonly [number, Bytes.EpochKey])[]
+      ) => Effect.Effect<void, unknown>
+      readonly recovered: () => readonly (readonly [number, Bytes.EpochKey])[]
+    },
+    unknown,
+    Scope.Scope
+  >
+}
+
+/** A complete history read, for replay from the package's genesis. */
+const readAllHistory = <P extends RecoveryHistoryPage>(
+  history: (cursor?: string) => Effect.Effect<P, unknown>
+) =>
+  Effect.gen(function* () {
+    const pages: P[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < 256; page++) {
+      const next = yield* history(cursor)
+      pages.push(next)
+      if (!next.nextCursor) return pages
+      cursor = next.nextCursor
+    }
+    return yield* Effect.fail({ code: 'storage' })
+  })
+
+/** Build a restore target from the service and this device's identity store. */
+export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
+  readonly id: string
+  readonly name: string
+  readonly genesisHash: string
+  readonly append: RecoveryWorkspaceTarget['append']
+  readonly history: (cursor?: string) => Effect.Effect<P, unknown>
+  readonly mailbox: RecoveryWorkspaceTarget['mailbox']
+  readonly stagedGroup: (
+    credential: string,
+    key: Result.Result.Success<ReturnType<typeof getCommittedEpochStagingKey>>
+  ) => Effect.Effect<EpochStagedGroup | null, unknown>
+  readonly identity: (pin: {
+    readonly genesisHash: string
+    readonly genesisRecordHex: string
+    readonly membershipId: string
+  }) => Effect.Effect<
+    {
+      readonly device: DeviceSigner & { readonly enc: Bytes.EncryptionPublicKey }
+      readonly credentialHash: string
+    },
+    unknown
+  >
+  readonly adopt: (join: {
+    readonly genesisRecordHex: string
+    readonly membershipId: string
+    readonly endorser: string
+    readonly pairingSessionId: string
+    readonly pages: readonly P[]
+    readonly recovered: readonly (readonly [number, Bytes.EpochKey])[]
+  }) => Effect.Effect<void, unknown>
+}): RecoveryRestoreTarget => ({
+  id: input.id,
+  name: input.name,
+  genesisHash: input.genesisHash,
+  connect: (anchor) =>
+    Effect.gen(function* () {
+      const hexOf = (value: Uint8Array) => Buffer.from(value).toString('hex')
+      const genesisRecordHex = hexOf(anchor.genesisRecord)
+      const membershipId = hexOf(anchor.membershipId.toBytes())
+      const { device, credentialHash } = yield* input.identity({
+        genesisHash: input.genesisHash,
+        genesisRecordHex,
+        membershipId
+      })
+      const keys = memoryEpochKeys()
+      const ledger = recoveryLedger({
+        genesis: anchor.genesis,
+        pages: () => readAllHistory(input.history)
+      })
+      let admission = ''
+      return {
+        personalSigner: device,
+        personal: { ...device, encryptionPublicKey: device.enc },
+        ledger,
+        installed: keys,
+        fetchCurrentEnvelope: recoveryFetchEnvelope({
+          mailbox: input.mailbox,
+          // No device of this user is left to deliver; R's own envelope must already exist.
+          deliver: () => Effect.void,
+          staged: (credential, epoch) =>
+            Effect.flatMap(ledger(), (view) => {
+              const key = getCommittedEpochStagingKey(view, epoch)
+              return Result.isSuccess(key)
+                ? input.stagedGroup(credential, key.success)
+                : Effect.succeed(null)
+            })
+        }),
+        submitOriginalAsRecovery: (record, _identity, credential) =>
+          Effect.gen(function* () {
+            admission = hexOf(hashRecordBytes(record).toBytes())
+            const reply = yield* input.append({
+              workspaceId: input.id,
+              requestId: admission,
+              recordHex: hexOf(record),
+              credentialHash,
+              signerCredential: hexOf(credential)
+            })
+            credential.fill(0)
+            return {
+              outcome: reply.status === 'committed' ? 'Committed' : 'Conflict',
+              record: new Uint8Array(record)
+            } as const
+          }),
+        acquirePersonal: () => Effect.fail({ code: 'invalid-input' }),
+        recovered: keys.entries,
+        adopt: (recovered) =>
+          Effect.flatMap(readAllHistory(input.history), (pages) =>
+            input.adopt({
+              genesisRecordHex,
+              membershipId,
+              endorser: hexOf(anchor.recovery.toBytes()),
+              pairingSessionId: admission.slice(0, 32),
+              pages,
+              recovered
+            })
+          )
+      }
+    })
+})
+
+/**
+ * Restore every workspace the file covers and this account can name. The genesis comes
+ * only from the authenticated package; ledger, checkpoint and key commitment are core's
+ * checks. One workspace's failure never stops the others.
+ */
+export const restoreAccountWorkspaces = (
+  io: RecoveryVaultIo & {
+    readonly file: Uint8Array
+    readonly workspaces: readonly RecoveryRestoreTarget[]
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: new Uint8Array(io.file) })
+      const local = yield* RecoveryVaultLocalStore
+      const results: { readonly name: string; readonly outcome: string }[] = []
+      for (const reference of yield* listVaultWorkspaces(vault)) {
+        const target = io.workspaces.find((row) => row.genesisHash === reference.genesis)
+        if (!target) continue
+        const attempt = Effect.scoped(
+          Effect.gen(function* () {
+            let connected: Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>> | undefined
+            const plan = yield* prepareVaultRestore({
+              vault,
+              local,
+              reference,
+              ports: (anchor) =>
+                target.connect(anchor).pipe(
+                  Effect.tap((ports) =>
+                    Effect.sync(() => {
+                      connected = ports
+                    })
+                  )
+                )
+            })
+            const workflow = yield* makeWorkspaceRecovery(plan.workflow)
+            const result = yield* workflow.restoreFromRecovery({
+              personal: connected!.personal,
+              submitOriginalAsRecovery: plan.submitOriginalAsRecovery
+            })
+            if (result.outcome === 'Committed') yield* connected!.adopt(connected!.recovered())
+            return result.outcome as string
+          })
+        )
+        const exit = yield* Effect.exit(attempt)
+        results.push({
+          name: target.name,
+          outcome: Exit.isSuccess(exit) ? exit.value : 'Failed'
+        })
+      }
+      return results
     }).pipe(Effect.provide(vaults(io)))
   )
 

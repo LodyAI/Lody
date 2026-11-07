@@ -22,9 +22,12 @@ import {
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recoveryReplacementPlan,
+  recoveryRestoreTarget,
   recoveryVaultEnabled,
   recoveryVaultFailure,
-  saveRecoveryFile
+  restoreAccountWorkspaces,
+  saveRecoveryFile,
+  setupWorkspaceRecovery
 } from './e2ee-recovery-vault.mts'
 
 const response = (value) => Response.json({ status: 'success', value })
@@ -613,7 +616,7 @@ void test('the plan names workspaces this device cannot act on', async () => {
         { id: 'here', name: 'Here' },
         { id: 'elsewhere', name: 'Elsewhere' }
       ]),
-      hasIdentity: (id) => id === 'here'
+      hasIdentity: (id) => Effect.succeed(id === 'here')
     })
   )
   assert.deepEqual(plan, {
@@ -622,4 +625,115 @@ void test('the plan names workspaces this device cannot act on', async () => {
     covered: [{ id: 'here', name: 'Here' }],
     uncovered: [{ id: 'elsewhere', name: 'Elsewhere' }]
   })
+})
+
+void test('setting up one workspace needs the current vault and reports a slow delivery', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file, vaultId } = await begunReplacement(dir, service)
+    const run = () =>
+      withClient(service, (store, client) =>
+        Effect.runPromise(
+          Effect.exit(
+            setupWorkspaceRecovery({
+              journalPath: join(dir, 'recovery-vault.sqlite'),
+              store,
+              file,
+              replacement: client.recoveryVaultReplacement(),
+              target: {
+                ...fakeTarget([]),
+                owner: () =>
+                  Effect.succeed({
+                    setup: () =>
+                      Effect.succeed({ outcome: 'Pending', status: { recoverable: false } })
+                  })
+              }
+            })
+          )
+        )
+      )
+    const refused = await run()
+    assert.equal(
+      recoveryVaultFailure(Exit.isFailure(refused) ? refused.cause.reasons[0]?.error : null)
+        .message,
+      'e2ee_recovery_authentication'
+    )
+    service.replacement.current = vaultId
+    const pending = await run()
+    assert.deepEqual(Exit.isSuccess(pending) ? pending.value : null, {
+      outcome: 'Pending',
+      recoverable: false
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a restore sends both credentials and names the R as endorser', async () => {
+  const appended = []
+  const adopted = []
+  const target = recoveryRestoreTarget({
+    id: 'workspace',
+    name: 'Workspace',
+    genesisHash: 'a'.repeat(64),
+    append: (request) =>
+      Effect.sync(() => {
+        appended.push(request)
+        return { status: 'committed' }
+      }),
+    history: () => Effect.succeed({ startIndex: 0, recordsHex: [], nextCursor: null }),
+    mailbox: () => ({ fetch: () => Effect.succeed({ items: [] }) }),
+    stagedGroup: () => Effect.succeed(null),
+    identity: (pin) =>
+      Effect.succeed({
+        device: { enc: 'encryption', pin },
+        credentialHash: 'c'.repeat(64)
+      }),
+    adopt: (join) =>
+      Effect.sync(() => {
+        adopted.push(join)
+      })
+  })
+  const anchor = {
+    genesis: { toBytes: () => new Uint8Array(32) },
+    membershipId: { toBytes: () => new Uint8Array(16).fill(1) },
+    recovery: { toBytes: () => new Uint8Array(32).fill(2) },
+    genesisRecord: new Uint8Array([3])
+  }
+  const ports = await Effect.runPromise(Effect.scoped(target.connect(anchor)))
+  assert.equal(ports.personal.encryptionPublicKey, 'encryption')
+  const record = new Uint8Array(64).fill(4)
+  const credential = new Uint8Array(32).fill(5)
+  const result = await Effect.runPromise(
+    ports.submitOriginalAsRecovery(record, undefined, credential)
+  )
+  assert.equal(result.outcome, 'Committed')
+  assert.equal(appended[0].credentialHash, 'c'.repeat(64))
+  assert.equal(appended[0].signerCredential, '05'.repeat(32))
+  assert.deepEqual(credential, new Uint8Array(32))
+  await Effect.runPromise(ports.adopt([]))
+  assert.equal(adopted[0].endorser, '02'.repeat(32))
+  assert.equal(adopted[0].pairingSessionId, appended[0].requestId.slice(0, 32))
+})
+
+void test('a file covering nothing here restores nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file } = await begunReplacement(dir, service)
+    const results = await withClient(service, (store) =>
+      Effect.runPromise(
+        restoreAccountWorkspaces({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          file,
+          workspaces: []
+        })
+      )
+    )
+    assert.deepEqual(results, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

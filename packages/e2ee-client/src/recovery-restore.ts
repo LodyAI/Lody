@@ -10,7 +10,7 @@ import {
   type WorkspaceRecoveryInput,
   type WorkspaceRestorePlan,
 } from '@lody/e2ee-core';
-import { wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
+import { hashRecordBytes, verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
 import { fromHex } from './bytes';
 
 /** Workspaces this vault can restore: the live entries of its authenticated index. */
@@ -24,10 +24,13 @@ export interface VaultRestoreAnchor {
   readonly genesis: Bytes.GenesisHash;
   readonly membershipId: Bytes.MembershipId;
   readonly recovery: Bytes.SigningPublicKey;
+  readonly genesisRecord: Uint8Array;
 }
 
 /** The platform's connections, opened only once the package names the workspace. */
 export interface VaultRestorePorts {
+  /** The new personal device, created once the package names the workspace. */
+  readonly personalSigner: WorkspaceRecoveryInput['personalSigner'];
   readonly ledger: () => Effect.Effect<LedgerView, unknown>;
   readonly fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'];
   readonly installed: WorkspaceRecoveryInput['installed'];
@@ -39,7 +42,6 @@ export interface VaultRestoreInput {
   readonly vault: RecoveryVault;
   readonly local: WorkspaceRecoveryInput['local'];
   readonly reference: RecoveryEntryReference;
-  readonly personalSigner: WorkspaceRecoveryInput['personalSigner'];
   readonly ports: (
     anchor: VaultRestoreAnchor
   ) => Effect.Effect<VaultRestorePorts, unknown, Scope.Scope>;
@@ -60,6 +62,7 @@ export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRest
             genesis: Result.getOrThrow(Bytes.genesisHash(fromHex(bundle.genesis))),
             membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(bundle.membershipId))),
             recovery: Result.getOrThrow(Bytes.signingPublicKey(bundle.signingPublic)),
+            genesisRecord: new Uint8Array(bundle.trust.genesisRecord),
           },
           trust: { ...bundle.trust, genesisRecord: new Uint8Array(bundle.trust.genesisRecord) },
         }),
@@ -74,7 +77,7 @@ export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRest
       local: input.local,
       genesis: anchor.genesis,
       membershipId: anchor.membershipId,
-      personalSigner: input.personalSigner,
+      personalSigner: ports.personalSigner,
       ledger: ports.ledger,
       installed: ports.installed,
       trust,
@@ -87,3 +90,32 @@ export const prepareVaultRestore = Effect.fnUntraced(function* (input: VaultRest
   };
   return plan;
 });
+
+/** One page of the service's ledger history. */
+export interface RecoveryHistoryPage {
+  readonly startIndex: number;
+  readonly recordsHex: readonly string[];
+  readonly nextCursor: string | null;
+}
+
+/** Replay the complete served history from the package's genesis. Each call rereads it,
+ * because a restore must see its own admission. */
+export const recoveryLedger =
+  (input: {
+    readonly genesis: Bytes.GenesisHash;
+    readonly pages: () => Effect.Effect<readonly RecoveryHistoryPage[], unknown>;
+  }) =>
+  () =>
+    Effect.gen(function* () {
+      const pages = yield* input.pages();
+      if (pages[0]?.startIndex !== 0)
+        return yield* Effect.fail(new RecoveryVaultError({ code: 'authentication' }));
+      const records = pages.flatMap((page) => page.recordsHex).map(fromHex);
+      return yield* Effect.fromResult(
+        verifyLedger({
+          anchor: input.genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+        })
+      );
+    }) as Effect.Effect<LedgerView, unknown>;
