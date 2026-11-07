@@ -1,3 +1,4 @@
+import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import { createLocalCloudPort, type CloudPort } from '@lody/platform';
 import {
   machineFlockKeys,
@@ -601,8 +602,15 @@ describe('LodyFleet remote authentication boundary', () => {
         runtimes: Map<string, unknown>;
         refreshRuntimeState: () => void;
         remoteBridge: unknown;
-        confirmEncryptedAuthority: (workspaceId: string, startedAt: number) => void;
+        confirmEncryptedAuthority: (workspaceId: string, startedAt: AuthorityStamp) => void;
+        authorityClock: () => AuthorityStamp;
       };
+      // Tests move the wall clock alone through this source; fake timers drive both.
+      const clocks = { wallOffset: 0 };
+      fleet.authorityClock = () => ({
+        wall: Date.now() + clocks.wallOffset,
+        monotonic: BigInt(Date.now()) * 1_000_000n,
+      });
       fleet.applyRemoteWorkspaceList = async () => {};
       const detached: string[] = [];
       const attached: string[] = [];
@@ -639,7 +647,8 @@ describe('LodyFleet remote authentication boundary', () => {
         attached,
         revoked,
         fail,
-        confirm: () => fleet.confirmEncryptedAuthority('encrypted', Date.now()),
+        clocks,
+        confirm: () => fleet.confirmEncryptedAuthority('encrypted', fleet.authorityClock()),
         listRecovered: () => push({ status: 'authorized', userId: 'user-1', workspaces: [] }),
       };
     };
@@ -684,6 +693,20 @@ describe('LodyFleet remote authentication boundary', () => {
         await vi.advanceTimersByTimeAsync(LIMIT - 1);
         expect(detached).toEqual(['plain']);
         await vi.advanceTimersByTimeAsync(1);
+        expect(detached).toEqual(['plain', 'encrypted']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the limit when the wall clock is set back repeatedly', async () => {
+      try {
+        const { detached, fail, clocks } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        for (let round = 0; round < 288; round += 1) {
+          await vi.advanceTimersByTimeAsync(5 * MINUTE);
+          clocks.wallOffset -= 5 * MINUTE;
+        }
         expect(detached).toEqual(['plain', 'encrypted']);
       } finally {
         vi.useRealTimers();

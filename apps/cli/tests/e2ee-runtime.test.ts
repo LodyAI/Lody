@@ -1,3 +1,4 @@
+import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import {
   createDaemonLossRegistry,
   readDaemonLossAuthority,
@@ -1026,7 +1027,8 @@ describe('machine E2EE local runtime', () => {
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
-      const authorityConfirmations: number[] = [];
+      const authorityConfirmations: AuthorityStamp[] = [];
+      let mailboxDown = false;
       try {
         const accountId = 'ledger-retry-account';
         const root = join(
@@ -1068,6 +1070,7 @@ describe('machine E2EE local runtime', () => {
             method: keyof E2eeMailboxRequests,
             input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
           ) => {
+            if (mailboxDown) throw new Error('synthetic mailbox failure');
             if (method === 'fetch')
               return {
                 items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
@@ -1099,6 +1102,13 @@ describe('machine E2EE local runtime', () => {
         });
         await host.refresh();
         expect(authorityConfirmations.length).toBeGreaterThan(0);
+        // Key work has its own failures: the verified read below still counts.
+        const beforeMailboxFailure = authorityConfirmations.length;
+        mailboxDown = true;
+        await host.refresh();
+        mailboxDown = false;
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeMailboxFailure);
+        await host.refresh();
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });

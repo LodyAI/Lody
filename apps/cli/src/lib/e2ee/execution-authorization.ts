@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Bytes, contentPermissions } from '@lody/e2ee-core/protocol';
 import type { CloudE2eePort } from '@lody/platform';
 import { CloudE2eeLedgerOutage } from '../cloud-e2ee-errors';
+import { withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
 import type { makeCliE2eeRuntime } from './runtime';
 
 export type ExecutionAuthorization =
@@ -33,20 +34,7 @@ const OUTAGE_EXECUTION_WINDOW_MS = 4 * 60 * 60_000;
 const OUTAGE_READ_WINDOW_MS = 24 * 60 * 60_000;
 /** A failed read is not repeated for this long, so an outage does not delay every request. */
 const OUTAGE_RETRY_MS = 60_000;
-/** Allowed drift between the clocks. More than this means a suspend or a clock change. */
-const OUTAGE_CLOCK_SKEW_MS = 60_000;
-type Stamp = { wall: number; monotonic: bigint };
-const inWindow = (start: Stamp, now: Stamp, limitMs: number) => {
-  const wall = now.wall - start.wall;
-  const monotonic = Number((now.monotonic - start.monotonic) / 1_000_000n);
-  return (
-    wall >= 0 &&
-    wall < limitMs &&
-    monotonic >= 0 &&
-    monotonic < limitMs &&
-    Math.abs(wall - monotonic) < OUTAGE_CLOCK_SKEW_MS
-  );
-};
+type Stamp = AuthorityStamp;
 
 /** One workspace/device-identity lifetime. This gate grants admission only for the
  * immediate new execution; callers must authenticate the frame and claim its journal
@@ -214,8 +202,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           relaxed =
             !!outage &&
             !!lastRead &&
-            inWindow(outage.at, now, OUTAGE_RETRY_MS) &&
-            inWindow(lastRead, now, OUTAGE_READ_WINDOW_MS);
+            withinAuthorityLimit(outage.at, now, OUTAGE_RETRY_MS) &&
+            withinAuthorityLimit(lastRead, now, OUTAGE_READ_WINDOW_MS);
           if (!relaxed) {
             start = yield* refreshOnce;
             relaxed = !start && !!outage;
@@ -258,7 +246,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
               ? OUTAGE_READ_WINDOW_MS
               : OUTAGE_EXECUTION_WINDOW_MS;
         const current = (at: Stamp) =>
-          relaxed ? inWindow(grantedFrom, at, windowMs) : fresh(grantedFrom, at);
+          relaxed ? withinAuthorityLimit(grantedFrom, at, windowMs) : fresh(grantedFrom, at);
         if (relaxed && !current(yield* stamp)) return denied('unavailable');
         if (principal === 'member') {
           grants.delete(requesterDevice);
