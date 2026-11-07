@@ -10,12 +10,12 @@ export class UpdaterIpc extends IpcService {
   }
 
   @IpcMethod()
-  async checkForUpdates() {
-    return await getIpcServiceDeps().appUpdaterService.checkForUpdates()
+  async checkForUpdates(fullRescue = false) {
+    return await getIpcServiceDeps().appUpdaterService.checkForUpdates(fullRescue === true)
   }
 
   @IpcMethod()
-  async quitAndInstall() {
-    return await getIpcServiceDeps().appUpdaterService.quitAndInstall()
+  async quitAndInstall(fullRescue = false) {
+    return await getIpcServiceDeps().appUpdaterService.quitAndInstall(fullRescue === true)
   }
 }
