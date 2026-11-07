@@ -645,7 +645,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       },
     };
     const config = { id: 'config', machineId, cliType: 'builtin', agentType: 'sorbet' };
-    document.getAgentConfigById = async () => config as never;
+    document.getAgentConfigForMachineLaunch = async () => config as never;
     const providerId = '提供商 / 账户';
     const control = new LocalControlHandler({
       machineId,

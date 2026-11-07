@@ -6,6 +6,19 @@ PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
 
+## Lody Agent setup
+
+The Lody Agent page exposes saved connections and custom endpoints while the
+initial setup is awaiting authentication, using the pending config on the target
+machine. Completing authentication lets the daemon resume verification; only a
+successful verification publishes the Agent config. Runtime preparation and
+verification do not mount connection-management probes.
+
+Connection management uses the target machine’s local capabilities for same-machine
+IPC and its remote capabilities for encrypted workspace RPC. A remote machine in a
+plaintext workspace can use the existing ACP sign-in flow, but cannot manage Sorbet
+custom endpoints through the encrypted-only Provider API.
+
 ## Usage range transitions
 
 `usage-calendar-visualization.tsx` keeps a positioned view frame across hourly and
