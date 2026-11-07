@@ -35,6 +35,8 @@ function assertNoLegacyAttachments(value: unknown): void {
     return;
   }
   const record = value as Record<string, unknown>;
+  if (record.type === 'local_attachment')
+    throw new Error('Local attachment references cannot be migrated from an OSS snapshot.');
   if (['file', 'image', 'image_group', 'image_url'].includes(String(record.type)))
     throw new Error('Legacy attachment references require conversion before migration.');
   for (const item of Object.values(record)) assertNoLegacyAttachments(item);
@@ -44,6 +46,8 @@ function fileItems(history: readonly SessionHistoryInput[]): LocalFile[] {
   for (const turn of history) {
     if ('contents' in turn) assertNoLegacyAttachments(turn.contents);
     for (const item of [...(turn.items ?? []), ...(turn.inputConfig?.inputBlocks ?? [])]) {
+      if (item.type === 'local_attachment')
+        throw new Error('Local attachment references cannot be migrated from an OSS snapshot.');
       if (item.type === 'image' || item.type === 'image_group')
         throw new Error('Cloud image references cannot be migrated from an OSS snapshot.');
       if (item.type === 'file') files.push(fileSchema.parse(item));
@@ -92,6 +96,8 @@ export function collectHistoricalAttachmentFiles(source: LoroDoc): LocalFile[] {
       return;
     }
     const record = value as Record<string, unknown>;
+    if (record.type === 'local_attachment')
+      throw new Error('Local attachment references cannot be migrated from an OSS snapshot.');
     if (record.type === 'image' || record.type === 'image_group' || record.type === 'image_url')
       throw new Error('Historical image references cannot be migrated from an OSS snapshot.');
     if (record.type === 'file') {
@@ -108,7 +114,7 @@ export function collectHistoricalAttachmentFiles(source: LoroDoc): LocalFile[] {
   const updates = doc.exportJsonUpdates(undefined, undefined, false);
   const mayContainAttachment = (value: unknown): boolean => {
     if (typeof value === 'string')
-      return ['file', 'image', 'image_group', 'image_url'].includes(value);
+      return ['file', 'image', 'image_group', 'image_url', 'local_attachment'].includes(value);
     if (!value || typeof value !== 'object') return false;
     return Object.values(value).some(mayContainAttachment);
   };

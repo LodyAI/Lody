@@ -266,6 +266,34 @@ describe('createWorkspaceMachineRpcFacade', () => {
     ).toEqual({ status: 'error', code: 'unsupported_protocol' });
   });
 
+  it('requires localAttachmentDownload support before sending a local reference to an older daemon', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
+      getMachineRpcClient: async () => {
+        throw new Error('Local references must not become path downloads on an old daemon');
+      },
+    });
+    expect(
+      await facade.requestFileDownloadChunk(remoteMachineId, {
+        sessionId,
+        path: 'input.txt',
+        offset: 0,
+        attachment: {
+          type: 'local_attachment',
+          referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
+          machineId: remoteMachineId,
+          sessionId,
+          turnId: 'turn',
+          kind: 'file',
+          fileName: 'input.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 1,
+        },
+      })
+    ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
   it('does not fall back to cloud for a local file download without IPC', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

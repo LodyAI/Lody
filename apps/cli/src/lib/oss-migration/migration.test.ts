@@ -722,6 +722,54 @@ describe('OSS migration', () => {
     expect(() => collectAttachmentFiles(doc)).toThrow('Legacy attachment references');
   });
 
+  it.each(['items', 'inputBlocks', 'contents', 'deleted'] as const)(
+    'rejects local references in %s before migration',
+    async (location) => {
+      const { original, manifest } = fixture();
+      const attachment = {
+        type: 'local_attachment' as const,
+        referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
+        machineId: manifest.sourceMachineId,
+        sessionId: 'one',
+        turnId: 'u1',
+        kind: 'file' as const,
+        fileName: 'local.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 5,
+      };
+      if (location === 'contents') {
+        original.getList('history').push({
+          id: 'legacy-local',
+          role: 'user',
+          timestamp: '2026-11-06T00:00:00Z',
+          contents: [attachment],
+        });
+        original.commit();
+      }
+      const mirror = createSessionMirror({ doc: original, initialState: {} });
+      mirror.historyWriter.update((history) =>
+        history.map((turn) =>
+          turn.id !== 'u1'
+            ? turn
+            : {
+                ...turn,
+                ...(location === 'contents'
+                  ? { contents: [attachment] }
+                  : location === 'inputBlocks'
+                    ? { inputConfig: { inputBlocks: [attachment] } }
+                    : { items: [attachment] }),
+              }
+        )
+      );
+      if (location === 'deleted')
+        mirror.historyWriter.update((history) => history.filter((turn) => turn.id !== 'u1'));
+      mirror.dispose();
+      await expect(
+        validateAttachments(original, 'one', await temporary(), manifest.sourceMachineId)
+      ).rejects.toThrow('Local attachment references cannot be migrated');
+    }
+  );
+
   it('validates attachment bytes and checkpoints uploads before changing history', async () => {
     const { manifest, original } = fixture();
     const dir = await temporary();

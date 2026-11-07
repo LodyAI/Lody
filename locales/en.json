@@ -1,4 +1,9 @@
 {
+  "sessions.localAttachmentDownload": "Download from original computer",
+  "sessions.localAttachmentDownloading": "Downloading from original computer…",
+  "sessions.localAttachmentDownloadFailed": "Cannot download. Check that the original computer is online and the file still exists.",
+  "sessions.localAttachmentOnly": "Available only on the original computer",
+  "sessions.localAttachmentUnavailable": "Local attachment unavailable",
   "settings.tabs.lodyAgent": "Lody Agent",
   "settings.categories.lodyAgent.description": "Sign in and connect the models Lody Agent uses",
   "lodyAgentSetting.disabled": "Turn on Lody Agent in Beta to use it.",
