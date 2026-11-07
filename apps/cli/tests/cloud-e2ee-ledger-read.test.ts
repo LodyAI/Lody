@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CloudE2eeDeviceRevoked,
@@ -8,18 +10,19 @@ import { createCloudE2eePort } from '../src/lib/cloud-cli-port';
 
 /** Only the network is replaced: replies pass through the real Convex SDK and the real port. */
 const network = vi.hoisted(() => ({
-  reply: (): Promise<Response> => Promise.reject(new Error('no reply configured')),
+  reply: (_url: unknown, _init: unknown): Promise<Response> =>
+    Promise.reject(new Error('no reply configured')),
 }));
 vi.mock('@/utils/http-transport', async (original) => ({
   ...(await original<object>()),
-  getCliHttpFetch: () => () => network.reply(),
+  getCliHttpFetch: () => (url: unknown, init: unknown) => network.reply(url, init),
 }));
 
 const UDF_FAILED = 560;
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const read = () =>
-  createCloudE2eePort({ authBaseUrl: 'https://cloud.invalid', logger: {} as never })
+const read = (authBaseUrl = 'https://cloud.invalid') =>
+  createCloudE2eePort({ authBaseUrl, logger: {} as never })
     .getHistory({ workspaceId: 'workspace', credential: 'a'.repeat(64) })
     .then(
       () => {
@@ -86,6 +89,24 @@ describe('latest ledger read failures through the Convex SDK', () => {
     network.reply = reply;
     expect(await read()).not.toBeInstanceOf(CloudE2eeLedgerOutage);
   });
+
+  it.each([200, 503])(
+    'treats a socket closed after %i response headers as an outage',
+    async (status) => {
+      const server = createServer((_request, response) => {
+        response.writeHead(status, { 'content-type': 'application/json', 'content-length': 1024 });
+        response.write('{"status":', () => response.socket?.destroy());
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const { port } = server.address() as AddressInfo;
+        network.reply = (url, init) => fetch(url as string, init as RequestInit);
+        expect(await read(`http://127.0.0.1:${port}`)).toBeInstanceOf(CloudE2eeLedgerOutage);
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    }
+  );
 
   it('keeps the removal and revocation types', async () => {
     network.reply = async () =>

@@ -214,11 +214,6 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (!start || (!relaxed && !fresh(start, yield* stamp))) return denied('unavailable');
         const grantedFrom = start;
         const grantedInWindow = windowGeneration;
-        if (relaxed && !authorityClocksAgree(grantedFrom, yield* stamp)) {
-          // Only a successful read reopens this: realigned clocks prove nothing.
-          endWindow();
-          return denied('unavailable');
-        }
         // Offline state supplies immediate known revocations, never freshness.
         let generation = options.runtime.executionGeneration();
         let policyCurrent: (() => boolean) | undefined;
@@ -251,11 +246,16 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
             : access === 'read'
               ? OUTAGE_READ_WINDOW_MS
               : OUTAGE_EXECUTION_WINDOW_MS;
-        const current = (at: Stamp) =>
-          relaxed
-            ? windowGeneration === grantedInWindow &&
-              withinAuthorityLimit(grantedFrom, at, windowMs)
-            : fresh(grantedFrom, at);
+        const current = (at: Stamp) => {
+          if (!relaxed) return fresh(grantedFrom, at);
+          if (windowGeneration !== grantedInWindow) return false;
+          if (!authorityClocksAgree(grantedFrom, at)) {
+            // Only a successful read reopens this: realigned clocks prove nothing.
+            endWindow();
+            return false;
+          }
+          return withinAuthorityLimit(grantedFrom, at, windowMs);
+        };
         if (relaxed && !current(yield* stamp)) return denied('unavailable');
         if (principal === 'member') {
           grants.delete(requesterDevice);

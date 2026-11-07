@@ -7728,6 +7728,42 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
+    it('ends the window when a held authorization sees the clocks disagree', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          io.wall += 2 * HOUR;
+          expect(granted.isCurrent?.()).toBe(false);
+          at(io, FIFTEEN_MINUTES + 120_000);
+          expect(granted.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps the read window after a held execution authorization expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          at(io, 5 * HOUR);
+          expect(granted.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
     it('keeps the longer read window after execution expires', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {

@@ -39,6 +39,28 @@ export function isCloudE2eeDeviceRevoked(value: unknown): boolean {
 /** Not sent by the service yet: an expired sign-in currently arrives as an ordinary refusal. */
 const SIGN_IN_EXPIRED_CODE = 'e2ee_sign_in_expired';
 
+/** Node's codes for a connection lost while a response body was still arriving. */
+const SOCKET_FAILURE_CODES = new Set([
+  'UND_ERR_SOCKET',
+  'UND_ERR_BODY_TIMEOUT',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+]);
+
+function isTransportInterruption(cause: Error): boolean {
+  const seen = new Set<unknown>();
+  let value: unknown = cause;
+  while (value instanceof Error && !seen.has(value)) {
+    if (value.name === 'TimeoutError' || value.name === 'AbortError') return true;
+    if ('code' in value && SOCKET_FAILURE_CODES.has(value.code as string)) return true;
+    seen.add(value);
+    value = value.cause;
+  }
+  return false;
+}
+
 /** A proxy or gateway reply can carry a refusal in its body, which the SDK reduces to a message. */
 const REFUSAL_TEXT = /e2ee_[a-z_]+|\bunauthori[sz]ed\b|\bforbidden\b|\brevoked\b|\bremoved\b/i;
 
@@ -54,7 +76,8 @@ export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown 
       ? new CloudE2eeLedgerOutage({ signInExpired: true, cause })
       : cause;
   }
-  if (httpStatus === undefined) return new CloudE2eeLedgerOutage({ cause });
+  if (httpStatus === undefined || isTransportInterruption(cause))
+    return new CloudE2eeLedgerOutage({ cause });
   const failedUpstream = httpStatus >= 500 || httpStatus === 429;
   return failedUpstream && cause.name === 'Error' && !REFUSAL_TEXT.test(cause.message)
     ? new CloudE2eeLedgerOutage({ cause })
