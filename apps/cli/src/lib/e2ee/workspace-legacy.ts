@@ -1205,6 +1205,8 @@ async function openWorkspaceOwned(
         const startedAt = authorityStamp();
         const confirmRead = opened.executionAuthorization.beginLatestRead();
         let status = await run(opened.runtime.status());
+        const trusted = status;
+        let movedBack = false;
         let cursor: string | undefined;
         let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
         do {
@@ -1231,6 +1233,11 @@ async function openWorkspaceOwned(
             });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
+          // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
+          movedBack ||=
+            page.checkpoint.length < trusted.length ||
+            (page.checkpoint.length === trusted.length &&
+              page.checkpoint.headHash !== trusted.headHash);
           status = await run(opened.runtime.ingest(page)).catch((error) => {
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
@@ -1243,7 +1250,7 @@ async function openWorkspaceOwned(
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
         // Later key work has its own failures; they do not undo this confirmation.
-        if (!cursor && !closed) {
+        if (!cursor && !closed && !movedBack) {
           confirmRead();
           options.onAuthorityConfirmed?.(startedAt);
         }

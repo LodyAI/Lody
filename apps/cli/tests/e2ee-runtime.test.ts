@@ -1105,6 +1105,15 @@ describe('machine E2EE local runtime', () => {
         mailboxDown = false;
         expect(authorityConfirmations.length).toBeGreaterThan(beforeMailboxFailure);
         await host.refresh();
+        // A signed older prefix is accepted as a no-op, but it is not a latest read.
+        const beforeOlderPrefix = authorityConfirmations.length;
+        history = page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(authorityConfirmations).toHaveLength(beforeOlderPrefix);
+        // The same checkpoint as the trusted head is an ordinary overlapping read.
+        history = page(fixture.records);
+        await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeOlderPrefix);
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
