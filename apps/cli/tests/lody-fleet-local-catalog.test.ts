@@ -580,6 +580,79 @@ describe('LodyFleet remote authentication boundary', () => {
     }
   });
 
+  describe('workspace subscription errors', () => {
+    const offlineHarness = async () => {
+      vi.useFakeTimers();
+      let fail: (error: Error) => void = () => {};
+      let push: (
+        snapshot: Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0]
+      ) => void = () => {};
+      const { fleet: harness } = createFleetHarness(
+        createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
+        createTestCloudPort((onValue, onError) => {
+          push = onValue;
+          fail = onError;
+          return () => {};
+        })
+      );
+      const fleet = harness as unknown as {
+        startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
+        applyRemoteWorkspaceList: () => Promise<void>;
+        runtimes: Map<string, unknown>;
+        refreshRuntimeState: () => void;
+        remoteBridge: unknown;
+      };
+      fleet.applyRemoteWorkspaceList = async () => {};
+      const detached: string[] = [];
+      const runtime = (id: string, contentMode: string) => ({
+        workspace: { id, contentMode },
+        lody: {
+          detachRemoteBridge: async () => {
+            detached.push(id);
+          },
+          attachRemoteBridge: async () => {},
+          handleRemoteAccessRevoked: async () => {},
+        },
+      });
+      fleet.refreshRuntimeState = () => {};
+      fleet.runtimes.set('encrypted', runtime('encrypted', 'e2ee'));
+      fleet.runtimes.set('plain', runtime('plain', 'plaintext'));
+      fleet.remoteBridge = new RemoteBridge({
+        logger: createSilentLogger(),
+        catalog: {} as never,
+        userId: 'user-1',
+        machineId: 'machine-1' as MachineId,
+        machineName: 'host',
+        getRuntime: (id) => fleet.runtimes.get(id) as never,
+      });
+      await fleet.startWorkspaceSubscription({ waitForInitial: false });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [] });
+      return { detached, fail };
+    };
+
+    it('keeps an encrypted workspace attached through a transient error', async () => {
+      try {
+        const { detached, fail } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(detached).toEqual(['plain']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('detaches an encrypted workspace on an explicit refusal', async () => {
+      try {
+        const { detached, fail } = await offlineHarness();
+        fail(new Error('subscription failed', { cause: new Error('Unauthorized') }));
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(detached.sort()).toEqual(['encrypted', 'plain']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('reports a rejected backend authorization for an invalid token', async () => {
     const runtimeStateReporter = createRuntimeStateReporter();
     const onFatalAuthFailure = vi.fn();

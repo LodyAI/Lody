@@ -147,14 +147,28 @@ export class RemoteBridge {
   async markOffline(runtimes: Iterable<RemoteBridgeRuntime>): Promise<void> {
     this.allowedWorkspaceIds.clear();
     this.clearAllAttachRetries();
-    for (const runtime of runtimes) {
-      try {
-        await runtime.detachRemoteBridge();
-      } catch (error) {
-        this.args.logger.debug(
-          `[remote-bridge] Failed to detach remote runtime: ${formatErrorMessage(error)}`
-        );
-      }
+    for (const runtime of runtimes) await this.detach(runtime);
+  }
+
+  private async detach(runtime: RemoteBridgeRuntime): Promise<void> {
+    try {
+      await runtime.detachRemoteBridge();
+    } catch (error) {
+      this.args.logger.debug(
+        `[remote-bridge] Failed to detach remote runtime: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
+  /** A transient control-plane failure. Encrypted runtimes stay attached and allowed. */
+  async markPlaintextOffline(
+    entries: Iterable<{ workspaceId: string; runtime: RemoteBridgeRuntime; encrypted: boolean }>
+  ): Promise<void> {
+    for (const { workspaceId, runtime, encrypted } of entries) {
+      if (encrypted) continue;
+      this.allowedWorkspaceIds.delete(workspaceId);
+      this.clearAttachRetry(workspaceId);
+      await this.detach(runtime);
     }
   }
 

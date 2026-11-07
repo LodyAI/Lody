@@ -1,3 +1,4 @@
+import { isCloudE2eeDeviceRevoked, isCloudE2eeMemberRemoved } from './cloud-e2ee-errors';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import type {
@@ -73,7 +74,7 @@ import {
   handleLocalProjectWorktreeConfigRequest,
   isLocalProjectWorktreeConfigRequest,
 } from '@/session/worktree/worktree-setup-config-store';
-import { formatErrorMessage } from '@/utils/format-error';
+import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
 import { Logger } from '@/utils/logger';
 import { traceAsync } from '@/utils/trace-span';
 import type { CloudAccessSnapshot, CloudPort } from '@lody/platform';
@@ -113,6 +114,10 @@ import { closeProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-write
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
 const FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS = 15_000;
+const isExplicitAccessRefusal = (error: unknown) =>
+  isCloudE2eeMemberRemoved(error) ||
+  isCloudE2eeDeviceRevoked(error) ||
+  /\bunauthori[sz]ed\b/i.test(formatErrorWithCauses(error));
 const FLEET_RECONCILE_RETRY_INITIAL_DELAY_MS = 5_000;
 const FLEET_RECONCILE_RETRY_MAX_DELAY_MS = 5 * 60_000;
 const FLEET_WORKSPACE_START_CONCURRENCY = 4;
@@ -211,6 +216,7 @@ export class LodyFleet {
   private invalidTokenReported = false;
   private lastCachedWorkspaceSignature: string | null = null;
   private remoteBridgeOfflineTimer: NodeJS.Timeout | null = null;
+  private remoteBridgeOfflineRefused = false;
   // Last valid workspace list, retried after an apply/reconcile failure. The
   // Convex subscription only re-fires on actual list changes, so without this a
   // one-off reconcile failure (e.g. a catalog write error) could leave the fleet
@@ -603,7 +609,7 @@ export class LodyFleet {
           this.refreshRuntimeState();
           // Transient subscription errors get a grace window before the data
           // plane detaches; a recovered workspace list cancels the timer.
-          this.scheduleRemoteBridgeOffline();
+          this.scheduleRemoteBridgeOffline(isExplicitAccessRefusal(error));
           this.settleFirstRemoteWorkspaceList();
 
           if (!initialResolved) {
@@ -1457,13 +1463,17 @@ export class LodyFleet {
    * Schedule the detach after a grace window; a successful workspace-list
    * update cancels it.
    */
-  private scheduleRemoteBridgeOffline(): void {
+  private scheduleRemoteBridgeOffline(refused: boolean): void {
+    this.remoteBridgeOfflineRefused ||= refused;
     if (this.stopped || this.remoteBridgeOfflineTimer) {
       return;
     }
     const timer = setTimeout(() => {
       this.remoteBridgeOfflineTimer = null;
-      void this.handleRemoteBridgeOffline();
+      const offline = this.remoteBridgeOfflineRefused
+        ? this.handleRemoteBridgeOffline()
+        : this.handleRemoteBridgeOutage();
+      void offline;
     }, FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS);
     timer.unref?.();
     this.remoteBridgeOfflineTimer = timer;
@@ -1474,6 +1484,21 @@ export class LodyFleet {
       clearTimeout(this.remoteBridgeOfflineTimer);
       this.remoteBridgeOfflineTimer = null;
     }
+    this.remoteBridgeOfflineRefused = false;
+  }
+
+  /** A failing workspace list says nothing about an encrypted workspace's access: it keeps
+   * its token and verified ledger, and its own refresh observes any revocation. */
+  private async handleRemoteBridgeOutage(): Promise<void> {
+    this.lastCachedWorkspaceSignature = null;
+    await this.remoteBridge?.markPlaintextOffline(
+      Array.from(this.runtimes.entries(), ([workspaceId, runtime]) => ({
+        workspaceId,
+        runtime: runtime.lody,
+        encrypted: runtime.workspace.contentMode === 'e2ee',
+      }))
+    );
+    this.refreshRuntimeState();
   }
 
   private async handleRemoteBridgeOffline(): Promise<void> {
