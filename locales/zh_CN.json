@@ -6076,6 +6076,8 @@
   "e2ee.recovery.replaceFinished": "恢复文件已更换。请保管好新文件；在已更换的工作区，旧文件不能再添加设备。",
   "e2ee.recovery.replacePending": "还在等待密钥送达。请稍候再试。",
   "e2ee.recovery.passkeyAdd": "添加 passkey…",
+  "e2ee.recovery.passkeyNameTitle": "给这个 passkey 命名",
+  "e2ee.recovery.passkeyNameHelp": "名称方便你以后区分不同的 passkey，只有你能看到。",
   "e2ee.recovery.passkeyAdded": "passkey 已添加并通过测试。请继续保管好恢复文件。",
   "e2ee.recovery.passkeyUnsupported": "这个 passkey 无法解锁恢复保险库。请继续使用恢复文件。",
   "e2ee.recovery.restorePasskey": "用 passkey 恢复…",
