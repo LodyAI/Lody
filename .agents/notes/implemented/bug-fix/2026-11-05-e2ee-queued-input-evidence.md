@@ -70,8 +70,8 @@ change.
   visible refusal path.
 - *Sign nothing new and trust `queuedItem.userId`.* That field is display data.
 - *Use the frame's config in place of the row's.* It would hide a mismatch rather than refuse it.
-- *Map the verified signer to an account.* The machine has no such directory, and the ledger
-  user ID is not an account ID.
+- *Map the verified signer to an account.* The machine had no such directory at the time. The
+  ledger user ID has since become the account ID (#2365), and requesters stay as decided here.
 
 ## Consequences and limits
 

@@ -17,7 +17,20 @@ note proposes evidence by author: signed purpose-8 dispatch originals for human 
 including queued input; a local receipt for machine-authored input; and the frame signer
 plus a later-edit check for Schedules. The main trade-off is that a Schedule declaration
 no longer proves its exact payload. A human Turn with no dispatch original can no longer start.
-Everything here comes from reading main `979b0efc5`; nothing was implemented or run.
+This note describes main `85e338e42`. The queue part is implemented; the fork itself is
+still in place, and the rest of this design was not implemented or run.
+
+## Current state
+
+| Part | State |
+| --- | --- |
+| Queued input evidence | Implemented in [#2345](../../implemented/bug-fix/2026-11-05-e2ee-queued-input-evidence.md): `queueDispatchOriginals`, the `queuedInput` marker, `queued_inputs` receipts for automation rows |
+| Requester and machine access | Implemented in [#2352](../../implemented/bug-fix/2026-11-06-e2ee-verified-requester.md): the requester comes from the verified signer, and access is decided locally |
+| Ledger user ID | The account ID since #2365. The ledger format did not change, and this design does not depend on it |
+| Writer binding on queue rows | Tried and removed. It is not part of this design |
+| `forkAt` in `resolve` and `resolveSchedule` | Still runs. Removal follows acceptance |
+| Receipts for the other machine-authored input | Not implemented |
+| Schedule frame-signer path, `frames`/`spans` reduction | Not implemented |
 
 ## Scope
 
@@ -40,29 +53,27 @@ admission refuses Roost with `e2ee_history_backend_unavailable`.
 | --- | --- | --- |
 | Human Turn, dispatch delivery | Client device | No original in `rpcDispatchOriginals` or the receipt cache: preparation failed or timed out, the host lacks the capability, or the Turn lacks `inputConfig`, `userId` or `timestamp` |
 | Human Turn, `history` delivery | Client device | Always; `dispatchUserTurn` is not called |
-| Queue promotion (`promoteNextQueuedMessage`) | **This machine** | Always. A `queue` delivery stores no original, so the machine-signed promoted row is the only evidence |
-| Refused steer | Client device | Not on the client's `promoteGuideToFollowUp` route, which dispatches. Whether a CLI-side promotion can still run in encrypted mode needs confirming; queue rules would apply |
+| Queue promotion (`promoteNextQueuedMessage`) | **This machine** | Always. The signed-row check runs first and covers `queuedInput`; author evidence then comes from `queueDispatchOriginals` or a receipt |
+| Refused steer | Client device | Not on the client's `promoteGuideToFollowUp` route, which dispatches. The steer path writes its own row, and refusal only changes status |
 | Agent-driven owner work (`lody session` create/send, MCP) | This machine | Always: a self-signed original falls through to the signed row |
 | Derived input (`derivedFrom`, shared-member derivation) | This machine | Always. Its origin Turn is resolved again below |
 | Derivation origin lookup (`classifyOrigin`, `verifiedOrigin`) | Member | `lookup.origin` skips the document's original. Only a cached received original avoids the fork. An owner's live Turn short-circuits the write-time check |
 | Generated Schedule Turn (`scheduleRun`) | This machine | Always, then `resolveSchedule` runs as well |
-| Automation queue row (`pushMessageQueue`) | This machine | Always, through queue promotion |
+| Automation queue row (`pushMessageQueue`) | This machine | Always, through queue promotion, before its receipt is compared |
 | Schedule handoff (`schedule-engine` `authorize`) | Definition signer | Always; one fork per signed frame holding the declaration |
 | Schedule actual start (`claim` → `authorizeSchedule`) | Definition signer | Always, repeated for each resolved project target |
 | Schedule manual run | Definition and request signers | Both of the above, for two declarations |
 
 ### Findings that shape the design
 
-- **Queued input needs its own evidence.** Promotion writes the history row on this machine,
-  so the row's signature names the machine. Every option has to carry the input's author
-  separately, independently of forkAt.
+- **Queued input has its own evidence.** Promotion writes the history row on this machine, so
+  the row's signature names the machine. The author's evidence travels separately and does not
+  depend on forkAt.
 - **The dispatch original is already a signed intent for human input.** It binds request ID,
   target machine, expiry, session, Turn, `userId`, timestamp and `inputConfig`, and that
   config normally carries `prompt` and `inputBlocks`. `resolveDispatchTurnInput` prefers them
   over the row's `items`, so the executed text is covered. Only a config with no blocks falls
   back to unsigned `items`.
-- **The client already prepares a frame for queued sends.** `refuseKnownWithdrawnTarget` calls
-  `prepareEncryptedDispatch` for every encrypted send, then discards the result.
 - **The fork carries more than the signer.** Comparing the reconstructed row with the current
   one also covers later changes to `inputConfig`, `items`, `scheduleRun` and `derivedFrom`.
   Row fields are separate operations, and status updates share the same
@@ -80,8 +91,8 @@ admission refuses Roost with `e2ee_history_backend_unavailable`.
 | Queued input | Unsolved without extra work | Dispatch original stored with the row | New signed record |
 | Machine input | Signer of its own frame | Local receipt with a row digest | Machine-signed record |
 | Schedule | Frame signer + `scheduleChangedSince` | Same as A | Signed declaration |
-| Client changes | None | Queue path only | Desktop, Web, mobile, CLI |
-| New format | None | One Session document map, one local table | New signed record and expiry rules |
+| Client changes | None | None left: the queue path shipped | Desktop, Web, mobile, CLI |
+| New format | None | None left: the document map and receipt table shipped | New signed record and expiry rules |
 | `frames`/`spans` | Kept in full | Schedule rooms only | Removable |
 | Fails a non-negotiable | **Yes, the third: not recommended** | No; see the guarantees below | No |
 
@@ -112,19 +123,15 @@ claim(userTurnId)
 - **Human input.** The dispatch original becomes the only evidence. The row's `inputConfig`
   must equal the signed one, as today; `resolve` and its fork are removed. A config with no
   input blocks is refused rather than falling back to unsigned `items`.
-- **Queued input.** The client stores the frame it already prepares in a new document map,
-  `queueDispatchOriginals`, beside the row. A separate map matters: the existing gate compares
-  configs strictly, and promotion adds `resume`, so an old CLI reading the frame from
-  `rpcDispatchOriginals` would deny the Turn. The gate compares the signed config with the
-  promoted row excluding `resume`. An encrypted queue row with no frame and no self receipt is
-  not started. Editing a queued row changes its config, and originals are immutable per Turn,
-  so an encrypted edit takes a new `userTurnId`.
-- **Machine-authored input.** Each write site records `(sessionId, userTurnId, digest)` in a
-  new table of `execution-origins.sqlite` before the history write. The digest covers the same
-  projection the gate compares today. A row with neither a matching receipt nor a dispatch
-  original does not start, including its `derivedFrom` and `scheduleRun`, and a missed write site
-  fails closed in tests. Automation queue rows record at enqueue, and
-  promotion binds the final projection.
+- **Queued input.** The [implemented evidence](../../implemented/bug-fix/2026-11-05-e2ee-queued-input-evidence.md) stays. Today the signed-row check
+  runs first and covers the `queuedInput` marker. Once that check goes, the marker only selects
+  where to read the original: the frame signer or the receipt decides the requester, and
+  `_lodyAutomation` needs a receipt. `queuedInputEvidence` remains the comparison.
+- **Machine-authored input.** Automation queue rows already record a receipt in
+  `queued_inputs`. Each other write site records `(sessionId, userTurnId, digest)` in the same
+  way before the history write. The digest covers the same projection the gate compares today.
+  A row with neither a matching receipt nor a dispatch original does not start, including its
+  `derivedFrom` and `scheduleRun`, and a missed write site fails closed in tests.
 - **Derivation.** Origin lookup reads the member's dispatch original from the document or
   receipt cache, then applies the existing rules unchanged. An origin with no frame refuses the
   derivation.
@@ -147,7 +154,7 @@ claim(userTurnId)
 | Displayed `items` match what was signed | Fork path only | No | No | Yes |
 | Schedule declaration rejects later edits | Yes | Yes | Yes | Yes |
 | Schedule declaration proves its exact payload | Yes | No | No, left to Roost | Yes |
-| Human Turn starts with no dispatch original | Yes | Yes | No, the sender sees a refusal | No |
+| Human Turn starts with no dispatch original | Yes, except queued input | Yes, except queued input | No, the sender sees a refusal | No |
 
 Option B's trade-offs are availability on a missing original and the Schedule payload check.
 Both are owner decisions below. A missing machine receipt refuses that input.
@@ -170,18 +177,19 @@ E2EE is still at the test-build stage, so "old clients" means earlier test build
 | Client / CLI | Result |
 | --- | --- |
 | New client, old CLI | The new map is ignored; behavior is as today |
-| Old client, new CLI | Dispatch turns work. Queued rows do not start and expire visibly |
+| Old client, new CLI | Dispatch turns work. Queued rows do not start, as already true since #2345 |
 | New client, new CLI | Target state |
 
-- **Order.** Ship the client change first, then flip the CLI gate atomically in one PR. No
+- **Order.** The client change has shipped. Flip the CLI gate atomically in one PR. No
   fallback to the fork is kept: it would keep the code this removes. Production deployment and
   acceptance order are unaffected, since implementation follows acceptance.
 - **Existing data.** No migration. Terminal Turns are never re-verified because the journal
   answers first; a pending Turn expires inside 15 minutes; machine input in flight at upgrade
   has no receipt, so it expires, and the next Schedule tick regenerates it. Schedule
   declarations and ledger data are unchanged.
-- **Mobile.** The mobile source is outside this repository. Its use of `prepareDispatch` must
-  be confirmed before the CLI flip; if it lacks one, its Turns would stop starting.
+- **Web and mobile.** Their source is outside this repository. They take the shared send path
+  through their `lody-oss` revision, as the queue note records. No device run has confirmed this
+  for direct sends, so confirm it before the CLI flip.
 
 ## Reducing `frames` and `spans`
 
@@ -198,13 +206,12 @@ Line counts are estimates, excluding generated files.
 
 | PR | Change | Size (code + tests) |
 | --- | --- | --- |
-| 1 | Shared schema and client: `queueDispatchOriginals`, new Turn ID on encrypted edit, visible preparation failure | ~120 + ~150 |
-| 2 | CLI: self-input receipts at every write site, still unused by the gate | ~250 + ~250 |
-| 3 | CLI gate flip: receipts and originals only, queue rule, remove `resolve` and Session `retain`/backfill | -130/+80 + ~300 rewritten |
-| 4 | CLI and shared: Schedule frame-signer path, remove the last fork | ~50 + ~100 |
-| 5 | Spec revision, `AGENTS.md`, this note to `implemented/` | Documentation |
+| 1 | CLI: receipts at the remaining write sites, still unused by the gate | ~200 + ~200 |
+| 2 | CLI gate flip: receipts and originals only, queue rule, remove `resolve` and Session `retain`/backfill | -130/+80 + ~300 rewritten |
+| 3 | CLI and shared: Schedule frame-signer path, remove the last fork | ~50 + ~100 |
+| 4 | Spec revision, `AGENTS.md`, this note to `implemented/` | Documentation |
 
-PR 3 and PR 4 land last and together in one test build, because this path gates every encrypted
+PR 2 and PR 3 land last and together in one test build, because this path gates every encrypted
 start and invalidates acceptance evidence.
 
 Regression scope: A, B, C, mobile and Schedule all rerun, including:
@@ -244,8 +251,8 @@ note does not approve any Spec.
 
 ## Verification limits
 
-Inventory and findings come from code reading. No tests ran. `frontiersToVV` exists in the pinned `loro-crdt` 1.17.0 typings, but its
-behavior on snapshot-only replicas and the cost of today's fork were not exercised or measured. Mobile behavior is not established from this
+Inventory and findings come from code reading; the tests named in the linked notes cover only what shipped. Nothing proposed here was run. `frontiersToVV` exists in the pinned `loro-crdt` 1.17.0 typings, but its
+behavior on snapshot-only replicas and the cost of today's fork were not exercised or measured. Web and mobile behavior is not established from this
 repository. Sizes are estimates.
 
 Related: [execution claim](2026-10-28-encrypted-agent-execution-claim.md);
