@@ -641,7 +641,8 @@ export async function createAutomationWorkspaceLegacy(options: {
           if (operation.type === 'cancel') {
             const wait = ledger.wait(operation.id);
             if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-            assertReadable(wait, input.sessionId);
+            assertReadable(wait);
+            if (wait.sessionId !== input.sessionId) throw new Error('AUTOMATION_NOT_FOUND');
             await handle.command({ type: 'cancel', id: operation.id });
             return { type: 'cancel' as const };
           }
