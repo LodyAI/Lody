@@ -82,7 +82,9 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
     layoutConfiguration.interSectionSpacing = LodySpacing.md
     layout.configuration = layoutConfiguration
-    collection = UICollectionView(frame: bounds, collectionViewLayout: layout)
+    let collection = ChatListCollectionView(frame: bounds, collectionViewLayout: layout)
+    collection.onLayout = { [weak self] in self?.updateBackdrop() }
+    self.collection = collection
     collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     collection.backgroundColor = .clear
     collection.delegate = self
@@ -204,10 +206,6 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     setSections(lastSections)
   }
 
-  func scrollViewDidScroll(_ scrollView: UIScrollView) {
-    updateBackdrop()
-  }
-
   /// One continuous backdrop runs from the pinned label to the window top.
   /// Keep UIKit's original supplementary label, including its native push-off.
   private func updateBackdrop() {
@@ -234,11 +232,6 @@ final class ChatListView: UIView, UICollectionViewDelegate {
                                 width: collection.bounds.width,
                                 height: collection.adjustedContentInset.top + header.frame.height + LodySpacing.xxl)
     }
-  }
-
-  func collectionView(_ collectionView: UICollectionView, willDisplaySupplementaryView view: UICollectionReusableView,
-                      forElementKind elementKind: String, at indexPath: IndexPath) {
-    updateBackdrop()
   }
 
   private static func same(_ a: LodyListRow, _ b: LodyListRow, _ ea: Bool?, _ eb: Bool?) -> Bool {
