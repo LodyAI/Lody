@@ -214,6 +214,26 @@ export const beginAccountVaultReplacement = (
     }).pipe(Effect.provide(vaults(io)))
   )
 
+const SECURITY_EVENT_KINDS = new Set([
+  'vault_replacement_reserved',
+  'vault_replacement_finished',
+  'personal_device_recovered'
+])
+
+/** Recent account security events this build can show, newest first. */
+export const recentAccountSecurityEvents = (
+  read: () => Effect.Effect<
+    { readonly events: readonly { id: string; kind: string; occurredAt: number }[] },
+    unknown
+  >
+) =>
+  Effect.map(read(), ({ events }) =>
+    events
+      .filter((event) => SECURITY_EVENT_KINDS.has(event.kind))
+      .map(({ id, kind, occurredAt }) => ({ id, kind, occurredAt }))
+      .sort((a, b) => b.occurredAt - a.occurredAt)
+  )
+
 /** What a replacement would cover, and whether one is already running. */
 export const recoveryReplacementPlan = (
   io: RecoveryVaultIo & {
