@@ -30,7 +30,8 @@ preserved; [ChatKit](https://github.com/Innei/ChatKit) remains a pinned submodul
 | [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime |
 | `shared/markdown-repair/` | Markdown repair entry used by both clients |
 
-Appearance code, icons, and fonts are owned by each platform. The former shared
+Appearance code and icons are owned by each platform. iOS uses system fonts,
+including system monospaced fonts for code; Android bundles Inter and JetBrains Mono. The former shared
 design generator and preview project are not included. iOS keeps the existing
 `LodyDesignSystem` module API in `ios/packages/LodyAppearance`; Android keeps its
 appearance sources and resources under `android/app/src/main`.
@@ -85,7 +86,9 @@ this import does not relicense them under the repository’s root license.
 
 Please also see the [iOS acknowledgements](ios/README.md#acknowledgements) for
 FlowDown, unixzii, MarkdownView, Litext, Loro, AXe, baguette, and other contributors.
-Inter, JetBrains Mono, and Lucide notices accompany the native appearance assets.
+Android’s Inter and JetBrains Mono notices accompany its bundled fonts. Lucide
+notices accompany the native icon assets; iOS retains its imported font notices
+as attribution history.
 
 The imported platform `AGENTS.md` files retain their existing detailed native
 contracts with explicit word-budget exceptions. Splitting those contracts is

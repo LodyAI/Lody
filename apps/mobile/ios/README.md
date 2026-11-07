@@ -59,7 +59,7 @@ What that week actually looked like:
 
 ### Authentic Apple HIG Native Experience
 
-- **Human Interface Guidelines Compliance**: Native adoption of iOS semantic colors, automatic light and dark mode adaptation, and Dynamic Type with SF Pro and SF Mono.
+- **Human Interface Guidelines Compliance**: Native adoption of iOS semantic colors, automatic light and dark mode adaptation, and Dynamic Type with system fonts. `LodyTextStyle` retains semantic sizes, weights, line heights and tracking for UIKit and SwiftUI; code uses the system monospaced face. Native UI needs no bundled font registration.
 - **Native Navigation**: The UIKit shell owns navigation controllers, transparent headers, and automatic scroll edge effects. Home uses an adaptive native split with session and inspector navigation. Transient flows open as native sheets through `LodyShell.presentNative`, and system grouped rows use UIKit `UICollectionViewListCell` via `LodyGroupedList`.
 - **Bilingual by Default**: English and Simplified Chinese product copy lives in `packages/LodyKit/Sources/LodyKit/Resources/Localizable.xcstrings`. Swift uses `String(localized:)`, Xcode compiles the catalog, and CI checks translation coverage and format arguments. Permission prompts live in `apps/ios/App/InfoPlist.xcstrings`.
 

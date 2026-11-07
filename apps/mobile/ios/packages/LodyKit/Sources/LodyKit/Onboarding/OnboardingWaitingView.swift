@@ -19,7 +19,7 @@ final class OnboardingWaitingView: UIStackView {
     prompt.adjustsFontForContentSizeCategory = true
     prompt.textColor = .secondaryLabel
     prompt.numberOfLines = 0
-    code.font = UIFontMetrics(forTextStyle: .title1).scaledFont(for: UIFont(name: "Menlo-Bold", size: 28) ?? .monospacedSystemFont(ofSize: 28, weight: .semibold))
+    code.font = UIFontMetrics(forTextStyle: .title1).scaledFont(for: .monospacedSystemFont(ofSize: 28, weight: .bold))
     code.adjustsFontForContentSizeCategory = true
     code.textColor = .label
     code.backgroundColor = .clear

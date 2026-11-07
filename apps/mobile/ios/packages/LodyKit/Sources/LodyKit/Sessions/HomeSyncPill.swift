@@ -20,7 +20,7 @@ struct HomeSyncPill: View {
         HStack(spacing: LodySpacing.xs + LodySpacing.xxs) {
           mark(state)
           Text(label(state))
-            .font(LodyTextStyle.caption.font)
+            .lodyTextStyle(.caption, fontOnly: true)
             .foregroundStyle(tint(state))
             .lineLimit(1)
         }
