@@ -20,7 +20,6 @@ import {
   type E2eeMachineSharingReplies,
   type E2eeMachineSharingHeadState,
   type E2eeMachineSharingRemovedHead,
-  type E2eeMachineSharingDisplayReader,
   DEFAULT_RUNTIME_ARTIFACTS_BASE_URL,
   resolveRuntimeArtifactsBaseUrl,
   resolvePlatformKind,
@@ -42,15 +41,6 @@ it('keeps machine sharing tombstones and account display outside execution crede
     Extract<E2eeMachineSharingReplies['readRequest'], { status: 'removed' }>
   >().toEqualTypeOf<E2eeMachineSharingRemovedHead>();
   expectTypeOf<Extract<keyof E2eeMachineSharingRemovedHead, 'frameHex'>>().toEqualTypeOf<never>();
-  expectTypeOf<
-    Extract<keyof E2eeMachineSharingRequests['latestForMember'], 'credential' | 'cliToken'>
-  >().toEqualTypeOf<never>();
-  expectTypeOf<Parameters<E2eeMachineSharingDisplayReader['latestForMember']>[0]>().toEqualTypeOf<
-    E2eeMachineSharingRequests['latestForMember']
-  >();
-  expectTypeOf<
-    CloudApi['e2eeMachineSharing']['latestForMember']['_type']
-  >().toEqualTypeOf<'query'>();
   expectTypeOf<CloudApi['e2eeMachineSharing']['readHead']['_type']>().toEqualTypeOf<'action'>();
 });
 

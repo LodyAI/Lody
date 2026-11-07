@@ -407,10 +407,6 @@ export type SeatInvitePreview =
 
 export type CloudApi = {
   e2eeMachineSharing: {
-    latestForMember: Query<
-      E2eeMachineSharingRequests['latestForMember'],
-      E2eeMachineSharingReplies['latestForMember']
-    >;
     readHead: Action<E2eeMachineSharingRequests['readHead'], E2eeMachineSharingReplies['readHead']>;
     readVersion: Action<
       E2eeMachineSharingRequests['readVersion'],
