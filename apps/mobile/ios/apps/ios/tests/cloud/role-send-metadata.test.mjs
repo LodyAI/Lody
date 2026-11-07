@@ -24,7 +24,7 @@ const bundle = await build({
           contents: `
       export const sendTurn = args => args;
       export const checkTurnQuota = () => {}, controlTurn = () => {}, editSession = () => {},
-        sessionDoc = () => {}, releaseDeletedSessions = () => {}, respondPermission = () => {};
+        sessionDoc = () => {}, readyHistory = () => [], releaseDeletedSessions = () => {}, respondPermission = () => {};
     `,
         }));
       },

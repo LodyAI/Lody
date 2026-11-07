@@ -42,6 +42,15 @@ final class SessionPreviewController: SessionController {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
 
+  /// Copy submenu reads, scripted so the menu runs offline.
+  static let copyFixture = SessionCopyService(
+    workspacePath: { _, _ in "/Users/preview/.lody/repos/github---innei---lody-ios/worktrees/native-session" },
+    markdown: { _ in
+      .ready(.init(markdown: "# Native session preview\n\nLive reply with a needle\n", estimatedTokens: 12, overBudget: false,
+                   toolCallsCollapsed: false, thinkingTruncated: false, terminalTrimmed: false, toolResultsTruncated: 0))
+    }
+  )
+
   override var persistsDraft: Bool { false }
 
   override var resourceItems: [[String: Any]] {
@@ -78,7 +87,14 @@ final class SessionPreviewController: SessionController {
   override func viewDidLoad() {
     probe.isAccessibilityElement = true
     probe.accessibilityIdentifier = "session-preview-probe"
+    copyService = Self.copyFixture
     super.viewDidLoad()
+    // Two members make Change owner available, as in a team workspace.
+    chat.members = [
+      "preview-user": WorkspaceMember(id: "preview-user", name: "Preview User", image: nil),
+      "preview-teammate": WorkspaceMember(id: "preview-teammate", name: "Ada Lovelace", image: nil),
+    ]
+    render()
     if scenario.hasPrefix("bar-") {
       let action = chat.onPreview
       chat.onPreview = { [weak self] body in
@@ -155,8 +171,8 @@ private final class SessionPreviewFixture {
       projects: [SessionProject(id: "preview-lody", name: "Lody", rootPath: "/Users/preview/lody")],
       sessions: [
         SessionItem(
-          id: Self.sessionId, title: "Native session preview", status: "idle", projectId: "preview-lody",
-          lastMessageAt: now - 60_000, branchName: "feature/native-session", machineId: "preview-mac",
+          id: Self.sessionId, title: "Native session preview", status: "idle", userId: "preview-user", projectId: "preview-lody",
+          lastMessageAt: now - 60_000, branchName: "feature/native-session", baseBranch: "main", machineId: "preview-mac",
           pullRequests: [.init(repository: "Innei/lody-ios", number: 31, status: "open", ci: "f")]
         ),
       ],
@@ -211,6 +227,9 @@ private final class SessionPreviewFixture {
     case .archive(let archived):
       catalog.sessions[index].archived = archived
       record(archived ? "archive" : "unarchive")
+    case .owner(let userId):
+      catalog.sessions[index].userId = userId
+      record("owner:\(userId)")
     case .rename(let title):
       catalog.sessions[index].title = title
       record("rename")

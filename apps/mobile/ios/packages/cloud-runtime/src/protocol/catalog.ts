@@ -191,6 +191,8 @@ export function projectRows(
       lastRunningSeen: stamp(value.lastRunningSeen),
       awaitingUserSince: stamp(value.awaitingUserSince),
       branchName: text(value.branchName) || undefined,
+      baseBranch:
+        text(value.baseBranch).trim() || text(project.branch).trim() || undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
       pullRequests: pullRequestReferences(

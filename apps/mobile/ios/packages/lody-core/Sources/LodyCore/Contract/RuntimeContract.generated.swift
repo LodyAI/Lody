@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","memorySettings","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","publishedShares","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","sendTurn","sessionPreview","sessionSharing","setActive","setTabClosed","start","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","memorySettings","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","publishedShares","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
 
   public enum AgentRoleItemVisibility: String, Codable, Sendable, Equatable, CaseIterable {
     case `private` = "private"
@@ -811,6 +811,108 @@ extension RuntimeContract {
         try value.encode(to: encoder)
       case .notApplied(let value):
         try c.encode("not_applied", forKey: Key("state"))
+        try value.encode(to: encoder)
+      }
+    }
+  }
+
+  public struct ConversationMarkdownParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var participants: [String: String]
+    public var incompleteNotice: String
+    public init(workspaceId: String, sessionId: String, participants: [String: String], incompleteNotice: String) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.participants = participants
+      self.incompleteNotice = incompleteNotice
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.participants = try c.decode([String: String].self, forKey: Key("participants"))
+      self.incompleteNotice = try c.decode(String.self, forKey: Key("incompleteNotice"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.participants, forKey: Key("participants"))
+      try c.encode(self.incompleteNotice, forKey: Key("incompleteNotice"))
+    }
+  }
+
+  public struct ConversationMarkdownResultEmpty: Codable, Sendable, Equatable {
+    public init() {
+    }
+    public init(from decoder: any Decoder) throws {
+      _ = try decoder.container(keyedBy: Key.self)
+    }
+    public func encode(to encoder: any Encoder) throws {
+      _ = encoder.container(keyedBy: Key.self)
+    }
+  }
+
+  public struct ConversationMarkdownResultReady: Codable, Sendable, Equatable {
+    public var markdown: String
+    public var estimatedTokens: Double
+    public var overBudget: Bool
+    public var toolCallsCollapsed: Bool
+    public var thinkingTruncated: Bool
+    public var terminalTrimmed: Bool
+    public var toolResultsTruncated: Double
+    public init(markdown: String, estimatedTokens: Double, overBudget: Bool, toolCallsCollapsed: Bool, thinkingTruncated: Bool, terminalTrimmed: Bool, toolResultsTruncated: Double) {
+      self.markdown = markdown
+      self.estimatedTokens = estimatedTokens
+      self.overBudget = overBudget
+      self.toolCallsCollapsed = toolCallsCollapsed
+      self.thinkingTruncated = thinkingTruncated
+      self.terminalTrimmed = terminalTrimmed
+      self.toolResultsTruncated = toolResultsTruncated
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.markdown = try c.decode(String.self, forKey: Key("markdown"))
+      self.estimatedTokens = try c.decode(Double.self, forKey: Key("estimatedTokens"))
+      self.overBudget = try c.decode(Bool.self, forKey: Key("overBudget"))
+      self.toolCallsCollapsed = try c.decode(Bool.self, forKey: Key("toolCallsCollapsed"))
+      self.thinkingTruncated = try c.decode(Bool.self, forKey: Key("thinkingTruncated"))
+      self.terminalTrimmed = try c.decode(Bool.self, forKey: Key("terminalTrimmed"))
+      self.toolResultsTruncated = try c.decode(Double.self, forKey: Key("toolResultsTruncated"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.markdown, forKey: Key("markdown"))
+      try c.encode(self.estimatedTokens, forKey: Key("estimatedTokens"))
+      try c.encode(self.overBudget, forKey: Key("overBudget"))
+      try c.encode(self.toolCallsCollapsed, forKey: Key("toolCallsCollapsed"))
+      try c.encode(self.thinkingTruncated, forKey: Key("thinkingTruncated"))
+      try c.encode(self.terminalTrimmed, forKey: Key("terminalTrimmed"))
+      try c.encode(self.toolResultsTruncated, forKey: Key("toolResultsTruncated"))
+    }
+  }
+
+  public enum ConversationMarkdownResult: Codable, Sendable, Equatable {
+    case empty(ConversationMarkdownResultEmpty)
+    case ready(ConversationMarkdownResultReady)
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      let tag = try c.decode(String.self, forKey: Key("state"))
+      switch tag {
+      case "empty": self = .empty(try ConversationMarkdownResultEmpty(from: decoder))
+      case "ready": self = .ready(try ConversationMarkdownResultReady(from: decoder))
+      default: throw DecodingError.dataCorruptedError(forKey: Key("state"), in: c, debugDescription: "Unknown state \(tag)")
+      }
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      switch self {
+      case .empty(let value):
+        try c.encode("empty", forKey: Key("state"))
+        try value.encode(to: encoder)
+      case .ready(let value):
+        try c.encode("ready", forKey: Key("state"))
         try value.encode(to: encoder)
       }
     }
@@ -5571,6 +5673,40 @@ extension RuntimeContract {
     }
   }
 
+  public struct SessionWorkspacePathParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public init(workspaceId: String, sessionId: String) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+    }
+  }
+
+  public struct SessionWorkspacePathResult: Codable, Sendable, Equatable {
+    public var path: String?
+    public init(path: String?) {
+      self.path = path
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.path = try c.decode(String?.self, forKey: Key("path"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.path, forKey: Key("path"))
+    }
+  }
+
   public struct SetActiveParams: Codable, Sendable, Equatable {
     public var active: Bool
     public init(active: Bool) {
@@ -5583,6 +5719,29 @@ extension RuntimeContract {
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.active, forKey: Key("active"))
+    }
+  }
+
+  public struct SetSessionOwnerParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var userId: String
+    public init(workspaceId: String, sessionId: String, userId: String) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.userId = userId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.userId = try c.decode(String.self, forKey: Key("userId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.userId, forKey: Key("userId"))
     }
   }
 
@@ -6971,6 +7130,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum ConversationMarkdown: RuntimeCall {
+      public typealias Params = RuntimeContract.ConversationMarkdownParams
+      public typealias Result = RuntimeContract.ConversationMarkdownResult
+      public static let method = "conversationMarkdown"
+      public static let timeout: Double = 15
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .conversationMarkdown(let result) = value { return result }
+        return nil
+      }
+    }
     public enum CreateSession: RuntimeCall {
       public typealias Params = RuntimeContract.CreateSessionParams
       public typealias Result = RuntimeContract.CreateSessionResult
@@ -7291,6 +7460,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum SessionWorkspacePath: RuntimeCall {
+      public typealias Params = RuntimeContract.SessionWorkspacePathParams
+      public typealias Result = RuntimeContract.SessionWorkspacePathResult
+      public static let method = "sessionWorkspacePath"
+      public static let timeout: Double = 15
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .sessionWorkspacePath(let result) = value { return result }
+        return nil
+      }
+    }
     public enum SetActive: RuntimeCall {
       public typealias Params = RuntimeContract.SetActiveParams
       public typealias Result = RuntimeContract.Empty
@@ -7298,6 +7477,16 @@ extension RuntimeContract {
       public static let timeout: Double = 10
       public static func result(_ value: RuntimeContract.CallResult) -> Result? {
         if case .setActive(let result) = value { return result }
+        return nil
+      }
+    }
+    public enum SetSessionOwner: RuntimeCall {
+      public typealias Params = RuntimeContract.SetSessionOwnerParams
+      public typealias Result = RuntimeContract.Empty
+      public static let method = "setSessionOwner"
+      public static let timeout: Double = 45
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .setSessionOwner(let result) = value { return result }
         return nil
       }
     }
@@ -7376,6 +7565,7 @@ extension RuntimeContract {
     case checkTurnQuota(RuntimeContract.CheckTurnQuotaResult)
     case closeSession(RuntimeContract.Empty)
     case controlTurn(RuntimeContract.ControlTurnResult)
+    case conversationMarkdown(RuntimeContract.ConversationMarkdownResult)
     case createSession(RuntimeContract.CreateSessionResult)
     case createTab(RuntimeContract.CreateSessionResult)
     case creationOptions(RuntimeContract.CreationOptions)
@@ -7408,7 +7598,9 @@ extension RuntimeContract {
     case sendTurn(RuntimeContract.SendTurnResult)
     case sessionPreview(RuntimeContract.SessionPreviewResult)
     case sessionSharing(RuntimeContract.SessionSharingResult)
+    case sessionWorkspacePath(RuntimeContract.SessionWorkspacePathResult)
     case setActive(RuntimeContract.Empty)
+    case setSessionOwner(RuntimeContract.Empty)
     case setTabClosed(RuntimeContract.Empty)
     case start(RuntimeContract.Empty)
     case turnDiff(RuntimeContract.DiffResult)
@@ -7479,6 +7671,7 @@ extension RuntimeContract {
         case "checkTurnQuota": message = .result(id: id, .checkTurnQuota(try c.decode(RuntimeContract.CheckTurnQuotaResult.self, forKey: Key("payload"))))
         case "closeSession": message = .result(id: id, .closeSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "controlTurn": message = .result(id: id, .controlTurn(try c.decode(RuntimeContract.ControlTurnResult.self, forKey: Key("payload"))))
+        case "conversationMarkdown": message = .result(id: id, .conversationMarkdown(try c.decode(RuntimeContract.ConversationMarkdownResult.self, forKey: Key("payload"))))
         case "createSession": message = .result(id: id, .createSession(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "createTab": message = .result(id: id, .createTab(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "creationOptions": message = .result(id: id, .creationOptions(try c.decode(RuntimeContract.CreationOptions.self, forKey: Key("payload"))))
@@ -7511,7 +7704,9 @@ extension RuntimeContract {
         case "sendTurn": message = .result(id: id, .sendTurn(try c.decode(RuntimeContract.SendTurnResult.self, forKey: Key("payload"))))
         case "sessionPreview": message = .result(id: id, .sessionPreview(try c.decode(RuntimeContract.SessionPreviewResult.self, forKey: Key("payload"))))
         case "sessionSharing": message = .result(id: id, .sessionSharing(try c.decode(RuntimeContract.SessionSharingResult.self, forKey: Key("payload"))))
+        case "sessionWorkspacePath": message = .result(id: id, .sessionWorkspacePath(try c.decode(RuntimeContract.SessionWorkspacePathResult.self, forKey: Key("payload"))))
         case "setActive": message = .result(id: id, .setActive(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
+        case "setSessionOwner": message = .result(id: id, .setSessionOwner(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "setTabClosed": message = .result(id: id, .setTabClosed(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "start": message = .result(id: id, .start(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "turnDiff": message = .result(id: id, .turnDiff(try c.decode(RuntimeContract.DiffResult.self, forKey: Key("payload"))))
