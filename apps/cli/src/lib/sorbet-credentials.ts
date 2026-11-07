@@ -11,12 +11,12 @@ import { acquireSorbetCredentialMutation } from '@/agent/sorbet-credential-mutat
 
 /** Resolve identity on the local machine; persisted launch fields never reach this operation. */
 export function createSorbetCredentialsHandler(
-  document: Pick<LoroDocumentManager, 'getAgentConfigById'>,
+  document: Pick<LoroDocumentManager, 'getAgentConfigForMachineLaunch'>,
   machineId: MachineId,
   logger: Logger
 ) {
   async function validate(configId: AgentConfigId) {
-    const config = await document.getAgentConfigById(configId, machineId);
+    const config = await document.getAgentConfigForMachineLaunch(configId, machineId);
     if (
       !config ||
       config.id !== configId ||
