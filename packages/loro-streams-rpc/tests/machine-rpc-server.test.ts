@@ -3287,86 +3287,92 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('appends structured ACP authorization before the final auth response', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    const authenticateMachineAcp = vi.fn(
-      async ({ onProgress }): Promise<MachineAcpAuthenticateResponse> => {
-        onProgress?.({
-          type: 'machine/acp-authentication-progress',
-          machineId,
-          requestId: 'auth-1',
-          agentType: 'kimi',
-          status: 'authorization',
-          authorizationUrl: 'https://www.kimi.com/code/authorize_device?user_code=GI5T-ACD0',
-          userCode: 'GI5T-ACD0',
-          expiresInSeconds: 1800,
-        });
-        return {
-          type: 'machine/acp-authenticate_response',
-          machineId,
-          requestId: 'auth-1',
-          agentType: 'kimi',
-          success: true,
-          disposition: 'authenticated',
-        };
-      }
-    );
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      authenticateMachineAcp,
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: 'req-auth',
-          method: 'machine/acp-authenticate',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1',
-          replyTo: 'workspace-1:rpc:res:machine-1',
-          sentAt: Date.now(),
-          expiresAt: Date.now() + 5000,
-          params: {
+  it.each(['api-key', 'oauth', undefined])(
+    'forwards selected ACP method %s and appends authorization before the final response',
+    async (methodId) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      const authenticateMachineAcp = vi.fn(
+        async ({ onProgress, methodId: selectedMethodId }): Promise<MachineAcpAuthenticateResponse> => {
+          expect(selectedMethodId).toBe(methodId);
+          onProgress?.({
+            type: 'machine/acp-authentication-progress',
+            machineId,
             requestId: 'auth-1',
-            action: 'start',
-            configId,
+            agentType: 'kimi',
+            status: 'authorization',
+            authorizationUrl: 'https://www.kimi.com/code/authorize_device?user_code=GI5T-ACD0',
+            userCode: 'GI5T-ACD0',
+            expiresInSeconds: 1800,
+          });
+          return {
+            type: 'machine/acp-authenticate_response',
+            machineId,
+            requestId: 'auth-1',
+            agentType: 'kimi',
+            success: true,
+            disposition: 'authenticated',
+          };
+        }
+      );
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        authenticateMachineAcp,
+      });
+
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'req-auth',
+            method: 'machine/acp-authenticate',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: {
+              requestId: 'auth-1',
+              action: 'start',
+              configId,
+              ...(methodId === undefined ? {} : { methodId }),
+            },
           },
-        },
-      ],
-      nextOffset: '5',
-      cursor: 'cursor-5',
-      upToDate: true,
-    });
+        ],
+        nextOffset: '5',
+        cursor: 'cursor-5',
+        upToDate: true,
+      });
 
-    await server.start();
+      await server.start();
 
-    await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(2);
-    });
+      await vi.waitFor(() => {
+        expect(fake.appended).toHaveLength(2);
+      });
 
-    expect(authenticateMachineAcp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: 'auth-1',
-        action: 'start',
-        configId,
-        onProgress: expect.any(Function),
-      })
-    );
-    expect(
-      fake.appended.map((entry) => (entry.value as { result?: { type?: string } }).result?.type)
-    ).toEqual(['machine/acp-authentication-progress', 'machine/acp-authenticate_response']);
+      expect(authenticateMachineAcp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 'auth-1',
+          action: 'start',
+          configId,
+          methodId,
+          onProgress: expect.any(Function),
+        })
+      );
+      expect(
+        fake.appended.map((entry) => (entry.value as { result?: { type?: string } }).result?.type)
+      ).toEqual(['machine/acp-authentication-progress', 'machine/acp-authenticate_response']);
 
-    server.stop();
-  });
+      server.stop();
+    }
+  );
 
   it('handles session preview create RPC requests', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
