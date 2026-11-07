@@ -111,7 +111,7 @@ async function workspaceFixture(
         getAgentConfigForMachineLaunch: async () => quota?.config,
       },
       hasAutomationSessionWork: () => false,
-      resolveSessionWorkdir: async () => root,
+      resolveAutomationWorkdir: async () => root,
       getAutomationSessionAuthority: () => authority,
     } as unknown as Lody,
     workspace: { id: 'workspace', name: 'synthetic', slug: 'synthetic' } as WorkspaceSummary,
@@ -129,6 +129,32 @@ async function workspaceFixture(
   return Object.assign(handle, { testRoot: root, testDocument: doc });
 }
 describe('Automation control authority', () => {
+  it('executes a registered condition in the Session workspace', async () => {
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: true,
+    });
+    const wait = host.ledger.registerWait(
+      {
+        program: `async ({ctx}) => {
+        const result = await ctx.exec({command: ${JSON.stringify(process.execPath)}, args: ['-e', 'process.stdout.write(process.cwd()); process.exitCode = 7']});
+        return result.exitCode === 7 ? {resumeText: 'Command completed', payload: result.stdout} : false;
+      }`,
+        intervalMs: 30000,
+      },
+      'session-a',
+      'user',
+      Date.now()
+    );
+    await host.wake();
+    await vi.waitFor(() => expect(host.ledger.wait(wait.id)?.state).toBe('matched'));
+    expect(host.ledger.wait(wait.id)?.result).toEqual({
+      resumeText: 'Command completed',
+      payload: await import('node:fs/promises').then((fs) => fs.realpath(host.testRoot)),
+    });
+  });
   it('queries capacity at the reset even when the exhausted snapshot is still fresh', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
