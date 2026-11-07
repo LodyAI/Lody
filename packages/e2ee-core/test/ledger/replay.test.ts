@@ -25,6 +25,7 @@ import { encodeCbor, type CborValue } from '../../src/internal/foundation/cbor';
 import { keyId } from '../../src/internal/foundation/identifiers';
 import * as Ledger from '@lody/e2ee-core/protocol';
 import ledgerV1 from '../ledger-v1-vector.json';
+import ledgerRecovery from '../ledger-recovery-vector.json';
 
 const ok = <A, E>(r: Result.Result<A, E>): A => Result.getOrThrow(r);
 const filled = (n: number, size = 32) => new Uint8Array(size).fill(n);
@@ -2371,6 +2372,65 @@ describe('frozen ledger v1 compatibility', () => {
     const extended = Ledger.extendLedger(before, records.slice(-1), checkpoint(records));
     expect(Result.isFailure(extended) && extended.failure).toMatchObject(ledgerV1.expected.failure);
     expect(before.length).toBe(ledgerV1.expected.verifiedLength);
+  });
+
+  describe('independently encoded recovery device', () => {
+    const recoveryRecords = ledgerRecovery.records.map((record) => fromHex(record.hex));
+    const recoveryAnchor = ok(Bytes.genesisHash(fromHex(ledgerRecovery.anchor)));
+    const verifyWith = (prefixLength: number, extra: Uint8Array[] = []) => {
+      const all = [...recoveryRecords.slice(0, prefixLength), ...extra];
+      return Ledger.verifyLedger({
+        anchor: recoveryAnchor,
+        records: all,
+        checkpoint: checkpoint(all),
+      });
+    };
+
+    it('keeps the tag 4 kind 2 record, its possession proof, hashes and replay state', () => {
+      // Created outside this codebase; a failure means existing recovery records stop verifying.
+      expect(recoveryRecords.map((record) => hex(Ledger.hashRecordBytes(record)))).toEqual(
+        ledgerRecovery.records.map((record) => record.hash)
+      );
+      const decoded = ok(Ledger.decodeRecord(recoveryRecords[2]!)).body;
+      if (decoded.type !== 'ordinary' || decoded.operation.type !== 'admitDevice')
+        throw new Error('expected tag 4');
+      const operation = decoded.operation;
+      expect(operation.kind).toBe('recovery');
+      expect(keyId(operation.possessionSignature.toBytes())).toBe(
+        ledgerRecovery.recovery.possessionSignature
+      );
+      const view = ok(verifyWith(ledgerRecovery.expected.verifiedLength));
+      expect(
+        keyId(
+          ok(
+            Ledger.possessionSigningBytes({
+              genesis: recoveryAnchor,
+              targetMembershipId: ok(
+                Bytes.membershipId(
+                  fromHex(Object.values(ledgerRecovery.expected.devices)[0]!.membershipId)
+                )
+              ),
+              signingPublicKey: operation.signingPublicKey,
+              encryptionPublicKey: operation.encryptionPublicKey,
+              kind: 'recovery',
+            })
+          )
+        )
+      ).toBe(ledgerRecovery.recovery.possessionSigningBytes);
+      expect(
+        Object.fromEntries(
+          comparable(view).devices.map(([key, membershipId, kind]) => [key, { membershipId, kind }])
+        )
+      ).toEqual(ledgerRecovery.expected.devices);
+    });
+
+    it.each(ledgerRecovery.negative)('rejects a recovery record whose $name', (vector) => {
+      const result = verifyWith(vector.prefixLength, [fromHex(vector.hex)]);
+      expect(Result.isFailure(result) && result.failure).toMatchObject({
+        code: vector.code,
+        position: vector.prefixLength,
+      });
+    });
   });
 });
 

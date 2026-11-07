@@ -61,6 +61,9 @@ export function RecoveryVaultSection() {
   const [plan, setPlan] = useState<Plan>();
   const [dialog, setDialog] = useState<'begin' | 'continue'>();
   const [passkey, setPasskey] = useState(false);
+  const [events, setEvents] = useState<readonly { id: string; kind: string; occurredAt: number }[]>(
+    []
+  );
   const [naming, setNaming] = useState<string>();
   const [passkeys, setPasskeys] = useState<readonly { entryId: string; label: string }[]>();
   const [pending, setPending] = useState<readonly { entryId: string; label: string }[]>([]);
@@ -71,6 +74,12 @@ export function RecoveryVaultSection() {
     void e2ee.recoveryReplacementPlan().then(
       (next) => {
         if (live) setPlan(next);
+      },
+      () => undefined
+    );
+    void e2ee.recentAccountSecurityEvents().then(
+      (next) => {
+        if (live) setEvents(next);
       },
       () => undefined
     );
@@ -354,6 +363,30 @@ export function RecoveryVaultSection() {
               </Button>
             </div>
           </>
+        )}
+        {events.length > 0 && (
+          <div {...stylex.props(styles.body)}>
+            <p>{t('e2ee.recovery.securityEvents')}</p>
+            <ul>
+              {events.slice(0, 5).map((event) => (
+                <li key={event.id}>
+                  {t(
+                    event.kind === 'personal_device_recovered'
+                      ? 'e2ee.recovery.eventRecovered'
+                      : event.kind === 'vault_replacement_finished'
+                        ? 'e2ee.recovery.eventReplaced'
+                        : 'e2ee.recovery.eventReplacing',
+                    { time: new Date(event.occurredAt).toLocaleString() }
+                  )}
+                </li>
+              ))}
+            </ul>
+            {plan?.replaceable && !plan.replacing && (
+              <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
+                {t('e2ee.recovery.eventNotMe')}
+              </Button>
+            )}
+          </div>
         )}
         {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
         {result?.kind === 'created' && (
