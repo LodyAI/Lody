@@ -2065,6 +2065,74 @@ describe('passkey wrapping of one vault master key', () => {
     return { storage, vault, recoveryFile };
   });
 
+  it('finishes a removal whose wrap deletion failed, and shows it unfinished until then', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const storage = yield* makeLabRecoveryVaultStore({
+              path: join(dir, 'vault.sqlite'),
+              mode: 'create',
+            });
+            let failDelete = false;
+            const store = {
+              ...storage.store,
+              deleteUnreferenced: (...args: Parameters<typeof storage.store.deleteUnreferenced>) =>
+                failDelete
+                  ? Effect.fail(new Error('synthetic lost delete'))
+                  : storage.store.deleteUnreferenced(...args),
+            };
+            const { vault } = yield* createRecoveryVault({
+              locator: 'https://synthetic.invalid/vault',
+              store,
+              local: storage.local,
+            });
+            const entryId = yield* vault.addPasskey(yield* passkey('credential-a', 21));
+            failDelete = true;
+            expect(Result.isFailure(yield* Effect.result(vault.removePasskey(entryId)))).toBe(true);
+            // The index no longer lists it, but its wrap still exists: not removed yet.
+            expect(yield* vault.listPasskeys()).toEqual([]);
+            expect(yield* storage.store.readEntry(vault.vaultId, entryId)).not.toBeNull();
+            expect(yield* vault.pendingPasskeyRemovals()).toEqual([
+              { entryId, label: 'Passkey credential-a' },
+            ]);
+            failDelete = false;
+            yield* vault.removePasskey(entryId);
+            expect(yield* storage.store.readEntry(vault.vaultId, entryId)).toBeNull();
+            expect(yield* vault.pendingPasskeyRemovals()).toEqual([]);
+            expect(Result.isFailure(yield* Effect.result(vault.removePasskey(entryId)))).toBe(true);
+          })
+        )
+      );
+    }));
+  it('never deletes an unlisted entry it has no record of removing', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { storage, vault } = yield* created(dir);
+            const f = yield* fixture();
+            const bundle = yield* generateRecoveryPackage({
+              genesis: hex(f.initial.genesis.toBytes()),
+              membershipId: hex(f.membership.toBytes()),
+              generation: 0,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: f.initial.record,
+                head: hex(f.view().head.toBytes()),
+                length: 1,
+              },
+            });
+            // An unreserved candidate, as another device's setup would leave it mid-way.
+            const candidate = yield* vault.upload(bundle);
+            wipeRecoveryPackage(bundle);
+            const refused = yield* Effect.result(vault.removePasskey(candidate.entryId));
+            expect(refused).toMatchObject({ _tag: 'Failure', failure: { code: 'conflict' } });
+            expect(yield* storage.store.readEntry(vault.vaultId, candidate.entryId)).not.toBeNull();
+          })
+        )
+      );
+    }));
   it('judges each ceremony on what WebAuthn actually reports for it', async () => {
     const first = output(1);
     const rejected = async (work: Effect.Effect<unknown, unknown>) =>

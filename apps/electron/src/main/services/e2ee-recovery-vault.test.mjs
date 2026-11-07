@@ -46,6 +46,7 @@ function syntheticService() {
     index = new Map(),
     calls = [],
     requests = [],
+    failDeletes = { value: 0 },
     replacement = { current: null, replacing: null }
   const key = (vaultId, entryId) => `${vaultId}/${entryId}`
   const fetch = async (_url, init) => {
@@ -95,6 +96,10 @@ function syntheticService() {
           nextCursor: null
         })
       case 'e2eeRecoveryVault:deleteUnreferenced': {
+        if (failDeletes.value > 0) {
+          failDeletes.value -= 1
+          throw new Error('synthetic lost delete')
+        }
         const current = index.get(args.vaultId)
         if (
           current?.revision !== args.expectedIndex.revision ||
@@ -123,7 +128,7 @@ function syntheticService() {
         throw new Error(`unexpected endpoint ${path}`)
     }
   }
-  return { entries, index, calls, requests, fetch, replacement }
+  return { entries, index, calls, requests, fetch, replacement, failDeletes }
 }
 
 async function withClient(service, work) {
@@ -961,17 +966,18 @@ void test('removing a passkey lists it no more and stops it unlocking the vault'
       Effect.runPromise(listRecoveryPasskeys({ ...io(store), unlock: { file } }))
     )
     assert.deepEqual(
-      listed.map((row) => row.label),
+      listed.passkeys.map((row) => row.label),
       ['Work MacBook', 'iPhone']
     )
-    const removed = listed.find((row) => row.label === 'Work MacBook')
+    const removed = listed.passkeys.find((row) => row.label === 'Work MacBook')
     const left = await withClient(service, (store) =>
       Effect.runPromise(
         removeRecoveryPasskey({ ...io(store), unlock: { file }, entryId: removed.entryId })
       )
     )
+    assert.equal(left.removed, true)
     assert.deepEqual(
-      left.map((row) => row.label),
+      left.passkeys.map((row) => row.label),
       ['iPhone']
     )
     const unlockWith = (port) =>
@@ -1019,6 +1025,45 @@ void test('removing an unknown passkey changes nothing', async () => {
     )
     assert.equal(Exit.isFailure(failed), true)
     assert.equal(service.entries.size, before)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('an unfinished removal is reported as such and finishes on retry', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file } = await createdVault(dir, service)
+    const io = (store) => ({ journalPath: join(dir, 'recovery-vault.sqlite'), store })
+    await withClient(service, (store) =>
+      Effect.runPromise(
+        enrollRecoveryPasskey({
+          ...io(store),
+          file,
+          port: syntheticAuthenticator(),
+          label: 'Lost iPhone'
+        })
+      )
+    )
+    const listed = await withClient(service, (store) =>
+      Effect.runPromise(listRecoveryPasskeys({ ...io(store), unlock: { file } }))
+    )
+    const [target] = listed.passkeys
+    service.failDeletes.value = 1
+    const remove = () =>
+      withClient(service, (store) =>
+        Effect.runPromise(
+          removeRecoveryPasskey({ ...io(store), unlock: { file }, entryId: target.entryId })
+        )
+      )
+    const first = await remove()
+    assert.equal(first.removed, false)
+    assert.deepEqual(first.passkeys, [])
+    assert.deepEqual(first.pending, [{ entryId: target.entryId, label: 'Lost iPhone' }])
+    const second = await remove()
+    assert.equal(second.removed, true)
+    assert.deepEqual(second.pending, [])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

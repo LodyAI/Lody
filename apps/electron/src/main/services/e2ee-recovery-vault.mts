@@ -35,7 +35,7 @@ import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/ser
 import { randomUUID } from 'node:crypto'
 import { open, rename, rm, type FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { Effect, Layer, Result, type Scope } from 'effect'
+import { Effect, Exit, Layer, Result, type Scope } from 'effect'
 
 /** Default-off gate for the post-MVP recovery vault. Proposal: specs/e2ee/recovery-vault.md. */
 export const RECOVERY_VAULT_ENV = 'LODY_E2EE_RECOVERY_VAULT'
@@ -442,10 +442,18 @@ export const enrollRecoveryPasskey = (
 export const listRecoveryPasskeys = (io: RecoveryVaultIo & { readonly unlock: RecoveryUnlock }) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const vault = yield* openVault(io.unlock)
-      return (yield* vault.listPasskeys()).map(({ entryId, label }) => ({ entryId, label }))
+      return yield* passkeyState(yield* openVault(io.unlock))
     }).pipe(Effect.provide(vaults(io)))
   )
+
+const passkeyState = (vault: RecoveryVault) =>
+  Effect.gen(function* () {
+    return {
+      passkeys: (yield* vault.listPasskeys()).map(({ entryId, label }) => ({ entryId, label })),
+      /** Removal began here but did not finish: these may still unlock the vault. */
+      pending: yield* vault.pendingPasskeyRemovals()
+    }
+  })
 
 /**
  * Remove a passkey: the index is committed first, then its wrap is deleted. This stops
@@ -457,8 +465,12 @@ export const removeRecoveryPasskey = (
   Effect.scoped(
     Effect.gen(function* () {
       const vault = yield* openVault(io.unlock)
-      yield* vault.removePasskey(io.entryId)
-      return (yield* vault.listPasskeys()).map(({ entryId, label }) => ({ entryId, label }))
+      const removed = yield* Effect.exit(vault.removePasskey(io.entryId))
+      const state = yield* passkeyState(vault)
+      // Unfinished is not removed: report it, so the user does not assume it stopped working.
+      if (Exit.isFailure(removed) && !state.pending.some((row) => row.entryId === io.entryId))
+        return yield* Effect.failCause(removed.cause)
+      return { removed: Exit.isSuccess(removed), ...state }
     }).pipe(Effect.provide(vaults(io)))
   )
 
