@@ -851,9 +851,12 @@ export class E2eeIpc extends IpcService {
     }
     return id
   }
-  private memberScope(workspaceId: string) {
+  /** `identity` lets one operation bind a later owner to the sign-in it started under. */
+  private memberScope(
+    workspaceId: string,
+    identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+  ) {
     const auth = getIpcServiceDeps().authService
-    const identity = auth.getCachedSessionIdentity()
     let original: Owner | undefined
     return <A>(work: (owner: Owner) => Effect.Effect<A, unknown>, create = false) =>
       withDesktopE2eeAccount(
@@ -1010,7 +1013,8 @@ export class E2eeIpc extends IpcService {
   async prepareMemberJoin(source: E2eeMemberOffer) {
     sender()
     const offer = MemberOfferSchema.parse(source)
-    const scope = this.memberScope(offer.workspaceId)
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const scope = this.memberScope(offer.workspaceId, identity)
     const cloud = await desktopE2eeCloudClient()
     const pending = await scope(
       (owner) =>
@@ -1035,9 +1039,10 @@ export class E2eeIpc extends IpcService {
           : Effect.fail(new Error('e2ee_account_mismatch'))
       )
     }
-    // Removal cleanup replaces the account owner; the new join binds to the current one.
+    // Removal cleanup replaces the account owner. The new join binds to the current owner,
+    // still under the sign-in generation this operation started with.
     const joining = (await this.endRemovedMemberJoin(offer.workspaceId, scope, cloud))
-      ? this.memberScope(offer.workspaceId)
+      ? this.memberScope(offer.workspaceId, identity)
       : scope
     const original = await joining((owner) =>
       owner.accountId === cloud.accountId
