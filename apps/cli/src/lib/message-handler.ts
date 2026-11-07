@@ -3708,7 +3708,12 @@ export class MessageHandler {
           const message: MachineAcpAuthenticateRequestValidated = (() => {
             switch (args.action) {
               case 'start':
-                return { ...common, action: args.action, configId: args.configId };
+                return {
+                  ...common,
+                  action: args.action,
+                  configId: args.configId,
+                  methodId: args.methodId,
+                };
               case 'cancel':
                 return {
                   ...common,
@@ -7664,7 +7669,10 @@ export class MessageHandler {
         )
           throw new Error('Sorbet credentials scope mismatch');
         const configId = request.params.configId as AgentConfigId;
-        const config = await this.workspaceDocument.getAgentConfigById(configId, this.machineId);
+        const config = await this.workspaceDocument.getAgentConfigForMachineLaunch(
+          configId,
+          this.machineId
+        );
         if (
           !config ||
           config.machineId !== this.machineId ||
