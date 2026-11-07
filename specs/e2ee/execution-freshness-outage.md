@@ -30,8 +30,7 @@ local verified ledger for a longer window:
 - **A refusal is not an outage.** A server reply with an explicit permission refusal
   ends the window at once, as it does today.
 - **People can see it.** While a machine relies on a window, the user sees a notice
-  that access could not be confirmed. An expired sign-in also asks them to sign in
-  again.
+  that access could not be confirmed.
 - **Known revocation still wins.** Every request is checked against the local
   verified ledger. A revocation the machine has ingested stops the affected work
   immediately, whatever remains of the window.
@@ -63,15 +62,13 @@ The rule is whether the reply carries an explicit refusal, not its HTTP status.
 | Result of the latest read | Effect |
 | --- | --- |
 | No reply, timeout, 5xx, 429, a server error with no business error code | Outage: the window applies |
-| Expired sign-in | Outage: the window applies, and the user is asked to sign in again |
 | Failure partway through a paged read | Outage: the read failed |
-| Explicit refusal: removed, revoked, unauthorized | The window ends at once |
+| Explicit refusal: removed, revoked, unauthorized, including an expired sign-in | The window ends at once |
 | A reply the client cannot understand, a reply that fails verification or moves the ledger backwards | Treated as a refusal: nothing is relaxed |
 
 ## Existing Specs
 
-These passages still state the 15-minute behavior. The implementation updates them
-in the same change, under this approval:
+These passages keep the 15-minute behavior for ordinary operation and link here:
 
 - [Foundations](../e2ee-foundations.md) and its Chinese version:
   - the "strictly less than 15-minute memory cache" passage;
@@ -87,16 +84,18 @@ in the same change, under this approval:
 ## Related limits
 
 `FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS` in `apps/cli/src/lib/lody-fleet.ts` keeps an
-encrypted remote bridge attached for at most 15 minutes without a confirmed ledger
-read. The implementation changes that limit with the windows above. Otherwise
-execution would be allowed while the bridge it needs has already detached.
+encrypted remote bridge attached for at most 24 hours without a confirmed ledger read,
+the longest window above. It changes with the windows: otherwise a request could be
+allowed while the bridge it needs has already detached.
 
 ## Evidence
 
-- Current behavior: `apps/cli/src/lib/e2ee/execution-authorization.ts`, where
-  `refresh` maps every read failure to a denied `unavailable`.
-- "Rollback or uncertain suspend/resume ends it" needs new detection, comparing the
-  change in wall clock with the change in monotonic clock. Today a long suspend is
-  caught because it always outlasts the 15-minute grant. A longer window removes that
-  property.
-- Executed validation: none. This is approved intent; the implementation is pending.
+- Implementation: `apps/cli/src/lib/e2ee/execution-authorization.ts`, with the outage rule
+  in `ledgerReadFailure` (`apps/cli/src/lib/cloud-e2ee-errors.ts`).
+- "Rollback or uncertain suspend/resume ends it" compares the change in wall clock with
+  the change in monotonic clock, because a long suspend no longer always outlasts the grant.
+- The notice is a runtime issue shown by `lody daemon status`. Other client surfaces do not
+  show it yet.
+- Executed validation: `apps/cli/tests/e2ee-runtime.test.ts` ("backend outage windows")
+  and `apps/cli/tests/lody-fleet-local-catalog.test.ts`, on synthetic ledgers with injected
+  clocks. No real backend outage was run.

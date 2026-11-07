@@ -13,7 +13,12 @@ import type {
   SessionFileSendLocalResponse
 } from '@lody/shared/message'
 import type { SessionId, WorkspaceId } from '@lody/shared/ids'
-import { SessionIdSchema, LocalProjectHistoryProviderSchema } from '@lody/shared/message-schemas'
+import {
+  SessionIdSchema,
+  LocalProjectHistoryProviderSchema,
+  SessionAttachmentRegisterRequestSchema,
+  SessionAttachmentResolveRequestSchema
+} from '@lody/shared/message-schemas'
 import type { LocalProjectHistoryProvider, LocalProjectId } from '@lody/shared/project'
 import { formatUnknownError } from '../../utils'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -66,6 +71,95 @@ export class LocalProjectsIpc extends IpcService {
   @IpcMethod()
   async control(request: LocalProjectControlRequest) {
     return await sendLocalProjectControl(request)
+  }
+
+  @IpcMethod()
+  async resolveLocalAttachment(payload: {
+    workspaceId: string
+    sessionId: string
+    attachment: import('@lody/shared').SessionLocalAttachment
+  }) {
+    const request = SessionAttachmentResolveRequestSchema.parse({
+      ...payload,
+      type: 'session/attachment-resolve',
+      machineId: payload.attachment.machineId
+    })
+    const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
+      ...request,
+      machineId: request.machineId as import('@lody/shared/ids').MachineId,
+      workspaceId: request.workspaceId as WorkspaceId
+    })
+    if (!result.ok) throw new Error(result.error)
+    const response = result.responses.find(
+      (item) => item.type === 'session/attachment-resolve_response'
+    )
+    if (!response?.success || !response.path)
+      throw new Error(response?.error ?? 'local_attachment_unavailable')
+    return response.path
+  }
+
+  @IpcMethod()
+  async prepareLocalAttachment(payload: {
+    workspaceId: string
+    sessionId: string
+    machineId: string
+    turnId: string
+    referenceId: string
+    kind: 'file' | 'image'
+    fileName: string
+    mimeType: string
+    source: { path: string } | { bytes: ArrayBuffer }
+  }) {
+    let staging: string | undefined
+    try {
+      if (!payload || !payload.source) throw new Error('invalid_request')
+      let sourcePath: string
+      const managed = 'bytes' in payload.source
+      if (managed) {
+        const bytes = (payload.source as { bytes: ArrayBuffer }).bytes
+        if (
+          !(bytes instanceof ArrayBuffer) ||
+          bytes.byteLength > SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES
+        )
+          throw new Error('invalid_attachment_bytes')
+        staging = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-attachment-'))
+        sourcePath = path.join(staging, 'source')
+        await fs.writeFile(sourcePath, Buffer.from(bytes), { mode: 0o600 })
+      } else {
+        sourcePath = (payload.source as { path: string }).path
+        if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath))
+          throw new Error('invalid_attachment_path')
+      }
+      const request = SessionAttachmentRegisterRequestSchema.parse({
+        type: 'session/attachment-register',
+        workspaceId: payload.workspaceId,
+        sessionId: payload.sessionId,
+        machineId: payload.machineId,
+        turnId: payload.turnId,
+        referenceId: payload.referenceId,
+        kind: payload.kind,
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        path: sourcePath,
+        managed
+      })
+      const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
+        ...request,
+        machineId: request.machineId as import('@lody/shared/ids').MachineId,
+        workspaceId: request.workspaceId as WorkspaceId
+      })
+      if (!result.ok) return { ok: false as const, error: result.error }
+      const response = result.responses.find(
+        (item) => item.type === 'session/attachment-register_response'
+      )
+      if (!response || !response.success || !response.attachment)
+        return { ok: false as const, error: response?.error ?? 'local_attachment_not_supported' }
+      return { ok: true as const, attachment: response.attachment }
+    } catch (error) {
+      return { ok: false as const, error: formatUnknownError(error) }
+    } finally {
+      if (staging) await fs.rm(staging, { recursive: true, force: true })
+    }
   }
 
   @IpcMethod()

@@ -3,6 +3,8 @@ import {
   ScheduleRepository,
   ScheduledMessageSchema,
   getServerNow,
+  getMachineRoomId,
+  type MachineMeta,
   type ScheduleDraft,
   type ScheduledMessage,
   type SessionId,
@@ -32,6 +34,7 @@ export function scheduledAttachmentProgress(attachments: SessionAttachmentDraft[
 /** Use the same owned attachment transfers as Send, without publishing a user turn. */
 export async function prepareScheduledMessage(args: {
   runtime: WorkspaceRuntime;
+  scheduleId: string;
   sessionId: SessionId;
   machineId: MachineId;
   actorId: string;
@@ -58,13 +61,18 @@ export async function prepareScheduledMessage(args: {
     signal: args.signal,
     token: () => args.token,
     localMachineId: () => args.localMachineId,
+    validateLocalTarget: async () => {
+      const machine = await args.runtime.repo.getDocMeta(getMachineRoomId(args.machineId));
+      if (args.machineId !== args.localMachineId || (machine?.meta as MachineMeta | undefined)?.protocolCapabilities?.localAttachments !== 1)
+        throw new Error('Update the local daemon to send local attachments');
+    },
     record: {
       workspaceId: args.runtime.workspaceId,
       sessionId: args.sessionId,
       targetMachineId: args.machineId,
       attachments,
       entry: {
-        id: 'scheduled-draft',
+        id: 'schedule:' + args.scheduleId,
         role: 'user',
         userId: args.actorId,
         timestamp: new Date(getServerNow()).toISOString(),

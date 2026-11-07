@@ -1,4 +1,9 @@
 {
+  "sessions.localAttachmentDownload": "从原电脑下载",
+  "sessions.localAttachmentDownloading": "正在从原电脑下载…",
+  "sessions.localAttachmentDownloadFailed": "无法下载，请确认原电脑在线且文件仍然存在。",
+  "sessions.localAttachmentOnly": "仅在原电脑上可用",
+  "sessions.localAttachmentUnavailable": "本地附件不可用",
   "settings.tabs.lodyAgent": "Lody Agent",
   "settings.categories.lodyAgent.description": "登录并连接 Lody Agent 使用的模型",
   "lodyAgentSetting.disabled": "在 Beta 中开启 Lody Agent 后即可使用。",

@@ -262,7 +262,8 @@ Withdrawal blocks new starts/later actions without killing already running tasks
 A separate account display query returns only ciphertext/untrusted metadata.
 
 Observed withdrawal invalidates authorization immediately. A strictly less than
-15-minute memory cache bounds time since this machine's authenticated latest read
+15-minute memory cache (see [outage windows](e2ee/execution-freshness-outage.md) for
+the machine's own member) bounds time since this machine's authenticated latest read
 started, intersected with ledger/request deadlines. It does **not** prove an unknown
 withdrawal takes effect within 15 minutes if the server continuously withholds new
 heads: signatures/chains detect known rollback/forks, not globally latest state.
@@ -300,7 +301,9 @@ The execution machine initiates its own authenticated latest-ledger read and
 records local start time **before network I/O**. Verify through that read's latest
 boundary; cache only the remaining part of a maximum **15 minutes from that
 start**, in memory. Slow or failed reads and forwarded/cached pages cannot renew
-it. Intersect with request/upstream deadlines and reserve clock/stop margin;
+it. When a read gets no answer, the machine's own member keeps the longer windows of
+[execution freshness during a backend outage](e2ee/execution-freshness-outage.md),
+counted from the same start. Intersect with request/upstream deadlines and reserve clock/stop margin;
 never wait on network under a global account lock. Restart discards this grant
 and requires online authenticated revalidation before new remote execution.
 Rollback or uncertain suspend/resume elapsed time invalidates the live cache.

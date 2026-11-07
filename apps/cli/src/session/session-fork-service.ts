@@ -197,6 +197,11 @@ export class SessionForkService {
       machineId: string;
       forkOperationStore: SessionForkOperationStore;
       isSourceBusy(sessionId: SessionId): boolean;
+      rebindLocalAttachment?: (
+        attachment: import('@lody/shared').SessionLocalAttachment,
+        sessionId: SessionId,
+        turnId: string
+      ) => Promise<import('@lody/shared').SessionLocalAttachment>;
       inspectGitWorkdir?: (workdir: string) => Promise<{ dirty: boolean; headSha: string }>;
       resolveGitBranch?: (workdir: string) => Promise<string | undefined>;
     }
@@ -584,6 +589,43 @@ export class SessionForkService {
         'SOURCE_TURN_NOT_FORKABLE',
         'This assistant message has no ACP turn boundary.'
       );
+    }
+
+    for (const entry of historyResult.history) {
+      const inherited = new Map<string, import('@lody/shared').SessionLocalAttachment>();
+      for (let index = 0; index < (entry.items ?? []).length; index++) {
+        const item = entry.items![index]!;
+        if (item.type !== 'local_attachment') continue;
+        if (
+          !this.deps.rebindLocalAttachment ||
+          item.sessionId !== sourceSessionId ||
+          item.turnId !== entry.id
+        ) {
+          return sessionForkFailure(
+            spec,
+            'FORK_UNAVAILABLE',
+            'Local attachments must be explicitly transferred before forking to this environment.'
+          );
+        }
+        try {
+          const rebound = await this.deps.rebindLocalAttachment(item, targetSessionId, entry.id);
+          entry.items![index] = rebound;
+          inherited.set(item.referenceId, rebound);
+        } catch {
+          return sessionForkFailure(
+            spec,
+            'FORK_UNAVAILABLE',
+            'A local attachment is unavailable on this machine.'
+          );
+        }
+      }
+      if (entry.inputConfig?.inputBlocks)
+        entry.inputConfig = {
+          ...entry.inputConfig,
+          inputBlocks: entry.inputConfig.inputBlocks.map((block) =>
+            block.type === 'local_attachment' ? (inherited.get(block.referenceId) ?? block) : block
+          ),
+        };
     }
 
     if (!agentConfig) {

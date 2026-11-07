@@ -26,6 +26,14 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Git credential broker
 
+- GitHub auth: conversation-owner personal → matching-owner machine → repo App,
+  once per source. Failures advance without a policy RPC; local context grants
+  machine eligibility. Never persist managed tokens or replay uncertain writes.
+  Checkout/LFS share the pinned helper context. Contract: [identity fallback](../../../../../specs/github-identity-fallback.md).
+
+- INVARIANT: agent PATH merges keep the session's `gh` shim dir first
+  ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
+
 - Local projects/worktrees and locally resolved Members use native Git/GitHub
   auth. Never enroll them on refresh; pin `repositoryCheckout` through archive/restore.
 

@@ -11,9 +11,9 @@ The integration retains upstream product behavior and local StyleX ownership. Ve
 
 ## Decision
 
-Integrate main `053466e5d36643032f28bb81784c9e830307faa0` into migration head
+Integrate main `6cc2de53c529733cbd50ef6658a7b9692acd1b55` into migration head
 `f5d2890144aaf3b08d23227c8d3e5212de913fe4`. Resolve the 133 conflicting paths
-in an isolated worktree. Preserve main's product behavior and the migration's
+in an isolated worktree, then retain the two import unions needed by the subsequent main update. The new local-attachment action glyphs use local StyleX sizing; Motion retains main's pinned dependency upgrade. Preserve main's product behavior and the migration's
 local StyleX ownership; a conflict-free textual merge alone is insufficient.
 
 | Area         | Retained contract                                                                                                                          |
