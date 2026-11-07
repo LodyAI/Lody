@@ -131,6 +131,9 @@ describe development signing only.
 
 What the repository shows:
 
+- The cloud desktop is `ai.lody.desktop` in the private `apps/electron-cloud/electron-builder.yml`.
+  `dev.loro.lody.oss` is the local-only public build, which has no vault, so the checks below
+  apply to the cloud build. iOS is `ai.lody.mobile`.
 - `apps/electron/electron-builder.yml` uses the hardened runtime and notarization, with
   `entitlements` for the app and `entitlementsInherit` for nested binaries.
 - `build/entitlements.mac.plist` has no `com.apple.developer.associated-domains`,

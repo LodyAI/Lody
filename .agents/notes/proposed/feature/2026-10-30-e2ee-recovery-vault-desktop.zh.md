@@ -110,6 +110,7 @@ Apple 的[授权项说明](https://developer.apple.com/tutorials/data/documentat
 
 仓库现状：
 
+- 云端桌面版是私有仓 `apps/electron-cloud/electron-builder.yml` 里的 `ai.lody.desktop`。`dev.loro.lody.oss` 是不连云的公开版，没有保险库，所以下面的检查针对云端版。iOS 是 `ai.lody.mobile`。
 - `apps/electron/electron-builder.yml` 使用 hardened runtime 和公证，应用用 `entitlements`，嵌套二进制用 `entitlementsInherit`。
 - `build/entitlements.mac.plist` 没有 `com.apple.developer.associated-domains`、`com.apple.application-identifier` 和
   `com.apple.developer.team-identifier`，也没有嵌入 profile。这三项都需要，只放在主应用上，不放进 inherit plist。
