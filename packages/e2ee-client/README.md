@@ -267,6 +267,13 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 `recoverySubmitOriginal` and `recoveryFetchEnvelope` adapt the service to core.
 [Spec](../../specs/e2ee/recovery-vault.md).
 
+## Browser passkeys
+
+`browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
+It reports what the browser returned and decides nothing: a browser without PRF reports
+`prfEnabled: false` and no result, and `passkey-unlock` refuses it. Its test runs real
+Chromium on the `vault.lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
+
 ## Verification and limits
 
 `pnpm --filter @lody/e2ee-client test` runs fixed proof/credential-boundary tests.
