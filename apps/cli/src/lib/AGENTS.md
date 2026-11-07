@@ -101,6 +101,7 @@ never pushed to renderers as local room health.
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen
   references, never source paths. [Input contract](../../../../specs/cli-session-attachments.md).
+  Use `LocalAttachmentStore` for local-reference storage; construct its account/workspace/machine scope once at composition, never reconstruct registry paths in consumers.
   Keep ACP `resource_link` file URIs, workspace-contained agent output, and
   MessageHandler-owned authorization-generation/AbortController backfill fencing.
 - [acp/AGENTS.md](acp/AGENTS.md) specifies ACP buffering/flush in `message-handler.ts`,

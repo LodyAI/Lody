@@ -1,3 +1,4 @@
+import { LocalAttachmentStore } from '../session-local-attachments';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -8,6 +9,7 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   ScheduleRepository,
+  ScheduledMessageSchema,
   scheduleDefinitionFingerprint,
   scheduleRegistryKeys,
   ScheduleRuntimeRowSchema,
@@ -85,6 +87,11 @@ export async function createScheduleWorkspace(args: {
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
+  const localAttachments = new LocalAttachmentStore({
+    accountId: auth.userId,
+    workspaceId,
+    machineId: auth.machineId,
+  });
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
   const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
@@ -220,7 +227,28 @@ export async function createScheduleWorkspace(args: {
         },
         target
       );
-      if (run.message) prepared = withScheduledMessageInput(prepared, run.message);
+      if (run.message) {
+        const inputBlocks = await Promise.all(
+          run.message.inputBlocks.map(async (block) => {
+            if (block.type !== 'local_attachment') return block;
+            if (
+              workspace.contentMode === 'e2ee' ||
+              block.sessionId !== run.sessionId ||
+              block.turnId !== 'schedule:' + run.scheduleId
+            )
+              throw new Error('Local attachment belongs to another scheduled message');
+
+            return localAttachments.inherit(block, {
+              sessionId: run.sessionId,
+              turnId: run.userTurnId,
+            });
+          })
+        );
+        prepared = withScheduledMessageInput(
+          prepared,
+          ScheduledMessageSchema.parse({ ...run.message, inputBlocks })
+        );
+      }
       if (prepared.meta.machineId !== run.machineId || prepared.meta.userId !== auth.userId)
         throw new Error('Schedule target ownership changed');
       prepared.meta.scheduleId = run.scheduleId;

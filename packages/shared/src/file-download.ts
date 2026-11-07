@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SessionLocalAttachmentSchema } from './message-schemas';
 import { SessionFileRootIdSchema } from './project-path';
 import { FilePreviewV3ErrorCodeSchema } from './file-preview';
 
@@ -9,6 +10,7 @@ export const FileDownloadRequestSchema = z
     sessionId: z.string().trim().min(1),
     rootId: SessionFileRootIdSchema.optional(),
     path: z.string().min(1),
+    attachment: SessionLocalAttachmentSchema.optional(),
     offset: z.number().int().min(0).max(FILE_DOWNLOAD_MAX_BYTES),
     revision: z
       .string()
