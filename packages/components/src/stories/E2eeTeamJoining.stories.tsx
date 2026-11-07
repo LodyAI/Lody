@@ -201,3 +201,27 @@ export const KeyDelivery: Story = {
     </div>
   ),
 };
+export const ApprovalPaymentRequired: Story = {
+  globals: { locale: 'zh_CN' },
+  render: () => (
+    <div style={settingsFrame}>
+      <E2eeTeamSettings
+        workspaceId={offer.workspaceId}
+        onOpenBilling={() => {}}
+        onRefreshBilling={async () => {}}
+        runtime={{
+          ...settingsRuntime,
+          setMemberRole: async () => {},
+          memberJoinRequests: async () => ({
+            ...pending,
+            seatPreview: {
+              ...pending.seatPreview!,
+              paymentAction: 'payment_required',
+            } as E2eeMemberReplies['pending']['seatPreview'],
+          }),
+          approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
+        }}
+      />
+    </div>
+  ),
+};

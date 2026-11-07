@@ -48,6 +48,7 @@ export type LodyLiveActivityPermissionActionsConfig = {
 };
 
 export type LodyLiveActivityBridge = {
+  setupOneSignalLiveActivities?: () => Promise<void>;
   setupPushLiveActivities?: () => Promise<void>;
   configurePermissionActions?: (payload: LodyLiveActivityPermissionActionsConfig) => Promise<void>;
   syncConversationSummary: (

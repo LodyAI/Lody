@@ -97,6 +97,23 @@ const accountDirectory = (accountId: string) =>
 /** The account-wide pairing journal; it holds no secret and no private key. */
 export const desktopAccountPairingDatabase = (accountId: string) =>
   join(accountDirectory(accountId), 'account-pairing.sqlite')
+/** Whether this device has a completed identity for the workspace. An unfinished restore
+ * leaves a directory behind, so the directory alone does not count. */
+export const desktopE2eeHasWorkspaceIdentity = async (accountId: string, workspaceId: string) => {
+  if (!existsSync(identityDirectory(accountId, workspaceId))) return false
+  return withDesktopE2eeAccount(
+    (owner) =>
+      owner.bootstrap.creationFor(workspaceId).pipe(
+        Effect.as(true),
+        Effect.catch(() => Effect.succeed(false))
+      ),
+    workspaceId,
+    false
+  )
+}
+/** Account-scoped recovery-vault journal (pins and intents only, never secrets). */
+export const desktopE2eeRecoveryJournalPath = (accountId: string) =>
+  join(accountDirectory(accountId), 'recovery-vault.sqlite')
 type IdentityLocation = string | { requestId: string }
 function identityDirectory(accountId: string, location?: IdentityLocation) {
   const root = accountDirectory(accountId)
@@ -436,12 +453,11 @@ export async function desktopE2eeCloudClient(): Promise<{
   )
 }
 
-/** New signatures need the account-global public ID; old originals and existing
- * workspaces remain local. No network work is admitted under the account lock. */
+/** Signing and retrying a creation stay local; the account lock admits no network work. */
 export async function prepareDesktopE2eeCreation(input: DesktopE2eeCreationIntent) {
   const auth = getIpcServiceDeps().authService
   const identity = auth.getCachedSessionIdentity()
-  const needsIdentity = await withDesktopE2eeAccount(
+  await withDesktopE2eeAccount(
     (owner) =>
       Effect.gen(function* () {
         if (owner.accountId !== input.accountId)
@@ -467,27 +483,9 @@ export async function prepareDesktopE2eeCreation(input: DesktopE2eeCreationInten
           if (origin.genesisHash !== receipt.genesisHash)
             return yield* Effect.fail(accountFailure('identity-lost'))
         }
-        return yield* owner.bootstrap.creationNeedsAccountIdentity(input)
       }),
     { requestId: input.requestId }
   )
-  if (needsIdentity) {
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== input.accountId) throw new Error('e2ee_account_mismatch')
-    const registered = await Effect.runPromise(cloud.client.accountIdentity())
-    await withDesktopE2eeAccount(
-      (owner) => {
-        const latest = auth.getCachedSessionIdentity()
-        return owner.accountId === input.accountId &&
-          registered.accountId === input.accountId &&
-          latest.userId === identity.userId &&
-          latest.generation === identity.generation
-          ? owner.bootstrap.recordAccountIdentity(registered)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
-      },
-      { requestId: input.requestId }
-    )
-  }
   return withDesktopE2eeAccount(
     (owner) => {
       const latest = auth.getCachedSessionIdentity()

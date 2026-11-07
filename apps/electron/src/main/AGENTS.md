@@ -46,6 +46,8 @@ Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
 credentials (redaction is only a backstop), and trace CLI spawns without their
 arguments. See the [tracing decision](../../../../.agents/notes/implemented/feature/2026-09-25-daily-log-crash-and-stall-tracing.md).
+URL diagnostics retain fixed route names and structural metadata only; arbitrary
+URL components and parameter names do not belong in diagnostics.
 
 ## Prepared windows
 
@@ -111,6 +113,12 @@ packaging result; native safeStorage assurance needs an isolated platform run.
 `e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
 It grants no renderer reader/status/content capability. Preserve existing readers;
 release a cold temporary host before replying. `status` still requires a window reader.
+
+The post-MVP recovery vault (`services/e2ee-recovery-vault.mts`) stays off unless
+main starts with `LODY_E2EE_RECOVERY_VAULT=on`; the renderer switch alone never enables it.
+Main owns the recovery file dialogs and bytes, writes the file only to the user's
+chosen path, and returns outcomes or `e2ee_recovery_*` codes, never file contents.
+Its account journal holds pins and intents only. Proposal: [recovery vault](../../../../specs/e2ee/recovery-vault.md).
 
 Team-member joining uses `services/e2ee-member-join.mts`: retain exact KeyPackages
 and every signed admission before I/O. Unknown outcomes cannot replace them;

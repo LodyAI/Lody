@@ -1,3 +1,4 @@
+import { isElectronRenderer } from '../lib/electron';
 import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
 import {
   getMachineRoomId,
@@ -52,7 +53,21 @@ export function createWorkspacePendingSends(args: {
     typeof BroadcastChannel === 'undefined'
       ? null
       : new BroadcastChannel(`lody-session-inputs:${scope}`);
+  const validateLocalAttachments = async (send: PendingSessionSend) => {
+    const target = send.targetMachineId;
+    if (!target || target !== args.localMachineId())
+      throw new Error('Local attachment execution environment changed');
+    const machine = await runtime.repo.getDocMeta(getMachineRoomId(target));
+    if ((machine?.meta as MachineMeta | undefined)?.protocolCapabilities?.localAttachments !== 1)
+      throw new Error('Update the local daemon to send local attachments');
+  };
   const validateTarget = async (send: PendingSessionSend) => {
+    if (
+      normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, '').some(
+        (block) => block.type === 'local_attachment'
+      )
+    )
+      await validateLocalAttachments(send);
     const found = await runtime.repo.getDocMeta(getSessionRoomId(send.sessionId));
     const meta = found?.meta as SessionMeta | undefined;
     if (isLoroRepoDocDeleted(found) || meta?.isArchived)
@@ -203,6 +218,7 @@ export function createWorkspacePendingSends(args: {
         token: args.token,
         attachmentToken: runtime.attachmentToken,
         localMachineId: args.localMachineId,
+        validateLocalTarget: () => validateLocalAttachments(send),
         update: publish,
         report: (id, progress) =>
           publish(
@@ -214,6 +230,12 @@ export function createWorkspacePendingSends(args: {
     },
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {
+        if (
+          normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, '').some(
+            (block) => block.type === 'local_attachment'
+          )
+        )
+          await validateLocalAttachments(send);
         if (runtime.contentMode === 'e2ee')
           assertProtectedAttachmentReferences([
             ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
@@ -271,6 +293,8 @@ export function createWorkspacePendingSends(args: {
     void inputOwner.refresh().catch(() => {});
   });
   return {
+    canPrepareAttachmentsLocally: (machineId: MachineId) =>
+      isElectronRenderer() && machineId === args.localMachineId(),
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);

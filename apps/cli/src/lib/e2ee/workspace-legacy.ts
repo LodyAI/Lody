@@ -50,6 +50,7 @@ import {
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
+import { authorityStamp, type AuthorityStamp } from './authority-clock';
 import { makeCliE2eeRuntime } from './runtime';
 import { makeCliE2eeExecutionAuthorization } from './execution-authorization';
 import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
@@ -448,6 +449,9 @@ type CliE2eeWorkspaceOptions = {
   expectedSigningPublicKey?: string;
   cloud: CloudE2eePort;
   onUnavailable: () => void;
+  /** A latest ledger read verified in full. `startedAt` was taken before its network I/O. */
+  onAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
+  onWindowNotice?: (active: boolean) => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
@@ -844,8 +848,8 @@ async function openWorkspaceOwned(
       opened.sharingRemote
         ? opened.sharing
             .authorize(machineId, opened.signingPublicKey, undefined, opened.sharingRemote)
-            .pipe(Effect.map((result) => result.allowed))
-        : Effect.succeed(false),
+            .pipe(Effect.map((result) => result.allowed || result.reason === 'policy-unavailable'))
+        : Effect.succeed(true),
     originals: new E2eeRpcOriginals(
       join(
         repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
@@ -1198,7 +1202,11 @@ async function openWorkspaceOwned(
     refresh = (async () => {
       while (pending && !isClosed()) {
         pending = false;
+        const startedAt = authorityStamp();
+        const confirmRead = opened.executionAuthorization.beginLatestRead();
         let status = await run(opened.runtime.status());
+        const trusted = status;
+        let movedBack = false;
         let cursor: string | undefined;
         let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
         do {
@@ -1225,6 +1233,18 @@ async function openWorkspaceOwned(
             });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
+          if (
+            page.checkpoint.length !== checkpoint.length ||
+            page.checkpoint.headHash !== checkpoint.headHash
+          ) {
+            opened.executionAuthorization.endOutageWindow();
+            throw new Error('e2ee_ledger_checkpoint_changed');
+          }
+          // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
+          movedBack ||=
+            page.checkpoint.length < trusted.length ||
+            (page.checkpoint.length === trusted.length &&
+              page.checkpoint.headHash !== trusted.headHash);
           status = await run(opened.runtime.ingest(page)).catch((error) => {
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
@@ -1236,6 +1256,12 @@ async function openWorkspaceOwned(
           epochTransition.observe(status);
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
+        // Later key work has its own failures; they do not undo this confirmation.
+        if (movedBack) opened.executionAuthorization.endOutageWindow();
+        else if (!cursor && !closed) {
+          confirmRead();
+          options.onAuthorityConfirmed?.(startedAt);
+        }
         if (!closed) {
           if (pairing) {
             await confirmPairing(pairing);
@@ -1454,6 +1480,53 @@ async function openWorkspaceOwned(
     authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
       run(authorizeScheduleExecution(request, doc)),
     resolveVerifiedExecutionOriginal,
+    ledgerIdentity: {
+      ownsDevice: (device: string) =>
+        opened.runtime.executionLedger().pipe(
+          Effect.map((view) => {
+            const state = view.inspectState();
+            const own = state.devices.get(opened.signingPublicKey);
+            const entry = state.devices.get(device);
+            return !!own && !!entry && own.membershipId.equals(entry.membershipId);
+          })
+        ),
+      memberDevice: (cryptoUserId: string) =>
+        opened.runtime.executionLedger().pipe(
+          Effect.map((view) => {
+            const state = view.inspectState();
+            for (const [device, entry] of state.devices) {
+              const member = state.members.get(hex(entry.membershipId.toBytes()));
+              if (
+                entry.kind === 'personal' &&
+                member &&
+                hex(member.userId.toBytes()) === cryptoUserId
+              )
+                return device;
+            }
+            return undefined;
+          })
+        ),
+    },
+    authorizeMachineTarget: (machineId: string, localProjectId?: string) =>
+      Effect.gen(function* () {
+        const state = (yield* opened.runtime.executionLedger()).inspectState();
+        const own = state.devices.get(opened.signingPublicKey);
+        for (const device of state.devices.values())
+          if (
+            device.kind === 'machine' &&
+            device.machineId === machineId &&
+            own?.membershipId.equals(device.membershipId)
+          )
+            return true;
+        if (!opened.sharingRemote) return false;
+        const result = yield* opened.sharing.authorize(
+          machineId,
+          opened.signingPublicKey,
+          localProjectId,
+          opened.sharingRemote
+        );
+        return result.allowed;
+      }),
     retainQueuedInput: (input: Parameters<ExecutionOrigins['retainQueuedInput']>[0]) =>
       executionOrigins.retainQueuedInput(input),
     startRpc: (

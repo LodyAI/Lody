@@ -1,0 +1,33 @@
+{
+  "hostReady": {
+    "type": "hostReady",
+    "protocol": 2,
+    "capabilities": [
+      "ping",
+      "setActive",
+      "probeSchema"
+    ]
+  },
+  "catalog": {
+    "type": "catalog",
+    "revision": 7,
+    "catalog": "{\"projects\":[{\"id\":\"p\",\"machineId\":\"m\",\"name\":\"Example\",\"rootPath\":\"/example\"}],\"sessions\":[{\"id\":\"s\",\"machineId\":\"m\",\"projectId\":\"p\",\"title\":\"中文 😀\",\"status\":\"idle\",\"archived\":false,\"pinned\":true,\"createdAt\":\"2026-10-28T00:00:00Z\"}],\"machineIds\":[\"m\"]}"
+  },
+  "synced": {
+    "type": "synced",
+    "revision": 7,
+    "streams": 2
+  },
+  "grant": {
+    "type": "grant"
+  },
+  "schema": {
+    "creationOptionsTrial": {
+      "p": "ok agents=1 capabilities=1"
+    },
+    "m": {
+      "otherKeys": [],
+      "capabilities": []
+    }
+  }
+}

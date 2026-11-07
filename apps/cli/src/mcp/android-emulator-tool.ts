@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { LodyToolServer } from './tool-help';
 import { z } from 'zod';
 import {
   AndroidEmulatorCommandSchema,
@@ -33,12 +33,14 @@ const inputSchema = z
   });
 
 export function registerAndroidEmulatorPreviewTool(
-  server: McpServer,
+  server: LodyToolServer,
   request: (command: AndroidEmulatorCommand) => Promise<unknown>
 ) {
   server.registerTool(
     ANDROID_EMULATOR_PREVIEW_TOOL_NAME,
     {
+      summary:
+        'Preview Android Emulators in Lody: list/start/status/stop, without building or installing apps.',
       title: 'Android Emulator Preview',
       description:
         'Preview a native Android app in an Android Emulator inside Lody’s dedicated simulator panel. Use this tool when developing, debugging, or demonstrating an Android app and the user needs to see or interact with the simulator. Supports listing simulators, starting a preview, checking status, and stopping a preview on the current session’s machine. Listing does not boot a device. Starting boots the selected simulator if needed; preparation is asynchronous and the stream connects when the user opens the Android Emulator panel. Each simulator can be controlled by only one session; occupied devices cannot be taken over. Stopping the preview leaves the simulator running. This tool does not build or install apps. For web pages or web apps, use lody_report_preview_candidate.',

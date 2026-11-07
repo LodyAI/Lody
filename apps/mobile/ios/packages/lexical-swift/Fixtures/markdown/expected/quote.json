@@ -1,0 +1,62 @@
+[
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "first line",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "type": "linebreak",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "second ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 1,
+        "mode": "normal",
+        "style": "",
+        "text": "line",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "quote",
+    "version": 1
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Reply under the quote.",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  }
+]

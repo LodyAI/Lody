@@ -11,6 +11,14 @@ import { DERIVED_START_GRACE_MS, MAX_DERIVED_TURNS_PER_ORIGIN } from './derivati
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 
+export type RequesterAccess =
+  | { allowed: true }
+  | { allowed: false; reason: 'not_visible' | 'project_not_shared' };
+
+/** The verified identity of a member who is not this machine's owner. */
+export const encryptedMemberRequester = (cryptoUserId: string) => `e2ee-member:${cryptoUserId}`;
+const memberRequesterPrefix = encryptedMemberRequester('');
+
 const retainedIntentSchema = z.union([
   z.tuple([z.literal(1), z.string(), z.string()]),
   z.tuple([z.literal(1), z.string(), z.string(), z.string()]),
@@ -20,7 +28,7 @@ const intentSchema = z.object({
   workspaceId: z.string().min(1),
   sessionId: z.string().min(1),
   userTurnId: z.string().min(1),
-  /** Never grants authority: execution identity comes from the verified signer. */
+  /** The identity `resolveRequester` verified; a row's own `userId` is display data. */
   requesterUserId: z.string().optional(),
   inputConfig: z.unknown().optional(),
   /** Every local project this machine resolved for the turn; empty means projectless. */
@@ -93,6 +101,15 @@ export function makeEncryptedAgentExecution(options: {
   /** This machine's account. Host-scoped credentials and identity follow it, so only
    * its owner principal may run a turn that names it as requester. */
   machineUserId: string;
+  /** Verified-ledger identity. Without it, turns keep the requester their caller names. */
+  ledgerIdentity?: {
+    /** Whether a device belongs to this machine's owner. */
+    ownsDevice: (device: string) => Effect.Effect<boolean, unknown>;
+    /** A member's current device. */
+    memberDevice: (cryptoUserId: string) => Effect.Effect<string | undefined, unknown>;
+  };
+  /** Whether this machine's own device may reach another machine. */
+  authorizeMachineTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
@@ -164,6 +181,62 @@ export function makeEncryptedAgentExecution(options: {
           Effect.map((result) => result._tag === 'Authorized' && result.isCurrent?.() !== false)
         )
       : Effect.succeed(false);
+  /** Who a verified input runs as. This machine's own rows keep the requester it wrote. */
+  const verifiedRequester = Effect.fnUntraced(function* (
+    verified: VerifiedExecutionOriginal
+  ): Effect.fn.Return<string | undefined, unknown> {
+    if (verified.derivedFrom) {
+      const origin = yield* verifiedOrigin(verified.derivedFrom);
+      return origin ? encryptedMemberRequester(origin.requesterCryptoUserId) : undefined;
+    }
+    if (verified.requesterDevice === options.selfDevice || !options.ledgerIdentity)
+      return undefined;
+    return (yield* options.ledgerIdentity.ownsDevice(verified.requesterDevice))
+      ? options.machineUserId
+      : encryptedMemberRequester(verified.requesterCryptoUserId);
+  });
+  const resolveRequester = Effect.fnUntraced(function* (
+    input: EncryptedExecutionIntent
+  ): Effect.fn.Return<{ state: 'pending' | 'denied' } | { userId?: string }, unknown> {
+    const intent = yield* attempt(() => intentSchema.parse(input));
+    const verified = yield* options.resolveVerifiedOriginal(intent);
+    if (verified && 'state' in verified) return { state: 'pending' };
+    if (!verified) return { state: 'denied' };
+    const userId = yield* verifiedRequester(verified);
+    return userId === undefined ? {} : { userId };
+  });
+  /** Local machine access for a verified requester; the service is never asked. */
+  const verifyRequesterAccess = Effect.fnUntraced(function* (
+    requesterUserId: string,
+    localProjectId?: string
+  ): Effect.fn.Return<RequesterAccess, unknown> {
+    if (requesterUserId === options.machineUserId) return { allowed: true };
+    const denied = { allowed: false, reason: 'not_visible' } as const;
+    if (!requesterUserId.startsWith(memberRequesterPrefix)) return denied;
+    if (!options.authorizeExecution || !options.ledgerIdentity) return denied;
+    const device = yield* options.ledgerIdentity.memberDevice(
+      requesterUserId.slice(memberRequesterPrefix.length)
+    );
+    if (!device) return denied;
+    const result = yield* authorizeAll(
+      options.authorizeExecution,
+      options.workspaceId,
+      device,
+      localProjectId ? [localProjectId] : undefined
+    );
+    if (result._tag !== 'Authorized')
+      return localProjectId ? { allowed: false, reason: 'project_not_shared' } : denied;
+    return result.isCurrent?.() === false ? denied : { allowed: true };
+  });
+  /** Another machine: only this machine's owner reaches it, through the local policy. */
+  const verifyMachineTarget = Effect.fnUntraced(function* (
+    requesterUserId: string,
+    machineId: string
+  ): Effect.fn.Return<RequesterAccess, unknown> {
+    const denied = { allowed: false, reason: 'not_visible' } as const;
+    if (requesterUserId !== options.machineUserId || !options.authorizeMachineTarget) return denied;
+    return (yield* options.authorizeMachineTarget(machineId)) ? { allowed: true } : denied;
+  });
   /** Automation admission spends an owner's rule, so it needs this machine's own input. */
   const automationEvidence = Effect.fnUntraced(function* (
     input: EncryptedExecutionIntent
@@ -231,6 +304,7 @@ export function makeEncryptedAgentExecution(options: {
     // machine that authored it; only this machine may author one, one level deep.
     let authorityDevice = verified.requesterDevice;
     let originKey: string | undefined;
+    let originRequester: string | undefined;
     if (verified.derivedFrom) {
       if (
         !options.selfDevice ||
@@ -252,6 +326,7 @@ export function makeEncryptedAgentExecution(options: {
       if ((derivedClaims.get(originKey) ?? 0) >= MAX_DERIVED_TURNS_PER_ORIGIN)
         return { state: 'denied' };
       authorityDevice = origin.requesterDevice;
+      originRequester = encryptedMemberRequester(origin.requesterCryptoUserId);
     }
     // Each touched project needs its own switch; every grant's fence must still hold.
     const authorizeTargets = (authorize: AuthorizeEncryptedExecution) =>
@@ -313,6 +388,16 @@ export function makeEncryptedAgentExecution(options: {
         : ('member' as const);
     if (principal !== 'owner' && intent.requesterUserId === options.machineUserId)
       return { state: 'denied' };
+    const expectedRequester = !options.ledgerIdentity
+      ? undefined
+      : (originRequester ??
+        (verified.requesterDevice === options.selfDevice
+          ? undefined
+          : principal === 'owner'
+            ? options.machineUserId
+            : encryptedMemberRequester(verified.requesterCryptoUserId)));
+    if (expectedRequester !== undefined && intent.requesterUserId !== expectedRequester)
+      return { state: 'denied' };
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
       if (
@@ -347,7 +432,16 @@ export function makeEncryptedAgentExecution(options: {
     attempt(() => {
       options.journal().finish(permit, Buffer.from('{"state":"settled"}'));
     });
-  return { claim, complete, classifyOrigin, authorizeAgentControl, automationEvidence };
+  return {
+    claim,
+    complete,
+    classifyOrigin,
+    authorizeAgentControl,
+    automationEvidence,
+    resolveRequester,
+    verifyRequesterAccess,
+    verifyMachineTarget,
+  };
 }
 export type EncryptedAgentExecution = ReturnType<typeof makeEncryptedAgentExecution>;
 

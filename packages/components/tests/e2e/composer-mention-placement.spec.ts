@@ -1,5 +1,98 @@
 import { expect, test } from '@playwright/test';
 
+for (const theme of ['light', 'dark']) {
+  for (const width of [900, 360]) {
+    test(`session reference keeps one text painter across caret positions (${theme}, ${width}px)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 700 });
+      await page.goto(
+        `/iframe.html?id=mentions-mentiontwolevelmenu--session-mention-rendering&viewMode=story&globals=theme:${theme}`
+      );
+      const input = page.getByRole('combobox', { name: 'Message' });
+      const frame = page.getByTestId('session-mention-rendering');
+      const reference = frame.locator('[data-mention-kind="session"]');
+      await expect(input).toBeVisible();
+      await input.focus();
+      const value = await input.inputValue();
+      const start = value.indexOf('@');
+      const end = value.indexOf(' 后续文字');
+      const paint = async (position: number) => {
+        await input.evaluate((node: HTMLTextAreaElement, position) => {
+          node.setSelectionRange(position, position);
+          node.dispatchEvent(new Event('select', { bubbles: true }));
+        }, position);
+        // Native editing and caret stay above one visual text layer, at every position.
+        await expect(input).toHaveCSS('-webkit-text-fill-color', 'rgba(0, 0, 0, 0)');
+        await expect(frame.locator('[data-mention-highlighter]')).toHaveCount(1);
+        return reference.screenshot({ caret: 'hide', animations: 'disabled' });
+      };
+      const after = await paint(value.length);
+      await reference.screenshot({ path: test.info().outputPath('reference.png'), caret: 'hide' });
+      expect((await paint(start)).equals(after)).toBe(true);
+      expect((await paint(end)).equals(after)).toBe(true);
+      await input.blur();
+      expect(
+        (await reference.screenshot({ caret: 'hide', animations: 'disabled' })).equals(after)
+      ).toBe(true);
+
+      // The mirror carries a selection spanning prose and the reference, while the
+      // native control retains the exact text range for copying and replacement.
+      await input.focus();
+      await input.evaluate((node: HTMLTextAreaElement, end) => {
+        node.setSelectionRange(0, end);
+        node.dispatchEvent(new Event('select', { bubbles: true }));
+      }, end);
+      await expect(reference).toHaveAttribute('data-selected', '');
+      await expect(reference).toHaveCSS(
+        'color',
+        await page.evaluate(() => {
+          const probe = document.createElement('span');
+          probe.style.color = 'HighlightText';
+          document.body.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return color;
+        })
+      );
+      expect(
+        await input.evaluate((node: HTMLTextAreaElement) =>
+          node.value.slice(node.selectionStart, node.selectionEnd)
+        )
+      ).toBe(value.slice(0, end));
+      await input.press('X');
+      await expect(input).toHaveValue(`X${value.slice(end)}`);
+      await expect(reference).toHaveCount(0);
+
+      // Reset through a fresh mount, as a persisted draft would be restored.
+      await page.reload();
+      await expect(reference).toHaveCount(1);
+      // Boundary insertion must preserve the reference and recolour it as one unit.
+      await input.focus();
+      await paint(start);
+      await input.press('X');
+      await expect(input).toHaveValue(`${value.slice(0, start)}X${value.slice(start)}`);
+      await expect(reference).toHaveCount(1);
+      await expect(reference).toHaveAttribute('data-mention-start', String(start + 1));
+      await input.press('ArrowRight');
+      expect(await input.evaluate((node: HTMLTextAreaElement) => node.selectionStart)).toBe(
+        end + 1
+      );
+      await input.press('Backspace');
+      await expect(input).toHaveValue(`${value.slice(0, start)}X${value.slice(end + 1)}`);
+      await expect(reference).toHaveCount(0);
+      // Empty drafts retain a visible native placeholder despite transparent glyphs.
+      await input.fill('');
+      const placeholder = await input.evaluate((node) => {
+        const style = getComputedStyle(node, '::placeholder');
+        return { fill: style.webkitTextFillColor, color: style.color };
+      });
+      expect(placeholder.fill).toBe(placeholder.color);
+      expect(placeholder.fill).not.toBe('rgba(0, 0, 0, 0)');
+    });
+  }
+}
+
 for (const { trigger, query, count } of [
   { trigger: '/', query: 'review', count: 2 },
   { trigger: '$', query: 'imagegen', count: 8 },

@@ -307,7 +307,7 @@ describe('Mention navigation and insertion', () => {
     expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
   });
 
-  it('keeps mention mirrors aligned while an IME composes before a session mention', () => {
+  it('keeps mention text aligned while an IME composes before a session mention', () => {
     const input = render(
       [{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }],
       '@',
@@ -325,13 +325,13 @@ describe('Mention navigation and insertion', () => {
     });
 
     expect(input.selectionStart).toBe(5);
-    expect(container?.querySelector('[data-mention-layer="background"]')?.textContent).toContain(
+    expect(container?.querySelector('[data-mention-layer="text"]')?.textContent).toContain(
       'zhong@fix-ci'
     );
-    expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
+    expect(container?.querySelector('[data-mention-layer="text"]')).not.toBeNull();
     expect(
       container
-        ?.querySelector('[data-mention-layer="chip"] [data-mention-kind="session"]')
+        ?.querySelector('[data-mention-layer="text"] [data-mention-kind="session"]')
         ?.getAttribute('data-mention-start')
     ).toBe('5');
 
@@ -348,10 +348,10 @@ describe('Mention navigation and insertion', () => {
 
     expect(latest.inputValue).toBe('中@fix-ci ');
     expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
-    expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
+    expect(container?.querySelector('[data-mention-layer="text"]')).not.toBeNull();
   });
 
-  it('keeps a readonly caret out of the opaque chip interior', () => {
+  it('keeps a readonly caret out of a committed mention', () => {
     const items = [{ value: 'plan', insertText: '/plan', kind: 'command' }];
     const input = render(items, '/', 1, true, true);
     commit('plan', 0);

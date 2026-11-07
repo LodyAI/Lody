@@ -28,7 +28,8 @@ vi.mock('react-i18next', () => {
   const t = (key: string) => key;
   return { useTranslation: () => ({ t }) };
 });
-vi.mock('../src/components/settings/invite-member-dialog', () => ({
+vi.mock('../src/components/settings/invite-member-dialog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/components/settings/invite-member-dialog')>()),
   SeatCostNotice: ({ preview }: { preview: unknown }) => (
     <p>{preview ? 'seat quote' : 'quote loading'}</p>
   ),
@@ -258,8 +259,7 @@ describe('encrypted team joining', () => {
       requestId: string;
       state: 'pending' | 'delivering' | 'delivered' | 'failed';
       code?: string;
-    }[] =
-      [];
+    }[] = [];
     const retried: string[] = [];
     const confirmation = deferred<{
       admitted: boolean;

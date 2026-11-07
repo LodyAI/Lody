@@ -55,8 +55,8 @@ export function makeE2eeRpcClient(options: {
   workspaceId: string;
   requesterDevice: string;
   originals: E2eeRpcStore['Service'];
-  /** Native host policy preflight: `false` is a verified denial; a failure means the
-   * policy could not be verified. The recipient still resolves the actual project and checks at start. */
+  /** Native host policy preflight: `false` is a verified denial. A failure or a host with no
+   * reader means the policy is unknown, which signs. The recipient decides at start. */
   authorizeTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
   ledger: () => Effect.Effect<LedgerView, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
@@ -183,9 +183,9 @@ export function makeE2eeRpcClient(options: {
           ?.membershipId.equals(state.devices.get(signer)!.membershipId);
         if (
           !sameOwner &&
-          !(yield* (authorizeTarget?.(machineId) ?? Effect.succeed(false)).pipe(
-            // Both refuse to sign; only a verified denial lets senders withhold the input.
-            Effect.mapError(() => new Error('e2ee_machine_sharing_unavailable'))
+          !(yield* (authorizeTarget?.(machineId) ?? Effect.succeed(true)).pipe(
+            // Only a verified denial withholds the input; otherwise the machine decides.
+            Effect.catch(() => Effect.succeed(true))
           ))
         )
           return yield* Effect.fail(new Error('e2ee_machine_not_shared'));

@@ -296,6 +296,10 @@ this page is the full text of the rules summarised there.
   fixes) are different: they create a new user Turn and must freeze a supported
   non-Plan mode into that Turn's `inputConfig`; they still must not mutate local
   composer state as a substitute for agent-confirmed runtime projection.
+  Sending does not require a `sessionConfiguration` capability: [#2185](https://github.com/LodyAI/Lody/pull/2185)
+  reverted confirmed-revision admission because it blocked existing execution machines.
+  [#2211](https://github.com/LodyAI/Lody/pull/2211) fixes the demonstrated Plan hydration
+  case through indexed Turn identity while retaining legacy behavior.
   `DesktopMachineMenu` is the matching elevated machine picker used by chat landing.
   Both render on the app-wide DropdownMenu surface (color-mix bg + layered
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to

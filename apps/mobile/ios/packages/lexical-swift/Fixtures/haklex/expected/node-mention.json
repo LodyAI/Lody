@@ -1,0 +1,61 @@
+{
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "Check out ",
+            "type": "text",
+            "version": 1
+          },
+          {
+            "type": "mention",
+            "version": 1,
+            "platform": "GH",
+            "handle": "innei"
+          },
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": " on GitHub and ",
+            "type": "text",
+            "version": 1
+          },
+          {
+            "type": "mention",
+            "version": 1,
+            "platform": "TW",
+            "handle": "_oQuery"
+          },
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": " on Twitter.",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "type": "paragraph",
+        "version": 1,
+        "textFormat": 0,
+        "textStyle": ""
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

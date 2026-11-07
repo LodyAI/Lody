@@ -77,3 +77,27 @@ void test('appends batched, redacted lines to the live rotation of the CLI daily
     /\[WARN\] \[desktop:44570\] callback https:\/\/lody\.ai\/auth\?code=\[redacted\]&state=\[redacted\] with Bearer \[redacted\]$/
   )
 })
+
+void test('daily desktop logs normalize pairing display forms in strings and formatted objects', async (t) => {
+  const logDir = await withLogDir(t)
+  const { log } = manualLog(logDir)
+  // Synthetic display forms; the logger does not validate protocol checksums.
+  const code = '0123456789ABCDEFGHJKMNPQRSTV'
+  const forms = [
+    code,
+    code.toLowerCase(),
+    code.match(/.{4}/g).join('--  '),
+    code.match(/.{4}/g).join('\n'),
+    code.match(/.{4}/g).join('\t'),
+    code.match(/.{4}/g).join('\f'),
+    code.match(/.{4}/g).join('\v'),
+    `lody://pair/${code}`
+  ]
+  for (const form of forms) log.info('display', form)
+  const { formatConsoleArgs } = await import('./desktop-log-core.ts')
+  for (const form of forms) log.info('display', formatConsoleArgs([{ value: form }]))
+  log.flushSync()
+  const text = await readFile(path.join(logDir, '2026-09-24.log'), 'utf8')
+  for (const form of forms) assert.equal(text.includes(form), false)
+  assert.equal((text.match(/\[redacted\]/g) ?? []).length, forms.length * 2)
+})

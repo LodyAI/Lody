@@ -88,15 +88,9 @@ function ComposerBox({
         onMentionsChange={setMentions}
         getMentionChip={chips ? getComposerMentionChip : undefined}
         triggers={[]}
-        // The real composer's surface, verbatim, including the
-        // `--mention-chip-surface` it sets. A decoration hides the textarea's
-        // glyphs by painting that colour, so a story on a *different* surface
-        // would hide the one bug this is most likely to have: the cover showing
-        // up as a rectangle.
         className={cn(
           'w-full rounded-xl border border-foreground/[0.10] bg-background px-3 py-2.5',
-          'dark:border-input-border/70 dark:bg-input/90',
-          '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]'
+          'dark:border-input-border/70 dark:bg-input/90'
         )}
       >
         <MentionLabel className="sr-only">Prototype composer</MentionLabel>

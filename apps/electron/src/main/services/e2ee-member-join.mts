@@ -163,7 +163,7 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
         if (!row?.history || !row.key_package) return null
         return hex(decodeMemberKeyPackage(row.key_package).request.requestId.toBytes())
       }),
-    prepare: Effect.fnUntraced(function* (source: E2eeMemberOffer, cryptoUserId: string) {
+    prepare: Effect.fnUntraced(function* (source: E2eeMemberOffer, userId: Bytes.UserId) {
       const offer = yield* sql(() => MemberOfferSchema.parse(source))
       const genesis = ok(Bytes.genesisHash(raw(offer.genesisHash)))
       if (
@@ -192,7 +192,7 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
       const request = yield* prepareJoinRequest({
         genesis,
         requestId: ok(Bytes.requestId(randomBytes(16))),
-        userId: ok(Bytes.userId(raw(cryptoUserId))),
+        userId,
         encryptionPublicKey: device.enc,
         expiresAt: offer.expiresAt,
         signer: device
