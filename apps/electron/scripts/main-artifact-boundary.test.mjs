@@ -22,9 +22,17 @@ test('installed entries preserve ownership boundary and snapshot executes withou
       join(source, 'index.ts'),
       "import { shared } from './shared.js'; export async function start(owned) { if (owned) return (await import('./application.ts')).start(); return shared }"
     )
+    const dependency = join(root, 'node_modules/.pnpm/synthetic@1/node_modules/synthetic')
+    await mkdir(dependency, { recursive: true })
+    await writeFile(join(dependency, 'index.js'), 'export const dependencyValue = 7')
+    // Both inputs map to the same suggested output path. Rollup must keep
+    // distinct modules and connect their imports after disambiguation.
+    const collision = join(root, 'node_modules/store/synthetic@1/packages/synthetic')
+    await mkdir(collision, { recursive: true })
+    await writeFile(join(collision, 'index.js'), 'export const collisionValue = 1')
     await writeFile(
       join(source, 'shared.js'),
-      "import { DatabaseSync } from 'node:sqlite'; export const shared = typeof DatabaseSync === 'function' ? 7 : 0"
+      "import { DatabaseSync } from 'node:sqlite'; import { dependencyValue } from '../../node_modules/.pnpm/synthetic@1/node_modules/synthetic/index.js'; import { collisionValue } from '../../node_modules/store/synthetic@1/packages/synthetic/index.js'; export const shared = typeof DatabaseSync === 'function' ? dependencyValue + collisionValue : 0"
     )
     await writeFile(
       join(source, 'auth-storage.ts'),
@@ -72,8 +80,15 @@ test('installed entries preserve ownership boundary and snapshot executes withou
       }
     })
     assert.equal(require(join(root, 'vite/main/index.js')).start instanceof Function, true)
+    const catalog = JSON.parse(await readFile(join(output, 'main/core-artifacts.json'), 'utf8'))
+    assert.ok(catalog.main.some((name) => name.startsWith('dependencies/')))
+    assert.ok(
+      catalog.main.every(
+        (name) => !name.split('/').some((part) => ['node_modules', '.pnpm'].includes(part))
+      )
+    )
     const host = require(join(output, 'main/index.js'))
-    assert.equal(await host.start(false), 7)
+    assert.equal(await host.start(false), 8)
     assert.equal(globalThis.businessEvaluated, undefined)
     for (const section of ['preload', 'renderer']) {
       await mkdir(join(output, section))
@@ -82,7 +97,7 @@ test('installed entries preserve ownership boundary and snapshot executes withou
     const snapshot = join(root, 'snapshot')
     await assembleCoreSnapshot(output, snapshot)
     await assert.rejects(access(join(snapshot, 'main/index.js')))
-    assert.equal(require(join(snapshot, 'main/application.js')).start(), 18)
+    assert.equal(require(join(snapshot, 'main/application.js')).start(), 19)
     assert.equal(await readFile(join(snapshot, 'preload/index.js'), 'utf8'), 'preload')
     assert.equal(await readFile(join(snapshot, 'renderer/index.js'), 'utf8'), 'renderer')
     await writeFile(

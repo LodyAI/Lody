@@ -3,6 +3,7 @@ import { createHash, createPublicKey } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 
 import {
   stagedRoostBindingPath,
@@ -73,6 +74,19 @@ async function afterPackInstalled(context) {
     )
     resourcesDir = path.join(context.appOutDir, 'resources')
   }
+  // Use builder's own ASAR reader so this structural check also runs when
+  // cross-packaging; ordinary Node fs cannot inspect an archive's entries.
+  const require = createRequire(import.meta.url)
+  const builderRequire = createRequire(require.resolve('electron-builder'))
+  const asar = createRequire(builderRequire.resolve('app-builder-lib'))('@electron/asar')
+  const archive = path.join(resourcesDir, 'app.asar')
+  const catalog = JSON.parse(asar.extractFile(archive, 'out/main/core-artifacts.json').toString())
+  for (const file of catalog.main) {
+    const entry = asar.statFile(archive, `out/main/${file}`)
+    if (!entry || entry.files)
+      throw new Error(`[core-artifacts] Missing packaged main file: ${file}`)
+  }
+  console.log(`[core-artifacts] verified ${catalog.main.length} packaged main files`)
   const publicEdKey = process.env.SPARKLE_ED_PUBLIC_KEY
   if (typeof publicEdKey === 'string' && shouldInjectSparklePublicKey({ platform, publicEdKey })) {
     const plistPath = sparkleInfoPlistPath({

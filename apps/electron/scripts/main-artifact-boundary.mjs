@@ -88,5 +88,13 @@ export function mainEntryFileName(chunk) {
   if (chunk.facadeModuleId?.endsWith('/src/main/window.ts')) return 'window.js'
   if (chunk.facadeModuleId?.endsWith('/src/main/native-storage-smoke.mts'))
     return 'native-storage-smoke.js'
-  return 'modules/[name].js'
+  // Builder treats node_modules directories as dependency inputs and drops them
+  // from ordinary file collection. These chunks are bundled code, so give them
+  // a separate namespace; Rollup connects imports and disambiguates collisions.
+  const parts = chunk.name.split('/')
+  const dependency = parts.includes('node_modules')
+  const name = parts
+    .map((part) => (part === 'node_modules' ? 'packages' : part === '.pnpm' ? 'store' : part))
+    .join('/')
+  return `${dependency ? 'dependencies' : 'modules'}/${name}.js`
 }
