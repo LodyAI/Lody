@@ -73,7 +73,7 @@ R持钥签名 = Ed25519_R("lody-e2ee/possess/v2\0" ||
 | 核验码 | [`snapshot-codec.ts`](../../../../packages/e2ee-core/src/internal/ledger/snapshot-codec.ts) 的 `snapshot-digest/v4`；QR `lody-ledger:1:<version>:<head>:<digest>` | 状态摘要和快照 v4 字节都没有 |
 | HPKE 和 epoch 密钥信封 | [`hpke.ts`](../../../../packages/e2ee-core/src/internal/crypto/hpke.ts)、[`envelope.ts`](../../../../packages/e2ee-core/src/internal/keys/envelope.ts) | 有 HPKE 和 epoch 历史向量；完整的签名信封没有 |
 | 短码配对 | [`pairing`](../../../../packages/e2ee-core/src/internal/pairing/index.ts) | `pairing-vector.json` |
-| 恢复保险库（不在 MVP 内） | [`vault.ts`](../../../../packages/e2ee-core/src/internal/recovery/vault.ts) | 只有恢复凭证；保险库文件上线前要补向量 |
+| 恢复保险库（不在 MVP 内） | [`vault.ts`](../../../../packages/e2ee-core/src/internal/recovery/vault.ts) | 恢复凭证向量，以及 `recovery-vault-vector.json`：恢复文件，file-wrap、prf-wrap、workspace-entry 和索引密文，`formatVersion: 1` 私钥包和 passkey 索引，含负向输入 |
 
 ## 向量和域审查
 

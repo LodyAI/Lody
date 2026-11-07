@@ -464,12 +464,21 @@ Intended behavior is the text above. Inspected on 2026-11-05 and not executed:
   `enabled: true` and `results.first` in one object. A real authentication result has no
   `enabled`, so current code would reject it. The [Lab test](../../packages/e2ee-lab/test/recovery-vault.test.ts)
   passes because it uses a synthetic object. This is a gap in code and in the earlier
-  wording, not a reduced guarantee.
+  wording, not a reduced guarantee. Since corrected by [#2364](https://github.com/LodyAI/Lody/pull/2364):
+  registration checks `enabled` (`verifiedPasskeyRegistration`) and unlock checks
+  `results.first` (`verifiedPasskeyPrf`) in [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts).
 - [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) already keys
   one `prf-wrap` entry per credential, but needs vaultId and locator from its caller,
   and leaves those entries outside index references.
 - No package outside core and the Lab consumes the vault. [#2125](https://github.com/LodyAI/Lody/pull/2125)
   is an unmerged draft with conflicts.
+
+Executed: [`recovery-vault-vector.json`](../../packages/e2ee-core/test/recovery-vault-vector.json),
+written by an independent generator, fixes the recovery file, the file-wrap, prf-wrap,
+workspace-entry and index ciphertexts, the `formatVersion: 1` package and the passkey
+index, with inputs that must be rejected. `recovery-package.test.ts` opens it through
+the recovery file and through a passkey PRF. Its nonces are fixed only for
+reproducibility.
 
 External sources: [WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) for `enabled`,
 optional registration results, the user-verified PRF, `user.id` overwrite and RP scope;
