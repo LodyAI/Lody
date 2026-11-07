@@ -4848,6 +4848,8 @@
   "settings.agentRoles.unavailable.machineUnknown": "你无法访问它所在的机器",
   "settings.agentRoles.unavailable.agentConfigMissing": "它绑定的 Agent 配置已不存在",
   "settings.agentRoles.unavailable.agentConfigMismatch": "它绑定的 Agent 配置属于另一台机器",
+  "settings.agentRoles.unavailable.modelUnavailable": "Agent 已不再提供保存的模型，请编辑此 Role 重新选择",
+  "settings.agentRoles.unavailable.modeUnavailable": "Agent 已不再提供保存的权限模式，请编辑此 Role 重新选择",
   "settings.agentRoles.form.name": "名称",
   "settings.agentRoles.form.sectionTarget": "运行位置",
   "settings.agentRoles.form.sectionTargetHint": "名称和指令在各机器间共享；每台机器单独固定 Agent 配置、模型和记忆体。未添加的机器不会运行这个角色，也不会改到别的机器上运行。",

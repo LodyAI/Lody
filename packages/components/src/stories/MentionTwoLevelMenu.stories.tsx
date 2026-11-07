@@ -245,6 +245,14 @@ const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
     }),
     'Unavailable: its machine is not available to you'
   ),
+  toAgentRoleCandidate(
+    roleItem({
+      slug: 'Retired-Model-Reviewer',
+      role: agentRole({ id: 'retired-model-role' as AgentRoleId, name: 'Retired Model Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'model_unavailable' },
+    }),
+    'Unavailable: its agent no longer offers the saved model. Edit this Role to pick another'
+  ),
 ];
 
 const COMMANDS: MentionCandidate[] = [
