@@ -22,7 +22,10 @@ test('installed entries preserve ownership boundary and snapshot executes withou
       join(source, 'index.ts'),
       "import { shared } from './shared.js'; export async function start(owned) { if (owned) return (await import('./application.ts')).start(); return shared }"
     )
-    await writeFile(join(source, 'shared.js'), 'export const shared = 7')
+    await writeFile(
+      join(source, 'shared.js'),
+      "import { DatabaseSync } from 'node:sqlite'; export const shared = typeof DatabaseSync === 'function' ? 7 : 0"
+    )
     await writeFile(
       join(source, 'auth-storage.ts'),
       'globalThis.businessEvaluated = true; export const value = 11'
@@ -33,6 +36,7 @@ test('installed entries preserve ownership boundary and snapshot executes withou
     )
     const build = await rollup({
       input: { index: join(source, 'index.ts'), application: join(source, 'application.ts') },
+      external: ['node:sqlite'],
       plugins: [mainArtifactBoundary()]
     })
     const output = join(root, 'out')
@@ -57,6 +61,7 @@ test('installed entries preserve ownership boundary and snapshot executes withou
           formats: ['cjs']
         },
         rollupOptions: {
+          external: ['node:sqlite'],
           preserveEntrySignatures: 'strict',
           output: {
             preserveModules: true,

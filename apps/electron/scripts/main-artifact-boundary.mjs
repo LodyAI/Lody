@@ -1,12 +1,7 @@
-import { builtinModules } from 'node:module'
+import { isBuiltin } from 'node:module'
 
 export function mainArtifactBoundary({ hostDependencies = [] } = {}) {
-  const allowed = new Set([
-    'electron',
-    ...builtinModules,
-    ...builtinModules.map((name) => `node:${name}`),
-    ...hostDependencies
-  ])
+  const allowed = new Set(['electron', ...hostDependencies])
   return {
     name: 'lody-main-artifact-boundary',
     generateBundle(_options, bundle) {
@@ -36,7 +31,7 @@ export function mainArtifactBoundary({ hostDependencies = [] } = {}) {
               const packageName = dependency.startsWith('@')
                 ? dependency.split('/').slice(0, 2).join('/')
                 : dependency.split('/')[0]
-              if (!allowed.has(dependency) && !allowed.has(packageName))
+              if (!isBuiltin(dependency) && !allowed.has(dependency) && !allowed.has(packageName))
                 throw new Error(`Undeclared Host external dependency: ${dependency}`)
             }
           }
