@@ -439,7 +439,7 @@ type RpcServerDeps = {
       requestId: string;
       onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
     } & (
-      | { action: 'start'; configId: AgentConfigId }
+      | { action: 'start'; configId: AgentConfigId; methodId?: string }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
           action: 'submit-code';
@@ -1441,6 +1441,7 @@ export class LoroStreamsMachineRpcServer {
                     requestId: request.params.requestId,
                     action: request.params.action,
                     configId: request.params.configId as AgentConfigId,
+                    methodId: request.params.methodId,
                     onProgress: appendProgress,
                   });
                 case 'cancel':
