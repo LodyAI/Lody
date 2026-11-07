@@ -22,6 +22,7 @@ import {
   continueAccountVaultReplacement,
   createAccountRecoveryVault,
   enrollRecoveryPasskey,
+  recentAccountSecurityEvents,
   inspectRecoveryFile,
   recoveryReplacementPlan,
   recoveryRestoreTarget,
@@ -40,6 +41,7 @@ function syntheticService() {
   const entries = new Map(),
     index = new Map(),
     calls = [],
+    requests = [],
     replacement = { current: null, replacing: null }
   const key = (vaultId, entryId) => `${vaultId}/${entryId}`
   const fetch = async (_url, init) => {
@@ -48,6 +50,7 @@ function syntheticService() {
       args: [args]
     } = JSON.parse(init.body)
     calls.push(path)
+    requests.push(init.body)
     switch (path) {
       case 'e2eeRecoveryVault:putImmutable': {
         const before = entries.get(key(args.vaultId, args.entry.entryId))
@@ -77,6 +80,15 @@ function syntheticService() {
         })
         return response({ outcome: 'Committed' })
       }
+      case 'accountSecurityEvents:list':
+        return response({
+          events: [
+            { id: 'a', kind: 'vault_replacement_reserved', occurredAt: 1_000 },
+            { id: 'b', kind: 'personal_device_recovered', occurredAt: 3_000 },
+            { id: 'c', kind: 'some_future_kind', occurredAt: 2_000 }
+          ],
+          nextCursor: null
+        })
       case 'e2eeRecoveryVault:replacementState':
         return response(replacement)
       case 'e2eeRecoveryVault:reserveReplacementVault':
@@ -95,7 +107,7 @@ function syntheticService() {
         throw new Error(`unexpected endpoint ${path}`)
     }
   }
-  return { entries, index, calls, fetch, replacement }
+  return { entries, index, calls, requests, fetch, replacement }
 }
 
 async function withClient(service, work) {
@@ -860,4 +872,16 @@ void test('a dismissed system prompt is a cancellation, not a failure', () => {
     recoveryVaultFailure(new E2eePasskeyCancelled('e2ee_passkey_cancelled')).message,
     'e2ee_recovery_cancelled'
   )
+})
+
+void test('account security events show known kinds, newest first, and nothing else', async () => {
+  const service = syntheticService()
+  const events = await withClient(service, (_store, client) =>
+    Effect.runPromise(recentAccountSecurityEvents(client.accountSecurityEvents()))
+  )
+  assert.deepEqual(events, [
+    { id: 'b', kind: 'personal_device_recovered', occurredAt: 3_000 },
+    { id: 'a', kind: 'vault_replacement_reserved', occurredAt: 1_000 }
+  ])
+  assert.deepEqual(JSON.parse(service.requests.at(-1)).args[0], { limit: 20 })
 })
