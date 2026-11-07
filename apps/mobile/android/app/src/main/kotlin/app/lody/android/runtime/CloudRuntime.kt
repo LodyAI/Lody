@@ -240,7 +240,7 @@ data class RunChoice(
     val configOptionValues: Map<String, Any> = emptyMap(),
     val agentRoleId: String? = null, val roleKnown: Boolean = false,
 )
-data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null)
+data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null)
 sealed interface RuntimeEvent {
     data class CreationChanged(val key: String = "") : RuntimeEvent
     data class SessionUpdated(val snapshot: SessionSnapshot) : RuntimeEvent

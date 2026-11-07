@@ -394,4 +394,20 @@
     <string name="home_group_pinned">Pinned</string>
     <string name="bar_view_pr">View PR</string>
     <string name="home_ci_expected">Checks expected</string>
+    <string name="usage_compacting">Compacting context</string>
+    <string name="usage_open">Open usage details, %1$d%% used</string>
+    <string name="usage_context">Context</string>
+    <string name="usage_tokens">%1$s / %2$s tokens</string>
+    <string name="usage_model">Model usage</string>
+    <string name="usage_unavailable">The provider did not report usage for this plan</string>
+    <string name="usage_weekly">Weekly</string>
+    <string name="usage_five_hours">5 hours</string>
+    <string name="usage_title">Usage</string>
+    <string name="usage_days">%1$sd</string>
+    <string name="usage_hours">%1$sh</string>
+    <string name="usage_minutes">%1$sm</string>
+    <string name="usage_used">%1$d%% used</string>
+    <string name="usage_resets">Resets %1$s</string>
+    <string name="usage_relative">Show relative time</string>
+    <string name="usage_absolute">Show absolute time</string>
 </resources>

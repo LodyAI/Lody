@@ -63,7 +63,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     super.viewDidLoad()
     Self.current = self
     view.accessibilityIdentifier = "home"
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     split.delegate = self
     split.primaryBackgroundStyle = .none
     split.preferredDisplayMode = .oneBesideSecondary
@@ -162,10 +162,11 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     }
     return false
   }
-  func showPanel(_ content: UIViewController, title: String, from: UIViewController, push: Bool, detents: [Double]) -> Bool {
+  func showPanel(_ content: UIViewController, title: String, from: UIViewController, push: Bool, detents: [Double], onClose: (() -> Void)? = nil) -> Bool {
     guard contains(from) || from.navigationController === inspector, session != nil else { return false }
     if layout == .compact, !push, !panelOpen { return false }
     let next = page(content, title: title)
+    next.onClose = onClose
     if from.navigationController === inspector {
       inspector.pushViewController(next, animated: true)
     } else {
@@ -223,7 +224,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   private func placeholder() -> UIViewController {
     let controller = UIViewController()
-    controller.view.backgroundColor = .systemBackground
+    controller.view.backgroundColor = .lodyBackground
     controller.view.accessibilityIdentifier = "ipad-detail-placeholder"
     var configuration = UIContentUnavailableConfiguration.empty()
     configuration.image = UIImage(systemName: "bubble.left.and.bubble.right")

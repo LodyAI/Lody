@@ -387,4 +387,20 @@
     <string name="home_group_pinned">置顶</string>
     <string name="bar_view_pr">查看 PR</string>
     <string name="home_ci_expected">等待检查</string>
+    <string name="usage_compacting">正在压缩上下文</string>
+    <string name="usage_open">查看用量详情，已用 %1$d%%</string>
+    <string name="usage_context">上下文</string>
+    <string name="usage_tokens">%1$s / %2$s tokens</string>
+    <string name="usage_model">模型用量</string>
+    <string name="usage_unavailable">提供商未报告此套餐的用量</string>
+    <string name="usage_weekly">每周</string>
+    <string name="usage_five_hours">5 小时</string>
+    <string name="usage_title">用量</string>
+    <string name="usage_days">%1$s天</string>
+    <string name="usage_hours">%1$s小时</string>
+    <string name="usage_minutes">%1$s分钟</string>
+    <string name="usage_used">已用 %1$d%%</string>
+    <string name="usage_resets">重置时间：%1$s</string>
+    <string name="usage_relative">显示相对时间</string>
+    <string name="usage_absolute">显示绝对时间</string>
 </resources>
