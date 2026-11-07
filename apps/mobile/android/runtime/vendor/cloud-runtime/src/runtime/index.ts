@@ -1,3 +1,4 @@
+import { sessionQuotaProjection } from '../protocol/session-usage.ts';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
@@ -8,6 +9,8 @@ import {
   reservedSessionIds,
   retainedSessionIds,
   setSessionTraceSink,
+  setSessionUsageReader,
+  refreshSessionUsage,
 } from './session';
 import { machineRpc } from './machine-rpc';
 import { decodeFrames, encodeFrame } from '../frames';
@@ -204,6 +207,25 @@ function askGitState(project: Project) {
     ),
   );
 }
+setSessionUsageReader((sessionId, modelId) => {
+  const meta = catalogs.get('meta');
+  const session = meta?.sessions.find((s) => s.id === sessionId);
+  const machine =
+    session && catalogs.get(session.machineId)?.agentUsage?.[session.machineId];
+  return sessionQuotaProjection(
+    session,
+    session
+      ? {
+          configs: machine?.configs ?? [],
+          quotas: mergeAgentQuotas(
+            meta?.agentUsage?.[session.machineId]?.quotas ?? [],
+            machine?.quotas ?? [],
+          ),
+        }
+      : undefined,
+    modelId,
+  );
+});
 let revision = 0;
 let lastPublished = '';
 function publish() {
@@ -220,6 +242,7 @@ function publish() {
     }
   for (const machine of meta.machineIds)
     if (!watchers.has(machine)) watch(machine);
+  refreshSessionUsage();
   channel.emit('creationOptionsChanged', {});
   if (unhealthy.size || meta.machineIds.some((id) => !catalogs.has(id))) return;
   const projects = new Map(meta.projects.map((p) => [p.id, p]));

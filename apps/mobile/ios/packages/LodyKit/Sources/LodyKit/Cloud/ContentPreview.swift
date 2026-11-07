@@ -77,7 +77,7 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
     download?.cancel()
     var loading = UIContentUnavailableConfiguration.loading()
     loading.text = String(localized: "native.attachment.preview.loading", bundle: .lody)
-    loading.background.backgroundColor = .systemBackground
+    loading.background.backgroundColor = .lodyBackground
     loading.button.title = String(localized: "native.close", bundle: .lody)
     loading.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.dismiss(animated: true) }
     contentUnavailableConfiguration = loading
@@ -105,7 +105,7 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
         try? FileManager.default.removeItem(at: directory)
         guard !Task.isCancelled, let self else { return }
         var failed = UIContentUnavailableConfiguration.empty()
-        failed.background.backgroundColor = .systemBackground
+        failed.background.backgroundColor = .lodyBackground
         failed.image = UIImage(systemName: "doc.badge.ellipsis")
         failed.text = file.fileName
         failed.secondaryText = error.localizedDescription

@@ -378,8 +378,8 @@ val LodyLightColors = LodyColors(
 )
 
 val LodyDarkColors = LodyColors(
-    bgBase = Color(0xFF000000),
-    bgGrouped = Color(0xFF000000),
+    bgBase = Color(0xFF111113),
+    bgGrouped = Color(0xFF111113),
     bgRaised = Color(0xFF1C1C1C),
     bgSunken = Color(0x1AFFFFFF),
     bgOverlay = Color(0xFF2B2B2B),

@@ -108,7 +108,7 @@ final class ChatAttachmentSheet: UIViewController, UICollectionViewDataSource, U
     view.backgroundColor = .lodyBackground
     configureCamera()
     if cameraOnly {
-      view.backgroundColor = .black
+      view.backgroundColor = .lodySoftDarkBackground
       view.accessibilityIdentifier = "camera-fullscreen"
       cameraView.setExpanded(true)
       cameraView.letterboxed = true
@@ -385,7 +385,7 @@ final class ChatAttachmentSheet: UIViewController, UICollectionViewDataSource, U
       self.cameraView.layer.cornerRadius = 0
       self.cameraView.layoutIfNeeded()
       self.cameraView.setExpanded(true)
-      self.view.backgroundColor = .black
+      self.view.backgroundColor = .lodySoftDarkBackground
       self.grid.alpha = 0
       self.status.alpha = 0
       self.footer.alpha = 0

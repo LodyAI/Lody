@@ -35,7 +35,7 @@ final class ShareViewController: UIViewController {
     navigation.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.addSubview(navigation.view)
     navigation.didMove(toParent: self)
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
 
     let providers = (extensionContext?.inputItems as? [NSExtensionItem] ?? []).flatMap { $0.attachments ?? [] }
     ingest = Task { [weak self] in

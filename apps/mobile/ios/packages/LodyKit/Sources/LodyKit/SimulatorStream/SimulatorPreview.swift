@@ -295,7 +295,7 @@ import UIKit
     leaving = previous
     isUserInteractionEnabled = false
     let black = UIView(frame: display)
-    black.backgroundColor = .black
+    black.backgroundColor = .lodySoftDarkBackground
     black.alpha = 0
     black.layer.cornerRadius = displayRadius
     black.layer.cornerCurve = .continuous
