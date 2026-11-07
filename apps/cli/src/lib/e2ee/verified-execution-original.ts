@@ -70,9 +70,9 @@ export function makeVerifiedExecutionOriginal(options: {
           : doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
         // This original cache is an accelerator, never the actual-start journal.
         // Its local I/O fault cannot block the independently signed durable origin.
-        const cached = yield* options
-          .readIncoming(intent)
-          .pipe(Effect.catch(() => Effect.succeed(undefined)));
+        const cached = lookup.origin
+          ? undefined
+          : yield* options.readIncoming(intent).pipe(Effect.catch(() => Effect.succeed(undefined)));
         const rpcOriginal =
           typeof fromDoc === 'string' ? fromDoc : cached ? hex(cached.frame) : undefined;
         if (rpcOriginal !== undefined) {
