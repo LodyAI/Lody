@@ -1,6 +1,12 @@
 import { MemoryBindingSchema, type MemoryBinding } from './memory-provider';
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
 import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
+import { summarizeAgentRunConfigCapabilities } from './acp-run-config';
+import {
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
+  type AcpCapabilityCacheEntry,
+} from './ai';
+import type { AgentConfigMeta } from './schema';
 
 /**
  * Agent Role — a named, mentionable preset for *creating* a Session.
@@ -566,7 +572,9 @@ export type AgentRoleUnavailableReason =
   | 'machine_unknown'
   | 'machine_offline'
   | 'agent_config_missing'
-  | 'agent_config_machine_mismatch';
+  | 'agent_config_machine_mismatch'
+  | 'model_unavailable'
+  | 'mode_unavailable';
 
 export type AgentRoleAvailability =
   | { kind: 'available' }
@@ -588,6 +596,60 @@ export type AgentRoleAvailabilityContext = {
    * falling back to another config.
    */
   loadedAgentConfigMachineIds: ReadonlySet<MachineId>;
+  /**
+   * What the Role's bound agent provably offers. Undefined means the pins cannot
+   * be judged, which leaves the Role available: `selectAgentRoleCapability`.
+   */
+  runConfigCapability?: (role: AgentRole) => AcpCapabilityCacheEntry | undefined;
+};
+
+/**
+ * A capability entry that can prove a pin is gone: a runtime probe of this exact
+ * agent that lists something. Saved model and permission pins outlive provider
+ * updates on purpose, so a static default or an empty probe disabling a working
+ * Role would be worse than the dispatch error it tried to prevent.
+ */
+export const selectAgentRoleCapability = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  config: Pick<AgentConfigMeta, 'agentType' | 'cliType' | 'runtimeOverrides'>
+): AcpCapabilityCacheEntry | undefined => {
+  const readable = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry,
+    config.runtimeOverrides
+  );
+  if (
+    readable?.provenance !== 'runtime' ||
+    readable.agentType !== config.agentType ||
+    readable.cliType !== config.cliType
+  ) {
+    return undefined;
+  }
+  const { models, modes } = summarizeAgentRunConfigCapabilities(readable);
+  return models.length > 0 || modes.length > 0 ? readable : undefined;
+};
+
+/** Which saved pin the agent no longer offers; dispatch would reject the same one. */
+export const findAgentRoleRunConfigIssue = (
+  role: Pick<AgentRole, 'runConfig'>,
+  capability: AcpCapabilityCacheEntry
+): Extract<AgentRoleUnavailableReason, 'model_unavailable' | 'mode_unavailable'> | undefined => {
+  const { modelId, modeId, configOptionValues } = role.runConfig;
+  const { models } = summarizeAgentRunConfigCapabilities(capability);
+  if (modelId && !models.some((model) => model.id === modelId)) return 'model_unavailable';
+  // A Role pins permission as `modeId` (legacy modes or a `mode` option) or as
+  // the value of the agent's `_permission` option, e.g. Grok's `permission_mode`.
+  // Check each pin against the knob that carries it.
+  const modeOption = capability.configOptions?.find((option) => option.category === 'mode');
+  const modeOffered = modeOption
+    ? modeOption.options.some((option) => option.value === modeId)
+    : capability.modes.some((mode) => mode.id === modeId);
+  if (modeId && !modeOffered) return 'mode_unavailable';
+  const permissionGone = (capability.configOptions ?? []).some((option) => {
+    if (option.category !== '_permission') return false;
+    const value = configOptionValues?.[option.id];
+    return value !== undefined && !option.options.some((candidate) => candidate.value === value);
+  });
+  return permissionGone ? 'mode_unavailable' : undefined;
 };
 
 export const resolveAgentRoleAvailability = (
@@ -612,5 +674,7 @@ export const resolveAgentRoleAvailability = (
   }
   if (role.runConfig.memory && !context.memoryProviderMachineIds?.has(role.machineId))
     return { kind: 'unavailable', reason: 'memory_unsupported' };
-  return { kind: 'available' };
+  const capability = context.runConfigCapability?.(role);
+  const issue = capability && findAgentRoleRunConfigIssue(role, capability);
+  return issue ? { kind: 'unavailable', reason: issue } : { kind: 'available' };
 };

@@ -50,9 +50,6 @@ export const sharingReplySchemas: {
     .nullable(),
   readVersion: z.union([versionSchema, removedSchema]).nullable(),
   readRequest: z.union([versionSchema, removedSchema]).nullable(),
-  latestForMember: z
-    .union([versionSchema.extend({ status: z.literal('active') }), removedSchema])
-    .nullable(),
   commit: z.union([
     z.object({ status: z.literal('committed'), version: versionSchema }),
     z.object({

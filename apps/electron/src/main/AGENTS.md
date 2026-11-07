@@ -46,6 +46,8 @@ Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
 credentials (redaction is only a backstop), and trace CLI spawns without their
 arguments. See the [tracing decision](../../../../.agents/notes/implemented/feature/2026-09-25-daily-log-crash-and-stall-tracing.md).
+URL diagnostics retain fixed route names and structural metadata only; arbitrary
+URL components and parameter names do not belong in diagnostics.
 
 ## Prepared windows
 

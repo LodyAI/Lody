@@ -14,6 +14,7 @@ import {
   getAgentRoleEmoji,
   type AgentConfigMeta,
   type AgentRole,
+  type AgentRoleAvailability,
   type AgentRoleId,
   type MachineViewMeta,
 } from '@lody/shared';
@@ -45,6 +46,8 @@ export type AgentRoleDetailSubject = {
    * a constant that says nothing.
    */
   machineLabel?: string;
+  /** Marks the pin that makes this Role unavailable, so the fix is obvious. */
+  availability?: AgentRoleAvailability;
 };
 
 /**
@@ -64,6 +67,7 @@ export function AgentRoleDetailPane({
   agentConfig,
   machine,
   machineLabel,
+  availability,
   onEdit,
   className,
 }: AgentRoleDetailSubject & {
@@ -124,7 +128,10 @@ export function AgentRoleDetailPane({
     ? labelFor(permissionFace.options, permissionValue)
     : undefined;
   const permissionTone = classifyPermissionModeFace(permissionValue);
-  const permissionIsWarning = permissionTone.kind !== 'hidden' && permissionTone.tone === 'warning';
+  const unavailableReason = availability?.kind === 'unavailable' ? availability.reason : undefined;
+  const permissionIsWarning =
+    unavailableReason === 'mode_unavailable' ||
+    (permissionTone.kind !== 'hidden' && permissionTone.tone === 'warning');
 
   const thinkingSelector = thoughtLevelSelectors.find((selector) => selector.type === 'select');
   const thinkingValue = pinnedValue(thinkingSelector?.configId);
@@ -187,6 +194,7 @@ export function AgentRoleDetailPane({
                  (`claude-opus-5` vs `claude-sonnet-5`), so the START is what
                  gives way when the line runs out. */
               elide="start"
+              tone={unavailableReason === 'model_unavailable' ? 'warning' : undefined}
             />
           ) : null}
           {thinkingValue ? (

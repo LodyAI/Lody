@@ -80,12 +80,13 @@ export function SessionPendingSendsHost({ runtime }: { runtime: WorkspaceRuntime
     [runtime, setPendingMetas, setSendStatuses]
   );
 
-  const hasPending = sends.some(send => !send.persisted);
+  const hasPending = sends.some((send) => !send.persisted);
   useEffect(() => {
     if (!hasPending) return undefined;
     const confirmLeave = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
+      console.warn('[Renderer] Unload blocked', { category: 'pending-sends' });
     };
     window.addEventListener('beforeunload', confirmLeave);
     return () => window.removeEventListener('beforeunload', confirmLeave);

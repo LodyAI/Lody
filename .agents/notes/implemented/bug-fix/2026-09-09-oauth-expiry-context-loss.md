@@ -42,7 +42,7 @@ The four defects compose; fixing any one alone still loses context.
    `RequestError`, an `Error` subclass, and `formatErrorWithCauses` prints only
    the message of a nested `Error` — dropping the `data.details` that carries the
    provider's text. A first version of this fix matched the flattened dump and
-   was caught in review; its tests passed only because they used a plain-object
+   was caught in review; its tests did not catch it because they used a plain-object
    `cause`, which `JSON.stringify` renders with `data` intact. Fixtures now use
    the SDK type.
 3. The restore fallback ran on any resume failure. An expired credential is
@@ -66,13 +66,19 @@ change that the narrower auth fix makes unnecessary for this defect; a genuine
 resume failure with synced history still replaces the session, and that remains
 the correct outcome.
 
-The `create` dispatch branch (`resolveSessionDispatchAction`) has no history
-replay at all, unlike `restoreMissingSession`. It is deliberately unchanged: it is
-reachable only when `meta.acpSessionId` was never written, so there is no agent
-context to lose, and routing those sessions to `continue` instead would skip the
-worktree preparation that only the create path performs. The one reachable
-context-losing case there is an imported session in `sync_conflict`, which belongs
-to the local-project history feature rather than to this defect.
+The `create` dispatch branch (`resolveSessionDispatchAction`) also reconstructs
+history before prompting a fresh agent. An absent `meta.acpSessionId` does not
+prove that history is empty: a first turn can fail during process startup before
+that id is written. A later send still uses create so that workspace preparation
+runs, but includes the earlier input as context. A genuinely new turn skips the
+history read; when metadata pointers or imported turn count prove earlier turns
+exist, create waits on the bounded mirror subscription before opening the native
+session, then proceeds without replay if nothing replayable arrives. The current
+user turn and its deterministic `assistant:<userTurnId>` entry are excluded so a
+re-dispatched turn cannot replay its own output or make an empty assistant entry
+look like synced prior context. Routing these sessions to `continue` would skip
+create-only worktree preparation. The failed input is context for the new
+request; it is not independently redispatched.
 
 The replay itself stays lossy by design: it is capped at 100k characters and drops
 terminal output, then thinking, then the oldest turns. This note does not change
@@ -92,10 +98,11 @@ expiries; a turn failing on `OAuth session expired` records `acp_auth_required`
 and terminates with `force = false`; a resume failure wrapping an auth cause
 halts without a second `createSession`; an unsynced history refuses the
 context-free fallback; and late-arriving history is awaited through a mirror
-subscription and reaches the prompt as replay text. The late-sync test drives the
-subscription from a microtask, so it asserts the signal rather than a sleep.
+subscription and reaches the prompt as replay text. A create turn continues
+without replay when expected history cannot be read. The late-sync test drives
+the subscription from a microtask, so it asserts the signal rather than a sleep.
 
 Not verified: no real provider credential was expired against a live adapter, so
 which adapters actually lose their transcript on `SIGKILL` — the premise for the
 graceful close — is inferred from the ACP contract rather than measured. The
-15s history-sync bound is a judgement, not a measurement.
+30s history-sync bound is a judgement, not a measurement.

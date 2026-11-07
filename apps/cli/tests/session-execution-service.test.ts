@@ -5829,29 +5829,156 @@ describe('SessionExecutionService', () => {
     expect(deps.clearSessionActivePresence).toHaveBeenCalledTimes(1);
   });
 
-  it('replays durable history when a fresh ACP restore has no resumable session id', async () => {
+  it.each(['create', 'continue'] as const)(
+    'replays failed first-turn input through %s dispatch without a resumable ACP id',
+    async (mode) => {
+      const meta = {
+        repoFullName: 'owner/repo',
+        isArchived: false,
+        lastHandledUserMsgId: 'turn-startup-failed',
+      };
+      let history: SessionHistoryInput[] = [
+        {
+          id: 'turn-startup-failed',
+          role: 'user',
+          timestamp: '2026-08-05T05:30:00.000Z',
+          status: 'failed',
+          fileDiff: [],
+          items: [{ type: 'text', text: 'Build this on the two MIT packages.' }],
+        },
+        {
+          id: 'turn-current',
+          role: 'user',
+          timestamp: '2026-08-05T05:31:00.000Z',
+          status: 'pending',
+          fileDiff: [],
+          items: [{ type: 'text', text: '?' }],
+        },
+        {
+          id: 'assistant:turn-current',
+          role: 'assistant',
+          timestamp: '2026-08-05T05:31:01.000Z',
+          fileDiff: [],
+          items: [{ type: 'text', text: 'Stale output from this turn.' }],
+        },
+      ];
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => meta),
+        setStatus: vi.fn(async () => {}),
+        setBaseBranch: vi.fn(async () => {}),
+        getHistory: vi.fn(() => history),
+        updateHistory: vi.fn(
+          async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+            history = updater(history);
+          }
+        ),
+      });
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(
+          async (_id: string, _blocks: { type: string; text: string }[], _options: unknown) => ({})
+        ),
+        currentModel: undefined,
+      };
+      const restoredSession = {
+        sessionId: 'session-fresh-restore' as SessionId,
+        acpSessionId: 'acp-fresh-restore' as ACPSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-fresh-restore'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const buildAcpPromptBlocks = vi.fn(async (args: { replayPromptText?: string }) => [
+        { type: 'text' as const, text: args.replayPromptText ?? '' },
+        { type: 'text' as const, text: '?' },
+      ]);
+      const deps = createBaseDeps({
+        sessionManager: {
+          getSession: vi.fn(() => null),
+          getPendingSession: vi.fn(() => null),
+          createSession: vi.fn(async () => restoredSession as unknown),
+          setSessionError: vi.fn(),
+          terminateSession: vi.fn(),
+          validateSessionCredentials: vi.fn(async () => {}),
+        } as unknown as SessionManager,
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+        buildAcpPromptBlocks,
+      });
+
+      const service = new SessionExecutionService(deps);
+      const request = {
+        type: 'session/chat' as const,
+        sessionId: 'session-fresh-restore' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: { kind: 'github' as const, repoFullName: 'owner/repo', branch: 'main' },
+        acpSessionConfig: { prompt: '?', cliType: 'builtin' as const, agentType: 'codex' },
+        userTurnId: 'turn-current',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      };
+      if (mode === 'create') {
+        await service.startSession({ ...request, type: 'session/create' });
+      } else {
+        await service.continueSession(request);
+      }
+
+      const delivered = agentClient.prompt.mock.calls[0]?.[1];
+      expect(delivered).toEqual([
+        { type: 'text', text: expect.stringContaining('Build this on the two MIT packages.') },
+        { type: 'text', text: '?' },
+      ]);
+      expect(delivered?.[0]?.text).not.toContain('[User]\n?');
+      expect(delivered?.[0]?.text).not.toContain('Stale output from this turn.');
+    }
+  );
+
+  it('waits for late-syncing history before creating a fresh ACP session', async () => {
     const meta = {
       repoFullName: 'owner/repo',
       isArchived: false,
+      latestUserMsgId: 'turn-earlier',
     };
-    let history: SessionHistoryInput[] = [
-      {
-        id: 'turn-startup-failed',
-        role: 'user',
-        timestamp: '2026-08-05T05:30:00.000Z',
-        status: 'failed',
-        fileDiff: [],
-        items: [{ type: 'text', text: 'Build this on the two MIT packages.' }],
-      },
-      {
-        id: 'turn-current',
-        role: 'user',
-        timestamp: '2026-08-05T05:31:00.000Z',
-        status: 'pending',
-        fileDiff: [],
-        items: [{ type: 'text', text: '?' }],
-      },
-    ];
+    const currentTurn: SessionHistoryInput = {
+      id: 'turn-current',
+      role: 'user',
+      timestamp: '2026-09-08T05:31:00.000Z',
+      status: 'pending',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'and now?' }],
+    };
+    const earlierTurn: SessionHistoryInput = {
+      id: 'turn-earlier',
+      role: 'user',
+      timestamp: '2026-09-08T05:30:00.000Z',
+      status: 'handled',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'Build this on the two MIT packages.' }],
+    };
+    const currentAssistant: SessionHistoryInput = {
+      id: 'assistant:turn-current',
+      role: 'assistant',
+      timestamp: '2026-09-08T05:31:01.000Z',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'Stale output from this turn.' }],
+    };
+    let history: SessionHistoryInput[] = [currentTurn, currentAssistant];
+    let notifyMirror: (() => void) | undefined;
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
@@ -5862,6 +5989,30 @@ describe('SessionExecutionService', () => {
           history = updater(history);
         }
       ),
+      mirror: {
+        subscribe: (listener: () => void) => {
+          notifyMirror = listener;
+          queueMicrotask(() => {
+            history = [earlierTurn, currentTurn, currentAssistant];
+            notifyMirror?.();
+          });
+          return () => {
+            notifyMirror = undefined;
+          };
+        },
+      },
+      sessionData: {
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+        commands: {},
+        durability: { waitDurable: async () => {} },
+      },
     });
     const agentClient = {
       isCreated: vi.fn(() => true),
@@ -5869,9 +6020,9 @@ describe('SessionExecutionService', () => {
       prompt: vi.fn(async () => ({})),
       currentModel: undefined,
     };
-    const restoredSession = {
-      sessionId: 'session-fresh-restore' as SessionId,
-      acpSessionId: 'acp-fresh-restore' as ACPSessionId,
+    const createdSession = {
+      sessionId: 'session-late-history-create' as SessionId,
+      acpSessionId: 'acp-created' as ACPSessionId,
       agentClient,
       terminalManager: {} as unknown,
       getWorkdir: () => '/tmp',
@@ -5880,15 +6031,17 @@ describe('SessionExecutionService', () => {
       exec: vi.fn(async () => ''),
       terminate: vi.fn(async () => {}),
       updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-fresh-restore'),
+      createAgent: vi.fn(async () => 'acp-created'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const buildAcpPromptBlocks = vi.fn(async () => [{ type: 'text', text: 'built prompt' }] as any);
+    const buildAcpPromptBlocks = vi.fn(async (args: { replayPromptText?: string }) => [
+      { type: 'text' as const, text: args.replayPromptText ?? '' },
+    ]);
     const deps = createBaseDeps({
       sessionManager: {
         getSession: vi.fn(() => null),
         getPendingSession: vi.fn(() => null),
-        createSession: vi.fn(async () => restoredSession as unknown),
+        createSession: vi.fn(async () => createdSession as unknown),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         validateSessionCredentials: vi.fn(async () => {}),
@@ -5905,13 +6058,13 @@ describe('SessionExecutionService', () => {
     });
 
     const service = new SessionExecutionService(deps);
-    await service.continueSession({
-      type: 'session/chat',
-      sessionId: 'session-fresh-restore' as SessionId,
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-late-history-create' as SessionId,
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: '?', cliType: 'builtin', agentType: 'codex' },
+      acpSessionConfig: { prompt: 'and now?', cliType: 'builtin', agentType: 'codex' },
       userTurnId: 'turn-current',
       userId: 'user-1',
       userName: 'User',
@@ -5923,16 +6076,177 @@ describe('SessionExecutionService', () => {
         replayPromptText: expect.stringContaining('Build this on the two MIT packages.'),
       })
     );
+  });
+
+  it('does not read history for a brand-new create turn', async () => {
+    const currentTurn: SessionHistoryInput = {
+      id: 'turn-current',
+      role: 'user',
+      timestamp: '2026-09-08T05:31:00.000Z',
+      status: 'pending',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'hello' }],
+    };
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => ({ repoFullName: 'owner/repo', isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      getHistory: vi.fn(() => [currentTurn]),
+      updateHistory: vi.fn(async () => {}),
+    });
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => ({})),
+      currentModel: undefined,
+    };
+    const createdSession = {
+      sessionId: 'session-brand-new' as SessionId,
+      acpSessionId: 'acp-brand-new' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-brand-new'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const buildAcpPromptBlocks = vi.fn(async () => [{ type: 'text', text: 'built' }] as any);
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(async () => createdSession as unknown),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        validateSessionCredentials: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      buildAcpPromptBlocks,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-brand-new' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-current',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
     expect(buildAcpPromptBlocks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replayPromptText: expect.not.stringContaining('[User]\n?'),
-      })
+      expect.objectContaining({ replayPromptText: undefined })
+    );
+  });
+
+  it('continues without replay when expected create history cannot be read', async () => {
+    const currentTurn: SessionHistoryInput = {
+      id: 'turn-current',
+      role: 'user',
+      timestamp: '2026-09-08T05:31:00.000Z',
+      status: 'pending',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'and now?' }],
+    };
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => ({
+        repoFullName: 'owner/repo',
+        isArchived: false,
+        lastHandledUserMsgId: 'turn-earlier',
+      })),
+      setStatus: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      getHistory: vi.fn(() => [currentTurn]),
+      updateHistory: vi.fn(async () => {}),
+    });
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => ({})),
+      currentModel: undefined,
+    };
+    const createdSession = {
+      sessionId: 'session-history-unavailable' as SessionId,
+      acpSessionId: 'acp-history-unavailable' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-history-unavailable'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const createSession = vi.fn(async () => createdSession as unknown);
+    const buildAcpPromptBlocks = vi.fn(async () => [{ type: 'text' as const, text: 'and now?' }]);
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession,
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        validateSessionCredentials: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      buildAcpPromptBlocks,
+    });
+
+    const service = new SessionExecutionService(deps);
+    vi.spyOn(
+      service as unknown as {
+        waitForReplayableHistory: (...args: unknown[]) => Promise<unknown>;
+      },
+      'waitForReplayableHistory'
+    ).mockRejectedValue(new Error('history unavailable'));
+
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-history-unavailable' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+      acpSessionConfig: { prompt: 'and now?', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-current',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(buildAcpPromptBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({ replayPromptText: undefined })
     );
     expect(agentClient.prompt).toHaveBeenCalledWith(
-      'acp-fresh-restore',
-      [{ type: 'text', text: 'built prompt' }],
+      'acp-history-unavailable',
+      [{ type: 'text', text: 'and now?' }],
       { signal: expect.any(AbortSignal) }
     );
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
   });
 
   it('waits for late-syncing history before replacing an unresumable ACP session', async () => {

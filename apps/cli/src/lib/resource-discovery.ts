@@ -1,6 +1,7 @@
 import {
   bindAgentRoleTarget,
   canReadAgentRole,
+  findAgentRoleRunConfigIssue,
   getAgentRoleTargets,
   getAcpCapabilityCacheKey,
   summarizeAgentRunConfigCapabilities,
@@ -282,33 +283,11 @@ export class ResourceDiscovery {
       const capability = config ? capabilityOf(config) : undefined;
       if (state.state === 'available' && !capability)
         state = { state: 'unknown', reason: 'capabilities_unreported' };
-      const models = capability ? summarizeAgentRunConfigCapabilities(capability).models : [];
-      if (
-        state.state === 'available' &&
-        capability &&
-        role.runConfig.modelId &&
-        !models.some((model) => model.id === role.runConfig.modelId)
-      )
-        state = { state: 'unavailable', reason: 'model_unavailable' };
-      // A Role pins permission as `modeId` (legacy modes or a `mode` option) or
-      // as the value of the agent's `_permission` option, e.g. Grok's
-      // `permission_mode`. Check each pin against the knob that carries it.
-      const modeOption = capability?.configOptions?.find((option) => option.category === 'mode');
-      const modeId = role.runConfig.modeId;
-      const unavailableMode =
-        Boolean(modeId) &&
-        !(modeOption
-          ? modeOption.options.some((option) => option.value === modeId)
-          : capability?.modes.some((mode) => mode.id === modeId));
-      const unavailablePermission = (capability?.configOptions ?? []).some((option) => {
-        if (option.category !== '_permission') return false;
-        const value = role.runConfig.configOptionValues?.[option.id];
-        return (
-          value !== undefined && !option.options.some((candidate) => candidate.value === value)
-        );
-      });
-      if (state.state === 'available' && capability && (unavailableMode || unavailablePermission))
-        state = { state: 'unavailable', reason: 'mode_unavailable' };
+      const runConfigIssue =
+        state.state === 'available' && capability
+          ? findAgentRoleRunConfigIssue(role, capability)
+          : undefined;
+      if (runConfigIssue) state = { state: 'unavailable', reason: runConfigIssue };
       if (
         pending &&
         (state.reason === 'agent_config_missing' ||
