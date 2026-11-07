@@ -15,9 +15,6 @@
 - Batch Windows ACL checks; bound async SQLite BUSY retries. No blocking busy_timeout in keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
-- A failing Fleet workspace list detaches ordinary runtimes after the grace window, but
-  encrypted runtimes keep their token and verified ledger. Only an explicit unauthorized
-  result or member/device revocation detaches them; their own ledger refresh observes revocation.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
   Distinguish damaged history/pins; never reset trusted pins from remote hints.
