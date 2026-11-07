@@ -20,22 +20,12 @@ export interface E2eeMachineSharingTransport {
   commit(input: E2eeMachineSharingRequests['commit']): Promise<E2eeMachineSharingReplies['commit']>;
 }
 
-/** Separate account-authenticated display port. No device credential is accepted; only opaque ciphertext and
- * untrusted routing/head metadata are returned. This port cannot renew a machine's execution freshness. */
-export interface E2eeMachineSharingDisplayReader {
-  /** The server checks current account workspace membership. Clients still verify signatures/ledger before display. */
-  latestForMember(
-    input: E2eeMachineSharingRequests['latestForMember']
-  ): Promise<E2eeMachineSharingReplies['latestForMember']>;
-}
-
 export type {
   E2eeMachineSharingScope,
   E2eeMachineSharingHead,
   E2eeMachineSharingHeadState,
   E2eeMachineSharingRemovedHead,
   E2eeMachineSharingReadResult,
-  E2eeMachineSharingLatestForMember,
   E2eeMachineSharingVersion,
   E2eeMachineSharingRequests,
   E2eeMachineSharingReplies,
