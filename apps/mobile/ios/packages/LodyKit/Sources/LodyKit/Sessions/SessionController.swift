@@ -378,11 +378,12 @@ class SessionController: UIViewController {
         [weak self] _ in self?.openWorkspaceChanges()
       })
     }
-    more.menu = UIMenu(children: changes + simulatorMenu() + [
-      UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
-        self?.find(query: "", keyboard: true)
-      },
-    ] + sessionMenuItems(session) + [
+    var children: [UIMenuElement] = changes + simulatorMenu()
+    children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
+      self?.find(query: "", keyboard: true)
+    })
+    children += sessionMenuItems(session)
+    more.menu = UIMenu(children: children + [
       UIAction(title: String(localized: "session.action.share", bundle: .lody), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
         self?.perform("share")
       },

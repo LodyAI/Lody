@@ -97,6 +97,8 @@
 
 - Conversation members use native `AuthAPI.members` pagination and the account/workspace-scoped `WorkspaceMembers` SQLite projection (ID, name, HTTPS avatar URL only). Cached identities render first; fresh responses reconfigure message rows without waiting for new messages. Request cancellation, account/workspace ownership, credential equality and LocalStore generation fence stale results and logout writes. Failed refreshes retain cached identities.
 
+- The conversation More menu follows web `SessionHeaderMenu` (`SessionController+More`): Rename and Change owner (multi-member workspaces; writes only `SessionMeta.userId`, never sharing) are hidden for archived chats; Copy offers base branch (only when it differs from the current branch), path, Markdown, URL and deeplink. Path and Markdown come from runtime ports of web `session-workspace-path` and `conversation-markdown`; keep them in step with web.
+
 - The conversation header has no PR button or historical PR menu. PR navigation stays in the context capsule above the composer.
 
 - Conversation changed files never expand inline: the files row keeps file count and line totals and opens `TurnFilesController` (titled with the file count). Keep the tasks row, files row and final model/time footer ordering when changing this output card.
