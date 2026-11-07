@@ -1,5 +1,4 @@
 import LodyCore
-import LodyDesignSystem
 import UIKit
 
 /// One scene owns the runtime and the application coordinators, independently of page lifetimes.
@@ -10,8 +9,6 @@ public final class LodyApplication {
   private let push = PushLifecycle()
 
   public func launch(_ application: UIApplication, options: [UIApplication.LaunchOptionsKey: Any]?) {
-    // Inter / JetBrains Mono for design-system surfaces (the Home chat list).
-    LodyFonts.register()
     _ = accent.application(application, didFinishLaunchingWithOptions: options)
     _ = push.application(application, didFinishLaunchingWithOptions: options)
   }

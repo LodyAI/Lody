@@ -199,16 +199,15 @@ final class ChatComposerInput: TextView {
   static func makeEditorView() -> LexicalView {
     let theme = Theme()
     theme.root = [.font: UIFont.dynamic(of: 17), .foregroundColor: UIColor.label]
-    theme.setValue(.text, forSubtype: TextNodeThemeSubtype.code, value: [.fontFamily: "Menlo", .backgroundColor: UIColor.tertiarySystemFill])
     theme.code = [
-      .fontFamily: "Menlo", .paddingHead: 8.0, .paddingTail: -8.0,
+      .paddingHead: 8.0, .paddingTail: -8.0,
       .codeBlockCustomDrawing: CodeBlockCustomDrawingAttributes(background: .secondarySystemFill, border: .separator, borderWidth: 0.5),
     ]
     theme.quote = [
       .paddingHead: 12.0,
       .quoteCustomDrawing: QuoteCustomDrawingAttributes(barColor: .separator, barWidth: 3, rounded: true, barInsets: .zero),
     ]
-    setHeadingFont(of: theme, body: UIFont.dynamic(of: 17))
+    setContentFonts(of: theme, body: UIFont.dynamic(of: 17))
     let history = EditorHistoryPlugin()
     let config = EditorConfig(theme: theme, plugins: [ListPlugin(), LinkPlugin(), MarkdownShortcutPlugin(), history])
     let view = LexicalView(editorConfig: config, featureFlags: FeatureFlags(), textViewType: ChatComposerInput.self)
@@ -218,7 +217,10 @@ final class ChatComposerInput: TextView {
   }
 
   // Matches ChatMarkdownTheme's title font, which the transcript uses for every heading level.
-  private static func setHeadingFont(of theme: Theme, body: UIFont) {
+  private static func setContentFonts(of theme: Theme, body: UIFont) {
+    let code = UIFont.monospacedSystemFont(ofSize: body.pointSize, weight: .regular)
+    theme.setValue(.text, forSubtype: TextNodeThemeSubtype.code, value: [.font: code, .backgroundColor: UIColor.tertiarySystemFill])
+    theme.code?[.font] = code
     let font = UIFont.systemFont(ofSize: body.pointSize * 20 / 17, weight: .semibold)
     for tag in ["h1", "h2", "h3", "h4", "h5", "h6"] {
       theme.setValue(.heading, forSubtype: tag, value: [.font: font])
@@ -246,7 +248,7 @@ final class ChatComposerInput: TextView {
     didSet {
       guard let font, (editor.getTheme().root?[.font] as? UIFont) != font else { return }
       editor.getTheme().root?[.font] = font
-      Self.setHeadingFont(of: editor.getTheme(), body: font)
+      Self.setContentFonts(of: editor.getTheme(), body: font)
       try? editor.update { editor.dirtyType = .fullReconcile }
     }
   }

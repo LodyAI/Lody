@@ -1,24 +1,48 @@
-// Hand-written runtime for the generated LodyTextStyles.swift. Edit freely.
+// System typography runtime for the platform-owned LodyTextStyles.swift.
 
-import CoreText
 import SwiftUI
 import UIKit
 
-/// One entry of the shared type scale. Instances are generated; see `LodyTextStyle.body` etc.
+/// One entry of the native type scale; see `LodyTextStyle.body` etc.
 public struct LodyTextStyle: Sendable, Hashable {
-    public let fontName: String
+    public let weight: LodyFontWeight
+    public var monospaced: Bool = false
     public let size: CGFloat
     public let lineHeight: CGFloat
     public let tracking: CGFloat
     public let dynamicType: LodyDynamicType
 
-    /// Scales with Dynamic Type. Prefer `.lodyTextStyle(_:)`, which also applies line height and tracking.
-    public var font: Font { .custom(fontName, size: size, relativeTo: dynamicType.textStyle) }
-
     /// UIKit font scaled for the current content size category.
     public var uiFont: UIFont {
-        let base = UIFont(name: fontName, size: size) ?? .systemFont(ofSize: size)
-        return UIFontMetrics(forTextStyle: dynamicType.uiTextStyle).scaledFont(for: base)
+        UIFontMetrics(forTextStyle: dynamicType.uiTextStyle).scaledFont(for: baseFont(size: size))
+    }
+
+    fileprivate func baseFont(size: CGFloat) -> UIFont {
+        monospaced
+            ? .monospacedSystemFont(ofSize: size, weight: weight.uiWeight)
+            : .systemFont(ofSize: size, weight: weight.uiWeight)
+    }
+}
+
+public enum LodyFontWeight: Sendable, Hashable {
+    case regular, medium, semibold, bold
+
+    fileprivate var uiWeight: UIFont.Weight {
+        switch self {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        }
+    }
+
+    fileprivate var swiftUIWeight: Font.Weight {
+        switch self {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        }
     }
 }
 
@@ -62,54 +86,38 @@ public enum LodyDynamicType: Sendable, Hashable {
 public extension View {
     /// Applies font, tracking and a fixed line height, matching Compose's
     /// `lineHeight` + `LineHeightStyle(Center, Trim.None)` on Android.
-    func lodyTextStyle(_ style: LodyTextStyle) -> some View {
-        modifier(LodyTextStyleModifier(style: style))
+    func lodyTextStyle(_ style: LodyTextStyle, fontOnly: Bool = false) -> some View {
+        modifier(LodyTextStyleModifier(style: style, fontOnly: fontOnly))
     }
 }
 
 private struct LodyTextStyleModifier: ViewModifier {
     let style: LodyTextStyle
+    let fontOnly: Bool
     @ScaledMetric private var size: CGFloat
     @ScaledMetric private var lineHeight: CGFloat
 
-    init(style: LodyTextStyle) {
+    init(style: LodyTextStyle, fontOnly: Bool) {
         self.style = style
+        self.fontOnly = fontOnly
         _size = ScaledMetric(wrappedValue: style.size, relativeTo: style.dynamicType.textStyle)
         _lineHeight = ScaledMetric(wrappedValue: style.lineHeight, relativeTo: style.dynamicType.textStyle)
     }
 
     func body(content: Content) -> some View {
-        let natural = (UIFont(name: style.fontName, size: size) ?? .systemFont(ofSize: size)).lineHeight
-        let leading = max(0, lineHeight - natural)
+        let natural = style.baseFont(size: size).lineHeight
+        let leading = fontOnly ? 0 : max(0, lineHeight - natural)
         content
-            .font(.custom(style.fontName, fixedSize: size))
-            .tracking(style.tracking)
+            .font(.system(size: size, weight: style.weight.swiftUIWeight, design: style.monospaced ? .monospaced : .default))
+            .tracking(fontOnly ? 0 : style.tracking)
             .lineSpacing(leading)
             .padding(.vertical, leading / 2)
     }
 }
 
-public enum LodyFonts {
-    private static let registration: Void = {
-        for name in LodyFontFiles.all {
-            // SwiftPM may keep or flatten the fonts/font directory when processing resources.
-            let url = Bundle.module.url(forResource: name, withExtension: "ttf")
-                ?? Bundle.module.url(forResource: name, withExtension: "ttf", subdirectory: "font")
-            guard let url else {
-                assertionFailure("Missing bundled font \(name).ttf")
-                continue
-            }
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
-    }()
-
-    /// Registers the bundled Inter / JetBrains Mono faces. Call once at launch, before any UI.
-    public static func register() { _ = registration }
-}
-
 public enum LodyAppearance {
     /// Points native navigation bars at the Lody type scale and accent while keeping the
-    /// system material (Liquid Glass) untouched. Call once at launch after `LodyFonts.register()`.
+    /// system material (Liquid Glass) untouched. Call once at launch if adopting the navigation type scale.
     @MainActor
     public static func apply() {
         let standard = UINavigationBarAppearance()

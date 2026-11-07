@@ -15,21 +15,7 @@ extension UIFont {
   }
 
   static func lodySFMono(ofSize size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
-    let names = [
-      UIFont.Weight.medium: "SFMono-Medium",
-      .semibold: "SFMono-Semibold",
-      .bold: "SFMono-Bold",
-    ]
-    if let name = names[weight], let font = UIFont(name: name, size: size) {
-      return font
-    }
-    if let font = UIFont(name: "SFMono-Regular", size: size) {
-      return font
-    }
-    if let descriptor = systemFont(ofSize: size, weight: weight).fontDescriptor.withDesign(.monospaced) {
-      return UIFont(descriptor: descriptor, size: size)
-    }
-    return monospacedSystemFont(ofSize: size, weight: weight)
+    monospacedSystemFont(ofSize: size, weight: weight)
   }
 
   func withTabularNumbers() -> UIFont {
