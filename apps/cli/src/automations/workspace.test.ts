@@ -621,22 +621,32 @@ describe('Automation control authority', () => {
   });
   it('manages an owned Session’s automations from another active Session', async () => {
     const host = await workspaceFixture({
-      id: 'session-b', machineId: 'machine', userId: 'user', collaborationStopped: false,
+      id: 'session-b',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
     });
-    const wait = await host.command(
+    const wait = (await host.command(
       { type: 'register', sessionId: 'session-b', program: '() => false', intervalMs: 30000 },
       'session-a'
-    ) as { id: string; sessionId: string };
+    )) as { id: string; sessionId: string };
     expect(wait.sessionId).toBe('session-b');
-    expect(await host.command({ type: 'list', sessionId: 'session-b' }, 'session-a'))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ id: wait.id })]));
-    expect(await host.command({ type: 'show', id: wait.id }, 'session-a'))
-      .toMatchObject({ sessionId: 'session-b' });
-    await host.command({ type: 'configure', sessionId: 'session-b', settings: { archiveAfterMerge: true } }, 'session-a');
-    expect(await host.command({ type: 'settings', sessionId: 'session-b' }, 'session-a'))
-      .toMatchObject({ archiveAfterMerge: true });
-    expect(await host.command({ type: 'activities', sessionId: 'session-b' }, 'session-a'))
-      .toMatchObject({ items: expect.any(Array) });
+    expect(await host.command({ type: 'list', sessionId: 'session-b' }, 'session-a')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: wait.id })])
+    );
+    expect(await host.command({ type: 'show', id: wait.id }, 'session-a')).toMatchObject({
+      sessionId: 'session-b',
+    });
+    await host.command(
+      { type: 'configure', sessionId: 'session-b', settings: { archiveAfterMerge: true } },
+      'session-a'
+    );
+    expect(
+      await host.command({ type: 'settings', sessionId: 'session-b' }, 'session-a')
+    ).toMatchObject({ archiveAfterMerge: true });
+    expect(
+      await host.command({ type: 'activities', sessionId: 'session-b' }, 'session-a')
+    ).toMatchObject({ items: expect.any(Array) });
     await host.command({ type: 'cancel', id: wait.id }, 'session-a');
     expect(host.ledger.wait(wait.id)?.state).toBe('cancelled');
     await expect(host.command({ type: 'list' }, 'inactive-session')).rejects.toThrow(

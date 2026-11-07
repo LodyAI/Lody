@@ -397,10 +397,7 @@ export async function createAutomationWorkspaceLegacy(options: {
       }
     );
     const assertReadable = (wait: AutomationWait) => {
-      if (
-        wait.ownerUserId !== auth.userId ||
-        wait.ownerMachineId !== auth.machineId
-      )
+      if (wait.ownerUserId !== auth.userId || wait.ownerMachineId !== auth.machineId)
         throw new Error('AUTOMATION_NOT_FOUND');
     };
     const publicWait = (wait: AutomationWait) => {
@@ -575,8 +572,7 @@ export async function createAutomationWorkspaceLegacy(options: {
                 const current = ledger.work(command.id);
                 return current ? workActivity(current) : undefined;
               }
-              if (receipt.rule.ownerUserId !== auth.userId)
-                throw new Error('AUTOMATION_NOT_FOUND');
+              if (receipt.rule.ownerUserId !== auth.userId) throw new Error('AUTOMATION_NOT_FOUND');
               await runtime.runPromise(service.cancel(command.id));
               const current = ledger.receipt(command.id);
               return current ? actionActivity(current) : undefined;
