@@ -9,6 +9,18 @@
         android:label="@string/app_name"
         android:supportsRtl="true">
         <activity
+            android:name="app.lody.android.auth.AuthCallbackActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="lody" android:host="auth" android:path="/mobile-callback" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name="app.lody.android.home.HomeActivity"
             android:exported="true"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"

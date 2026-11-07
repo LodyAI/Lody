@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +20,14 @@ const script = fileURLToPath(
 const available = spawnSync('xcodegen', ['--version']).status === 0;
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'lody-project-'));
+  const mobile = await realpath(await mkdtemp(join(tmpdir(), 'lody-project-')));
+  const root = join(mobile, 'ios/apps/ios');
+  await mkdir(root, { recursive: true });
+  await mkdir(join(root, 'scripts'));
+  await copyFile(
+    new URL('../../../../../backend-config.mjs', import.meta.url),
+    join(mobile, 'backend-config.mjs'),
+  );
   await mkdir(join(root, 'App'), { recursive: true });
   await writeFile(
     join(root, 'package.json'),
@@ -24,12 +39,15 @@ async function fixture() {
   );
   await writeFile(join(root, 'App/Main.swift'), 'struct App {}');
   const targets = {};
-  for (const name of [
-    'Lody',
-    'LodyShare',
-    'LodyNotificationService',
-  ]) {
-    targets[name] = { type: 'application', platform: 'iOS', sources: ['App'] };
+  for (const name of ['Lody', 'LodyShare', 'LodyNotificationService']) {
+    targets[name] = {
+      type: 'application',
+      platform: 'iOS',
+      sources: ['App'],
+      ...(name === 'Lody'
+        ? {}
+        : { info: { path: `.generated/${name}/Info.plist` } }),
+    };
   }
   await writeFile(
     join(root, 'project.yml'),
@@ -46,7 +64,7 @@ function generate(root, environment = {}) {
       'import json, runpy, sys; from pathlib import Path; runpy.run_path(sys.argv[1])["generate"](Path(sys.argv[2]), json.loads(sys.argv[3]))',
       script,
       root,
-      JSON.stringify(environment),
+      JSON.stringify({ PATH: process.env.PATH, ...environment }),
     ],
     { encoding: 'utf8' },
   );
@@ -97,7 +115,7 @@ test(
         'New source is not included in the build',
       );
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(join(root, '../../..'), { recursive: true, force: true });
     }
   },
 );
@@ -151,7 +169,7 @@ test(
           ),
       );
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(join(root, '../../..'), { recursive: true, force: true });
     }
   },
 );

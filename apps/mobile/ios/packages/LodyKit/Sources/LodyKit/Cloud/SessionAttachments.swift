@@ -43,7 +43,7 @@ enum SessionAttachments {
 
   static func imageDownloadURL(workspace: String, session: String, imageId: String) -> URL {
     let path = [workspace, session, imageId].map(segment)
-    return URL(string: "https://api.lody.ai/api/workspaces/\(path[0])/session-images/\(path[1])/\(path[2])")!
+    return URL(string: "\(BackendEnvironment.worker)/api/workspaces/\(path[0])/session-images/\(path[1])/\(path[2])")!
   }
 
   static func imageThumbnailURL(workspace: String, session: String, imageId: String, width: Int) -> URL {
@@ -91,7 +91,7 @@ enum SessionAttachments {
       guard size.isRegularFile == true, let count = size.fileSize, count > 0, count <= 100 * 1024 * 1024 else {
         throw error(String(localized: "native.attachment.error.empty", bundle: .lody))
       }
-      let base = "https://api.lody.ai/api/workspaces/\(segment(workspace))/session-\(kind == "image" ? "images" : "files")"
+      let base = "\(BackendEnvironment.worker)/api/workspaces/\(segment(workspace))/session-\(kind == "image" ? "images" : "files")"
       var responseStage: StaticString = kind == "image" ? "image_upload" : "file_upload"
       var result: [String: Any]
       if kind == "image" {
@@ -185,7 +185,7 @@ enum SessionAttachments {
     guard let token = try AuthKeychain.read() else { throw error(String(localized: "native.attachment.error.signIn", bundle: .lody)) }
     let path = [workspace, session, fileId].map(segment)
     let kind = image ? "session-images" : "session-files"
-    var request = URLRequest(url: URL(string: "https://api.lody.ai/api/workspaces/\(path[0])/\(kind)/\(path[1])/\(path[2])")!, timeoutInterval: 120)
+    var request = URLRequest(url: URL(string: "\(BackendEnvironment.worker)/api/workspaces/\(path[0])/\(kind)/\(path[1])/\(path[2])")!, timeoutInterval: 120)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let (temporary, response) = try await URLSession.shared.download(for: request)
     defer { try? FileManager.default.removeItem(at: temporary) }

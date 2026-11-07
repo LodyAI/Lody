@@ -17,29 +17,41 @@ internal class CloudAuthHttp(private val transport: AuthTransport) : CloudAuthAp
     private fun <T> decode(block: () -> T): T = try { block() } catch (_: Exception) { throw AuthFailure("invalid_auth_response") }
     private fun JSONObject.text(key: String): String = (get(key) as String).also { require(it.isNotBlank() && it.length <= 16384) }
     private fun JSONObject.seconds(key: String, maximum: Int): Int = (get(key) as Number).toInt().also { require(it in 1..maximum) }
-    override suspend fun authorize(): DeviceAuthorization {
-        val body = request("/api/auth/device/code", body = JSONObject().put("client_id", "lody-cli"))
-        return decode {
-            val data = JSONObject(body)
-            val uri = URI(data.text("verification_uri_complete"))
-            require(uri.scheme == "https" && uri.host in setOf("lody.ai", "backend.lody.ai") && uri.userInfo == null && uri.port == -1 && uri.fragment == null)
-            val official = "https://lody.ai" + uri.rawPath + (uri.rawQuery?.let { "?$it" } ?: "")
-            DeviceAuthorization(data.text("device_code"), data.text("user_code"), official, data.seconds("expires_in", 3600), data.seconds("interval", 60))
+    private suspend fun nativeRequest(path: String, body: JSONObject): JSONObject {
+        val reply = transport.request(path, null, body.toString())
+        if (reply.status !in 200..299) {
+            val code = try { JSONObject(reply.body).optString("code") } catch (_: Exception) { "" }
+            throw AuthFailure(when (code) {
+                "INVALID_EMAIL_OR_PASSWORD", "INVALID_PASSWORD", "USER_NOT_FOUND" -> "invalid_credentials"
+                "EMAIL_NOT_VERIFIED" -> "email_not_verified"
+                "USER_ALREADY_EXISTS", "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" -> "email_in_use"
+                "PASSWORD_TOO_SHORT", "PASSWORD_TOO_LONG" -> "invalid_password"
+                "INVALID_EMAIL" -> "invalid_email"
+                else -> if (reply.status == 429) "rate_limited" else "request_failed"
+            })
         }
+        return decode { JSONObject(reply.body) }
     }
-    override suspend fun poll(code: DeviceAuthorization): TokenPoll {
-        val body = request("/api/auth/device/token", body = JSONObject().put("client_id", "lody-cli").put("device_code", code.deviceCode).put("grant_type", "urn:ietf:params:oauth:grant-type:device_code"), polling = true)
-        return decode {
-            val data = JSONObject(body)
-            if (data.has("access_token")) TokenPoll.Authorized(Credential(data.text("access_token")))
-            else when (data.text("error")) {
-                "authorization_pending" -> TokenPoll.Pending
-                "slow_down" -> TokenPoll.SlowDown
-                "access_denied" -> TokenPoll.Denied
-                "expired_token" -> TokenPoll.Expired
-                else -> throw IllegalArgumentException()
-            }
-        }
+    private fun JSONObject.credential(): Credential = decode { Credential(text("token")) }
+    override suspend fun exchange(code: String, verifier: String): Credential =
+        nativeRequest("/api/auth/mobile/exchange", JSONObject().put("code", code).put("code_verifier", verifier).put("redirect_uri", NATIVE_CALLBACK)).credential()
+    override suspend fun email(email: String, password: String): Credential =
+        nativeRequest("/api/auth/sign-in/email", JSONObject().put("email", email).put("password", password).put("callbackURL", "${app.lody.android.BackendEnvironment.site}/api/auth/mobile/email-verified")).credential()
+    override suspend fun register(name: String, email: String, password: String): Credential? {
+        val data = nativeRequest("/api/auth/sign-up/email", JSONObject().put("name", name).put("email", email).put("password", password).put("callbackURL", "${app.lody.android.BackendEnvironment.site}/api/auth/mobile/email-verified"))
+        return if (data.isNull("token") || !data.has("token")) {
+            sendVerification(email)
+            null
+        } else data.credential()
+    }
+    override suspend fun google(idToken: String, nonce: String): Credential =
+        nativeRequest("/api/auth/sign-in/social", JSONObject().put("provider", "google").put("idToken", JSONObject().put("token", idToken).put("nonce", nonce))).credential()
+    override suspend fun sendVerification(email: String) {
+        nativeRequest("/api/auth/send-verification-email", JSONObject().put("email", email).put("callbackURL", "${app.lody.android.BackendEnvironment.site}/api/auth/mobile/email-verified"))
+    }
+    override suspend fun requestReset(email: String) {
+        if (app.lody.android.BackendEnvironment.site != "https://backend.lody.ai") throw AuthFailure("unsupported_local_reset")
+        nativeRequest("/api/auth/request-password-reset", JSONObject().put("email", email).put("redirectTo", "https://lody.ai/reset-password"))
     }
     override suspend fun account(credential: Credential): Account {
         val session = request("/api/auth/get-session", credential)

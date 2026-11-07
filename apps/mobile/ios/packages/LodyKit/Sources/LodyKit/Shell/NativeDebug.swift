@@ -93,53 +93,53 @@ enum NativeDebug {
 
 final class NativeDebugController: UIViewController {
   private static let groups: [(id: String, header: String, rows: [(String, String, String)])] = [
-    ("ui", "界面验收", [
+    ("ui", String(localized: "debug.native.ui.verification", bundle: .lody), [
       ("create-recovery", "Device recovery verification", "desktopcomputer"),
-      ("pull-request-preview", "GitHub PR / CI 预览", "arrow.triangle.pull"),
-      ("project-picker-preview", "选择项目验收", "folder"),
-      ("notification-preview", "通知权限验收", "bell"),
-      ("push-subscription-verify", "验证 OneSignal 订阅", "bell.badge"),
-      ("permission-native-preview", "权限验收", "hand.raised"),
-      ("onboarding-preview", "登录引导验收", "hand.wave"),
-      ("project-history-preview", "项目会话同步验收", "arrow.triangle.2.circlepath"),
+      ("pull-request-preview", String(localized: "debug.native.github.pr.ci.preview", bundle: .lody), "arrow.triangle.pull"),
+      ("project-picker-preview", String(localized: "debug.native.project.picker.verification", bundle: .lody), "folder"),
+      ("notification-preview", String(localized: "debug.native.notification.permission.verification", bundle: .lody), "bell"),
+      ("push-subscription-verify", String(localized: "debug.native.verify.onesignal.subscription", bundle: .lody), "bell.badge"),
+      ("permission-native-preview", String(localized: "debug.native.permission.verification", bundle: .lody), "hand.raised"),
+      ("onboarding-preview", String(localized: "debug.native.onboarding.verification", bundle: .lody), "hand.wave"),
+      ("project-history-preview", String(localized: "debug.native.project.conversation.sync.verification", bundle: .lody), "arrow.triangle.2.circlepath"),
       ("directory-preview", "Folder browser", "folder"),
       ("project-preview", "Project page", "folder.badge.gearshape"),
       ("activity-preview", "Activity page", "bolt.horizontal"),
-      ("settings-preview", "远程设置验收", "gear"),
+      ("settings-preview", String(localized: "debug.native.remote.settings.verification", bundle: .lody), "gear"),
       ("settings-baseline-live", "Settings baseline", "gearshape.2"),
       ("ai-usage-preview", "AI usage", "chart.bar"),
-      ("mcp-settings-preview", "MCP 设置验收", "server.rack"),
+      ("mcp-settings-preview", String(localized: "debug.native.mcp.settings.verification", bundle: .lody), "server.rack"),
       ("memory-preview", "Memory acceptance", "brain"),
       ("published-shares-preview", "Published shares acceptance", "link"),
       ("memory-states-preview", "Memory states", "brain"),
-      ("agent-roles-preview", "Agent 角色验收", "person.crop.square"),
+      ("agent-roles-preview", String(localized: "debug.native.agent.role.verification", bundle: .lody), "person.crop.square"),
       ("archived-sessions-preview", "Archived sessions", "archivebox"),
       ("session-preview-live", "Native session", "bubble.left"),
-      ("machine-settings-preview", "机器设置验收", "desktopcomputer"),
-      ("preferences-preview", "偏好设置验收", "slider.horizontal.3"),
+      ("machine-settings-preview", String(localized: "debug.native.machine.settings.verification", bundle: .lody), "desktopcomputer"),
+      ("preferences-preview", String(localized: "debug.native.preferences.verification", bundle: .lody), "slider.horizontal.3"),
       ("diagnostics-preview", "Diagnostics", "waveform.path.ecg"),
-      ("appearance-preview", "外观验收", "circle.lefthalf.filled"),
-      ("queued-message-behavior-preview", "排队消息行为验收", "arrow.uturn.forward"),
+      ("appearance-preview", String(localized: "debug.native.appearance.verification", bundle: .lody), "circle.lefthalf.filled"),
+      ("queued-message-behavior-preview", String(localized: "debug.native.queued.message.behavior.verification", bundle: .lody), "arrow.uturn.forward"),
       ("model-memory", "Model memory verification", "brain"),
       ("create-parity", "Create parity verification", "square.on.square"),
     ]),
-    ("chat", "聊天与输入", [
+    ("chat", String(localized: "debug.native.chat.and.input", bundle: .lody), [
       ("item-detail-preview", "Item details", "doc.text.magnifyingglass"),
       ("edit-message-preview", "Message editing", "pencil"),
       ("file-diff-preview", "Native diff", "plus.forwardslash.minus"),
       ("workspace-changes-preview", "Native workspace changes", "arrow.triangle.branch"),
       ("file-content-preview", "Native file content", "doc"),
-      ("agent-error-preview", "Agent 错误预览", "exclamationmark.circle"),
+      ("agent-error-preview", String(localized: "debug.native.agent.error.preview", bundle: .lody), "exclamationmark.circle"),
     ]),
-    ("send", "发送", [
-      ("send-preview", "离线发送验收", "paperplane"),
-      ("send-queue", "Queue 验收", "list.bullet"),
+    ("send", String(localized: "debug.native.sending", bundle: .lody), [
+      ("send-preview", String(localized: "debug.native.offline.send.verification", bundle: .lody), "paperplane"),
+      ("send-queue", String(localized: "debug.native.queue.verification", bundle: .lody), "list.bullet"),
       ("session-share-preview", "Conversation sharing", "link"),
-      ("send-guide", "引导发送验收", "arrow.uturn.forward"),
-      ("send-scroll-guide", "长上下文 · 直接插话", "arrow.uturn.forward"),
-      ("send-scroll-queue", "长上下文 · 队列插话", "list.bullet"),
-      ("send-scroll-normal", "长上下文 · 普通发送", "paperplane"),
-      ("send-interrupt", "Queue 中断验收", "stop.circle"),
+      ("send-guide", String(localized: "debug.native.guided.send.verification", bundle: .lody), "arrow.uturn.forward"),
+      ("send-scroll-guide", String(localized: "debug.native.long.context.direct.interjection", bundle: .lody), "arrow.uturn.forward"),
+      ("send-scroll-queue", String(localized: "debug.native.long.context.queued.interjection", bundle: .lody), "list.bullet"),
+      ("send-scroll-normal", String(localized: "debug.native.long.context.normal.send", bundle: .lody), "paperplane"),
+      ("send-interrupt", String(localized: "debug.native.queue.interrupt.verification", bundle: .lody), "stop.circle"),
     ]),
   ]
 
@@ -175,20 +175,20 @@ final class NativeDebugController: UIViewController {
         return LodyListRow.item(id, title, image: image, disclosure: id != "push-subscription-verify")
       })
     }
-    var hang = LodyListRow.item("runtime-hang", "卡死 WebView JS", image: "exclamationmark.triangle")
+    var hang = LodyListRow.item("runtime-hang", String(localized: "debug.native.hang.webview.javascript", bundle: .lody), image: "exclamationmark.triangle")
     hang.destructive = true
-    sections.append(.group("runtime", header: "数据运行时",
-      footer: "故障注入会暂时中断同步。看门狗应自动重建；连续故障达到上限后，请返回项目页下拉重新同步。", [
+    sections.append(.group("runtime", header: String(localized: "debug.native.data.runtime", bundle: .lody),
+      footer: String(localized: "debug.native.faultExplanation", bundle: .lody), [
         runtimeRow(),
         hang,
-        .item("runtime-restart", "模拟 WebContent 进程丢失", image: "arrow.clockwise"),
+        .item("runtime-restart", String(localized: "debug.native.simulate.webcontent.process.loss", bundle: .lody), image: "arrow.clockwise"),
       ]))
     list.setSections(sections)
   }
 
   private func runtimeRow() -> LodyListRow {
     guard let status = DataRuntime.current?.status() else {
-      return .item("runtime-state", "无法读取运行时状态", image: "cpu", action: false)
+      return .item("runtime-state", String(localized: "debug.native.runtime.status.unavailable", bundle: .lody), image: "cpu", action: false)
     }
     let generation = (status["generation"] as? Int).map { "#\($0)" }
     let details = [generation, status["reason"] as? String, status["lastStartReason"] as? String]

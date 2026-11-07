@@ -1,0 +1,4 @@
+# Local backend configuration; only the non-secret template is versioned.
+.env
+.env.*
+!.env.example

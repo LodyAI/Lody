@@ -42,9 +42,11 @@
 
 - Keep fault injection, runtime internals, and navigation/native demos on the development-only Debug page, reached from Settings. Product screens expose actionable connection state only.
 
+- Build-time backends are resolved by the shared `../backend-config.mjs`; see [backend configuration](docs/backend-configuration.md). Keep Swift and bundled runtime configuration identical; nonproduction storage must never reuse production credentials or caches. All configurations require public HTTPS origins; never relax TLS validation.
+
 ## Cloud POC
 
-- Device Flow uses the currently registered `lody-cli` client transparently; do not claim a dedicated iOS client until the server registers one. Never substitute desktop credentials for app authorization.
+- Login is native: email/password uses Better Auth; Apple uses AuthenticationServices; Google uses its native SDK with public client IDs; GitHub/Discord use a system authentication session and a one-use PKCE backend handoff. Never restore device-code polling or a Web login screen. `AuthSession` alone installs Keychain credentials, after account validation and cancellation checks after every suspension. Credential HTTP requests refuse all redirects and cookies; persist only the raw JSON `token`, never the signed `set-auth-token` cookie header, because Streams authorization looks up the raw session token. See [native auth configuration](docs/native-auth.md). Never substitute desktop credentials for app authorization.
 - `data-runtime` in LodyKit owns the POC's catalog replicas, Streams reads, cursors and retry. Native sessions observe projected catalog events; do not add a second live replica. The old offline decoder is retained only as a comparison path.
 - Swift owns the offscreen WebView and watchdog. Keep startup/heartbeat deadlines outside JS, ignore callbacks from replaced views, and bound automatic restarts. Background suspension is not a watchdog failure: retain the WebView and reset its heartbeat deadline on foreground; recreate only a missing or failed runtime. User-started sends use only a short UIApplication background allowance through reply synchronization; never request BGContinuedProcessingTask, which displays a system Live Activity, or use idle connection keepalive.
 - The host↔runtime boundary is the versioned contract in `packages/cloud-runtime/src/contract`, with generated Swift in `packages/lody-core` (`pnpm contract`). Add methods there: the runtime exposes only `dataRuntime.receive` and posts only `ready` / `envelope`; do not add `callAsyncJavaScript` commands.

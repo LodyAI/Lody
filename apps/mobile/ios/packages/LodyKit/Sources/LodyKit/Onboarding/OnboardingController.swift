@@ -1,53 +1,133 @@
+import AuthenticationServices
 import UIKit
 
 @MainActor
-class OnboardingController: UIViewController {
-  private static let features = [
-    ("sessions", "bubble.left.and.text.bubble.right.fill"),
-    ("reply", "paperplane.fill"),
-    ("privacy", "lock.shield.fill"),
-  ]
-
+class OnboardingController: UIViewController, UITextFieldDelegate {
   private let service: OnboardingService
-  private let intro = OnboardingIntro()
   private let scroll = UIScrollView()
-  private let header = UIStackView()
-  private let featureRows: [UIView]
-  private let featureStack = UIStackView()
-  private let waitingView = OnboardingWaitingView()
-  private let footer = UIStackView()
-  private let footnote = UIStackView()
+  private let email = UITextField()
+  private let name = UITextField()
+  private var registering = false
+  private var emailSubmit: UIButton?
+  private let password = UITextField()
   private let errorLabel = UILabel()
-  private let button = UIButton(configuration: .prominentGlass())
-  private var panelBottom: NSLayoutConstraint?
+  private let progress = UIActivityIndicatorView(style: .medium)
+  private let cancelButton = UIButton(type: .system)
+  private var controls: [UIControl] = []
   private var observers: [NSObjectProtocol] = []
-  private var state = OnboardingState()
-  private var shown = false
   private var finished = false
 
   init(service: OnboardingService = .live) {
     self.service = service
-    featureRows = Self.features.map { Self.featureRow(id: $0.0, symbol: $0.1) }
     super.init(nibName: nil, bundle: nil)
     title = String(localized: "onboarding.title", bundle: .lody)
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
-
   isolated deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .lodyBackground
+    view.backgroundColor = .systemBackground
     view.accessibilityIdentifier = "onboarding-sheet"
-    buildContent()
-    buildPanel()
-    if let probe = intro.probe {
-      probe.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
-      view.addSubview(probe)
+    scroll.translatesAutoresizingMaskIntoConstraints = false
+    scroll.keyboardDismissMode = .interactive
+    view.addSubview(scroll)
+    let stack = UIStackView()
+    stack.axis = .vertical
+    stack.spacing = 16
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    scroll.addSubview(stack)
+    NSLayoutConstraint.activate([
+      scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+      scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      scroll.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+      stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 24),
+      stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
+      stack.centerXAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerXAnchor),
+      stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -48),
+    ])
+    let heading = UILabel()
+    heading.text = String(localized: "auth.native.title", bundle: .lody)
+    heading.font = .preferredFont(forTextStyle: .largeTitle)
+    heading.adjustsFontForContentSizeCategory = true
+    heading.accessibilityTraits = .header
+    heading.numberOfLines = 0
+    stack.addArrangedSubview(heading)
+    configure(name, key: "auth.native.name", content: .name)
+    name.autocapitalizationType = .words
+    name.isHidden = true
+    stack.addArrangedSubview(name)
+    configure(email, key: "auth.native.email", content: .username)
+    email.keyboardType = .emailAddress
+    email.returnKeyType = .next
+    configure(password, key: "auth.native.password", content: .password)
+    password.isSecureTextEntry = true
+    password.returnKeyType = .go
+    stack.addArrangedSubview(email)
+    stack.addArrangedSubview(password)
+    let signIn = button("auth.native.signIn") { [weak self] in self?.submitEmail() }
+    emailSubmit = signIn
+    signIn.accessibilityIdentifier = "auth-email-submit"
+    stack.addArrangedSubview(signIn)
+    let toggle = button("auth.native.toggleRegistration") { [weak self] in
+      guard let self else { return }
+      self.registering.toggle()
+      self.name.isHidden = !self.registering
+      self.password.text = nil
+      self.password.textContentType = self.registering ? .newPassword : .password
+      let key = self.registering ? "auth.native.register" : "auth.native.signIn"
+      self.emailSubmit?.configuration?.title = String(localized: String.LocalizationValue(key), bundle: .lody)
     }
-    waitingView.reopen = { [weak self] in self?.service.reopen() }
+    toggle.accessibilityIdentifier = "auth-registration-toggle"
+    stack.addArrangedSubview(toggle)
+    let resend = button("auth.native.resend") { [weak self] in
+      guard let self else { return }
+      let address = (self.email.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      guard address.contains("@") else {
+        self.errorLabel.text = String(localized: "auth.native.fields", bundle: .lody)
+        self.errorLabel.isHidden = false
+        return
+      }
+      self.password.text = nil
+      self.submit(.resendVerification(address))
+    }
+    resend.accessibilityIdentifier = "auth-verification-resend"
+    stack.addArrangedSubview(resend)
+    let reset = button("auth.reset.forgot") { [weak self] in
+      guard let self, !self.service.state().busy else { return }
+      self.password.text = nil
+      self.view.endEditing(true)
+      let page = PasswordResetController()
+      LodyShell.shared.presentNative(page, title: page.title ?? "")
+    }
+    reset.accessibilityIdentifier = "auth-reset-request"
+    stack.addArrangedSubview(reset)
+    let apple = ASAuthorizationAppleIDButton(type: .signIn, style: .black)
+    apple.addAction(UIAction { [weak self] _ in self?.submit(.apple) }, for: .touchUpInside)
+    apple.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
+    apple.accessibilityIdentifier = "auth-apple"
+    controls.append(apple)
+    stack.addArrangedSubview(apple)
+    for (key, method) in [("auth.native.google", NativeLoginMethod.google), ("auth.native.github", .github), ("auth.native.discord", .discord)] {
+      let control = button(key) { [weak self] in self?.submit(method) }
+      control.accessibilityIdentifier = key
+      stack.addArrangedSubview(control)
+    }
+    errorLabel.numberOfLines = 0
+    errorLabel.font = .preferredFont(forTextStyle: .body)
+    errorLabel.adjustsFontForContentSizeCategory = true
+    errorLabel.textColor = .systemRed
+    errorLabel.accessibilityIdentifier = "auth-error"
+    stack.addArrangedSubview(errorLabel)
+    stack.addArrangedSubview(progress)
+    cancelButton.setTitle(String(localized: "common.cancel", bundle: .lody), for: .normal)
+    cancelButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+    cancelButton.addAction(UIAction { [weak self] _ in self?.service.cancel() }, for: .touchUpInside)
+    cancelButton.accessibilityIdentifier = "auth-cancel"
+    stack.addArrangedSubview(cancelButton)
     for name in service.changes {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.render() }
@@ -59,208 +139,88 @@ class OnboardingController: UIViewController {
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     LodyScrollEdges.bind(scroll, to: self)
-    guard !shown else { return }
-    shown = true
-    play(header: true)
   }
 
-  override func viewSafeAreaInsetsDidChange() {
-    super.viewSafeAreaInsetsDidChange()
-    panelBottom?.constant = -max(view.safeAreaInsets.bottom, 16)
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if isMovingFromParent || navigationController?.isBeingDismissed == true || isBeingDismissed {
+      service.cancel()
+      password.text = nil
+    }
   }
 
-  private func buildContent() {
-    scroll.alwaysBounceVertical = true
-    scroll.showsVerticalScrollIndicator = false
-    scroll.contentInsetAdjustmentBehavior = .automatic
-    scroll.translatesAutoresizingMaskIntoConstraints = false
-    LodyScrollEdges.navigation(scroll)
-    view.addSubview(scroll)
-
-    let logo = UIImageView(image: UIImage(named: "onboarding-logo", in: Bundle.main, compatibleWith: nil)
-      ?? UIImage(named: "onboarding-logo"))
-    logo.accessibilityIgnoresInvertColors = true
-    logo.layer.cornerRadius = 15
-    logo.layer.cornerCurve = .continuous
-    logo.clipsToBounds = true
-    logo.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([logo.widthAnchor.constraint(equalToConstant: 64), logo.heightAnchor.constraint(equalToConstant: 64)])
-    let titleLabel = UILabel()
-    titleLabel.text = String(localized: "onboarding.title", bundle: .lody)
-    titleLabel.font = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: .systemFont(ofSize: 30, weight: .bold))
-    titleLabel.adjustsFontForContentSizeCategory = true
-    titleLabel.attributedText = NSAttributedString(string: titleLabel.text ?? "", attributes: [.kern: -0.6])
-    titleLabel.textAlignment = .center
-    titleLabel.numberOfLines = 0
-    titleLabel.accessibilityTraits = .header
-    header.addArrangedSubview(logo)
-    header.addArrangedSubview(titleLabel)
-    header.axis = .vertical
-    header.alignment = .center
-    header.spacing = 14
-
-    featureRows.forEach(featureStack.addArrangedSubview)
-    featureStack.axis = .vertical
-    featureStack.spacing = 24
-
-    let content = UIStackView(arrangedSubviews: [header, featureStack, waitingView])
-    content.axis = .vertical
-    content.spacing = 36
-    content.translatesAutoresizingMaskIntoConstraints = false
-    scroll.addSubview(content)
-    NSLayoutConstraint.activate([
-      scroll.topAnchor.constraint(equalTo: view.topAnchor),
-      scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 48),
-      content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
-      content.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 28),
-      content.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -28),
-    ])
+  private func configure(_ field: UITextField, key: String, content: UITextContentType) {
+    field.placeholder = String(localized: String.LocalizationValue(key), bundle: .lody)
+    field.accessibilityLabel = field.placeholder
+    field.accessibilityIdentifier = key
+    field.textContentType = content
+    field.autocapitalizationType = .none
+    field.autocorrectionType = .no
+    field.borderStyle = .roundedRect
+    field.font = .preferredFont(forTextStyle: .body)
+    field.adjustsFontForContentSizeCategory = true
+    field.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
+    field.delegate = self
+    controls.append(field)
   }
 
-  private func buildPanel() {
-    let people = UIImageView(image: UIImage(systemName: "person.2.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20)))
-    people.tintColor = .lodyAccent
-    people.contentMode = .center
-    let note = UILabel()
-    note.text = String(localized: "login.footnote", bundle: .lody)
-    note.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: .systemFont(ofSize: 12))
-    note.adjustsFontForContentSizeCategory = true
-    note.textColor = .secondaryLabel
-    note.textAlignment = .center
-    note.numberOfLines = 0
-    footnote.addArrangedSubview(people)
-    footnote.addArrangedSubview(note)
-    footnote.axis = .vertical
-    footnote.alignment = .center
-    footnote.spacing = 8
-    footnote.isLayoutMarginsRelativeArrangement = true
-    footnote.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14)
+  private func button(_ key: String, action: @escaping @MainActor () -> Void) -> UIButton {
+    var config = UIButton.Configuration.filled()
+    config.title = String(localized: String.LocalizationValue(key), bundle: .lody)
+    config.baseBackgroundColor = .systemBlue
+    let button = UIButton(configuration: config)
+    button.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
+    button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+    controls.append(button)
+    return button
+  }
 
-    errorLabel.font = .preferredFont(forTextStyle: .body)
-    errorLabel.adjustsFontForContentSizeCategory = true
-    errorLabel.textColor = .systemRed
-    errorLabel.textAlignment = .center
-    errorLabel.numberOfLines = 0
-    footer.addArrangedSubview(footnote)
-    footer.addArrangedSubview(errorLabel)
-    footer.axis = .vertical
+  func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+    if textField === email { password.becomeFirstResponder() }
+    else { submitEmail() }
+    return true
+  }
 
-    button.addAction(UIAction { [weak self] _ in self?.press() }, for: .primaryActionTriggered)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.heightAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
+  private func submitEmail() {
+    let address = (email.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard address.contains("@"), let secret = password.text, !secret.isEmpty else {
+      errorLabel.text = String(localized: "auth.native.fields", bundle: .lody)
+      errorLabel.isHidden = false
+      return
+    }
+    if registering {
+      let displayName = (name.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !displayName.isEmpty, (8...128).contains(secret.count) else {
+        errorLabel.text = String(localized: "auth.native.registrationFields", bundle: .lody)
+        errorLabel.isHidden = false
+        return
+      }
+      submit(.register(displayName, address, secret))
+    } else { submit(.email(address, secret)) }
+    password.text = nil
+  }
 
-    let panel = UIStackView(arrangedSubviews: [footer, button])
-    panel.axis = .vertical
-    panel.spacing = 14
-    panel.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(panel)
-    let bottom = panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16)
-    panelBottom = bottom
-    NSLayoutConstraint.activate([
-      panel.topAnchor.constraint(equalTo: scroll.bottomAnchor),
-      panel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-      panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-      bottom,
-    ])
+  private func submit(_ method: NativeLoginMethod) {
+    guard !service.state().busy else { return }
+    view.endEditing(true)
+    service.login(method)
   }
 
   private func render() {
-    let next = service.state()
-    if next.signedIn {
+    let state = service.state()
+    if state.signedIn {
       guard !finished else { return }
       finished = true
+      password.text = nil
       LodyShell.shared.finish(from: self, value: nil)
-      // Close the welcome container even when its authorization browser is on top.
       LodyShell.shared.close(from: self)
       return
     }
-    let resumed = state.waiting && !next.waiting
-    state = next
-    featureStack.isHidden = next.waiting
-    footer.isHidden = next.waiting
-    waitingView.isHidden = !next.waiting
-    waitingView.update(code: next.code)
-    footnote.isHidden = next.error != nil
-    errorLabel.isHidden = next.error == nil
-    if let error = next.error, errorLabel.text != error { UIAccessibility.post(notification: .announcement, argument: error) }
-    errorLabel.text = next.error
-    applyButton()
-    if resumed, shown { play(header: false) }
-  }
-
-  private func applyButton() {
-    let waiting = state.waiting
-    let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .semibold))
-    var configuration: UIButton.Configuration = .lodyProminent(font: font)
-    if waiting {
-      configuration = .glass()
-      configuration.baseForegroundColor = .lodyAccent
-      configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-        var attributes = attributes
-        attributes.font = font
-        return attributes
-      }
-    }
-    var key = "login.connect"
-    if waiting {
-      key = "common.cancel"
-    } else if state.error != nil {
-      key = "login.retry"
-    }
-    configuration.title = String(localized: String.LocalizationValue(key), bundle: .lody)
-    configuration.cornerStyle = .capsule
-    button.configuration = configuration
-    button.accessibilityIdentifier = waiting ? "auth-cancel" : "onboarding-connect"
-    button.accessibilityLabel = String(localized: String.LocalizationValue(key), bundle: .lody)
-  }
-
-  private func press() {
-    if state.waiting { service.cancel() } else { service.login() }
-  }
-
-  private func play(header animateHeader: Bool) {
-    guard !state.waiting else {
-      if animateHeader { intro.play([(header, 0)]) }
-      return
-    }
-    var blocks = featureRows.enumerated().map { (view: $0.element, step: $0.offset + 1) }
-    blocks.append((footer, 4))
-    if animateHeader { blocks.insert((header, 0), at: 0) }
-    intro.play(blocks)
-  }
-
-  private static func featureRow(id: String, symbol: String) -> UIView {
-    let icon = UIImageView(image: UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 28)))
-    icon.tintColor = .lodyAccent
-    icon.contentMode = .center
-    icon.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 36), icon.heightAnchor.constraint(equalToConstant: 36)])
-    let title = UILabel()
-    title.text = String(localized: String.LocalizationValue("onboarding." + id + ".title"), bundle: .lody)
-    title.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .semibold))
-    title.adjustsFontForContentSizeCategory = true
-    title.numberOfLines = 0
-    let body = UILabel()
-    body.text = String(localized: String.LocalizationValue("onboarding." + id + ".body"), bundle: .lody)
-    body.font = .preferredFont(forTextStyle: .body)
-    body.adjustsFontForContentSizeCategory = true
-    body.textColor = .secondaryLabel
-    body.numberOfLines = 0
-    let text = UIStackView(arrangedSubviews: [title, body])
-    text.axis = .vertical
-    text.spacing = 2
-    let iconColumn = UIStackView(arrangedSubviews: [icon])
-    iconColumn.axis = .vertical
-    iconColumn.isLayoutMarginsRelativeArrangement = true
-    iconColumn.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 2, leading: 0, bottom: 0, trailing: 0)
-    let row = UIStackView(arrangedSubviews: [iconColumn, text])
-    row.axis = .horizontal
-    row.alignment = .top
-    row.spacing = 16
-    row.isAccessibilityElement = true
-    row.accessibilityLabel = [title.text, body.text].compactMap(\.self).joined(separator: ", ")
-    return row
+    controls.forEach { $0.isEnabled = !state.busy }
+    cancelButton.isHidden = !state.busy
+    if state.busy { progress.startAnimating() } else { progress.stopAnimating() }
+    errorLabel.isHidden = state.error == nil
+    if let error = state.error, errorLabel.text != error { UIAccessibility.post(notification: .announcement, argument: error) }
+    errorLabel.text = state.error
   }
 }

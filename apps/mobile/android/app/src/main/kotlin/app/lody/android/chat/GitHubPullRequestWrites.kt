@@ -55,8 +55,8 @@ internal class GitHubPullRequestWrites(private val http: GitHubHttp = GitHubHttp
         if (!repo.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) || repo.substringAfter('/') in listOf(".", "..") || number <= 0) {
             throw GitHubWriteFailure("invalid_request")
         }
-        val auth = JSONObject(expect(http.request("GET", "https://backend.lody.ai/api/auth/convex/token", credential.token, null), null))
-        val broker = JSONObject(expect(http.request("POST", "https://convex.lody.ai/api/action", auth.getString("token"),
+        val auth = JSONObject(expect(http.request("GET", "${app.lody.android.BackendEnvironment.site}/api/auth/convex/token", credential.token, null), null))
+        val broker = JSONObject(expect(http.request("POST", "${app.lody.android.BackendEnvironment.convex}/api/action", auth.getString("token"),
             JSONObject().put("path", "github:getOperationAccessTokenByRepoNameForClient").put("format", "convex_encoded_json")
                 .put("args", JSONArray().put(JSONObject().put("workspaceId", workspace).put("repoFullName", repo).put("operation", "write")))), null))
         val value = broker.optJSONObject("value")

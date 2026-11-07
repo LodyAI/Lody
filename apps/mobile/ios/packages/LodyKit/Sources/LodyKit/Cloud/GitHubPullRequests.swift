@@ -16,10 +16,10 @@ import Foundation
     let writing = operation != "read"
     let body = (args["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     if operation == "comment" && (body.isEmpty || body.count > 65536) { throw failure("invalid_comment") }
-    let auth = try await request("https://backend.lody.ai/api/auth/convex/token", token: credential)
+    let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", token: credential)
     guard let jwt = auth["token"] as? String else { throw failure("unauthorized") }
     try checkIdentity(credential)
-    let broker = try await request("https://convex.lody.ai/api/action", token: jwt, body: [
+    let broker = try await request("\(BackendEnvironment.convex)/api/action", token: jwt, body: [
       "path": "github:getOperationAccessTokenByRepoNameForClient", "format": "convex_encoded_json",
       "args": [["workspaceId": workspace, "repoFullName": repo, "operation": writing ? "write" : "read"]]
     ])

@@ -172,11 +172,11 @@
 
 ### 官方 mobile 有、本仓没有
 
-| 状态    | 项                   | 缺口                        | 本仓锚点                                                              | 说明                                      |
-| ------- | -------------------- | --------------------------- | --------------------------------------------------------------------- | ----------------------------------------- |
-| missing | 岛内批准权限         | 设计明确不做岛内同意 / 拒绝 | `docs/superpowers/specs/2026-09-09-live-activity-design.md` Non-goals | 官方 README 展示从灵动岛批准              |
-| drift   | 杀进程后的桌面新会话 | 可能要等重新打开才上岛      | 同上                                                                  | 未用 push-to-start 时杀进程丢桌面新开会话 |
-| drift   | Device Flow 客户端名 | 授权页显示 `lody-cli`       | `login.footnote`、AGENTS.md                                           | 服务端未注册独立 iOS client 前保持透明    |
+| 状态    | 项                   | 缺口                                                               | 本仓锚点                                                              | 说明                                      |
+| ------- | -------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------- | ----------------------------------------- |
+| missing | 岛内批准权限         | 设计明确不做岛内同意 / 拒绝                                        | `docs/superpowers/specs/2026-09-09-live-activity-design.md` Non-goals | 官方 README 展示从灵动岛批准              |
+| drift   | 杀进程后的桌面新会话 | 可能要等重新打开才上岛                                             | 同上                                                                  | 未用 push-to-start 时杀进程丢桌面新开会话 |
+| partial | 原生登录配置         | 原生邮箱、Apple、Google、GitHub/Discord 已接；真实提供方验收待配置 | `AuthSession`、`NativeAuthProviders`                                  | [配置和验证限制](native-auth.md)          |
 
 ---
 
@@ -192,7 +192,7 @@
 | drift   | 项目历史          | 手动批量导入 + 冲突确认                                                                                                             | 导入 UI 在桌面 / 本机；手机读已导入会话                                                   | README「不是自动镜像」；`settings.history.hint`                       |
 | drift   | 权限 UI           | 单请求、单列选项                                                                                                                    | 多题卡 + 自动继续                                                                         | `PermissionScreen.tsx`                                                |
 | drift   | 目录 / 文件上限   | 副本 8 MiB；目录前 2000 条                                                                                                          | 桌面无此移动端天花板                                                                      | AGENTS.md；`files.ts` `listDir`                                       |
-| drift   | Auth 客户端身份   | `lody-cli` Device Flow                                                                                                              | 官方 App 有独立客户端                                                                     | 等服务端注册再改声称                                                  |
+| adapted | Auth 客户端身份   | 原生 Better Auth 登录与 PKCE 单次交接；不再使用 `lody-cli` Device Flow                                                              | 官方云端认证                                                                              | [原生登录协议](native-auth.md)                                        |
 
 ---
 

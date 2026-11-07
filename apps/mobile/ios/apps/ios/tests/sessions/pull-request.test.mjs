@@ -22,6 +22,7 @@ test('PR associations use OSS URL/status and separate CI rollups; invalid target
     number: 31,
     repository: 'LodyAI/Lody',
     ci: 'f',
+    merge: undefined,
   });
   assert.equal(refs[1].status, 'merged');
 });

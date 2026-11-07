@@ -120,12 +120,12 @@ internal class LiveProjectAdding(
 
     /** Admins and owners manage the workspace's GitHub (iOS `WorkspaceSettingsCloud.github`). */
     private suspend fun canManage(credential: Credential, workspace: String): Boolean {
-        val session = JSONObject(expect(http.request("GET", "https://backend.lody.ai/api/auth/get-session", credential.token, null)))
+        val session = JSONObject(expect(http.request("GET", "${app.lody.android.BackendEnvironment.site}/api/auth/get-session", credential.token, null)))
         val user = session.optJSONObject("user")?.optString("id").orEmpty()
         if (user.isEmpty()) throw ProjectAddFailure("unauthorized")
         val organization = runCatching {
             JSONObject(expect(http.request("GET",
-                "https://backend.lody.ai/api/auth/organization/get-full-organization?organizationId=" + URLEncoder.encode(workspace, "UTF-8"),
+                "${app.lody.android.BackendEnvironment.site}/api/auth/organization/get-full-organization?organizationId=" + URLEncoder.encode(workspace, "UTF-8"),
                 credential.token, null)))
         }.getOrNull() ?: return false
         if (organization.optString("id") != workspace) return false
@@ -135,9 +135,9 @@ internal class LiveProjectAdding(
     }
 
     private suspend fun convex(credential: Credential, kind: String, path: String, args: JSONObject): Any? {
-        val auth = JSONObject(expect(http.request("GET", "https://backend.lody.ai/api/auth/convex/token", credential.token, null)))
+        val auth = JSONObject(expect(http.request("GET", "${app.lody.android.BackendEnvironment.site}/api/auth/convex/token", credential.token, null)))
         val jwt = auth.optString("token").ifEmpty { throw ProjectAddFailure("unauthorized") }
-        val response = JSONObject(expect(http.request("POST", "https://convex.lody.ai/api/$kind", jwt,
+        val response = JSONObject(expect(http.request("POST", "${app.lody.android.BackendEnvironment.convex}/api/$kind", jwt,
             JSONObject().put("path", path).put("format", "convex_encoded_json").put("args", JSONArray().put(args)))))
         if (response.optString("status") != "success") throw ProjectAddFailure("request_failed")
         return response.opt("value")

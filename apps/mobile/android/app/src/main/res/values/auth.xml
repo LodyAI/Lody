@@ -1,0 +1,29 @@
+<resources>
+    <string name="auth_register">Create account</string>
+    <string name="auth_name">Name</string>
+    <string name="auth_email">Email</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_have_account">Already have an account? Sign in</string>
+    <string name="auth_reset">Forgot password?</string>
+    <string name="auth_verify">Resend verification email</string>
+    <string name="auth_google">Sign in with Google</string>
+    <string name="auth_verify_notice">Check your email to verify your account, then sign in.</string>
+    <string name="auth_email_sent">If this address is eligible, an email has been sent. Check your inbox.</string>
+    <string name="auth_invalid_credentials">The email or password is incorrect.</string>
+    <string name="auth_email_in_use">This email is already registered. Try signing in.</string>
+    <string name="auth_invalid_email">Enter a valid email address.</string>
+    <string name="auth_invalid_password">Use a password between 8 and 128 characters.</string>
+    <string name="auth_rate_limited">Too many attempts. Please try again later.</string>
+    <string name="auth_network">Cannot connect. Check your connection and try again.</string>
+    <string name="auth_not_configured">This sign-in provider is not configured for this build.</string>
+    <string name="auth_cancelled">Sign-in cancelled.</string>
+    <string name="auth_google_unavailable">Google sign-in is unavailable. Check Google Play services or use another method.</string>
+    <string name="auth_expired">Please sign in again.</string>
+    <string name="auth_failed">Sign-in could not be completed. Please try again.</string>
+    <string name="auth_github">Continue with GitHub</string>
+    <string name="auth_discord">Continue with Discord</string>
+    <string name="auth_apple">Continue with Apple</string>
+    <string name="auth_browser_pending">Complete sign-in in your browser, or cancel to dismiss this attempt.</string>
+    <string name="auth_browser_unavailable">Install or enable a browser to use this sign-in method.</string>
+    <string name="auth_unsupported_local_reset">Password reset is not supported for local or nonproduction backends. No reset email was requested.</string>
+</resources>

@@ -1,3 +1,4 @@
+import GoogleSignIn
 import LodyCore
 import LodyDesignSystem
 import UIKit
@@ -53,6 +54,7 @@ public final class LodyApplication {
   }
 
   public func open(_ url: URL) {
+    if GIDSignIn.sharedInstance.handle(url) { return }
     guard let destination = AppLink.parse(url.absoluteString) else { return }
     switch destination {
     case .share: shares.wake()

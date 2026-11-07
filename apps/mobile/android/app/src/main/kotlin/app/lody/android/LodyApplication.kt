@@ -65,6 +65,7 @@ open class LodyApplication : Application() {
             submissions.activate(null)
             cloud.disconnect()
         }
+        account.browserStore = BrowserAuthStore(KeystoreCredentialStore(this, "browser-auth"))
         members = WorkspaceMembers(cache, account::members)
         projectAdding = app.lody.android.home.LiveProjectAdding(runtimeOwner, account, app.lody.android.chat.GitHubHttpClient())
         cloud = CatalogRepository(account, runtimeOwner, applicationScope, cache) { scope, grant -> prepared = scope to grant }

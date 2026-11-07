@@ -29,8 +29,6 @@ class CatalogConnectionTest {
  @Test fun disconnectWhileGrantPendingCannotStartAnOldWorkspace()=runTest {
   val instances=mutableListOf<Fake>();val grant=CompletableDeferred<ShortLivedGrant>()
   val api=object:CloudAuthApi {
-   override suspend fun authorize():DeviceAuthorization=error("unused")
-   override suspend fun poll(code:DeviceAuthorization):TokenPoll=error("unused")
    override suspend fun account(credential:Credential)=Account("u","User",listOf(Workspace("w","Work")))
    override suspend fun grant(credential:Credential,workspaceId:String)=withContext(NonCancellable){grant.await()}
    override suspend fun signOut(credential:Credential)=Unit
@@ -51,8 +49,6 @@ class CatalogConnectionTest {
  @Test fun changedGrantOriginReplacesPermissionAndRejectsOldCatalogEvents()=runTest {
   val instances=mutableListOf<Fake>();val origins=mutableListOf<String>();var grants=0
   val api=object:CloudAuthApi {
-   override suspend fun authorize():DeviceAuthorization=error("unused")
-   override suspend fun poll(code:DeviceAuthorization):TokenPoll=error("unused")
    override suspend fun account(credential:Credential)=Account("u","User",listOf(Workspace("w","Work")))
    override suspend fun grant(credential:Credential,workspaceId:String)=ShortLivedGrant("fixture","https://gateway${++grants}.example.org",60)
    override suspend fun signOut(credential:Credential)=Unit

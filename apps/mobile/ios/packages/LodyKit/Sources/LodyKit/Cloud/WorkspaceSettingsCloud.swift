@@ -9,12 +9,12 @@ import Foundation
           let data = payload.data(using: .utf8), data.count <= 16 * 1024,
           let args = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let workspace = args["workspaceId"] as? String, !workspace.isEmpty, workspace.count <= 200 else { throw GitHubCloud.failure() }
-    let session = try await GitHubCloud.request("https://backend.lody.ai/api/auth/get-session", token: token) as? [String: Any]
+    let session = try await GitHubCloud.request("\(BackendEnvironment.site)/api/auth/get-session", token: token) as? [String: Any]
     guard try AuthKeychain.read() == token,
           let user = (session?["user"] as? [String: Any])?["id"] as? String, !user.isEmpty else { throw GitHubCloud.failure() }
     var role: String?
     if args["page"] as? String == "github" {
-      var url = URLComponents(string: "https://backend.lody.ai/api/auth/organization/get-full-organization")!
+      var url = URLComponents(string: "\(BackendEnvironment.site)/api/auth/organization/get-full-organization")!
       url.queryItems = [URLQueryItem(name: "organizationId", value: workspace)]
       let organization = try? await GitHubCloud.request(url.url!.absoluteString, token: token) as? [String: Any]
       if organization?["id"] as? String == workspace,
