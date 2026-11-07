@@ -1,3 +1,4 @@
+import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import {
   createDaemonLossRegistry,
   readDaemonLossAuthority,
@@ -1022,6 +1023,8 @@ describe('machine E2EE local runtime', () => {
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      const authorityConfirmations: AuthorityStamp[] = [];
+      let mailboxDown = false;
       try {
         const accountId = 'ledger-retry-account';
         const root = join(
@@ -1050,6 +1053,7 @@ describe('machine E2EE local runtime', () => {
           JSON.stringify({ genesisHash: hex(fixture.genesis.toBytes()), signingPublicKey })
         );
         let history = page(fixture.records);
+        let pagedHistory: ReturnType<typeof page>[] = [];
         let reads = 0;
         let revision = 0;
         let retryFailed = () => {};
@@ -1057,12 +1061,13 @@ describe('machine E2EE local runtime', () => {
         const cloud = {
           getHistory: async () => {
             reads++;
-            return history;
+            return pagedHistory.shift() ?? history;
           },
           mailboxCall: async (
             method: keyof E2eeMailboxRequests,
             input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
           ) => {
+            if (mailboxDown) throw new Error('synthetic mailbox failure');
             if (method === 'fetch')
               return {
                 items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
@@ -1090,8 +1095,38 @@ describe('machine E2EE local runtime', () => {
           onUnavailable: () => {
             queueMicrotask(() => retryFailed());
           },
+          onAuthorityConfirmed: (startedAt) => authorityConfirmations.push(startedAt),
         });
         await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(0);
+        // Key work has its own failures: the verified read below still counts.
+        const beforeMailboxFailure = authorityConfirmations.length;
+        mailboxDown = true;
+        await host.refresh();
+        mailboxDown = false;
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeMailboxFailure);
+        await host.refresh();
+        // A signed older prefix is accepted as a no-op, but it is not a latest read.
+        const beforeOlderPrefix = authorityConfirmations.length;
+        history = page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(authorityConfirmations).toHaveLength(beforeOlderPrefix);
+        // The same checkpoint as the trusted head is an ordinary overlapping read.
+        history = page(fixture.records);
+        await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeOlderPrefix);
+        // Every page of one read has to name the checkpoint of the first page.
+        const beforeChangedCheckpoint = authorityConfirmations.length;
+        const unavailable = Promise.withResolvers<void>();
+        retryFailed = unavailable.resolve;
+        pagedHistory = [page(fixture.records, 0, 1), page(fixture.records.slice(0, -1), 1)];
+        await host.refresh();
+        await unavailable.promise;
+        retryFailed = () => {};
+        expect(authorityConfirmations).toHaveLength(beforeChangedCheckpoint);
+        await vi.advanceTimersByTimeAsync(250);
+        await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeChangedCheckpoint);
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
@@ -1118,6 +1153,7 @@ describe('machine E2EE local runtime', () => {
           };
         };
         history = rejectedHistory();
+        const confirmedBefore = authorityConfirmations.length;
         await host.refresh();
         const before = reads;
         for (const [index, delay] of [250, 1_000, 4_000].entries()) {
@@ -1134,7 +1170,9 @@ describe('machine E2EE local runtime', () => {
         history = page(fixture.records);
         await vi.advanceTimersByTimeAsync(100_000);
         expect(reads - before).toBe(3);
+        expect(authorityConfirmations).toHaveLength(confirmedBefore);
         await host.refresh(); // Explicit retry resets the bounded episode.
+        expect(authorityConfirmations.length).toBeGreaterThan(confirmedBefore);
         await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
         history = rejectedHistory();
         await host.refresh();
