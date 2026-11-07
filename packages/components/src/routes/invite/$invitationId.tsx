@@ -1,3 +1,4 @@
+import { seatBillingErrorKey } from '@/components/settings/billing-errors';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -153,8 +154,11 @@ export function AcceptInvitationComponent() {
       } else if (isEmailVerificationRequiredError(result.error)) {
         setStatus('verification_required');
       } else {
-        setStatus('error');
-        setErrorMessage(result.error.message || t('invite.error.unknown'));
+        const billingKey = seatBillingErrorKey(result.error);
+        setStatus(billingKey ? 'billing_blocked' : 'error');
+        setErrorMessage(
+          billingKey ? t(billingKey) : result.error.message || t('invite.error.unknown')
+        );
       }
     }
   };

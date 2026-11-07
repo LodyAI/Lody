@@ -1,3 +1,22 @@
+export type SubscriptionPaymentStatus = {
+  billingInterval: BillingInterval;
+  effectiveAt: number | null;
+  payment?: {
+    status: 'settled' | 'required' | 'checking';
+    amountRemaining?: number;
+    currency?: string;
+    invoiceUrl?: string | null;
+    hasMore?: boolean;
+    outstandingInvoices?: Array<{
+      id: string;
+      status?: string;
+      amountRemaining: number;
+      currency: string;
+      invoiceUrl: string | null;
+    }>;
+  };
+};
+
 import type {
   E2eeContentTokenRequest,
   E2eeContentToken,
@@ -392,9 +411,12 @@ type UpcomingInvoicePreview = {
  * `billed` quotes the prorated charge applied when the invitation is accepted.
  */
 export type SeatInvitePreview =
-  | { status: 'not_billed'; reason: 'free' | 'covered' }
+  | { status: 'not_billed'; reason: 'free' | 'covered'; availableSeats?: number }
   | {
       status: 'billed';
+      addedSeats?: number;
+      paymentAction?: 'method_required' | 'payment_required' | 'refresh';
+      invoiceAt?: number | null;
       interval: BillingInterval;
       unitAmount: number | null;
       proratedAmount: number | null;
@@ -699,7 +721,10 @@ export type CloudApi = {
         pendingInvitationCount: number;
       } | null
     >;
-    getWorkspaceSeatInvitePreview: Query<{ workspaceId: string }, SeatInvitePreview | null>;
+    getWorkspaceSeatInvitePreview: Query<
+      { workspaceId: string; requestedSeats?: number },
+      SeatInvitePreview | null
+    >;
     listDeletedWorkspaceBillingAccounts: Query<
       Record<string, never>,
       Array<{ workspaceId: string; name: string }>
@@ -717,12 +742,18 @@ export type CloudApi = {
     previewSubscriptionIntervalChange: Action<
       { workspaceId: string; interval: BillingInterval },
       {
+        quoteId: string;
+        continuation?: boolean;
         currency: string;
         interval: BillingInterval;
         quantity: number;
         unitAmount: number;
         subtotalAmount: number;
         promoDiscountAmount: number;
+        accruedSeatAmount?: number;
+        adjustmentAmount?: number;
+        taxAmount?: number;
+        balanceAmount?: number;
         creditAmount: number;
         deferredToBalanceAmount: number;
         amountDueNow: number;
@@ -754,9 +785,10 @@ export type CloudApi = {
       { workspaceId: string; cancel: boolean },
       { cancelAtPeriodEnd: boolean; currentPeriodEnd: number | null }
     >;
+    getSubscriptionPaymentStatus: Action<{ workspaceId: string }, SubscriptionPaymentStatus>;
     setSubscriptionInterval: Action<
-      { workspaceId: string; interval: BillingInterval },
-      { billingInterval: BillingInterval; effectiveAt: number | null }
+      { workspaceId: string; interval: BillingInterval; quoteId?: string },
+      SubscriptionPaymentStatus
     >;
   };
   githubPersonalAuthorization: {
