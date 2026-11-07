@@ -34,6 +34,10 @@
 - The cloud runtime starts with the verified native account identity and watches machine presence; offline probes still omit identity. Network readiness and catalog synchronization are separate states; a WebView heartbeat never means cloud LIVE.
 - Keep one app module and manual construction while these boundaries remain small. JSON belongs in adapters; do not introduce a second Streams client in native code or a dependency-injection framework for this probe.
 
+## Push notifications
+
+- `notifications/PushNotifications` is process-owned. Register only with a verified native account, never a cached identity or a WebView token. Only backend `selfHostedEnabled: true` selects FCM; confirmed `false` selects OneSignal identity `lody-push-v2:<userId>`. Failed/malformed provider queries preserve the existing selection, never silently fall back. Registration exchanges the BetterAuth session for a session-bound Convex JWT, never a bare CLI key. Account teardown stops new work and joins submitted mutations before unregister and SDK logout. Submitted mutation waits ignore caller cancellation but have a 15-second deadline. A timeout leaves remote commit unknown even after later cleanup; do not claim total fencing or add durable ID/token rotation or uncertainty queues. Backend same-token ownership transfer also means a rotated installation ID alone is not a fence. Keep public Firebase client options separate from backend service credentials. Notification clicks and foreground display in both providers require an explicit nonblank `recipientUserId` exactly matching the verified account. The OneSignal foreground lifecycle listener suppresses display when signed out/unverified or direct FCM is selected. Notification routes resolve workspace slugs through verified membership and preserve the exact session target. See [configuration and device acceptance](README.md#push-notifications).
+
 ## Catalog cache and connection recovery
 
 - `CatalogRepository` replaces the old cloud probe controller and owns the selected workspace, one runtime subscription and the typed display projection. Pages observe its StateFlow; they never own a WebView or parse cache JSON.

@@ -75,6 +75,28 @@ cd ..
 
 See the [Android README](android/README.md) for device setup and runtime ownership.
 
+## Push notifications
+
+Both native clients select their push provider from the authenticated backend's
+`pushSubscriptions:configuration` response. `selfHostedEnabled: true` selects
+APNs on iOS or FCM on Android; `false` selects OneSignal. A failed configuration
+read is not permission to switch providers. OneSignal uses the external identity
+`lody-push-v2:<userId>`; notification recipients and local account checks still
+use the raw user ID.
+
+Provider configuration does not enroll offline devices. Open the updated app and
+sign in to register with the selected provider. Direct push registration is bound
+to the authenticated login session, not just the account. Keep server credentials
+out of either native build. Delivery is best effort; successful registration or a
+provider acceptance does not prove the device displayed an alert.
+
+See [iOS push setup](ios/apps/ios/PUSH_NOTIFICATIONS.md) and
+[Android setup](android/README.md) for public client configuration and device
+verification. The [push boundary decision](../../.agents/notes/implemented/architecture/2026-10-16-direct-push-client.md#native-mobile-clients)
+explains provider identity and lifecycle ownership. These native clients are
+independent of the shared Web/Capacitor client; adopting them does not update that
+client's provider implementation.
+
 ## Licenses and acknowledgements
 
 The imported iOS client and shared cloud-runtime code retain their

@@ -59,6 +59,36 @@ backend's session-revocation guarantee. A server-side session-bound enrollment s
 would be required for that guarantee. Provider switching requires current clients;
 offline clients cannot install a removed SDK from a remote configuration change.
 
+## Native mobile clients
+
+The independent Swift and Kotlin clients under `apps/mobile` do not consume the
+shared Web/Capacitor facade. Their process-owned notification coordinators read
+`pushSubscriptions:configuration` and select OneSignal unless the successful
+response explicitly enables direct delivery. Query failures do not authorize a
+provider change. Native OneSignal logins map raw account IDs to
+`lody-push-v2:<userId>`; payload recipient checks and navigation retain raw IDs.
+Mixing these namespaces silently leaves a valid SDK subscription unreachable by
+the sender. Old provider identities are not merged into the new namespace.
+
+Direct registration uses a stable installation UUID and the authenticated app
+session. iOS submits its actual Bundle ID, while Android supplies a token from
+its configured Firebase project. Provider secrets remain server-owned. The
+notification coordinator owns credential snapshots, serializes cleanup against
+registration and fences retired local account work. A transport timeout is not proof
+of server cancellation or commit order: ambiguous writes can race later server
+operations. These clients do not add server-side registration generations.
+Notification failures are isolated
+from sign-in and conversation availability; foreground/auth refresh retries
+registration rather than replaying notifications. iOS does not restore removed
+Live Activities.
+
+A backend switch alone cannot re-enroll offline devices. Accepted OS/provider
+messages can arrive after logout, and OneSignal does not inherit direct delivery's
+server-side session revocation guarantees. Keep this limitation distinct from
+client click ownership checks. Native checks cover the lifecycle and routing
+boundaries; real provider credentials, OS permission/signing and device delivery
+still require platform acceptance tests.
+
 ## Verification
 
 Behavioral tests cover native token upload, opt-out, late callbacks, Web
