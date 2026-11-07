@@ -666,6 +666,9 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
     let signUp = mode == .signUp
     nameRow.isHidden = !signUp
     forgotRow.isHidden = signUp
+    // Web: the password field keeps 12 pt below it and the submit button adds 4 more;
+    // signing in, the forgot-password row sits in that gap instead.
+    formPanel.setCustomSpacing(signUp ? 16 : 4, after: passwordField)
     password.textContentType = signUp ? .newPassword : .password
     password.placeholder = signUp
       ? String(localized: "auth.login.passwordCreatePlaceholder", bundle: .lody)

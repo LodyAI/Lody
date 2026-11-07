@@ -461,7 +461,7 @@ private fun EmailPanel(
                 TextAction(stringResource(R.string.login_forgot_password), strong = false, enabled = !busy, colors = colors, onClick = onForgot)
             }
         }
-        Spacer(Modifier.height(if (register) M.fieldGap else LodySpacing.xs))
+        Spacer(Modifier.height(if (register) M.fieldGap + LodySpacing.xs else LodySpacing.xs))
         val submitLabel = when {
             submitting && register -> stringResource(R.string.login_creating_account)
             submitting -> stringResource(R.string.login_loading)
