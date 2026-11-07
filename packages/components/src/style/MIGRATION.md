@@ -256,62 +256,42 @@ with an owned data attribute, as the project row and disabled context action do,
 so an unrelated outer marker cannot reveal a nested control. Verify outer hover
 and focus as well as the component's own hover and focus.
 
-## Capture and verify a batch
+## Verify a style change
 
-1. Identify the owned surface and its real callers, including dynamic class maps,
-   native hooks and Slot/render children. Historical compiler inventories are
-   frozen evidence; do not reinstall Tailwind solely to count source strings.
-2. Capture the unchanged component before editing. Verify the effective root theme
-   and relevant computed palette: story-level globals can override URL globals,
-   leaving a requested light frame dark.
-   Prefer a fixed Storybook
-   build. Give every candidate a unique output directory and log; only the actual
-   build process exit zero plus matching final input hashes authorizes capture.
-   Old completion text, early index files or a live server alone are insufficient.
-   Include its important states, both themes, narrow/desktop widths and
-   exact breakpoint boundaries. New stories render production components with
-   synthetic data, never recreated approximations of the UI.
-3. Migrate one owned unit, then run its behavior suites, component typecheck,
-   formatting and `node scripts/stylex-review.mjs`. The review script is an aid;
-   it cannot prove CSS equivalence.
-4. Capture after with the same targets and Chromium. The harness waits for
-   Storybook completion, fonts, finite animations and stable geometry. Capture
-   rendering failures and fail the command instead of silently omitting them.
-   Scope readiness selectors to the actual fixture; Storybook has hidden global
-   headings, and a portal-only story can legitimately leave its canvas empty.
-   Gate its real visible dialog, with an explicit allow-blank exception, rather
-   than weakening painted-content checks for every story.
-   Input selection and mirror state can commit separately: await selected-chip
-   removal and matching scroll positions as well as the native caret. A Framer
-   Motion panel can keep stable geometry at initial opacity zero; require its
-   actual visible state before accepting an expanded frame.
-   Use a real mobile device descriptor when device detection depends on UA or
-   touch support; a narrow desktop window exercises compact desktop layout.
-   Record explicit asset readiness and network conditions on both sides. An
-   avatar fallback and a loaded avatar are different states, not a CSS diff.
-5. Generate the self-contained HTML comparison, open it, inspect differences,
-   and fix their causes. Preserve before frames when retrying after a fix.
+Identify the owned surface and its actual callers, including dynamic styles,
+Slot/render children, integration hooks and portals. Capture the unchanged source
+before editing, then build the final source into a separate immutable directory.
+Use the same maintained profile and Chromium environment for both captures. The
+[visual acceptance workflow](../../tests/visual/README.md) owns the commands,
+profile map, deterministic policy and report contract.
 
-From `packages/components`:
+Profiles render production components with synthetic data. Include important
+states, both themes, relevant viewport boundaries and actual pointer/keyboard
+interactions. Verify the effective theme and visible state rather than assuming
+URL globals or stable geometry establish them: a panel can be stable at opacity
+zero, and an avatar fallback is a different state from a loaded image. Use real
+completion signals, including selection, clipping and portal state where relevant.
+A narrow desktop viewport does not qualify a mobile UA-dependent branch.
 
-```sh
-pnpm exec storybook build --output-dir artifacts/visual/build-before
-node tests/visual/serve.mjs --root artifacts/visual/build-before --port 6017
-node tests/visual/visual-regression.mjs capture --phase before \
-  --storybook http://127.0.0.1:6017 --targets tests/visual/continuation-targets.json
-# Serve the final build on a separate port, then capture the same target file.
-node tests/visual/visual-regression.mjs report --before before --after after --name acceptance
-```
+Run the owning behavior suites, typecheck and formatting as well as the real-browser
+gate. The [design-system AST inventory](../../scripts/design-system-audit.mjs) can
+locate declarations needing semantic owner review; candidate or unresolved counts
+are neither violations nor a visual acceptance result. Do not reinstall the retired
+Tailwind compiler merely to reproduce historical source inventories.
 
-Reports live in ignored `artifacts/visual/`. They embed their PNGs as data URLs,
-include capture failures, and compare portalled content as well as the story root.
-The pixel comparator reports summed RGB differences greater than 12/765; it also
-compares geometry and computed type/color properties. An unchanged screenshot
-alone does not prove behavior: exercise typing, disabled controls, keyboard focus,
-hover, navigation, expanded content and file/error states where relevant.
+The static gate requires independent repeatability, zero raw pixel differences and
+equal recorded geometry/content. Computed CSS differences remain explicit. Inspect
+the self-contained report in a browser, investigate each difference and preserve
+failed runs under ignored `artifacts/visual/`. A corrected capture uses a new output
+directory; it does not overwrite evidence or close unexplained historical differences.
+Generated reports, screenshots and per-run inventories stay outside the source tree.
 
-A completed batch has verified production-component rendering and behavior,
-working caller classes and CSS hooks, and an explicit list of compatibility
-classes and unverified states. A larger migration remains incomplete until its
-remaining inventory and unvisited application routes are addressed. Never present
-passing stories as full desktop/backend end-to-end coverage.
+Intentional design-system changes need separate After-only token/material and
+interaction contracts. Passing those checks does not turn a changed Before/After
+image into equivalence. Keep intentional changes, unresolved differences and
+unverified states distinct in the report.
+
+Validate the actual built desktop where the affected route or host behavior matters.
+Storybook success does not establish full-app, native or backend coverage. A completed
+surface has verified production rendering and behavior with its real callers; remaining
+unvisited states and open visual differences still limit the larger migration claim.

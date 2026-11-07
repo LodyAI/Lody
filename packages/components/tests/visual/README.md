@@ -1,1090 +1,123 @@
-# Style migration visual acceptance
+# Visual acceptance
 
-Capture production components in a real Chromium browser, compare their pixels
-and computed geometry, and generate a self-contained HTML report. Screenshot
-evidence is separate from behavior tests and from the real Electron smoke run.
+Use real browser captures to verify rendered styles and interactions. The static-build
+gate records reproducibility and Before/After differences; the Electron smoke checks
+the built desktop separately. Neither establishes unvisited product coverage.
 
-| Entry                     | Responsibility                                                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `accept.mjs`              | Strict deterministic baseline/verify gate for immutable static builds.                                        |
-| `profiles/components.mjs` | Composer, sidebar, mobile drawers, Markdown, settings and loading/disabled/hover/focus states.                |
-| `profiles/docs.mjs`       | Docs pages, themes, responsive layouts and real search/TOC/language states.                                   |
-| `visual-regression.mjs`   | Capture, assemble and compare immutable screenshot phases.                                                    |
-| `serve.mjs`               | Serve a fixed Storybook build or report directory on loopback; missing files return 404 when no index exists. |
-| `*-targets.json`          | Story, viewport, theme and interaction-state coverage.                                                        |
-| `electron-smoke.mts`      | Launch the actual built OSS desktop through the existing isolated E2E harness.                                |
+| Entry                                                                                                                                                                                                                                                        | Purpose                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| [`accept.mjs`](accept.mjs), [`accept.test.mjs`](accept.test.mjs)                                                                                                                                                                                             | Baseline/verify CLI and its real-browser positive and negative controls.                                |
+| [`profiles/components.mjs`](profiles/components.mjs), [`profiles/docs.mjs`](profiles/docs.mjs)                                                                                                                                                               | Product stories and docs pages across themes, viewports and interaction states.                         |
+| [`profiles/design-system-core.mjs`](profiles/design-system-core.mjs), [`profiles/design-system-rich-inputs.mjs`](profiles/design-system-rich-inputs.mjs), [`profiles/design-system-context.mjs`](profiles/design-system-context.mjs)                         | Compare intentional material, typography and context changes without treating them as pixel-equivalent. |
+| [`profiles/design-system-browser-annotations.mjs`](profiles/design-system-browser-annotations.mjs), [`profiles/design-system-pr-emoji.mjs`](profiles/design-system-pr-emoji.mjs), [`profiles/design-system-command.mjs`](profiles/design-system-command.mjs) | Browser/annotation controls, merge actions, Emoji and Command interaction states.                       |
+| [`profiles/design-system-contracts.mjs`](profiles/design-system-contracts.mjs), [`profiles/design-system-context-contracts.mjs`](profiles/design-system-context-contracts.mjs)                                                                               | After-only token, material, effective disabled opacity, focus and context-action contracts.             |
+| [`electron-smoke.mts`](electron-smoke.mts)                                                                                                                                                                                                                   | Actual OSS Electron startup, onboarding and local chat through the isolated E2E harness.                |
 
-The legacy report's `identical` status uses threshold/layout checks, and
-`changedPixels: 0` does not prove byte equality or zero raw RGBA differences.
-Inspect `pngIdentical` and retain independent raw-pixel counts. A nonzero raw
-comparison stays OPEN even when its threshold count is zero.
+## Run the static-build gate
 
-## Deterministic static-build gate
+Use the repository's supported Node and pnpm versions and an installed Chromium.
+From `packages/components`, build each source version into a different directory:
 
-Use `accept.mjs` for a new baseline and strict verification. From
-`packages/components`, pass immutable static build directories and the same
-Chromium executable, profile, OS and Node runtime on both sides:
+```sh
+pnpm exec storybook build --output-dir /tmp/lody-ui-before
+```
+
+Capture that unchanged build before editing the owned surface:
 
 ```sh
 node tests/visual/accept.mjs baseline \
-  --build /tmp/site-before \
-  --profile tests/visual/profiles/docs.mjs \
-  --out /tmp/docs-baseline --browser /path/to/chromium
+  --build /tmp/lody-ui-before \
+  --profile tests/visual/profiles/components.mjs \
+  --out artifacts/visual/ui-before --browser /path/to/chromium
+```
+
+After implementation and the owning behavior tests, build and verify the same profile:
+
+```sh
+pnpm exec storybook build --output-dir /tmp/lody-ui-after
 node tests/visual/accept.mjs verify \
-  --build /tmp/site-after --baseline /tmp/docs-baseline \
-  --profile tests/visual/profiles/docs.mjs \
-  --out /tmp/docs-verification --browser /path/to/chromium
+  --build /tmp/lody-ui-after --baseline artifacts/visual/ui-before \
+  --profile tests/visual/profiles/components.mjs \
+  --out artifacts/visual/ui-after --browser /path/to/chromium
 ```
 
-For Storybook builds, use `--profile tests/visual/profiles/components.mjs` with the same commands. It contains 16 scenarios. `pnpm run test:visual:harness` exercises the gate itself with real browser positive and negative controls.
-
-Both commands refuse an existing output directory. `verify` never creates or
-updates a baseline, and accepts only a successful baseline with matching profile,
-environment and policy. Build and profile hashes are checked again after capture.
-Open the self-contained `report.html` in the new output directory; `manifest.json`
-and the original PNG/geometry records preserve failures as well as successes.
-
-Each case runs twice in independent browser contexts. A baseline must reproduce
-itself; verification must reproduce itself and match the baseline with **zero raw
-RGBA pixel differences and equal recorded geometry/content**. Computed CSS
-serialization differences are recorded separately. No pixel tolerance, masks or
-automatic baseline updates can turn a difference into a pass. This gate creates
-new evidence; it does not relabel older reports or close their OPEN differences.
-
-The fixed environment is `en-US`, UTC, 2026-01-01T12:00:00Z, DPR 1, sRGB and
-reduced motion. Capture explicitly finishes finite animations, pauses infinite
-animations and SVG SMIL at zero, and hides the caret. These are declared animation
-endpoints, not motion-sequence equivalence. Full-page PNGs include portals; each
-scenario's `root` limits its geometry snapshot. Readiness uses actual DOM states,
-font/image completion and animation-frame geometry stability, without sleeps.
-
-The docs profile contains 24 cases: Introduction, Quick Start and Sessions in
-light/dark at 390×844 and 1440×1000, plus keyboard search selection, mobile TOC
-expansion/desktop TOC focus, and language popovers at both sizes. Search waits for
-real index results and verifies ArrowDown selects the second result while focus
-stays in the input. An active scrollspy item establishes client readiness; the
-desktop track variables and clipping must also match all active anchors.
-
-All off-origin requests fail capture except two explicitly declared nonvisual
-analytics prefixes: `https://www.clarity.ms/tag/` and
-`https://www.googletagmanager.com/gtag/js?`. The runner aborts and records those
-requests; it sends no analytics traffic and does not rewrite application source.
-Other network failures remain failures, including unexpected external assets.
-
-## Design-system convergence
-
-`profiles/design-system-core.mjs` and `profiles/design-system-rich-inputs.mjs`
-retain real Before/After evidence for intentional material, type and state
-changes. They still use the strict zero-difference gate: a changed design stays
-red, with its actual raw pixels and geometry available for review.
-
-`profiles/design-system-contracts.mjs` is an **After-only** contract board. It
-compares production nodes with public tokens in the same palette, checks effective
-opacity through ancestors and checks a single parent-owned focus edge. It does
-not establish equivalence to the old UI. See the
-[owning decision](../../../../.agents/notes/implemented/architecture/2026-11-07-design-system-convergence.md)
-for scope and retained fixture blockers.
-
-Theme storage is initialized only in the top-level document. Opaque sandbox
-frames keep their native storage and service-worker restrictions. Playwright's
-built-in service-worker block initialization accesses the forbidden getter in
-those frames, so the runner instead installs the same registration no-op only in
-non-opaque documents and records each blocked registration. A real worker or any
-application `pageerror`, including one from a sandbox frame, still fails capture.
-The fixed clock and seeded randomness remain enabled; no sandbox flags are changed.
-
-Browser cleanup first disconnects its `chromium.connect` client, then closes the
-BrowserServer owner and confirms native exit and that its WebSocket/HTTP listener
-refuses connections. Native exit alone does not confirm listener cleanup. Each
-stage has a bounded deadline; a lost client close receipt cannot hold a confirmed
-disconnection open. Failure still reaches the command result, sibling static-server
-cleanup continues, and forced termination is limited to the owned process group.
-The browser and static listener ports are recorded for independent exit checks.
-After native exit, the owner releases its own inherited stdio streams so a child
-pipe cannot postpone Playwright's close event. Listener probes are bounded and
-spaced 250ms apart; they never busy-loop through ephemeral TCP ports.
-
-## Capture a component batch
-
-From `packages/components`, before editing the selected components:
-
-```sh
-pnpm exec storybook build --output-dir /tmp/lody-stylex-before
-node tests/visual/serve.mjs --root /tmp/lody-stylex-before --port 6017
-```
-
-In another terminal, capture a target profile:
-
-```sh
-node tests/visual/visual-regression.mjs capture --phase batch-before \
-  --storybook http://127.0.0.1:6017 --targets tests/visual/continuation-targets.json
-```
-
-After implementation, build to a different directory, serve it on a different
-port and capture the same targets as `batch-after`. Never replace the directory
-being used by a running capture. Dev-server HMR can mix source versions or empty
-an already-rendered story; use an immutable static build for acceptance.
-
-```sh
-node tests/visual/visual-regression.mjs report \
-  --before batch-before --after batch-after --name acceptance
-```
-
-Open `artifacts/visual/acceptance.html`. PNGs are embedded as data URLs, so the
-report remains viewable without the Storybook server or sibling image files.
-The adjacent JSON preserves the raw comparison results. For very large
-assemblies, derived report manifests may retain only the exact fields read by
-`diffLayout` to avoid duplicate nested styles exceeding V8 JSON limits. Verify
-every copied value and original PNG hash; keep complete native snapshots and
-full-field proofs unchanged and report their additional differences separately. Each frame shows its
-story ID, viewport, theme, state and source phases, so search can locate a
-specific story rather than only its group. Capture failures,
-missing frames and changed computed styles are not silently treated as passes;
-`report` returns nonzero for them. Color-expression serialization, transparent
-shadow layers and saturated circular radii can produce raw computed differences
-even with byte-identical PNGs. Review and document that evidence explicitly;
-never erase measured differences merely to make the report green.
-
-Large reports can exhaust a browser session when many high-DPI screenshots stay
-decoded after scrolling and expanding. After generating a report, run:
-
-```sh
-node tests/visual/preview-report.mjs --report artifacts/visual/alpha-acceptance.html
-```
-
-The optional postprocessor generates bounded canvas previews from the real PNGs,
-embeds every unchanged original once by SHA and loads the original in the existing
-zoom viewer. It writes a backup plus a provenance manifest. Verify preview and
-original decoding separately, then exercise keyboard/click zoom, Escape, repeated
-scroll/expand/resize and memory recovery in a real browser. A thumbnail is not an
-original screenshot, and a derived diff mask is labelled separately.
-
-Each capture waits for Storybook completion, visible content, fonts, visible
-image loading/decoding, finite animations and stable geometry throughout the body,
-including portal positioners that resize after their trigger has settled. A target
-label must also intersect its clipping ancestors and pass a real hit/paint check;
-a visible input alone does not establish that its label is on screen. Stable
-geometry and identical pixels alone do not establish the intended state: constrain
-sibling copy-feedback icons when a timer can reset them, and record actual popup
-and ancestor opacity/visibility before accepting dialog captures. Keep byte-equal
-but unpainted calibration frames separate from painted acceptance. Element-local
-original-token stress can expose real CSS differences even when the current fixed
-component props cannot produce those writers; report that contract boundary
-without presenting DOM injection as an observed application caller. `allowBlankIds`
-permits deliberately blank or textless skeleton roots and portal-only stories;
-skeleton profiles require a visible painted placeholder, and portal-only profiles
-require a visible actual portalled control through `ready`. It never exempts that
-required content. Failed image loads or missing content
-fail the capture. Saved, validated frame checkpoints from a stalled runner remain
-frame evidence only: final behavior assertions and normal process/browser closure
-require their own completion signals. Portalled content is part of the layout snapshot. A fixed
-Date value stabilizes relative-time labels without stopping the browser's timers.
-Every story gets a fresh page in its browser context. Reusing worker pages would
-make native Back/Forward availability depend on which earlier story that worker
-visited; changing the worker count must not change the captured UI state.
-
-`--only <story-id-fragment>` limits a capture. `LODY_VISUAL_WORKERS=3` limits
-parallel browser pages. `--resume` requires the original static build, exact targets
-and the same capture script; use a new phase after changing any of them. Successful
-screenshots are retained in a manifest, and failures include diagnostic screenshots.
-
-For native browser controls, a decoded media source and `readyState` do not establish
-that the browser's internal controls painted the same state. Preserve original
-frames and inspect the user-agent shadow controls when ordinary DOM records agree
-but duration labels or control positions differ. A later settled capture cannot
-retroactively prove the original state or close its unexplained pixels. A state
-key does not establish focus: ordered fill steps may finish on a different control.
-Preserve inherited capture keys and annotate the actual focused state separately.
-
-Check migrated custom-property writers in the complete built CSS, including their
-layer ancestors. A writer-only compiler probe can omit priority-zero root/theme
-rules and produce a different grouping result. Pair inherited, inline and real
-caller-layer overrides on the actual child; do not infer cascade equivalence from
-matching default screenshots.
-
-Capture defaults to reduced motion. A target can set `reducedMotion` to
-`no-preference`; `svgTime` on a target or viewport pauses real SVG SMIL at that
-time in seconds, since Playwright's animation switch does not synchronize SMIL.
-A viewport's `device` names a Playwright device descriptor, including its UA,
-touch support and mobile mode. Width alone does not exercise mobile device
-detection. These are Chromium device emulations, not native iOS/WebKit runs.
-
-`waitForFunction` expressions must synchronously return a condition; function
-expressions are invoked and Promise results are rejected. Run
-`node tests/visual/readiness-check.mjs --storybook http://127.0.0.1:6127` against
-a fixed build to verify that false gates prevent captures, true gates allow them,
-and async conditions fail explicitly. Earlier captures retain real PNGs but cannot
-establish that JSON arrow-function gates ran before this runner correction.
-
-`ready[storyId]` contains observable steps required before the first screenshot.
-Use it to await a fixture's known logo: Base UI can preload an image before
-mounting its `<img>`, so inspecting `document.images` alone cannot establish
-readiness. `blockedHosts` explicitly aborts requests to the listed hosts. The
-avatar profiles use this to exercise the real offline fallback on both builds;
-they do not substitute images. Keep the original network-dependent captures and
-document why they were unsuitable for a pair.
-
-The `waitForFunction` step takes a nonempty browser `expression` and optional
-`timeout` (default 15 seconds). Use a read-only predicate for an application
-completion signal: a stable clipped form can still be an unfinished login
-transition. The login profile requires the stage and expanding rows to reach
-their visible phase and measured panel heights, using the existing E2E contract.
-It applies the same predicate after view changes on both immutable builds.
-
-## Target profiles and interaction coverage
-
-| Profile                                                                                                                                                                                  | Coverage                                                                                                                                                                                                                     |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `continuation-targets.json`                                                                                                                                                              | Auth/workspace pages, mentions, mobile files and annotation stories at 390/768/1280px in both themes.                                                                                                                        |
-| `files-targets.json`                                                                                                                                                                     | Real desktop file browser, folder/text/binary/error states and 767/768px boundaries.                                                                                                                                         |
-| `draft-targets.json`                                                                                                                                                                     | Empty, ready and submitting drafts, typing, hover, keyboard focus and disabled controls.                                                                                                                                     |
-| `interaction-targets.json`                                                                                                                                                               | Mobile drill/Markdown/HTML, annotation collapse/hover/independent keyboard peek, textarea focus and disabled state.                                                                                                          |
-| `session-leaf-targets.json`                                                                                                                                                              | Usage variants, relation trees/confirmation and the delayed notification prompt.                                                                                                                                             |
-| `usage-portal-targets.json`                                                                                                                                                              | Actually opened usage portals across seven variants.                                                                                                                                                                         |
-| `regression-targets.json`                                                                                                                                                                | Additional information-bar and onboarding checks; historical missing baselines remain explicit.                                                                                                                              |
-| `status-targets.json`                                                                                                                                                                    | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                                                                                                                          |
-| `project-edit-targets.json`                                                                                                                                                              | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.                                                                                                                |
-| `rename-targets.json`                                                                                                                                                                    | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.                                                                                                              |
-| `schedule-style-targets.json`                                                                                                                                                            | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries.                                                                                                                       |
-| `bub-style-targets.json`                                                                                                                                                                 | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states.                                                                                                                             |
-| `info-chip-style-targets.json`                                                                                                                                                           | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries.                                                                                                                   |
-| `usage-skeleton-targets.json`, `usage-skeleton-narrow-targets.json`                                                                                                                      | Actual day/week/year placeholders, root/subtree spacing, 671/672/673px heatmap containers and 320px layouts.                                                                                                                 |
-| `leaves3-info-bar-targets.json`                                                                                                                                                          | Actual privacy/preview actions, compact and empty states, palette scopes and nested light/dark exclusions.                                                                                                                   |
-| `outline-rail-targets.json`                                                                                                                                                              | Actual rail, overflow, portal and caller precedence at 927/928/929px container widths.                                                                                                                                       |
-| `skeleton-sizing-targets.json`                                                                                                                                                           | Optional width/height, explicit zero and actual sizing changes on the shared Skeleton primitive.                                                                                                                             |
-| `acp-select-targets.json`                                                                                                                                                                | Actual ACP selection variants, disabled/empty options, menus, caller overrides and local scale variables.                                                                                                                    |
-| `leaves4-stuck-banner-targets.json`                                                                                                                                                      | Recovery/dismiss callbacks, long translated copy and narrow connection banners.                                                                                                                                              |
-| `leaves4-queue-display-targets.json`                                                                                                                                                     | Real queue disclosure, utility/opaque callers, folding and root/subtree theme observations.                                                                                                                                  |
-| `leaves5-skills-targets.json`, `leaves5-skills-detail-targets.json`                                                                                                                      | Production skills Body states, runtime spacing, long/absent descriptions, refresh callbacks and detail/back; the story shell is not the product Drawer.                                                                      |
-| `leaves6-mention-targets.json`, `leaves6-queue-row-targets.json`, `leaves6-filter-pill-targets.json`                                                                                     | Mention selection/scroll readiness, owned row hover/focus and filter theme scopes/visible open/close states.                                                                                                                 |
-| `leaves7-home-targets.json`, `leaves7-project-screen-targets.json`, `leaves7-recurrence-targets.json`                                                                                    | Actual home/project headers and recurrence controls, search/filter/archive feedback, disabled days and scoped theme values.                                                                                                  |
-| `leaves8-editor-terminal-targets.json`, `leaves8-warning-targets.json`, `leaves8-merge-targets.json`                                                                                     | Production message editor, command divider, warning palette and compact merge control states, including local variable scopes and callbacks.                                                                                 |
-| `leaves9-composer-status-targets.json`, `leaves9-composer-fallback-targets.json`                                                                                                         | Production composer warning/error/info/absent status, actual render-failure fallback, preserved draft editing/retry and element-local palette scopes.                                                                        |
-| `leaves9-sidebar-targets.json`                                                                                                                                                           | Exported legacy Sidebar adapter, mobile opening, desktop collapse, floating/inset layout, 767/768px boundary and local theme variables; no active app consumer is claimed.                                                   |
-| `leaves10-composer-surface-targets.json`                                                                                                                                                 | Real Composer frames and mention covers, local palettes, file drag enter/leave/drop, disabled/dialog ignore paths and actual selected chips.                                                                                 |
-| `leaves10-share-card-targets.json`                                                                                                                                                       | Fixed share-card layout across sizes, backdrops, mat, titles, empty content and local spacing; pixel equality alone does not establish selected-palette isolation.                                                           |
-| `leaves11-share-palette-targets.json`                                                                                                                                                    | Actual share-card palette/spacing isolation and layout against pre-migration source, kept separate from buggy-Before repair witnesses.                                                                                       |
-| `leaves12-spinner-dimensions-targets.json`                                                                                                                                               | Named and explicit Spinner dimensions, SVG attributes, local spacing, mounted zero/omit/update and real saving/merging consumers.                                                                                            |
-| `leaves13-spinner-auth-targets.json`, `leaves13-spinner-mobile-targets.json`, `leaves13-spinner-misc-targets.json`                                                                       | Actual authentication/mobile/loading Spinner callers, local spacing and observable pending controls.                                                                                                                         |
-| `leaves14-spinner-password-targets.json`, `leaves14-spinner-account-targets.json`                                                                                                        | Password/account pending controls and local spacing, with closing-motion and synthetic Capacitor identity probes recorded separately.                                                                                        |
-| `leaves14-monaco-targets.json`                                                                                                                                                           | Actual Monaco viewer wrapper and editor, with scrollbar class/transition readiness separate from wrapper geometry.                                                                                                           |
-| `leaves15-popover-layout-targets.json`                                                                                                                                                   | Actual Popup zero/default padding and gap, same-node updates, contained and forced theme, focus/ref/positioner contracts.                                                                                                    |
-| `leaves15-popover-consumers-targets.json`                                                                                                                                                | Seven production popups: anchored/stage/CI, closed tabs, Share, sender profile and turn configuration; actual themes recorded separately.                                                                                    |
-| `leaves16-history-spinner-targets.json`, `leaves16-spinner-session-targets.json`                                                                                                         | Real history import/resolve pending and reopen, Session/loading/settings Spinner consumers and local spacing.                                                                                                                |
-| `leaves17-popover-dimensions-targets.json`                                                                                                                                               | Actual Popup dimensions, zero/default updates, local spacing, contained and forced theme; positioner ownership remains separate.                                                                                             |
-| `leaves18-project-settings-spinner-targets.json`, `leaves18-spinner-about-targets.json`                                                                                                  | Actual project loading/sharing and About updater components, synthetic public CloudApi/IPC boundaries, local spacing and recovery.                                                                                           |
-| `leaves19-menu-dimensions-targets.json`, `leaves19-menu-consumers-targets.json`                                                                                                          | Actual Menu popup bounds, zero/reset/container/compact, Header Copy/Fork/Owner, Side Add and local/remote file menus; Opened sessions remains uncovered.                                                                     |
-| `leaves20-integrations-spinner-targets.json`, `leaves20-ceremony-targets.json`                                                                                                           | Public cloud-shaped Integrations loading/preference/auth recovery and actual paused Ceremony, scope palettes, real skip/finish controls; dark host stress differs from route light ownership.                                |
-| `leaves21-context-menu-dimensions-targets.json`, `leaves21-context-consumers-targets.json`                                                                                               | Actual ContextMenu bounds/zero/reset/container and six real row menus opened with browser right-click; Gallery remains After-only.                                                                                           |
-| `leaves22-button-dimensions-targets.json`                                                                                                                                                | Button box dimensions, zero/omit and same-node updates, caller contracts and local spacing; held active captures are a separate reduced-motion native probe.                                                                 |
-| `leaves22-button-mobile-targets.json`, `leaves22-button-leaf-targets.json`, `leaves22-button-auth-targets.json`                                                                          | Actual mobile/leaf/auth callers, portal pairing and handoff states; unmounted login controls stay deferred.                                                                                                                  |
-| `leaves22-button-private-targets.json`                                                                                                                                                   | Header trigger, reply card/dialog and Plan Copy hover/focus; audited successful Before subset covers eight migrated utilities, with failed Search/hidden Footer states retained separately.                                  |
-| `leaves23-context-remaining-targets.json`, `leaves23-owned-controls-targets.json`                                                                                                        | Real Markdown/local-project/file-tree/terminal menus and visible Opened/Search/Footer controls; three original hidden xterm helper geometry records remain explicit.                                                         |
-| `leaves24-message-action-button-targets.json`                                                                                                                                            | Actual message-action Button dimensions, hover/focus and scoped spacing; physical touch and controlled clipboard feedback are separate reduced-motion native captures.                                                       |
-| `leaves24-button-small-callers-targets.json`                                                                                                                                             | Mermaid min/max/reset and actual portal spacing; MobileAdd directory navigation, Usage detail close and Loro empty-view recovery. Rejected gates and local navigation failures stay separate.                                |
-| `leaves25-button-invariants-desktop-targets.json`, `leaves25-button-invariants-phone-targets.json`                                                                                       | Actual primitive-owned declarations: 40 PNG pairs; 44-root computed proof is separate and adds no PNGs. Original readiness failures remain diagnostic.                                                                       |
-| `leaves25-private-fork-button-targets.json`                                                                                                                                              | Closed two-caller Fork helper defaults, caller overrides, real menus and legacy Spinner pending states; rejected selector/ready phases remain separate.                                                                      |
-| `leaves26-spinner-invariants-targets.json`, `leaves26-spinner-sharing-targets.json`, `leaves26-spinner-project-ready-targets.json`, `leaves26-spinner-project-after-repair-targets.json` | Real Spinner invariant states; cached-avatar and Sharing readiness have separate source phases. Normal-motion supplements and original OPEN frames stay separate.                                                            |
-| `leaves26-message-content-spacing-targets.json`, `leaves26-sender-avatar-targets.json`                                                                                                   | Actual message action reveal/edit/cancel and sender profile, plus retained plan/media spacing controls; rejected writer-layer candidate and native audio OPEN remain explicit.                                               |
-| `leaves26-sidebar-footer-targets.json`                                                                                                                                                   | Four internal callers of the module-private Loro footer helper, actual menus/actions and scoped dimensions; desktop remains an unchanged control.                                                                            |
-| `leaves27-sidebar-desktop-targets.json`, `leaves27-sidebar-phone-targets.json`                                                                                                           | Real public Sidebar adapters; desktop and explicit-phone profiles preserve caller variants. Rejected ancestor/caller prototypes and five supplemental OPEN pairs remain separate.                                            |
-| `leaves27-managed-preview-spinner-targets.json`                                                                                                                                          | Actual sandbox inspector target resolution, draft Cancel/reopen/pending and element-local Spinner dimensions; four real animation samples are separate.                                                                      |
-| `leaves28-collapsible-layout-targets.json`                                                                                                                                               | Three private CollapsibleCard callers, owned width/radius/padding composition, actual normal/activity media, kind=read, local variables and direct Thought search compatibility.                                             |
-| `leaves29-message-action-colors-targets.json`                                                                                                                                            | Seven fixed ghost-action Button sites, both Fork callers, fine/coarse color states and scoped tokens. Accepted120 includes112 original plus8 exact-state-ready pending pairs; direct inline token negatives remain separate. |
-| `leaves30-billing-container-spinner-targets.json`                                                                                                                                        | Actual Billing preview/Cancel/reopen/pending-confirmation flows with synthetic public providers. Accepted normal-motion screenshots additionally require painted dialogs; no Stripe/auth E2E claim.                          |
-| `leaves31-conversation-panel-targets.json`                                                                                                                                               | Actual Terminal and Plan header/body layout, collapse/Space reopen, approval/drafting/local variables; 216 native role snapshots add no PNGs.                                                                                |
-| `leaves32-managed-frame-targets.json`                                                                                                                                                    | Actual credentialless inspector iframe, transparent synthetic child paint, Cancel/reopen/pending and local white variable; v1 paint failure and scheme experiment stay diagnostic.                                           |
-| `leaves33-search-action-colors-targets.json`                                                                                                                                             | Actual SearchBar typing/navigation/wrap/clear/Escape/Close and 128-result search; native fine/coarse glyph/token controls and genuine inline negatives remain separate.                                                      |
-| `leaves34-no-background-colors-targets.json`                                                                                                                                             | Actual fixed Operation/Header More ink; inherited hover backgrounds, focus, disabled state and two target tokens. Four inline negatives are genuine color differences.                                                       |
-| `leaves35-project-group-icons-targets.json`, `leaves35-project-group-natural-menu-targets.json`                                                                                          | Actual group resolved/fallback glyphs, caller precedence and natural 70% opacity; original six raster OPENs remain explicit.                                                                                                 |
-| `leaves35-project-group-menu-painted-targets.json`, `leaves35-project-group-natural-menu-painted-targets.json`                                                                           | Genuine painted-menu readiness; final48closed+12painted source rows retain three current raster OPENs and exact source provenance.                                                                                           |
-| `leaves44-modal-spacing-targets.json`, `leaves44-modal-spacing-consumers-targets.json`                                                                                                   | Actual Dialog/Alert default-none combinations, omission reset, retained value/focus, inline style callbacks and real modal host; Rename/Operation portals use actual-popup readiness.                                        |
-| `leaves45-avatar-glyph-targets.json`                                                                                                                                                     | Actual User/Workspace fallback glyphs across five rungs, inherited glyph-token theme, mounted theme swap/restore and initials controls; DPR3 CSS adds no PNGs.                                                               |
-| `leaves46-dialog-consumers-targets.json`                                                                                                                                                 | Actual pasted-text editing, Quick Open filtering and Operation reply reopen; real coordinate clicks pass through the mirror. Forced UI-dark/global-light retains its original Markdown contrast limitation.                  |
-| `leaves47-spinner-margin-targets.json`, `leaves47-spinner-margin-rtl-targets.json`                                                                                                       | Five pending Spinner margins with root/subtree spacing and local-button RTL. Whole-app RTL failures and two normal-motion Billing pixel OPENs remain separate.                                                               |
-| `leaves48-input-height-targets.json`, `leaves48-input-height-consumers-targets.json`                                                                                                     | Actual plain/leading/password well height, native attributes, style callbacks, zero/reset and four app callers. Three original one-pixel PNG OPENs remain; CSS-only probes and Gallery After-only images stay separate.      |
-| `leaves49-command-dialog-targets.json`                                                                                                                                                   | Existing public CommandDialog filter/empty/keyboard/reopen at 1280/639/640/390px. Phone captures retain the original 512px overflow and explicit 30+10 Before origins; matching pixels do not establish viewport fit.        |
-| `leaves50-private-spacing-targets.json`                                                                                                                                                  | Six private spacing owners, callbacks and local variables. Accepted72 retain64standard/eightnative origins; Banner UNKNOWNs and one collapsed PlanBar pixel OPEN remain.                                                     |
-| `leaves51-private-input-height-targets.json`                                                                                                                                             | Actual account edit inputs and session search use controlHeight;48 exact pairs cover editing, long text, query, keyboard and Escape/reopen.                                                                                  |
-| `leaves52-workspace-delete-spinner-targets.json`                                                                                                                                         | Real typing, deferred confirmation and completed/reopened deletion sheet. Three original pixel OPENs remain despite matching layout and bounded ancestor CSS.                                                                |
-| `leaves54-public-browser-loading-targets.json`                                                                                                                                           | Renderer-only PublicBrowserSurface Loading/ready/error with never-forward synthetic IPC; corrected Before excludes initial fixture theme IPC errors.                                                                         |
-| `leaves74-tooltip-type-width-targets.json`, `leaves77-*-targets.json`                                                                                                                    | Actual Tooltip text/width/wrapping, real archive hover and completed Monaco embedded-JavaScript rendering; original state-mismatched and raw-pixel frames remain separate.                                                   |
-| `leaves75-resize-*-targets.json`                                                                                                                                                         | Opt-in edge-handle owner, default controls, actual 767/768px boundary and native drag/keyboard supplements; normal-motion captures establish settled endpoints.                                                              |
-| `leaves76-button-typography-*-targets.json`                                                                                                                                              | Actual private Button consumers and owner typography fields; rejected custom-property CSS-wide semantics remain distinct from the final physical-field API.                                                                  |
-| `leaves78-diff-notice-*-targets.json`                                                                                                                                                    | Actual DiffNotice header, public direct-child callers and retained dark-border precedence; native logical-axis and real 75ms motion frames are supplemental.                                                                 |
-| `legacy-task-targets.json`                                                                                                                                                               | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.                                                                                                      |
-| `legacy-updated-task-targets.json`                                                                                                                                                       | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                                                                                                                    |
-| `owned-session-list-targets.json`                                                                                                                                                        | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.                                                                                                        |
-| `owned-updated-session-targets.json`                                                                                                                                                     | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states.                                                                                                  |
-| `owned-login-targets.json`                                                                                                                                                               | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary.                                                                                                                          |
-| `mobile-project-settings-targets.json`                                                                                                                                                   | Production project settings with multiple machines, long labels, local editors, loading and read-only states.                                                                                                                |
-| `mobile-account-settings-targets.json`                                                                                                                                                   | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables.                                                                                                               |
-| `leaves85-*-targets.json`                                                                                                                                                                | Actual Dialog/Vaul hidden names; original portal gates and strict replacements retain distinct origins.                                                                                                                      |
-| `leaves86-card-title-targets.json`                                                                                                                                                       | Fixed auth/workspace Card titles with real theme/paint/focus/password-reveal gates.                                                                                                                                          |
-| `leaves87-mobile-*-targets.json`                                                                                                                                                         | Native landing labels, keyboard focus and sidebar callback at 320/390/767/768px, with RTL/local font.                                                                                                                        |
-| `leaves87-preview-title-targets.json`, `leaves87-popover-default-controls-targets.json`                                                                                                  | Actual BaseUI Popover hidden title open/Escape/reopen and default-owner controls.                                                                                                                                            |
-| `leaves88-*-targets.json`                                                                                                                                                                | Actual standalone/managed annotation Textarea input, pending/cancel, theme and size gates.                                                                                                                                   |
-| `mobile-workspace-sheets-targets.json`                                                                                                                                                   | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts.                                                                                                                     |
-| `file-image-targets.json`                                                                                                                                                                | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close.                                                                                                                              |
-| `markdown-links-targets.json`                                                                                                                                                            | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety.                                                                                                                 |
-| `workspace-shell-targets.json`                                                                                                                                                           | Actual sidebar empty states, menus, tooltips, keyboard focus, resize and root/subtree variables.                                                                                                                             |
-| `sidebar-targets.json`                                                                                                                                                                   | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.                                                                                                                  |
-| `sidebar-mobile-targets.json`                                                                                                                                                            | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                                                                                                                         |
-| `sidebar-updated-interaction-targets.json`                                                                                                                                               | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                                                                                                                                    |
-| `sidebar-archive-long-targets.json`                                                                                                                                                      | Long-title clipping and slot geometry during archive confirmation and commit.                                                                                                                                                |
-| `sidebar-send-motion-targets.json`                                                                                                                                                       | Normal-motion send rings at SMIL times 0 and 0.6 seconds.                                                                                                                                                                    |
-| `chat-targets.json`                                                                                                                                                                      | Composer/landing, selector menus, disabled-context hover/keyboard actions and connection-state transitions.                                                                                                                  |
-| `chat-mobile-targets.json`                                                                                                                                                               | Real iPhone/Android descriptors, touch actions, keyboard tooltip control and pasted-text layouts.                                                                                                                            |
-| `chat-mobile-home-targets.json`                                                                                                                                                          | Mobile home headers, workspace logos, onboarding, crowded status and reconnect/offline states.                                                                                                                               |
-| `chat-boundary-targets.json`                                                                                                                                                             | 311/312, 639/640 and 671/672px widths for compact composer and disabled-context styling.                                                                                                                                     |
-| `chat-context-targets.json`, `chat-mobile-context-targets.json`                                                                                                                          | Independent corrected context-action/tooltip captures; retain invalid initial selector diagnostics.                                                                                                                          |
-
-`schedule-style-native.mjs`, `bub-style-native.mjs` and `info-chip-style-native.mjs`
-take `--phase <name> --storybook <immutable-url>`. They supplement screenshots
-with computed child/tooltip contracts, exact clipboard and document-link intents,
-and trusted pointer/keyboard states, including local theme-scope selectors. The
-chip runner adds `--scope-only true` for its separate local-variable matrix. The
-install-guide fixture intercepts its existing browser clipboard and external-open
-boundaries; it never runs the displayed command or opens the live guide. Scope
-probes verify selector matching, not theme-provider persistence or native OS UI.
-
-`outline-rail-native.mjs` takes the same phase and immutable URL arguments. It
-records actual keyboard navigation, pointer preview/jump, touch, overflow scrolling
-and unrelated outer-marker states, including raw scrollbar pseudo styles. Caller
-descendant ink must retain its original priority relative to named hover/focus
-variants. Native frames are separate executions; overlapping states do not imply
-additional distinct UI coverage. Full-field observations supplement the report's
-smaller layout view without replacing the original screenshots.
-
-Composer fallback readiness requires the production failure text, preserved draft
-and fallback textarea marker, rather than a hand-rendered substitute. A changing
-reset key must leave the captured failure visible; only the actual retry action
-restores the normal composer with the edited draft. Palette probes assert resolved
-status ink, including an element-local writer and nested light-scope exclusion.
-
-Composer surface checks distinguish the frame's translucent oklab fill from the
-mention cover's opaque sRGB mix. Compare both actual backgrounds and the raw
-custom property, after local variables and mirror selection/scroll have committed.
-File-event controls use real browser DataTransfer/File objects with production
-handlers; record their synthetic dispatch boundary. For normal-motion session
-colours, pause the actual CSS transitions and screenshot with animations allowed;
-record pre/post current times rather than treating disabled animation as a midpoint.
-
-Popover readiness measures the actual `role=dialog` popup after its finite
-transition, fonts/images and complete content have committed. Keep its layout
-props distinct from positioner `style` and ref ownership. Story globals can force
-a theme despite the requested URL: the sender profile is light and the desktop
-turn-configuration story is dark. Record actual palette observations rather than
-counting each requested theme as distinct rendered coverage. A story play action
-may leave a popup closed; establish the required state with explicit user input
-and retain the rejected capture.
-Dimension gates must resolve CSS units at the element instead of parsing `.25rem`
-as a pixel step. A computed `min-width` can be `0px` when the authored default is
-`auto`; assert actual layout and keep failed assumptions as diagnostics. History
-confirmation can close its parent Drawer while a callback remains pending; use
-real reopen controls for that state rather than assuming it remains on screen.
-Submenu keyboard focus can open a tooltip over other rows. Preserve that feedback
-frame, then focus an actual non-tooltip row for an additional complete-content
-state. Check requested IDs against the built Storybook index: a misspelled ID can
-otherwise leave a smaller successful selection. Synthetic IPC fixtures must
-implement the existing theme subscription boundary before their component renders;
-keep unsupported-event failures separate from product style acceptance.
-A route that owns light theme can still have a dark-host stress fixture, but label
-that boundary. Paused/reduced-motion frames do not establish the full motion or
-audio timeline. Keep above-threshold paints OPEN even when inherited CSS, image
-bytes, hit stacks and animation records match. Original capture harnesses remain
-hash-identified when later batches extend optional interaction arguments.
-
-For managed iframe backgrounds, computed color does not establish child-composited
-paint. Decode original full screenshots at declared points and keep source-document
-scheme, transparency and security attributes. A same-frame child-scheme mutation
-can diagnose a white/cyan mismatch, but accepted product comparisons must use
-independently built matching fixture documents without that runtime mutation.
-
-`leaves31-33-acceptance.html` separates 168 exact formal pairs/12,024 records from
-20 supplemental pairs and four original failed-calibration images. Eight supported
-search native pairs agree in ordinary CSS, pseudos and actual SVG descendants;
-four manual inline original-token pairs genuinely differ by 392 raw/392 threshold
-pixels each. The reviewed SearchBar has fixed children and no style/visual props;
-its three production callers supply only height-only rootFill. The local theme
-is not an arbitrary Button/ancestor API. Preserve raw token inputs, disabled `/40`
-and artificial ancestor counterexamples; identical default screenshots cannot
-justify expanding that contract. Prototype computed ink and screenshot changes
-are reported independently, without inferring unproved paint causes. Saved native
-screenshots and complete checkpoints do not establish successful cleanup if the
-process subsequently stalls. Frozen older reports and non-exhaustive OPEN indices
-remain unchanged; current report QA covers full payload decode and two continuous
-1280/390 Chrome interaction cycles.
-
-`leaves34-35-acceptance.html` remains **partial visual acceptance**: 105/108
-formal PNG pairs exact, three current focus-ring OPENs/14raw pixels, with all
-5,264 standard node records equal. Six original pairs/24raw pixels stay separate.
-Zero threshold pixels does not close these differences. Its selector matrix is
-an explicit reference assembly of48original closed-state pairs plus12real
-painted-menu captures, not a fabricated capture manifest. Actual popup paint
-requires opacity1, identity transform and no pending lifecycle/finite transition;
-mounted geometry alone previously accepted opacity0. Natural menu controls keep
-real70% glyph opacity without caller masks. Bound ring CSS/repeat diagnostics do
-not prove exact raster causes. Fixed no-background color themes target only two
-tokens and retain all51others, including ghostHover; four manual same-element
-inline token cases truly change colors and stay negative contracts. Native data
-completion and stalled cleanup are separately reported. Original image/source
-hashes, all payload decode and two continuous1280/390 report UI cycles qualify
-this batch without changing prior frozen reports or inventory-method baselines.
-
-The 36–39 control-dimension report separates 248 formal pairs (246 exact, two
-OPEN, 13,210 equal standard records), twenty exact selected native pairs and
-51 broader browser-story pairs (44 exact, seven OPEN). Keep the original invalid
-viewport frames and four cross-method native differences diagnostic; a same-method
-comparison does not retroactively close them. Width/height checks must include
-both `innerWidth`/`innerHeight` and the actual PNG dimensions. Full CSS and actual
-pointer/focus/animation records constrain a diagnosis without proving its raster
-cause. The solo share-title continuation separately records 28 exact pairs and
-4,102 records, including scoped dimensions and actual long-title clipping.
-
-The 41 continuation uses 60 real pairs/1,900 standard records; each side is an
-explicit 52+8 capture-origin assembly. Keep the original eight timeout screenshots,
-wrong square-size assumption and bounded diagnostic follow-up separate. A body
-portal subtree can shrink a 17.5px share glyph to 16px wide: preserve that actual
-flex contract. The mobile-account/encrypted-mark continuation contributes another
-64 exact pairs/4,536 records and eight normal-motion closing pairs; pausing a real
-closing animation at its start does not validate its whole timeline. An empty or
-opaque caller class still replaces the encrypted mark's default rather than
-merging with it. CSS-only samples never add screenshot pairs.
-
-The modal-spacing/avatar-glyph report has 108 exact formal PNG pairs/7,536 equal
-standard records. The modal fixture's Before uses real legacy classes and its
-After swaps only that local adapter to the new Content props; retain both fixture
-hashes instead of claiming identical source bytes. Twelve modal CSS scenes and
-four DPR3 avatar CSS scenes add no screenshot pairs. Gallery and Electron images
-are After-only, with actual pixel dimensions retained.
-
-A portal-only Rename story leaves its decorated story root blank even when its
-body-mounted dialog is painted. Its target may use the existing `allowBlankIds`
-exception only with strict actual-popup spacing/paint/theme/focus/animation gates.
-Retain the initial five error PNGs, interrupted checkpoint and count correction;
-the original four-failure log summary does not enumerate that final interrupted
-image. The public Avatar root and original UserAvatar parameter-format hunk stay
-unchanged; use the actual d22e Before source rather than a HEAD format variant.
-No new matching matrix closes historical pixel OPENs or inline negative contracts.
-
-The existing Browser Preview sweep inherits its configured base URL in every
-fresh context. Static builds use production React, so story input helpers must
-not call `React.act`; dispatch the native input boundary, allow the controlled
-value to commit, submit and await each scenario's actual result. Keep original
-failed story runs distinct from corrected Before/After acceptance.
-
-A repair's immediate Before may already contain a migration bug. Keep that
-Before→Final witness, but establish restoration against a separately built,
-hash-identified original-source reference. A matching buggy layout screenshot
-cannot certify an isolated card's selected palette. Compare actual element
-colours, local spacing and unchanged outer-root values with the reference.
-
-Spinner motion probes pause the actual infinite wrapper animation at 400ms of
-its 900ms cycle with screenshots allowing animations. Reduced-motion profiles
-assert the app's actual shortened duration; they do not require the normal-motion
-value. Record DPR, SVG attributes, computed dimensions and same-instance updates. Newly introduced dynamic inline
-variables are expected source differences; preserve them separately from exact
-ordinary CSS/pseudo fields and PNG comparisons. Read-only saving textareas and
-disabled action buttons are different states and need their actual contracts.
-Long-label reconnect fixtures can clip the loading mark outside their narrow
-column. Record that limit and use the separate visible production-controls branch
-for coverage. Monaco readiness must account for scrollbar visibility classes and
-actual transitions: an opacity snapshot alone can precede the screenshot's
-animation endpoint. Preserve failed gates and original changed frames when
-collecting a matrix with corrected readiness.
-
-Theme initialization can replace a story's early root palette override. Record
-the actual element variables after initialization; a story's name is not scope
-coverage. Runtime root probes apply and assert their values after that boundary.
-Native queue scroll captures wait for real `scrollend`, verify the visible last
-row and hit chain, and compare layout/CSS/input state before and after each shot.
-Keep earlier scroll paints and their unresolved causes alongside recaptures.
-
-`legacy-task-native.mjs` and `legacy-updated-task-native.mjs` take the same phase
-and immutable URL arguments. TaskList writes `proof.json`: matching primary
-computed observations plus separately named gesture screenshots. Updated writes
-`manifest.json` with native screenshots, trusted events and callback assertions.
-Do not count computed-only observations as additional screenshot pairs. Preserve
-complete nested fields when comparing; native report adapters assign stable
-node-index paths and retain original PNG hashes. Actual touch covers swipe/archive
-and the 767/768px boundary; forced colors and drag/cancel/reorder are separate
-states. Original nested-button Enter and touch-without-hover restrictions remain
-explicit; an unsupported interaction is not a passing screenshot state.
-
-The `owned-session-list-native.mjs`, `owned-updated-session-native.mjs` and
-`owned-login-native.mjs` runners also take `--phase` and `--storybook`.
-Capture `owned-login-targets.json` with `LODY_VISUAL_WORKERS=1`: the existing
-LoginPage stories share a context's last-used-provider storage, so concurrent
-stories can change the hidden panel's input state. Use the same story order on
-both sources.
-SessionList writes `proof.json`; only entries with `shot` are screenshot pairs,
-while matching primary observations supply additional computed fields. Drag
-captures require the intended moved pose, settled geometry/styles and actual
-pointer hit testing. Updated-list captures preserve precise-opener callbacks,
-mention payloads, caller precedence and actual touch archive behavior. Login
-captures inspect provider SVG sizing, pending spinner spacing and synthetic auth
-intents without completing a sign-in. Retain initial mismatched interaction or
-transition captures when improving readiness; compare both sources again with
-the same final runner and keep raw pixel and diagnostic differences explicit.
-
-`mobile-project-settings-native.mjs`, `mobile-account-settings-native.mjs` and
-`mobile-workspace-sheets-native.mjs` use the same phase/immutable-URL arguments.
-They record trusted pointer/touch/keyboard events, callback results, focus, exact
-geometry and nested computed styles. Project touch-held states record the original
-Chromium behavior without claiming `:active` when that pseudo-class is absent.
-Account iOS-branch emulation and sheet keyboard-inset CSS probes do not establish
-native WebKit or an OS keyboard. The local build rejects cloud workspace creation;
-the create runner verifies that rejection and never substitutes a successful
-cloud mutation. Delete uses a deferred synthetic callback and verifies its actual
-completion/close/reset behavior. Keep failed fixture/locator calibrations, raw
-pixel differences and unchanged-source control runs separate from formal pairs.
-
-The compiler-backed inventory and its parser tests were retired with the final
-Storybook compiler. Their frozen source and final JSON are preserved in ignored
-`artifacts/visual/compiler-retirement-source/` and
-`artifacts/visual/code-focus-zero-compiler-inventory.json`. The final scan found
-zero recognized utilities in 1,795 files, with 744 unresolved expressions. This
-is a static lower bound, not a visual or dynamic-string pass. Earlier inventories
-must retain their scanner versions and source snapshots; do not compare counts
-from different recognition methods as migration percentages.
-
-`session-layout-native.mjs`, `search-table-native.mjs` and
-`onboarding-surface-native.mjs` capture the owned layout, table and onboarding
-fixtures. Keep caller-class precedence, named outer-group hover, resize-handle
-pseudo-elements and clipboard deadlines in the recorded contract. Onboarding
-overlays resolve to light even when the surrounding Storybook preview requests
-dark; record the resolved theme separately. A generic story-sequence capture
-that leaves Motion at its initial opacity is a failed capture, not an acceptable
-blank baseline. Preserve that run alongside independent native-input evidence.
-Its native runner fixes Date while timers and rAF continue, and records explicitly
-paused infinite WAAPI icons per frame. Stable computed fields do not certify the
-custom tour camera's private rest state or screenshot-time raster equivalence;
-retain changed camera coordinates and PNGs in the report.
-
-`file-image-native.mjs`, `markdown-links-native.mjs` and
-`workspace-shell-native.mjs` use the same phase/immutable-URL arguments.
-Image observations digest loaded image bytes while keeping random blob URL
-identities in separate source metadata. Its final native gesture witnesses use
-normal motion; reduced-motion primary coverage does not establish reduced-motion
-pinch behavior. PhotoView has JavaScript throttling and geometry rebasing beyond
-CSS animation completion. Preserve incomplete full runs when adapting common
-entries, and label later individual-state witnesses as supplemental. Never let a
-zero-failure subset manifest erase the original failure or missing sequence.
-Markdown clipboard deadlines use the controlled clock and actual deferred
-clipboard boundary. Sidebar pointer/keyboard and separate trusted-touch probes
-are distinct input coverage. Supplemental theme/caller probes and computed-only
-custom-property observations keep separate counts and original provenance.
-
-`chat-search-ready-targets.json` explicitly enters the search query and waits for
-the filtered result. Storybook play completion can precede a successful input
-during menu autofocus; a stable unfiltered menu is still the wrong state.
-
-The `controls-session-*-targets.json` profiles cover production SessionList
-layouts, real mobile detection, group creation/collapse and keyboard reordering.
-Their skeleton readiness checks a visible placeholder before allowing textless
-content. `controls-terminal*-targets.json` exercises the real dock and xterm
-against a synthetic transport, including limits/errors, tab lifecycle and normal
-motion at separately named viewports. `controls-schedule*-targets.json` covers
-property rows, real recurrence consumers, native time/date input and portals;
-`controls-view-targets.json` opens production turn metadata and activity states.
-These fixtures replace transport data, never the rendered UI.
-
-The `next-preview*-targets.json` profiles cover native annotation actions,
-corner peeks and explicit theme scopes. `next-search*-targets.json` checks the
-real search bar and visible text/Markdown marks; a process disclosure opening
-does not establish that provider-gated thought content rendered.
-`next-recurrence*-targets.json` and `next-pin-targets.json` cover day/date toggles,
-native input segments and the shared pinned-message column. `next-swipe-targets.json`
-and `next-queue*-targets.json` exercise production rows and cached-image previews.
-`next-swipe-touch.mjs` adds trusted CDP touch input and native Tab/Enter for the
-gesture paths the ordinary capture steps do not implement. Its phases use the
-same manifest shape and can be assembled with the ordinary captures.
-
-The `round-{command,slider,copy,layout,scroll}-targets.json` profiles exercise the
-shared adapters and their actual consumers. Command virtual-list readiness
-filters and clears through the real input before requiring mounted rows; an
-initial empty virtual viewport is not accepted as list coverage.
-`round-layout-native.mjs` and `round-scroll-native.mjs` add trusted pointer,
-touch, wheel and keyboard paths. `round-slider-copy-native.mjs` exercises native
-range behavior in Chromium/Firefox and uses Playwright's clock plus the real
-clipboard for the two-second copied state. Scroll and slider/copy runners take
-`--phase <name> --storybook <immutable-url>`; slider/copy also requires
-`--kind slider|copy` and optionally `--engine firefox`. The layout runner takes
-`LODY_LAYOUT_PHASE` and `LODY_LAYOUT_URL` environment variables. Keep both sides
-on the same runner.
-
-The `followup-{emoji,drawer}-targets.json` profiles cover the real Emoji Picker
-and Drawer adapters and their settings consumers. Emoji readiness waits for the
-actual filtered row count, active emoji and visible footer label; a filled search
-input alone precedes Frimousse's deferred list update. The corresponding native
-runners capture paused/released local Emojibase requests, sticky headers, native
-keyboard selection and forced colors, plus Vaul touch drag/close in four directions.
-Run either with `--phase <name> --storybook <immutable-url>`. Drawer waits for
-Vaul's own 500ms no-drag opening guard before trusted touch input. Failed
-forced-colors candidates and caret hash controls remain separate evidence.
-
-The `diff-{main,leaves,edge}-targets.json` profiles mount the production Diff
-Viewer, comments and action buttons. Shadow-line readiness proves body layout;
-async syntax/theme frames also require real colored token spans. The native
-runners capture actual shadow DOM, container breakpoint changes, context expansion,
-selection, normal-motion collapse frames, touch comments and real clipboard
-success/rejection/deadlines. Both take `--phase <name> --storybook <immutable-url>`.
-Keep nonstandard native scenario keys as separately verified supplemental pairs:
-assembling them as ordinary profiles can invent canonical rest frames that the
-runner never intended to capture. Inspect original phase failures and expected
-counts rather than accepting that invented matrix.
-
-The historical `alpha-{mobile,surface,sidebar}-targets.json` profiles separated an
-unchanged baseline, exact original CSS-declaration controls and final source.
-Runtime restored-declaration images are real browser controls, not whole
-historical builds. A later independent source-reference build keeps verified
-color/state/palette repairs while retaining the five utilities being migrated;
-its screenshots isolate migration equivalence without late inline mutation.
-Preserve rejected reference paint results and their provenance when using that
-source reference. The native runners record target uniqueness, computed values,
-media/input state and the exact declarations applied. Mobile captures must await
-finite animation completion and stable geometry, transform, opacity and color.
-Upstream direct folder selection retires the removal-confirmation components and
-their dedicated AlphaSidebar stories/profile/runner and mobile-removal palette
-runner. Current AlphaMobile covers tabs only. Reproduce retired states from their
-recorded source commits; their original report images remain historical evidence.
-The `main-*-integration-*` runners compare the updated live surfaces with an
-explicit source-reference unit on the same integrated graph, not a whole
-historical-main application. Preserve that reference boundary and failed builds.
-`main-mobile-settings-scopes.mjs` and `main-queue-integration-scopes.mjs` keep
-root/subtree ink, hover and focus probes reproducible with the same
-`--phase` / `--storybook` arguments. Preserve real command-port, no-op callback
-and scheduler-preview-slot limits instead of labelling these as daemon tests.
-
-Static Storybook builds explicitly retain `@pierre/diffs`' shipped web-component
-registration module: version 1.0.10's side-effect metadata names an unpublished
-source path. Require rendered shadow-DOM lines before accepting a diff body;
-an unregistered zero-height custom element only verifies its surrounding chrome.
-
-The `states` object maps a story ID to ordered state names and observable steps.
-When another surface such as an error toast also uses `role="dialog"`, locate
-the intended dialog by its accessible name. Portal-only fixtures still require
-visible actual content even when their unpainted story root is allowed blank.
-Steps use roles, text or owned selectors and can click, tap, hover, focus, fill, press,
-move the pointer, or assert visible/hidden/enabled/disabled state. `clickPoint` reads
-the actual target box and sends a real pointer click at its centre. It covers a
-pointer-transparent mirror over a textarea without dispatching a synthetic event
-or forcing the mirror to accept input. States execute
-in sequence after a fresh story load. Move the pointer away before a keyboard
-peek so a hovering pointer cannot satisfy the intended keyboard condition.
-
-`create-targets.json`, `notification-targets.json` and `join-targets.json` are
-supplemental profiles used to replace invalid legacy captures with verified
-original-component frames. Before-source copies and per-frame origins stay in
-the local evidence; no recreated or generated image serves as a baseline.
-
-To combine independent profiles, give each its own capture phase and assemble
-them. A later capture may become part of the accepted matrix after its actual
-source, readiness and interaction are verified. It does not automatically close
-the original failure or difference; source manifests retain both origins and
-the remaining uncertainty:
-
-```sh
-node tests/visual/visual-regression.mjs assemble \
-  --phases pages-before,files-before,draft-before --phase acceptance-before
-node tests/visual/visual-regression.mjs assemble \
-  --phases pages-after,files-after,draft-after --phase acceptance-after
-node tests/visual/visual-regression.mjs report \
-  --before acceptance-before --after acceptance-after --name acceptance
-```
-
-Already assembled phases can be combined again. Each frame retains its original
-capture phase and URL, and nested source metadata remains in the manifest. When
-combining progressive batches, document each batch's baseline and final build;
-do not describe every frame as coming from one final build.
-
-An optional `--context <json-file>` adds `scope`, `checks` and `limits` string
-arrays and an `evidence` array of `{label,dataUrl}` screenshots to the report.
-`metricsDescription` states which assembled phases the counters include; use it
-when native captures are part of the matrix.
-`coverage` rows contain `{file,before,after,remaining}`. `evidencePairs` contains
-`{label,beforeUrl,afterUrl}` with embedded PNG data URLs; `evidenceTitle` and
-`evidenceDescription` identify the evidence and its limits. Use these for measured
-coverage, reviewed differences and separate Electron images. Keep ignored runtime
-artifacts out of commits.
-
-## Frozen continuation reports
-
-Run each shipped UI output in its real browser entry point. Storybook success does
-not establish that a generated single-file viewer contains its extracted styles.
-The helper's offline browser run exposed missing StyleX CSS despite a successful
-build. Compare complete target records even when the PNG is identical: navigation
-can move the incorrect target outside the viewport. The implementation and build
-ordering belong to [the helper build guide](../../../code-review-helper/standalone-build.md).
-
-| Local report                                   | Accepted source scope                                                                                                                                         | Formal visual result                                                                          | Separate boundaries                                                                                                                                                                                                            |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header                                  | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal                   | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance                                                                                |
-| `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                                                                | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained    | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                                                                                                       |
-| `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                                                           | 191/192 PNG pairs exact; 48,356 full standard records equal                                   | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                                                                                                 |
-| `artifacts/visual/leaves68-71-acceptance.html` | 18 utilities in eight product files: modal/popup geometry, opt-in full-width Drawer and Tooltip padding                                                       | 200/208 product PNG pairs exact; 10,248 full standard records equal; fixture20 pairs separate | Eight corner OPENs, two original normal-motion OPENs, three proven wrong-pose captures and all known negative controls retained                                                                                                |
-| `artifacts/visual/leaves72-73-acceptance.html` | 12 utilities in six files: exact local title typography and closed command backdrop/layout                                                                    | 111/112 PNG pairs exact; 9,748 full standard records equal                                    | Original429raw/0thresholdOPEN retained; rejected fallback/descendant-token candidates, known negatives and legacy-label correction explicit                                                                                    |
-| `artifacts/visual/leaves74-78-acceptance.html` | 35 utilities in 16 sources plus the Button typography API owner: Tooltip values, edge handles and DiffNotice header                                           | 305/310 PNG pairs exact; 30,303 full standard records equal                                   | Five formal OPENs/13 raw pixels, two supplemental sidebar OPENs/882 raw pixels, rejected CSS-wide semantics, original failures and four Electron After-only images retained                                                    |
-| `artifacts/visual/leaves79-81-acceptance.html` | 18 utilities in five sources: composer resize/hint, private DiffViewer header and fixed Field labels                                                          | 292/296 PNG pairs exact; 14,056 full standard records equal                                   | Four formal OPENs/1,075 raw pixels, one native OPEN/22 raw pixels, same-element negatives, unpainted calibration and unknown final native process closure retained                                                             |
-| `artifacts/visual/leaves82-84-acceptance.html` | 15 utilities in seven sources: opt-in solid Button, fixed tab/menu typography and actual Stack Drawer width                                                   | 305/306 PNG pairs exact; 12,854 full standard records equal                                   | One original formal OPEN/10 raw/7 threshold pixels, inline-token/width negatives, wrong-theme and keyboard failures, partial native recovery and four Electron After-only images retained                                      |
-| `artifacts/visual/leaves85-88-acceptance.html` | 23 utilities in 19 sources: actual hidden-name owners, fixed Card title type and annotation Textareas                                                         | 284/284 PNG pairs exact; 12,554 full standard records equal                                   | 76 supplemental pairs including 16 known token negatives; 87 retained unpaired images; original Stack missing-description relation remains OPEN; 89 audit earns zero migration credit                                          |
-| `artifacts/visual/leaves90-93-acceptance.html` | Eight source utilities removed in eight product files; six runtime helper applications migrate separately; shared Header owner and type export are additional | 164/164 formal PNG pairs exact; 8,068 full standard records equal                             | Original 92 three OPENs/5,602 raw/5,534 threshold pixels and 93 native OPEN/473 raw/402 threshold pixels remain; font writer rejection, token negatives, 91 unpaired images and four actual Electron After-only pages retained |
-| `artifacts/visual/leaves94-95-acceptance.html` | Fifteen utilities in four app consumers, one app xs owner and two shared ring-owner sources: Skeleton ring and exact Avatar sizes                             | 152/152 formal PNG pairs exact; 27,218 complete standard records equal                        | 60 supplementary pairs include ten known token-priority negatives; twelve Gallery After-only states and two original calibration checkpoints remain separate; full regression remains through93 only                           |
-| `artifacts/visual/leaves97-acceptance.html`    | Two private MobileHome sheets adopt the existing legacy Drawer safe-area padding owner                                                                        | 60/64 formal PNG pairs exact; 5,704 standard records equal                                    | Four original Header OPENs/78 raw/2 threshold pixels remain; 48 supplementary pairs include caller negatives and bounded diagnostics; 94 original Before-only images remain separate                                           |
-| `artifacts/visual/leaves96-98-acceptance.html` | Independent code-review-helper pipeline: 59 utilities in one Renderer across findings and reference chips                                                     | 125/128 formal PNG pairs exact; 66,536 standard records equal                                 | Seven original raster OPENs/187 raw/0 threshold remain. Eight fixed real offline single-file pairs match complete PNG/style/geometry; the original missing-CSS outputs and twelve original run images are retained             |
-| `artifacts/visual/leaves99-acceptance.html`    | Four fixed Rename Textarea utilities adopt existing owner tokens, resize and layout APIs; ref-owned height/overflow remain                                    | 109/110 formal PNG pairs exact; 2,848 standard records equal                                  | Original pending/Escape OPEN/5,932 raw/0 threshold remains; 24 native and eight normal-motion pairs match; token negatives, browser controls, 17 failed frames and 44 existing 320px clipped states are retained               |
-
-| `artifacts/visual/leaves100-acceptance.html` | Twenty private helper severity-map color utilities across actual badges and inline markers | 80/80 formal PNG pairs exact; 44,560 full standard records equal | Six standalone pairs match; four original native OPENs/130 raw/0 threshold pixels remain; matching normal/coarse/full-panel controls do not establish their cause |
-
-| `artifacts/visual/leaves101-102-acceptance.html` | 49 private GroupSection utilities and 27 local Alert owner utilities; actual monospace, local colors and CVA selector preserved | 76/92 formal PNG pairs exact; 24,255 standard records equal | 16 formal OPENs/75 raw plus five native OPENs/22 raw; initial ten record mismatches and compiler/fallback/theme failures retained. No 101 standalone pair was captured; two final file images are After-only |
-
-| `artifacts/visual/leaves103-105-acceptance.html` | 114 Renderer utility migrations; 54 additional occurrences removed only as unused-module cleanup | 153/156 formal PNG pairs exact; 73,555 complete standard records equal | Three formal OPENs/17 raw plus one native OPEN/17 raw/one threshold; font fallback rejection and caret/readiness failures retained. The same old 104 environment proves only the cleanup delta |
-| `artifacts/visual/leaves104-106-acceptance.html` | 86 ordinary-runtime mappings in four local control owners; zero source deletion; original Slot and exported class selectors retained | 194 current PNG pairs and complete records exact, including 98 formal/1,476 standard records | Two rejected Slot candidates and four failed images retained; actual phone CommitRow Tooltip remains NOT_ACCEPTED. Fourteen old positive pairs are historical only |
-
-| `artifacts/visual/leaves107-acceptance.html` | 182 FileTree/commit utilities migrate; 27 unreachable EmptyThread occurrences are cleanup only | 108/136 formal PNG pairs exact; 66,456 standard records equal; native30 and file10 exact | 28 formal OPENs/7,795 raw plus one normal-motion raw pixel remain. Actual body-absence readiness replaces two rejected cells; phone offline tooltip remains offscreen |
-
-| `artifacts/visual/leaves108-109-acceptance.html` | 78 private diff/context utilities; six normal Separator mappings/source removal0, legal Slot retained | 84/128 formal PNG pairs exact; 40,078 standard records equal; 204 pairs total/158exact | 46 OPENs/347raw/135 informational threshold; nativeAfter and file109 finalization unknown. Four transition gates and six selector failures retained; Sidebar context images are After-only |
-
-| `artifacts/visual/leaves110-acceptance.html` | Eleven normal SidebarMenuButton layout mappings; source303 retained for legal Slot/nonempty className callers, single CVA graph | 64/64 formal PNG pairs /3,836 records and24/24 native /600 nodes exact;240 actual component-output cases | Two original hover-occlusion failures retained; task-only Git blob excludes the protected Tooltip whitespace. Isolated visual module evidence does not validate the25 unrelated user paths omitted from that tree |
-
-| `artifacts/visual/leaves111-112-acceptance.html` | 164 private shell/navigation and element-local literal-font utilities | 201 accepted pairs/185 exact; 133 formal/44,522 equal records; two whole-renderer font pairs separate | 16 OPENs/119 raw/24 informational threshold; two new-private-writer negatives and original UNKNOWN closure remain separate |
-| `artifacts/visual/leaves113-acceptance.html` | 25 ordinary Sidebar layout mappings; source removal0, original caller/Slot paths retained | 114 PNG pairs and full records exact:76 formal/3,480 records+38 native/912 nodes | Six original pointer-occlusion paths remain NOT_ACCEPTED; keyboard success does not close them |
-| `artifacts/visual/leaves114-115-acceptance.html` | 44 guarded SidebarMenu mappings and27 private Markdown/diagnostic utilities; exact reverse registration/fallback preserved | 258 current pairs/247 exact;184 formal/31,884 records equal | 11 OPENs/254 raw/12 informational threshold; six rejected pruning pairs and all old variants separate |
-
-The self-contained report keeps the original images and per-frame immutable build
-origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
-flex-shrink counterexample, exact dark/light-exclusion and coarse/focus conditions,
-local spacing/border writers, RTL physical-right padding and the opaque border-color
-fallback visible to reviewers. Calendar's protected user formatting is outside the
-task-only patch. Local selector scopes do not establish a whole application palette;
-phone initial-preview visibility and native/backend/export behavior remain bounded.
-
-The current scanner-v2 three-root timeline covers
-`packages/components/src/{components,ui,routes}` through batch 99:
-1,424 occurrences /157 files /725 unresolved expressions: 990 component, 429 legacy
-UI and five route occurrences. The source snapshot and method are recorded in
-`inventory-source-through99-proof.json`. Through 95 remains frozen at
-1,430/157/725; batches 97 and 99 account for the six source utilities removed
-within these roots. The exact-root through110 snapshot differs only at Sidebar:
-1,424 occurrences/157used files/726 unresolved expressions. Its extra unresolved
-entry is a known StyleX class-map alias lookup. The isolated visual tree's25
-pre-existing user-file differences are listed in
-`leaves110-build-root-boundary-audit.json`; see
-`inventory-source-through110-proof.json` for the separate static-root boundary.
-Batches 94–95 remove fifteen source utilities. Through 93 remains frozen at
-1,445/157/725: that group removes eight source utilities while exposing two existing
-margin literals inside runtime helper calls, a net decrease of six. Its six
-runtime utility applications earn no extra source-deletion credit. Through 88
-remains 1,451/159/726, through 84 is 1,474/163/726, through 81 is 1,489/163/724,
-and through 78 is 1,507/163/718.
-
-The broader package-src scan is historical through 93, not refreshed through 99:
-`packages/components/src`, excluding `stories`, has 1,454 occurrences /159 files
-/729 unresolved expressions across 1,396 scanned files. Its additional lib/hooks
-boundary is nine occurrences in two files and four unresolved expressions.
-Compare it with the earlier full scan of the same package path, 1,460/161/730;
-it does not cover every package or Tailwind host. Keep this separate from the
-three-root timeline. The through93 manual audit separately retains sixteen
-unconsumed skip-link literals, three touch-helper literals and four opaque caller
-arguments after batch 92; its older six-argument audit is unchanged. The independent
-helper batches 96, 98, 100, 101 and 102 remove 155 selected-source utilities without
-reducing this component inventory. Its separate through102 source snapshot validates
-32 production JS/TS files against the successful build and uses its actual CSS entry
-with the same v2 AST rules: 1,075 occurrences/ten files/26 unresolved expressions.
-The historical through102 snapshot excludes stories, tests and later work; see
-`inventory-helper-source-through102-proof.json`. The exact successful-build snapshot
-through107 separately validates thirty production files: 698 occurrences/eight
-used files/18 unresolved expressions, including 519 in ReviewRenderer. See
-`inventory-helper-source-through107-proof.json`. Its decrease of 377 separates
-296 migrations from 81 unused/unreachable cleanup occurrences; 104/106's 86 normal
-runtime mappings delete no source literals. The exact successful-build snapshot
-through 109 has 620 occurrences/eight used files/18 unresolved expressions across
-thirty production files, including 441 in ReviewRenderer. Its 78-source decrease is
-migration; 108's six normal-runtime mappings delete no literals. See
-`inventory-helper-source-through109-proof.json`. The exact through115 snapshot
-freezes thirty production hashes and the successful final stylesheet:434 occurrences/
-eight files/21 unresolved, including255 in ReviewRenderer. Through112 remains456/8/18;
-115 removes22 scanner occurrences plus five manually audited default-parameter
-utilities outside the v2 lower bound. Three new unresolved entries are private StyleX
-blockClassName references. See `inventory-helper-source-through115-proof.json`;
-later117/119 and all stories/tests are excluded. The historical through100 bound
-remains 1,151/ten/26; the two units remove exactly 76. Any later application
-batch requires a fresh source-frozen inventory before advancing the through99
-timeline. These static lower
-bounds are not completion percentages.
-
-The 94–95 report embeds every original screenshot and ten labelled masks derived
-from real raw RGBA differences. Its 152 formal pairs all match; known Avatar
-same-element token-input negatives are separate. An original Gallery gate failure
-and a rejected report phone layout remain reviewable. Two actual Chrome QA cycles
-verify 203 unique original payloads, their previews, filtering, original-size
-keyboard/pointer zoom and 1280/390px layouts. The index now links 67 frozen reports through131 and explicitly withdraws the
-111 unsafe Sidebar runtime mappings in110/113/114/116/120. Correction127 restores
-32 original PNG/full-record pairs; old reports keep their original hashes. New
-successful subsets do not close historical OPENs. Two real Chrome cycles verify
-index search, relative links and 1280/390px layouts.
-
-The 60–63 report keeps the explicit 48+16 notification Before assembly and its
-distinct harness identities. Retain raw xterm helper records and original corner
-pixels; later matching controls establish no historical raster cause. CSS-only
-checks, wheel PNG supplements and terminal After-only inspection have separate
-counters. The scope table scrolls locally on narrow screens; offline QA verifies
-original payloads, previews, filtering, zoom and keyboard access at 1280/390px.
-
-The 64–67 report separates default-theme success from parent-token acceptance.
-Actual Before / Rejected / Final images retain the repaired material contract.
-Inspect emitted full-build rules and non-target tokens: direct public-token atoms
-avoid a default group, while an existing same-element theme needs one complete
-compiler-local map. See [`MIGRATION.md`](../../src/style/MIGRATION.md). Ordinary
-imported maps in fixtures need this audit too; source completeness proves no
-emitted inheritance. The private Button fixture correction separately verifies
-20 unchanged real pairs and all 27 emitted declarations (18 inherited); two older
-message-action fixture helpers remain pending. Supplementary geometry, negative
-controls and original pixel OPENs remain separate from formal counts. The later
-through71 source-stable full suite and four actual Electron After-only screenshots
-are recorded in `artifacts/visual/leaves71-stable-full-regression-verification.json`;
-they do not replace any report's original source or application Before baseline.
-
-The 74–78 report separates formal acceptance from 140 supplemental/rejected pairs
-and 27 actual diagnostic/After-only images. The initial Button candidate has sixty
-matching ordinary screenshot pairs but fails real CSS-wide and variable-fallback
-semantics; it remains rejected. The final owner uses two bounded physical font
-fields and preserves defaults. The four corrected batch 77 cells require real
-trigger hover/hit state or completed Monaco registry/model/rendered tokens; their
-new origins do not replace the five original corner OPENs. Batch 78 retains its
-dark border utility because the complete compiler proves a public direct-child
-winner would otherwise change. Native timeouts and actual module-fetch failures
-retain separate evidence and unresolved causes. The through 78 source-stable
-components/UI suites, desktop rebuild and four actual Electron After-only images
-are recorded in `artifacts/visual/leaves78-stable-full-regression-verification.json`;
-they do not close historical pixel differences or establish a full-app Before.
-
-The 79–81 report separates 296 formal pairs from 91 supplemental/negative/calibration
-pairs and nine actual diagnostic images. Composer ancestor conditions preserve
-both matching and complete-build specificity; the private same-element opacity
-utility negative still exposes a layer boundary. DiffViewer keeps the original
-shrinking glyph and dark border winner. Field labels use existing atoms only at
-fixed plain-text sites, with six real inline-token negatives retained. Original
-offscreen native label frames are calibration; the focused recovery states have
-explicit new origins and paint/hit checks. Batch 81 saves all 24 per-side focused
-frame checkpoints, but the final label-click assertion and process closure remain
-unknown after a verified self-owned process stop. A completed image matrix does
-not prove that complete behavioral run. The report's original pixel differences
-remain open despite matching bounded controls. Batch 80's old `UI84` aggregate
-key is corrected by a separate count proof: its manifests contain 85 source entries,
-and the original source locks are unchanged.
-
-The 82–84 report separates 306 formal pairs from 69 supplemental pairs and 41
-unpaired real images. The opt-in solid Button changes only existing pigments;
-legacy shadow/transition/active classes remain on actual Send/Stop templates.
-Fixed Tabs preserve logical padding-inline; four separate vertical-rl pairs verify
-the nonzero logical axis without claiming whole-product vertical layout support.
-The actual Stack fixture renders real SessionDetail loading and ChatLanding; it
-bypasses workspace-ready admission and does not cover the four inner drawers.
-Original theme and keyboard-gate failures remain alongside corrected captures.
-Batch 84 preserves two healthy native Before checkpoints and a distinct missing-only
-recovery; its original Escape timeout has no contemporaneous target/error image,
-so the bounded focus-delivery control does not establish its exact cause. The single
-original batch 82 pixel OPEN remains open despite five matching later controls.
-The source-stable through 84 components/UI suites, desktop build and four real
-Electron After-only images are in
-`artifacts/visual/leaves84-stable-full-regression-verification.json`; they do not
-supply an original Tailwind full-app baseline or prove agent/backend dispatch.
-
-The 85–88 report separates hidden-name ownership from context and accessibility
-validity. UIDialog, actual Vaul and Popover retain their original contexts; the
-Dialog title clears its logical close-control inset as well as physical padding.
-The Stack's pre-existing dangling description relation remains open on both sides.
-Card titles use existing local size/leading tokens at fixed plain-text sites;
-Textarea fonts use the existing physical style fields. Actual local values,
-placeholder fields and same-element token negatives stay separate. Original
-portal-root/span/global-heading gates, native screenshot caret effects and the
-rejected import-shadow source remain reviewable without fabricated images.
-The earlier native Textarea matrix lacks placeholder fields and contributes only
-its sixteen actual Before-only PNGs. Gallery samples are After-only. Through84's
-full suite/Electron evidence is historical, not a through88 full-regression claim.
-
-The 90–93 report preserves all 40 earlier report hashes and keeps their history
-table collapsed by default. Its 136 supplementary pairs include 118 byte-exact
-pairs and 18 non-exact pairs; this is not an OPEN-issue count because it includes
-known negatives, rejected candidates and controls using unchanged source. The 91
-unpaired images include readiness failures, invalid premature captures and four
-actual Electron pages. The original 92 hover trigger and 93 Header raster trigger
-remain unproven. Through 93, the stable full run passes 620 component files /6,208
-tests, 25 UI files /312 tests and the actual Electron build/smoke. The 78 existing
-styleq warnings remain, and root `pnpm check` is not claimed PASS because of the
-existing ACP SDK prerequisite failure. Batch 94 and other Tailwind hosts are
-outside that validation boundary.
-
-## Current corrected boundary
-
-The public Sidebar's empty-caller guard did not isolate ancestor utility precedence.
-Batch127 restores the actual Before110 cascade; no source-removal credit is claimed.
-The earlier bounded reports remain historical evidence, with their runtime migration
-credit withdrawn. The exact fixed core inventory at132 is1,399 occurrences /157 used files /
-726 unresolved expressions across790 production sources. It includes130/131 and
-DEV125, excludes133/134, and matches the stable full-suite and actual renderer
-build graphs. See `artifacts/visual/inventory-source-through132-proof.json`;
-this is not a percentage or a claim of production visual coverage. Helper's
-independent through129 cut is392/8/21 from30 sources matched to its successful
-293-input build;14 migrated utilities and one cleanup explain the15 decrease.
-
-| Report                          | Accepted scope                                                                                         | Remaining limits                                                                                                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `leaves117-119-acceptance.html` | 27 annotation utilities;54 positive pairs                                                              | 15 raster OPENs;119 Checkbox rejected                                                                                                                    |
-| `leaves118-acceptance.html`     | 10 fixed Input/Tooltip utilities;56 exact positive pairs                                               | Two radius utilities retained; six direct token negatives; old12 candidate rejected                                                                      |
-| `leaves123-acceptance.html`     | No accepted migration                                                                                  | Offscreen color/partial capture failure; source restored                                                                                                 |
-| `leaves124-acceptance.html`     | Two dimensions in real Electron navigation;18 complete records match                                   | Two target PNG OPENs; context is supplemental, not extra pairs                                                                                           |
-| `leaves125-acceptance.html`     | Two dimensions in actual DEV email branch;22 exact pairs                                               | No production branch coverage                                                                                                                            |
-| `leaves126-acceptance.html`     | No accepted migration                                                                                  | Inherited typography/scroll geometry failure; source restored                                                                                            |
-| `leaves127-acceptance.html`     | 32 exact restoration pairs/752 full nodes                                                              | Withdraws111 runtime mappings; old OPENs remain                                                                                                          |
-| `leaves128-acceptance.html`     | Six private glyph ink utilities;68 exact pairs including4 normal                                       | Two intentional token carriers differ; four direct token negatives                                                                                       |
-| `leaves129-acceptance.html`     | 14 real error-fallback utilities;26 exact primary pairs                                                | One recovery OPEN; caught React errors expected; one redundant cleanup separate                                                                          |
-| `leaves130-acceptance.html`     | Three private identity-button gap/align utilities;66 complete record pairs                             | One target crop OPEN/10 raw;two direct gap-token negatives;two backgrounds retained                                                                      |
-| `leaves131-acceptance.html`     | Two fixed plain-text ink utilities;76 exact positive pairs                                             | Four token negatives; four normal frames have interrupted cleanup                                                                                        |
-| `leaves132-acceptance.html`     | Six real Sidebar ancestor regressions;12 positive image comparisons/click paths                        | Historical unsafe6 rejected;no exhaustive CSS claim;locked runtime/setup failures retained                                                               |
-| `leaves133-acceptance.html`     | Two private Description/QR label utilities;32 cells/64 target views and32 context views exact          | Four direct token negatives;original leading writer retained;physical font-normal remains                                                                |
-| `leaves134-acceptance.html`     | 19 private commit focus/transition utilities;44 formal/43 exact;final closed-portal8 exact             | Original native8 geometry failures and warm8 portal-state mismatches remain;three pixel OPENs;raw comma-space differences explicit                       |
-| `leaves135-acceptance.html`     | Zero migration;one retained p-0 compatibility class                                                    | Eight DOM diagnostics,including four legal zero-ancestor counterexamples;not a built After migration                                                     |
-| `leaves136-acceptance.html`     | 13 native tree controls;36 formal/35 exact and34 native/15 exact;file10 exact                          | 20 target OPENs197raw;navigation OPEN11423raw/157threshold;bounded sidebar diagnostic does not close it                                                  |
-| `leaves137-acceptance.html`     | Three private summary/Spinner colors;30 positive target/context pairs exact                            | Four direct-token negatives;sharing is an existing capability fixture,not OSS cloud coverage                                                             |
-| `leaves138-acceptance.html`     | Nine native helper utilities; formal48/47 exact                                                        | Group-hover candidates restored; native/file raster OPENs retained                                                                                       |
-| `leaves139-acceptance.html`     | Three fixed primary label utilities;180 completed positive pairs exact                                 | Secondary six restored after coarse-hover background failure; normal cleanup incomplete                                                                  |
-| `leaves140-acceptance.html`     | Two private merge-button spacing utilities;60 exact positive pairs                                     | Static background/ink compatibility retained;self-dark counterexample and held-touch gaps                                                                |
-| `leaves141-acceptance.html`     | Six secondary ink utilities;284 pairs282 exact,216 API After-only frames                               | Default-owner two OPENs347raw/82threshold;360 inline carriers explicitly differ                                                                          |
-| `leaves142-acceptance.html`     | Eight helper utilities;55 formal exact,134 total108 exact                                              | Exact fractional-rem predicate required;26 OPENs262raw/52threshold;cleanup separate                                                                      |
-| `leaves143-acceptance.html`     | Thirteen helper Button caller utilities;210 pairs204 exact                                             | Six OPENs387raw/143threshold;raw selector and Slot contract separate;invalid prior menu captures retained                                                |
-| `leaves144-acceptance.html`     | One private Drawer gap;24 positive cells/24 target+24 context views/580 full records exact             | Real safe-area and vertical-writing failures retain three compatibility classes;body portal scope                                                        |
-| `leaves145-acceptance.html`     | Two source ink utilities/five runtime uses;144 pairs143 exact                                          | One SVG OPEN4raw;rejected touch captures and persistence gaps remain                                                                                     |
-| `leaves146-acceptance.html`     | One real Electron navigation ink;24 positive cells/336 captured records                                | Three target and three context raster OPENs;576 boot-variable raw differences;original wide build gate FAIL retained                                     |
-| `leaves147-acceptance.html`     | Seven Goal/CI occurrences;162 PNG pairs exact,24 callbacks equal                                       | Portal-container CSS capture gap;precise1008carriers;newlint warning;oldclassassertion failure retained                                                  |
-| `leaves148-acceptance.html`     | Four shadow/outline occurrences;86 pairs78exact                                                        | Eight forced-color OPENs356/52;shadow lexical carriers;no-probe registration check                                                                       |
-| `leaves149-acceptance.html`     | Zero migration;6 classes retained                                                                      | 12 actual Icon/Stream caller counterexamples;8controls;DOM-only calibration,coarse failure retained                                                      |
-| `leaves150-acceptance.html`     | Zero migration;9 layouts retained                                                                      | 18 controls and20 caller counterexamples;6 equal PNGs still fail CSS fields                                                                              |
-| `leaves151-acceptance.html`     | Four rotate occurrences;112 pairs103exact,448 full records same                                        | Nine OPENs874/2;settled screenshots and56events,not animation-frame equality                                                                             |
-| `leaves152-acceptance.html`     | Five occurrences+two separate cleanups;126 pairs117exact                                               | Nine OPENs69/15;unpainted zero-size boundaries and original partial/failure evidence                                                                     |
-| `leaves153-acceptance.html`     | One Cancel ink occurrence;90 positive/reference pairs77exact                                           | Thirteen OPENs58/0;translate restored after writer counterexample;private-var negatives separate                                                         |
-| `leaves154-acceptance.html`     | Zero migration;Progress2classes retained                                                               | Four real public Sidebar regressions;38 matching pairs do not accept them                                                                                |
-| `leaves155-acceptance.html`     | One physical margin+one separate cleanup;128 pairs115exact                                             | Thirteen OPENs44/15;explicit idle-ready replacements,originalCopied frames preserved                                                                     |
-| `leaves156-acceptance.html`     | Zero migration;isolated proposed extraction research                                                   | Native thirteen pass under early flat routing;Slot/query/collision counterexamples prevent universal adoption                                            |
-| `leaves157-acceptance.html`     | Zero migration;Outline p3 retained                                                                     | Three named-host caller regressions and one12pixel context OPEN;320suppressed Rail is not a missed popup                                                 |
-| `leaves158-acceptance.html`     | One root-height migration and two separate cleanups; 112 pairs/103 exact, 1,120 captured records equal | Nine OPENs 511/267; original collection failures retained; no standard-runner pairs invented                                                             |
-| `leaves160-acceptance.html`     | One parse-error padding migration and one cleanup; 32 pairs/29 exact, 228 captured records equal       | Three OPENs 4/2; real inner failure from synthetic malformed input, not a top-level crash; two overwritten Before logs disclosed                         |
-| `leaves161-acceptance.html`     | Eight amber migrations; all 96 pairs exact, 476 captured records equal                                 | 188 precise class carriers separate; actual presentational owner after mechanical extraction, not stateful quota/Electron coverage                       |
-| `leaves162-acceptance.html`     | Zero migration; five input classes restored despite 63 paired PNGs matching                            | Two complete-object differences, two strict pre/post failures, and nine missing states per direction remain; three painted diagnostics do not close them |
-
-| `leaves165-acceptance.html` | Ten private tracking/leading utilities;38 pairs/28 exact | Ten OPENs28,779/27,837; incomplete original sidebar and five explicit navigation supplements remain distinct |
-| `leaves169-acceptance.html`, `leaves172-acceptance.html`, `leaves174-acceptance.html` | Twenty-three private weight/leading utilities;112 pairs/90 exact | Twenty-two OPENs838/465; precise asset ports, actual Chrome font rows, portal/control scope and unknown cleanup retained |
-| `leaves170-acceptance.html` | One real Electron chat-route height;12 pairs exact | Two cells retain32boot runtime differences across pre/post; compact desktop390 is not mobile branch |
-| `leaves173-acceptance.html`, `recovery173-fixture-isolation.html` | Four offline-route styles;28 original and28 fixture-recovery pairs exact | Pure synthetic platform; fresh route reuses original component without mutating exported singleton; no backend/IPC claim |
-| `leaves175-acceptance.html`, `leaves181-acceptance.html` | One private opacity and one solo font;36+32 pairs exact | Shared story default12controls exact; explicit128share URL origins across pre/post, all remaining fields strict |
-| `leaves178-acceptance.html` | Six tabular utilities;27 full pairs/16 exact,1512target/font rows | Eleven OPENs775/486; four limited Copied feedback pairs add57/0; two original uncalibrated PR supplements retained rejected |
-| `leaves179-public-caller-acceptance.html` | Zero migration;canvas pointer candidate restored | Default PNG/GPU equality does not accept public ancestor pointer-events and trusted target reversal; original default report retained |
-| `leaves171-acceptance.html`, `leaves177-acceptance.html`, `leaves180-acceptance.html` | Unadopted bounded native-build proposal,zero product credit | Native row180 exact;whole App39raw/0threshold remains OPEN;171/177 failures and original restoration-order mistake retained |
-
-| `leaves182-acceptance.html` | Five content-pane utilities;18 Electron PNGs exact,3,242 scene records | One state retains12 non-content hover-field differences; boot/ID/blob carriers and original harness failures separate |
-| `leaves183-acceptance.html`, `leaves186-acceptance.html` | Nine private typography utilities;39/39 and20/23 PNGs exact | Three186 OPENs111raw/72threshold;183 file cleanup unknown; registrations retained without a patch |
-| `leaves185-acceptance-final.html` | Twenty layout-helper literals;46 formal/41exact,5,118 scene records | Five formal OPENs709raw; diagnostics/controls and three unknown cleanups separate; ordered legacy CSS qualification is not a new visual replay |
-| `leaves190-candidate.html` | One closed time-picker constraint adopted by Root;18 Input/indicator ROIs and78 UA nodes exact | Whole-view15/18exact;three OPENs2094/2112/2094raw,maximum channel delta1; frozen candidate predates Root adoption |
-| `leaves171-final-matrix-acceptance.html`, `leaves184-acceptance.html`, `leaves188-counterexample.html` | Rejected native compiler route;zero migration credit | Earlier66 exact pairs and actual-App crop equality do not accept three arbitrary-property size/clipping/hit regressions; all trial source/config/lock changes restored |
-
-| `leaves189-acceptance.html` | Six private spacing consumers;final6 keyorder PNGs/342records exact;56 healthy and3Copied states qualified by real-browser field bridges | Original56 images55exact andCopy3 images2exact;twoOPEN68raw/43threshold;four naive-order failures retained; bridges are not new PNGs;original cleanup unknown |
-
-| `leaves191-acceptance.html` | One private warning interaction;16pairs/148targets/1,204form geometry records match,12PNGexact | Four caret-location OPENs72raw/72threshold;original Positioner interception/blur and phone-story clipping retained;final191-only build/smoke separate |
-| `leaves192-public-acceptance-delivery.html` | Zero migration;4direct controls exact and4public opacity regressions | Opacity0.7→1/721raw;Root sources unchanged;full animation-variable shorthand also unsupported by locked compiler mode |
-
-| `leaves193-acceptance.html` | Two private pending-child Spinner dimensions; 11 real Electron PNG pairs exact | 957 boot/ID raw differences, original strict-comparison failure and three supplementary images retained; not full JSON equality |
-| `leaves194-login-acceptance.html` | Two private handoff-anchor dimensions; 32 target/expanded-ring regions and pixels outside the canvas exact; four native reduced-motion whole PNG pairs exact | All 32 natural-motion whole images remain OPEN; strict sandbox exercises real Continue/Tab/Enter and href, without OS protocol or external Auth acceptance |
-| `skeleton-shapes195-acceptance.html` | Three Usage skeleton utilities; corrected workspace UI graph gives 44 exact PNG/RGBA pairs and 14,732 strict node records | Original wrong-graph After44 and two Gallery timeouts remain REJECTED; six Gallery states are After-only with zero paired credit; four normal-motion pairs use actual pulse paused at400ms |
-| `leaves196-acceptance.html` | Seven private Checkbox utilities applied after freeze; original20 formal18PNGexact, CSSwide2/actual5px2/scroll1 exact | Two raw-pixel OPENs and17 raw diff entries remain:16 positions plus full540→547 geometry-list mismatch, not a scalar total; scroll45/560 is separate; all original20 defaultVesperdark, light uncovered |
-| `join-textarea197-acceptance.html` | One fixed Textarea min-height token binding;44PNG/RGBAexact and644 node records qualified outside exact carriers | Raw44class/132token/36HTTP-verified image-port changes retained; wrong-port run rejected; actualinput1000/TabSpace/disabled/CSSwide covered |
-| `leaves198-acceptance.html` | Canonical field.labelWeight and three private Login utilities; 21 product Login/QR whole PNG pairs exact; two Gallery original control ROIs exact | Gallery new rows retain whole-image/102 ancestor differences; two private-writer negatives600→500 and dark18px OPEN remain; two new Gallery images are After-only, not paired credit |
-| `label-weight200-acceptance.html` | Four private Field.Label weights in three modules;48pairs/45PNGexact,198 target records and11798 dialog geometry qualified outside exact carriers | Three OPENs30raw/0threshold outside target boxes remain unexplained; legacy weight writer unchanged; label click/disabled/QR Space/380/400/CSSwide verified |
-| `leaves201-acceptance.html` | Actual Electron private root background;12pairs/11PNGexact,74 records/3406 root geometry qualified;1222 renderer files and335 guards restored exact | Logo239raw/0threshold OPEN;10 fixed ID paths/9-value bijection only; boot variables have real readers and640vs1280 startup history differs; Preferences modal is not settings-route coverage |
-| `leaves202-acceptance.html` | Private Login submit marginTop;12 actual pairs (11 healthy plus generic403) all PNG/RGBA exact,372 form nodes;106 CSS resources byte-exact | Original misreached Unverified pair REJECTED and CLI pointer failure retained;Resend lacks fixture code and is not covered;initial0px/16px and spacing5 preserved;24class/72matched-rule routing differences explicit |
-| `leaves203-acceptance.html` | One private descendant-size utility, six fixed SVG calls; ten actual PNG/RGBA pairs exact,304 records and958 geometry; production five glyphs plus natural DEV sixth Mail | 84 class, two fixed debug-source attributes,42 matched-rule projections and24 CSS URL carriers explicitly differ; old nested CSSOM-reader gap and collector failures retained;105/106 CSS resources exact with only the old important descendant rule removed |
-| `card-typography204-acceptance.html` | Five auth title utilities move through two optional Card.Title physical typography props;51 page viewports and4 original Card ROI pairs PNG/RGBA exact,471 records/1468 geometry;102 exact class/inline carriers | Four new Gallery rows are After-only; both collectors exit1 on the same48 existing styleq logs plus4 broken-avatar console errors/4 aborts. Five CSS-wide token-fallback negatives retained; no new token or global retention rule |
-| `leaves207-acceptance-final.html` | Fifteen private ReviewCheck label base utilities;16 original PNG/RGBA pairs exact and112 target records qualified;737 retained CSS rules/182 at-rule nodes exact | Two initial pairs retain348 whole-document extent differences (446.5px), cause unknown. Separate six real scroll stages match fields, extents, hits and PNGs without closing the original OPEN; fixed Vesper dark only. Root adoption is recorded separately from the historical sealed proposal |
-| `review207-standalone-acceptance.html` | Actual production single-file templates, no external CSS;8 native-state pairs/56 records/4168 geometry, desktop4 PNG/RGBA exact; two added real navigation scenes have equal final nav/scroller fields and PNGs | Phone4 retain34raw/0threshold OPEN; original nav attributes absent. New fresh lazy/IO histories differ before mature layout; both390 scrollIntoView paths pan mainLeft0→147, explicit navigation reaches16. All originals/first desktop scroll failure retained |
-| `leaves208-acceptance.html` | Six private native CSS state utilities;20 Storybook/8 actual single-file formal pairs,23 PNG exact; four extra real group-navigation scenes exact including172 nav records | Five original OPENs:36raw Storybook plus112516raw/106504threshold desktop sidebar. Eight unrelated storage keys, original middle-scroll/history and old348 fields remain; nav-ready scenes are1280-only diagnostics, not closure |
-| `button-typography210-acceptance.html` | Button fontWeight owner field,2 source utilities/5 fixed readers;68 actual pairs PNG/RGBA exact,830 records/1594 geometry,352 class/inline carriers and106 CSS files exact;10 Gallery states After-only | Literal weight0 rejection/550 retention differs from var0 inheriting333. Old JSDOM assertion and target-classifier failure retained;26 Gallery console diagnostics and2 blocked requests remain |
-
-| `leaves211-acceptance.html` | Fifteen private Checkbox wrapper utilities;15 formal plus one mixed-directory focus supplement,16 PNG/RGBA exact;778 target/688 nav/8381 geometry | Only240 class/four CSS-URL carriers differ;63 registrations/733 retained rules same,whole at-rule185→183 differs. Original forceExpanded preparation drift retained |
-| `modal-title212-acceptance.html` | Four consumer utilities via optional Dialog/Drawer Title fontWeight;54 formal PNG/RGBA exact,270 records/1112 geometry,88 exact carriers,106 CSS byte-identical;16 Gallery After-only | No Title.asChild promise; post-capture cleanup qualified separately,not54 new PNGs. Caret mutation,Gallery readiness failures and absent original terminal DOM retained |
-| `leaves214-acceptance.html` | Six native focus utilities;11 pairs/nine PNG/RGBA exact,519 target/473 nav/5759 geometry;physical shadows exact | Two OPENs1968raw/1632threshold in header corners/title text;30 named ring comma-space raw differences qualified by locked grammar/consumers. Whole at-rule183→181 differs;older OPENs stay open |
-
-| `drawer-description216-acceptance.html` | Two workspace-description utilities via legacy DrawerDescription fontSize;22 formal/21 PNG-RGBA exact,66 records/464 geometry/36 exact carriers;12 API states After-only | Original focused-input719raw/0threshold OPEN,max9,outside target description;input complete computed not captured and cause unknown. Real create fixture rejects,no creation success claim;single removed CSS rule/pure helper edge qualified;all readiness/float/module-oracle failures retained |
-| `next-native-share-card-counter-acceptance.html` | Zero migration;one real public descendant shadow-none counterexample rejects three utilities;49 full descendants per endpoint | Unlayered private writer restores large shadow,95906raw/12307threshold pixels;original highlight gate/preparation failure and report-layout failure preserved |
-
-| `leaves215-acceptance.html`, `root215216-current-cut-delivery.json` | Selector-preserving declaration ownership at10 consumer occurrences/8 aliases;original8prod+4DEV PNG/RGBA exact,current8prod/456nodes exact and106 CSS byte-identical;stable620/6218 component tests | Tailwind retention/order remain;no10 net removal. Original prepared-cut scope,40 DEV source-line differences,14 exact current CSS URLs,production CSS map gap,Vite-close failure and HMR old-UI behavior retained;final doc/format bridge separate |
-| `leaves217-acceptance.html`, `leaves218-acceptance.html` | Public Sidebar declaration ownership at49 additional utility positions; original21+21 matrices have19+20 PNG/RGBA exact;106 CSS resources match on both frozen cuts | Three UA-mobile-layout OPENs remain:32,090raw/max1 and21,320raw/max3, all threshold12 zero; target ROIs affected. Fine-pointer Chromium UA emulation is not touch/Safari. GroupAction DEV mapping becomes null. Root test-scan cleanup/build qualification is separate; no net Tailwind removal |
-| `leaves220-acceptance.html` | Nine private helper SVG dimension utilities;32 Storybook+7 official file:// pairs PNG/RGBA exact;171 full targets and1,638 navigation geometry/state records match | One phone-map active BODY textContent loses71 characters; cause unknown. Two DOM-only ancestor calibration pairs show a real external-wrapper difference outside identified host contracts. Prepared39 theme/dependency paths are explicitly qualified; viewer source-only, not a third runtime matrix |
-| `leaves221-acceptance.html` | Nine declaration-ownership positions;17 real Storybook pairs over2,377 body/36 targets and2 actual Electron pairs over633 nodes/four targets are PNG/RGBA exact;native trusted drag/drop/self/disabled/drafts exercised | ActualApp raw fixed IDs, resource routes and boot elapsed readers/writers (including2 physical hidden-mark animation-delay fields) stay explicit;no identical startup-history or App drag claim. Original missing CLI-marker failure preserved;both private containers use identical copied runtime. Common fixture changes implicit candidates;old Root CSS identity not implied;no net removal |
-| `leaves222-acceptance.html` | Three private commit Tooltip dimensions;20 painted Storybook+2 file:// pairs PNG/RGBA exact;576 target physical records match | Two screen-outside diagnostics retained,one73raw/0threshold OPEN;24total23exact. Four clipboard reads denied;Check success is separate. Original three Before failures retained;fixed Vesper,not full responsive popup visibility |
-| `leaves223-acceptance.html` | Nine Sidebar ownership positions;23 PNG/RGBA pairs exact,3,414 nodes/238 targets and120 CVA/cn returns match;106 CSS same | New DEV desktopcn mapping143:25→null;source23bindings butproduction22 becausepaddinginline;commonfixture CSS scope and originaldriver failures preserved |
-| `leaves224-acceptance.html`, `leaves225-acceptance.html` | ContextSwitch eight ownership positions;22427/32 PNGexact,22534/39 plus one exact19-record reselect supplement;all106 CSS+225rendererCSS same within their frozen cuts | Ten original paintOPENs total812+924raw/zero-threshold remain;225originalpublishedbottom four-field discrepancy stays OPEN;reselect is not replacement;no netTailwind dependency removal |
-| `leaves226-acceptance-final.html` | Label-only declaration ownership;18 PNG/RGBA pairs exact over3,600 body/32 target records; native/Slot caller identity retained | Two original post-pointer Header transforms differ; three Switch cleanups not adopted. Comparator RangeError, initial report overflow and rejected Root h8 integration retained; no net removal |
-| `leaves227-acceptance.html` | Build-only per-key native atom association;24 pairs/21 PNG exact,324 target records match apart from24 URL ports;106 Storybook and1 renderer CSS byte-exact;28 compiler tests | Three original production OPENs total762raw/zero-threshold. Two-height sample adds no production credit; original report Escape cleanup failure retained. No runtime probes, overlapping binding properties or atom dedup support |
-| `leaves228-acceptance.html` | Twelve Sidebar height/radius ownership positions;21 PNG/RGBA pairs exact over4,564 body/728 target records, including real variants/callers/Slot/disabled/local variables/mobile drawer actions | No net utility removal; isolated common metadata-literal baseline, not8f/repairedRoot CSS identity. Root merges only task appends and preserves scan-safe correction |
-| `leaves229-acceptance.html` | Eight native Monaco/terminal/container positions;18 PNG/RGBA pairs exact over4,172 body/18 targets;real readonly keys, synthetic terminal echo and pointer blur, actual windowed container | Terminal formal pairs are pointer-blurred;focused Before-only and43 cursor pre/post differences retained. Existing Monaco negative mapped offsets unchanged;precise CSSURL/AX refs qualified. No new backend/canvas/animation-history claim |
-| `leaves230-acceptance.html` | Nineteen ACP selector ownership positions;36 PNG/RGBA pairs exact,5,816body/264targets,84 real cn/twMerge cases | Three extra candidates retain utilities; original source-cut/scope correction is in the independent review; no net removal |
-| `leaves231-acceptance.html` | Twenty Sidebar palette/layout ownership positions;20 PNG/RGBA pairs exact,4,079body/305targets, actual palette/subtree/CVA/Slot callers | Two UA drawer cases are fine-pointer/hover Chrome, not touch. Original optimizer and minimal-theme failures retained |
-| `review232-acceptance.html` | Build-only matching Tailwind optimizer phase and physical-declaration claims;37 compiler tests,107 full CSS assets exact,8 real demo pairs exact | Zero consumer credit. Original bundle-resolution/report-cleanup failures remain; no fresh HMR qualification |
-| `leaves233-acceptance.html` | Nine project-selector ownership positions;32 real pairs/27 PNG exact,7,878body/384targets; canonical input-fill key shared with231 | Five OPENs151raw/72threshold; selection endpoints not captured, caret cause unproved. Offline fallback only; no loaded-avatar credit |
-| `leaves234-acceptance.html` | Thirty Composer ownership positions;53 desktop-family pairs exact,6,653body/175targets;8 separate mobile-UA pairs/3 exact,1,126body/28targets; real minimum-height and Drawer branches | Five mobile OPENs24,723raw/1threshold; actual touch0/mouse only. Desktop390 is compact desktop, not mobile. Canonical padding-zero/ACP keys reused; original failures retained |
-| `root230233-browser-acceptance.html` | Frozen combined26-pair supplement/22 exact,5,182body/305targets;107 CSS assets and four official builds pass; native selection endpoints captured | Four OPENs72raw/72threshold. Immutable report retains actual default PostCSS failure;235 fixes that build path in separate scope, without closing pixels |
-| `root230233-235-independent-adoption-opinion.json` | Four-file PostCSS phase fix;7 real factory/hook cases plus original37 tests; actual default Vite CSS entry now accepts and preserves old24-key asset bytes | Tool-only44-key proof, not current55-key Root qualification. Raw opacity spelling difference predates fix; no new touch/HMR/whole-App screenshot credit |
-| `root230235-browser-acceptance.html` | Combined55-key/77-binding cut; six real builds and108 CSS pairs exact;18 UI pairs/16 PNG exact,3,214body/162targets | Two OPENs1,668raw/18threshold; all historical OPENs remain. Stable620-file/6,246-test regression belongs to this cut, not later extensions |
-| `leaves236-acceptance.html` | Seven Composer base-color ownership positions;desktop12/24 PNG exact, mobile2/4 exact;107 CSS pairs exact | Twelve desktop OPENs240raw, two mobile OPENs6,916raw/180threshold plus three hover-field differences; separate hover-none control does not close them |
-| `leaves237-acceptance.html` | Ten LoroSidebar ownership positions;27/27 PNG exact,6,391body/135targets,107 CSS pairs exact | CTA/radio callbacks verified; menu actions prove paint/close only. Original report-close failure retained |
-| `leaves238-acceptance.html` | Five AttachmentAddMenu ownership positions;formal19/24 PNG exact,3,433body/106targets,107 CSS pairs exact | Five OPENs199,629raw/zero-threshold. Three root-only controls do not accept submenu; two complex MCP widths remain Tailwind |
-| `leaves239-acceptance.html` | Seven message-action ownership positions;31/33 PNG exact,5,861body/125targets,107 CSS pairs exact | Two mobile-tap OPENs71raw/2threshold. Arbitrary public icon, selection Range, Check-present gate and fine/hover capability unproved |
-| `leaves240-acceptance.html` | One ACP font pair ownership position;24/24 PNG exact,3,969body/255targets, six actual builds/108 CSS pairs exact | Sole closed writer-first pair; research24 DOM cases in three images is separate. Current merged69-key/70-declaration/89-binding Root needs its own qualification |
-| `root236240-acceptance.html` | Combined69-key/70-declaration/89-binding cut;50 real pairs/44 PNG exact,8,864body/270targets; six actual builds/108 CSS pairs exact | Six pixel OPENs30,840raw/201threshold plus three hover-field differences. Stable620-file/6,257-test regression belongs to this cut; original Loro driver/resource failures retained |
-| `leaves241-reduced-acceptance.html` | Eleven window-geometry ownership positions;8 final reduced pairs PNG/RGBA exact,944body/72targets,107 CSS pairs exact; all public types preserved | Original14-position candidate rejected for literal-type widening despite26 exact PNGs. Final8 reuse original Before files; synthetic IPC geometry is not native OS dragging/fullscreen |
-| `leaves242-acceptance.html` | Five existing font-pair positions;35 formal pairs/30 PNG exact,108 CSS pairs exact; one independent Back→Home pair exact | Five OPENs216,383raw/66,585threshold; one natural Back retains27 linked focus/highlight fields. Home control and identical emitted library definitions do not close that actual state difference |
-| `leaves244-acceptance-final.html` | Fifteen Sidebar frame/Rail positions;28/30 PNG exact,3,988body/117targets,107 CSS pairs exact; final unowned-format restoration has equal actual JS/389 candidates | Two UA Drawer OPENs32,151raw/zero-threshold, max delta1. Rejected Provider omission/30 bad frames and original invalid AST visitor/report overflow remain. Both viewport-height fallback aliases stay Tailwind; legacy Sidebar absent from App runtime graph |
-| `leaves243-acceptance.html` | Five CommandDialog ownership positions;37 formal pairs/31 PNG exact,5,301body/516targets;108 CSS pairs exact | Six OPENs120raw/120threshold. Original390 panel clipping, input-driver failures, missing first failure image, OOM and route guard retained;42rem maximum verified from real compiler |
-| `leaves245-acceptance.html` | Nine Mention field ownership positions;21 formal pairs/20 PNG exact,3,056body/100targets;107 CSS pairs exact | One exact PNG still has14 mirror fields differing; one caret pair has20raw/20threshold pixels. Dark readonly visual gap remains. Captured fixture and later type/alpha qualifications are separate |
-| `leaves245-natural-mirror-ready-acceptance.html` | Separate natural-initialization control;one exact pair/136body/4targets with both mirrors naturally reading the textarea offsetHeight | No injected style/event and no original pair replaced; does not close either245 OPEN or the readonly gap |
-| `leaves246-acceptance.html` | Eight Sidebar Input/Skeleton ownership positions through two existing-field bindings;12 formal pairs/8 PNG exact,1,738body/110targets;108 CSS pairs exact | Four OPENs56,902raw/22threshold; real UA Drawer differs from width-only desktop. Original Skeleton caller-style omission, driver/port failures and namespace-export summary correction retained; not whole-App Sidebar coverage |
-| `root246-pixel-open-addendum.html` | Five original OPEN pairs shown with derived masks of every raw changed pixel | Zero new product captures or migration credit; no raster cause assigned and no threshold-based dismissal |
-| `leaves247-acceptance.html` | Four popup declaration positions;18 PNG/RGBA pairs exact,2,830body/98targets,108 full CSS pairs exact | Nine ordinary-StyleX Usage frames remain rejected for real primitive cascade changes; original min-width build rejection retained; zero net utility removal |
-| `leaves248-acceptance.html` | Three SessionDetail Spinner callsites use existing diameter API;16 formal plus2 local-menu pairs exact; net removes6 utilities | Actual phase-specific owner JSX projected into real Menu/Spinner hosts, not full controller/RPC. Raw API carriers differ; reduced local-menu size transitions use controlled completed-phase sampling |
-| `leaves250-acceptance.html` | One filter minimum declaration;9 PNG/RGBA pairs exact,1,701body/72targets,108 full CSS pairs exact | Before genuinely reuses247 final After frames with fixed249 producer qualification; not a new Before capture, no net removal |
-| `leaves251-acceptance.html` | One ChatLanding Spinner callsite uses existing diameter API;14 PNG/RGBA pairs exact,1,722body/56targets; net removes2 utilities | Real owner JSX/visual Button attributes projected into real Composer/Button/Spinner hosts, not full controller/RPC.308 exact API carriers differ; original root-font transition failure retained |
-
-| `root220-note-navigation-supplement.html` | Separate actual390px file-nav pair exposes the annotation on both sides;new PNGs match | Original22039 matrix and71-character OPEN unchanged;sampled fields are narrow,not whole-pageCSS;right-edge clipping stays common |
-
-The unchanged workspace-inset browser spec passes16 after-only cases in the
-healthy190 build. The prior32 failures remain recorded as a different environment;
-this adds durable behavior coverage and does not replace the original185 visual
-pairs or their OPENs. See `leaves185-healthy190-after-only-verification.json`.
-
-Root independently reopens original compressed records and decodes PNG RGBA.
-Named carrier exceptions retain both raw values; they never establish whole-object
-equality. The latest fixed component suite passes 620 files/6,209 tests with all
-3,208 inputs unchanged; its 790 frozen core147 hashes match. This test window
-excludes later161 and the isolated159 build prototype. The
-[migration note](../../../../.agents/notes/implemented/architecture/2026-10-22-tailwind-to-stylex-migration.md#public-callers-and-the-remaining-cascade-boundary)
-owns current source inventory and its counting limits. Visual OPENs remain separate.
-
-The original146 wide build gate stays FAIL because the guide changed between
-builds. Its qualified product gate excludes only that proven unconsumed Markdown
-file; emitted external and inline CSS equality is measured directly. UI owner141
-independently passes 25 files/313 tests and types with its four owner files locked,
-without a fresh whole-UI-graph stability claim.
-
-Earlier132 renderer inputs first hit the default4GB heap limit and then built
-successfully with8GB; retain both attempts. Its four real Electron pages are
-After-only, separate from the actual124/146 paired target captures. All335 verified
-main/CLI/lock artifacts remain unchanged. The root check remains blocked at the
-existing ACP SDK prerequisite; no backend/submodule workaround is included.
+`pnpm run test:visual` invokes the same CLI. `pnpm run test:visual:harness` exercises
+its real-browser success and failure paths with synthetic harness fixtures; those
+images are not product acceptance evidence. `--browser` overrides
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` and Playwright's default executable.
+
+Both modes refuse an existing output directory. Verification requires a successful
+baseline with the same runner, profile, browser executable/version, Playwright, OS,
+Node and policy fingerprints. It never updates the baseline. Changing any of those
+inputs requires a new baseline and a new output directory. Keep static builds and
+profile inputs unchanged throughout capture; the runner rechecks their hashes.
+
+Open `report.html` in the output directory. It embeds the original PNGs and records
+failures alongside successful cases. `manifest.json`, PNG hashes, layout snapshots,
+raw difference images and cleanup results remain available beside it. Output belongs
+under ignored `artifacts/visual/`; generated reports, captures, inventories and
+one-run target manifests are not source files to commit.
+
+## What a pass establishes
+
+Each scenario runs twice in independent browser contexts. A baseline must reproduce
+itself. Verification must reproduce itself and match the baseline with zero raw RGBA
+pixel differences and equal recorded geometry/content. Computed CSS differences are
+recorded separately. There are no tolerance thresholds, image masks or automatic
+baseline updates. A nonzero raw difference remains open even when another comparator
+would round it down to zero.
+
+The runner fixes locale, timezone, clock, random seed, DPR, color profile and reduced
+motion. It finishes finite animations, pauses infinite animations and SVG SMIL at
+zero, and hides the caret. This compares declared endpoints; it does not verify
+continuous motion or native iOS/WebKit rendering. A narrow Chromium viewport also
+does not establish a mobile UA-dependent branch.
+
+Profiles own real readiness and actions. They wait for the actual story/page, effective
+theme and intended visible state. The runner also waits for fonts, images and stable
+geometry and checks that the recorded DOM/layout does not change during the screenshot.
+Stable geometry alone is insufficient when a popup is still transparent, a label is
+clipped or a request has not completed. Add an observable readiness condition instead
+of a delay, mask or replacement screenshot.
+
+Full-page screenshots include portals; `root` scopes the geometry snapshot. External
+requests are aborted. Undeclared external requests, failed assets, application page
+errors and unexpected workers fail capture; explicitly blocked nonvisual requests
+remain recorded. Sandbox frames retain their native restrictions, and theme storage
+initialization is limited to the top-level document. The runner owns the static server
+and browser it starts. Cleanup failure also fails the command, with bounded shutdown
+and resource results retained in the manifest.
+
+## Design-system checks
+
+Use the design-system comparison profiles with the same baseline/verify commands.
+An intentional appearance change still fails strict old/new equivalence. Review its
+raw images and geometry against the agreed design-system decision; do not change the
+gate to relabel that difference as a pass.
+
+Run the contract profiles against the final build to check rendered family tokens,
+single focus ownership, effective disabled opacity and real actions. A baseline of
+that final build checks the contracts and independent repeatability; verification
+against the same build checks repeatability again. This is After-only evidence and
+cannot establish equivalence to the old design. Scope and exceptions belong to the
+[design-system decision](../../../../.agents/notes/implemented/architecture/2026-11-07-design-system-convergence.md).
+
+When extending coverage, add a maintained scenario to the relevant profile. Render
+production components with synthetic data, exercise actual pointer/keyboard actions,
+and include the relevant rest, hover, focus, disabled, pending, error and responsive
+states. Keep expected data branches and unavailable fixtures explicit. A matching
+fallback does not qualify a loaded-avatar branch, and an unvisited branch remains
+unverified.
+
+Retain failed runs and their original source/build/profile fingerprints in ignored
+artifacts. A corrected run gets a new directory. Later successful subsets do not close
+unexplained earlier pixel differences, invalid readiness, incomplete cleanup or missing
+application baselines. Keep the current open issues in the acceptance report and its
+owning decision; this README is the workflow reference, not a batch-results ledger.
 
 ## Real desktop smoke
 
-From the repository root:
+From the repository root, build the desktop and run the existing harness:
 
 ```sh
 pnpm --dir apps/electron build
@@ -1092,27 +125,20 @@ pnpm --dir e2e exec tsx --tsconfig ../apps/cli/tsconfig.json \
   ../packages/components/tests/visual/electron-smoke.mts
 ```
 
-If the bundled CLI is already built and synced, `build:app` rebuilds the desktop
-without repeating that work. Reused dependency trees need resolved SDK peer
-versions checked against `pnpm-lock.yaml`; the SDK version alone is insufficient.
-Rebuild and sync the CLI after correcting a verification environment before
-accepting its desktop screenshots. The runner mounts the production main/preload/
-renderer/IPC/CLI graph through the existing E2E harness. It owns temporary data,
-user-data and endpoint bindings and verifies shutdown cleanup. Each immutable
-round contains application PNGs, trace, console/runtime logs, assertions and
-build hashes. A single run is after-only evidence. Two runs around an actual
-rebuild supply application before/after images; natural startup animations still
-need separate phase control before their pixel differences can be a gate.
+The smoke uses the actual main/preload/renderer graph with isolated application data.
+It records build hashes, screenshots, logs and shutdown results under
+`packages/components/artifacts/visual/`. It reaches an editable local chat through
+onboarding and checks that the workspace fills its viewport. Set
+`LODY_STYLE_MIGRATION_SCHEDULES=1` to additionally exercise the local schedule editor.
+A single run is After-only evidence, not a full-app Before/After comparison or proof
+of every backend/native interaction.
 
-Set `LODY_STYLE_MIGRATION_SCHEDULES=1` on the smoke command to additionally open
-the actual local Schedules editor, switch daily/weekly/monthly rules, toggle a
-weekday with Space, edit the native time segments and toggle a month date.
-The runner leaves this isolated draft unsaved and records seven application
-images rather than the default four.
-
-The component behavior suite is separate. On Node 26, disable native Web Storage
-so jsdom supplies its own Storage objects:
+Behavior tests remain separate from screenshot acceptance. From `packages/components`,
+use the owning suites with jsdom's storage on Node 26:
 
 ```sh
-NODE_OPTIONS=--no-experimental-webstorage NODE_ENV=test pnpm test -- --maxWorkers=2
+NODE_OPTIONS=--no-experimental-webstorage NODE_ENV=test pnpm exec vitest run --maxWorkers=2
 ```
+
+For style ownership and caller composition, see the
+[StyleX migration guide](../../src/style/MIGRATION.md).

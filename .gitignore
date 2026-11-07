@@ -126,6 +126,8 @@ logs/
 /artifacts/
 # Visual-regression captures for the Tailwind -> StyleX migration.
 /packages/components/artifacts/
+# Temporary capture plans stay with local evidence; reusable profiles are source modules.
+/packages/components/tests/visual/*.json
 
 # OS
 .DS_Store

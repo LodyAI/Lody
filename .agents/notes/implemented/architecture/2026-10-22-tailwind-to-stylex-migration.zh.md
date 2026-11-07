@@ -13,6 +13,10 @@ Lody 共享产品 UI 已使用直接 StyleX，替代依赖 Tailwind 的声明桥
 
 后续[设计系统收敛](2026-11-07-design-system-convergence.zh.md)会有意替换迁移时保留的旧透明度与材质覆盖；其新外观验收与原迁移等价性分开。
 
+版本控制只保留可复用的确定性验收入口、行为测试、产品状态配置和 Electron smoke。
+分批采集清单、一次性采集脚本、词法快照及生成证据放在源码目录之外的忽略产物中。
+这样维护中的验证合同不依赖历史迁移批次，同时保留本地调查证据。
+
 ## 所有权与组合
 
 [产品样式层](../../../../packages/components/src/style/README.md)拥有应用颜色和尺度；[迁移指南](../../../../packages/components/src/style/MIGRATION.md)拥有具体组合及采集规则。样式位于组件本地 `stylex.create`，只有区域内重复结构才提取到相邻 surface。语义化 primitive 参数仍是常规设计 API。

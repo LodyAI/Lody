@@ -13,6 +13,12 @@ Lody's shared product UI now uses direct StyleX instead of a Tailwind declaratio
 
 The subsequent [design-system convergence](2026-11-07-design-system-convergence.md) intentionally replaces preserved legacy opacity and material overrides; its new appearance checks are separate from migration equivalence.
 
+Version control retains the reusable deterministic gate, behavioral harness tests,
+product-state profiles and Electron smoke check. Batch-specific capture plans,
+one-off collectors, lexical snapshots and generated evidence stay outside the
+source tree in ignored artifacts. This keeps the maintained verification contract
+independent of historical migration batches without discarding their local evidence.
+
 ## Ownership and composition
 
 The [product style layer](../../../../packages/components/src/style/README.md) owns application colors and scales; the [migration guide](../../../../packages/components/src/style/MIGRATION.md) owns the detailed composition and capture contract. Components keep local `stylex.create` declarations and share only repeated area styles in adjacent surfaces. Semantic primitive props remain the normal design API.
