@@ -68,10 +68,15 @@ final class LodyShell {
     return pushNative(content, title: title, from: navigation, headerShown: headerShown)
   }
 
-  func presentDetail(_ content: UIViewController, title: String, from source: UIViewController, push: Bool = false, detents: [Double] = [0.6, 1]) {
-    if HomeController.current?.showPanel(content, title: title, from: source, push: push, detents: detents) == true { return }
-    if push { pushNative(content, title: title, from: source) }
-    else { presentNative(content, title: title, detents: detents, grabber: true) }
+  func presentDetail(_ content: UIViewController, title: String, from source: UIViewController, push: Bool = false, detents: [Double] = [0.6, 1], onClose: (() -> Void)? = nil) {
+    if HomeController.current?.showPanel(content, title: title, from: source, push: push, detents: detents, onClose: onClose) == true { return }
+    if push {
+      guard let page = pushNative(content, title: title, from: source) else { onClose?(); return }
+      page.onClose = onClose
+    } else {
+      guard presenter != nil else { onClose?(); return }
+      presentNative(content, title: title, detents: detents, grabber: true).onClose = onClose
+    }
   }
 
   @discardableResult

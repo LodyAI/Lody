@@ -139,29 +139,14 @@ extension SessionController {
     LodyShell.shared.presentNative(page, title: String(localized: "detail.title", bundle: .lody), detents: [0.6, 1], grabber: true)
   }
 
-  private func openFile(_ path: String, line: Int, from source: UIViewController? = nil) {
-    guard !openingFile, !path.isEmpty else { return }
-    openingFile = true
-    Task { @MainActor [weak self] in
-      guard let self else { return }
-      defer { self.openingFile = false }
-      var opened = false
-      if let runtime = DataRuntime.current {
-        opened = await FilePreview.open(sessionId: self.sessionId, path: path, line: line, runtime: runtime, from: source ?? self)
-      }
-      guard !opened, (source ?? self).view.window != nil else { return }
-      self.open("file-content", ["sessionId": self.sessionId, "path": path, "line": line], present: true, from: source)
-    }
-  }
-
-  func open(_ page: String, _ params: [String: Any], present: Bool = false, title: String? = nil, from source: UIViewController? = nil) {
+  func open(_ page: String, _ params: [String: Any], present: Bool = false, title: String? = nil, from source: UIViewController? = nil, onClose: (() -> Void)? = nil) {
     guard let content = LodyNativePages.make(page, params: Self.json(params)) else {
       preconditionFailure("Missing native session page: \(page)")
     }
     let titles = ["files": "files.title", "workspace-changes": "workspaceChanges.title", "file-diff": "diff.title"]
     let name = title ?? content.title ?? titles[page].map { String(localized: String.LocalizationValue($0), bundle: .lody) } ?? ""
     if ["file-content", "file-diff", "files", "workspace-changes"].contains(page) {
-      LodyShell.shared.presentDetail(content, title: name, from: source ?? self, push: !present, detents: [1])
+      LodyShell.shared.presentDetail(content, title: name, from: source ?? self, push: !present, detents: [1], onClose: onClose)
     } else if present { LodyShell.shared.presentNative(content, title: name, grabber: true) }
     else { LodyShell.shared.pushNative(content, title: name, from: source ?? self) }
   }

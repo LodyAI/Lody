@@ -5,9 +5,9 @@ import UIKit
 
 /// Semantic colors. Every value follows the trait collection's light / dark style.
 public enum LodyColor {
-    /// Screen background for plain lists and content (iOS systemBackground).
+    /// Screen background for plain lists and content (white / soft dark).
     public static let bgBase = Color(uiColor: LodyUIColor.bgBase)
-    /// Behind grouped lists and cards (iOS systemGroupedBackground).
+    /// Behind grouped lists and cards (grouped light / soft dark).
     public static let bgGrouped = Color(uiColor: LodyUIColor.bgGrouped)
     /// Cards and cells on bg.grouped, sheets, the composer (iOS secondarySystemGroupedBackground).
     public static let bgRaised = Color(uiColor: LodyUIColor.bgRaised)
@@ -268,8 +268,8 @@ public enum LodyColor {
 
 /// UIKit mirror of `LodyColor` for views that are not SwiftUI.
 public enum LodyUIColor {
-    public static let bgBase = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x000000FF)
-    public static let bgGrouped = UIColor(lodyLight: 0xF2F2F2FF, dark: 0x000000FF)
+    public static let bgBase = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x111113FF)
+    public static let bgGrouped = UIColor(lodyLight: 0xF2F2F2FF, dark: 0x111113FF)
     public static let bgRaised = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x1C1C1CFF)
     public static let bgSunken = UIColor(lodyLight: 0x0000000D, dark: 0xFFFFFF1A)
     public static let bgOverlay = UIColor(lodyLight: 0xFFFFFFFF, dark: 0x2B2B2BFF)

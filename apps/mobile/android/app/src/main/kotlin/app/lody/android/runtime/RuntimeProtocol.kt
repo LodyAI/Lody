@@ -92,7 +92,7 @@ internal object RuntimeProtocol {
                     agentRoleId = field("agentRoleId"), roleKnown = value.has("agentRoleId"),
                 )
             }
-            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer))
+            RuntimeEvent.SessionUpdated(SessionSnapshot(message.text("sessionId"), envelope.text("status"), entries, composer, SessionUsageJson.parse(envelope.optJSONObject("usage"))))
         }
         "catalog" -> {
             val catalog = JSONObject(message.get("catalog") as String)

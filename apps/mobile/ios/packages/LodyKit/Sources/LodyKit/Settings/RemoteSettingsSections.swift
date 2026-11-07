@@ -62,6 +62,7 @@ struct UsageWindow: Codable, Equatable, Sendable {
 struct AgentQuota: Codable, Equatable, Sendable {
   var id: String
   var provider: String
+  var agentConfigId: String?
   var name: String?
   var windows: [UsageWindow]
 }
@@ -71,6 +72,7 @@ struct AgentUsageConfig: Codable, Equatable, Sendable {
   var name: String
   var provider: String
   var eligible: Bool
+  var rateLimitsAvailable: Bool?
 }
 
 struct AgentUsage: Codable, Equatable, Sendable {
