@@ -174,6 +174,19 @@ Behavioral tests check deterministic collection, platform conflicts, source
 license mismatch, installed text, cache reuse and explicit rejection of missing
 or modified cached notices.
 
+## Connection diagnostics
+
+CLI debug logs use `[preview-tunnel]` for connector registration, DNS publication,
+and public HTTP readiness. DNS entries include the A-query outcome (such as
+`ENOTFOUND`, `ENODATA`, or an empty answer), attempt count and elapsed time,
+including the ten-second fallback to HTTP. A negative DNS answer does not prove
+that Cloudflare has not published the record; local filtering can produce it too.
+Public probes record a final ready/failed result with their last outcome and
+cancellation state. These diagnostics omit request tokens and raw error messages.
+Correlate the public hostname with `[http-transport]` dispatcher logs for the
+actual direct/proxy selection; DNS publication queries use configured DNS servers
+independently of that HTTP proxy. These logs do not change retry or timeout policy.
+
 ## Agent-reported startup
 
 The local message handler derives the active execution user and passes it separately
