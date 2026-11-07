@@ -1027,6 +1027,7 @@ describe('machine E2EE local runtime', () => {
           JSON.stringify({ genesisHash: hex(fixture.genesis.toBytes()), signingPublicKey })
         );
         let history = page(fixture.records);
+        let pagedHistory: ReturnType<typeof page>[] = [];
         let reads = 0;
         let revision = 0;
         let retryFailed = () => {};
@@ -1034,7 +1035,7 @@ describe('machine E2EE local runtime', () => {
         const cloud = {
           getHistory: async () => {
             reads++;
-            return history;
+            return pagedHistory.shift() ?? history;
           },
           mailboxCall: async (
             method: keyof E2eeMailboxRequests,
@@ -1088,6 +1089,18 @@ describe('machine E2EE local runtime', () => {
         history = page(fixture.records);
         await host.refresh();
         expect(authorityConfirmations.length).toBeGreaterThan(beforeOlderPrefix);
+        // Every page of one read has to name the checkpoint of the first page.
+        const beforeChangedCheckpoint = authorityConfirmations.length;
+        const unavailable = Promise.withResolvers<void>();
+        retryFailed = unavailable.resolve;
+        pagedHistory = [page(fixture.records, 0, 1), page(fixture.records.slice(0, -1), 1)];
+        await host.refresh();
+        await unavailable.promise;
+        retryFailed = () => {};
+        expect(authorityConfirmations).toHaveLength(beforeChangedCheckpoint);
+        await vi.advanceTimersByTimeAsync(250);
+        await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeChangedCheckpoint);
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
