@@ -5,6 +5,7 @@ enum LodyListPhoto {
   enum Shape { case circle, original }
 
   nonisolated static let size = CGSize(width: 36, height: 36)
+  private nonisolated static let rasterScale: CGFloat = 3
   private static let cache = NSCache<NSURL, UIImage>()
   private static let originals = NSCache<NSURL, UIImage>()
   private static var waiters: [URL: [(UIImage?) -> Void]] = [:]
@@ -134,7 +135,8 @@ enum LodyListPhoto {
   nonisolated static func circular(_ image: UIImage) -> UIImage {
     let format = UIGraphicsImageRendererFormat()
     format.opaque = false
-    format.scale = image.scale
+    // Decoded CGImages have scale 1; keep the thumbnail pixel budget when masking.
+    format.scale = rasterScale
     return UIGraphicsImageRenderer(size: size, format: format).image { _ in
       UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).addClip()
       let scale = max(size.width / max(image.size.width, 1), size.height / max(image.size.height, 1))
@@ -152,7 +154,7 @@ enum LodyListPhoto {
     let options: [CFString: Any] = [
       kCGImageSourceCreateThumbnailFromImageAlways: true,
       kCGImageSourceCreateThumbnailWithTransform: true,
-      kCGImageSourceThumbnailMaxPixelSize: Int(size.width * 3),
+      kCGImageSourceThumbnailMaxPixelSize: Int(size.width * rasterScale),
     ]
     guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
     return UIImage(cgImage: cg, scale: 1, orientation: .up).withRenderingMode(.alwaysOriginal)

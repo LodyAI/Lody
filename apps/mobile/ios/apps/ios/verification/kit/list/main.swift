@@ -772,3 +772,35 @@ assert(nativeMenuButton.menu !== offlineMenu, "Nested device changes must still 
 let onlineMenu = nativeMenuButton.menu!
 stableMenu.setItems([workspaceChoice, devicesMenu])
 assert(nativeMenuButton.menu === onlineMenu, "Nested equal values must preserve the menu")
+
+// Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
+let retinaFormat = UIGraphicsImageRendererFormat()
+retinaFormat.scale = 1
+retinaFormat.opaque = true
+let detailSource = UIGraphicsImageRenderer(size: CGSize(width: 108, height: 108), format: retinaFormat).image { _ in
+  for x in 0..<108 {
+    (x.isMultiple(of: 2) ? UIColor.black : UIColor.white).setFill()
+    UIRectFill(CGRect(x: x, y: 0, width: 1, height: 108))
+  }
+}
+let avatarDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+try! FileManager.default.createDirectory(at: avatarDirectory, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: avatarDirectory) }
+let detailURL = avatarDirectory.appendingPathComponent("retina-avatar.png")
+try! detailSource.pngData()!.write(to: detailURL)
+let detailedAvatar = LodyListPhoto.image(for: detailURL, ready: { _ in })!
+assert(detailedAvatar.size == CGSize(width: 36, height: 36), "Retina pixels must not enlarge the avatar layout")
+assert(detailedAvatar.cgImage!.width == 108 && detailedAvatar.cgImage!.height == 108,
+       "Decoded avatars must retain 3x detail through circular rendering and caching")
+assert(LodyListPhoto.cached(detailURL)?.cgImage?.width == 108)
+var detailPixels = [UInt8](repeating: 0, count: 108 * 108 * 4)
+detailPixels.withUnsafeMutableBytes { bytes in
+  let context = CGContext(data: bytes.baseAddress, width: 108, height: 108, bitsPerComponent: 8,
+                          bytesPerRow: 108 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+  context.draw(detailedAvatar.cgImage!, in: CGRect(x: 0, y: 0, width: 108, height: 108))
+}
+let black = Int(detailPixels[(54 * 108 + 52) * 4])
+let white = Int(detailPixels[(54 * 108 + 53) * 4])
+assert(white - black > 200, "One-pixel avatar detail must survive, not be blurred by a 1x intermediate")
+print("PASS: cached circular avatars preserve Retina resolution and image detail")
