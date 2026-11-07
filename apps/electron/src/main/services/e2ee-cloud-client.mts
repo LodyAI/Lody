@@ -880,6 +880,44 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     staging,
     /** Opaque recovery-vault ciphertext storage. Login gates retrieval only; the
      * service never decrypts, selects ledger trust or proves an active Recovery device. */
+    /** Whole-vault replacement bookkeeping. State never decides trust; the ledger does. */
+    recoveryVaultReplacement: (signal?: AbortSignal) => {
+      const ok = z.object({ ok: z.literal(true) })
+      return {
+        state: () =>
+          request(
+            (client) => client.query(api.e2eeRecoveryVault.replacementState, {}),
+            z.object({ current: z.string().nullable(), replacing: z.string().nullable() }),
+            signal
+          ),
+        reserve: (vaultId: string) =>
+          request(
+            (client) => client.mutation(api.e2eeRecoveryVault.reserveReplacementVault, { vaultId }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid),
+        finish: (oldVaultId: string, newVaultId: string) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.finishReplacement, { oldVaultId, newVaultId }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid),
+        abandon: (vaultId: string) =>
+          request(
+            (client) => client.mutation(api.e2eeRecoveryVault.abandonReplacement, { vaultId }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid)
+      }
+    },
+    /** Encrypted workspaces this account can name, whether or not this device joined them. */
+    recoveryVaultAccountWorkspaces: (signal?: AbortSignal) =>
+      request(
+        (client) => client.query(api.e2eeMembers.workspaces, {}),
+        z.array(z.object({ id: z.string(), name: z.string(), genesisHash: hash })),
+        signal
+      ),
     /** Whether this account already has a vault. One account has one vault. */
     hasRecoveryVault: (signal?: AbortSignal) =>
       request(

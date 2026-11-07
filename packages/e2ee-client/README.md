@@ -262,7 +262,9 @@ yet. [Spec](../../specs/e2ee/recovery-vault.md).
 
 `replaceAccountVault` proves a new R for every workspace before revoking any old R, and
 makes the new vault current last. Every step resumes from its own journal, so rerunning is
-safe. Service state and the product flow are not wired yet, so nothing calls it.
+safe. `abandonVaultReplacement` gives up on the device that started, and
+`planVaultReplacement` names workspaces the device cannot act on.
+`recoverySubmitOriginal` and `recoveryFetchEnvelope` adapt the service to core.
 [Spec](../../specs/e2ee/recovery-vault.md).
 
 ## Verification and limits
