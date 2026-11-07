@@ -14,12 +14,14 @@ import test from 'node:test'
 import { Effect, Exit, Result, Scope } from 'effect'
 import { decodeRecoveryVaultCiphertext } from '@lody/e2ee-core/host'
 import { vaultCiphertextDigest } from '@lody/e2ee-core/protocol'
+import { E2eePasskeyCancelled } from '@lody/platform/e2ee-passkey'
 import { makeE2eeCloudClient } from './e2ee-cloud-client.mts'
 import {
   abandonAccountVaultReplacement,
   beginAccountVaultReplacement,
   continueAccountVaultReplacement,
   createAccountRecoveryVault,
+  enrollRecoveryPasskey,
   inspectRecoveryFile,
   recoveryReplacementPlan,
   recoveryRestoreTarget,
@@ -639,7 +641,7 @@ void test('setting up one workspace needs the current vault and reports a slow d
             setupWorkspaceRecovery({
               journalPath: join(dir, 'recovery-vault.sqlite'),
               store,
-              file,
+              unlock: { file },
               replacement: client.recoveryVaultReplacement(),
               target: {
                 ...fakeTarget([]),
@@ -727,7 +729,7 @@ void test('a file covering nothing here restores nothing', async () => {
         restoreAccountWorkspaces({
           journalPath: join(dir, 'recovery-vault.sqlite'),
           store,
-          file,
+          unlock: { file },
           workspaces: []
         })
       )
@@ -736,4 +738,120 @@ void test('a file covering nothing here restores nothing', async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+const syntheticAuthenticator = (options = {}) => {
+  const credentials = new Map()
+  return {
+    available: async () => true,
+    register: async (request) => {
+      const credentialId = `credential${credentials.size}A`
+      credentials.set(credentialId, new Uint8Array(request.userHandle))
+      return { credentialId, prfEnabled: options.prf ?? true }
+    },
+    authenticate: async (request) => {
+      const [credentialId, userHandle] = [...credentials].find(
+        ([id]) => request.allowCredentialIds.length === 0 || request.allowCredentialIds.includes(id)
+      )
+      return {
+        credentialId,
+        userHandle,
+        userVerified: true,
+        prfFirst: new Uint8Array(32).fill(44)
+      }
+    }
+  }
+}
+
+const createdVault = async (dir, service) => {
+  let file
+  const created = await withClient(service, (store) =>
+    Effect.runPromise(
+      createAccountRecoveryVault({
+        journalPath: join(dir, 'recovery-vault.sqlite'),
+        store,
+        exists: Effect.succeed(false),
+        locator: 'https://synthetic.convex.cloud',
+        persist: (bytes) => {
+          file = new Uint8Array(bytes)
+          return memorySave(bytes)
+        }
+      })
+    )
+  )
+  return { file, vaultId: created.vaultId }
+}
+
+void test('a passkey enrolled with the file then sets up a workspace without it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file, vaultId } = await createdVault(dir, service)
+    service.replacement.current = vaultId
+    const port = syntheticAuthenticator()
+    const enrolled = await withClient(service, (store) =>
+      Effect.runPromise(
+        enrollRecoveryPasskey({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          file,
+          port,
+          label: 'iCloud Keychain'
+        })
+      )
+    )
+    assert.deepEqual(enrolled, { passkeys: 1 })
+    const log = []
+    const result = await withClient(service, (store, client) =>
+      Effect.runPromise(
+        setupWorkspaceRecovery({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          unlock: { passkey: port, locator: 'https://synthetic.convex.cloud' },
+          replacement: client.recoveryVaultReplacement(),
+          target: fakeTarget(log)
+        })
+      )
+    )
+    assert.deepEqual(result, { outcome: 'Committed', recoverable: true })
+    assert.deepEqual(log, ['setup'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a passkey without PRF is reported plainly and enrolls nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file } = await createdVault(dir, service)
+    const before = service.entries.size
+    const failed = await withClient(service, (store) =>
+      Effect.runPromise(
+        Effect.exit(
+          enrollRecoveryPasskey({
+            journalPath: join(dir, 'recovery-vault.sqlite'),
+            store,
+            file,
+            port: syntheticAuthenticator({ prf: false }),
+            label: 'Other'
+          })
+        )
+      )
+    )
+    assert.equal(
+      recoveryVaultFailure(Exit.isFailure(failed) ? failed.cause.reasons[0]?.error : null).message,
+      'e2ee_recovery_prf-unavailable'
+    )
+    assert.equal(service.entries.size, before)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a dismissed system prompt is a cancellation, not a failure', () => {
+  assert.equal(
+    recoveryVaultFailure(new E2eePasskeyCancelled('e2ee_passkey_cancelled')).message,
+    'e2ee_recovery_cancelled'
+  )
 })

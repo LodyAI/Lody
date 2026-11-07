@@ -36,7 +36,8 @@ type Result =
         | 'e2ee.recovery.replaceAbandoned'
         | 'e2ee.recovery.replaceFinished'
         | 'e2ee.recovery.replacePending'
-        | 'e2ee.recovery.setupDone';
+        | 'e2ee.recovery.setupDone'
+        | 'e2ee.recovery.passkeyAdded';
     }
   | { kind: 'restored'; results: readonly { name: string; outcome: string }[] }
   | { kind: 'created'; vaultId: string }
@@ -56,12 +57,19 @@ export function RecoveryVaultSection() {
   const [result, setResult] = useState<Result>();
   const [plan, setPlan] = useState<Plan>();
   const [dialog, setDialog] = useState<'begin' | 'continue'>();
+  const [passkey, setPasskey] = useState(false);
   useEffect(() => {
     if (!enabled || !e2ee) return;
     let live = true;
     void e2ee.recoveryReplacementPlan().then(
       (next) => {
         if (live) setPlan(next);
+      },
+      () => undefined
+    );
+    void e2ee.recoveryPasskeyAvailable().then(
+      (next) => {
+        if (live) setPasskey(next);
       },
       () => undefined
     );
@@ -77,7 +85,9 @@ export function RecoveryVaultSection() {
       const next = await work();
       if (next) setResult(next);
     } catch (error) {
-      setResult({ kind: 'error', code: error instanceof Error ? error.message : '' });
+      const code = error instanceof Error ? error.message : '';
+      // Dismissing the system prompt is a choice, not a failure.
+      if (!code.includes('e2ee_recovery_cancelled')) setResult({ kind: 'error', code });
     } finally {
       setBusy(false);
     }
@@ -144,6 +154,38 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.restore')}
             </Button>
           )}
+          {passkey && !!plan?.uncovered.length && (
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const restored = await e2ee.restoreFromRecoveryFile('passkey');
+                  return restored.outcome === 'restored'
+                    ? { kind: 'restored', results: restored.results }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.restorePasskey')}
+            </Button>
+          )}
+          {passkey && plan?.replaceable && (
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const added = await e2ee.addRecoveryPasskey();
+                  return added.outcome === 'added'
+                    ? { kind: 'notice', key: 'e2ee.recovery.passkeyAdded' }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.passkeyAdd')}
+            </Button>
+          )}
         </div>
         {!!plan?.covered.length && (
           <div {...stylex.props(styles.body)}>
@@ -170,6 +212,27 @@ export function RecoveryVaultSection() {
                 >
                   {t('e2ee.recovery.setup')}
                 </Button>
+                {passkey && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        const done = await e2ee.setupWorkspaceRecovery(workspace.id, 'passkey');
+                        if (done.outcome === 'cancelled') return undefined;
+                        return {
+                          kind: 'notice',
+                          key:
+                            done.outcome === 'Committed' && done.recoverable
+                              ? 'e2ee.recovery.setupDone'
+                              : 'e2ee.recovery.replacePending',
+                        };
+                      })
+                    }
+                  >
+                    {t('e2ee.recovery.setupPasskey')}
+                  </Button>
+                )}
               </div>
             ))}
           </div>
@@ -236,13 +299,15 @@ export function RecoveryVaultSection() {
               {t(
                 result.code.includes('e2ee_recovery_disabled')
                   ? 'e2ee.recovery.disabled'
-                  : result.code.includes('e2ee_recovery_replacing')
-                    ? 'e2ee.recovery.replacingElsewhere'
-                    : result.code.includes('e2ee_recovery_exists')
-                      ? 'e2ee.recovery.exists'
-                      : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                        ? 'e2ee.recovery.wrongFile'
-                        : 'e2ee.recovery.failed'
+                  : result.code.includes('e2ee_recovery_prf-unavailable')
+                    ? 'e2ee.recovery.passkeyUnsupported'
+                    : result.code.includes('e2ee_recovery_replacing')
+                      ? 'e2ee.recovery.replacingElsewhere'
+                      : result.code.includes('e2ee_recovery_exists')
+                        ? 'e2ee.recovery.exists'
+                        : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                          ? 'e2ee.recovery.wrongFile'
+                          : 'e2ee.recovery.failed'
               )}
             </Alert.Description>
           </Alert.Root>
