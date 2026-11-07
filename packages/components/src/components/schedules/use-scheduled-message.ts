@@ -217,6 +217,7 @@ export function useScheduledMessage(session: SessionMeta, machine: MachineMeta |
             return receipt?.ready ? { ...item, ready: receipt.ready } : item;
           });
           const message = await prepareScheduledMessage({
+          scheduleId: draft.scheduleId,
             runtime,
             sessionId: session.id,
             machineId: session.machineId as MachineId,

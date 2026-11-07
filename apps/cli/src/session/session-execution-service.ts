@@ -8025,6 +8025,7 @@ export class SessionExecutionService {
                 await self.deps.buildAcpPromptBlocks({
                   workspaceId,
                   sessionId,
+                  userTurnId,
                   inputBlocks: sessionInputBlocks,
                   replayPromptText:
                     replayPromptResult && replayPromptResult.stats.messagesIncluded > 0
