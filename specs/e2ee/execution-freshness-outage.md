@@ -30,8 +30,7 @@ local verified ledger for a longer window:
 - **A refusal is not an outage.** A server reply with an explicit permission refusal
   ends the window at once, as it does today.
 - **People can see it.** While a machine relies on a window, the user sees a notice
-  that access could not be confirmed. An expired sign-in also asks them to sign in
-  again.
+  that access could not be confirmed.
 - **Known revocation still wins.** Every request is checked against the local
   verified ledger. A revocation the machine has ingested stops the affected work
   immediately, whatever remains of the window.
@@ -63,9 +62,8 @@ The rule is whether the reply carries an explicit refusal, not its HTTP status.
 | Result of the latest read | Effect |
 | --- | --- |
 | No reply, timeout, 5xx, 429, a server error with no business error code | Outage: the window applies |
-| Expired sign-in | Outage: the window applies, and the user is asked to sign in again |
 | Failure partway through a paged read | Outage: the read failed |
-| Explicit refusal: removed, revoked, unauthorized | The window ends at once |
+| Explicit refusal: removed, revoked, unauthorized, including an expired sign-in | The window ends at once |
 | A reply the client cannot understand, a reply that fails verification or moves the ledger backwards | Treated as a refusal: nothing is relaxed |
 
 ## Existing Specs
