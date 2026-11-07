@@ -47,7 +47,7 @@ import {
 } from './mobile-inline-picker';
 
 const styles = stylex.create({
-  sheet: { height: 'auto', maxHeight: '85dvh' },
+  sheet: { height: 'auto' },
   header: { paddingInline: space[4], paddingTop: space[2], paddingBottom: space[1] },
   title: {
     margin: 0,
@@ -197,6 +197,9 @@ export function MobileRunConfigSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
         xstyle={[styles.sheet, keyboard.contentXstyle]}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >

@@ -1,6 +1,7 @@
 export * from './capabilities';
 export * from './cloud-api';
 export * from './cloud-port';
+export * from './e2ee-passkey';
 export * from './e2ee-workspaces';
 export * from './e2ee-account-pairing';
 export * from './e2ee-machine-sharing';

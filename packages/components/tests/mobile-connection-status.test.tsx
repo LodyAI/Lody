@@ -74,8 +74,10 @@ describe('mobile connection status', () => {
     expect(status().textContent).toBe('Recovered');
     expect(getComputedStyle(status().firstElementChild!).opacity).toBe('1');
     await advance(1);
-    // AnimatePresence may retain the exiting subtree after it becomes invisible.
-    expect(getComputedStyle(status().firstElementChild!).opacity).toBe('0');
+    // Motion can remove a completed exit or retain its invisible subtree.
+    const exiting = status().firstElementChild;
+    if (exiting) expect(getComputedStyle(exiting).opacity).toBe('0');
+    else expect(status().textContent).toBe('');
   });
 
   it('cancels an old recovery without hiding a new offline status', async () => {

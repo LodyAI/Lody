@@ -35,7 +35,6 @@ import { QUEUE_LINE, queueSurface } from './surface';
 import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
 import {
-  themeFontSize,
   themeFontWeight,
   themeRadius,
   themeShadow,
@@ -44,9 +43,7 @@ import {
 
 const MAX_INLINE_IMAGES = 3;
 
-/** The queue's own muted ink, at the two steps the rows use. */
-const MUTED_FOREGROUND_60 =
-  'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)';
+/** The queue's own muted index ink. */
 const MUTED_FOREGROUND_70 =
   'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)';
 

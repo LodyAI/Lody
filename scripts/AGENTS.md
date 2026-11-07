@@ -90,3 +90,7 @@ or a user data directory.
 `security-undici-probe.mjs` runs a synthetic loopback response in an isolated
 client process; its root script tests must observe natural child exit after a
 caught fetch rejection. Do not mask uncaught errors or force successful exit.
+
+The documentation link scan excludes native Lexical Markdown fixtures under
+`apps/mobile/ios/packages/lexical-swift/Fixtures/`: their literal links are test
+data. Mobile READMEs and development documentation remain checked.

@@ -1,0 +1,339 @@
+name: TestFlight (iOS)
+
+on:
+  workflow_call:
+    inputs:
+      notes:
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Optional notification notes'
+        required: false
+        type: string
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IOS_DIR: apps/ios
+  APPLE_TEAM_ID: YTRMX32C99
+  LODY_BUNDLE_ID: ai.lody.mobile
+  ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+  ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+  ASC_BYPASS_KEYCHAIN: '1'
+
+jobs:
+  submit:
+    name: Archive and upload
+    runs-on: xcode-27
+    timeout-minutes: 120
+    outputs:
+      build_number: ${{ steps.build.outputs.build_number }}
+      marketing_version: ${{ steps.build.outputs.marketing_version }}
+      source_short: ${{ steps.meta.outputs.source_short }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Record Xcode and SDK versions
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Ensure Metal Toolchain
+        run: /bin/bash .github/scripts/ensure-metal-toolchain.sh iphoneos
+
+      - name: Ensure cmake
+        run: command -v cmake >/dev/null || brew install cmake
+
+      - name: Record commit
+        id: meta
+        run: echo "source_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install asc
+        uses: rudrankriyam/setup-asc@5358c70a27a3f0d1517604b0f1fdc43e70c1cc4d # v1
+        with:
+          version: 4.11.0
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate native runtime assets
+        working-directory: ${{ env.IOS_DIR }}
+        run: pnpm native:assets
+
+      - name: Prepare App Store Connect authentication
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          : "${ASC_KEY_ID:?ASC_KEY_ID is required}"
+          : "${ASC_ISSUER_ID:?ASC_ISSUER_ID is required}"
+          : "${ASC_API_KEY_P8:?ASC_API_KEY_P8 is required}"
+          key_path="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s' "$ASC_API_KEY_P8" > "$key_path"
+          chmod 600 "$key_path"
+          echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "ASC_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Resolve version and build number
+        id: build
+        working-directory: ${{ env.IOS_DIR }}
+        run: |
+          set -euo pipefail
+          marketing_version="$(node -p "require('./package.json').version")"
+          if [[ ! "$marketing_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json has an invalid marketing version: $marketing_version"
+            exit 1
+          fi
+          build_number="$(asc builds next-build-number \
+            --app "$LODY_BUNDLE_ID" \
+            --version "$marketing_version" \
+            --platform IOS \
+            | jq -r .nextBuildNumber)"
+          if [[ ! "$build_number" =~ ^[0-9]+$ ]]; then
+            echo "::error::App Store Connect did not return a build number for $marketing_version."
+            exit 1
+          fi
+          {
+            echo "MARKETING_VERSION=$marketing_version"
+            echo "BUILD_NUMBER=$build_number"
+          } >> "$GITHUB_ENV"
+          {
+            echo "marketing_version=$marketing_version"
+            echo "build_number=$build_number"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $marketing_version ($build_number)"
+
+      - name: Generate native iOS project
+        working-directory: ${{ env.IOS_DIR }}
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          pnpm prebuild
+
+      - name: Stamp build number
+        working-directory: ${{ env.IOS_DIR }}
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" .generated/Lody/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' .generated/Lody/Info.plist)" = "$BUILD_NUMBER"
+
+      - name: Verify compatible native build mode
+        run: /bin/bash .github/scripts/verify-ios-build-mode.sh "$IOS_DIR"
+
+      - name: Import distribution certificate
+        env:
+          DIST_CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${DIST_CERT_P12:?IOS_DIST_CERT_P12 is required}"
+          : "${DIST_CERT_PASSWORD:?IOS_DIST_CERT_PASSWORD is required}"
+          keychain_path="$RUNNER_TEMP/ci.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" login.keychain-db
+          printf '%s' "$DIST_CERT_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" \
+            -k "$keychain_path" \
+            -P "$DIST_CERT_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/codesign_allocate
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path" > /dev/null
+          identities="$(security find-identity -v -p codesigning "$keychain_path")"
+          printf '%s\n' "$identities"
+          grep -q 'Apple Distribution:' <<< "$identities"
+          certificate_serial="$(
+            security find-certificate -c 'Apple Distribution' -p "$keychain_path" |
+              openssl x509 -noout -serial |
+              sed -n 's/^serial=//p'
+          )"
+          if [[ ! "$certificate_serial" =~ ^[[:xdigit:]:]+$ ]]; then
+            echo "::error::Could not read the imported Apple Distribution certificate serial."
+            exit 1
+          fi
+          echo "IOS_DIST_CERT_SERIAL=$certificate_serial" >> "$GITHUB_ENV"
+
+      - name: Install provisioning profiles
+        run: |
+          set -euo pipefail
+          target_bundle_ids="$(
+            xcodebuild -project "$IOS_DIR/Lody.xcodeproj" -alltargets \
+              -configuration Release -sdk iphoneos -showBuildSettings -json |
+              jq -r '[.[].buildSettings | select(.TARGET_NAME == "Lody" or .PRODUCT_TYPE == "com.apple.product-type.app-extension") | .PRODUCT_BUNDLE_IDENTIFIER] | unique[]'
+          )"
+          export TARGET_BUNDLE_IDS="$target_bundle_ids"
+          /bin/bash .github/scripts/install-app-store-profiles.sh
+
+      - name: Apply manual signing
+        working-directory: ${{ env.IOS_DIR }}
+        run: |
+          set -euo pipefail
+          python3 scripts/prebuild-native.py
+          xcodebuild -project Lody.xcodeproj -alltargets -configuration Release \
+            -sdk iphoneos -showBuildSettings -json > "$RUNNER_TEMP/signing-settings.json"
+          jq -e \
+            --arg team "$APPLE_TEAM_ID" \
+            --argjson profiles "$IOS_PROFILE_MAP" \
+            -f ../../.github/scripts/verify-signing-settings.jq \
+            "$RUNNER_TEMP/signing-settings.json"
+
+      - name: Archive
+        working-directory: ${{ env.IOS_DIR }}
+        run: |
+          set -o pipefail
+          command -v xcbeautify >/dev/null || brew install xcbeautify
+          xcodebuild \
+            -project Lody.xcodeproj \
+            -scheme Lody \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Lody.xcarchive" \
+            archive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            | xcbeautify --renderer github-actions
+
+      - name: Verify archive
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Lody.xcarchive/Products/Applications/Lody.app"
+          test -d "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "$LODY_BUNDLE_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "$BUILD_NUMBER"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = "$MARKETING_VERSION"
+          echo "Archived $LODY_BUNDLE_ID $MARKETING_VERSION ($BUILD_NUMBER)"
+
+      - name: Export IPA
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          import plistlib
+
+          options = {
+              "method": "app-store-connect",
+              "destination": "export",
+              "signingStyle": "manual",
+              "signingCertificate": "Apple Distribution",
+              "teamID": os.environ["APPLE_TEAM_ID"],
+              "provisioningProfiles": json.loads(os.environ["IOS_PROFILE_MAP"]),
+              "manageAppVersionAndBuildNumber": False,
+          }
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "exportOptions.plist"), "wb") as output:
+              plistlib.dump(options, output, sort_keys=False)
+          PY
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Lody.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/exportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+          ipa="$(find "$RUNNER_TEMP/export" -maxdepth 1 -name '*.ipa' -print -quit)"
+          test -n "$ipa"
+          echo "IPA_PATH=$ipa" >> "$GITHUB_ENV"
+
+      - name: Verify exported IPA
+        run: |
+          set -euo pipefail
+          verification_directory="$RUNNER_TEMP/ipa-verification"
+          rm -rf "$verification_directory"
+          mkdir -p "$verification_directory"
+          /usr/bin/ditto -x -k "$IPA_PATH" "$verification_directory"
+          app="$(find "$verification_directory/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          /bin/bash .github/scripts/verify-apple-bundle-linkage.sh "$app"
+
+      - name: Upload to TestFlight
+        env:
+          NOTES: ${{ inputs.notes }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          set -euo pipefail
+          short="$(git rev-parse --short "$SOURCE_SHA")"
+          subject="$(git log -1 --format=%s "$SOURCE_SHA")"
+          changelog="$(git log -8 --format='- %s (%h)' "$SOURCE_SHA")"
+          lead="${NOTES:-$subject}"
+          notes="$(printf 'Lody %s (%s) · %s\n%s\n\nRecent commits:\n%s\n\n%s' \
+            "$MARKETING_VERSION" "$BUILD_NUMBER" "$short" "$lead" "$changelog" "$SOURCE_URL")"
+          if [ "${#notes}" -gt 4000 ]; then
+            notes="${notes:0:3997}..."
+          fi
+          printf '%s\n' "$notes"
+          asc builds upload \
+            --app "$LODY_BUNDLE_ID" \
+            --ipa "$IPA_PATH" \
+            --version "$MARKETING_VERSION" \
+            --build-number "$BUILD_NUMBER" \
+            --test-notes "$notes" \
+            --locale en-US \
+            --wait
+
+      - name: Distribute to TestFlight group
+        if: ${{ vars.TESTFLIGHT_GROUP != '' }}
+        run: |
+          asc builds add-groups \
+            --app "$LODY_BUNDLE_ID" \
+            --latest \
+            --group "${{ vars.TESTFLIGHT_GROUP }}"
+
+      - name: Clean up signing assets
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/ci.keychain-db" || true
+          rm -f "$RUNNER_TEMP/dist.p12" "$RUNNER_TEMP"/AuthKey_*.p8
+          rm -f "$RUNNER_TEMP"/*.mobileprovision
+          if [ -n "${IOS_PROFILE_MAP:-}" ]; then
+            jq -r '.[]' <<< "$IOS_PROFILE_MAP" | while IFS= read -r uuid; do
+              rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+              rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$uuid.mobileprovision"
+            done
+          fi
+
+  notify:
+    name: Notify Telegram
+    runs-on: ubuntu-latest
+    needs: submit
+    if: ${{ always() }}
+    steps:
+      - name: Notify
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          RESULT: ${{ needs.submit.result }}
+          VERSION: ${{ needs.submit.outputs.marketing_version }}
+          BUILD: ${{ needs.submit.outputs.build_number }}
+          COMMIT: ${{ needs.submit.outputs.source_short }}
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
+            echo "::notice::TELEGRAM_BOT_TOKEN is not set; skipping notification."
+            exit 0
+          fi
+          if [ "$RESULT" = success ]; then
+            title="✅ Lody TestFlight 已上传 ${VERSION} (${BUILD})"
+          else
+            title="❌ Lody TestFlight 失败"
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          text="$(printf '<b>%s</b>\n<b>提交</b>: <code>%s</code>\n<a href="%s">打开 GitHub Actions</a>' "$title" "$COMMIT" "$run_url")"
+          jq -n --arg text "$text" \
+            '{chat_id: "@order_usagi", text: $text, parse_mode: "HTML", disable_web_page_preview: true}' \
+            | curl -sS -f -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -H 'Content-Type: application/json' -d @-

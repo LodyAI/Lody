@@ -1,0 +1,16 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "katex-block",
+        "version": 1,
+        "equation": "\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}"
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

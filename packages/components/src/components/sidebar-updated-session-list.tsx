@@ -1048,7 +1048,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {titleNode}
           </div>
           {showMetaLine ? (
-            <div data-sidebar-session-meta="" {...stylex.props(updatedStyles.metaLine)}>
+            <div
+              data-sidebar-session-meta=""
+              className={clsx(
+                stylex.props(updatedStyles.metaLine, sidebarSurface.meta).className,
+                SIDEBAR_CAPTION_TEXT_CLASS
+              )}
+            >
               {showProjectLine ? <UpdatedItemProjectLine item={item} /> : null}
               {showBranchLine ? <SidebarBranchSegment branchName={branchName} /> : null}
             </div>

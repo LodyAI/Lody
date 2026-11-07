@@ -8,7 +8,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { usePlatform } from '@lody/platform/react';
 import { E2eeTeamSettingsHost } from './e2ee-team-settings';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, useCloudAction } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
 import { toast } from '@/lib/toast';
 import type { AvatarKind, CliApiKeyRecord, WorkspaceId } from '@lody/shared';
@@ -116,6 +116,9 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Admission accrues any additional seat fee; collection is deferred to the billing date.
+  const refreshAdmissionBilling = useCloudAction(
+    cloudOperations.billing.purchaseWorkspaceMemberSeat
+  );
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
@@ -188,6 +191,16 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   const authBaseUrl = import.meta.env.VITE_CONVEX_SITE_URL;
   const canGenerateCliApiKey = Boolean(authBaseUrl && sessionToken);
   const billingUiAvailable = !isNativeAppShell();
+  const openAdmissionBilling = billingUiAvailable
+    ? () => {
+        if (!activeOrganization?.slug) return;
+        void router.navigate({
+          to: '/$workspaceName/settings/billing',
+          params: { workspaceName: activeOrganization.slug },
+        });
+      }
+    : undefined;
+
   // OAuth account linking uses a same-origin redirect that only works in a real
   // web browser. The Electron/native OAuth proxy only supports sign-in (not
   // linkSocial), so the flow would dead-end on a one-time-token page. Gate the
@@ -757,6 +770,8 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
             runtime={platform.e2eeWorkspaces.runtime}
             workspaceId={activeOrganization.id}
             accountId={currentUserId}
+            onOpenBilling={openAdmissionBilling}
+            onRefreshBilling={() => refreshAdmissionBilling({ workspaceId: activeOrganization.id })}
             labels={
               new Map(
                 activeOrganization.members.map(
@@ -766,7 +781,10 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
             }
           />
         ) : role === 'owner' && !encrypted ? (
-          <WorkspaceJoinRequestsSettings workspaceId={activeOrganization.id} />
+          <WorkspaceJoinRequestsSettings
+            workspaceId={activeOrganization.id}
+            onOpenBilling={openAdmissionBilling}
+          />
         ) : undefined
       }
       memberLimit={memberLimitState?.memberLimit ?? null}

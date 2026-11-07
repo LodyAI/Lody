@@ -9,7 +9,7 @@ import { deriveSessionSendProgress } from '@/lib/session-send-status';
 import { QUEUE_LINE, queueSurface } from './surface';
 import { IconAction, TextAction, queueRowStyles } from './message-queue-row';
 import { themeColors } from '../../../style/theme-colors.stylex';
-import { themeFontSize, themeSpace } from '../../../style/theme-scale.stylex';
+import { themeSpace } from '../../../style/theme-scale.stylex';
 
 const MAX_INLINE_ATTACHMENTS = 3;
 

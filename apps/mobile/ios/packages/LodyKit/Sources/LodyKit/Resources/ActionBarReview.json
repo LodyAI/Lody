@@ -1,0 +1,9 @@
+{
+  "title": "胶囊界面审阅",
+  "machine": "Leon 的 MacBook Pro",
+  "simulator": "打开 iPhone 17 Pro",
+  "prompt": "整理移动端对话界面的状态与操作。",
+  "reply": "当前页面用于审阅输入框上方的胶囊。点击或长按可查看对应操作。",
+  "task": "检查",
+  "taskDescription": "审阅界面状态"
+}

@@ -1,3 +1,4 @@
+import { BillingIntervalDialog, type IntervalResult } from './billing-interval-dialog';
 import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import {
   readReferral,
@@ -10,20 +11,9 @@ import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePostHog } from '@posthog/react';
-import * as stylex from '@stylexjs/stylex';
-import { themeColors } from '../../style/theme-colors.stylex';
-import {
-  themeFontSize,
-  themeFontWeight,
-  themeLineHeight,
-  themeRadius,
-  themeSpace,
-} from '../../style/theme-scale.stylex';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { Spinner } from '@lody/ui/spinner';
-import { Button } from '@lody/ui/button';
 import { useCloudAction } from '@lody/platform/react';
-import { ConvexError } from 'convex/values';
+import { getBillingErrorCode } from './billing-errors';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -56,7 +46,6 @@ import {
 import {
   BillingSettingsView,
   formatDate,
-  formatUsd,
   type BillingOverviewData,
   type BillingInterval,
   type BillingInvoice,
@@ -70,22 +59,6 @@ function captureBillingEvent(...args: Parameters<typeof capturePostHogEvent>) {
   } catch {
     // Analytics must not interrupt checkout navigation or return reconciliation.
   }
-}
-
-/** Extract the billing error code from a ConvexError thrown by billing actions. */
-function getBillingErrorCode(error: unknown): string | null {
-  if (error instanceof ConvexError) {
-    const data: unknown = error.data;
-    if (
-      data &&
-      typeof data === 'object' &&
-      'code' in data &&
-      typeof (data as { code: unknown }).code === 'string'
-    ) {
-      return (data as { code: string }).code;
-    }
-  }
-  return null;
 }
 
 const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
@@ -102,78 +75,6 @@ const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
 const CHECKOUT_CONFIRMATION_WINDOW_MS = 2 * 60 * 1000;
 const CHECKOUT_CONFIRMATION_INTERVAL_MS = 3_000;
 
-/**
- * The switch-interval preview: what today's charge would be, before the switch
- * is committed. It is printed inside the confirmation dialog, so it reads the
- * theme's own inks rather than the palette a product surface would use.
- */
-const styles = stylex.create({
-  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
-  /** The preview's loading line. */
-  loading: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: themeSpace[2],
-    paddingBlock: themeSpace[2],
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
-    color: themeColors.mutedForeground,
-  },
-  error: {
-    margin: 0,
-    paddingBlock: themeSpace[2],
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
-    color: themeColors.destructive,
-  },
-  /** The panel the charge is broken down in. */
-  panel: {
-    borderRadius: themeRadius.lg,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.7)',
-    backgroundColor: 'hsl(var(--muted) / 0.3)',
-    padding: themeSpace[3],
-    fontSize: themeFontSize.sm,
-    lineHeight: themeLineHeight.sm,
-  },
-  /** One line of the breakdown: what it is on the left, what it costs on the right. */
-  line: {
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: themeSpace[4],
-  },
-  /** A line that follows the one above it. */
-  lineSpaced: { marginTop: themeSpace[1.5] },
-  /** The charge itself: ruled off from the lines that explain it. */
-  lineTotal: {
-    marginTop: themeSpace[2],
-    paddingTop: themeSpace[2],
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: 'hsl(var(--border) / 0.6)',
-    fontWeight: themeFontWeight.normal,
-  },
-  /** The note under the breakdown, ruled off the same way. */
-  note: {
-    margin: 0,
-    marginTop: themeSpace[2.5],
-    paddingTop: themeSpace[2.5],
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: 'hsl(var(--border) / 0.6)',
-    fontSize: themeFontSize.xs,
-    lineHeight: themeLineHeight.xs,
-    color: themeColors.mutedForeground,
-  },
-  muted: { color: themeColors.mutedForeground },
-  strong: { color: themeColors.foreground },
-  primary: { color: themeColors.primary },
-  /** Money reads as a column of digits. */
-  amount: { fontVariantNumeric: 'tabular-nums' },
-});
-
 export function BillingSettingsComponent() {
   // Registry-level gating already hides the billing tab without the 'billing'
   // capability (open-source local build); this is a safety net for deep links.
@@ -181,7 +82,14 @@ export function BillingSettingsComponent() {
   if (!billingAvailable) {
     return null;
   }
-  return <CloudBillingSettings />;
+  return <BillingSettingsScope />;
+}
+
+// Dialogs and async continuations belong to one account/workspace, never the next one.
+function BillingSettingsScope() {
+  const { authSessionId } = useAuthenticatedConvex();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  return <CloudBillingSettings key={`${authSessionId ?? ''}:${workspaceId ?? ''}`} />;
 }
 
 function CloudBillingSettings() {
@@ -268,6 +176,10 @@ function CloudBillingSettings() {
     cloudOperations.billing.setSubscriptionCancelAtPeriodEnd
   );
   const setSubscriptionInterval = useCloudAction(cloudOperations.billing.setSubscriptionInterval);
+  const getPaymentStatus = useCloudAction(cloudOperations.billing.getSubscriptionPaymentStatus);
+  const getOutstandingInvoice = useCloudAction(cloudOperations.billing.getBillingInvoice);
+  const getPaymentStatusRef = useRef(getPaymentStatus);
+  getPaymentStatusRef.current = getPaymentStatus;
   const previewSubscriptionIntervalChange = useCloudAction(
     cloudOperations.billing.previewSubscriptionIntervalChange
   );
@@ -278,6 +190,12 @@ function CloudBillingSettings() {
   const [cancelPending, setCancelPending] = useState(false);
   const [switchIntervalDialogOpen, setSwitchIntervalDialogOpen] = useState(false);
   const [switchIntervalPending, setSwitchIntervalPending] = useState(false);
+  const [targetInterval, setTargetInterval] = useState<BillingInterval>('month');
+  const intervalPreviewAction = useRef(previewSubscriptionIntervalChange);
+  intervalPreviewAction.current = previewSubscriptionIntervalChange;
+  const [intervalResult, setIntervalResult] = useState<IntervalResult | null>(null);
+  const [intervalError, setIntervalError] = useState<string | null>(null);
+  const [intervalReloadKey, setIntervalReloadKey] = useState(0);
   // undefined = previewing, null = preview failed, object = ready.
   const [intervalPreview, setIntervalPreview] = useState<
     Awaited<ReturnType<typeof previewSubscriptionIntervalChange>> | undefined
@@ -640,62 +558,68 @@ function CloudBillingSettings() {
   // proration: the new interval's period starts today, the unused portion of
   // the current period is credited, and the net is charged now. The confirm
   // dialog previews that breakdown before the user commits.
-  const targetInterval: BillingInterval = overview?.billingInterval === 'month' ? 'year' : 'month';
 
   // Load the proration preview whenever the dialog opens.
   useEffect(() => {
-    if (!switchIntervalDialogOpen || !workspaceId) return undefined;
+    if (!switchIntervalDialogOpen || !workspaceId || intervalResult) return undefined;
     let cancelled = false;
     setIntervalPreview(undefined);
-    previewSubscriptionIntervalChange({ workspaceId, interval: targetInterval })
+    setIntervalError(null);
+    intervalPreviewAction
+      .current({ workspaceId, interval: targetInterval })
       .then((result) => {
-        if (!cancelled) setIntervalPreview(result);
+        if (!cancelled) {
+          setIntervalPreview(result);
+          if (result?.continuation) setTargetInterval(result.interval);
+        }
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        if (getBillingErrorCode(error) === 'interval_already_current') {
+          try {
+            const status = await getPaymentStatusRef.current({ workspaceId });
+            if (!cancelled) {
+              setIntervalResult(status);
+              setIntervalError(null);
+            }
+          } catch {
+            if (!cancelled) {
+              setIntervalPreview(null);
+              setIntervalError('payment_status_unavailable');
+            }
+          }
+          return;
+        }
         console.error('Failed to preview interval switch:', error);
-        if (!cancelled) setIntervalPreview(null);
+        if (!cancelled) {
+          setIntervalPreview(null);
+          setIntervalError(getBillingErrorCode(error));
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [switchIntervalDialogOpen, workspaceId, targetInterval, previewSubscriptionIntervalChange]);
-
-  // When switching to monthly leaves leftover account credit, estimate the
-  // date it runs out: each covered renewal draws one month of the recurring
-  // total (subtotalAmount) from the credit, starting after the first period.
-  const switchCreditCoverageDate = (() => {
-    if (
-      targetInterval !== 'month' ||
-      !intervalPreview ||
-      intervalPreview.remainingCredit <= 0 ||
-      intervalPreview.subtotalAmount <= 0 ||
-      !intervalPreview.nextRenewalAt
-    ) {
-      return null;
-    }
-    const coveredMonths = Math.floor(
-      intervalPreview.remainingCredit / intervalPreview.subtotalAmount
-    );
-    const date = new Date(intervalPreview.nextRenewalAt);
-    date.setMonth(date.getMonth() + coveredMonths);
-    return date.getTime();
-  })();
+  }, [switchIntervalDialogOpen, workspaceId, targetInterval, intervalReloadKey, intervalResult]);
 
   // The invoice history + next-charge preview come from an action (not a
   // reactive query), so subscription changes must trigger a reload explicitly.
   const reloadInvoices = () => setInvoicesReloadKey((key) => key + 1);
 
   const handleSwitchInterval = async () => {
-    if (!workspaceId) return;
+    if (!workspaceId || !intervalPreview) return;
     setSwitchIntervalPending(true);
+    setIntervalError(null);
     try {
-      await setSubscriptionInterval({ workspaceId, interval: targetInterval });
+      const result = await setSubscriptionInterval({
+        workspaceId,
+        interval: targetInterval,
+        quoteId: intervalPreview.quoteId,
+      });
+      setIntervalResult(result);
       trackBilling('billing/interval_change_result', {
         billing_interval: targetInterval,
         outcome: 'success',
       });
       toast.success(t('billing.switchIntervalSuccess'));
-      setSwitchIntervalDialogOpen(false);
       reloadInvoices();
     } catch (error) {
       console.error('Failed to switch billing interval:', error);
@@ -704,7 +628,46 @@ function CloudBillingSettings() {
         billing_interval: targetInterval,
         reason_code: 'interval_change_failed',
       });
-      toast.error(t('billing.switchIntervalError'));
+      setIntervalError(getBillingErrorCode(error) ?? 'unknown');
+      reloadInvoices();
+    } finally {
+      setSwitchIntervalPending(false);
+    }
+  };
+
+  const refreshPaymentStatus = async () => {
+    if (!workspaceId || switchIntervalPending) return;
+    setSwitchIntervalPending(true);
+    setIntervalError(null);
+    try {
+      setIntervalResult(await getPaymentStatus({ workspaceId }));
+      reloadInvoices();
+    } catch {
+      setIntervalError('payment_status_unavailable');
+    } finally {
+      setSwitchIntervalPending(false);
+    }
+  };
+
+  const viewOutstandingInvoice = async () => {
+    if (!workspaceId || !overviewScope || switchIntervalPending) return;
+    setSwitchIntervalPending(true);
+    setIntervalError(null);
+    try {
+      const status = await getPaymentStatus({ workspaceId });
+      setIntervalResult(status);
+      const outstanding = status.payment?.outstandingInvoices ?? [];
+      if (outstanding[0]) {
+        const detail = await getOutstandingInvoice({ workspaceId, invoiceId: outstanding[0].id });
+        setSelectedInvoice({ scope: overviewScope, invoice: detail.invoice });
+        setSwitchIntervalDialogOpen(false);
+      } else if (status.payment?.status === 'settled') {
+        setIntervalResult(status);
+      } else {
+        setIntervalError('payment_status_unavailable');
+      }
+    } catch {
+      setIntervalError('payment_status_unavailable');
     } finally {
       setSwitchIntervalPending(false);
     }
@@ -823,7 +786,12 @@ function CloudBillingSettings() {
         onIntervalChange={setInterval}
         onPaymentMethod={() => void handlePaymentMethod()}
         onUpgrade={() => void handleUpgrade()}
-        onSwitchInterval={() => setSwitchIntervalDialogOpen(true)}
+        onSwitchInterval={() => {
+          setTargetInterval(overview?.billingInterval === 'month' ? 'year' : 'month');
+          setIntervalResult(null);
+          setIntervalError(null);
+          setSwitchIntervalDialogOpen(true);
+        }}
         switchIntervalPending={switchIntervalPending}
         onCancelSubscription={() => setCancelDialogOpen(true)}
         onResumeSubscription={() => void handleSetCancelAtPeriodEnd(false)}
@@ -873,121 +841,22 @@ function CloudBillingSettings() {
           onCanceled={reloadInvoices}
         />
       ) : null}
-      <AlertDialog.Root open={switchIntervalDialogOpen} onOpenChange={setSwitchIntervalDialogOpen}>
-        <AlertDialog.Content>
-          <AlertDialog.Header>
-            <AlertDialog.Title>{t('billing.switchIntervalDialogTitle')}</AlertDialog.Title>
-            <AlertDialog.Description>
-              {t(
-                targetInterval === 'year'
-                  ? 'billing.switchIntervalDialogDescriptionYearly'
-                  : 'billing.switchIntervalDialogDescriptionMonthly',
-                { date: formatDate(intervalPreview?.nextRenewalAt ?? undefined) }
-              )}
-            </AlertDialog.Description>
-          </AlertDialog.Header>
-          {intervalPreview === undefined ? (
-            <div {...stylex.props(styles.loading)}>
-              <Spinner diameter="calc(var(--spacing) * 4)" />
-              {t('billing.historyLoading')}
-            </div>
-          ) : intervalPreview === null ? (
-            <p {...stylex.props(styles.error)}>{t('billing.switchPreviewError')}</p>
-          ) : (
-            <div {...stylex.props(styles.panel)}>
-              {/* Subtotal: seats × unit price */}
-              <div {...stylex.props(styles.line)}>
-                <span {...stylex.props(styles.muted)}>
-                  {t(
-                    targetInterval === 'year'
-                      ? 'billing.switchLineSeatsYearly'
-                      : 'billing.switchLineSeatsMonthly',
-                    {
-                      count: intervalPreview.quantity,
-                      price: formatUsd(intervalPreview.unitAmount),
-                    }
-                  )}
-                </span>
-                <span {...stylex.props(styles.amount, styles.strong)}>
-                  {formatUsd(intervalPreview.subtotalAmount)}
-                </span>
-              </div>
-              {/* Existing subscription discount */}
-              {intervalPreview.promoDiscountAmount !== 0 ? (
-                <div {...stylex.props(styles.line, styles.lineSpaced)}>
-                  <span {...stylex.props(styles.primary)}>{t('billing.upcomingDiscount')}</span>
-                  <span {...stylex.props(styles.amount, styles.primary)}>
-                    {formatUsd(intervalPreview.promoDiscountAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {/* Credit for the unused portion of the current period */}
-              {intervalPreview.creditAmount !== 0 ? (
-                <div {...stylex.props(styles.line, styles.lineSpaced)}>
-                  <span {...stylex.props(styles.muted)}>{t('billing.switchLineCredit')}</span>
-                  <span {...stylex.props(styles.amount, styles.strong)}>
-                    {formatUsd(intervalPreview.creditAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {/* Credit that exceeds today's charge, saved to account balance —
-                  keeps the lines reconciling to the $0 charged today. */}
-              {intervalPreview.deferredToBalanceAmount !== 0 ? (
-                <div {...stylex.props(styles.line, styles.lineSpaced)}>
-                  <span {...stylex.props(styles.muted)}>
-                    {t('billing.switchLineDeferredCredit')}
-                  </span>
-                  <span {...stylex.props(styles.amount, styles.strong)}>
-                    {formatUsd(intervalPreview.deferredToBalanceAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {/* Net charged today */}
-              <div {...stylex.props(styles.line, styles.lineTotal)}>
-                <span {...stylex.props(styles.strong)}>{t('billing.switchLineDueNow')}</span>
-                <span {...stylex.props(styles.amount, styles.strong)}>
-                  {formatUsd(intervalPreview.amountDueNow)}
-                </span>
-              </div>
-              {/* When leftover credit remains (e.g. year→month), spell out how
-                  long it covers renewals before billing resumes. */}
-              {intervalPreview.remainingCredit > 0 ? (
-                <p {...stylex.props(styles.note)}>
-                  {switchCreditCoverageDate
-                    ? t('billing.switchCreditCoverageNote', {
-                        amount: formatUsd(intervalPreview.remainingCredit),
-                        date: formatDate(switchCreditCoverageDate),
-                      })
-                    : t('billing.switchCreditGenericNote', {
-                        amount: formatUsd(intervalPreview.remainingCredit),
-                      })}
-                </p>
-              ) : null}
-            </div>
-          )}
-          <AlertDialog.Footer>
-            <AlertDialog.Cancel disabled={switchIntervalPending}>
-              {t('common.cancel')}
-            </AlertDialog.Cancel>
-            <Button
-              disabled={switchIntervalPending || intervalPreview === undefined}
-              onClick={() => {
-                // Keep the dialog open until the switch resolves (it closes in
-                // the handler on success) so the pending state is visible.
-                void handleSwitchInterval();
-              }}
-            >
-              {switchIntervalPending ? (
-                <Spinner
-                  diameter="calc(var(--spacing) * 4)"
-                  className={stylex.props(styles.pendingSpinnerSpacing).className}
-                />
-              ) : null}
-              {t('billing.switchIntervalConfirm')}
-            </Button>
-          </AlertDialog.Footer>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+      <BillingIntervalDialog
+        open={switchIntervalDialogOpen}
+        onOpenChange={setSwitchIntervalDialogOpen}
+        interval={targetInterval}
+        preview={intervalPreview}
+        pending={switchIntervalPending}
+        result={intervalResult}
+        errorCode={intervalError}
+        onConfirm={() => void handleSwitchInterval()}
+        onRetry={() => {
+          if (intervalResult) void refreshPaymentStatus();
+          else setIntervalReloadKey((key) => key + 1);
+        }}
+        onPaymentMethod={() => void handlePaymentMethod()}
+        onViewInvoices={() => void viewOutstandingInvoice()}
+      />
       <AlertDialog.Root open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <AlertDialog.Content>
           <AlertDialog.Header>

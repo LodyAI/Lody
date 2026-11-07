@@ -2914,6 +2914,7 @@ export function LoroAppSidebar({
             sectionLabel,
             subtitle: project.name,
             repoFullName: resolveProjectGitHubRepo(session.project) ?? null,
+            branchName: session.branchName,
             machineName: section.machineDisplayName,
             historyBackend: resolveSessionHistoryBackendKind(session),
             owner: resolveSessionAuthor(session),

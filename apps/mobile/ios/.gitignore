@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*.local
+apps/ios/Lody.xcodeproj/
+apps/ios/.generated/
+packages/LodyKit/Vendor/
+packages/LodyKit/DataChannel/.build/
+packages/LodyKit/.build/
+packages/LodyKit/.swiftpm/
+.superpowers/
+
+
+*.pyc
+# 用 **/ 写法：Lody App 的项目文件只读本文件，裸 .artifacts/ 会让根级目录在 App 里也消失
+**/.artifacts/
+packages/lody-core/.build/
+packages/lody-core/.swiftpm/
+apps/macos/Resources/Generated/
+**/xcuserdata/
+
+packages/LodyAppearance/.build/
+packages/LodyAppearance/.swiftpm/

@@ -1,0 +1,67 @@
+{
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "This is a statement with a footnote",
+            "type": "text",
+            "version": 1
+          },
+          {
+            "type": "footnote",
+            "version": 1,
+            "identifier": "1"
+          },
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": " and another reference",
+            "type": "text",
+            "version": 1
+          },
+          {
+            "type": "footnote",
+            "version": 1,
+            "identifier": "2"
+          },
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": ".",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "type": "paragraph",
+        "version": 1,
+        "textFormat": 0,
+        "textStyle": ""
+      },
+      {
+        "type": "footnote-section",
+        "version": 1,
+        "definitions": {
+          "1": "First footnote with detailed explanation.",
+          "2": "Second footnote referencing additional sources."
+        }
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

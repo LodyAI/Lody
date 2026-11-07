@@ -57,12 +57,14 @@ changes dependencies, native boundaries, consumers or ownership.
 
 ## Repository boundary
 
-- Public source: `apps/{cli,electron}` and their packages. Exclude hosted backends,
-  operator/billing config, private secrets/records, and Web/mobile app sources.
+- Public source: `apps/{cli,electron,mobile}` and their packages. Exclude hosted backends,
+  operator/billing config, private secrets/records, and private Web app sources.
   Never commit captured user/agent transcripts; fixtures must be synthetic.
 - Never depend on `@lody/convex`, private workspace packages, or generated backend
   API declarations. Optional-cloud protocol names/DTOs belong in `packages/cloud-api`;
   shared product code uses `packages/platform` capabilities and ports.
+- Native mobile clients keep independent builds and public cloud protocol clients;
+  they must not import private backend code.
 - The OSS desktop is local-only; authenticated product-cloud requests are forbidden.
   Public managed-runtime downloads are the exception. Shared packages stay
   platform-neutral; local telemetry is hard-disabled.

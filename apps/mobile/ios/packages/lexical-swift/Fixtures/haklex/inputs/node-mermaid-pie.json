@@ -1,0 +1,16 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "mermaid",
+        "diagram": "pie title Tech Stack Usage\n    \"React\" : 45\n    \"Vue\" : 25\n    \"Angular\" : 15\n    \"Svelte\" : 10\n    \"Other\" : 5",
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

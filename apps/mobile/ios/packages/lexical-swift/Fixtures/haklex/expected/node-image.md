@@ -1,0 +1,1 @@
+![Beautiful landscape](https://picsum.photos/1200/720?random=301 "A stunning mountain landscape with loading placeholder")

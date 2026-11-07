@@ -40,7 +40,6 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
-import { clsx } from 'clsx';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   useMacTrafficLightRowPadClass,

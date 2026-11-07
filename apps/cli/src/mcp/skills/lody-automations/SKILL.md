@@ -5,9 +5,7 @@ description: Register a background condition that resumes this Session when read
 
 # Lody Automations
 
-Use `lody_automation` for future behavior the user requested. A registration belongs
-to this Session: Lody checks its CodeMode JavaScript condition after the Agent finishes and queues the
-result back into this same conversation. Registration returns immediately.
+Use `lody_automation` for future behavior the user requested. A registration defaults to this Session. Pass `sessionId` to target another owned Session on the same machine; Lody checks the condition and queues the result in that target conversation. Registration returns immediately.
 
 ## Choose the operation
 

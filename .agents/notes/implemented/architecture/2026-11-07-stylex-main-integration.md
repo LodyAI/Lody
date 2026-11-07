@@ -11,10 +11,11 @@ The integration retains upstream product behavior and local StyleX ownership. Ve
 
 ## Decision
 
-Integrate main `6cc2de53c529733cbd50ef6658a7b9692acd1b55` into migration head
-`f5d2890144aaf3b08d23227c8d3e5212de913fe4`. Resolve the 133 conflicting paths
-in an isolated worktree, then retain the two import unions needed by the subsequent main update. The new local-attachment action glyphs use local StyleX sizing; Motion retains main's pinned dependency upgrade. Preserve main's product behavior and the migration's
-local StyleX ownership; a conflict-free textual merge alone is insufficient.
+Integrate main through `e5109b47cb293ccaed3b0f42b37724870bd66bbe` into migration
+head `f5d2890144aaf3b08d23227c8d3e5212de913fe4` in an isolated worktree. Preserve
+upstream billing recovery, sidebar branch metadata and local attachment behavior
+alongside local StyleX ownership; a conflict-free textual merge alone is insufficient.
+Local-attachment glyphs use local StyleX sizing, and Motion retains main's pinned upgrade.
 
 | Area         | Retained contract                                                                                                                          |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -29,6 +30,12 @@ local StyleX ownership; a conflict-free textual merge alone is insufficient.
 fold layouts. It adds no wrapper and avoids passing a raw descendant namespace
 through `StyleXStyles`. Existing InlinePicker and fold-panel owners compose their
 new layout constraints in the same `stylex.props` call.
+
+The run-configuration drawer retains its native fold-aware height capped by the
+keyboard-available viewport. Component-only typechecking does not cover all renderer
+constraints: Electron's consuming configuration also checks unused declarations.
+Recovery-status tests assert the complete visible interval and then invisibility;
+they permit Motion to remove an exited subtree instead of requiring a retained node.
 
 ## Dependency and verification boundary
 
