@@ -961,57 +961,123 @@ describe('SessionFileContentView', () => {
     expect(view.querySelector('[data-testid="monaco-viewer"]')).toBeNull();
   });
 
-  it('copies unsaved Markdown edits from the mobile native source', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [
-        {
-          path: 'README.md',
+  it.each(['write', 'read'] as const)(
+    'opens read-only and resets on reopen with role=%s',
+    async (role) => {
+      const provider = createEditableProvider();
+      const renderView = (active: boolean) =>
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'src/live.ts',
+          fileId: 't:live',
+          fileProvider: provider,
+          fileProviderRole: role,
+          defaultReadOnly: true,
+          active,
+        });
+      const view = await render(renderView(true));
+      await flushMicrotasks();
+      expect(monacoMockState.readOnly).toBe(true);
+      expect(monacoMockState.onContentChange).toBeUndefined();
+      const editButton = () =>
+        view.querySelector<HTMLButtonElement>('button[aria-label="Edit file"]');
+      if (role === 'read') {
+        expect(editButton()).toBeNull();
+        return;
+      }
+      expect(editButton()).not.toBeNull();
+      await act(async () => editButton()?.click());
+      expect(monacoMockState.readOnly).toBe(false);
+      expect(monacoMockState.onContentChange).toBeTypeOf('function');
+      const mountedEditor = view.querySelector('[data-testid="monaco-viewer"]');
+      await act(async () => {
+        view.querySelector<HTMLButtonElement>('button[aria-label="Switch to read-only"]')?.click();
+      });
+      expect(monacoMockState.readOnly).toBe(true);
+      expect(view.querySelector('[data-testid="monaco-viewer"]')).toBe(mountedEditor);
+      await act(async () => editButton()?.click());
+      await rerender(renderView(false));
+      await rerender(renderView(true));
+      await flushMicrotasks();
+      expect(monacoMockState.readOnly).toBe(true);
+      expect(editButton()).not.toBeNull();
+    }
+  );
+
+  it.each([false, true])(
+    'copies unsaved Markdown edits with defaultReadOnly=%s',
+    async (defaultReadOnly) => {
+      const provider = createFakeSessionFileProvider({
+        files: [
+          {
+            path: 'README.md',
+            fileId: 't:readme',
+            kind: 'text',
+            sourceState: 'live-collaborative',
+          },
+        ],
+        snapshots: { 'README.md': { kind: 'text', text: '# Original' } },
+      });
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'README.md',
           fileId: 't:readme',
-          kind: 'text',
-          sourceState: 'live-collaborative',
-        },
-      ],
-      snapshots: { 'README.md': { kind: 'text', text: '# Original' } },
-    });
-    const view = await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'README.md',
-        fileId: 't:readme',
-        fileProvider: provider,
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        preferNativeMarkdownSelection: true,
-      })
-    );
-    await flushMicrotasks();
+          fileProvider: provider,
+          fileProviderPending: false,
+          fileProviderRole: 'write',
+          preferNativeMarkdownSelection: true,
+          defaultReadOnly,
+        })
+      );
+      await flushMicrotasks();
 
-    await act(async () => {
-      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click();
-    });
-    const source = view.querySelector<HTMLTextAreaElement>(
-      'textarea[aria-label="Markdown source"]'
-    );
-    expect(source?.readOnly).toBe(false);
+      await act(async () => {
+        view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click();
+      });
+      const source = view.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Markdown source"]'
+      );
+      expect(source?.readOnly).toBe(defaultReadOnly);
+      if (defaultReadOnly) {
+        await act(async () => {
+          view.querySelector<HTMLButtonElement>('button[aria-label="Edit file"]')?.click();
+        });
+        expect(source?.readOnly).toBe(false);
+      }
 
-    const editedMarkdown = '# Edited locally\n\nNot saved yet.';
-    await act(async () => {
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        'value'
-      )?.set;
-      valueSetter?.call(source, editedMarkdown);
-      source?.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await flushMicrotasks();
+      const editedMarkdown = '# Edited locally\n\nNot saved yet.';
+      await act(async () => {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          'value'
+        )?.set;
+        valueSetter?.call(source, editedMarkdown);
+        source?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await flushMicrotasks();
+      if (defaultReadOnly) {
+        await act(async () => {
+          view
+            .querySelector<HTMLButtonElement>('button[aria-label="Switch to read-only"]')
+            ?.click();
+        });
+        expect(source?.readOnly).toBe(true);
+        expect(source?.value).toBe(editedMarkdown);
+        expect(view.querySelector<HTMLButtonElement>('button[aria-label="Save"]')?.disabled).toBe(
+          false
+        );
+      }
 
-    await act(async () => {
-      view.querySelector<HTMLButtonElement>('button[aria-label="Copy full Markdown"]')?.click();
-    });
-    await flushMicrotasks();
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith(editedMarkdown);
-  });
+      await act(async () => {
+        view.querySelector<HTMLButtonElement>('button[aria-label="Copy full Markdown"]')?.click();
+      });
+      await flushMicrotasks();
+      expect(writeTextToClipboard).toHaveBeenLastCalledWith(editedMarkdown);
+    }
+  );
 
   it('renders SVG text files as an image by default with a preview eye toggle', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
