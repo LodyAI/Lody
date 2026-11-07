@@ -109,6 +109,14 @@ as with an already accepted APNs alert. Tap navigation still validates the resto
 account and membership; this client change does not alter the backend payload or
 claim to eliminate that OS delivery boundary.
 
+## Appearance
+
+Dark mode uses soft black (`#111113`) for app/page base and grouped surfaces,
+including the launch/window background, aligned with iOS. Light mode stays white;
+raised surfaces, translucent scrims/shadows and artwork retain their own colors.
+There is no separate pure-black mode. The protocol WebView is offscreen and does
+not render app pages.
+
 ## Verification
 
 With an emulator or device connected:
@@ -139,3 +147,16 @@ See [phase-2 architecture](docs/phase-2-architecture.md) for account, credential
 The debug cloud probe now restores the saved workspace and catalog projection before online synchronization. Cached account context is explicitly unverified and cannot request grants. A failed cloud connection retains cached display. Network validation while foregrounded retries an unavailable read lease. See [cache architecture](docs/catalog-cache.md) and [scope](docs/phase-3-cache.md). Native conversations build on this cached catalog projection.
 
 Local screenshots, recordings and raw verification reports are excluded from Git. Checked-in verification summaries distinguish deterministic tests from real-cloud acceptance and remaining checks.
+
+### Conversation usage
+
+The composer displays context consumption and eligible subscription windows beside
+Send/Stop, with a details popover and relative/absolute reset-time buttons.
+`SessionSnapshot.usage` consumes an optional session-envelope `usage` projection:
+`context: { used, size }`, `isContextCompacting`, `quotaEligible`, `modelId`, `modelLabel`, and
+`quota: { id, provider, agentConfigId, name?, windows: [{ label?, usedPercent, duration?, resetsAt? }] }`.
+Durations and reset timestamps are seconds (reset timestamps are Unix time).
+The shared runtime must resolve the selected model/config and apply capability
+and authentication eligibility before setting `quotaEligible: true` and emitting `quota`. Older
+runtimes without this projection hide the indicator rather than inventing usage.
+Runtime delivery of this new projection is coordinated separately from native UI.

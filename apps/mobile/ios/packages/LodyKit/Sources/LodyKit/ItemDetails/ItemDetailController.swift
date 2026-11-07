@@ -21,7 +21,7 @@ class ItemDetailController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.accessibilityIdentifier = "item-detail-scroll"
     LodyScrollEdges.navigation(scroll)

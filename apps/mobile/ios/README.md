@@ -249,3 +249,16 @@ Lody iOS is made possible thanks to these open-source projects and creators:
 - **[baguette](https://github.com/tddworks/baguette)**: Headless iOS Simulator control and streaming (Apache-2.0). The native simulator viewer is a client of its HTTP and WebSocket protocol; baguette itself runs on the Mac and is not bundled.
 - **[libdatachannel](https://github.com/paullouisageneau/libdatachannel)**: Native data-only Simulator transport (MPL-2.0), built from pinned source at `pnpm prebuild` with media and WebSocket disabled, over [libjuice](https://github.com/paullouisageneau/libjuice) (MPL-2.0), [usrsctp](https://github.com/sctplab/usrsctp) (BSD-3-Clause) and [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) (Apache-2.0). No camera, microphone or WebView is involved.
 - **[vphone-client](https://github.com/datdadev/vphone-client)**: Its native remote iPhone viewer (hardware decode into `AVSampleBufferDisplayLayer`, raw UIKit touch forwarding, never dropping input behind video) shaped the design of Lody's simulator viewer.
+
+### Native canvas appearance
+
+App-owned dark backgrounds are fixed soft `#111113`. `LodyTint` provides plain,
+grouped and opaque canvases, while `LodyAppearance` uses the same dark base for
+`bgBase` and `bgGrouped`. Light backgrounds retain their existing semantics.
+Camera and simulator media surfaces use the fixed dark color in both themes;
+launch uses the matching dynamic `CanvasBackground` asset. Appearance settings
+only offer the app icon: legacy `darkBackground` values are ignored, not migrated.
+This supersedes the optional pure-black background described in the historical
+Home design and settings migration documents. Masks, scrims, shadows, media
+content and foreground colors remain unchanged. The native `design` check tests
+legacy values, both themes and increased contrast, including text readability.

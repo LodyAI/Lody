@@ -19,7 +19,7 @@ final class MessageForkController: UIViewController {
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     status.numberOfLines = 0
     status.font = .preferredFont(forTextStyle: .body)
     status.text = String(localized: "message.fork.explanation", bundle: .lody)
