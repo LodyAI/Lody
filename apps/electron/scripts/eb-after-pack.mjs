@@ -365,7 +365,7 @@ async function afterPackInstalled(context) {
     cliRuntimePath,
     [
       '-e',
-      `if (Number(process.versions.node.split('.')[0]) !== 24 || Number(process.versions.napi) < 10 || Number(process.versions.electron.split('.')[0]) !== 44) throw Error('Unsupported Core Host runtime capabilities'); require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
+      `if (Number(process.versions.node.split('.')[0]) !== 24 || Number(process.versions.napi) < 10 || Number(process.versions.electron.split('.')[0]) !== 44) throw Error('Unsupported Core Host runtime capabilities'); console.log('core-host-runtime=' + JSON.stringify(process.versions)); require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
     ],
     {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -388,6 +388,12 @@ async function afterPackInstalled(context) {
   console.log('[main-native-storage-smoke] E2EE SQLite and encrypted custody wrote and reopened')
 
   console.log(`[embedded-cli-smoke] OK for ${platform}-${archName} (boot + native bindings)`)
+  return JSON.parse(
+    mainSmoke.stdout
+      .split('\n')
+      .find((line) => line.startsWith('core-host-runtime='))
+      .slice('core-host-runtime='.length)
+  )
 }
 
 function resolvePackedCliRuntimePath({ binaryPath, productFilename, resourcesDir, platform }) {
@@ -413,7 +419,7 @@ function resolvePackedCliRuntimePath({ binaryPath, productFilename, resourcesDir
 }
 
 export default async function afterPack(context, config) {
-  await afterPackInstalled(context)
+  const runtime = await afterPackInstalled(context)
   const resourcesDir =
     context.electronPlatformName === 'darwin' || context.electronPlatformName === 'mas'
       ? path.join(
@@ -459,9 +465,13 @@ export default async function afterPack(context, config) {
     const electronVersion =
       context.packager.config.electronVersion ??
       JSON.parse(fs.readFileSync(require.resolve('electron/package.json'), 'utf8')).version
-    // Advertise the guaranteed Node API baseline, not the builder's Node version.
-    // Matching-target probes below verify the installed runtime against it.
-    const hostCapabilities = { electron: electronVersion, node: '24.0.0', nodeApi: '10.0.0' }
+    // Matching-target probes report the packaged runtime, never the builder's Node.
+    // Cross-packaging advertises only the pinned runtime's guaranteed baseline.
+    const hostCapabilities = {
+      electron: runtime?.electron ?? electronVersion,
+      node: runtime?.node ?? '24.0.0',
+      nodeApi: runtime?.napi ? `${runtime.napi}.0.0` : '10.0.0'
+    }
     for (const name of Object.keys(appPackage.dependencies ?? {}).sort()) {
       const file = `node_modules/${name}/package.json`
       if (entries.has(`/${file}`)) {
