@@ -876,6 +876,9 @@ importers:
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.1
+      acorn:
+        specifier: 8.16.0
+        version: 8.16.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
