@@ -85,8 +85,11 @@ enum NativeDebug {
     }
     let onboarding = content is OnboardingController
     let regular = LodyShell.shared.presenter?.traitCollection.horizontalSizeClass == .regular
+    // Sign-in covers the phone like web /login; elsewhere it is a sheet.
+    var style = regular ? "formSheet" : "pageSheet"
+    if onboarding && !regular { style = "fullScreen" }
     LodyShell.shared.presentNative(content, title: content.title ?? "", detents: [1], grabber: !onboarding,
-      dismissible: !onboarding, style: regular ? "formSheet" : "pageSheet",
+      dismissible: !onboarding, style: style,
       headerShown: !onboarding && !(content is CreateSessionHostController))
   }
 }

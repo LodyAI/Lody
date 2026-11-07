@@ -82,8 +82,6 @@
     <string name="home_sign_out">Sign out</string>
 
     <!-- Sign in -->
-    <string name="sign_in_title">Sign in to Lody</string>
-    <string name="sign_in_action">Sign in</string>
     <string name="sign_in_cancel">Cancel</string>
 
     <!-- Chat -->

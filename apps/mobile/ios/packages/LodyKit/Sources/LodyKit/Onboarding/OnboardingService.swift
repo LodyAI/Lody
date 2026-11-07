@@ -4,6 +4,7 @@ struct OnboardingState: Equatable {
   var signedIn = false
   var busy = false
   var error: String?
+  var verificationSent = false
 }
 
 @MainActor
@@ -18,7 +19,8 @@ struct OnboardingService {
       changes: [.lodyAuthDidChange],
       state: {
         let auth = AuthSession.shared.snapshot
-        return OnboardingState(signedIn: auth.account != nil, busy: auth.busy, error: auth.error)
+        return OnboardingState(signedIn: auth.account != nil, busy: auth.busy, error: auth.error,
+                               verificationSent: auth.verificationSent)
       },
       login: { method in Task { await AuthSession.shared.login(method) } },
       cancel: { AuthSession.shared.cancel() }

@@ -81,8 +81,6 @@
     <string name="home_sign_out">退出登录</string>
 
     <!-- Sign in -->
-    <string name="sign_in_title">登录 Lody</string>
-    <string name="sign_in_action">登录</string>
     <string name="sign_in_cancel">取消</string>
 
     <!-- Chat -->

@@ -120,6 +120,8 @@ final class LocalStore: @unchecked Sendable {
     let password = views.first { $0.accessibilityIdentifier == "auth.native.password" } as! UITextField
     let submit = views.first { $0.accessibilityIdentifier == "auth-email-submit" } as! UIButton
     precondition(password.isSecureTextEntry && password.textContentType == .password)
+    let entry = views.first { $0.accessibilityIdentifier == "auth-email-entry" } as! UIButton
+    entry.sendActions(for: .touchUpInside)
     email.text = "person@example.test"
     password.text = "synthetic-password"
     submit.sendActions(for: .touchUpInside)
@@ -131,12 +133,25 @@ final class LocalStore: @unchecked Sendable {
     let name = views.first { $0.accessibilityIdentifier == "auth.native.name" } as! UITextField
     precondition(!name.isHidden && password.textContentType == .newPassword)
     name.text = "New User"
+    // Web `validateNewPassword`: registration needs letters and numbers.
+    selected = nil
     password.text = "synthetic-password"
     submit.sendActions(for: .touchUpInside)
+    let error = views.first { $0.accessibilityIdentifier == "auth-error" } as! UILabel
+    precondition(selected == nil && error.text == String(localized: "auth.login.passwordComplexity", bundle: .lody),
+                 "Registration applies the shared password rules before any request")
+    password.text = "synthetic-password-1"
+    submit.sendActions(for: .touchUpInside)
     if case let .register(displayName, address, secret) = selected {
-      precondition(displayName == "New User" && address == "person@example.test" && secret == "synthetic-password")
+      precondition(displayName == "New User" && address == "person@example.test" && secret == "synthetic-password-1")
       precondition(password.text?.isEmpty != false)
     } else { preconditionFailure("Native registration must use the session owner") }
+    state.verificationSent = true
+    NotificationCenter.default.post(name: changed, object: nil)
+    let body = views.first { $0.accessibilityIdentifier == "auth-verification-body" } as! UILabel
+    precondition(body.superview?.isHidden == false && email.superview?.superview?.superview?.isHidden == true,
+                 "A sent verification link replaces the email form with next steps")
+    state.verificationSent = false
     let resend = views.first { $0.accessibilityIdentifier == "auth-verification-resend" } as! UIButton
     resend.sendActions(for: .touchUpInside)
     if case let .resendVerification(address) = selected { precondition(address == "person@example.test") }

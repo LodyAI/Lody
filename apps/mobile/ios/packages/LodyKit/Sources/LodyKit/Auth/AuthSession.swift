@@ -8,6 +8,8 @@ struct AuthSnapshot: Encodable, Sendable {
   var initialWorkspace = ""
   var catalogRevision = 0
   var error: String?
+  /// An email sign-up or resend sent a verification link; nothing was installed.
+  var verificationSent = false
 
   var json: String {
     let encoder = JSONEncoder()
@@ -49,6 +51,7 @@ final class AuthSession {
   private var initialCatalog: String?
   private var catalogRevision = 0
   private var error: String?
+  private var verificationSent = false
   private var current: Task<Void, Never>?
   private var attempt = 0
   private var started = false
@@ -187,20 +190,20 @@ final class AuthSession {
   }
 
   private func performLogin(_ id: Int, method: NativeLoginMethod) async {
-    update(id) { busy = true; error = nil }
+    update(id) { busy = true; error = nil; verificationSent = false }
     do {
       let token: String
       switch method {
       case let .email(email, password): token = try await api.email(email: email, password: password)
       case let .register(name, email, password):
         guard let registered = try await api.register(name: name, email: email, password: password) else {
-          update(id) { busy = false; localReady = true; error = String(localized: "auth.native.verificationSent", bundle: .lody) }
+          update(id) { busy = false; localReady = true; verificationSent = true }
           return
         }
         token = registered
       case let .resendVerification(email):
         try await api.resendVerification(email: email)
-        update(id) { busy = false; localReady = true; error = String(localized: "auth.native.verificationSent", bundle: .lody) }
+        update(id) { busy = false; localReady = true; verificationSent = true }
         return
       case .apple, .google, .github, .discord:
         guard let controller = presenter?() else { throw CancellationError() }
@@ -215,6 +218,7 @@ final class AuthSession {
       await save(fresh)
       guard active(id) else { return }
       try AuthKeychain.save(token)
+      NativeLastLoginMethod(method)?.write()
       update(id) { account = fresh; credential = token }
     } catch is CancellationError {
       // Cancellation is not an authentication error.
@@ -282,7 +286,8 @@ final class AuthSession {
       localReady: localReady,
       initialWorkspace: initialWorkspace,
       catalogRevision: catalogRevision,
-      error: error
+      error: error,
+      verificationSent: verificationSent
     )
     guard Self.published.set(snapshot.json) else { return }
     NotificationCenter.default.post(name: .lodyAuthDidChange, object: nil)

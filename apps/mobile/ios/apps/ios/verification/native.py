@@ -55,7 +55,7 @@ checks = {
     'file-link': ['Chat/ChatFileLink.swift'],
     'strings': ['LodyLocalization.swift'],
     'auth': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/NativeAuthHandoff.swift'],
-    'auth-session': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/AuthSession.swift', 'Auth/NativeLoginMethod.swift', 'Onboarding/OnboardingService.swift', 'Onboarding/OnboardingController.swift', 'Onboarding/PasswordResetController.swift'],
+    'auth-session': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/AuthSession.swift', 'Auth/NativeLoginMethod.swift', 'Onboarding/OnboardingService.swift', 'Onboarding/LoginAppearance.swift', 'Onboarding/LoginDitherView.swift', 'Onboarding/OnboardingController.swift', 'Onboarding/PasswordResetController.swift'],
     'session-permission': ['Sessions/PermissionProjection.swift', 'Sessions/SessionPermission.swift', 'Sessions/SessionEnvelope.swift'],
     'session-decisions': ['LodyLocalization.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift', 'Sessions/SessionDecisions.swift'],
     'outbox': ['LodyLocalization.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionSender.swift', 'Outbox/OutboxRecord.swift', 'Outbox/OutboxStore.swift', 'Outbox/OutboxDispatcher.swift', 'Outbox/OutboxForeground.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],

@@ -22,6 +22,22 @@ with the locally held PKCE verifier; that contract is unchanged.
 Errors are mapped to English/Simplified Chinese resources; raw server messages
 are never displayed or logged.
 
+## Sign-in page
+
+`auth/NativeSignInScreen` reproduces web `/login` (`packages/components/src/components/login-page.tsx`)
+and stays in step with iOS `OnboardingController`: the dithered jellyfish surface on top
+(`auth/LoginDitherView`, web's WebGL fragment shader unchanged on OpenGL ES 2, drawn into a
+framebuffer of 3 dp cells and magnified without filtering; the blit pass paints the rounded corners
+and the fold-away fade because a SurfaceView ignores Compose clipping; one still frame when system
+animations are off), then a bottom-anchored column: title and description, one group of equal
+GitHub / Google / Apple / Discord buttons, "Continue with email", and the legal notice. The method
+that last installed an account (`LastLoginMethod`, SharedPreferences) carries "Last used". The
+email view slides in beside the providers and folds the visual away; it holds web's sign-in /
+create-account form (`LoginForm`, `LoginFormTest`: create account applies web's letters-and-digits,
+8-character rule), and a sent verification link shows web's "Next steps" panel. Colours and
+geometry are `designsystem/LodyLoginColors.kt`; controls keep 44 dp touch targets where web uses
+36 px buttons.
+
 ## Provider setup (public IDs only in the app)
 
 - Google uses AndroidX Credential Manager with the official Google ID library,

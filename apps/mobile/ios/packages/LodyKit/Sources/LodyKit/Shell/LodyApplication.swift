@@ -91,7 +91,7 @@ public final class LodyApplication {
       guard onboarding == nil else { return }
       let regular = HomeController.current?.traitCollection.horizontalSizeClass == .regular
       let page = LodyShell.shared.presentNative(OnboardingController(), title: "", dismissible: false,
-        style: regular ? "formSheet" : "pageSheet", headerShown: false)
+        style: regular ? "formSheet" : "fullScreen", headerShown: false)
       onboarding = page
       page.onClose = { [weak self] in self?.onboarding = nil; self?.reconcile() }
       return

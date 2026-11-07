@@ -6,6 +6,21 @@ drains previous local persistence before admitting a replacement attempt, and
 checks cancellation after every suspension before credential installation.
 Passwords are cleared from the form after submission and are never persisted.
 
+## Sign-in page
+
+`OnboardingController` reproduces web `/login` (`packages/components/src/components/login-page.tsx`)
+in UIKit: full screen on iPhone (a form sheet on iPad), the dithered jellyfish surface on top
+(`LoginDitherView`, web's WebGL fragment shader ported line for line to a Metal source compiled at
+runtime, 3 pt cells, 1.6 s centre-out reveal, one still frame under Reduce Motion), then a
+bottom-anchored column: title and description, one group of equal GitHub / Google / Apple / Discord
+buttons, the "Continue with email" row, and the legal notice. The method this device last completed
+(`NativeLastLoginMethod`, written by `AuthSession` after a credential is installed) carries the
+"Last used" badge. The email view slides in beside the providers and folds the visual away; it
+holds web's sign-in / create-account form (create account applies web's letters-and-digits,
+8-character rule), and a sent verification link (`AuthSnapshot.verificationSent`) replaces the form
+with web's "Next steps" panel. Colours are web's product palette (`LoginPalette`); controls keep
+44 pt touch targets where web uses 36 px buttons. Provider marks live in `App/Icons.xcassets`.
+
 ## Public protocol
 
 - Email: `POST https://backend.lody.ai/api/auth/sign-in/email` with

@@ -1,22 +1,27 @@
 import UIKit
 
+/// Requests a password-reset email, in the sign-in page's language: a title,
+/// a description, the email field and one primary action. The reset itself
+/// completes on the HTTPS website (see `docs/native-auth.md`).
 @MainActor
 final class PasswordResetController: UIViewController {
   private let api: AuthAPI
-  private let email = UITextField()
+  private let emailField = LoginField(label: String(localized: "auth.login.emailLabel", bundle: .lody))
   private let message = UILabel()
-  private let submit = UIButton(type: .system)
-  private let cancelButton = UIButton(type: .system)
-  private let progress = UIActivityIndicatorView(style: .medium)
+  private let submit = LoginButton(.primary, title: String(localized: "auth.reset.send", bundle: .lody), centered: true)
+  private let cancelButton = LoginButton(.ghost, title: String(localized: "common.cancel", bundle: .lody), centered: true)
   private let scroll = UIScrollView()
   private(set) var task: Task<Void, Never>?
   private var generation = 0
   private var completed = false
 
-  init(api: AuthAPI = AuthAPI()) {
+  private var email: UITextField { emailField.field }
+
+  init(api: AuthAPI = AuthAPI(), email: String = "") {
     self.api = api
     super.init(nibName: nil, bundle: nil)
     title = String(localized: "auth.reset.title", bundle: .lody)
+    self.email.text = email
   }
 
   @available(*, unavailable)
@@ -24,14 +29,40 @@ final class PasswordResetController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = LoginPalette.page
     view.accessibilityIdentifier = "auth-reset-page"
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.keyboardDismissMode = .interactive
     view.addSubview(scroll)
-    let stack = UIStackView()
+    let heading = UILabel()
+    heading.attributedText = NSAttributedString(string: title ?? "", attributes: [.kern: -0.6])
+    heading.font = LoginType.font(24, .semibold, style: .title2)
+    heading.adjustsFontForContentSizeCategory = true
+    heading.textColor = LoginPalette.label
+    heading.accessibilityTraits = .header
+    heading.numberOfLines = 0
+    message.font = LoginType.description
+    message.adjustsFontForContentSizeCategory = true
+    message.numberOfLines = 0
+    message.accessibilityIdentifier = "auth-reset-message"
+    show("auth.reset.description")
+    email.placeholder = String(localized: "auth.login.emailPlaceholder", bundle: .lody)
+    email.accessibilityIdentifier = "auth.native.email"
+    email.textContentType = .emailAddress
+    email.keyboardType = .emailAddress
+    submit.accessibilityIdentifier = "auth-reset-submit"
+    submit.addAction(UIAction { [weak self] _ in self?.perform() }, for: .touchUpInside)
+    cancelButton.addAction(UIAction { [weak self] _ in
+      guard let self else { return }
+      self.discard()
+      LodyShell.shared.close(from: self)
+    }, for: .touchUpInside)
+    let stack = UIStackView(arrangedSubviews: [heading, message, emailField, submit, cancelButton])
     stack.axis = .vertical
-    stack.spacing = 16
+    stack.spacing = 24
+    stack.setCustomSpacing(8, after: heading)
+    stack.setCustomSpacing(16, after: emailField)
+    stack.setCustomSpacing(4, after: submit)
     stack.translatesAutoresizingMaskIntoConstraints = false
     scroll.addSubview(stack)
     NSLayoutConstraint.activate([
@@ -44,32 +75,6 @@ final class PasswordResetController: UIViewController {
       stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 24),
       stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -24),
     ])
-    configure(email, "auth.native.email", content: .emailAddress)
-    email.keyboardType = .emailAddress
-    stack.addArrangedSubview(email)
-    message.font = .preferredFont(forTextStyle: .body)
-    message.adjustsFontForContentSizeCategory = true
-    message.numberOfLines = 0
-    message.accessibilityIdentifier = "auth-reset-message"
-    show("auth.reset.requestHint")
-    stack.addArrangedSubview(message)
-    var configuration = UIButton.Configuration.filled()
-    configuration.title = text("auth.reset.send")
-    configuration.baseBackgroundColor = .systemBlue
-    submit.configuration = configuration
-    submit.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
-    submit.accessibilityIdentifier = "auth-reset-submit"
-    submit.addAction(UIAction { [weak self] _ in self?.perform() }, for: .touchUpInside)
-    stack.addArrangedSubview(submit)
-    stack.addArrangedSubview(progress)
-    cancelButton.setTitle(String(localized: "common.cancel", bundle: .lody), for: .normal)
-    cancelButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    cancelButton.addAction(UIAction { [weak self] _ in
-      guard let self else { return }
-      self.discard()
-      LodyShell.shared.close(from: self)
-    }, for: .touchUpInside)
-    stack.addArrangedSubview(cancelButton)
   }
 
   override func viewWillAppear(_ animated: Bool) {
@@ -88,25 +93,12 @@ final class PasswordResetController: UIViewController {
     task = nil
   }
 
-  private func configure(_ field: UITextField, _ key: String, content: UITextContentType) {
-    field.placeholder = text(key)
-    field.accessibilityLabel = field.placeholder
-    field.accessibilityIdentifier = key
-    field.textContentType = content
-    field.autocapitalizationType = .none
-    field.autocorrectionType = .no
-    field.borderStyle = .roundedRect
-    field.font = .preferredFont(forTextStyle: .body)
-    field.adjustsFontForContentSizeCategory = true
-    field.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
-  }
-
   private func perform() {
     guard task == nil else { return }
     if completed { LodyShell.shared.close(from: self); return }
     let address = (email.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     if !address.contains("@") {
-      show("auth.native.fields", error: true)
+      show("auth.login.emailInvalid", error: true)
       return
     }
     view.endEditing(true)
@@ -120,12 +112,13 @@ final class PasswordResetController: UIViewController {
         guard let self, self.generation == id else { return }
         self.completed = true
         self.show("auth.reset.sent")
-        self.email.isHidden = true
-        self.submit.configuration?.title = self.text("auth.reset.done")
+        self.emailField.isHidden = true
+        self.cancelButton.isHidden = true
+        self.submit.titleText = String(localized: "auth.reset.done", bundle: .lody)
       } catch {
         guard let self, self.generation == id, !Task.isCancelled else { return }
-        self.message.text = (error as? AuthFailure)?.message ?? self.text("auth.reset.failed")
-        self.message.textColor = .systemRed
+        self.message.text = (error as? AuthFailure)?.message ?? String(localized: "auth.reset.failed", bundle: .lody)
+        self.message.textColor = LoginPalette.danger
       }
       guard let self, self.generation == id else { return }
       self.task = nil
@@ -136,15 +129,11 @@ final class PasswordResetController: UIViewController {
   private func setBusy(_ busy: Bool) {
     submit.isEnabled = !busy
     email.isEnabled = !busy
-    if busy { progress.startAnimating() } else { progress.stopAnimating() }
+    submit.setWorking(busy)
   }
 
   private func show(_ key: String, error: Bool = false) {
-    message.text = text(key)
-    message.textColor = error ? .systemRed : .secondaryLabel
-  }
-
-  private func text(_ key: String) -> String {
-    String(localized: String.LocalizationValue(key), bundle: .lody)
+    message.text = String(localized: String.LocalizationValue(key), bundle: .lody)
+    message.textColor = error ? LoginPalette.danger : LoginPalette.secondaryLabel
   }
 }
