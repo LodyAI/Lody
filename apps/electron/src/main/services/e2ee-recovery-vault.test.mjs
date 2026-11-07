@@ -21,8 +21,10 @@ import {
   beginAccountVaultReplacement,
   continueAccountVaultReplacement,
   createAccountRecoveryVault,
+  defaultPasskeyLabel,
   enrollRecoveryPasskey,
   recentAccountSecurityEvents,
+  passkeyLabel,
   inspectRecoveryFile,
   recoveryReplacementPlan,
   recoveryRestoreTarget,
@@ -818,7 +820,7 @@ void test('a passkey enrolled with the file then sets up a workspace without it'
         })
       )
     )
-    assert.deepEqual(enrolled, { passkeys: 1 })
+    assert.deepEqual(enrolled, { passkeys: 1, labels: ['iCloud Keychain'] })
     const log = []
     const result = await withClient(service, (store, client) =>
       Effect.runPromise(
@@ -884,4 +886,42 @@ void test('account security events show known kinds, newest first, and nothing e
     { id: 'a', kind: 'vault_replacement_reserved', occurredAt: 1_000 }
   ])
   assert.deepEqual(JSON.parse(service.requests.at(-1)).args[0], { limit: 20 })
+
+void test('a passkey label is the user name for it, trimmed and bounded', () => {
+  assert.equal(passkeyLabel('  Work   MacBook  '), 'Work MacBook')
+  assert.equal(passkeyLabel('x'.repeat(64)), 'x'.repeat(64))
+  assert.throws(() => passkeyLabel('   '), /invalid-input/)
+  assert.throws(() => passkeyLabel('x'.repeat(65)), /invalid-input/)
+  assert.throws(() => passkeyLabel(42), /invalid-input/)
+})
+
+void test('the default label describes the device without its host name', () => {
+  assert.equal(
+    defaultPasskeyLabel({ platform: 'darwin', systemVersion: '15.2' }),
+    'Mac · macOS 15.2'
+  )
+  assert.equal(defaultPasskeyLabel({ platform: 'darwin', systemVersion: '' }), 'Mac')
+  assert.equal(defaultPasskeyLabel({ platform: 'linux', systemVersion: '6.8' }), 'This device')
+})
+
+void test('an enrolled passkey keeps the name the user gave it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file } = await createdVault(dir, service)
+    const added = await withClient(service, (store) =>
+      Effect.runPromise(
+        enrollRecoveryPasskey({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          file,
+          port: syntheticAuthenticator(),
+          label: 'Work MacBook'
+        })
+      )
+    )
+    assert.deepEqual(added, { passkeys: 1, labels: ['Work MacBook'] })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

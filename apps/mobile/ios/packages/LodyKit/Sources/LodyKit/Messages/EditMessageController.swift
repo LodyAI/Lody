@@ -35,7 +35,7 @@ class EditMessageController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     let notice = UILabel()
     notice.text = String(localized: "chat.edit.notice", bundle: .lody)
     for label in [notice, errorLabel] {

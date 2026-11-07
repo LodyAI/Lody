@@ -50,6 +50,18 @@ final class SessionPreviewController: SessionController {
   }
 
   override func adjustComposer(_ state: inout [String: Any]) {
+    if scenario.hasPrefix("usage") {
+      state["connection"] = ""
+      state["usage"] = [
+        "context": ["used": 84_000, "size": 200_000],
+        "modelLabel": "Claude Sonnet 4.5",
+        "quota": ["windows": [
+          ["usedPercent": 21, "duration": 604_800, "resetsAt": 1_800_000_000],
+          ["usedPercent": 63, "duration": 18_000, "resetsAt": 1_799_600_000],
+        ]],
+      ]
+      return
+    }
     guard scenario.hasPrefix("bar-") else { return }
     state["connection"] = ""
     if scenario == "bar-running", let session = source.state.catalog.session(sessionId) {
@@ -110,6 +122,8 @@ final class SessionPreviewController: SessionController {
 
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
+    if scenario.hasPrefix("usage") { chat.composer.usageNow = { Date(timeIntervalSince1970: 1_799_596_400) } }
+    if scenario == "usage-popup" { chat.composer.presentUsage() }
     if scenario == "bar-tabs" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.chat.onTitlePress([:]) }
     }

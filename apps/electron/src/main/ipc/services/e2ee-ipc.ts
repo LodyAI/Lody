@@ -49,7 +49,9 @@ import {
   abandonAccountVaultReplacement,
   beginAccountVaultReplacement,
   continueAccountVaultReplacement,
+  defaultPasskeyLabel,
   enrollRecoveryPasskey,
+  passkeyLabel,
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recentAccountSecurityEvents,
@@ -3501,6 +3503,15 @@ export class E2eeIpc extends IpcService {
       if ('file' in unlock) unlock.file.fill(0)
     }
   }
+  /** Default-off: a readable default passkey name for this device. */
+  @IpcMethod()
+  async recoveryPasskeyDefaultLabel() {
+    sender()
+    return defaultPasskeyLabel({
+      platform: process.platform,
+      systemVersion: process.getSystemVersion()
+    })
+  }
   /** Default-off: whether this device can attempt a passkey ceremony. */
   @IpcMethod()
   async recoveryPasskeyAvailable() {
@@ -3509,15 +3520,16 @@ export class E2eeIpc extends IpcService {
   }
   /** Default-off: add a passkey. Adding one needs V, so the user picks the file first. */
   @IpcMethod()
-  async addRecoveryPasskey() {
+  async addRecoveryPasskey(label: string) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const name = passkeyLabel(label)
     const file = await this.chooseRecoveryFile()
     if (!file) return { outcome: 'cancelled' as const }
     const port = this.passkeyPort()
     try {
       const added = await this.recoveryOperation(({ store, journalPath }) =>
-        enrollRecoveryPasskey({ store, journalPath, file, port, label: hostname() })
+        enrollRecoveryPasskey({ store, journalPath, file, port, label: name })
       )
       return { outcome: 'added' as const, passkeys: added.passkeys }
     } finally {

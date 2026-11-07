@@ -5,6 +5,35 @@ import org.junit.Test
 import java.io.File
 class RuntimeProtocolTest {
  private val fixtures=JSONObject(File(System.getProperty("runtime.fixtures")).readText())
+ @Test fun usageProjectionPrefersContextThenFiveHours() {
+  fun usage(json: String): SessionUsage? = (RuntimeProtocol.event(JSONObject().put("type", "session").put("sessionId", "s")
+   .put("session", """{"v":1,"status":"live","entries":[],"usage":$json}""")) as RuntimeEvent.SessionUpdated).snapshot.usage
+  val quota = """"quota":{"name":"Codex","windows":[{"duration":604800,"usedPercent":29},{"duration":18000,"usedPercent":0,"resetsAt":1900000000}]}"""
+  assertFalse(usage("{}")!!.visible)
+  assertFalse(usage("{$quota}")!!.visible)
+  val eligible = usage("{\"quotaEligible\":true,\"modelId\":\"codex-model\",\"modelLabel\":\"Selected model\",$quota}")!!
+  assertEquals("codex-model", eligible.modelId)
+  assertEquals("Selected model", eligible.quota!!.name)
+  assertEquals(0.0, eligible.triggerPercent!!, 0.0)
+  assertEquals(listOf(604800.0, 18000.0), eligible.windows.map { it.duration })
+  assertEquals(1900000000.0, eligible.windows.last().resetsAt!!, 0.0)
+  val context = usage("{\"context\":{\"used\":250,\"size\":200},$quota}")!!
+  assertEquals(100.0, context.triggerPercent!!, 0.0)
+  assertEquals(250.0, context.context!!.used, 0.0)
+  assertFalse(usage("{\"context\":{\"used\":20,\"size\":0}}")!!.visible)
+  assertTrue(usage("{\"isContextCompacting\":true}")!!.visible)
+  assertNull(usage("null"))
+ }
+ @Test fun malformedUsageDoesNotInventQuotaAndEmptyReportedPlanSurvives() {
+  val parsed = SessionUsageJson.parse(JSONObject("""{"quotaEligible":true,"context":{"size":100,"used":-1},"quota":{"windows":[{"usedPercent":"20"},{"usedPercent":120,"duration":-3,"resetsAt":0}]}}"""))!!
+  assertEquals(0.0, parsed.context!!.percent, 0.0)
+  assertEquals(100.0, parsed.windows.single().usedPercent, 0.0)
+  assertNull(parsed.windows.single().duration)
+  assertNull(parsed.windows.single().resetsAt)
+  val empty = SessionUsageJson.parse(JSONObject("""{"quotaEligible":true,"quota":{"windows":[]}}"""))!!
+  assertNotNull(empty.quota)
+  assertFalse(empty.visible)
+ }
  @Test fun sessionTextKeepsOrderAndStreamingButOmitsToolPayloads() {
   val body="""{"v":1,"status":"live","entries":[{"id":"u","role":"user","finished":true,"items":[{"type":"text","text":"hello"}]},{"id":"a","role":"assistant","finished":false,"items":[{"type":"text","text":"First"},{"type":"tool_call","title":"private payload"},{"type":"text","text":"Second"},{"type":"proposed_plan","status":"cleared","markdown":"old plan"}]}]}"""
   val frame=JSONObject().put("type","session").put("sessionId","s").put("session",body)

@@ -291,6 +291,9 @@ final class AuthSession {
   }
 
   private func publish() {
+    if localReady && (!busy || account == nil) {
+      PushNotifications.shared.identify(account?.user.id, credential: credential)
+    }
     snapshot = AuthSnapshot(
       account: account,
       busy: busy,

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
 import { AlertDialog } from '@/ui/dialog';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
@@ -61,6 +62,7 @@ export function RecoveryVaultSection() {
   const [events, setEvents] = useState<readonly { id: string; kind: string; occurredAt: number }[]>(
     []
   );
+  const [naming, setNaming] = useState<string>();
   useEffect(() => {
     if (!enabled || !e2ee) return;
     let live = true;
@@ -184,12 +186,10 @@ export function RecoveryVaultSection() {
               variant="secondary"
               disabled={busy}
               onClick={() =>
-                void run(async () => {
-                  const added = await e2ee.addRecoveryPasskey();
-                  return added.outcome === 'added'
-                    ? { kind: 'notice', key: 'e2ee.recovery.passkeyAdded' }
-                    : undefined;
-                })
+                void e2ee.recoveryPasskeyDefaultLabel().then(
+                  (label) => setNaming(label),
+                  () => setNaming('')
+                )
               }
             >
               {t('e2ee.recovery.passkeyAdd')}
@@ -346,6 +346,43 @@ export function RecoveryVaultSection() {
           </Alert.Root>
         )}
       </div>
+      <AlertDialog.Root
+        open={naming !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setNaming(undefined);
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('e2ee.recovery.passkeyNameTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>{t('e2ee.recovery.passkeyNameHelp')}</AlertDialog.Description>
+          </AlertDialog.Header>
+          <Input
+            aria-label={t('e2ee.recovery.passkeyNameTitle')}
+            value={naming ?? ''}
+            maxLength={64}
+            onChange={(event) => setNaming(event.target.value)}
+          />
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
+            <Button
+              disabled={busy || !naming?.trim()}
+              onClick={() => {
+                const label = naming ?? '';
+                setNaming(undefined);
+                void run(async () => {
+                  const added = await e2ee.addRecoveryPasskey(label);
+                  return added.outcome === 'added'
+                    ? { kind: 'notice', key: 'e2ee.recovery.passkeyAdded' }
+                    : undefined;
+                });
+              }}
+            >
+              {t('e2ee.recovery.passkeyAdd')}
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
       <AlertDialog.Root
         open={dialog !== undefined}
         onOpenChange={(open) => {

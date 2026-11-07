@@ -38,7 +38,7 @@ class PermissionController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .systemGroupedBackground
+    view.backgroundColor = .lodyGroupedBackground
     list.frame = view.bounds
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.addSubview(list)

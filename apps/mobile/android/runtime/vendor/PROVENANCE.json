@@ -84,5 +84,19 @@
       "src/protocol/message-references.ts"
     ],
     "note": "Readable legacy skill expansions and file reference spans."
+  },
+  "sessionUsage": {
+    "files": [
+      "README.md",
+      "src/models/agent-usage.ts",
+      "src/models/session.ts",
+      "src/protocol/agent-usage.ts",
+      "src/protocol/session-usage.ts",
+      "src/protocol/subscription-quota.ts",
+      "src/runtime/project.ts",
+      "src/runtime/session.ts",
+      "src/runtime/index.ts"
+    ],
+    "note": "Reviewed local shared session usage projection: context and compaction, config/capability eligibility, exact config/model quota selection, existing catalog/session watch refresh. Copied verbatim from ios/packages/cloud-runtime; no external forecast requests."
   }
 }

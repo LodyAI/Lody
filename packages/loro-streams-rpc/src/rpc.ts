@@ -453,6 +453,7 @@ export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.e
         requestId: z.string().trim().min(1).max(1024),
         action: z.literal('start'),
         configId: AgentConfigIdSchema,
+        methodId: z.string().trim().min(1).max(1024).optional(),
       })
       .strict(),
     z
