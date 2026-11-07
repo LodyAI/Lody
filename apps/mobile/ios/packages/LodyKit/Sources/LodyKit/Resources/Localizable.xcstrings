@@ -10188,16 +10188,16 @@
     "native.attachment.error.upload": {
       "extractionState": "manual",
       "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "附件上传失败，请检查网络或账户配额后重试"
-          }
-        },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The attachment upload failed. Check your network or account quota and try again."
+            "value": "The attachment could not be uploaded. Try again later; export diagnostics if it keeps failing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件上传失败，请稍后重试；持续失败时请导出诊断日志。"
           }
         }
       }
@@ -24912,6 +24912,227 @@
           "stringUnit": {
             "state": "translated",
             "value": "未能确认操作结果，请检查 Tab 列表后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The attachment upload was cancelled. The message has not been sent."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件上传已取消，消息尚未发送。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.connection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not establish the attachment upload connection. Check your network; export diagnostics if it keeps failing."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法建立附件上传连接，请检查网络后重试；持续失败时请导出诊断日志。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The network is unavailable or the connection was lost during upload. Check your connection and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传时网络连接不可用或已中断，请检查网络后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.rateLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many upload requests. Wait a moment and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传请求过于频繁，请稍后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.storageQuota": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The account or workspace attachment storage quota is exhausted. Free up space or contact an administrator."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账户或工作区的附件存储配额已用完，请释放空间或联系管理员。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The attachment upload timed out. Check your connection and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件上传超时，请检查网络后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadFormat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This attachment format is not supported by the upload service. Convert it or attach it as a file."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传接口不支持此附件格式，请转换格式或作为文件重新添加。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The upload request was rejected as invalid. Select the attachment again; if it still fails, try a new conversation and export diagnostics."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传请求未通过校验，请重新选择附件后重试；仍失败时请尝试新对话并导出诊断日志。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadService": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The attachment upload service is temporarily unavailable. Try again later."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件上传服务暂时异常，请稍后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadTooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The attachment exceeds the upload size limit. Reduce its size and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件超过上传大小限制，请缩小或压缩后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The upload destination is unavailable. Check access to the conversation and workspace, or try a new conversation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传目标不可用，请确认对话和工作区仍可访问，或新建对话后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadSignIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload authentication failed. Sign in again and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传身份验证失败，请重新登录后重试。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.uploadPermission": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You do not have permission to upload attachments to this workspace or conversation. Contact an administrator to check access."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有向此工作区或对话上传附件的权限，请联系管理员确认访问权限。"
           }
         }
       }

@@ -217,6 +217,36 @@ enum SessionAttachments {
     return error(String(localized: "native.attachment.error.uploadResponse", bundle: .lody))
   }
 
+  private static func uploadError(status: Int, serverCode: String?) -> NSError {
+    let key: String
+    switch serverCode {
+    case "quota_exceeded", "storage_quota_exceeded": key = "storageQuota"
+    case "unauthorized": key = "uploadSignIn"
+    case "forbidden": key = "uploadPermission"
+    case "invalid_request", "bad_request": key = "uploadInvalid"
+    case "not_found": key = "uploadUnavailable"
+    case "internal_server_error", "service_unavailable": key = "uploadService"
+    case "payload_too_large", "file_too_large": key = "uploadTooLarge"
+    case "unsupported_media_type": key = "uploadFormat"
+    case "rate_limited", "rate_limit_exceeded": key = "rateLimited"
+    default:
+      switch status {
+      case 400, 422: key = "uploadInvalid"
+      case 401: key = "uploadSignIn"
+      case 403: key = "uploadPermission"
+      case 404, 410: key = "uploadUnavailable"
+      case 413: key = "uploadTooLarge"
+      case 415: key = "uploadFormat"
+      case 429: key = "rateLimited"
+      case 500...599: key = "uploadService"
+      default: key = "upload"
+      }
+    }
+    let detail = String(localized: String.LocalizationValue("native.attachment.error." + key), bundle: .lody)
+    return NSError(domain: "SessionAttachments", code: status,
+      userInfo: [NSLocalizedDescriptionKey: "\(detail) (HTTP \(status))"])
+  }
+
   static func request(_ url: String, token: String, stage: StaticString, attempt: UUID, method: String = "POST", headers: [String: String], body: Data? = nil,
     onProgress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> [String: Any] {
     try Task.checkCancellation()
@@ -242,7 +272,16 @@ enum SessionAttachments {
       let failure = error as NSError
       if failure.domain == NSURLErrorDomain { fields["networkCode"] = String(failure.code) }
       DiagnosticsStore.shared.record("attachment", "transport_failed", fields: fields)
-      throw error
+      let key: String
+      switch failure.domain == NSURLErrorDomain ? failure.code : 0 {
+      case NSURLErrorTimedOut: key = "native.attachment.error.timeout"
+      case NSURLErrorCancelled: key = "native.attachment.error.cancelled"
+      case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost, NSURLErrorDNSLookupFailed:
+        key = "native.attachment.error.network"
+      default: key = "native.attachment.error.connection"
+      }
+      throw NSError(domain: failure.domain, code: failure.code,
+        userInfo: [NSLocalizedDescriptionKey: String(localized: String.LocalizationValue(key), bundle: .lody)])
     }
     guard let response = response as? HTTPURLResponse else {
       throw invalidResponse(stage: stage, attempt: attempt)
@@ -257,7 +296,7 @@ enum SessionAttachments {
         fields["serverCode"] = DiagnosticsStore.attachmentServerCode(code)
       }
       DiagnosticsStore.shared.record("attachment", "http_failed", fields: fields)
-      throw error(String(localized: "native.attachment.error.upload", bundle: .lody))
+      throw uploadError(status: response.statusCode, serverCode: fields["serverCode"])
     }
     if data.isEmpty {
       DiagnosticsStore.shared.record("attachment", "request_succeeded", fields: fields)

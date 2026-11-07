@@ -64,7 +64,7 @@ final class SessionSender {
   }
 
   var canSend: Bool {
-    ready && !dispatching && !sending && record?.phase != "failed" && !inputs.context.overflow
+    ready && !dispatching && !sending && !inputs.context.overflow
       && inputs.session?.archived != true && !inputs.userId.isEmpty
   }
 

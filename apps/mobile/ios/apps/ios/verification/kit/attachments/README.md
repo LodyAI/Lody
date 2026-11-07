@@ -16,8 +16,11 @@ Cloud limits: eight images (5 MiB each after conversion) and eight files
 (100 MiB each) per message. HEIC and oversized photos convert to JPEG at up to
 2048 pixels. Videos and other non-image types upload as files; a movie marked
 as an image is coerced onto the file route instead of extracting a still.
-Upload failure retains the draft; no message dispatch is retried
-automatically. History displays image thumbnails above their text bubbles; files retain their names.
+Upload failure retains the pending turn for explicit retry. A definite failure
+does not disable the composer: submitting new content replaces that pending turn
+with a fresh message and only the newly selected attachments. Unconfirmed delivery
+still blocks another submission; no message dispatch is retried automatically.
+History displays image thumbnails above their text bubbles; files retain their names.
 
 Settings → Diagnostics → Export diagnostic file includes upload request start,
 success and failure events for images, files and multipart create/part/complete/abort.
@@ -25,8 +28,11 @@ A random per-attachment attempt ID joins multipart requests without recording an
 workspace, session, filename, URL, attachment content or credentials. Failures
 include HTTP status, allowlisted server error categories (including authorization
 and storage quota), or native URL loading error codes. Unknown server error text
-and codes are omitted. Invalid JSON and incomplete upload responses are recorded
-separately. The native check exports the real on-disk diagnostics and verifies
+and codes are omitted. Alerts classify invalid requests, authentication/access,
+storage quota, attachment size/format, rate limits, server availability and network
+failures, retaining HTTP status for support. Only allowlisted server categories
+override status-based explanations; response bodies never become alert text. Invalid
+JSON and incomplete upload responses are recorded separately. The native check exports the real on-disk diagnostics and verifies
 failure stages, multipart cleanup correlation and private-data exclusion.
 
 Attachment routes are hosted on `https://api.lody.ai`, separately from the

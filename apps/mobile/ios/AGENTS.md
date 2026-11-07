@@ -157,3 +157,5 @@
   active status but not unread. Preserve Tab inputs through owner filters, keep
   Tabs hidden as list entries, and apply the summary to status grouping as well as
   row markers without rewriting catalog session state.
+
+- Definite send failures must leave the composer available for a fresh turn. Keep the failed pending turn retryable until an explicit replacement; never reuse its attachments for the new turn or relax the fence for unconfirmed delivery.

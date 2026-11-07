@@ -50,6 +50,14 @@ final class UploadProtocol: URLProtocol {
       let status: Int
       let body: String
       switch request.url!.lastPathComponent {
+      case "bad-request":
+        status = 400; body = #"{"error":"private-server-message"}"#
+      case "too-large":
+        status = 413; body = "{}"
+      case "format":
+        status = 415; body = "{}"
+      case "unknown":
+        status = 409; body = #"{"error":"private-server-message"}"#
       case "unauthorized":
         status = 401; body = #"{"error":"Unauthorized","message":"private-server-message"}"#
       case "quota":
@@ -226,15 +234,28 @@ final class UploadProtocol: URLProtocol {
       let fields = $0["fields"] as? [String: String]
       return $0["event"] as? String == "request_succeeded" && fields?["stage"] == "multipart_abort" && fields?["attempt"] == failedPartFields["attempt"]
     }, "Cleanup must not hide the failed part, and must share its attempt identifier")
-    let httpFailures: [(String, Int, String?)] = [("unauthorized", 401, "unauthorized"), ("quota", 403, "storage_quota_exceeded"),
-                                               ("rate", 429, "rate_limited"), ("private", 403, nil), ("html", 502, nil), ("malformed", 200, nil)]
+    let httpFailures: [(String, Int, String?)] = [("bad-request", 400, nil), ("unauthorized", 401, "unauthorized"), ("quota", 403, "storage_quota_exceeded"),
+                                               ("too-large", 413, nil), ("format", 415, nil), ("unknown", 409, nil), ("rate", 429, "rate_limited"), ("private", 403, nil), ("html", 502, nil), ("malformed", 200, nil)]
     for (fixture, status, serverCode) in httpFailures {
       let attempt = UUID()
       do {
         _ = try await SessionAttachments.request("https://api.lody.ai/diagnostics/\(fixture)", token: "synthetic-test-token",
           stage: "image_upload", attempt: attempt, headers: ["x-file-name": "private-filename"])
         fatalError("Failed requests must still reject the upload")
-      } catch {}
+      } catch {
+        let message = error.localizedDescription
+        assert(!message.contains("private-server-message"), "Raw server text must never reach the alert")
+        if fixture == "bad-request" {
+          assert(message.contains("400") && !message.contains("quota"), "HTTP 400 must explain an invalid upload request, not suggest quota exhaustion")
+        }
+        let categories = ["bad-request": "uploadInvalid", "unauthorized": "uploadSignIn", "quota": "storageQuota", "too-large": "uploadTooLarge",
+          "format": "uploadFormat", "unknown": "upload", "rate": "rateLimited", "private": "uploadPermission", "html": "uploadService"]
+        if let category = categories[fixture] {
+          assert(message.hasPrefix(String(localized: String.LocalizationValue("native.attachment.error." + category), bundle: .lody)),
+            "The alert must classify the response, with a specific storage-quota code taking precedence over HTTP 403")
+          assert(message.contains("HTTP \(status)"), "HTTP failures retain their status for support")
+        }
+      }
       let (_, records) = try diagnostics()
       let events = records.filter { ($0["fields"] as? [String: String])?["attempt"] == attempt.uuidString }
       assert(events.count == 2 && events.first?["event"] as? String == "request_started")
@@ -250,7 +271,10 @@ final class UploadProtocol: URLProtocol {
           stage: "file_upload", attempt: attempt, headers: [:], body: Data("private-file-contents".utf8), onProgress: { _, _ in })
         fatalError("Network failures must still reject the upload")
       } catch let error as NSError {
-        assert(error.domain == NSURLErrorDomain && error.code == code, "Preserve the original transport error")
+        assert(error.domain == NSURLErrorDomain && error.code == code, "Preserve transport and cancellation identity")
+        let category = fixture == "timeout" ? "timeout" : "cancelled"
+        assert(error.localizedDescription == String(localized: String.LocalizationValue("native.attachment.error." + category), bundle: .lody))
+        assert(!error.localizedDescription.contains("private-"), "Transport alerts must not reveal raw network descriptions or URLs")
       }
       let (_, records) = try diagnostics()
       let event = records.last { ($0["fields"] as? [String: String])?["attempt"] == attempt.uuidString }!

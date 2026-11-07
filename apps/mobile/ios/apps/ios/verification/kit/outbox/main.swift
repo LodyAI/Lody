@@ -117,6 +117,33 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     try await dispatch()
     try await foreground()
     try await handoff()
+    try await failedSendRecovery()
+  }
+
+  @MainActor static func failedSendRecovery() async throws {
+    let disk = Disk()
+    let store = OutboxStore(key: "pending-sends:u1:w", generation: 0, persistence: disk.persistence, awaitingConfirmation: "unknown")
+    store.onChange = { NotificationCenter.default.post(name: .lodyOutboxDidChange, object: store) }
+    try await store.put(record("s1", phase: "failed", sendId: "failed-image")).value
+    let network = Network()
+    let completed = Gate()
+    let inflight = OutboxInflight()
+    let sender = SessionSender(sessionId: "s1", store: store, services: network.services, inflight: inflight)
+    defer { store.onChange = nil; sender.changed = nil }
+    sender.update(.init(userId: "u1", connected: true, session: SessionItem(id: "s1"), context: OutboxForeground(live: true)))
+    precondition(sender.canSend, "A definite upload failure must allow a fresh turn")
+    precondition(sender.record?.sendId == "failed-image" && sender.pendingSendJSON.contains("draft.txt"),
+      "The failed draft stays available for explicit retry until the user submits a replacement")
+    sender.changed = { if sender.record?.phase == "accepted", sender.canSend { completed.open() } }
+    sender.submit(["id": "new-text", "text": "A fresh message", "attachments": []], choice: [:])
+    try await completed.wait()
+    precondition(sender.record?.sendId == "new-text" && sender.record?.phase == "accepted")
+    precondition(network.sent.count == 1 && network.sent[0]["text"] == .string("A fresh message") && network.sent[0]["attachments"] == .array([]),
+      "A new send must not replay the failed image or its message identity")
+    sender.changed = nil
+    try await store.put(record("s1", phase: "unknown")).value
+    precondition(!sender.canSend, "An unknown delivery still prevents duplicate submissions")
+    print("PASS: a failed attachment does not lock fresh sends; failed content remains retryable and unknown delivery stays fenced")
   }
 
   @MainActor static func pendingSends() async throws {

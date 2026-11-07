@@ -73,20 +73,25 @@ ui.axe('tap', '--id', 'send-fail')
 ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('send.alert.title') for i in items), 'Failure alert missing')
 ui.axe('tap', '--label', catalog.system('ok'))
 assert (ui.element('session-input').get('AXValue') or '').casefold() == 'third next draft', 'Failure overwrote new input'
-assert not ui.element('session-send')['enabled'], 'Retained failure must not be overwritten by a new send'
+assert ui.element('session-send')['enabled'], 'A definite failure must allow a fresh message'
 ui.capture('new-draft-preserved')
+ui.axe('tap', '--id', 'session-send')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · sending' for i in items), 'Fresh message after failure did not start')
+ui.axe('tap', '--id', 'send-complete')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · accepted' for i in items), 'Fresh message was not accepted')
+ui.capture('new-send-after-failure')
 
 # A completed Session can retire a published outbox row while the native clear
 # token is unchanged after view restoration. The empty pending prop owns this
 # transition and must release only that published send.
 ui.axe('tap', '--id', 'send-toggle-pending')
-ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · idle' for i in items), 'Failed fixture did not retire')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · idle' for i in items), 'Accepted fixture did not retire')
 ui.axe('tap', '--id', 'send-toggle-pending')
-ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · unknown' for i in items), 'Stale pending fixture did not load')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · unknown' for i in items), 'Stale pending fixture did not load')
 assert not ui.element('session-send')['enabled'], 'A pending send must lock duplicate submission'
 ui.capture('stale-pending')
 ui.axe('tap', '--id', 'send-toggle-pending')
-ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · idle' for i in items), 'Completed fixture did not retire pending state')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · idle' for i in items), 'Completed fixture did not retire pending state')
 send = ui.element('session-send')
 assert send['AXLabel'] == catalog.text('native.chat.composer.send'), 'Completed Session left the composer stuck in Loading'
 if not ui.element('session-input').get('AXValue'):
@@ -95,7 +100,7 @@ if not ui.element('session-input').get('AXValue'):
 assert ui.element('session-send')['enabled'], 'Completed Session did not accept a new draft'
 ui.capture('completed-unlocked')
 ui.axe('tap', '--id', 'send-toggle-pending')
-ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · unknown' for i in items), 'Unknown-send fixture did not load')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · unknown' for i in items), 'Unknown-send fixture did not load')
 ui.axe('tap', '--id', 'session-input')
 ui.type_into('session-input', 'draft during confirmation')
 confirmation_draft = ui.element('session-input').get('AXValue') or ''
@@ -105,7 +110,7 @@ assert confirmation_draft.casefold() == 'draft during confirmation', 'Confirmati
 assert not ui.element('session-send')['enabled']
 ui.capture('causal-confirming')
 ui.axe('tap', '--id', 'send-reply')
-ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · idle' for i in items), 'A causally matching reply without its user row did not retire pending state')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 4 · idle' for i in items), 'A causally matching reply without its user row did not retire pending state')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'session-send' and i.get('enabled') for i in items), 'A confirmed reply left the next draft locked')
 assert ui.element('session-input').get('AXValue') == confirmation_draft, 'Confirmation changed the next draft'
 ui.capture('causal-unlocked')

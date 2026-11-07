@@ -675,6 +675,7 @@ typingInput.text = "下一条新草稿"
 typingComposer.textViewDidChange(typingInput)
 typingComposer.setPendingSend(rejected)
 precondition(typingInput.text == "下一条新草稿", "Failure must preserve the next draft while the transcript owns retry")
+precondition(typingSend.isEnabled, "A definite failure must release the pending composer lock for the next draft")
 print("Composer continuity: editable pending input and no failed-draft jump passed")
 for action in typingSend.actions(forTarget: typingComposer, forControlEvent: .touchUpInside) ?? [] {
   typingComposer.perform(NSSelectorFromString(action))
