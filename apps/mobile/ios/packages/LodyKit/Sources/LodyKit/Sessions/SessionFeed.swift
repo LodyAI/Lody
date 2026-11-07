@@ -25,6 +25,7 @@ struct SessionFeedState: Equatable, Sendable {
   var entriesJSON = "[]"
   var billableTurnCount: Int?
   var composerJSON: String?
+  var usageJSON: String?
   var preview: SessionBrowserPreview?
   var transcript = SessionTranscriptFacts()
   var isLiveUpdate = false
@@ -178,7 +179,7 @@ final class SessionFeed {
       awaitingSnapshot = false
       state = SessionFeedState(
         status: "live", revision: revision, entriesJSON: envelope.entriesJSON,
-        billableTurnCount: envelope.billableTurnCount, composerJSON: envelope.composerJSON, preview: envelope.preview, transcript: envelope.transcript
+        billableTurnCount: envelope.billableTurnCount, composerJSON: envelope.composerJSON, usageJSON: envelope.usageJSON, preview: envelope.preview, transcript: envelope.transcript
       )
       state.isLiveUpdate = isLiveUpdate
     } else {

@@ -63,7 +63,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     super.viewDidLoad()
     Self.current = self
     view.accessibilityIdentifier = "home"
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     split.delegate = self
     split.primaryBackgroundStyle = .none
     split.preferredDisplayMode = .oneBesideSecondary
@@ -223,7 +223,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   private func placeholder() -> UIViewController {
     let controller = UIViewController()
-    controller.view.backgroundColor = .systemBackground
+    controller.view.backgroundColor = .lodyBackground
     controller.view.accessibilityIdentifier = "ipad-detail-placeholder"
     var configuration = UIContentUnavailableConfiguration.empty()
     configuration.image = UIImage(systemName: "bubble.left.and.bubble.right")

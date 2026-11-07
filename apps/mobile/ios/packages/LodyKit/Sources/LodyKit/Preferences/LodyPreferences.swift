@@ -2,7 +2,6 @@ import Foundation
 
 struct PreferencesSnapshot: Codable, Equatable, Sendable {
   let accentColor: String
-  let darkBackground: String
   let queuedMessageBehavior: String
 }
 
@@ -12,7 +11,6 @@ enum LodyPreferences {
   static var snapshot: PreferencesSnapshot {
     PreferencesSnapshot(
       accentColor: "ink",
-      darkBackground: LodyDarkBackground.current.rawValue,
       queuedMessageBehavior: queuedMessageBehavior
     )
   }

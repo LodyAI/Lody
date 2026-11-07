@@ -1,3 +1,4 @@
+import { isSubscriptionQuotaEligible } from './subscription-quota.ts';
 import type {
   AgentQuota,
   AgentUsage,
@@ -13,7 +14,12 @@ const text = (v: unknown) => (typeof v === 'string' ? v : '');
 const positive = (v: unknown) =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
 
-function quota(provider: string, id: string, raw: unknown): AgentQuota {
+function quota(
+  provider: string,
+  id: string,
+  raw: unknown,
+  agentConfigId: string | null = null,
+): AgentQuota {
   const value = object(raw);
   const current =
     typeof value.limitId === 'string' && !!text(object(value.scope).providerId);
@@ -57,6 +63,7 @@ function quota(provider: string, id: string, raw: unknown): AgentQuota {
   return {
     id,
     provider,
+    agentConfigId,
     name:
       text(value.limitName) ||
       (id === 'codex_bengalfox' ? 'Codex Spark' : undefined),
@@ -72,11 +79,21 @@ export function projectAgentUsage(rows: Row[], machineId: string): AgentUsage {
     const value = object(row.value);
     if (
       row.key[0] === 'rateLimit' &&
-      row.key.length === 3 &&
+      (row.key.length === 3 || row.key.length === 4) &&
       text(row.key[1]) &&
       text(row.key[2])
     ) {
-      quotas.push(quota(text(row.key[1]), text(row.key[2]), row.value));
+      if (row.key.length === 4 && text(row.key[3]))
+        quotas.push(
+          quota(
+            text(row.key[2]),
+            text(row.key[3]),
+            row.value,
+            text(row.key[1]),
+          ),
+        );
+      else if (row.key.length === 3)
+        quotas.push(quota(text(row.key[1]), text(row.key[2]), row.value));
     }
     if (
       row.key[0] !== 'agentConfig' ||
@@ -91,11 +108,14 @@ export function projectAgentUsage(rows: Row[], machineId: string): AgentUsage {
       id: text(value.id),
       name: text(value.name),
       provider,
-      eligible:
-        value.cliType === 'builtin' &&
-        ['codex', 'claude', 'grok', 'kimi'].includes(provider) &&
-        !text(value.brandId) &&
-        Object.keys(object(value.env)).length === 0,
+      eligible: isSubscriptionQuotaEligible(value),
+      rateLimitsAvailable: rows.some(
+        (row) =>
+          row.key[0] === 'acpCapability' &&
+          row.key.length === 2 &&
+          row.key[1] === value.id &&
+          object(object(row.value).rateLimits).version === 1,
+      ),
     });
   }
   return { configs, quotas };
@@ -103,6 +123,19 @@ export function projectAgentUsage(rows: Row[], machineId: string): AgentUsage {
 
 export function legacyAgentQuotas(raw: unknown): AgentQuota[] {
   return Object.entries(object(raw)).map(([key, value]) => {
+    const parts = key.split('::');
+    if (parts[0] === 'provider' && parts.length === 4) {
+      try {
+        return quota(
+          decodeURIComponent(parts[2]),
+          decodeURIComponent(parts[3]),
+          value,
+          decodeURIComponent(parts[1]),
+        );
+      } catch {
+        return quota('', '', null);
+      }
+    }
     const separator = key.indexOf('::');
     if (separator === -1) return quota(key, key, value);
     const provider = key.slice(0, separator);
@@ -114,17 +147,20 @@ export function mergeAgentQuotas(
   legacy: AgentQuota[],
   current: AgentQuota[],
 ): AgentQuota[] {
-  const providers = new Set(current.map((q) => q.provider));
+  const providers = new Set(
+    current.map((q) => `${q.agentConfigId ?? ''}:${q.provider}`),
+  );
   const merged = new Map(
     legacy
       .filter(
         (q) =>
-          !providers.has(q.provider) ||
+          !providers.has(`${q.agentConfigId ?? ''}:${q.provider}`) ||
           (q.id !== q.provider && q.id.startsWith(q.provider)),
       )
-      .map((q) => [`${q.provider}::${q.id}`, q]),
+      .map((q) => [`${q.agentConfigId ?? ''}::${q.provider}::${q.id}`, q]),
   );
-  for (const q of current) merged.set(`${q.provider}::${q.id}`, q);
+  for (const q of current)
+    merged.set(`${q.agentConfigId ?? ''}::${q.provider}::${q.id}`, q);
   return [...merged.values()].sort((a, b) =>
     `${a.provider}:${a.id}`.localeCompare(`${b.provider}:${b.id}`),
   );

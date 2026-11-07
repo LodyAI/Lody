@@ -35,14 +35,7 @@ final class AppearanceController: UIViewController {
   }
 
   private func render() {
-    list.setSections([.group("appearance-section", header: text("title"), [darkBackgroundRow(), appIconRow()])])
-  }
-
-  private func darkBackgroundRow() -> LodyListRow {
-    let current = LodyDarkBackground.current.rawValue
-    var row = LodyListRow.item("appearance", text("darkBackground"), value: text(current), image: "circle.lefthalf.filled")
-    row.options = ["soft", "black"].map { option($0, text($0), selected: $0 == current) }
-    return row
+    list.setSections([.group("appearance-section", header: text("title"), [appIconRow()])])
   }
 
   private func appIconRow() -> LodyListRow {
@@ -59,21 +52,11 @@ final class AppearanceController: UIViewController {
   private func event(_ name: String, _ body: [String: Any]) {
     guard let id = body["id"] as? String else { return }
     switch (name, id, body["actionId"] as? String) {
-    case ("rowAction", "appearance", let value?):
-      LodyDarkBackground.save(value)
     case ("rowPress", "app-icon", _):
       LodyShell.shared.pushNative("app-icon", title: text("appIcon"), from: self)
     default:
       break
     }
-  }
-
-  private func option(_ id: String, _ title: String, selected: Bool) -> LodyListAction {
-    var action = LodyListAction()
-    action.id = id
-    action.title = title
-    action.selected = selected
-    return action
   }
 
   private func text(_ key: String) -> String { String(localized: String.LocalizationValue("settings.appearance." + key), bundle: .lody) }
