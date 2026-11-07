@@ -88,6 +88,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'beginRecoveryReplacement',
       'continueRecoveryReplacement',
       'abandonRecoveryReplacement',
+      'recentAccountSecurityEvents',
       'setupWorkspaceRecovery',
       'restoreFromRecoveryFile',
       'recoveryPasskeyAvailable',

@@ -56,6 +56,7 @@ import {
   removeRecoveryPasskey,
   createAccountRecoveryVault,
   inspectRecoveryFile,
+  recentAccountSecurityEvents,
   recoveryReplacementPlan,
   recoveryRestoreTarget,
   recoveryVaultEnabled,
@@ -3295,6 +3296,18 @@ export class E2eeIpc extends IpcService {
       })
     )
     return { outcome: 'created' as const, vaultId: created.vaultId }
+  }
+  /** Default-off: recent account security events, for the security settings list. */
+  @IpcMethod()
+  async recentAccountSecurityEvents() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const { client } = await desktopE2eeCloudClient()
+    return Effect.runPromise(recentAccountSecurityEvents(client.accountSecurityEvents())).catch(
+      (error) => {
+        throw recoveryVaultFailure(error)
+      }
+    )
   }
   /** Default-off: what replacing the recovery file would cover from this device. */
   @IpcMethod()

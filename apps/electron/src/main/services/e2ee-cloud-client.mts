@@ -880,6 +880,19 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     staging,
     /** Opaque recovery-vault ciphertext storage. Login gates retrieval only; the
      * service never decrypts, selects ledger trust or proves an active Recovery device. */
+    /** The first page of account security events. Kinds this build does not know pass
+     * through as strings, and the caller ignores them. */
+    accountSecurityEvents: (signal?: AbortSignal) => () =>
+      request(
+        (client) => client.query(api.accountSecurityEvents.list, { limit: 20 }),
+        z.object({
+          events: z
+            .array(z.object({ id: z.string(), kind: z.string(), occurredAt: z.number() }))
+            .max(50),
+          nextCursor: z.string().nullable()
+        }),
+        signal
+      ),
     /** Whole-vault replacement bookkeeping. State never decides trust; the ledger does. */
     recoveryVaultReplacement: (signal?: AbortSignal) => {
       const ok = z.object({ ok: z.literal(true) })
