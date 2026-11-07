@@ -1,3 +1,4 @@
+import { assertHostCompatible } from './compatibility.mjs'
 import * as fs from 'node:fs/promises'
 import path from 'node:path'
 import { createReadStream, createWriteStream } from 'node:fs'
@@ -42,6 +43,7 @@ async function stage({
   manifest,
   publicKey,
   hostAbi,
+  hostCapabilities = {},
   channel,
   platform,
   arch,
@@ -56,9 +58,7 @@ async function stage({
 }) {
   validateManifest(manifest)
   if (verifyManifest(manifest, publicKey) === false) throw new Error('Invalid manifest signature')
-  for (const [key, value] of Object.entries({ hostAbi, channel, platform, arch })) {
-    if (manifest[key] !== value) throw new Error(`Inapplicable manifest: ${key}`)
-  }
+  assertHostCompatible(manifest, { hostAbi, hostCapabilities, channel, platform, arch })
   signal?.throwIfAborted()
   const started = now()
   const cpuStarted = process.cpuUsage()

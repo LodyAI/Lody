@@ -1,6 +1,11 @@
+import {
+  HOST_ABI,
+  CORE_RUNTIME_REQUIREMENTS,
+  dependencyRequirement
+} from './core-ota/compatibility.mjs'
 import { isBuiltin } from 'node:module'
 
-export function mainArtifactBoundary({ hostDependencies = [] } = {}) {
+export function mainArtifactBoundary({ hostDependencies = [], readHostPackageVersion } = {}) {
   const allowed = new Set(['electron', ...hostDependencies])
   return {
     name: 'lody-main-artifact-boundary',
@@ -51,6 +56,23 @@ export function mainArtifactBoundary({ hostDependencies = [] } = {}) {
       }
       const coreFiles = closure(core.fileName, true)
       const hostFiles = closure(host.fileName, true)
+      const externals = [
+        ...new Set(
+          [...coreFiles]
+            .flatMap((name) => [
+              ...(bundle[name].imports ?? []),
+              ...(bundle[name].dynamicImports ?? [])
+            ])
+            .filter((name) => !bundle[name])
+        )
+      ].sort()
+      const hostRequirements = { ...CORE_RUNTIME_REQUIREMENTS }
+      for (const id of externals) {
+        if (id === 'electron' || isBuiltin(id)) continue
+        const name = id.startsWith('@') ? id.split('/').slice(0, 2).join('/') : id.split('/')[0]
+        if (!readHostPackageVersion) throw new Error(`Missing Host dependency version: ${name}`)
+        hostRequirements[`packages/${name}`] = dependencyRequirement(readHostPackageVersion(name))
+      }
       this.emitFile({
         type: 'asset',
         fileName: 'core-artifacts.json',
@@ -58,6 +80,8 @@ export function mainArtifactBoundary({ hostDependencies = [] } = {}) {
           JSON.stringify(
             {
               version: 1,
+              hostAbi: HOST_ABI,
+              hostRequirements,
               main: [...coreFiles].sort(),
               hostDependencies: [
                 ...new Set(

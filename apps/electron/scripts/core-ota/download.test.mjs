@@ -33,7 +33,13 @@ test('signed build stages 401 files, reuses content across skipped releases and 
   for (let i = 0; i < 401; i++)
     await fs.writeFile(path.join(input, `${i}.js`), `export default ${i % 7};`)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi1', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi1',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const built = await buildRelease({
     ...applicability,
     input,
@@ -204,7 +210,13 @@ test('previousInput builds a real dictionary frame and transfer replays exact ba
   await fs.writeFile(path.join(previous, 'main.js'), base)
   await fs.writeFile(path.join(input, 'main.js'), target)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi1', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi1',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const built = await buildRelease({
     ...applicability,
     input,
@@ -249,7 +261,13 @@ test('401 unique tiny objects merge into one bounded range around locally reused
   await fs.writeFile(path.join(input, 'bulk'), bulk)
   await fs.writeFile(path.join(local, 'bulk'), bulk)
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const built = await buildRelease({
     ...applicability,
     input,
@@ -303,7 +321,13 @@ test('completed objects survive interruption, corrupt cache is fetched again, an
   await fs.writeFile(path.join(input, 'a'), randomBytes(128))
   await fs.writeFile(path.join(input, 'b'), randomBytes(128))
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi1', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi1',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const built = await buildRelease({
     ...applicability,
     input,
@@ -384,7 +408,13 @@ test('stream spool budgets and corrupt HTTP frames leave no partial files', asyn
   await fs.mkdir(input)
   await fs.writeFile(path.join(input, 'large'), randomBytes(512 * 1024))
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const output = path.join(root, 'output')
   const { manifest } = await buildRelease({
     ...applicability,
@@ -429,7 +459,13 @@ test('measured latency replans the next missing pack with a synthetic clock', as
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-plan-')))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const data = [randomBytes(1024), randomBytes(1024), randomBytes(1024)]
   const frames = data.map((b) => zstdCompressSync(b))
   const gap = Buffer.alloc(1024 * 1024)
@@ -454,7 +490,7 @@ test('measured latency replans the next missing pack with a synthetic clock', as
   const manifest = signManifest(
     {
       ...applicability,
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: 'r',
       seq: 1,
       tree,
@@ -503,7 +539,13 @@ test('authenticated invalid zstd and output overflow clean decoder temporaries',
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-decode-')))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   let bytes
   const server = createServer((req, res) =>
     res.writeHead(200, { 'Content-Length': bytes.length }).end(bytes)
@@ -520,7 +562,7 @@ test('authenticated invalid zstd and output overflow clean decoder temporaries',
     const manifest = signManifest(
       {
         ...applicability,
-        schemaVersion: 1,
+        schemaVersion: 2,
         releaseId: 'r',
         seq: 1,
         tree: [{ path: 'file', sha256: hash, size: 6 }],
@@ -558,7 +600,13 @@ test('multiple packs recycle disk spool within a one-pack budget', async (t) => 
   await fs.mkdir(input)
   for (let i = 0; i < 4; i++) await fs.writeFile(path.join(input, String(i)), randomBytes(1024))
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const output = path.join(root, 'output')
   const { manifest } = await buildRelease({
     ...applicability,
@@ -668,9 +716,15 @@ test('latency switches remaining cross-pack patches to consolidated objects befo
     compressedSha256: sha256(bytes)
   }))
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const applicability = {
+    hostRequirements: {},
+    hostAbi: 'abi',
+    channel: 'nightly',
+    platform: 'linux',
+    arch: 'x64'
+  }
   const manifest = signManifest(
-    { ...applicability, schemaVersion: 1, releaseId: 'r', seq: 1, tree, packs, objects, patches },
+    { ...applicability, schemaVersion: 2, releaseId: 'r', seq: 1, tree, packs, objects, patches },
     privateKey
   )
   const local = path.join(root, 'local')

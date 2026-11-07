@@ -1,3 +1,5 @@
+// @ts-ignore standalone Node ESM host module
+import { assertHostCompatible } from '../../../scripts/core-ota/compatibility.mjs'
 import { readFile, readdir, lstat, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -262,12 +264,11 @@ export class CoreUpdaterService {
         }
       }
       const manifest = parseCoreManifest(Buffer.concat(chunks).toString('utf8'))
-      if (
-        ['hostAbi', 'channel', 'platform', 'arch'].some(
-          (key) => manifest[key] !== this.metadata[key]
-        )
-      )
+      try {
+        assertHostCompatible(manifest, this.metadata)
+      } catch {
         return { handled: false, started: false }
+      }
       if (manifest.releaseId === this.selection?.releaseId) {
         publish({ phase: 'up_to_date' })
         return { handled: false, started: true }

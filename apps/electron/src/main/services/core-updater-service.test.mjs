@@ -26,6 +26,12 @@ test('public feed stages a signed executable Core and confirms its matching atte
       platform: process.platform,
       arch: process.arch,
       hostAbi: 'abi1',
+      hostCapabilities: { electron: '44.9.3', 'packages/host-fixture': '1.2.3' },
+      hostRequirements: {
+        electron: { minimum: '44.0.0', before: '45.0.0' },
+        'packages/host-fixture': { minimum: '1.2.0', before: '2.0.0' }
+      },
+      hostBuildId: 'build1',
       publicKey,
       feedUrl: 'https://updates.example/manifest.json'
     }
@@ -86,6 +92,43 @@ test('public feed stages a signed executable Core and confirms its matching atte
       'skipping r2 requires no intermediate manifest or content'
     )
 
+    const buildB = {
+      ...metadata,
+      hostBuildId: 'build2',
+      hostCapabilities: { electron: '44.10.0', 'packages/host-fixture': '1.3.0' }
+    }
+    const activationB = await openActivation({
+      root: join(root, 'store'),
+      installed: buildB,
+      publicKey,
+      lease: { assertHeld() {} }
+    })
+    assert.equal(
+      activationB.directory,
+      activation.directory,
+      'compatible builds share immutable releases and CAS'
+    )
+    assert.equal(
+      (await activationB.begin()).builtin,
+      true,
+      'new installation first admits its builtin'
+    )
+    const updaterB = new CoreUpdaterService(buildB, activationB, fetchImpl)
+    assert.equal((await updaterB.check(() => {})).handled, true)
+    assert.equal(packRequests, firstRequests, 'compatible build reuses verified CAS')
+    assert.equal(
+      (await activationB.begin()).releaseId,
+      'r3',
+      'same signed release activates on another build'
+    )
+    const incompatible = new CoreUpdaterService(
+      { ...buildB, hostCapabilities: { electron: '45.0.0' } },
+      activationB,
+      fetchImpl
+    )
+    assert.equal((await incompatible.check(() => {})).handled, false)
+    assert.equal(packRequests, firstRequests, 'incompatible runtime never downloads packs')
+
     const resources = join(root, 'resources')
     await mkdir(resources)
     const hostPackage = join(resources, 'app.asar/node_modules/host-fixture')
@@ -95,8 +138,10 @@ test('public feed stages a signed executable Core and confirms its matching atte
     await writeFile(
       join(resources, 'core-ota-host.json'),
       JSON.stringify({
-        schemaVersion: 1,
-        ...metadata,
+        schemaVersion: 2,
+        ...Object.fromEntries(
+          Object.entries(metadata).filter(([key]) => key !== 'hostRequirements')
+        ),
         publicKey: publicKey.export({ type: 'spki', format: 'pem' })
       })
     )
@@ -374,12 +419,18 @@ test('health, rescue and graceful shutdown persist distinct attempt outcomes', a
     channel: 'test',
     platform: process.platform,
     arch: process.arch,
+    hostBuildId: 'test-build',
     hostAbi: 'test'
   }
-  const options = { root, installed, lease: { assertHeld() {} } }
+  const options = {
+    root,
+    installed,
+    publicKey: generateKeyPairSync('ed25519').publicKey,
+    lease: { assertHeld() {} }
+  }
   try {
     const initial = await openActivation(options)
-    const pointer = join(initial.directory, 'pointer.json')
+    const pointer = join(initial.directory, 'pointer-test-build.json')
     for (const outcome of ['ack', 'fail', 'abandon']) {
       await writeFile(
         pointer,
@@ -507,12 +558,18 @@ test('loaded external startup exceptions persist rollback before rescue', async 
     channel: 'test',
     platform: process.platform,
     arch: process.arch,
+    hostBuildId: 'test-build',
     hostAbi: 'test'
   }
-  const options = { root, installed, lease: { assertHeld() {} } }
+  const options = {
+    root,
+    installed,
+    publicKey: generateKeyPairSync('ed25519').publicKey,
+    lease: { assertHeld() {} }
+  }
   try {
     const initial = await openActivation(options)
-    const pointer = join(initial.directory, 'pointer.json')
+    const pointer = join(initial.directory, 'pointer-test-build.json')
     for (const asynchronous of [false, true]) {
       await writeFile(
         pointer,

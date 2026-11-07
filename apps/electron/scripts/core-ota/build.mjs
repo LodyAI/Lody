@@ -1,3 +1,4 @@
+import { validateRequirements } from './compatibility.mjs'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
@@ -59,6 +60,7 @@ async function immutableWrite(path, bytes) {
   }
 }
 export async function buildRelease(o) {
+  validateRequirements(o.hostRequirements)
   const input = await realpath(o.input)
   const requested = resolve(o.output)
   await mkdir(dirname(requested), { recursive: true })
@@ -208,13 +210,14 @@ export async function buildRelease(o) {
   }
   const manifest = signManifest(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       releaseId: o.release,
       seq: o.seq,
       channel: o.channel,
       platform: o.platform,
       arch: o.arch,
       hostAbi: o.hostAbi,
+      hostRequirements: o.hostRequirements,
       tree,
       packs: packs.map(({ sha256, path, size }) => ({ sha256, path, size })),
       objects,
@@ -231,7 +234,19 @@ export async function buildDesktopRelease({ buildOutput, ...options }) {
   try {
     await assembleCoreSnapshot(buildOutput, join(snapshot, 'out'))
     await verifyCoreResources(join(snapshot, 'out'))
-    return await buildRelease({ ...options, input: snapshot })
+    const artifacts = JSON.parse(
+      await readFile(join(buildOutput, 'main/core-artifacts.json'), 'utf8')
+    )
+    if (!artifacts.hostRequirements || !artifacts.hostAbi)
+      throw new Error('Missing Core Host requirements')
+    if (options.hostAbi && options.hostAbi !== artifacts.hostAbi)
+      throw new Error('Core Host protocol mismatch')
+    return await buildRelease({
+      ...options,
+      hostAbi: artifacts.hostAbi,
+      hostRequirements: artifacts.hostRequirements,
+      input: snapshot
+    })
   } finally {
     await rm(snapshot, { recursive: true, force: true })
   }
@@ -251,6 +266,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       platform: 'platform',
       arch: 'arch',
       'host-abi': 'hostAbi',
+      'host-requirements': 'hostRequirementsFile',
       'key-file': 'keyFile'
     }
     const args = process.argv.slice(2)
@@ -261,8 +277,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       o[k] = args[i + 1]
     }
     if (Boolean(o.input) === Boolean(o.buildOutput)) throw new Error('Choose input or build-output')
-    if (Object.keys(o).filter((k) => k !== 'previousInput').length !== 9)
+    if (
+      ['output', 'release', 'seq', 'channel', 'platform', 'arch', 'keyFile'].some((key) => !o[key])
+    )
       throw new Error('Missing arguments')
+    if (o.input) {
+      if (!o.hostAbi || !o.hostRequirementsFile)
+        throw new Error('Explicit Host requirements required for raw input')
+      o.hostRequirements = JSON.parse(await readFile(o.hostRequirementsFile, 'utf8'))
+    } else if (o.hostRequirementsFile)
+      throw new Error('Desktop requirements come from emitted artifacts')
     if (!/^\d+$/.test(o.seq)) throw new Error('Invalid sequence')
     o.seq = Number(o.seq)
     await (o.buildOutput ? buildDesktopRelease : buildRelease)({ ...o, returnPackBytes: false })

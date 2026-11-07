@@ -59,6 +59,8 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
   basename. KDE uses that identity to associate Wayland/X11 windows with the
   installed icon.
 
+Core packaging and ABI changes must follow [Host compatibility](scripts/core-ota/README.md#host-compatibility-and-build-identity).
+
 ## Embedded CLI and native dependencies
 
 - Main-process E2EE also uses `better-sqlite3`. Declare it in this app's runtime

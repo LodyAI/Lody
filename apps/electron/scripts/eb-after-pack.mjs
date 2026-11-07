@@ -1,5 +1,7 @@
+import { HOST_ABI, assertHostCompatible } from './core-ota/compatibility.mjs'
+import { computeHostBuildId } from './core-ota/host-build.mjs'
 import fs from 'node:fs'
-import { createHash, createPublicKey } from 'node:crypto'
+import { createPublicKey } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -363,7 +365,7 @@ async function afterPackInstalled(context) {
     cliRuntimePath,
     [
       '-e',
-      `require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
+      `if (Number(process.versions.node.split('.')[0]) !== 24 || Number(process.versions.napi) < 10 || Number(process.versions.electron.split('.')[0]) !== 44) throw Error('Unsupported Core Host runtime capabilities'); require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
     ],
     {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -446,30 +448,33 @@ export default async function afterPack(context, config) {
       createPublicKey(config.publicKey).asymmetricKeyType !== 'ed25519'
     )
       throw new Error('Core requires an Ed25519 public key')
-    const hash = createHash('sha256')
-    function hashTree(directory, prefix) {
-      for (const name of fs.readdirSync(directory).sort()) {
-        const file = path.join(directory, name)
-        const stat = fs.lstatSync(file)
-        if (stat.isSymbolicLink()) {
-          hash.update(`${prefix}/${name}:link:${fs.readlinkSync(file)}`)
-          continue
-        }
-        if (stat.isDirectory()) hashTree(file, `${prefix}/${name}`)
-        else if (stat.isFile()) {
-          hash.update(`${prefix}/${name}\0${stat.size}\0`)
-          hash.update(fs.readFileSync(file))
-        }
+    const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url))
+    const require = createRequire(import.meta.url)
+    const builderRequire = createRequire(require.resolve('electron-builder'))
+    const asar = createRequire(builderRequire.resolve('app-builder-lib'))('@electron/asar')
+    const archive = path.join(resourcesDir, 'app.asar')
+    const entries = new Set(asar.listPackage(archive))
+    const appPackage = JSON.parse(asar.extractFile(archive, 'package.json').toString())
+    const catalog = JSON.parse(asar.extractFile(archive, 'out/main/core-artifacts.json').toString())
+    const electronVersion =
+      context.packager.config.electronVersion ??
+      JSON.parse(fs.readFileSync(require.resolve('electron/package.json'), 'utf8')).version
+    // Advertise the guaranteed Node API baseline, not the builder's Node version.
+    // Matching-target probes below verify the installed runtime against it.
+    const hostCapabilities = { electron: electronVersion, node: '24.0.0', nodeApi: '10.0.0' }
+    for (const name of Object.keys(appPackage.dependencies ?? {}).sort()) {
+      const file = `node_modules/${name}/package.json`
+      if (entries.has(`/${file}`)) {
+        hostCapabilities[`packages/${name}`] = JSON.parse(
+          asar.extractFile(archive, file).toString()
+        ).version
       }
     }
-    const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url))
-    const repositoryDirectory = path.resolve(scriptsDirectory, '../../..')
-    hash.update(JSON.stringify(config))
-    hash.update(fs.readFileSync(path.join(repositoryDirectory, 'pnpm-lock.yaml')))
-    // Includes installed Host chunks, Electron executable/frameworks, and native resources.
-    hashTree(context.appOutDir, 'installed-host')
-    hashTree(path.join(scriptsDirectory, 'core-ota'), 'core-host-modules')
-    const hostAbi = hash.digest('hex')
+    const metadata = { schemaVersion: 2, ...config, hostAbi: HOST_ABI, hostCapabilities }
+    assertHostCompatible(
+      { ...config, hostAbi: catalog.hostAbi, hostRequirements: catalog.hostRequirements },
+      metadata
+    )
     const moduleDirectory = path.join(resourcesDir, 'core-ota')
     fs.mkdirSync(moduleDirectory, { recursive: true })
     for (const name of [
@@ -477,15 +482,15 @@ export default async function afterPack(context, config) {
       'bootstrap.mjs',
       'protocol.mjs',
       'download.mjs',
-      'cas.mjs'
+      'cas.mjs',
+      'compatibility.mjs'
     ])
       fs.copyFileSync(
         path.join(scriptsDirectory, 'core-ota', name),
         path.join(moduleDirectory, name)
       )
-    fs.writeFileSync(
-      path.join(resourcesDir, 'core-ota-host.json'),
-      JSON.stringify({ schemaVersion: 1, ...config, hostAbi })
-    )
+    const metadataFile = path.join(resourcesDir, 'core-ota-host.json')
+    const hostBuildId = await computeHostBuildId(context.appOutDir, metadataFile, metadata)
+    fs.writeFileSync(metadataFile, JSON.stringify({ ...metadata, hostBuildId }))
   }
 }

@@ -16,10 +16,12 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     const { publicKey, privateKey } = generateKeyPairSync('ed25519')
     const installed = {
       product: 'lody',
+      hostBuildId: 'test-build',
       channel: 'nightly',
       platform: 'darwin',
       arch: 'arm64',
-      hostAbi: 'abi1'
+      hostAbi: 'abi1',
+      hostRequirements: {}
     }
     const options = { root, installed, publicKey, lease: { assertHeld() {} } }
     await assert.rejects(openInstalledCore({ resourcesPath: root, root, isOwner: () => false }))
@@ -42,13 +44,14 @@ test('restart rejects interrupted release; healthy release survives and corrupti
       const hash = sha256(bytes)
       const manifest = signManifest(
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           releaseId: id,
           seq,
           channel: installed.channel,
           platform: installed.platform,
           arch: installed.arch,
           hostAbi: installed.hostAbi,
+          hostRequirements: {},
           tree: [{ path: 'core.mjs', sha256: hash, size: bytes.length }],
           packs: [{ path: 'pack', sha256: hash, size: bytes.length }],
           objects: {
@@ -112,7 +115,7 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     await rm(source, { recursive: true })
     await corrupt.adoptStaged({ directory: downloadDirectory, manifest })
     const stagedState = JSON.parse(
-      await readFile(path.join(owner.directory, 'pointer.json'), 'utf8')
+      await readFile(path.join(owner.directory, 'pointer-test-build.json'), 'utf8')
     )
     assert.equal(stagedState.current, null)
     assert.equal(stagedState.staged, 'three')
@@ -123,7 +126,7 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     failedService.selection = failedSelection
     failedService.setHealthRescue(async () => {
       const persisted = JSON.parse(
-        await readFile(path.join(owner.directory, 'pointer.json'), 'utf8')
+        await readFile(path.join(owner.directory, 'pointer-test-build.json'), 'utf8')
       )
       assert.ok(persisted.rejected.includes('three'))
       assert.equal(persisted.attempt, null)
@@ -131,7 +134,7 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     })
     await assert.rejects(failedService.failInitialHealth(), /quit rejected/)
     const failureState = JSON.parse(
-      await readFile(path.join(owner.directory, 'pointer.json'), 'utf8')
+      await readFile(path.join(owner.directory, 'pointer-test-build.json'), 'utf8')
     )
     assert.ok(failureState.rejected.includes('three'))
     assert.equal(failureState.attempt, null)
@@ -139,7 +142,7 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     assert.equal((await recovered.begin()).builtin, true)
     await chmod(path.join(owner.directory, 'releases', 'three'), 0o700)
     await writeFile(
-      path.join(owner.directory, 'pointer.json'),
+      path.join(owner.directory, 'pointer-test-build.json'),
       JSON.stringify({ current: '../../escape' })
     )
     await assert.rejects(openActivation(options), /Invalid Core activation pointer/)

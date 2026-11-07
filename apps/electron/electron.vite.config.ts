@@ -86,6 +86,10 @@ export default defineConfig(({ mode }) => {
     main: {
       plugins: [
         mainArtifactBoundary({
+          readHostPackageVersion: (name: string) =>
+            JSON.parse(
+              fs.readFileSync(resolve(__dirname, 'node_modules', name, 'package.json'), 'utf8')
+            ).version,
           hostDependencies: Object.keys(
             JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf8')).dependencies
           )
@@ -121,6 +125,9 @@ export default defineConfig(({ mode }) => {
             '@devframes/json-render',
             '@lody/cli-supervisor',
             '@lody/shared',
+            '@lody/cloud-api',
+            '@lody/platform',
+            '@lody/loro-streams-rpc',
             'devframe',
             'effect'
           ]
