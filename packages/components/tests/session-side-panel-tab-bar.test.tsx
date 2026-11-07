@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
+import { frame, visualElementStore } from 'framer-motion';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -42,6 +43,19 @@ const TABS: SessionSidePanelTabItem[] = [
   },
 ];
 const AVAILABLE_PANELS: SessionSidePanelOption[] = [{ id: 'pr', label: 'PR', kind: 'pr' }];
+
+async function settleLayout() {
+  await act(async () => {
+    await new Promise<void>((resolve) => frame.postRender(() => resolve()));
+    await new Promise<void>((resolve) => frame.postRender(() => resolve()));
+  });
+}
+
+function getProjection(element: Element) {
+  const projection = visualElementStore.get(element)?.projection;
+  if (!projection) throw new Error('Expected the real tab Motion projection');
+  return projection;
+}
 
 describe('getSidePanelTabCloseFallback', () => {
   const tabIds = ['files', 'changes', 'browser'];
@@ -178,6 +192,94 @@ describe('SessionSidePanelTabBar', () => {
 
     expect(onTabSelect).toHaveBeenCalledWith('side-session:two');
     expect(onTabClose).toHaveBeenCalledWith('side-session:one');
+  });
+
+  it('releases Review tab layout ownership after close and repeated session unmounts', async () => {
+    function ReviewTabs() {
+      const [tabs, setTabs] = useState<SessionSidePanelTabItem[]>([
+        { id: 'changes', label: 'All Changes', kind: 'changes', closeable: true },
+        { id: 'diff:all-changes', label: 'Review diff', kind: 'diff', closeable: true },
+      ]);
+      return createElement(SessionSidePanelTabBar, {
+        tabs,
+        activeTabId: tabs.at(-1)?.id ?? null,
+        onTabSelect: () => undefined,
+        onTabClose: (id: string) => setTabs((current) => current.filter((tab) => tab.id !== id)),
+        closeTabLabel: (label: string) => `Close ${label}`,
+      });
+    }
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await act(async () => root?.render(createElement(ReviewTabs)));
+      await settleLayout();
+      const [changes, diff] = Array.from(container.querySelectorAll('[role="tab"]'), getProjection);
+      const projectionRoot = changes.root!;
+      const changesId = changes.options.layoutId!;
+      const diffId = diff.options.layoutId!;
+      expect(projectionRoot.sharedNodes.get(changesId)?.members).toContain(changes);
+      expect(projectionRoot.sharedNodes.get(diffId)?.members).toContain(diff);
+
+      await act(async () =>
+        container?.querySelector<HTMLButtonElement>('[aria-label="Close Review diff"]')?.click()
+      );
+      await settleLayout();
+      expect(projectionRoot.sharedNodes.has(diffId)).toBe(false);
+      expect(projectionRoot.sharedNodes.get(changesId)?.members).toContain(changes);
+
+      await act(async () => root?.render(null));
+      await settleLayout();
+      expect(projectionRoot.sharedNodes.has(changesId)).toBe(false);
+    }
+  });
+
+  it('preserves device tab shared-layout handoff and releases the completed owner', async () => {
+    const devices: SessionSidePanelTabItem[] = [
+      { id: 'ios-simulator', label: 'iOS', kind: 'ios-simulator', closeable: true },
+      { id: 'android-emulator', label: 'Android', kind: 'android-emulator', closeable: true },
+    ];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const renderDevices = (split: readonly [string, string] | null) =>
+      act(() =>
+        root?.render(
+          createElement(SessionSidePanelTabBar, {
+            tabs: devices,
+            activeTabId: 'ios-simulator',
+            split,
+            onTabSelect,
+            onTabClose,
+            onTabsSplit: () => undefined,
+            onTabUnsplit: () => undefined,
+            closeTabLabel: (label: string) => `Close ${label}`,
+          })
+        )
+      );
+    renderDevices(null);
+    await settleLayout();
+    const previous = getProjection(container.querySelector('[role="tab"]')!);
+    const projectionRoot = previous.root!;
+    const layoutId = previous.options.layoutId!;
+
+    renderDevices(['ios-simulator', 'android-emulator']);
+    const next = getProjection(container.querySelector('[role="group"] [role="tab"]')!);
+    expect(next).not.toBe(previous);
+    expect(next.options.layoutId).toBe(layoutId);
+    expect(projectionRoot.sharedNodes.get(layoutId)?.lead).toBe(next);
+    expect(next.resumeFrom).toBe(previous);
+    await settleLayout();
+    expect(projectionRoot.sharedNodes.get(layoutId)?.members).toContain(next);
+
+    const layoutIds = Array.from(
+      container.querySelectorAll('[role="tab"]'),
+      (tab) => getProjection(tab).options.layoutId!
+    );
+    await act(async () => root?.render(null));
+    await settleLayout();
+    for (const id of layoutIds) expect(projectionRoot.sharedNodes.has(id)).toBe(false);
   });
 
   it('draws a split pair as one group in split order that still selects each member', async () => {

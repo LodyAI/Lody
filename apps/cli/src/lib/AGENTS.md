@@ -10,10 +10,8 @@
 ## Composition and transports
 
 - Daemon commands borrow its replica; command cleanup failures never fence.
-- GitHub auth: conversation-owner personal → matching-owner machine → repo App,
-  once per source. Failures advance without a policy RPC; local context grants
-  machine eligibility. Never persist managed tokens or replay uncertain writes.
-  Checkout/LFS share the pinned helper context. Contract: [identity fallback](../../../../specs/github-identity-fallback.md).
+- Before changing GitHub authentication or agent PATH merging, read the
+  [credential broker rules](../session/worktree/AGENTS.md#git-credential-broker).
 
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK
@@ -49,9 +47,6 @@
   reintroduce a proxy-authoring path (invariants in `specs/local-first-two-plane.md`).
   Local dispatch triggers off the renderer-authored `latestUserMsgId` doc-meta write
   plus the local Machine RPC fast path.
-
-- INVARIANT: agent PATH merges keep the session's `gh` shim dir first
-  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
 
 ## Encrypted workspace catalog
 
