@@ -19,8 +19,10 @@
 - Commit a matched result and its continuation identity together. Never rerun a matched
   program; recheck admission and captured source evidence. Retry interrupted checks,
   reconcile accepted effects, and never use tool side effects as durable steps.
-- CodeMode exposes only scoped `ctx` reads. Credentials and network auth stay with
-  resource owners. Scope close joins interpreter and owner reads; no ambient shell or env.
+- CodeMode exposes scoped `ctx` reads, bounded HTTP observations and local commands in
+  the Session workdir. Commands receive an explicit environment and no implicit shell.
+  Scope close interrupts the interpreter and its operations. Credentials and network
+  auth for observations stay with resource owners.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance

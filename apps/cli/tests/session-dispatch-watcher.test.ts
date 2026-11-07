@@ -2807,6 +2807,44 @@ describe('SessionDispatchWatcher', () => {
     }
   });
 
+  it('builds an encrypted turn request under the verified requester', async () => {
+    const id = 'encrypted-requester' as SessionId;
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {} as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+      encryptedWorkspace: true,
+      resolveEncryptedRequester: async () => ({ userId: 'e2ee-member:verified' }),
+    });
+    const request = await (
+      watcher as unknown as {
+        buildChatRequestFromHistoryEntry: (
+          meta: SessionMeta,
+          entry: SessionHistoryInput,
+          launch: undefined,
+          user: { name: string; email: string },
+          requesterUserId?: string
+        ) => Promise<{ userId: string; userName: string }>;
+      }
+    ).buildChatRequestFromHistoryEntry(
+      { id, userId: 'label', cliType: 'builtin', agentType: 'codex' } as SessionMeta,
+      {
+        id: 'turn',
+        role: 'user',
+        userId: 'label',
+        items: [{ type: 'text', text: 'hello' }],
+        timestamp: '2026-11-06T00:00:00.000Z',
+      } as SessionHistoryInput,
+      undefined,
+      { name: 'Label Name', email: 'label@example.com' },
+      'e2ee-member:verified'
+    );
+    expect(request).toMatchObject({ userId: 'e2ee-member:verified', userName: 'Label Name' });
+  });
+
   it('leaves no pending activation once a promoted queue turn is handled', async () => {
     // The settled state after a direct send has run: both pointers name it.
     const afterPromotion = await promoteQueuedMessage(

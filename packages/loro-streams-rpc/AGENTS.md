@@ -19,8 +19,8 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   Code Collab/preview actions require write authority and execution claims. Keep same-member
   machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
 - Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
-  returns a verified `false`; its failure is `e2ee_machine_sharing_unavailable`, because
-  senders withhold input only for a known withdrawal.
+  returns a verified `false`. An unknown policy signs, because senders withhold input
+  only for a known withdrawal and the receiving machine decides.
 - A fully verified ledger view that no longer contains the requester classifies
   dispatch/read as exact `e2ee_device_revoked` (membership retained) or
   `e2ee_member_removed`; never as generic `e2ee_rpc_denied`.

@@ -1,4 +1,6 @@
 import { readAutomationContext } from './context/reads-legacy';
+import { execAutomationCommand } from './context/exec';
+import { platformLayer } from '@/platform/process-options';
 import { observeWorkflows, checkWorkflowEvidence } from './sources/workflows';
 import { publicActivity, actionActivity, workActivity } from './control/activities';
 import { Clock, Effect, Layer, ManagedRuntime } from 'effect';
@@ -256,17 +258,40 @@ export async function createAutomationWorkspaceLegacy(options: {
     Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
       Effect.uninterruptible,
       Effect.flatMap((context) =>
-        evaluateAutomationProgram(wait.program, context, (input) =>
-          Effect.tryPromise(() =>
-            readAutomationContext({
-              ledger,
-              manager: lody.documentManager,
-              authority,
-              wait,
-              input,
-              now: Date.now(),
-            })
-          ).pipe(Effect.uninterruptible)
+        evaluateAutomationProgram(
+          wait.program,
+          context,
+          (input) =>
+            Effect.tryPromise(() =>
+              readAutomationContext({
+                ledger,
+                manager: lody.documentManager,
+                authority,
+                wait,
+                input,
+                now: Date.now(),
+              })
+            ).pipe(Effect.uninterruptible),
+          false,
+          (input) =>
+            Effect.tryPromise({
+              try: () => lody.resolveAutomationWorkdir(wait.sessionId as SessionId),
+              catch: () => new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'),
+            }).pipe(
+              Effect.flatMap((root) =>
+                root
+                  ? execAutomationCommand(input, root, {
+                      PATH: process.env.PATH,
+                      HOME: process.env.HOME,
+                      USERPROFILE: process.env.USERPROFILE,
+                      SystemRoot: process.env.SystemRoot,
+                      TMPDIR: process.env.TMPDIR,
+                      TEMP: process.env.TEMP,
+                      TMP: process.env.TMP,
+                    }).pipe(Effect.provide(platformLayer({ logger })))
+                  : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
+              )
+            )
         )
       )
     );
@@ -396,12 +421,8 @@ export async function createAutomationWorkspaceLegacy(options: {
         );
       }
     );
-    const assertReadable = (wait: AutomationWait, requesterSessionId?: string) => {
-      if (
-        wait.ownerUserId !== auth.userId ||
-        wait.ownerMachineId !== auth.machineId ||
-        (requesterSessionId && wait.sessionId !== requesterSessionId)
-      )
+    const assertReadable = (wait: AutomationWait) => {
+      if (wait.ownerUserId !== auth.userId || wait.ownerMachineId !== auth.machineId)
         throw new Error('AUTOMATION_NOT_FOUND');
     };
     const publicWait = (wait: AutomationWait) => {
@@ -485,14 +506,8 @@ export async function createAutomationWorkspaceLegacy(options: {
           const now = await runtime.runPromise(Clock.currentTimeMillis);
           switch (command.type) {
             case 'register': {
-              const sessionId = requesterSessionId ?? command.sessionId;
+              const sessionId = command.sessionId ?? requesterSessionId;
               if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               const context = await sessionContext(sessionId);
               if (command.expiresAt !== undefined && command.expiresAt <= now)
                 throw new Error('AUTOMATION_ALREADY_EXPIRED');
@@ -512,14 +527,8 @@ export async function createAutomationWorkspaceLegacy(options: {
             }
             case 'settings':
             case 'configure': {
-              const sessionId = requesterSessionId ?? command.sessionId;
+              const sessionId = command.sessionId ?? requesterSessionId;
               if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               await sessionContext(sessionId);
               if (command.type === 'configure') {
                 const record =
@@ -550,32 +559,20 @@ export async function createAutomationWorkspaceLegacy(options: {
               return sessionPolicySettings(ledger, sessionId);
             }
             case 'list': {
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               return ledger
-                .waits(auth.userId, requesterSessionId ?? command.sessionId)
+                .waits(auth.userId, command.sessionId ?? requesterSessionId)
                 .map(publicWait);
             }
             case 'show': {
               const wait = ledger.wait(command.id);
               if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-              assertReadable(wait, requesterSessionId);
+              assertReadable(wait);
               return publicWait(wait);
             }
             case 'activities': {
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               const page = ledger.activityPage(
                 auth.userId,
-                requesterSessionId ?? command.sessionId,
+                command.sessionId ?? requesterSessionId,
                 command.limit,
                 command.before
               );
@@ -584,7 +581,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             case 'cancel': {
               const wait = ledger.wait(command.id);
               if (wait) {
-                assertReadable(wait, requesterSessionId);
+                assertReadable(wait);
                 await runtime.runPromise(service.cancel(wait.id));
                 const current = ledger.wait(wait.id);
                 return current && publicWait(current);
@@ -592,11 +589,7 @@ export async function createAutomationWorkspaceLegacy(options: {
               const receipt = ledger.receipt(command.id);
               if (!receipt) {
                 const work = ledger.work(command.id);
-                if (
-                  !work ||
-                  work.ownerUserId !== auth.userId ||
-                  (requesterSessionId && work.sessionId !== requesterSessionId)
-                )
+                if (!work || work.ownerUserId !== auth.userId)
                   throw new Error('AUTOMATION_NOT_FOUND');
                 ledger.putWork({ ...work, state: 'cancelled', updatedAt: now });
                 if (work.invocationId) await runtime.runPromise(service.cancel(work.invocationId));
@@ -604,11 +597,7 @@ export async function createAutomationWorkspaceLegacy(options: {
                 const current = ledger.work(command.id);
                 return current ? workActivity(current) : undefined;
               }
-              if (
-                receipt.rule.ownerUserId !== auth.userId ||
-                (requesterSessionId && receipt.rule.scope.sessionId !== requesterSessionId)
-              )
-                throw new Error('AUTOMATION_NOT_FOUND');
+              if (receipt.rule.ownerUserId !== auth.userId) throw new Error('AUTOMATION_NOT_FOUND');
               await runtime.runPromise(service.cancel(command.id));
               const current = ledger.receipt(command.id);
               return current ? actionActivity(current) : undefined;
@@ -677,7 +666,8 @@ export async function createAutomationWorkspaceLegacy(options: {
           if (operation.type === 'cancel') {
             const wait = ledger.wait(operation.id);
             if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-            assertReadable(wait, input.sessionId);
+            assertReadable(wait);
+            if (wait.sessionId !== input.sessionId) throw new Error('AUTOMATION_NOT_FOUND');
             await handle.command({ type: 'cancel', id: operation.id });
             return { type: 'cancel' as const };
           }

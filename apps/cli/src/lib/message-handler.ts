@@ -1,3 +1,4 @@
+import { LocalAttachmentStore } from './session-local-attachments';
 import type {
   SorbetCustomProvider,
   SorbetCustomProviderInput,
@@ -867,6 +868,7 @@ export class MessageHandler {
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
+  private localAttachments: LocalAttachmentStore;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
   private turnPostProcessingService: TurnPostProcessingService;
@@ -2532,6 +2534,7 @@ export class MessageHandler {
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
   }): Promise<ContentBlock[]> {
+    const localAttachmentBlocks: ContentBlock[] = [];
     const textParts: string[] = [];
     const imageInputBlocks: Extract<SessionInputBlock, { type: 'image' }>[] = [];
     const fileInputBlocks: Extract<SessionInputBlock, { type: 'file' }>[] = [];
@@ -2539,6 +2542,33 @@ export class MessageHandler {
     const visualAnnotationRefTexts: string[] = [];
 
     for (const block of args.inputBlocks) {
+      if (block.type === 'local_attachment') {
+        if (!args.userTurnId) throw new Error('Local attachment requires its original turn');
+        const resolved = await this.localAttachments.resolve(
+          {
+            sessionId: args.sessionId,
+            turnId: args.userTurnId,
+          },
+          block
+        );
+        if (block.kind === 'image') {
+          if (resolved.sizeBytes > 20 * 1024 * 1024)
+            throw new Error('Local image exceeds image input limit');
+          localAttachmentBlocks.push({
+            type: 'image',
+            mimeType: block.mimeType,
+            data: (await fs.promises.readFile(resolved.path)).toString('base64'),
+          });
+        }
+        localAttachmentBlocks.push({
+          type: 'resource_link',
+          uri: pathToFileURL(resolved.path).href,
+          name: block.fileName,
+          mimeType: block.mimeType,
+          size: resolved.sizeBytes,
+        });
+        continue;
+      }
       if (block.type === 'text') {
         const trimmed = block.text.trim();
         if (trimmed) {
@@ -2610,7 +2640,10 @@ export class MessageHandler {
     ).trim();
 
     const hasCurrentRequestContent =
-      imageBlocks.length > 0 || fileAttachmentBlocks.length > 0 || textPrompt.length > 0;
+      localAttachmentBlocks.length > 0 ||
+      imageBlocks.length > 0 ||
+      fileAttachmentBlocks.length > 0 ||
+      textPrompt.length > 0;
     const replayText = args.replayPromptText?.trim() ?? '';
 
     const promptBlocks: ContentBlock[] = [];
@@ -2621,6 +2654,7 @@ export class MessageHandler {
       });
     }
 
+    promptBlocks.push(...localAttachmentBlocks);
     promptBlocks.push(...imageBlocks);
     promptBlocks.push(...imageAttachmentBlocks);
     promptBlocks.push(...fileAttachmentBlocks);
@@ -2673,7 +2707,7 @@ export class MessageHandler {
 
     let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
     try {
-      access = await this.cloudPort.access.verifyMachineAccess({
+      access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId: args.requestedByUserId,
@@ -2720,6 +2754,32 @@ export class MessageHandler {
     }
   }
 
+  /** Encrypted machine access is decided here, from the verified ledger and sharing policy. */
+  private async verifyRequesterMachineAccess(
+    input: Parameters<CloudPort['access']['verifyMachineAccess']>[0]
+  ): ReturnType<CloudPort['access']['verifyMachineAccess']> {
+    const gate = this.encryptedExecution;
+    if (!gate) return await this.cloudPort.access.verifyMachineAccess(input);
+    return await Effect.runPromise(
+      gate.verifyRequesterAccess(input.requesterUserId, input.localProjectId)
+    );
+  }
+
+  /** See `DaemonWorkspace.checkEncryptedMachineAccess`. */
+  private async checkEncryptedMachineAccess(target: {
+    machineId: string;
+    requesterUserId: string;
+    localProjectId?: string;
+  }) {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_access_unavailable');
+    return await Effect.runPromise(
+      target.machineId === this.machineId
+        ? gate.verifyRequesterAccess(target.requesterUserId, target.localProjectId)
+        : gate.verifyMachineTarget(target.requesterUserId, target.machineId)
+    );
+  }
+
   private async verifyMachineAccess(args: {
     requesterUserId: string;
     sessionId: SessionId;
@@ -2736,7 +2796,7 @@ export class MessageHandler {
       return { outcome: 'allowed' };
     }
     try {
-      const access = await this.cloudPort.access.verifyMachineAccess({
+      const access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId: args.requesterUserId,
@@ -3074,6 +3134,11 @@ export class MessageHandler {
     this.machineName = config.machineName;
     this.cliVersion = config.cliVersion;
     this.machineId = config.machineId as MachineId;
+    this.localAttachments = new LocalAttachmentStore({
+      accountId: this.userId,
+      workspaceId: this.workspaceId,
+      machineId: this.machineId,
+    });
     this.sessionActivePresence = new SessionActivePresenceControllerLegacy(
       this.workspaceDocument,
       this.machineId,
@@ -3485,7 +3550,7 @@ export class MessageHandler {
           isLoroRepoDocDeleted(record) ||
           record.meta.isArchived ||
           record.meta.machineId !== this.machineId ||
-          record.meta.userId !== request.requestedByUserId
+          (!this.encryptedExecution && record.meta.userId !== request.requestedByUserId)
         ) {
           throw new Error('Simulator session access denied.');
         }
@@ -3503,7 +3568,7 @@ export class MessageHandler {
           parent.meta.isArchived ||
           parent.meta.parentSessionId ||
           parent.meta.machineId !== this.machineId ||
-          parent.meta.userId !== request.requestedByUserId
+          (!this.encryptedExecution && parent.meta.userId !== request.requestedByUserId)
         ) {
           throw new Error('Simulator parent session access denied.');
         }
@@ -3791,7 +3856,10 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
-        downloadFileChunk: async (request) => await fileReader.downloadFileChunk(request),
+        downloadFileChunk: async (request) =>
+          request.attachment
+            ? this.downloadRegisteredAttachment(request)
+            : fileReader.downloadFileChunk(request),
         openCodeCollabText: async (request) => await codeReader.openText(request),
         refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
@@ -3870,7 +3938,7 @@ export class MessageHandler {
           });
         },
         probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
-          const access = await this.cloudPort.access.verifyMachineAccess({
+          const access = await this.verifyRequesterMachineAccess({
             workspaceId: this.workspaceId,
             machineId: this.machineId,
             requesterUserId: requestedByUserId,
@@ -3917,6 +3985,16 @@ export class MessageHandler {
       executionService: this.executionService,
       accessPolicy: makeSessionAccessPolicy(this.localWorkspaceCatalog),
       canUseMachine: async (args) => await this.verifyMachineAccess(args),
+      ...(this.encryptedExecution
+        ? {
+            resolveEncryptedRequester: async (intent: {
+              workspaceId: string;
+              sessionId: string;
+              userTurnId: string;
+              inputConfig?: unknown;
+            }) => await Effect.runPromise(this.encryptedExecution!.resolveRequester(intent)),
+          }
+        : {}),
       // P5/D11 snapshot bookkeeping for the watcher's background owner
       // recheck. Only confirmed online verdicts reach this: an allow refreshes
       // the optimistic-allow snapshot (the sole writer of `verifiedAt`), a
@@ -3956,7 +4034,16 @@ export class MessageHandler {
       },
       onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
     });
+    const inheritLocalAttachment = async (
+      attachment: import('@lody/shared').SessionLocalAttachment,
+      sessionId: SessionId,
+      turnId: string
+    ) => {
+      if (this.encryptedAttachments) throw new Error('Protected local attachments are unavailable');
+      return this.localAttachments.inherit(attachment, { sessionId, turnId });
+    };
     this.sessionForkService = new SessionForkService({
+      rebindLocalAttachment: inheritLocalAttachment,
       workspaceDocument: this.workspaceDocument,
       sessionManager: this.sessionManager,
       userResolver: this.sessionUserResolver,
@@ -3979,6 +4066,7 @@ export class MessageHandler {
       );
     });
     this.sessionEditAndResendService = new SessionEditAndResendService({
+      rebindLocalAttachment: inheritLocalAttachment,
       workspaceDocument: this.workspaceDocument,
       sessionManager: this.sessionManager,
       executionService: this.executionService,
@@ -7232,6 +7320,7 @@ export class MessageHandler {
             ? {
                 classifyEncryptedDerivation: (origin, target) =>
                   this.classifyEncryptedDerivation(origin, target),
+                checkEncryptedMachineAccess: (target) => this.checkEncryptedMachineAccess(target),
               }
             : {}),
         },
@@ -7419,6 +7508,13 @@ export class MessageHandler {
     }
   }
 
+  private async downloadRegisteredAttachment(
+    request: import('@lody/shared').FileDownloadRequest
+  ): Promise<import('@lody/shared').FileDownloadResponse> {
+    if (this.encryptedAttachments) return { status: 'error', code: 'unsupported_protocol' };
+    return this.localAttachments.download(request);
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
@@ -7481,6 +7577,19 @@ export class MessageHandler {
     };
   }
 
+  /** Encrypted: act as the turn's verified principal; a shared member controls only
+   * within that member's own rights for the turn's projects. */
+  private async agentDeviceControlAllowed(sessionId: SessionId): Promise<boolean> {
+    const gate = this.encryptedExecution;
+    if (!gate) return true;
+    const control = this.executionService.getEncryptedControlPrincipal(sessionId);
+    if (control?.kind === 'owner') return true;
+    if (control?.kind !== 'member') return false;
+    return await Effect.runPromise(
+      gate.authorizeAgentControl(control.requesterDevice, control.localProjectIds)
+    ).catch(() => false);
+  }
+
   private async dispatchLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
@@ -7530,7 +7639,9 @@ export class MessageHandler {
         );
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
-        return this.filePreviewService.downloadFileChunk(request.params);
+        return request.params.attachment
+          ? this.downloadRegisteredAttachment(request.params)
+          : this.filePreviewService.downloadFileChunk(request.params);
 
       case 'project/probe-local-member': {
         if (
@@ -7766,22 +7877,7 @@ export class MessageHandler {
       case 'ios-simulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        // Encrypted: act as the turn's verified principal; a shared member controls
-        // only within that member's own rights for the turn's projects.
-        const control = this.encryptedExecution
-          ? this.executionService.getEncryptedControlPrincipal(sessionId)
-          : ({ kind: 'owner' } as const);
-        const controlAllowed =
-          control?.kind === 'owner' ||
-          (control?.kind === 'member' &&
-            this.encryptedExecution !== undefined &&
-            (await Effect.runPromise(
-              this.encryptedExecution.authorizeAgentControl(
-                control.requesterDevice,
-                control.localProjectIds
-              )
-            ).catch(() => false)));
-        if (!invocation?.requesterUserId || !controlAllowed) {
+        if (!invocation?.requesterUserId || !(await this.agentDeviceControlAllowed(sessionId))) {
           return {
             type: 'ios-simulator/control_response' as const,
             sessionId,
@@ -7800,7 +7896,7 @@ export class MessageHandler {
       case 'android-emulator/agent-control': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);
-        if (!invocation?.requesterUserId) {
+        if (!invocation?.requesterUserId || !(await this.agentDeviceControlAllowed(sessionId))) {
           return {
             type: 'android-emulator/control_response' as const,
             sessionId,
@@ -7991,6 +8087,64 @@ export class MessageHandler {
       case 'session/file-upload':
         await this.handleSessionFileUpload(message, context);
         break;
+      case 'session/attachment-resolve': {
+        try {
+          if (
+            context.source !== 'local' ||
+            message.machineId !== this.machineId ||
+            message.workspaceId !== this.workspaceId ||
+            this.encryptedAttachments
+          )
+            throw new Error('Local attachment is unavailable on this machine');
+          const resolved = await this.localAttachments.resolve(
+            {
+              sessionId: message.sessionId,
+              turnId: message.attachment.turnId,
+            },
+            message.attachment
+          );
+          context.send({
+            type: 'session/attachment-resolve_response',
+            sessionId: message.sessionId,
+            success: true,
+            path: resolved.path,
+          });
+        } catch (error) {
+          context.send({
+            type: 'session/attachment-resolve_response',
+            sessionId: message.sessionId,
+            success: false,
+            error: formatErrorMessage(error),
+          });
+        }
+        break;
+      }
+      case 'session/attachment-register': {
+        try {
+          if (
+            context.source !== 'local' ||
+            message.machineId !== this.machineId ||
+            message.workspaceId !== this.workspaceId ||
+            this.encryptedAttachments
+          )
+            throw new Error('Local attachment registration is unavailable for this target');
+          const attachment = await this.localAttachments.register(message);
+          context.send({
+            type: 'session/attachment-register_response',
+            sessionId: message.sessionId,
+            success: true,
+            attachment,
+          });
+        } catch (error) {
+          context.send({
+            type: 'session/attachment-register_response',
+            sessionId: message.sessionId,
+            success: false,
+            error: formatErrorMessage(error),
+          });
+        }
+        break;
+      }
       case 'session/file-send-local':
         await this.handleSessionFileSendLocal(message, context);
         break;
@@ -10846,7 +11000,7 @@ export class MessageHandler {
   }): Promise<
     { ok: true; rootPath: string } | { ok: false; response: LocalProjectControlResponse }
   > {
-    const access = await this.cloudPort.access.verifyMachineAccess({
+    const access = await this.verifyRequesterMachineAccess({
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       requesterUserId: args.requesterUserId,
@@ -11019,7 +11173,7 @@ export class MessageHandler {
     const { requesterUserId } = precheck;
 
     try {
-      const access = await this.cloudPort.access.verifyMachineAccess({
+      const access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId,

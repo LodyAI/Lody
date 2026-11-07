@@ -41,6 +41,8 @@ export type PendingSessionSendsPorts = {
 };
 
 export type PendingSessionSends = ReturnType<typeof createPendingSessionSends> & {
+  /** Admission may skip cloud attachment proof only for a known native local target. */
+  canPrepareAttachmentsLocally?: (machineId: MachineId) => boolean;
   acknowledgeLanded?: (ids: Iterable<string>) => Promise<void>;
   resume?: () => Promise<void>;
   /** The input coordinator keeps delivery ownership after its visible row is gone. */

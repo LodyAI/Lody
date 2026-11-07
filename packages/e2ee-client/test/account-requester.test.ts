@@ -1,6 +1,6 @@
-import { Effect, Exit, Fiber } from 'effect';
-import { describe, expect, it } from 'vitest';
-import { hashRecordBytes } from '@lody/e2ee-core/protocol';
+import { Effect, Exit, Fiber, Result } from 'effect';
+import { describe, expect, it, vi } from 'vitest';
+import { accountUserId, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
 import {
   makeAccountE2eeRuntime,
@@ -15,7 +15,7 @@ const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 
 /** A real signed ledger: the owner's genesis, then the owner admitting a personal phone. */
 function fixture() {
-  const f = envelopeFixture();
+  const f = envelopeFixture(0, 100, Result.getOrThrow(accountUserId('acc1')).toBytes());
   const genesisHash = hex(f.context.genesis.toBytes());
   const page = {
     workspaceId: 'w1',
@@ -26,7 +26,7 @@ function fixture() {
     position: 'opaque/final',
     nextCursor: null,
   };
-  const [[membershipId, member]] = [...f.view().inspectState().members.entries()];
+  const [[membershipId]] = [...f.view().inspectState().members.entries()];
   const calls: { kind: string; value?: unknown }[] = [];
   let pending: { pairingSessionId: string } | null = null;
   const host: AccountPairingIdentityHost = {
@@ -47,12 +47,12 @@ function fixture() {
       Effect.sync(() => void calls.push({ kind: 'accept', value })),
     activate: () => Effect.sync(() => void calls.push({ kind: 'activate' })),
   };
-  const requester = (cryptoUserId = hex(member!.userId.toBytes())) =>
+  const requester = (accountId = 'acc1') =>
     makePortableAccountPairingRequester({
       workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash }],
       host: () => Effect.succeed(host),
       history: () => Effect.succeed(page),
-      accountIdentity: () => Effect.succeed({ cryptoUserId }),
+      accountId,
     });
   return {
     f,
@@ -71,8 +71,8 @@ describe('portable account pairing requester', () => {
     expect(calls).toEqual([
       { kind: 'prepare', value: { genesisRecordHex: hex(f.genesisRecord), membershipId } },
     ]);
-    // A service naming another crypto user finds no membership and prepares nothing.
-    const [other] = await Effect.runPromise(requester('ff'.repeat(32))());
+    // Another account finds no membership and prepares nothing.
+    const [other] = await Effect.runPromise(requester('acc2')());
     const refused = await Effect.runPromiseExit(other!.identity());
     expect(Exit.isFailure(refused)).toBe(true);
     expect(calls).toHaveLength(1);
@@ -165,7 +165,14 @@ describe('portable account pairing approver key delivery', () => {
       }),
     keyDeliveryEvidence: () => Effect.succeed('e2ee_key_not_sent'),
   });
-  const deliver = async (sessions: (AccountPairingApproverSession | null)[]) => {
+  const fixedRetry = (sleeps: number[]) => ({
+    delays: [10, 20, 40],
+    sleep: (ms: number) => Effect.sync(() => sleeps.push(ms)),
+  });
+  const deliver = async (
+    sessions: (AccountPairingApproverSession | null)[],
+    retry: typeof fixedRetry | null = fixedRetry
+  ) => {
     const events: AccountPairingKeyDeliveryEvent[] = [];
     const sleeps: number[] = [];
     let ended: () => void = () => {};
@@ -180,10 +187,7 @@ describe('portable account pairing approver key delivery', () => {
           events.push(event);
           if (event.state === 'ended' || event.state === 'delivered') ended();
         },
-        keyDeliveryRetry: {
-          delays: [10, 20, 40],
-          sleep: (ms) => Effect.sync(() => sleeps.push(ms)),
-        },
+        ...(retry ? { keyDeliveryRetry: retry(sleeps) } : {}),
       })()
     );
     await Effect.runPromise(workspaces[0]!.deliverKeys!(new Uint8Array(32).fill(2), 'r1'));
@@ -207,6 +211,62 @@ describe('portable account pairing approver key delivery', () => {
       'ended',
     ]);
     expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
+  });
+
+  it('catches up with the ledger before retrying a delivery the mailbox refused as stale', async () => {
+    const rounds = { count: 0 };
+    let ledgerCurrent = false;
+    const session = {
+      ...approverSession(rounds),
+      refresh: () =>
+        Effect.sync(() => {
+          ledgerCurrent = true;
+        }),
+      keyDeliveryEvidence: () =>
+        Effect.succeed(ledgerCurrent ? ('delivered' as const) : ('e2ee_key_not_sent' as const)),
+    };
+    const { events } = await deliver([session, session]);
+    expect(events.at(-1)!.state).toBe('delivered');
+    expect(rounds.count).toBe(2);
+  });
+
+  it('still retries the round when the ledger catch-up fails', async () => {
+    const rounds = { count: 0 };
+    const session = { ...approverSession(rounds), refresh: () => Effect.fail('offline') };
+    const { events } = await deliver([session, session, session, session]);
+    expect(rounds.count).toBe(4);
+    expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
+  });
+
+  it('continues the retries with the default schedule when a ledger catch-up hangs', async () => {
+    vi.useFakeTimers();
+    try {
+      const rounds = { count: 0, released: 0 };
+      let cancelled = 0;
+      const session = {
+        ...approverSession(rounds),
+        refresh: () =>
+          Effect.never.pipe(
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                cancelled += 1;
+              })
+            )
+          ),
+      };
+      const delivered = deliver(
+        Array.from({ length: 9 }, () => session),
+        null
+      );
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+      const { events } = await delivered;
+      expect(rounds.count).toBe(9);
+      expect(rounds.released).toBe(9);
+      expect(cancelled).toBe(8);
+      expect(events.at(-1)!.state).toBe('ended');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ends without another round once the approving session is no longer available to the account', async () => {

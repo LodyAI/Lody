@@ -539,6 +539,68 @@ describe('SessionChatInputArea submission feedback', () => {
     });
   }
 
+  it.each([true, false])(
+    'retires command hydration only after /compact acceptance=%s',
+    async (accepted) => {
+      const acceptance = deferredBoolean();
+      const submitted: SessionInputBlock[][] = [];
+      const textarea = await renderComposer({
+        onSendMessage: (blocks) => {
+          submitted.push(blocks);
+          return acceptance.promise;
+        },
+        overrides: {
+          initialInputText: '',
+          availableCommands: [{ name: 'compact', description: 'Compact history' }],
+        },
+      });
+      const commandRanges = () => container!.querySelectorAll('[data-mention-kind="command"]');
+      const input = async (text: string, inputType = 'insertText') => {
+        await act(async () => {
+          textarea.focus();
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+            textarea,
+            text
+          );
+          textarea.setSelectionRange(text.length, text.length);
+          textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType }));
+        });
+      };
+      await input('/compact');
+      // Commit the command menu item before submitting the message.
+      await act(async () => {
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      const commandDraft = textarea.value;
+      expect(commandDraft.trimEnd()).toBe('/compact');
+      expect(commandRanges().length).toBeGreaterThan(0);
+      await submit('button');
+      expect(submitted[0]).toMatchObject([{ type: 'text', text: '/compact' }]);
+      expect(textarea.value).toBe('');
+      await act(async () => acceptance.resolve(accepted));
+      if (!accepted) {
+        expect(textarea.value).toBe(commandDraft);
+        expect(commandRanges().length).toBeGreaterThan(0);
+        expect(commandRanges()[0]?.textContent).toBe('/compact');
+        return;
+      }
+      expect(textarea.value).toBe('');
+      // A first fragment shorter than /compact must not consume its stale seed.
+      const mixedText = '中文测试123456789';
+      for (let length = 1; length <= mixedText.length; length++) {
+        await input(mixedText.slice(0, length));
+      }
+      expect(commandRanges()).toHaveLength(0);
+      textarea.select();
+      await input('', 'deleteContentBackward');
+      await input(mixedText, 'historyUndo');
+      expect(textarea.value).toBe(mixedText);
+      expect(commandRanges()).toHaveLength(0);
+    }
+  );
+
   it('inserts a quote at the caret, preserves it after rejection, and restores deletion with undo/redo', async () => {
     scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
     const composerRef = createRef<SessionChatInputAreaHandle>();

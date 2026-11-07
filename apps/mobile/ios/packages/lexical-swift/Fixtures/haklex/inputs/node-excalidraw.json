@@ -1,0 +1,16 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "excalidraw",
+        "snapshot": "{\"elements\":[{\"id\":\"rect1\",\"type\":\"rectangle\",\"x\":100,\"y\":100,\"width\":200,\"height\":120,\"strokeColor\":\"#1971c2\",\"backgroundColor\":\"#a5d8ff\",\"fillStyle\":\"solid\",\"strokeWidth\":2,\"roughness\":1,\"opacity\":100,\"seed\":1,\"version\":1,\"versionNonce\":1,\"isDeleted\":false,\"boundElements\":null,\"updated\":1,\"link\":null,\"locked\":false},{\"id\":\"ellipse1\",\"type\":\"ellipse\",\"x\":350,\"y\":140,\"width\":160,\"height\":80,\"strokeColor\":\"#e8590c\",\"backgroundColor\":\"#ffc078\",\"fillStyle\":\"solid\",\"strokeWidth\":2,\"roughness\":1,\"opacity\":100,\"seed\":2,\"version\":1,\"versionNonce\":2,\"isDeleted\":false,\"boundElements\":null,\"updated\":1,\"link\":null,\"locked\":false}],\"appState\":{},\"files\":{}}",
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

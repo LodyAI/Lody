@@ -22,3 +22,6 @@
 [submodule "packages/acp-extension-devin"]
 	path = packages/acp-extension-devin
 	url = https://github.com/LodyAI/acp-extension-devin.git
+[submodule "mobile-chat-kit"]
+	path = apps/mobile/ios/packages/chat-kit
+	url = https://github.com/Innei/ChatKit

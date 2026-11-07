@@ -1,0 +1,159 @@
+{
+  "phase": 2,
+  "date": "2026-10-28",
+  "status": "authenticated cloud read verified; natural-expiry renewal and extended stability remain unverified",
+  "device": "Pixel 8 emulator, Android 14 API 34 ARM64",
+  "webview": "149.0.7827.91",
+  "javascriptTests": {
+    "passed": 15,
+    "failed": 0
+  },
+  "junit": [
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.cloud.CloudProbeControllerTest.xml",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.runtime.RuntimeOwnerTest.xml",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.runtime.RuntimeHealthTest.xml",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.cloud.StreamAccessTest.xml",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.runtime.RuntimeProtocolTest.xml",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.auth.AccountControllerTest.xml",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.auth.DeviceFlowTest.xml",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.auth.CloudAuthHttpTest.xml",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/TEST-app.lody.android.runtime.ChunkAssemblerTest.xml",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "report": "verification/reports/phase-2/device.xml",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "builds": [
+    "assembleDebug",
+    "assembleRelease",
+    "lintDebug"
+  ],
+  "release": {
+    "networkAssetPresent": true,
+    "diagnosticAssetsAbsent": true,
+    "diagnosticClassesAbsent": true
+  },
+  "realCloud": {
+    "deviceCodeIssuance": "passed",
+    "userAuthorization": "passed: user independently authorized Android Device Flow",
+    "workspaceDiscovery": "passed: five accessible workspaces",
+    "streamsBootstrapAndLongPoll": "real Lody catalog reached LIVE: 43 projects, 1793 sessions, 15 streams; shared loop uses long-poll, individual HTTP requests were not separately captured",
+    "backgroundResume": "returned to LIVE with same catalog; transient UNAVAILABLE observed during recovery",
+    "networkRecovery": "Wi-Fi and cellular disabled: UNAVAILABLE; both restored: automatic LIVE after approximately two minutes without login or manual reconnect",
+    "credentialRestore": "force-stop/relaunch changed PID 23057 to 24964; account and workspace list restored without new authorization; no catalog cache restored",
+    "naturalExpiryGrantRenewal": "not independently verified; deterministic renewal/retry/migration tests passed",
+    "sustainedStability": "not established; transient network_or_auth observed during this session",
+    "postRestartSync": "reselected Lody and returned LIVE with 43 projects / 1793 sessions / 15 streams"
+  },
+  "review": {
+    "importantFindingsFixed": 3,
+    "deferredMinor": [
+      "initial grant receipt deadline",
+      "finer native grant error category"
+    ]
+  },
+  "scopeExcluded": [
+    "catalog persistence",
+    "product navigation",
+    "sending",
+    "physical-device/version matrix"
+  ],
+  "snapshotFilesVerified": 64,
+  "lintFindings": [
+    {
+      "id": "OldTargetApi",
+      "severity": "Warning"
+    },
+    {
+      "id": "AndroidGradlePluginVersion",
+      "severity": "Warning"
+    },
+    {
+      "id": "GradleDependency",
+      "severity": "Warning"
+    },
+    {
+      "id": "GradleDependency",
+      "severity": "Warning"
+    },
+    {
+      "id": "NewerVersionAvailable",
+      "severity": "Warning"
+    },
+    {
+      "id": "DataExtractionRules",
+      "severity": "Warning"
+    },
+    {
+      "id": "MissingApplicationIcon",
+      "severity": "Warning"
+    },
+    {
+      "id": "UseKtx",
+      "severity": "Warning"
+    }
+  ],
+  "uiEvidence": "verification/evidence/phase-2",
+  "uiVerdict": "pending visual review; product UI design remains later scope",
+  "artifactCheck": {
+    "warnings": [],
+    "pending": []
+  }
+}

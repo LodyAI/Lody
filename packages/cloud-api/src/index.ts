@@ -1,3 +1,22 @@
+export type SubscriptionPaymentStatus = {
+  billingInterval: BillingInterval;
+  effectiveAt: number | null;
+  payment?: {
+    status: 'settled' | 'required' | 'checking';
+    amountRemaining?: number;
+    currency?: string;
+    invoiceUrl?: string | null;
+    hasMore?: boolean;
+    outstandingInvoices?: Array<{
+      id: string;
+      status?: string;
+      amountRemaining: number;
+      currency: string;
+      invoiceUrl: string | null;
+    }>;
+  };
+};
+
 import type {
   E2eeContentTokenRequest,
   E2eeContentToken,
@@ -392,9 +411,12 @@ type UpcomingInvoicePreview = {
  * `billed` quotes the prorated charge applied when the invitation is accepted.
  */
 export type SeatInvitePreview =
-  | { status: 'not_billed'; reason: 'free' | 'covered' }
+  | { status: 'not_billed'; reason: 'free' | 'covered'; availableSeats?: number }
   | {
       status: 'billed';
+      addedSeats?: number;
+      paymentAction?: 'method_required' | 'payment_required' | 'refresh';
+      invoiceAt?: number | null;
       interval: BillingInterval;
       unitAmount: number | null;
       proratedAmount: number | null;
@@ -407,10 +429,6 @@ export type SeatInvitePreview =
 
 export type CloudApi = {
   e2eeMachineSharing: {
-    latestForMember: Query<
-      E2eeMachineSharingRequests['latestForMember'],
-      E2eeMachineSharingReplies['latestForMember']
-    >;
     readHead: Action<E2eeMachineSharingRequests['readHead'], E2eeMachineSharingReplies['readHead']>;
     readVersion: Action<
       E2eeMachineSharingRequests['readVersion'],
@@ -487,7 +505,6 @@ export type CloudApi = {
     complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
   };
   e2eeWorkspaces: {
-    accountIdentity: Action<Record<string, never>, { accountId: string; cryptoUserId: string }>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
@@ -496,6 +513,14 @@ export type CloudApi = {
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   e2eeRecoveryVault: {
+    hasAccountVault: Query<Record<string, never>, { exists: boolean }>;
+    replacementState: Query<
+      Record<string, never>,
+      { current: string | null; replacing: string | null }
+    >;
+    reserveReplacementVault: Mutation<{ vaultId: string }, { ok: true }>;
+    finishReplacement: Mutation<{ oldVaultId: string; newVaultId: string }, { ok: true }>;
+    abandonReplacement: Mutation<{ vaultId: string }, { ok: true }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;
@@ -703,7 +728,10 @@ export type CloudApi = {
         pendingInvitationCount: number;
       } | null
     >;
-    getWorkspaceSeatInvitePreview: Query<{ workspaceId: string }, SeatInvitePreview | null>;
+    getWorkspaceSeatInvitePreview: Query<
+      { workspaceId: string; requestedSeats?: number },
+      SeatInvitePreview | null
+    >;
     listDeletedWorkspaceBillingAccounts: Query<
       Record<string, never>,
       Array<{ workspaceId: string; name: string }>
@@ -721,12 +749,18 @@ export type CloudApi = {
     previewSubscriptionIntervalChange: Action<
       { workspaceId: string; interval: BillingInterval },
       {
+        quoteId: string;
+        continuation?: boolean;
         currency: string;
         interval: BillingInterval;
         quantity: number;
         unitAmount: number;
         subtotalAmount: number;
         promoDiscountAmount: number;
+        accruedSeatAmount?: number;
+        adjustmentAmount?: number;
+        taxAmount?: number;
+        balanceAmount?: number;
         creditAmount: number;
         deferredToBalanceAmount: number;
         amountDueNow: number;
@@ -758,9 +792,10 @@ export type CloudApi = {
       { workspaceId: string; cancel: boolean },
       { cancelAtPeriodEnd: boolean; currentPeriodEnd: number | null }
     >;
+    getSubscriptionPaymentStatus: Action<{ workspaceId: string }, SubscriptionPaymentStatus>;
     setSubscriptionInterval: Action<
-      { workspaceId: string; interval: BillingInterval },
-      { billingInterval: BillingInterval; effectiveAt: number | null }
+      { workspaceId: string; interval: BillingInterval; quoteId?: string },
+      SubscriptionPaymentStatus
     >;
   };
   githubPersonalAuthorization: {

@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:name="android.app.Application" android:label="Lody M3E 试样" android:theme="@android:style/Theme.Material.Light.NoActionBar" tools:replace="android:name,android:label">
+        <activity android:name="app.lody.android.home.HomeActivity" tools:node="remove" />
+        <activity android:name="app.lody.android.diagnostics.ExpressivePreviewActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

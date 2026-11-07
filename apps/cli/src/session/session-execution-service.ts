@@ -111,6 +111,7 @@ import {
   getSessionRoomId,
   hasBuiltinRuntimeOverrideValues,
   hasRecentResumeNotice,
+  isReplayEntryExcluded,
   isSessionCollaborationStopped,
   type IssuePRMention,
   type LocalProjectId,
@@ -3083,8 +3084,19 @@ export class SessionExecutionService {
     });
   }
 
-  async dispatchPreparedSessionTurn(options: PreparedSessionDispatchOptions): Promise<void> {
-    const { sessionId, userTurnId, dispatchSource } = options;
+  async dispatchPreparedSessionTurn(prepared: PreparedSessionDispatchOptions): Promise<void> {
+    const { sessionId, userTurnId, dispatchSource } = prepared;
+    // Ordinary workspaces must stay synchronous up to the first registration below.
+    const verifiedUserId = this.deps.encryptedExecution
+      ? await this.verifiedRequesterUserId(sessionId, userTurnId, prepared.invocation?.inputConfig)
+      : undefined;
+    const options =
+      verifiedUserId && prepared.invocation
+        ? {
+            ...prepared,
+            invocation: { ...prepared.invocation, requesterUserId: verifiedUserId },
+          }
+        : prepared;
     const expectedTurnId = this.getAssistantEntryIdForUserTurn(userTurnId);
     const span = startTraceSpan(this.deps.logger, 'execution.prepared_session_turn', {
       sessionId,
@@ -4690,11 +4702,15 @@ export class SessionExecutionService {
       ) {
         const control = await sessionDoc.getDocState();
         const receipt = control?.humanInputReceipts?.[invocation.sourceTurnId];
-        if (receipt?.userId === invocation.requesterUserId)
+        // Encrypted receipts carry a display label; the requester here is already verified.
+        if (
+          receipt &&
+          (this.deps.encryptedExecution || receipt.userId === invocation.requesterUserId)
+        )
           await this.acceptInboxHumanInput({
             sessionId,
             inputId: invocation.sourceTurnId,
-            userId: receipt.userId,
+            userId: invocation.requesterUserId,
             config: invocation.inputConfig,
           });
       }
@@ -6132,6 +6148,68 @@ export class SessionExecutionService {
     return builder.finish();
   }
 
+  /**
+   * Create dispatch has no `meta.acpSessionId`, but that does not prove the
+   * conversation is empty: a first start can fail during process startup.
+   * Replay is best-effort. Wait briefly for earlier turns, but if the mirror or
+   * backend cannot provide them, start the requested turn without replay rather
+   * than blocking a session that otherwise could run.
+   */
+  private hasPriorCreateHistory(
+    meta: SessionMeta | undefined,
+    userTurnId: string | undefined
+  ): boolean {
+    if (!meta) return false;
+    if ((meta.externalHistory?.importedTurnCount ?? 0) > 0) return true;
+    return [meta.lastHandledUserMsgId, meta.processingUserMsgId, meta.latestUserMsgId].some(
+      (turnId) => !!turnId && turnId !== userTurnId
+    );
+  }
+
+  private async buildCreateHistoryReplay(args: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId?: string;
+    meta?: SessionMeta;
+  }): Promise<ReplayPromptResult | undefined> {
+    const { sessionId, sessionDoc, userTurnId, meta } = args;
+    if (!userTurnId || !this.hasPriorCreateHistory(meta, userTurnId)) {
+      return undefined;
+    }
+
+    try {
+      const replayHistory = await this.waitForReplayableHistory({
+        sessionId,
+        sessionDoc,
+        excludeTurnId: userTurnId,
+      });
+      const hasReplayableEntry = replayHistory.some(
+        (entry) =>
+          !isReplayEntryExcluded(entry, userTurnId) &&
+          (entry.role === 'user' || entry.role === 'assistant')
+      );
+      if (!hasReplayableEntry) {
+        this.deps.logger.warn(
+          `[${sessionId}] Continuing create without history replay; prior turns were expected but none are replayable`
+        );
+        return undefined;
+      }
+      const replay = await this.buildHistoryReplay(sessionDoc, userTurnId);
+      if (replay.stats.messagesIncluded === 0) {
+        this.deps.logger.warn(
+          `[${sessionId}] Continuing create without history replay; replay contained no messages`
+        );
+        return undefined;
+      }
+      return replay;
+    } catch (error) {
+      this.deps.logger.warn(
+        `[${sessionId}] Continuing create without history replay: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async getSessionBackend(
     sessionDoc: SessionDocument,
     sessionId: SessionId
@@ -6167,7 +6245,8 @@ export class SessionExecutionService {
     ): boolean =>
       history.some(
         (entry) =>
-          entry.id !== args.excludeTurnId && (entry.role === 'user' || entry.role === 'assistant')
+          !isReplayEntryExcluded(entry, args.excludeTurnId) &&
+          (entry.role === 'user' || entry.role === 'assistant')
       );
 
     let latest = await this.getSessionHistoryQuery(args.sessionDoc);
@@ -6519,10 +6598,44 @@ export class SessionExecutionService {
     return { kind: 'github', repoFullName, branch };
   }
 
+  /** Encrypted starts run as the verified signer; a row's `userId` stays display data. */
+  private async verifiedRequesterUserId(
+    sessionId: string,
+    userTurnId: string | undefined,
+    inputConfig: unknown
+  ): Promise<string | undefined> {
+    const gate = this.deps.encryptedExecution;
+    if (!gate?.resolveRequester || !userTurnId) return undefined;
+    const requester = await Effect.runPromise(
+      gate.resolveRequester({
+        workspaceId: this.deps.workspaceId,
+        sessionId,
+        userTurnId,
+        inputConfig,
+      })
+    ).catch(() => undefined);
+    return requester && 'userId' in requester ? requester.userId : undefined;
+  }
+
+  private async withVerifiedRequester<
+    T extends { sessionId: string; userTurnId?: string; userId: string; acpSessionConfig: unknown },
+  >(message: T): Promise<T> {
+    const userId = await this.verifiedRequesterUserId(
+      message.sessionId,
+      message.userTurnId,
+      message.acpSessionConfig
+    );
+    return userId ? { ...message, userId } : message;
+  }
+
   async continueSession(
-    message: SessionChatRequestValidated,
+    rawMessage: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    const message =
+      dispatchOptions?.dispatchSource === 'inbox'
+        ? rawMessage
+        : await this.withVerifiedRequester(rawMessage);
     if (
       dispatchOptions?.dispatchSource === 'inbox' &&
       (!dispatchOptions.inboxBatch || !this.operationInbox)
@@ -7539,9 +7652,10 @@ export class SessionExecutionService {
   }
 
   async startSession(
-    message: SessionCreateRequestValidated,
+    rawMessage: SessionCreateRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    const message = await this.withVerifiedRequester(rawMessage);
     const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
     const userTurnId =
       typeof message.userTurnId === 'string' && message.userTurnId.trim()
@@ -7812,6 +7926,15 @@ export class SessionExecutionService {
           });
 
           yield* abortIfCancelled();
+          const replayPromptResult = yield* self.tryPromise(() =>
+            self.buildCreateHistoryReplay({
+              sessionId,
+              sessionDoc,
+              userTurnId,
+              meta: existingMeta,
+            })
+          );
+          yield* abortIfCancelled();
           if (project?.kind === 'local') {
             if (!workdir) {
               yield* Effect.fail(
@@ -7902,7 +8025,12 @@ export class SessionExecutionService {
                 await self.deps.buildAcpPromptBlocks({
                   workspaceId,
                   sessionId,
+                  userTurnId,
                   inputBlocks: sessionInputBlocks,
+                  replayPromptText:
+                    replayPromptResult && replayPromptResult.stats.messagesIncluded > 0
+                      ? replayPromptResult.promptText
+                      : undefined,
                 })
             );
           };

@@ -9,7 +9,7 @@ Translation: current
 登录不等于设备获准。每个安装持有独立 Ed25519/X25519 密钥，同 profile 的标签与
 worker 共用一个受控安装。本 Spec 扩展平台边界，不改变账本 v1、HPKE、签名字节或
 内容格式，也不启用产品组合。[Owner 批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#client-custody-修订批准)
-列明获批的确切修订及范围。恢复库保持 draft，不属于本次工作。
+列明获批的确切修订及范围。恢复库另行批准，不属于本次工作。
 
 ## 信任与保护
 

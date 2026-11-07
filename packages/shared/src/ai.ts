@@ -1633,6 +1633,19 @@ export function isSessionFileSourcePath(value: string): boolean {
   return !normalized.split('/').some((segment) => segment === '..');
 }
 
+/** A scoped host registration. Never a blob key or an upload candidate. */
+export type SessionLocalAttachment = {
+  type: 'local_attachment';
+  referenceId: string;
+  machineId: string;
+  sessionId: string;
+  turnId: string;
+  kind: 'file' | 'image';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
 export type SessionFilePayload = {
   encryption?: import('./encrypted-attachment').EncryptedAttachment;
   type: 'file';
@@ -1745,6 +1758,7 @@ export type SessionInputBlock =
       type: 'image';
     } & SessionImagePayload)
   | SessionFilePayload
+  | SessionLocalAttachment
   | ({
       type: 'comment_reference';
     } & CommentReferencePayload)
@@ -1827,6 +1841,7 @@ export type MessageContent =
     } & SessionImagePayload)
   | SessionImageGroupContent
   | SessionFilePayload
+  | SessionLocalAttachment
   | {
       type: 'thought';
       text: string;

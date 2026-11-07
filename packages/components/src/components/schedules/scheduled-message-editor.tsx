@@ -1,3 +1,4 @@
+import { getDroppedFileLocalPath } from '@/lib/dropped-local-path';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
@@ -108,6 +109,7 @@ export function ScheduledMessageEditor({
         id: crypto.randomUUID(),
         kind,
         source: file,
+        localSourcePath: getDroppedFileLocalPath(file) ?? undefined,
         name: file.name,
         mimeType: file.type,
         lastModified: file.lastModified,
@@ -131,6 +133,7 @@ export function ScheduledMessageEditor({
                 ...(text.trim() ? [{ type: 'text' as const, text }] : []),
               ];
         const message = await prepareScheduledMessage({
+          scheduleId: document.definition.scheduleId,
           runtime,
           sessionId: target.sessionId as SessionId,
           machineId: document.definition.machineId as MachineId,

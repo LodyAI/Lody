@@ -237,7 +237,8 @@ workflow's.
     background (`deliverKeys`) so the new device receives the current epoch key, which
     the invitation does not carry. Approval does not wait for it. Each attempt ends
     with mailbox evidence (`keyDeliveryEvidence`); anything short of `delivered` is
-    retried on a bounded backoff. Each attempt acquires the session, releases it when
+    retried on a bounded backoff, and a retry first refreshes the ledger, for at most
+    30 seconds, because the mailbox refuses a sender behind it. Each attempt acquires the session, releases it when
     done (so no reader stays open across the backoff), and ends if the session
     belongs to another device (another account); the journal stores the same envelope
     id and bytes. The workflow releases the sessions it listed when it finishes. `onKeyDelivery` reports `running`,
@@ -248,6 +249,23 @@ workflow's.
   accurate.
 
 Identity protection comes from each host's platform (`PersonalHostPlatform.protection`).
+
+## Restore from a vault
+
+`prepareVaultRestore` builds a restore plan from an unlocked vault on a device that knows
+nothing about the workspace. The genesis comes only from the authenticated package, and
+the platform's ports open after that. Core then verifies the ledger, the package checkpoint
+and the current-epoch commitment before R admits the new device. No product flow calls it
+yet. [Spec](../../specs/e2ee/recovery-vault.md).
+
+## Replace a whole vault
+
+`replaceAccountVault` proves a new R for every workspace before revoking any old R, and
+makes the new vault current last. Every step resumes from its own journal, so rerunning is
+safe. `abandonVaultReplacement` gives up on the device that started, and
+`planVaultReplacement` names workspaces the device cannot act on.
+`recoverySubmitOriginal` and `recoveryFetchEnvelope` adapt the service to core.
+[Spec](../../specs/e2ee/recovery-vault.md).
 
 ## Verification and limits
 

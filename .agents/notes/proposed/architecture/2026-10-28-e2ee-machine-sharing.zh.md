@@ -40,7 +40,7 @@ PR: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.co
 
 复用既有 content-v0 document-update 密码学，固定资源 `machine-access:<unpadded-base64url(machineIdUtf8)>:<ownerMembershipIdHex>:<generationHex>`、docEpoch 零和签名／AAD 绑定 `lody-e2ee/machine-sharing/v2\0`。完整原始密文帧用 SHA-256 摘要，不能哈希解码状态；帧上限仍为 262287 字节。未知结果保留原文重试，不重新加密或自动重放。没有 v1 策略读取、回退或静默转换。
 
-后端使用凭据身份、账本验证的当前代次与 `admitMachineSharingFrame`；在同一原子 mutation 中复查当前 personal／成员／机器资格与代次，比较完整 scope／status／版本／摘要，去重请求意图并插入原文与 head。旧代 pending 请求即使版本／摘要数值相同也冲突；已提交精确重试返回原收据或清理后的 removed，同 requestId 改变意图要失败。最小请求意图收据和移除 cutoff 保留；清理绑定旧代次，不能删除新代提交。版本清理后可返回 null，readHead 保留旧 removed 高水位，不能把它当可信 pin。账号 `latestForMember` 仅向当前工作区成员返回密文／未验证元数据，不续期执行新鲜度。
+后端使用凭据身份、账本验证的当前代次与 `admitMachineSharingFrame`；在同一原子 mutation 中复查当前 personal／成员／机器资格与代次，比较完整 scope／status／版本／摘要，去重请求意图并插入原文与 head。旧代 pending 请求即使版本／摘要数值相同也冲突；已提交精确重试返回原收据或清理后的 removed，同 requestId 改变意图要失败。最小请求意图收据和移除 cutoff 保留；清理绑定旧代次，不能删除新代提交。版本清理后可返回 null，readHead 保留旧 removed 高水位，不能把它当可信 pin。
 
 `readMachineSharingHistoryStep` 允许在原 personal 签发者撤销后读取同代、历史入账的所有者个人设备签名的完整正文，不产生执行凭证，也不证明发布时刻或当时权限。只有新的明确所有者意图可在同代保留该状态，由当前有效 personal 设备签发 n+1；machine/recovery 签名不能作为恢复输入。`openMachineSharingPolicy` 和 `authorizeMachineExecution` 继续要求当前有效所有者个人设备授权，Guest/recovery 不执行，全团队包括未来合格成员。活跃代次内缺失历史不能跳过。
 
@@ -97,7 +97,7 @@ owner 确认的 MVP 允许新成员读取工作区全部历史。因此，会话
 
 ## 发送端撤回闸门
 
-机器发现加密输入有两条途径：签名的 RPC 快速路径，以及已同步会话历史中的待处理轮次。历史来源由写入者认证，因此待处理的用户轮次一旦同步就可以执行。已经验证到撤回的诚实发送端因此不得写入这条输入。加密发送在写入任何元数据、回执或历史之前先准备 dispatch；如果宿主返回已验证的拒绝 `e2ee_machine_not_shared`，发送以"未发送"失败，composer 保留草稿。`prepareDispatch` 把无法验证的策略单独报告为 `e2ee_machine_sharing_unavailable`。这一结果与超时、传输失败一样仍属未知：输入照旧写入，由接收机器决定。"先写入、事后修复轮次"的方案被否决，因为上传和机器发现历史会与修复竞争。
+加密发送在写入任何元数据、回执或历史之前先准备 dispatch。已验证的拒绝 `e2ee_machine_not_shared` 会让发送以"未发送"失败，composer 保留草稿。策略无法验证、宿主没有策略读取能力、超时或传输失败都属未知：输入照常写入，由接收机器决定。这项检查在写入之前运行，而不是事后修复。
 
 已验证的撤回必须保持已知。宿主从资源的已接受 pin 推导它：pin 绑定工作区、genesis、机器、所有者和 generation，只随更新的已验证 head 推进；失败、回滚或过期的刷新都不会改写它。`knownDenial` 在本地重新打开 pin 住的策略。拒绝只需要历史资格：签发它的所有者个人设备在签署时已被接纳即可；该设备后来被撤销只会让授权失效（需要重新签名），不会让已保留的拒绝失效。`authorize` 返回该拒绝而不是未知失败，桌面端的 prepare 在任何网络读取之前先检查它。只有更新的已验证读取（可见索引刷新或设置视图）才能解除。renderer 也会在本运行时内记住每个已验证的撤回，直到之后某次 prepare 成功。对这类机器，超过 200 ms 期限的 prepare 会被拒绝；对其他机器仍按未知处理：轮次照旧写入，若迟到的结果是已验证撤回，则把该轮次改为 `canceled`。这一步使用提交时的 `onlyAwaitingStart` 守卫，已被机器认领的轮次保持其自身结果。该守卫只保护本副本的提交：并发的离线副本仍可能合并覆盖 `canceled`。这种取消是尽力而为，不是全局撤回证明；这种情况仍由机器侧 owner 批准的窗口兜底。排队行没有历史轮次可结算，同样依赖该窗口。
 

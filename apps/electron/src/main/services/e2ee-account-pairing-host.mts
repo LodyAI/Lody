@@ -8,7 +8,7 @@ import type {
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
-import { decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
+import { accountUserId, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
 import type { EpochStagingStore, KeyMailbox } from '@lody/e2ee-core/services'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import {
@@ -31,7 +31,6 @@ const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code }
 
 /** The cloud calls this host needs; the desktop cloud client implements them. */
 export interface AccountPairingCloud {
-  accountIdentity(): Effect.Effect<{ accountId: string; cryptoUserId: string }, unknown>
   history(request: E2eeWorkspaceHistoryRequest): Effect.Effect<E2eeWorkspaceHistoryPage, unknown>
   appendRecord(request: E2eeAppendRecordRequest): Effect.Effect<unknown, unknown>
   /** Key-round services for one device, bound to the current signed-in client. */
@@ -225,9 +224,11 @@ export function makeDesktopAccountPairingHost(input: {
   const ownMembership = Effect.fnUntraced(function* (
     view: import('@lody/e2ee-core/protocol').LedgerView
   ) {
-    const { cryptoUserId } = yield* cloud.accountIdentity()
-    const mine = [...view.inspectState().members.entries()].filter(
-      ([, member]) => hex(member.userId.toBytes()) === cryptoUserId
+    const userId = yield* Effect.mapError(Effect.fromResult(accountUserId(input.accountId)), () =>
+      fail('missing-binding')
+    )
+    const mine = [...view.inspectState().members.entries()].filter(([, member]) =>
+      member.userId.equals(userId)
     )
     if (mine.length !== 1) return yield* Effect.fail(fail('missing-binding'))
     return mine[0]![0]

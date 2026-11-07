@@ -768,6 +768,41 @@ export interface SessionFileUploadResponse {
  *
  * Mirrors `SessionFileUploadRequest`; the only difference is the message type.
  */
+export type SessionAttachmentResolveRequest = {
+  type: 'session/attachment-resolve';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  attachment: import('./ai').SessionLocalAttachment;
+};
+export type SessionAttachmentResolveResponse = {
+  type: 'session/attachment-resolve_response';
+  sessionId: SessionId;
+  success: boolean;
+  path?: string;
+  error?: string;
+};
+export type SessionAttachmentRegisterRequest = {
+  type: 'session/attachment-register';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  turnId: string;
+  referenceId: string;
+  path: string;
+  managed: boolean;
+  kind: 'file' | 'image';
+  fileName: string;
+  mimeType: string;
+};
+export type SessionAttachmentRegisterResponse = {
+  type: 'session/attachment-register_response';
+  sessionId: SessionId;
+  success: boolean;
+  error?: string;
+  attachment?: import('./ai').SessionLocalAttachment;
+};
+
 export interface SessionFileSendLocalRequest {
   type: 'session/file-send-local';
   machineId: MachineId;
@@ -966,6 +1001,8 @@ export type LocalSessionControlRequest =
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
+  | SessionAttachmentRegisterRequest
+  | SessionAttachmentResolveRequest
   | SessionHistoryReadRequest
   | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
@@ -997,6 +1034,8 @@ export type LocalSessionControlResponse =
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse
+  | SessionAttachmentRegisterResponse
+  | SessionAttachmentResolveResponse
   | SessionHistoryReadResponse
   | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse

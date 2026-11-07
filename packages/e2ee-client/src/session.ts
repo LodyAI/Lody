@@ -736,7 +736,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               : []
           )
         ),
-      refresh: () => run(serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())))),
+      refresh: (timeoutMs?: number) => {
+        const refresh = serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())));
+        return run(timeoutMs === undefined ? refresh : refresh.pipe(Effect.timeout(timeoutMs)));
+      },
       keyRound: () => run(keyRound()),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
       status: () => run(status()),

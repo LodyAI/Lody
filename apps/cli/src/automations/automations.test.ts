@@ -7,7 +7,10 @@ import { OrchestrationConnection } from '../orchestration/platform/database';
 import { classifyCapacityFailure } from '@/session/acp-error-classification';
 import type { RateLimitsSnapshot } from 'acp-extension-core';
 import { retainsAutomationGrant } from './actions/authorization';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchAutomationContext } from './context/fetch';
+import { execAutomationCommand } from './context/exec';
+import { platformLayer } from '@/platform/process-options';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -620,6 +623,76 @@ describe('Capacity evidence', () => {
 
 describe('JavaScript conditions', () => {
   const context = { sessionId: 'session', workspaceId: 'workspace', now: 100 };
+  it('passes command results through the condition interpreter', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-automation-exec-'));
+    roots.push(root);
+    const program = `async ({ctx}) => {
+      const result = await ctx.exec({command: ${JSON.stringify(process.execPath)}, args: ['-e', 'process.stdout.write("ready"); process.exitCode = 7']});
+      return result.exitCode === 7 ? {resumeText: result.stdout} : false;
+    }`;
+    const result = await Effect.runPromise(
+      evaluateProgram(
+        program,
+        context,
+        () => Effect.fail('unexpected read'),
+        false,
+        (input) =>
+          execAutomationCommand(input, root, { PATH: process.env.PATH }).pipe(
+            Effect.provide(platformLayer({}))
+          )
+      )
+    );
+    expect(result).toEqual({ resumeText: 'ready' });
+  });
+  it('exposes buffered HTTP responses to conditions', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"ready":true}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    try {
+      expect(
+        await evaluateAutomationProgram(
+          `async ({ctx}) => {
+        const response = await ctx.fetch('https://example.com/status');
+        const data = await response.json();
+        return response.ok && data.ready ? { resumeText: 'Ready' } : false;
+      }`,
+          context,
+          async () => {
+            throw new Error('unexpected read');
+          }
+        )
+      ).toEqual({ resumeText: 'Ready' });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+  it('rejects oversized bodies and aborts active HTTP requests', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('x'.repeat(64 * 1024 + 1)))
+      .mockImplementationOnce(
+        (_url, options) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            });
+          })
+      );
+    try {
+      await expect(
+        fetchAutomationContext({ url: 'https://example.com' }, new AbortController().signal)
+      ).rejects.toThrow('AUTOMATION_FETCH_BODY_TOO_LARGE');
+      const controller = new AbortController();
+      const pending = fetchAutomationContext({ url: 'https://example.com' }, controller.signal);
+      controller.abort();
+      await expect(pending).rejects.toThrow('aborted');
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
   it('checks arbitrary state asynchronously and persists one continuation across restart', async () => {
     const { ledger, open } = fixture();
     const program = `async ({ ctx }) => {
@@ -714,6 +787,42 @@ describe('JavaScript conditions', () => {
         )
       )
     ).rejects.toThrow();
+  });
+  it('aborts a fetch when the evaluation is interrupted', async () => {
+    const entered = Deferred.makeUnsafe<void>();
+    let aborted = false;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            'abort',
+            () => {
+              aborted = true;
+              reject(new Error('aborted'));
+            },
+            { once: true }
+          );
+          Effect.runSync(Deferred.succeed(entered, undefined));
+        })
+    );
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fiber = yield* evaluateProgram(
+              `async ({ctx}) => { await ctx.fetch('https://example.com'); return false; }`,
+              context,
+              () => Effect.fail('unexpected read')
+            ).pipe(Effect.forkChild);
+            yield* Deferred.await(entered);
+            yield* Fiber.interrupt(fiber);
+            expect(aborted).toBe(true);
+          })
+        )
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
   it('interrupts and joins an in-flight scoped read on cancellation', async () => {
     const entered = Deferred.makeUnsafe<void>();

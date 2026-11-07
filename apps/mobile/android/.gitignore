@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+.kotlin/
+.idea/
+local.properties
+**/build/
+.DS_Store
+*.jks
+*.keystore
+node_modules/
+.ryugi/artifacts/.state/
+
+.ryugi/sdd/
+
+# Local acceptance evidence and generated reports
+verification/evidence/
+verification/reports/

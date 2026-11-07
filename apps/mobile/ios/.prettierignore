@@ -1,0 +1,25 @@
+packages/dom-webview/build/
+packages/dom-webview/LICENSE
+packages/dom-webview/README.md
+pnpm-lock.yaml
+apps/ios/Lody.xcodeproj/
+apps/ios/.generated/
+node_modules/
+.expo/
+dist/
+apps/ios/verification/kit/chat/throw-tuner.html
+
+.acceptances/
+apps/ios/vendor
+.artifacts/
+packages/lexical-swift/Fixtures/haklex/
+packages/lexical-swift/Fixtures/html/
+packages/lexical-swift/Fixtures/markdown/
+packages/lexical-swift/Sources/Lexical/Documentation.docc/
+
+# User-provided conversation attachments are not project source.
+.lody/
+
+packages/lody-core/.build/
+packages/lody-core/.swiftpm/
+apps/macos/Resources/Generated/

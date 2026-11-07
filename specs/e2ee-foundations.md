@@ -262,7 +262,8 @@ Withdrawal blocks new starts/later actions without killing already running tasks
 A separate account display query returns only ciphertext/untrusted metadata.
 
 Observed withdrawal invalidates authorization immediately. A strictly less than
-15-minute memory cache bounds time since this machine's authenticated latest read
+15-minute memory cache (see [outage windows](e2ee/execution-freshness-outage.md) for
+the machine's own member) bounds time since this machine's authenticated latest read
 started, intersected with ledger/request deadlines. It does **not** prove an unknown
 withdrawal takes effect within 15 minutes if the server continuously withholds new
 heads: signatures/chains detect known rollback/forks, not globally latest state.
@@ -300,7 +301,9 @@ The execution machine initiates its own authenticated latest-ledger read and
 records local start time **before network I/O**. Verify through that read's latest
 boundary; cache only the remaining part of a maximum **15 minutes from that
 start**, in memory. Slow or failed reads and forwarded/cached pages cannot renew
-it. Intersect with request/upstream deadlines and reserve clock/stop margin;
+it. When a read gets no answer, the machine's own member keeps the longer windows of
+[execution freshness during a backend outage](e2ee/execution-freshness-outage.md),
+counted from the same start. Intersect with request/upstream deadlines and reserve clock/stop margin;
 never wait on network under a global account lock. Restart discards this grant
 and requires online authenticated revalidation before new remote execution.
 Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
@@ -404,7 +407,7 @@ product channels or establish runtime acceptance.
 
 ## Format compatibility
 
-**Freeze point.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) becomes permanent when a production deployment first enables encrypted workspace creation, because only then can a ledger exist that must never break. Merging code does not freeze it. Until that point the format may still change, but only with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault and trust-anchor encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. After the freeze the vector is never regenerated.
+**Freeze point.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) becomes permanent when a production deployment first enables encrypted workspace creation, because only then can a ledger exist that must never break. Merging code does not freeze it. Until that point the format may still change, but only with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. After the freeze the vector is never regenerated.
 
 **What freezes.** Every record that v1 accepts at a position must stay accepted by every later client, with the same bytes, hashes and resulting ledger state. New behavior, including relaxed or extended permissions, takes effect only through records after a capability declaration; it never changes how an existing record verifies.
 

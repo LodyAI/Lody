@@ -25,7 +25,7 @@ Members of an encrypted workspace had no way to check that the Lody server shows
   
   Different positions are never reported as an attack, as the whitepaper asks.
 - **Scanning** uses `getUserMedia` plus `jsqr` (Apache-2.0), only after the person presses the camera button, and releases the camera on the first decoded frame. Pasting always works. The macOS build adds the camera entitlement and `NSCameraUsageDescription`.
-- **Names and avatars** are display data, not ledger facts. The ledger's user ID is random, and no member-profile API exists yet. The page accepts `you` and `memberProfiles`. The route supplies only `you`, attached to the genesis member and only when this device holds the creation pin; others show "Member N". The hint text tells people to confirm in person which member they are.
+- **Names and avatars** are display data, not ledger facts. The ledger's user ID names an account but carries no display data, and this page takes profiles from a separate directory. The page accepts `you` and `memberProfiles`. The route supplies only `you`, attached to the genesis member and only when this device holds the creation pin; others show "Member N". The hint text tells people to confirm in person which member they are.
 
 ## Alternatives
 

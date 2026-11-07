@@ -52,7 +52,8 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   lookup needs no mention grant.
 - Each Role target binds `machineId + agentConfigId`; never guess or fall back. One
   target is a v1 row, more are v2 ([Spec](../../../specs/agent-role-machine-targets.md)).
-  Unavailable targets stay listed, unmentionable. Freeze prompt/target/revision/config
+  Unavailable targets stay listed, unmentionable; a retired model or mode pin counts
+  only when an exact runtime probe lists alternatives. Freeze prompt/target/revision/config
   at acceptance; retries ignore edits. Session Role metadata: provenance only.
   `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
 - Memory stores provider/id references, frozen per turn; daemon/env rules:

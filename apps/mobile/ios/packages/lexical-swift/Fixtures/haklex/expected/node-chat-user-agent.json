@@ -1,0 +1,65 @@
+{
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "A captured exchange between user and assistant:",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "type": "paragraph",
+        "version": 1,
+        "textFormat": 0,
+        "textStyle": ""
+      },
+      {
+        "type": "chat",
+        "version": 1,
+        "variant": "user-agent",
+        "participants": [
+          {
+            "id": "p_u_demo",
+            "kind": "user",
+            "name": "Innei"
+          },
+          {
+            "id": "p_a_demo",
+            "kind": "agent",
+            "name": "Claude"
+          }
+        ],
+        "messages": [
+          {
+            "id": "m_ua_1",
+            "participantId": "p_u_demo",
+            "content": "How does Lexical's DecoratorNode differ from ElementNode?"
+          },
+          {
+            "id": "m_ua_2",
+            "participantId": "p_a_demo",
+            "content": "The two serve different purposes:\n\n- **ElementNode** contains other nodes — paragraphs, headings, lists.\n- **DecoratorNode** renders a React component as a leaf — polls, embeds, charts.\n\nUse a decorator when the content isn't editable as text."
+          },
+          {
+            "id": "m_ua_3",
+            "participantId": "p_u_demo",
+            "content": "Got it. So for the chat node we should subclass DecoratorNode."
+          }
+        ]
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

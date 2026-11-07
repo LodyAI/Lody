@@ -1,0 +1,38 @@
+{
+  "phase": "3 first slice: connection follow-up and catalog cache",
+  "date": "2026-10-28",
+  "status": "implementation and deterministic checks passed; fresh cloud authorization needed for actual offline-restart acceptance",
+  "tests": {
+    "javascript": 15,
+    "jvm": 43,
+    "androidDevice": 24,
+    "failures": 0
+  },
+  "builds": [
+    "assembleDebug",
+    "assembleRelease",
+    "lintDebug"
+  ],
+  "device": "Pixel 8 emulator Android 14 API34; WebView149",
+  "architecture": "single module; one CatalogRepository; replaceable suspend store ports; atomic whole snapshots; conflated scoped disk worker; source-stamped generation",
+  "newDependencies": [],
+  "review": {
+    "critical": 0,
+    "importantFixed": 3,
+    "minorDeferred": 0
+  },
+  "actualCloudCacheAcceptance": "pending: app is currently signed out after instrumented verification",
+  "naturalServerGrantExpiry": "not observed; elapsed receipt lifetime and replacement tested deterministically",
+  "limits": [
+    "whole snapshots, no relational queries",
+    "8 MiB per workspace, 8 retained workspaces",
+    "no message-history UI or sending in this foundation slice",
+    "physical-device and extended reliability testing pending"
+  ],
+  "releaseDiagnosticAssetsAndActivityAbsent": true,
+  "rulings": [
+    "in-place uncommitted unborn bootstrap repository",
+    "scope is connection follow-up + cache, product pages later",
+    "AtomicFile rather than Room until relational queries are needed"
+  ]
+}
