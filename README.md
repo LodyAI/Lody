@@ -179,10 +179,7 @@ Lody’s new native mobile clients live in [apps/mobile](apps/mobile/README.md).
 They are under active development and keep independent iOS and Android build
 toolchains; see the mobile README for setup and current scope.
 
-The iOS client is built directly on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**.
-We thank [Innei](https://github.com/Innei) and the upstream contributors for the
-native app, chat experience, application architecture, and Loro/Flock protocol
-runtime that made this work possible. Android also reuses a provenance-tracked
-snapshot of that runtime. This is substantial foundational work, not merely
-inspiration. Upstream licenses, notices, and additional acknowledgements are
-preserved in the [mobile credits](apps/mobile/README.md#credits-and-origins).
+The iOS client is based on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**,
+and Android reuses its cloud protocol runtime. Thanks to Innei and the upstream
+contributors; see the [mobile credits](apps/mobile/README.md#credits-and-origins)
+for acknowledgements and licenses.

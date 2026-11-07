@@ -16,30 +16,11 @@ desktop’s local-only composition.
 
 ## Credits and origins
 
-**This work builds directly on [lody-ios](https://github.com/Innei/lody-ios),
-created by [Innei](https://github.com/Innei) and its contributors.** Their native
-iOS client is the foundation of the iOS app here, including its UIKit/Swift UI,
-LodyKit application architecture, native chat experience, and browser-safe
-Loro/Flock protocol runtime. This is a continuation of substantial upstream work,
-not an implementation started from scratch by the Lody team.
-
-The Android client also builds on that work through a provenance-tracked snapshot
-of the iOS cloud runtime and shared protocol semantics, with its own Kotlin and
-Jetpack Compose UI. Thank you to Innei and all upstream contributors for making
-this foundation available. Read Innei’s account of the original project:
-[Prototype in a Day, Shipped in a Week](https://innei.in/en/posts/tech/lody-ios-prototype-to-product).
-
-Imported from [Leeeon233/lody-mobile](https://github.com/Leeeon233/lody-mobile)
-at [`8dab135b5b5c6e3409390ebde7f57b2b5d52b2b3`](https://github.com/Leeeon233/lody-mobile/commit/8dab135b5b5c6e3409390ebde7f57b2b5d52b2b3).
-That repository brought together Innei’s iOS client and
-[LodyAI/lody-android](https://github.com/LodyAI/lody-android).
-The import preserves source and notices; the linked repositories retain the
-original commit history. [ChatKit](https://github.com/Innei/ChatKit), also by Innei,
-remains a submodule pinned to `f36df0ef559642715433baf38845e4e06600d784`.
-
-Upstream lody-ios remains an independent project. Please report issues with this
-integration to the Lody repository; inclusion here does not imply upstream
-maintainers support this fork.
+The iOS client is based on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**,
+and Android reuses its cloud protocol runtime. Thank you to
+[Innei](https://github.com/Innei) and the upstream contributors for the native app,
+chat experience, and shared runtime. Original licenses and copyright notices are
+preserved; [ChatKit](https://github.com/Innei/ChatKit) remains a pinned submodule.
 
 ## Repository layout
 
