@@ -51,11 +51,7 @@ import {
   createCliSqliteRepoStore,
   type CliSqliteRepoStore,
 } from '../src/lib/loro/sqlite-repo-store';
-import {
-  CloudE2eeLedgerOutage,
-  CloudE2eeMemberRemoved,
-  ledgerReadFailure,
-} from '../src/lib/cloud-e2ee-errors';
+import { CloudE2eeLedgerOutage, CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
 import { randomUUID } from 'node:crypto';
 import { resetCliE2eeIdentity } from '../src/lib/e2ee/reset-identity';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
@@ -7679,26 +7675,62 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
-    it('tells an outage from a refusal by the reply, not its status', () => {
-      const coded = (code: string) => Object.assign(new Error('rejected'), { data: { code } });
-      const outage = (cause: unknown, status?: number) =>
-        ledgerReadFailure(cause, status) instanceof CloudE2eeLedgerOutage;
-      expect(outage(new TypeError('fetch failed'))).toBe(true);
-      expect(outage(new DOMException('timed out', 'TimeoutError'))).toBe(true);
-      expect(outage(new Error('Bad gateway'), 502)).toBe(true);
-      expect(outage(new Error('Too many requests'), 429)).toBe(true);
-      expect(outage(new Error('[Server Error]'), 560)).toBe(true);
-      const expired = ledgerReadFailure(coded('e2ee_sign_in_expired'));
-      expect(expired).toMatchObject({ signInExpired: true });
+    it('invalidates an outage authorization when the window ends', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          expect(granted.isCurrent?.()).toBe(true);
+          io.respond = async () => {
+            throw new Error('e2ee_device_unauthorized');
+          };
+          at(io, FIFTEEN_MINUTES + 120_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(granted.isCurrent?.()).toBe(false);
+        })
+      ));
 
-      expect(outage(coded('e2ee_device_unauthorized'), 560)).toBe(false);
-      expect(outage(coded('e2ee_ledger_rollback'), 560)).toBe(false);
-      expect(outage(new CloudE2eeMemberRemoved())).toBe(false);
-      expect(outage(new Error('Forbidden'), 403)).toBe(false);
-      expect(outage(new SyntaxError('Unexpected token'), 200)).toBe(false);
-      expect(outage(new Error('Invalid response: {}'), 200)).toBe(false);
-      expect(outage(Object.assign(new Error('bad'), { name: 'ZodError' }), 200)).toBe(false);
-    });
+    it('needs a successful read after the clocks disagree', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          at(io, FIFTEEN_MINUTES + 120_000);
+          io.wall += 2 * HOUR;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 360_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps the longer read window after execution expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 5 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+        })
+      ));
 
     it('keeps another member at 15 minutes', async () => {
       const directory = await mkdtemp(join(tmpdir(), 'execution-outage-member-'));

@@ -14,19 +14,19 @@ const elapsed = (start: AuthorityStamp, now: AuthorityStamp) => ({
   monotonic: Number((now.monotonic - start.monotonic) / 1_000_000n),
 });
 
+/** False after a clock rollback, a suspend or a clock change since `start`. */
+export const authorityClocksAgree = (start: AuthorityStamp, now: AuthorityStamp): boolean => {
+  const { wall, monotonic } = elapsed(start, now);
+  return wall >= 0 && monotonic >= 0 && Math.abs(wall - monotonic) < AUTHORITY_CLOCK_SKEW_MS;
+};
+
 export const withinAuthorityLimit = (
   start: AuthorityStamp,
   now: AuthorityStamp,
   limitMs: number
 ): boolean => {
   const { wall, monotonic } = elapsed(start, now);
-  return (
-    wall >= 0 &&
-    wall < limitMs &&
-    monotonic >= 0 &&
-    monotonic < limitMs &&
-    Math.abs(wall - monotonic) < AUTHORITY_CLOCK_SKEW_MS
-  );
+  return authorityClocksAgree(start, now) && wall < limitMs && monotonic < limitMs;
 };
 
 /** Time left under {@link withinAuthorityLimit}, assuming the clocks stay in step. */

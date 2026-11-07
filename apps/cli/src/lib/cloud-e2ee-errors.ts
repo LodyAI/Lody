@@ -39,8 +39,12 @@ export function isCloudE2eeDeviceRevoked(value: unknown): boolean {
 /** Not sent by the service yet: an expired sign-in currently arrives as an ordinary refusal. */
 const SIGN_IN_EXPIRED_CODE = 'e2ee_sign_in_expired';
 
+/** A proxy or gateway reply can carry a refusal in its body, which the SDK reduces to a message. */
+const REFUSAL_TEXT = /e2ee_[a-z_]+|\bunauthori[sz]ed\b|\bforbidden\b|\brevoked\b|\bremoved\b/i;
+
 /** Maps a failed latest ledger read to the outage rule of
- * specs/e2ee/execution-freshness-outage.md. Anything else stays a refusal. */
+ * specs/e2ee/execution-freshness-outage.md. `httpStatus` is absent when no response arrived.
+ * Only a confirmed transport failure is an outage; anything else stays a refusal. */
 export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown {
   if (!(cause instanceof Error)) return cause;
   if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) return cause;
@@ -50,12 +54,11 @@ export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown 
       ? new CloudE2eeLedgerOutage({ signInExpired: true, cause })
       : cause;
   }
-  // A reply the client cannot read: invalid JSON, an unknown envelope or a failed schema.
-  if (cause.name === 'ZodError' || cause.name === 'SyntaxError') return cause;
-  if (cause.message.startsWith('Invalid response:')) return cause;
-  if (httpStatus !== undefined && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 429)
-    return cause;
-  return new CloudE2eeLedgerOutage({ cause });
+  if (httpStatus === undefined) return new CloudE2eeLedgerOutage({ cause });
+  const failedUpstream = httpStatus >= 500 || httpStatus === 429;
+  return failedUpstream && cause.name === 'Error' && !REFUSAL_TEXT.test(cause.message)
+    ? new CloudE2eeLedgerOutage({ cause })
+    : cause;
 }
 
 /** The latest ledger read got no answer. It carries no access decision, unlike a refusal.

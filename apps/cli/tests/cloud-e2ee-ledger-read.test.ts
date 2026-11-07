@@ -1,0 +1,113 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  CloudE2eeDeviceRevoked,
+  CloudE2eeLedgerOutage,
+  CloudE2eeMemberRemoved,
+} from '../src/lib/cloud-e2ee-errors';
+import { createCloudE2eePort } from '../src/lib/cloud-cli-port';
+
+/** Only the network is replaced: replies pass through the real Convex SDK and the real port. */
+const network = vi.hoisted(() => ({
+  reply: (): Promise<Response> => Promise.reject(new Error('no reply configured')),
+}));
+vi.mock('@/utils/http-transport', async (original) => ({
+  ...(await original<object>()),
+  getCliHttpFetch: () => () => network.reply(),
+}));
+
+const UDF_FAILED = 560;
+const json = (body: unknown, status: number) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const read = () =>
+  createCloudE2eePort({ authBaseUrl: 'https://cloud.invalid', logger: {} as never })
+    .getHistory({ workspaceId: 'workspace', credential: 'a'.repeat(64) })
+    .then(
+      () => {
+        throw new Error('expected the read to fail');
+      },
+      (cause: unknown) => cause
+    );
+
+describe('latest ledger read failures through the Convex SDK', () => {
+  beforeEach(() => {
+    network.reply = () => Promise.reject(new Error('no reply configured'));
+  });
+
+  it.each<[string, () => Promise<Response>]>([
+    ['no reply', () => Promise.reject(new TypeError('fetch failed'))],
+    ['a timeout', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
+    ['a bad gateway page', async () => new Response('<html>Bad gateway</html>', { status: 502 })],
+    ['an empty 503', async () => new Response('', { status: 503 })],
+    ['a 429', async () => new Response('Too many requests', { status: 429 })],
+    [
+      'a server error with no business code',
+      async () => json({ status: 'error', errorMessage: '[Server Error]' }, UDF_FAILED),
+    ],
+  ])('treats %s as an outage', async (_name, reply) => {
+    network.reply = reply;
+    expect(await read()).toBeInstanceOf(CloudE2eeLedgerOutage);
+  });
+
+  it.each<[string, () => Promise<Response>]>([
+    [
+      'a 429 naming a refusal',
+      async () => json({ code: 'e2ee_device_revoked', message: 'refused' }, 429),
+    ],
+    [
+      'a 502 naming a refusal',
+      async () => json({ code: 'e2ee_member_removed', message: 'refused' }, 502),
+    ],
+    ['a 403', async () => new Response('Forbidden', { status: 403 })],
+    ['a 200 success with no value', async () => json({ status: 'success' }, 200)],
+    ['a 200 with an unknown status', async () => json({ status: 'pending' }, 200)],
+    ['a 200 that is not JSON', async () => new Response('<html></html>', { status: 200 })],
+    ['a success failing the page schema', async () => json({ status: 'success', value: {} }, 200)],
+    [
+      'an unauthorized code',
+      async () =>
+        json(
+          {
+            status: 'error',
+            errorMessage: 'refused',
+            errorData: { code: 'e2ee_device_unauthorized' },
+          },
+          UDF_FAILED
+        ),
+    ],
+    [
+      'an unknown business code',
+      async () =>
+        json(
+          { status: 'error', errorMessage: 'refused', errorData: { code: 'e2ee_ledger_rollback' } },
+          UDF_FAILED
+        ),
+    ],
+  ])('does not treat %s as an outage', async (_name, reply) => {
+    network.reply = reply;
+    expect(await read()).not.toBeInstanceOf(CloudE2eeLedgerOutage);
+  });
+
+  it('keeps the removal and revocation types', async () => {
+    network.reply = async () =>
+      json(
+        { status: 'error', errorMessage: 'refused', errorData: { code: 'e2ee_member_removed' } },
+        UDF_FAILED
+      );
+    expect(await read()).toBeInstanceOf(CloudE2eeMemberRemoved);
+    network.reply = async () =>
+      json(
+        { status: 'error', errorMessage: 'refused', errorData: { code: 'e2ee_device_revoked' } },
+        UDF_FAILED
+      );
+    expect(await read()).toBeInstanceOf(CloudE2eeDeviceRevoked);
+  });
+
+  it('reads an expired sign-in as an outage that asks to sign in', async () => {
+    network.reply = async () =>
+      json(
+        { status: 'error', errorMessage: 'expired', errorData: { code: 'e2ee_sign_in_expired' } },
+        UDF_FAILED
+      );
+    expect(await read()).toMatchObject({ signInExpired: true });
+  });
+});

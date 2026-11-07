@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Bytes, contentPermissions } from '@lody/e2ee-core/protocol';
 import type { CloudE2eePort } from '@lody/platform';
 import { CloudE2eeLedgerOutage } from '../cloud-e2ee-errors';
-import { withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
+import { authorityClocksAgree, withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
 import type { makeCliE2eeRuntime } from './runtime';
 
 export type ExecutionAuthorization =
@@ -213,6 +213,12 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (closed) return denied('closed');
         if (!start || (!relaxed && !fresh(start, yield* stamp))) return denied('unavailable');
         const grantedFrom = start;
+        const grantedInWindow = windowGeneration;
+        if (relaxed && !authorityClocksAgree(grantedFrom, yield* stamp)) {
+          // Only a successful read reopens this: realigned clocks prove nothing.
+          endWindow();
+          return denied('unavailable');
+        }
         // Offline state supplies immediate known revocations, never freshness.
         let generation = options.runtime.executionGeneration();
         let policyCurrent: (() => boolean) | undefined;
@@ -246,7 +252,10 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
               ? OUTAGE_READ_WINDOW_MS
               : OUTAGE_EXECUTION_WINDOW_MS;
         const current = (at: Stamp) =>
-          relaxed ? withinAuthorityLimit(grantedFrom, at, windowMs) : fresh(grantedFrom, at);
+          relaxed
+            ? windowGeneration === grantedInWindow &&
+              withinAuthorityLimit(grantedFrom, at, windowMs)
+            : fresh(grantedFrom, at);
         if (relaxed && !current(yield* stamp)) return denied('unavailable');
         if (principal === 'member') {
           grants.delete(requesterDevice);
