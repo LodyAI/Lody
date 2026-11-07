@@ -99,6 +99,46 @@ MVP 要求用户至少配对两台设备。保险库覆盖没有设备幸存的�
 `file://` 或自定义 scheme 的渲染端根本无法调用 WebAuthn。Associated Domains 标明可用于
 Developer ID 应用，但没有端到端成功的报告。
 
+## 可行性 spike：Developer ID、AuthenticationServices 与 PRF
+
+静态部分，2026-11-07，在 Linux 上完成。没有在 Mac 上构建、签名或运行过任何东西，所以可行性仍未证实。公开资料也没有定论：
+Apple 的[授权项说明](https://developer.apple.com/tutorials/data/documentation/bundleresources/entitlements/com.apple.developer.associated-domains.md)和
+[passkey 指南](https://developer.apple.com/documentation/authenticationservices/supporting-passkeys.md)都没有谈 Developer ID。
+[TeamDev 的指南](https://teamdev.com/mobrowser/tutorials/features/touch-id/)为 Chromium 应用嵌入了 Developer ID profile，但针对的是 Touch ID 钥匙串组，
+不是 `webcredentials`。[Clerk](https://clerk.com/docs/reference/electron/passkeys) 和
+[electron-webauthn-mac](https://awesome.ecosyste.ms/projects/github.com%2Fvault12%2Felectron-webauthn-mac) 只描述了开发签名。
+
+仓库现状：
+
+- 云端桌面版是私有仓 `apps/electron-cloud/electron-builder.yml` 里的 `ai.lody.desktop`。`dev.loro.lody.oss` 是不连云的公开版，没有保险库，所以下面的检查针对云端版。iOS 是 `ai.lody.mobile`。
+- `apps/electron/electron-builder.yml` 使用 hardened runtime 和公证，应用用 `entitlements`，嵌套二进制用 `entitlementsInherit`。
+- `build/entitlements.mac.plist` 没有 `com.apple.developer.associated-domains`、`com.apple.application-identifier` 和
+  `com.apple.developer.team-identifier`，也没有嵌入 profile。这三项都需要，只放在主应用上，不放进 inherit plist。
+- 主应用保留 library validation，所以原生模块必须由同一团队签名。现有的 `electron-sparkle-updater` 原生模块是打包先例。
+
+electron-builder 的 `mac.provisioningProfile` 能否嵌入 Developer ID profile，以及 Sparkle 更新后它是否仍然有效，要在第一次签名构建时确认。
+
+在 Mac 上按顺序执行，遇到第一个失败就停下：
+
+1. **签名。** 用 profile 和新授权项构建。`codesign -d --entitlements - Lody.app` 能列出这三项，`spctl -a -vv Lody.app` 接受，公证后能启动。这里启动失败是主要风险。
+2. **关联。** `curl https://app-site-association.cdn-apple.com/a/v1/vault.lody.ai` 返回文件，`sudo swcutil show` 列出应用和这个域名。
+3. **Ceremony。** 用一个最小原生模块为 `vault.lody.ai` 创建带 PRF 输入的平台 passkey，并锚定到 `BrowserWindow`。系统弹窗显示 RP，注册报告支持 PRF。
+4. **PRF。** 认证返回 32 字节，第二次认证以及通过 iCloud 钥匙串在第二台 Mac 上得到相同字节。
+5. **更新。** 从一个签名版本 Sparkle 更新到下一个后，第 2 到 4 步仍然正常。
+
+如果第 1 或第 2 步失败，Developer ID 就走不通这条路。退路是 macOS 上只用恢复文件，passkey 只留给 iPhone 和 Web 界面，这需要 owner 决定。
+
+## Web 解锁界面：最小计划
+
+尚未开始，等 macOS 和 iPhone 在真机上通过后再做。已批准的形态见 [Spec](../../../../specs/e2ee/recovery-vault.zh.md#passkey-解锁)。最小构建：
+
+1. `vault.lody.ai` 上独立的静态应用，由已提供 AASA 的 Worker 提供，没有第三方脚本和遥测，使用严格 CSP 和独立的部署凭据。
+2. 基于 `navigator.credentials` 的浏览器 `E2eePasskeyPort`，复用 `@lody/e2ee-client`。浏览器不返回 PRF 时，在同一界面提供恢复文件。
+3. 只有一条流程：登录、解锁、恢复到这个域下的浏览器设备 C，再显示配对码，让普通 Web 应用或其他设备经 C 加入。
+4. V 从不存储，V、R 和 PRF 结果都不会进入普通 Web 应用。
+
+开始前要定：这个域下如何登录，又不共享普通应用的会话。控制这台主机的恶意运营方仍可尝试发起 ceremony，Spec 已接受这一点。
+
 ## 后果与局限
 
 所有能力默认关闭，不改变配对、账本和工作区行为。以下几点仍未验证：

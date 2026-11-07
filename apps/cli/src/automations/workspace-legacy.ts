@@ -1,4 +1,6 @@
 import { readAutomationContext } from './context/reads-legacy';
+import { execAutomationCommand } from './context/exec';
+import { platformLayer } from '@/platform/process-options';
 import { observeWorkflows, checkWorkflowEvidence } from './sources/workflows';
 import { publicActivity, actionActivity, workActivity } from './control/activities';
 import { Clock, Effect, Layer, ManagedRuntime } from 'effect';
@@ -256,17 +258,40 @@ export async function createAutomationWorkspaceLegacy(options: {
     Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
       Effect.uninterruptible,
       Effect.flatMap((context) =>
-        evaluateAutomationProgram(wait.program, context, (input) =>
-          Effect.tryPromise(() =>
-            readAutomationContext({
-              ledger,
-              manager: lody.documentManager,
-              authority,
-              wait,
-              input,
-              now: Date.now(),
-            })
-          ).pipe(Effect.uninterruptible)
+        evaluateAutomationProgram(
+          wait.program,
+          context,
+          (input) =>
+            Effect.tryPromise(() =>
+              readAutomationContext({
+                ledger,
+                manager: lody.documentManager,
+                authority,
+                wait,
+                input,
+                now: Date.now(),
+              })
+            ).pipe(Effect.uninterruptible),
+          false,
+          (input) =>
+            Effect.tryPromise({
+              try: () => lody.resolveAutomationWorkdir(wait.sessionId as SessionId),
+              catch: () => new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'),
+            }).pipe(
+              Effect.flatMap((root) =>
+                root
+                  ? execAutomationCommand(input, root, {
+                      PATH: process.env.PATH,
+                      HOME: process.env.HOME,
+                      USERPROFILE: process.env.USERPROFILE,
+                      SystemRoot: process.env.SystemRoot,
+                      TMPDIR: process.env.TMPDIR,
+                      TEMP: process.env.TEMP,
+                      TMP: process.env.TMP,
+                    }).pipe(Effect.provide(platformLayer({ logger })))
+                  : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
+              )
+            )
         )
       )
     );

@@ -170,6 +170,20 @@ The scope covers these points:
 - **What the old file can still do.** For replaced workspaces, the old file can no longer admit devices or receive new keys, but anyone with the old file and the account can still open the keys it already has until rotation. Replacement does not erase copies. Passkeys must be enrolled again.
 - **Limits.** The flow needs a working personal device; a working passkey can restore one first. Workspaces the device cannot act on are named and may keep the old R. Ledger format and `formatVersion: 1` are unchanged, the flow is default-off, and the recovery vault remains outside the MVP. Approval records intent only, not implementation, deployment or real-device acceptance.
 
+## Execution freshness during a backend outage
+
+On 2026-11-07, owner Zixuan Chen (zxch3n) answered the open questions of [PR #2381](https://github.com/LodyAI/Lody/pull/2381) at head `eb0bb74d66905b59be7745ccf2386ce00bc49cfd` in their own session `b12f1597-06ba-4a6e-944c-0395a7d58542`, message `d1041859-25c8-47de-9dbc-96a8bd4e81f1`. The closeout commit writes those answers into [`specs/e2ee/execution-freshness-outage.md`](../../../../specs/e2ee/execution-freshness-outage.md) (blob `4d74fbbdf51b89def934b1f052870f4b68ee4c32` at that head), adds its Chinese version and sets its status.
+
+The scope covers these points:
+
+- **Windows.** When the latest ledger read gets no answer, the machine keeps deciding from its local verified ledger: reads by its own member for 24 hours, execution by its own member for 4 hours. Requests from other members stay at 15 minutes.
+- **Outage or refusal.** No reply, a timeout, a 5xx, a 429 and a server error with no business error code count as an outage. Removed, revoked and unauthorized end the window at once. A reply the client cannot understand is treated as a refusal.
+- **Expired sign-in.** Revised on 2026-11-07 by the owner in the same session, in message `042a6021-a85e-4ce1-973b-a32cf3a92e78` (04:29:38 UTC): it ends the window like unauthorized, because the service reports both the same way. Their first answer counted it as an outage.
+- **Visibility.** The user sees a notice while a window is in use.
+- **Consequence.** The longer bound replaces the 15-minute worst case for the same member's reads and execution, as the Spec's "Changed bound" section states. The implementation updates the 15-minute passages in the whitepaper and foundations to this meaning under this approval.
+
+Nothing here implements the change or approves the implementation.
+
 ## Machine sharing
 
 On 2026-11-02, owner Zixuan Chen (zxch3n) approved the [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) by merging [PR #2228](https://github.com/LodyAI/Lody/pull/2228) as merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`. The approved [English text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md) has Git blob `37ce21f8e5a3db433b38ac0d2701fcacf6408080`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md) has Git blob `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`. Later changes that only record this approval are editorial. The scope includes the owner's decision that withdrawal blocks new starts and further authorized actions without forcibly terminating running commands, and the 2026-10-28 acceptance that withdrawal has no strict upper bound if the server keeps withholding newer policies. Approval records intent, not deployment or two-member product acceptance.

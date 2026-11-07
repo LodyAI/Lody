@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  esbuild: true
+nodeLinker: hoisted
+minimumReleaseAgeExclude:
+  - '@rien7/anchored-overlay-kit@0.3.0'
+
+overrides:
+  happy-dom: 21.0.4

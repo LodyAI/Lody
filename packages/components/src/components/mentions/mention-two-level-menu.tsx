@@ -249,6 +249,7 @@ const styles = stylex.create({
     fontWeight: 400,
     whiteSpace: 'normal',
   },
+  noteWarning: { color: colors.warning },
   /** Trailing metadata — `#3312`, a key, a scope — in the caption step. */
   trailing: {
     flexShrink: 0,
@@ -651,7 +652,14 @@ function CandidateRow({
           {candidate.hint ? <span {...stylex.props(styles.hint)}>{candidate.hint}</span> : null}
         </span>
         {candidate.subtitle ? (
-          <span {...stylex.props(styles.note)}>{candidate.subtitle}</span>
+          <span
+            {...stylex.props(
+              styles.note,
+              candidate.subtitleTone === 'warning' && styles.noteWarning
+            )}
+          >
+            {candidate.subtitle}
+          </span>
         ) : null}
         {candidate.disabledReason ? (
           <span {...stylex.props(styles.note)}>{candidate.disabledReason}</span>
@@ -746,6 +754,7 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
           agentConfig={detail.agentRole.agentConfig}
           machine={detail.agentRole.machine}
           machineLabel={detail.agentRole.machineLabel}
+          availability={detail.agentRole.availability}
           className="absolute inset-0 h-auto w-auto"
         />
       </div>

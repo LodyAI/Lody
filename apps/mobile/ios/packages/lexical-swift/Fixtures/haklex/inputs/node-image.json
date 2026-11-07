@@ -1,0 +1,22 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "image",
+        "src": "https://picsum.photos/1200/720?random=301",
+        "altText": "Beautiful landscape",
+        "caption": "A stunning mountain landscape with loading placeholder",
+        "width": 1200,
+        "height": 720,
+        "thumbhash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+        "accent": "#7ba8c4",
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

@@ -96,9 +96,7 @@ consecutive policy versions and owns execution freshness before using the core
 pure authorization decision. Every scope includes the ledger-qualified machine binding generation. Removal
 closes the old resource; readmission starts at revision one in a new resource,
 while atomic replacement preserves generation. Storage tombstones cannot replace
-verified history pins. The separate
-`E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
-only and returns ciphertext/untrusted metadata, with no execution freshness.
+verified history pins.
 See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
 
 ## Portable personal-device runtime

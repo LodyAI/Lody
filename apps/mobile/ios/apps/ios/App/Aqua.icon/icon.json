@@ -1,0 +1,33 @@
+{
+  "fill": {
+    "solid": "extended-srgb:0.05500,0.10000,0.22000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "character.png",
+          "name": "Aqua",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [0, 0]
+          }
+        }
+      ],
+      "lighting": "individual",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.2
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.15
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

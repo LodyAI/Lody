@@ -358,6 +358,9 @@ export const cloudOperations = {
     setSubscriptionCancelAtPeriodEnd: action<
       ConvexApi['billing']['setSubscriptionCancelAtPeriodEnd']
     >('billing:setSubscriptionCancelAtPeriodEnd'),
+    getSubscriptionPaymentStatus: action<ConvexApi['billing']['getSubscriptionPaymentStatus']>(
+      'billing:getSubscriptionPaymentStatus'
+    ),
     setSubscriptionInterval: action<ConvexApi['billing']['setSubscriptionInterval']>(
       'billing:setSubscriptionInterval'
     ),

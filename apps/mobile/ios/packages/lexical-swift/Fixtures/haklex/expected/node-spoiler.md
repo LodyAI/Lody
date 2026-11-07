@@ -1,0 +1,1 @@
+This is a ||hidden spoiler text|| that reveals on hover.

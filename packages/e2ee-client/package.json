@@ -13,7 +13,8 @@
     "./errors": "./src/errors.ts",
     "./maintenance": "./src/maintenance.ts",
     "./recovery-restore": "./src/recovery-restore.ts",
-    "./vault-replacement": "./src/vault-replacement.ts"
+    "./vault-replacement": "./src/vault-replacement.ts",
+    "./passkey-unlock": "./src/passkey-unlock.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

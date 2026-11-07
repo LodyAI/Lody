@@ -2,6 +2,7 @@ import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
+import type { AuthorityStamp } from './e2ee/authority-clock';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
 import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
@@ -40,6 +41,10 @@ const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
+  onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
+  /** True while execution relies on an outage window. */
+  onEncryptedWindowNotice?: (active: boolean) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -133,6 +138,8 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
+        onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
+        onWindowNotice: options.onEncryptedWindowNotice,
         onRemoved: async (reason, recorded) => {
           const owner = await removalOwner;
           if (!owner) return;
@@ -702,6 +709,11 @@ export class Lody {
 
   async resolveSessionWorkdir(sessionId: SessionId): Promise<string | null> {
     return await this.runtime.resolveSessionWorkdir(sessionId);
+  }
+
+  async resolveAutomationWorkdir(sessionId: SessionId): Promise<string | null> {
+    const manager = this.runtime.getSessionManager();
+    return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
   }
 
   onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {

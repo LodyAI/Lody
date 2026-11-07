@@ -1,0 +1,397 @@
+<resources>
+    <string name="app_name">Lody</string>
+
+    <!-- Home: tabs and bars -->
+    <string name="home_tab_chats">Chats</string>
+    <string name="home_tab_projects">Projects</string>
+    <string name="home_tab_settings">Settings</string>
+    <string name="home_new_chat">New chat</string>
+    <string name="home_new_chat_unavailable">Creating chats isn’t available on Android yet</string>
+    <string name="home_account">Account and workspaces</string>
+    <string name="home_search">Search</string>
+    <string name="home_search_close">Close search</string>
+    <string name="home_search_placeholder">Search chats</string>
+    <string name="home_search_clear">Clear search</string>
+    <string name="home_search_empty">No chats match “%1$s”</string>
+    <string name="home_view">View</string>
+    <string name="home_view_details">Display</string>
+    <string name="home_view_project">Project</string>
+    <string name="home_view_pull_request">PR status</string>
+    <string name="home_view_branch">Branch</string>
+
+    <!-- Home: chats grouped by time -->
+    <string name="home_bucket_today">Today</string>
+    <string name="home_bucket_yesterday">Yesterday</string>
+    <string name="home_bucket_week">This week</string>
+    <string name="home_bucket_month">This month</string>
+    <string name="home_bucket_older">Older</string>
+
+    <!-- Home: grouping -->
+    <string name="home_tree_expand">Show opened chats</string>
+    <string name="home_tree_collapse">Hide opened chats</string>
+    <string name="home_tree_expanded">Expanded</string>
+    <string name="home_tree_collapsed">Collapsed</string>
+    <plurals name="home_tree_count">
+        <item quantity="one">%1$d opened chat</item>
+        <item quantity="other">%1$d opened chats</item>
+    </plurals>
+    <string name="home_view_scope">Show</string>
+    <string name="home_scope_mine">My tasks</string>
+    <string name="home_scope_team">Team tasks</string>
+    <string name="home_view_grouping">Group by</string>
+    <string name="home_grouping_time">Time</string>
+    <string name="home_grouping_project">Project</string>
+    <string name="home_grouping_status">Status</string>
+    <string name="home_group_chats">Chats</string>
+    <string name="home_group_attention">Needs you</string>
+    <string name="home_group_finished">Just finished</string>
+    <string name="home_group_running">Running</string>
+    <string name="home_group_pull_request">Open pull requests</string>
+    <string name="home_group_idle">Idle</string>
+    <string name="home_group_show_less">Show less</string>
+    <string name="home_ci_pass">CI passed</string>
+    <string name="home_ci_fail">CI failed</string>
+    <string name="home_ci_pending">CI running</string>
+    <plurals name="home_group_show_all">
+        <item quantity="one">Show all %1$d</item>
+        <item quantity="other">Show all %1$d</item>
+    </plurals>
+
+    <!-- Home: chat rows -->
+    <string name="home_age_now">now</string>
+    <string name="home_age_minutes">%1$dm</string>
+    <string name="home_age_hours">%1$dh</string>
+    <string name="home_age_days">%1$dd</string>
+    <string name="home_pr_open">PR open</string>
+    <string name="home_pr_merged">PR merged</string>
+    <string name="home_pr_closed">PR closed</string>
+    <string name="home_pr_draft">Draft PR</string>
+
+    <!-- Home: states -->
+    <string name="home_loading">Loading chats…</string>
+    <string name="home_empty">No chats yet</string>
+    <string name="home_projects_empty">No projects yet</string>
+    <string name="home_offline">Offline</string>
+    <string name="home_syncing">Syncing…</string>
+    <string name="home_connected">Connected</string>
+    <string name="home_no_workspaces">No accessible workspaces</string>
+
+    <!-- Home: settings tab -->
+    <string name="home_settings_account">Account</string>
+    <string name="home_settings_workspace">Workspace</string>
+    <string name="home_sign_out">Sign out</string>
+
+    <!-- Sign in -->
+    <string name="sign_in_title">Sign in to Lody</string>
+    <string name="sign_in_body">Your chats sync from Lody Cloud. Sign in with your Lody account in the browser.</string>
+    <string name="sign_in_action">Sign in</string>
+    <string name="sign_in_connecting">Connecting…</string>
+    <string name="sign_in_code">Authorization code</string>
+    <string name="sign_in_code_hint">Confirm this code in your browser. It expires in %1$d minutes.</string>
+    <string name="sign_in_open">Open authorization page</string>
+    <string name="sign_in_cancel">Cancel</string>
+
+    <!-- Chat -->
+    <string name="chat_back">Back</string>
+    <string name="chat_loading">Loading messages…</string>
+    <string name="chat_empty">No text messages yet</string>
+    <string name="chat_offline">Messages unavailable</string>
+    <string name="chat_retry">Retry</string>
+
+    <!-- New session -->
+    <string name="create_title">New session</string>
+    <string name="create_pick_machine">Choose computer</string>
+    <string name="create_pick_project">Choose project</string>
+    <string name="create_more_projects">More projects…</string>
+    <string name="create_chat_only">No project</string>
+    <string name="create_worktree">Run in a worktree</string>
+    <string name="create_agent_unavailable">Assistants aren’t available on Android yet</string>
+    <string name="create_readonly_note">Android can’t create sessions yet; this page shows the layout.</string>
+    <string name="create_composer_placeholder">Describe what you want to do…</string>
+    <string name="create_composer_placeholder_agent">Work with %1$s</string>
+    <string name="create_attach">Add attachment</string>
+    <string name="create_mention">Mention</string>
+    <string name="create_send">Send</string>
+    <string name="create_search_projects">Search projects</string>
+    <string name="create_run_config">Run configuration</string>
+    <string name="create_run_config_unavailable">Assistant unavailable</string>
+    <string name="create_result_unknown">Delivery is unconfirmed. Check the conversation before starting another one.</string>
+    <string name="create_result_rejected">Creation was rejected. Return and check your selection before trying again.</string>
+    <string name="create_branch_name">Branch name</string>
+    <string name="create_sending">Creating conversation and sending…</string>
+    <string name="create_open_result">Open conversation</string>
+    <string name="create_agent">Assistant</string>
+    <string name="create_role">Role</string>
+    <string name="create_role_none">None</string>
+    <string name="create_role_unavailable_machine">This computer is no longer in the workspace</string>
+    <string name="create_role_unavailable_agent">Its agent was removed from this computer</string>
+    <string name="create_role_unavailable_offline">Its agent is offline</string>
+    <string name="create_model">Model</string>
+    <string name="create_effort">Reasoning</string>
+    <string name="run_config_plan">Plan</string>
+    <string name="run_config_fast">Fast</string>
+    <string name="create_mode">Mode</string>
+    <string name="create_extras_unavailable">Attachments and mentions are not available yet.</string>
+    <string name="create_search_machines">Search computers</string>
+    <string name="create_default">Default</string>
+
+    <!-- Conversation -->
+    <string name="chat_delivery_sending">Sending</string>
+    <string name="chat_delivery_sent">Sent</string>
+    <string name="chat_delivery_queued">Queued</string>
+    <string name="chat_delivery_seen">Read</string>
+    <string name="chat_delivery_failed">Not sent</string>
+    <string name="chat_send_failed">The message was not sent</string>
+    <string name="chat_member">Member</string>
+    <string name="chat_worked_for">Worked for %1$s</string>
+    <string name="chat_composer_placeholder">Reply…</string>
+    <string name="chat_composer_unavailable">Waiting for the conversation to connect…</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_stop_failed">Couldn’t stop the turn. Try again.</string>
+    <string name="chat_run_config">Model and mode</string>
+    <string name="chat_attach_photos">Photos and videos</string>
+    <string name="chat_attach_files">Files</string>
+    <string name="chat_attach_remove">Remove</string>
+    <string name="chat_attach_limit">Up to 8 images and 8 files per message.</string>
+    <string name="chat_attach_failed">Couldn’t upload the attachments. The message wasn’t sent.</string>
+    <string name="create_search_branches">Search branches</string>
+    <string name="create_more_branches">More branches…</string>
+    <string name="create_mode_auto">Auto</string>
+    <string name="chat_working">Working…</string>
+    <string name="chat_finished_working">Execution details</string>
+    <string name="chat_scroll_latest">Scroll to latest</string>
+    <string name="bar_action_create_pr">Create PR</string>
+    <string name="bar_action_create_draft_pr">Create Draft PR</string>
+    <string name="bar_action_commit_and_push">Commit &amp; Push</string>
+    <string name="bar_action_resolve_conflicts">Resolve Conflicts</string>
+    <string name="bar_action_fix_ci_errors">Fix CI Errors</string>
+    <string name="bar_more">More actions</string>
+    <string name="bar_ci_s">CI passed</string>
+    <string name="bar_ci_f">CI failed</string>
+    <string name="bar_ci_e">CI error</string>
+    <string name="bar_ci_p">CI running</string>
+    <string name="bar_conflicts">Has conflicts</string>
+    <string name="bar_prompt_createPrOrigin">(Sent by the **Create PR** button in Lody.)</string>
+    <string name="bar_prompt_createDraftPrOrigin">(Sent by the **Create Draft PR** button in Lody.)</string>
+    <string name="bar_prompt_createPr">Create a PR for the current worktree (a regular PR, not a draft). Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL.</string>
+    <string name="bar_prompt_createDraftPr">Create a draft PR for the current worktree. Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL.</string>
+    <string name="bar_prompt_prBranchUpkeep">After the PR exists, keep it current: at the end of every turn in this conversation, commit any outstanding changes and push them to the PR branch before you finish, so the PR head always matches your latest work. Treat this as the default rather than something to ask about each time. Skip it only when the user interrupts you or asks for something that overrides it — in that case say so instead of pushing silently.</string>
+    <string name="bar_prompt_commitAndPush">Publish the current branch: commit anything uncommitted, then push to the remote branch.\n\nInstructions:\n- Generate a concise, descriptive commit message based on the changes\n- Stage all changes (git add -A)\n- Commit with the generated message\n- If the working tree is already clean, skip the commit — the branch may simply\n  hold commits that were never pushed\n- Push to the current branch, and report it if the push fails</string>
+    <string name="bar_prompt_resolveConflicts">Resolve the merge conflicts for %1$s pull request %2$s against its base branch.\nPR: %3$s\n\nInspect the pull request and repository instructions first. Choose the merge or rebase workflow that matches this repository’s conventions, preserve the intent of both sides, run the relevant checks, and push the resolved branch.</string>
+    <string name="bar_prompt_fixCi">Fix the failing CI checks for %1$s pull request #%2$d.\n\nInspect the complete GitHub Actions/check logs yourself before changing code. Read the repository instructions, identify the root cause, implement the smallest correct fix, run the relevant checks locally, then commit and push the fix to the PR branch.\n\nCurrent PR snapshot:\n- URL: %3$s\n- Head: %4$s\n\nFailed checks: list the failing checks of the PR head from GitHub yourself.</string>
+    <string name="bar_copy_branch">Copy branch name</string>
+    <string name="bar_branch_copied">Branch name copied</string>
+    <string name="bar_machine">Computer</string>
+    <string name="bar_action_ready_for_review">Ready for review</string>
+    <string name="bar_action_merge">Merge</string>
+    <string name="bar_merge_message">Merging cannot be undone. Choose how to merge.</string>
+    <string name="bar_merge_merge">Create a merge commit</string>
+    <string name="bar_merge_squash">Squash and merge</string>
+    <string name="bar_merge_rebase">Rebase and merge</string>
+    <string name="bar_merge_merge_desc">All commits from this branch will be added to the base branch.</string>
+    <string name="bar_merge_squash_desc">The commits from this branch will be combined into a single commit.</string>
+    <string name="bar_merge_rebase_desc">The commits will be rebased and added to the base branch.</string>
+    <string name="bar_merge_pending">Merging…</string>
+    <string name="bar_merge_done">Pull request merged</string>
+    <string name="bar_merge_error">Failed to merge</string>
+    <string name="bar_ready_pending">Waiting for GitHub…</string>
+    <string name="bar_ready_done">Marked ready for review</string>
+    <string name="bar_ready_error">Failed to mark as ready for review</string>
+    <string name="bar_error_not_mergeable">Merging is blocked — required reviews, failing checks, or the branch is behind.</string>
+    <string name="bar_error_head_changed">The pull request has new commits. Review them, then merge again.</string>
+    <string name="bar_error_authorization_required">Connect GitHub for this workspace on the web first.</string>
+    <string name="bar_error_merge_unknown">The merge result is unknown. Check the pull request on GitHub before trying again.</string>
+    <string name="bar_error_ready_unknown">The result is unknown. Check the pull request on GitHub before trying again.</string>
+    <string name="bar_error_not_open">This pull request is no longer open.</string>
+    <string name="bar_error_forbidden">You do not have permission to change this pull request.</string>
+    <string name="bar_open_github">Open on GitHub</string>
+    <string name="chat_activity_thought">Thought</string>
+    <string name="chat_activity_thinking">Thinking…</string>
+    <string name="chat_step_ran">Ran</string>
+    <string name="chat_step_running">Running</string>
+    <string name="chat_step_read">Read</string>
+    <string name="chat_step_reading">Reading</string>
+    <string name="chat_step_edited">Edited</string>
+    <string name="chat_step_editing">Editing</string>
+    <string name="chat_step_deleted">Deleted</string>
+    <string name="chat_step_deleting">Deleting</string>
+    <string name="chat_step_moved">Moved</string>
+    <string name="chat_step_moving">Moving</string>
+    <string name="chat_step_searched">Searched</string>
+    <string name="chat_step_searching">Searching</string>
+    <string name="chat_step_fetched">Fetched</string>
+    <string name="chat_step_fetching">Fetching</string>
+    <string name="chat_step_failed">Failed</string>
+    <string name="chat_step_awaiting">Awaiting approval</string>
+    <plurals name="chat_activity_commands">
+        <item quantity="one">Ran %d command</item>
+        <item quantity="other">Ran %d commands</item>
+    </plurals>
+    <plurals name="chat_activity_reads">
+        <item quantity="one">Read %d file</item>
+        <item quantity="other">Read %d files</item>
+    </plurals>
+    <plurals name="chat_activity_edits">
+        <item quantity="one">Edited %d file</item>
+        <item quantity="other">Edited %d files</item>
+    </plurals>
+    <plurals name="chat_activity_searches">
+        <item quantity="one">Ran %d search</item>
+        <item quantity="other">Ran %d searches</item>
+    </plurals>
+    <plurals name="chat_activity_fetches">
+        <item quantity="one">Fetched %d resource</item>
+        <item quantity="other">Fetched %d resources</item>
+    </plurals>
+    <plurals name="chat_activity_tools">
+        <item quantity="one">Called %d tool</item>
+        <item quantity="other">Called %d tools</item>
+    </plurals>
+    <string name="chat_step_detail_failed">Could not load this step.</string>
+    <string name="chat_step_detail_empty">This step has no details.</string>
+    <string name="chat_step_detail_truncated">Truncated; open on desktop for the rest.</string>
+    <string name="chat_step_exit_code">Exit code %1$d</string>
+    <string name="chat_task_actor">Task</string>
+    <string name="chat_task_cancelled">Cancelled</string>
+    <string name="chat_task_unknown">Status unknown</string>
+    <string name="chat_task_waiting_first">Waiting for the first step…</string>
+    <string name="chat_task_no_steps">No steps were received.</string>
+    <plurals name="chat_tasks_waiting">
+        <item quantity="one">Waiting on %d task</item>
+        <item quantity="other">Waiting on %d tasks</item>
+    </plurals>
+    <plurals name="chat_tasks_waiting_background">
+        <item quantity="one">Waiting on %d background task</item>
+        <item quantity="other">Waiting on %d background tasks</item>
+    </plurals>
+    <plurals name="chat_tasks_count">
+        <item quantity="one">%d task</item>
+        <item quantity="other">%d tasks</item>
+    </plurals>
+    <plurals name="chat_tasks_count_background">
+        <item quantity="one">%d background task</item>
+        <item quantity="other">%d background tasks</item>
+    </plurals>
+    <string name="create_no_available_agents">No available assistants on this computer. Choose another computer.</string>
+    <string name="create_waiting_agents">Waiting for assistants to sync…</string>
+    <string name="chat_new_tab">New conversation in current working directory</string>
+    <string name="chat_current_tab">Current conversation</string>
+    <string name="chat_tab_creation_failed">Could not create a Tab conversation.</string>
+    <string name="chat_tab_creation_unknown">Creation result is unknown. Tap again to open the conversation.</string>
+    <plurals name="chat_directory_tabs"><item quantity="one">%d conversation in this directory</item><item quantity="other">%d conversations in this directory</item></plurals>
+    <string name="chat_tasks_subagents">Subagents</string>
+    <string name="chat_tasks_others">Tasks</string>
+    <string name="chat_tasks_back">Back to tasks</string>
+    <plurals name="chat_files_count">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <string name="chat_files_back">Back to files</string>
+    <string name="chat_diff_binary">This file is not text, so there is no line diff.</string>
+    <string name="chat_diff_too_large">This change is too large to show on the phone.</string>
+    <string name="chat_diff_unavailable">The diff is unavailable. The computer may be offline or the file gone.</string>
+    <string name="chat_diff_same">No line changes.</string>
+    <plurals name="chat_diff_unchanged">
+        <item quantity="one">⋯ %d unchanged line</item>
+        <item quantity="other">⋯ %d unchanged lines</item>
+    </plurals>
+    <string name="bar_workspace_changes">All changes</string>
+    <string name="create_machine_no_agents">No available assistants</string>
+    <string name="mention_files">Files and folders</string>
+    <string name="mention_skills">Skills</string>
+    <string name="mention_sessions">Sessions</string>
+    <string name="mention_roles">Agent Roles</string>
+    <string name="mention_issues">Issues</string>
+    <string name="mention_prs">Pull Requests</string>
+    <string name="mention_commands">Commands</string>
+    <string name="mention_empty">No matching references</string>
+    <string name="mention_loading">Loading…</string>
+    <string name="mention_back">Back</string>
+    <string name="mention_directory">Reference folder %1$s</string>
+    <string name="home_projects_source">Source</string>
+    <string name="home_projects_source_all">All</string>
+    <string name="home_projects_source_github">GitHub</string>
+    <string name="home_projects_source_local">Local</string>
+    <string name="home_projects_hide_empty">Hide projects without chats</string>
+    <plurals name="home_project_attention">
+        <item quantity="one">%d chat needs you</item>
+        <item quantity="other">%d chats need you</item>
+    </plurals>
+    <plurals name="home_project_running">
+        <item quantity="one">%d running</item>
+        <item quantity="other">%d running</item>
+    </plurals>
+    <plurals name="home_project_finished">
+        <item quantity="one">%d just finished</item>
+        <item quantity="other">%d just finished</item>
+    </plurals>
+    <plurals name="home_project_prs">
+        <item quantity="one">%d open PR</item>
+        <item quantity="other">%d open PRs</item>
+    </plurals>
+    <plurals name="home_project_open">
+        <item quantity="one">%d chat</item>
+        <item quantity="other">%d chats</item>
+    </plurals>
+    <string name="home_projects_search_empty">No projects match “%1$s”</string>
+    <string name="chat_new_tab_title">New chat</string>
+    <string name="mention_shortcuts">Prompt Shortcuts</string>
+    <string name="projects_add_title">Add Project</string>
+    <string name="projects_add_local">Add Local Folder</string>
+    <string name="projects_add_github">Add GitHub Repository</string>
+    <string name="projects_add_done">Added %s</string>
+    <string name="projects_local_machines_failed">Couldn\'t load your computers.</string>
+    <string name="projects_local_read_failed">Can\'t open this folder.</string>
+    <string name="projects_local_add_failed">Couldn\'t add the folder. Try again.</string>
+    <string name="projects_local_up">Up one folder</string>
+    <string name="projects_local_empty">No folders here</string>
+    <string name="projects_local_more">Load more</string>
+    <string name="projects_local_add">Add “%1$s”</string>
+    <string name="projects_github_search">Search repositories</string>
+    <string name="projects_github_private">Private</string>
+    <string name="projects_github_added">Added</string>
+    <string name="projects_github_add_failed">Couldn\'t add the repository. Try again.</string>
+    <string name="projects_github_install_failed">Couldn\'t open GitHub. Try again.</string>
+    <string name="projects_github_load_failed">Couldn\'t load repositories.</string>
+    <string name="projects_github_none">The Lody GitHub App can\'t reach any repositories yet. Grant it access on GitHub, then come back.</string>
+    <string name="projects_github_none_member">No repositories are connected yet. Ask a workspace admin to install the Lody GitHub App.</string>
+    <string name="projects_github_member_note">Only workspace admins and owners can add repositories.</string>
+    <string name="projects_github_missing">Don\'t see a repository? Grant the Lody GitHub App access to it on GitHub.</string>
+    <string name="projects_github_install">Configure on GitHub</string>
+    <plurals name="create_group_members">
+        <item quantity="one">%d repository</item>
+        <item quantity="other">%d repositories</item>
+    </plurals>
+    <string name="message_copy">Copy message</string>
+    <string name="message_copied">Copied</string>
+    <string name="message_edit">Edit message</string>
+    <string name="message_info">Conversation information</string>
+    <string name="message_fork">Fork conversation</string>
+    <string name="message_fork_explanation">Continue from this reply in a new tab, using the same project and working directory.</string>
+    <string name="message_unavailable">This action is unavailable for this message. Refresh the conversation and try again.</string>
+    <string name="message_unknown">The result is not yet confirmed. Check the conversation before trying again.</string>
+    <string name="message_close">Close</string>
+    <string name="message_save_resend">Save and resend</string>
+    <string name="message_keep_attachments">Keep %1$d original attachments</string>
+    <string name="message_no_info">No information available for this reply.</string>
+    <string name="message_model">Model</string>
+    <string name="message_reasoning">Reasoning</string>
+    <string name="message_mode">Mode</string>
+    <string name="message_input_tokens">Input tokens</string>
+    <string name="message_output_tokens">Output tokens</string>
+    <string name="message_reasoning_tokens">Reasoning tokens</string>
+    <string name="message_cache_read">Cache read</string>
+    <string name="message_cache_write">Cache write</string>
+    <string name="message_seconds">%1$ds</string>
+    <string name="message_minutes_seconds">%1$dm %2$ds</string>
+    <string name="chat_closed_tabs">Closed conversations</string>
+    <string name="chat_close_tab">Close</string>
+    <string name="chat_restore_tab">Restore conversation</string>
+    <string name="chat_no_closed_tabs">No closed conversations</string>
+    <string name="chat_tabs_all_closed">No open Tab. Tap the conversations button to create or restore a conversation.</string>
+    <string name="chat_tab_change_failed">Could not confirm the change. Check the Tab list before trying again.</string>
+    <string name="chat_close_current">Close current conversation</string>
+    <string name="home_group_pinned">Pinned</string>
+    <string name="bar_view_pr">View PR</string>
+    <string name="home_ci_expected">Checks expected</string>
+</resources>

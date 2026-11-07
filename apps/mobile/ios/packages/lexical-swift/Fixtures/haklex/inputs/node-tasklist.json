@@ -1,0 +1,85 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "list",
+        "listType": "check",
+        "tag": "ul",
+        "start": 1,
+        "children": [
+          {
+            "type": "listitem",
+            "checked": true,
+            "value": 1,
+            "children": [
+              {
+                "children": [
+                  {
+                    "detail": 0,
+                    "format": 0,
+                    "mode": "normal",
+                    "style": "",
+                    "text": "Completed task",
+                    "type": "text",
+                    "version": 1
+                  }
+                ],
+                "direction": "ltr",
+                "format": "",
+                "indent": 0,
+                "type": "paragraph",
+                "version": 1,
+                "textFormat": 0,
+                "textStyle": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "version": 1
+          },
+          {
+            "type": "listitem",
+            "checked": false,
+            "value": 2,
+            "children": [
+              {
+                "children": [
+                  {
+                    "detail": 0,
+                    "format": 0,
+                    "mode": "normal",
+                    "style": "",
+                    "text": "Pending task",
+                    "type": "text",
+                    "version": 1
+                  }
+                ],
+                "direction": "ltr",
+                "format": "",
+                "indent": 0,
+                "type": "paragraph",
+                "version": 1,
+                "textFormat": 0,
+                "textStyle": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

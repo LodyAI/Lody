@@ -1,0 +1,1 @@
+<video src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" poster="https://picsum.photos/1280/720?random=302" width=1280 height=720 controls></video>

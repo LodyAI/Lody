@@ -15,6 +15,7 @@
       "import": "./src/react.ts"
     },
     "./telemetry": "./src/telemetry.ts",
+    "./e2ee-passkey": "./src/e2ee-passkey.ts",
     "./host-keys": {
       "types": "./src/host-keys.ts",
       "import": "./src/host-keys.ts"

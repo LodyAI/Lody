@@ -1,3 +1,10 @@
+import { useCloudQuery } from '@lody/platform/react';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  SeatCostNotice,
+  isSeatInvitePreviewReady,
+  type SeatInvitePreview,
+} from '../../settings/invite-member-dialog';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -50,6 +57,7 @@ export interface InviteEntry {
 }
 
 export interface InviteScreenViewProps {
+  seatPreview?: SeatInvitePreview | null;
   email: string;
   onEmailChange: (next: string) => void;
   onAdd: () => void;
@@ -64,6 +72,7 @@ export interface InviteScreenViewProps {
 }
 
 export function InviteScreenView({
+  seatPreview,
   email,
   onEmailChange,
   onAdd,
@@ -95,8 +104,15 @@ export function InviteScreenView({
           </Button>
           <Button
             size="large"
-            onClick={onSendAndContinue}
-            disabled={!hasAnything || sending || pendingCount === 0}
+            onClick={() => {
+              if (isSeatInvitePreviewReady(seatPreview)) onSendAndContinue();
+            }}
+            disabled={
+              !hasAnything ||
+              sending ||
+              pendingCount === 0 ||
+              !isSeatInvitePreviewReady(seatPreview)
+            }
           >
             {sending ? <Spinner size="small" /> : <Send {...stylex.props(surface.icon16)} />}
             {pendingCount > 0
@@ -186,6 +202,7 @@ export function InviteScreenView({
             )}
           </div>
         )}
+        {pendingCount > 0 && <SeatCostNotice preview={seatPreview} />}
       </div>
     </OnboardingShell>
   );
@@ -247,8 +264,19 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
   const [invites, setInvites] = useState<InviteEntry[]>([]);
   const [sending, setSending] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
+  const requestedSeats = invites.filter((entry) => entry.status === 'pending').length;
+  const seatPreview = useCloudQuery(
+    cloudOperations.billing.getWorkspaceSeatInvitePreview,
+    activeOrganization && requestedSeats > 0
+      ? { workspaceId: activeOrganization.id, requestedSeats }
+      : 'skip'
+  );
 
   const handleAdd = useCallback(() => {
+    if (invites.length >= 100) {
+      setInputError(t('workspace.invite.seat.batchLimit'));
+      return;
+    }
     const candidate = email.trim();
     if (!candidate) {
       setInputError(t('onboarding.invite.errorEmpty', 'Enter an email address'));
@@ -289,6 +317,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
       onCompleted();
       return;
     }
+    if (!isSeatInvitePreviewReady(seatPreview)) return;
     setSending(true);
     void (async () => {
       // Mark all pending as sending up-front so the user sees progress.
@@ -340,10 +369,11 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
         return current;
       });
     })();
-  }, [activeOrganization, authClient, invites, onCompleted, t]);
+  }, [activeOrganization, authClient, invites, onCompleted, seatPreview, t]);
 
   return (
     <InviteScreenView
+      seatPreview={seatPreview}
       email={email}
       onEmailChange={(next) => {
         setEmail(next);

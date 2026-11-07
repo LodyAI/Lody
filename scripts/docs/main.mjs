@@ -523,6 +523,8 @@ async function checkRepositoryMarkdown(root) {
         `${agentsBudgetFile}: ${relative} is budgeted but does not exist; update the manifest in the same change`
       );
   for (const file of files.filter((file) => /\.md$/i.test(file))) {
+    // Native editor fixtures contain literal Markdown inputs/outputs, not documentation.
+    if (file.startsWith('apps/mobile/ios/packages/lexical-swift/Fixtures/')) continue;
     const absolute = path.join(root, file);
     if (!existsSync(absolute) || lstatSync(absolute).isSymbolicLink()) continue;
     const bytes = readFileSync(localPath(root, file));
