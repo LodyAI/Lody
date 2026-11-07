@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, readdir, realpath, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { chmod, readFile, readdir, realpath, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateKeyPairSync } from 'node:crypto'
@@ -310,4 +310,149 @@ test('activation shutdown write failure does not prevent independent teardown', 
   await service.abandonHealthAttempt()
   released = true
   assert.equal(released, true)
+})
+
+test('admitted health persistence excludes timeout and duplicate ACK writes', async () => {
+  let release
+  const pending = new Promise((resolve) => {
+    release = resolve
+  })
+  const state = { healthy: false, failed: false }
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async acknowledge() {
+        await pending
+        state.healthy = true
+      },
+      async fail() {
+        state.failed = true
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  await service.markMainReady()
+  const first = service.acknowledgeHealthy()
+  const second = service.acknowledgeHealthy()
+  await service.failInitialHealth()
+  release()
+  await Promise.all([first, second])
+  assert.deepEqual(state, { healthy: true, failed: false })
+})
+
+test('timeout admission excludes a late renderer ACK', async () => {
+  let release
+  const pending = new Promise((resolve) => {
+    release = resolve
+  })
+  const state = { healthy: false, failed: false }
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async acknowledge() {
+        state.healthy = true
+      },
+      async fail() {
+        await pending
+        state.failed = true
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  await service.markMainReady()
+  const timeout = service.failInitialHealth()
+  await service.acknowledgeHealthy()
+  release()
+  await timeout
+  assert.deepEqual(state, { healthy: false, failed: true })
+})
+
+test('health, rescue and graceful shutdown persist distinct attempt outcomes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'core-health-state-'))
+  const installed = {
+    product: 'lody',
+    channel: 'test',
+    platform: process.platform,
+    arch: process.arch,
+    hostAbi: 'test'
+  }
+  const options = { root, installed, lease: { assertHeld() {} } }
+  try {
+    const initial = await openActivation(options)
+    const pointer = join(initial.directory, 'pointer.json')
+    for (const outcome of ['ack', 'fail', 'abandon']) {
+      await writeFile(
+        pointer,
+        JSON.stringify({
+          current: 'candidate',
+          previous: 'good',
+          staged: null,
+          attempt: { releaseId: 'candidate', attemptId: '00000000-0000-0000-0000-000000000001' },
+          rejected: [],
+          seq: 1
+        })
+      )
+      const activation = await openActivation(options)
+      const service = new CoreUpdaterService({}, activation)
+      service.selection = {
+        builtin: false,
+        releaseId: 'candidate',
+        attemptId: '00000000-0000-0000-0000-000000000001'
+      }
+      if (outcome === 'ack') {
+        await service.markMainReady()
+        await service.acknowledgeHealthy()
+      } else if (outcome === 'fail') {
+        await service.failInitialHealth()
+        await service.acknowledgeHealthy()
+      } else await service.abandonHealthAttempt()
+      const saved = JSON.parse(await readFile(pointer, 'utf8'))
+      assert.equal(saved.attempt, null)
+      assert.equal(saved.current, outcome === 'fail' ? 'good' : 'candidate')
+      assert.deepEqual(saved.rejected, outcome === 'fail' ? ['candidate'] : [])
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('failed health persistence still hands recovery to the quit owner', async () => {
+  let rescued = false
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async fail() {
+        throw new Error('disk unavailable')
+      }
+    }
+  )
+  service.setHealthRescue(() => {
+    rescued = true
+  })
+  await service.failInitialHealth()
+  assert.equal(rescued, true)
+})
+
+test('oversized manifest cancels the response and releases its reader without staging', async () => {
+  let cancelled = false
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(16 * 1024 * 1024 + 1))
+    },
+    cancel() {
+      cancelled = true
+    }
+  })
+  const service = new CoreUpdaterService(
+    { feedUrl: 'https://updates.example/manifest.json' },
+    {},
+    async () => new Response(body)
+  )
+  const states = []
+  const result = await service.check((state) => states.push(state))
+  assert.equal(result.error, 'Core manifest exceeds limit')
+  assert.equal(cancelled, true)
+  assert.equal(body.locked, false)
+  assert.equal(states.at(-1).phase, 'error')
+  assert.equal(service.ready, false)
 })

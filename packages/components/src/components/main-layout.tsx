@@ -87,6 +87,7 @@ export function MainLayout({
       <PromptShortcutProvider enabled={workspaceReady}>
         <CompactDesktopLayoutSync />
         <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
+          {workspaceReady ? <span hidden data-core-workspace-ready={workspace} /> : null}
           {children}
           {workspaceReady ? <ScheduleRegistrySync /> : null}
           {owner && workspaceReady ? <WorkspaceBadge /> : null}

@@ -15,6 +15,8 @@ export class CoreUpdaterService {
   private pending = false
   private downloaded = false
   private abort?: AbortController
+  private healthWrite: Promise<void> = Promise.resolve()
+  private healthDecision: 'ack' | 'fail' | undefined
   private healthy = false
   private shuttingDown = false
   private healthTimer?: ReturnType<typeof setTimeout>
@@ -102,10 +104,15 @@ export class CoreUpdaterService {
   }
 
   private async failInitialHealth() {
-    if (this.healthy || this.recovering || this.shuttingDown) return
+    if (this.healthy || this.recovering || this.shuttingDown || this.healthDecision) return
+    this.healthDecision = 'fail'
     this.recovering = true
     if (this.healthTimer) clearTimeout(this.healthTimer)
-    await this.activation.fail(this.selection)
+    try {
+      await this.activation.fail(this.selection)
+    } catch (error) {
+      console.warn('[Core OTA] Could not persist failed health attempt', error)
+    }
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
@@ -131,6 +138,7 @@ export class CoreUpdaterService {
   async abandonHealthAttempt() {
     this.shuttingDown = true
     if (this.healthTimer) clearTimeout(this.healthTimer)
+    await this.healthWrite.catch(() => {})
     if (!this.recovering && this.selection && !this.selection.builtin && !this.healthy)
       await this.activation.abandon(this.selection).catch((error: unknown) => {
         console.warn('[Core OTA] Could not record graceful shutdown', error)
@@ -141,9 +149,20 @@ export class CoreUpdaterService {
     this.rendererReady = true
     if (!this.mainReady || this.recovering || this.shuttingDown) return
     if (!this.selection || this.selection.builtin || this.healthy) return
-    await this.activation.acknowledge(this.selection)
-    this.healthy = true
-    if (this.healthTimer) clearTimeout(this.healthTimer)
+    if (this.healthDecision) return this.healthWrite
+    this.healthDecision = 'ack'
+    this.healthWrite = (async () => {
+      try {
+        await this.activation.acknowledge(this.selection)
+        this.healthy = true
+        if (this.healthTimer) clearTimeout(this.healthTimer)
+      } catch (error) {
+        this.healthDecision = undefined
+        void this.failInitialHealth().catch(console.error)
+        throw error
+      }
+    })()
+    return this.healthWrite
   }
 
   stop() {
@@ -200,10 +219,26 @@ export class CoreUpdaterService {
       if (!response.ok) throw new Error(`Core feed HTTP ${response.status}`)
       const chunks: Uint8Array[] = []
       let size = 0
-      for await (const chunk of response.body!) {
-        size += chunk.length
-        if (size > 16 * 1024 * 1024) throw new Error('Core manifest exceeds limit')
-        chunks.push(chunk)
+      if (!response.body) throw new Error('Core manifest body missing')
+      const reader = response.body.getReader()
+      let completed = false
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) {
+            completed = true
+            break
+          }
+          size += value.byteLength
+          if (size > 16 * 1024 * 1024) throw new Error('Core manifest exceeds limit')
+          chunks.push(value)
+        }
+      } finally {
+        try {
+          if (!completed) await reader.cancel().catch(() => {})
+        } finally {
+          reader.releaseLock()
+        }
       }
       const manifest = parseCoreManifest(Buffer.concat(chunks).toString('utf8'))
       if (

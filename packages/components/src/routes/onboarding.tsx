@@ -136,5 +136,10 @@ function DesktopOnboardingExperience() {
     [analytics, completeThemeLifecycle, navigate, setDraft, setPhase, t, workspaceSlug]
   );
 
-  return <OnboardingOverlay onCompleted={complete} />;
+  return (
+    <>
+      <span hidden data-core-entry-ready="/onboarding" />
+      <OnboardingOverlay onCompleted={complete} />
+    </>
+  );
 }

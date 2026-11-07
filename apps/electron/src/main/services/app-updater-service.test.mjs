@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url)
 /** Evaluate a main-process module with synthetic Electron and updater dependencies. */
 async function load(relative, dependencies, context = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
+  dependencies = { './core-updater-service': { getCoreUpdater: () => undefined }, ...dependencies }
   const exports = {}
   runInNewContext(
     ts.transpileModule(
