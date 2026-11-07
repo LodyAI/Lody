@@ -113,6 +113,13 @@ enum SessionAttachments {
           bytes = jpeg; contentType = "image/jpeg"
           fileName = (name as NSString).deletingPathExtension + ".jpg"
         }
+        DiagnosticsStore.shared.record("attachment", "image_prepared", fields: [
+          "attempt": attempt.uuidString, "session": DiagnosticsStore.correlation(session),
+          "sourceType": DiagnosticsStore.attachmentMediaType(mime),
+          "uploadType": DiagnosticsStore.attachmentMediaType(contentType),
+          "sourceBytes": String(count), "imageBytes": String(bytes.count),
+          "converted": String(contentType != mime || count > 5 * 1024 * 1024),
+        ])
         guard bytes.count <= 5 * 1024 * 1024 else { throw error(String(localized: "native.attachment.error.imageTooLarge", bundle: .lody)) }
         let boundary = UUID().uuidString
         let safeName = fileName.replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
@@ -254,7 +261,9 @@ enum SessionAttachments {
     request.httpMethod = method; request.httpBody = body
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-    var fields = ["stage": stage.description, "attempt": attempt.uuidString]
+    var fields = ["stage": stage.description, "attempt": attempt.uuidString,
+      "requestBytes": String(body?.count ?? 0)]
+    let started = ProcessInfo.processInfo.systemUptime
     DiagnosticsStore.shared.record("attachment", "request_started", fields: fields)
     let data: Data
     let response: URLResponse
@@ -270,6 +279,7 @@ enum SessionAttachments {
       }
     } catch {
       let failure = error as NSError
+      fields["elapsedMs"] = String(Int(max(0, ProcessInfo.processInfo.systemUptime - started) * 1000))
       if failure.domain == NSURLErrorDomain { fields["networkCode"] = String(failure.code) }
       DiagnosticsStore.shared.record("attachment", "transport_failed", fields: fields)
       let key: String
@@ -287,13 +297,44 @@ enum SessionAttachments {
       throw invalidResponse(stage: stage, attempt: attempt)
     }
     fields["httpStatus"] = String(response.statusCode)
+    fields["elapsedMs"] = String(Int(max(0, ProcessInfo.processInfo.systemUptime - started) * 1000))
+    fields["responseBytes"] = String(data.count)
+    switch response.mimeType?.lowercased() {
+    case "application/json", "application/problem+json": fields["responseType"] = "json"
+    case "text/html": fields["responseType"] = "html"
+    case "text/plain": fields["responseType"] = "text"
+    case nil: fields["responseType"] = "missing"
+    default: fields["responseType"] = "other"
+    }
+    fields["cfRay"] = response.value(forHTTPHeaderField: "CF-Ray")
+    fields["requestId"] = response.value(forHTTPHeaderField: "X-Request-ID")
     guard (200..<300).contains(response.statusCode) else {
-      // Only allowlisted error categories survive metadata filtering; never persist response text.
-      if data.count <= 64 * 1024,
-         let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-        let detail = value["error"] as? [String: Any]
-        let code = value["code"] as? String ?? detail?["code"] as? String ?? value["error"] as? String
-        fields["serverCode"] = DiagnosticsStore.attachmentServerCode(code)
+      // Classify bounded responses without persisting their text, keys or arbitrary codes.
+      fields["serverCodeState"] = "missing"
+      if data.isEmpty {
+        fields["responseBody"] = "empty"
+      } else if data.count > 64 * 1024 {
+        fields["responseBody"] = "too_large"
+      } else {
+        fields["serverErrorFingerprint"] = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+        if let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+          fields["responseBody"] = "json_other"
+          if let value = json as? [String: Any] {
+            fields["responseBody"] = "json_object"
+            let detail = value["error"] as? [String: Any]
+            let candidates = [value["code"], detail?["code"], value["error"], detail?["message"], value["message"]]
+              .compactMap { $0 as? String }.filter { !$0.isEmpty }
+            // An unrecognized top-level code must not mask a recognized nested category.
+            if let code = candidates.compactMap(DiagnosticsStore.attachmentServerCode).first {
+              fields["serverCode"] = code
+              fields["serverCodeState"] = "recognized"
+            } else if !candidates.isEmpty {
+              fields["serverCodeState"] = "unrecognized"
+            }
+          }
+        } else {
+          fields["responseBody"] = "invalid_json"
+        }
       }
       DiagnosticsStore.shared.record("attachment", "http_failed", fields: fields)
       throw uploadError(status: response.statusCode, serverCode: fields["serverCode"])
