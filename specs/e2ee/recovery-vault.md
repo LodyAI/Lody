@@ -464,7 +464,9 @@ Intended behavior is the text above. Inspected on 2026-11-05 and not executed:
   `enabled: true` and `results.first` in one object. A real authentication result has no
   `enabled`, so current code would reject it. The [Lab test](../../packages/e2ee-lab/test/recovery-vault.test.ts)
   passes because it uses a synthetic object. This is a gap in code and in the earlier
-  wording, not a reduced guarantee.
+  wording, not a reduced guarantee. Since corrected by [#2364](https://github.com/LodyAI/Lody/pull/2364):
+  registration checks `enabled` (`verifiedPasskeyRegistration`) and unlock checks
+  `results.first` (`verifiedPasskeyPrf`) in [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts).
 - [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) already keys
   one `prf-wrap` entry per credential, but needs vaultId and locator from its caller,
   and leaves those entries outside index references.

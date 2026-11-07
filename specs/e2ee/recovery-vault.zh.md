@@ -323,7 +323,8 @@ Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控�
 
 - [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts) 要求同一对象里同时有 `enabled: true`
   和 `results.first`。真实认证结果没有 `enabled`，所以现有代码会拒绝它。[Lab 测试](../../packages/e2ee-lab/test/recovery-vault.test.ts)
-  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。
+  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。已被 [#2364](https://github.com/LodyAI/Lody/pull/2364) 修正：
+  注册看 `enabled`（`verifiedPasskeyRegistration`），解锁看 `results.first`（`verifiedPasskeyPrf`），见 [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts)。
 - [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) 已经为每个凭据建一个 `prf-wrap` 条目，
   但 vaultId 和定位符要由调用方提供，这些条目也不在索引引用之内。
 - core 和 Lab 之外没有包使用保险库。[#2125](https://github.com/LodyAI/Lody/pull/2125) 是未合入的 draft PR，且有冲突。
