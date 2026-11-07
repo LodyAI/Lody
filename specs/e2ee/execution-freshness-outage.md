@@ -19,16 +19,15 @@ keeps deciding from its local verified ledger for a longer window:
 
 | Request | Window after the last successful latest read |
 | --- | --- |
-| Read (file preview, live status) | 24 hours |
+| Read (file preview, live status) by the machine's own member | 24 hours |
 | Execution by the machine's own member | 1 to 4 hours |
-| Execution by another member, through machine sharing | 15 minutes, unchanged |
+| Any request from another member, including execution through machine sharing | 15 minutes, unchanged |
 
 ## Guarantees
 
-- **A refusal is not an outage.** A server reply that the member was removed, the
-  device was revoked or the request is unauthorized ends access at once, as it does
-  today. A reply that fails verification or moves the ledger backwards is also not
-  an outage.
+- **A refusal is not an outage.** A server reply with an explicit permission refusal
+  ends access at once, as it does today. A reply that fails verification or moves the
+  ledger backwards is also not an outage.
 - **Known revocation still wins.** Every request is checked against the local
   verified ledger. A revocation the machine has ingested stops the affected work
   immediately, whatever remains of the window.
@@ -48,27 +47,55 @@ as the end of the window. This replaces the 15-minute worst case for reads and
 same-member execution only. The existing Specs already say this bound depends on
 the server supplying current state; this decision does not change that dependency.
 
+The window applies per member, not per device, so it also covers a revoked device of
+the same member. If a partial outage stops the machine's ledger read while that
+device can still reach the machine, the device keeps execution for up to the
+same-member window (at most 4 hours) and reads for up to 24 hours.
+
 ## Open questions
 
 - Same-member execution window: the approved range is 1 to 4 hours. The proposal
   uses 4 hours, so a typical outage does not stop a person's own work.
-- Transport failure: the implementation must define it at the client boundary. The
-  proposal counts no reply, a timeout and a server-side failure such as a 5xx, and
-  counts every structured refusal as a refusal.
+- Transport failure: the proposal decides by whether the reply carries an explicit
+  refusal code, not by HTTP status.
+  - No reply, a timeout, a 5xx, a 429 rate limit and a server error with no business
+    error code count as transport failures.
+  - Only an explicit permission refusal (removed, revoked, unauthorized) ends the
+    window.
+  - An expired sign-in is neither. It needs its own rule, which this draft does not
+    set.
+  - A reply the client cannot understand does not relax anything.
+  - A failure partway through a paged read counts as a failed read.
 
 ## Existing Specs
 
 This draft does not change them. If it is approved, the implementation updates
 these approved passages in the same change, and they return to review:
 
-- [Permission freshness](../e2ee-foundations.md#permission-freshness-and-the-separate-durable-expiry-clock):
-  the 15-minute cache and "failed reads cannot renew it".
-- [Whitepaper](whitepaper.md): "failure to refresh by expiry blocks new execution".
+- [Foundations](../e2ee-foundations.md) and its Chinese version:
+  - the "strictly less than 15-minute memory cache" passage;
+  - [permission freshness](../e2ee-foundations.md#permission-freshness-and-the-separate-durable-expiry-clock):
+    the 15-minute cache and "failed reads cannot renew it".
+- [Whitepaper](whitepaper.md) and its Chinese version:
+  - "worst-case 15-minute revocation bound" and "failure to refresh by expiry blocks
+    new execution";
+  - "at most 15 minutes from before its own authenticated latest read".
 
 [Machine sharing](machine-sharing.md) needs no change.
+
+## Related limits
+
+`FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS` in `apps/cli/src/lib/lody-fleet.ts` keeps an
+encrypted remote bridge attached for at most 15 minutes without a confirmed ledger
+read. If this draft is approved, that limit must change with the windows above.
+Otherwise execution would be allowed while the bridge it needs has already detached.
 
 ## Evidence
 
 - Current behavior: `apps/cli/src/lib/e2ee/execution-authorization.ts`, where
   `refresh` maps every read failure to a denied `unavailable`.
+- "Rollback or uncertain suspend/resume ends it" needs new detection, comparing the
+  change in wall clock with the change in monotonic clock. Today a long suspend is
+  caught because it always outlasts the 15-minute grant. A longer window removes that
+  property.
 - Executed validation: none. This is a proposal and nothing is implemented.
