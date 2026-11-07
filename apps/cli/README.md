@@ -14,6 +14,25 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Agent session identity
+
+Agent processes and their ACP terminals receive `LODY_SESSION_ID` and
+`LODY_WORKSPACE_SESSION_ID`. The workspace owner id is the parent Session id for a Tab,
+or the current Session id for an independent Session.
+
+`LODY_AGENT_ROLE_ID`, `LODY_PARENT_SESSION_ID`, and `LODY_OPENED_BY_SESSION_ID`
+expose the current Session's Role, parent, and exact opener ids. Absent values
+are unset, including values inherited from the host or login shell. These ids
+require no lookup before a create. They contain no Role name or prompt and do
+not change create defaults.
+
+`SessionManager` reads Role and opener provenance from the Session metadata at
+the common process startup boundary. `SessionConfig` carries them to
+`Session.buildShellEnv` for creation, restoration, edit-and-resend, and forks.
+The parent id follows the existing workspace configuration. This avoids separate
+copies at every configuration constructor. Desktop manual PTYs use
+`terminal-pty-service`, outside this agent environment contract.
+
 ## Automations
 
 `lody automation` registers durable JavaScript conditions that return results to

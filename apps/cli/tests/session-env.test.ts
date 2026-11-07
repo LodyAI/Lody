@@ -6,7 +6,7 @@ import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import * as harnessRuntime from '../src/agent/deepseek-harness-runtime';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SessionId, WorkspaceId } from '@lody/shared';
+import type { AgentRoleId, SessionId, WorkspaceId } from '@lody/shared';
 
 // Control the login-shell overlay so we can simulate a `~/.zshrc` that exports
 // ANTHROPIC_* (the second auth source the scrub must still see). Defaults to {}
@@ -58,31 +58,55 @@ describe('Session buildShellEnv', () => {
   afterEach(() => {
     loginShellOverlay.value = {};
     resolvedLoginShellOverlay.value = {};
+    vi.unstubAllEnvs();
   });
 
-  it('exposes the workspace owner session id for child sessions', () => {
+  it('exposes session identity for a child Tab', () => {
     const session = new Session(
       createConfig({
         sessionId: 'child-session-2' as SessionId,
         parentSessionId: 'parent-session-1' as SessionId,
+        agentRoleId: 'role-1' as AgentRoleId,
+        openedBySessionId: 'opener-session-3' as SessionId,
       }),
       createSilentLogger()
     );
 
     const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
 
-    expect(env.LODY_SESSION_ID).toBe('child-session-2');
-    expect(env.LODY_WORKSPACE_SESSION_ID).toBe('parent-session-1');
+    expect(env).toMatchObject({
+      LODY_SESSION_ID: 'child-session-2',
+      LODY_WORKSPACE_SESSION_ID: 'parent-session-1',
+      LODY_AGENT_ROLE_ID: 'role-1',
+      LODY_PARENT_SESSION_ID: 'parent-session-1',
+      LODY_OPENED_BY_SESSION_ID: 'opener-session-3',
+    });
   });
 
-  it('falls back to its own session id when no parent session exists', () => {
-    const session = new Session(createConfig(), createSilentLogger());
-
-    const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
-
-    expect(env.LODY_SESSION_ID).toBe('session-1');
-    expect(env.LODY_WORKSPACE_SESSION_ID).toBe('session-1');
-  });
+  it.each([undefined, 'opener-session-3'])(
+    'keeps independent identity separate from inherited values with opener %s',
+    (openedBySessionId) => {
+      const inherited = {
+        LODY_AGENT_ROLE_ID: 'stale-role',
+        LODY_PARENT_SESSION_ID: 'stale-parent',
+        LODY_OPENED_BY_SESSION_ID: 'stale-opener',
+      };
+      for (const [key, value] of Object.entries(inherited)) vi.stubEnv(key, value);
+      loginShellOverlay.value = inherited;
+      const session = new Session(
+        createConfig({ env: inherited, openedBySessionId: openedBySessionId as SessionId }),
+        createSilentLogger()
+      );
+      const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
+      expect(env).toMatchObject({
+        LODY_SESSION_ID: 'session-1',
+        LODY_WORKSPACE_SESSION_ID: 'session-1',
+        LODY_AGENT_ROLE_ID: undefined,
+        LODY_PARENT_SESSION_ID: undefined,
+        LODY_OPENED_BY_SESSION_ID: openedBySessionId,
+      });
+    }
+  );
 
   it('allows updateEnv to remove stale session environment keys', () => {
     const session = new Session(
@@ -177,7 +201,6 @@ describe('Session buildShellEnv', () => {
 
       const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
 
-      // Subscription / OAuth / shell-set users should still see their inherited credentials.
       expect(env.ANTHROPIC_API_KEY).toBe('sk-from-shell');
     } finally {
       if (original === undefined) {
