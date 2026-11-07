@@ -37,6 +37,7 @@ const {
   pinSession,
   markSessionRead,
   renameSession,
+  setSessionOwner,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
 );
@@ -418,6 +419,45 @@ test('rename writes a user-directed title onto the session meta', async () => {
   );
   await assert.rejects(
     renameSession({ sessionId: 's1', title: 'x'.repeat(201) }, replica),
+    /invalid_session/,
+  );
+});
+
+test('changing the owner rewrites only SessionMeta.userId, never sharing', async () => {
+  const meta = new Flock('owner'),
+    remoteMeta = new Flock('owner-remote');
+  meta.set(['m', 'session-s1'], {
+    id: 's1',
+    userId: 'alice',
+    visibility: 'private',
+  });
+  meta.commit();
+  remoteMeta.importFile(meta.exportFile());
+  let fail = true;
+  const replica = {
+    flock: meta,
+    client: {
+      async append({ part }) {
+        if (fail) throw new Error('offline');
+        remoteMeta.importJson(unframe(part.body));
+        return { ok: true, result: {} };
+      },
+    },
+  };
+  await assert.rejects(
+    setSessionOwner({ sessionId: 's1', userId: 'bob' }, replica),
+    /offline/,
+  );
+  fail = false;
+  await setSessionOwner({ sessionId: 's1', userId: ' carol ' }, replica);
+  assert.equal(remoteMeta.get(['m', 'session-s1', 'userId']), 'carol');
+  assert.equal(remoteMeta.get(['m', 'session-s1']).visibility, 'private');
+  await assert.rejects(
+    setSessionOwner({ sessionId: 'missing', userId: 'bob' }, replica),
+    /session_not_found/,
+  );
+  await assert.rejects(
+    setSessionOwner({ sessionId: 's1', userId: '  ' }, replica),
     /invalid_session/,
   );
 });

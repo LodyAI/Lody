@@ -133,6 +133,42 @@ ui.capture('archived-menu')
 tap_label(catalog.text('session.action.unarchive'))
 wait_probe('unarchive', 'Unarchive did not reach the session service')
 
+# Web SessionHeaderMenu's Copy submenu: every option reaches the clipboard.
+copy_menu = catalog.text('session.copy.title')
+for option, expected in [
+    ('session.copy.baseBranch', 'main'),
+    ('session.copy.path', '/Users/preview/.lody/repos/github---innei---lody-ios/worktrees/native-session'),
+    ('session.copy.markdown', '# Native session preview\n\nLive reply with a needle'),
+    ('session.copy.url', 'https://lody.ai/preview/sessions/native-session'),
+    ('session.copy.deeplink', 'lody://session/native-session?workspace=preview-workspace'),
+]:
+    tap_label(more)
+    tap_label(copy_menu)
+    if option == 'session.copy.baseBranch':
+        ui.capture('copy-submenu')
+    tap_menu_item(catalog.text(option))
+    wait_clipboard(expected)
+
+# Rename and Change owner write through the session service.
+tap_label(more)
+tap_label(catalog.text('session.action.rename'))
+ui.wait(lambda items: any(i.get('type') == 'TextField' for i in items), 'Rename prompt has no title field')
+ui.axe('key-combo', '--modifiers', '227', '--key', '4')
+ui.axe('key', '42')
+ui.axe('type', 'Renamed preview')
+buttons = [i for i in ui.state() if i.get('type') == 'Button' and i.get('AXLabel') == catalog.text('session.action.rename')]
+frame = max(buttons, key=lambda i: i['frame']['y'])['frame']
+ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.5')
+wait_probe('rename', 'Rename did not reach the session service')
+wait_text('Renamed preview')
+
+tap_label(more)
+tap_label(catalog.text('session.owner.change'))
+ui.capture('owner-submenu')
+tap_menu_item('Ada Lovelace')
+wait_probe('owner:preview-teammate', 'Change owner did not reach the session service')
+wait_text(catalog.text('session.owner.changed', name='Ada Lovelace'))
+
 tap_label(more)
 tap_label(catalog.text('session.action.find'))
 ui.element('chat-find-field')
@@ -161,4 +197,4 @@ ui.open_case('session-preview-find')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'chat-find-field' and 'needle' in (i.get('AXValue') or '') for i in items), 'Find query did not open the find bar')
 ui.capture('find-query')
 
-print('PASS: native session page renders cached then live history, title and header actions, find, deletion return, offline reconnect and an incoming find query.')
+print('PASS: native session page renders cached then live history, title and header actions (copy submenu, rename, change owner), find, deletion return, offline reconnect and an incoming find query.')

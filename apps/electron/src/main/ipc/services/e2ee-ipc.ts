@@ -51,7 +51,9 @@ import {
   continueAccountVaultReplacement,
   defaultPasskeyLabel,
   enrollRecoveryPasskey,
+  listRecoveryPasskeys,
   passkeyLabel,
+  removeRecoveryPasskey,
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recentAccountSecurityEvents,
@@ -3499,6 +3501,40 @@ export class E2eeIpc extends IpcService {
             )
           )
       )
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: list the vault's passkeys, opening it with the file or a passkey. */
+  @IpcMethod()
+  async listRecoveryPasskeys(method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const passkeys = await this.recoveryOperation(({ store, journalPath }) =>
+        listRecoveryPasskeys({ store, journalPath, unlock })
+      )
+      return { outcome: 'listed' as const, passkeys }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: remove one passkey. Removing changes the index, so V must open again. */
+  @IpcMethod()
+  async removeRecoveryPasskey(entryId: string, method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (typeof entryId !== 'string' || !/^[0-9a-f]{64}$/.test(entryId))
+      throw new Error('e2ee_recovery_invalid-input')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const passkeys = await this.recoveryOperation(({ store, journalPath }) =>
+        removeRecoveryPasskey({ store, journalPath, unlock, entryId })
+      )
+      return { outcome: 'removed' as const, passkeys }
     } finally {
       if ('file' in unlock) unlock.file.fill(0)
     }

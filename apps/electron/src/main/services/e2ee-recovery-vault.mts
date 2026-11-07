@@ -438,6 +438,30 @@ export const enrollRecoveryPasskey = (
     }).pipe(Effect.provide(vaults(io)))
   )
 
+/** The passkeys enrolled on the account's vault. Listing them needs V. */
+export const listRecoveryPasskeys = (io: RecoveryVaultIo & { readonly unlock: RecoveryUnlock }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const vault = yield* openVault(io.unlock)
+      return (yield* vault.listPasskeys()).map(({ entryId, label }) => ({ entryId, label }))
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
+/**
+ * Remove a passkey: the index is committed first, then its wrap is deleted. This stops
+ * future use only; a copy of the wrap taken earlier still opens V with that passkey.
+ */
+export const removeRecoveryPasskey = (
+  io: RecoveryVaultIo & { readonly unlock: RecoveryUnlock; readonly entryId: string }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const vault = yield* openVault(io.unlock)
+      yield* vault.removePasskey(io.entryId)
+      return (yield* vault.listPasskeys()).map(({ entryId, label }) => ({ entryId, label }))
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
 /** Set up recovery for one workspace, opening the vault with its file or a passkey. */
 export const setupWorkspaceRecovery = (
   io: RecoveryVaultIo & {

@@ -93,7 +93,9 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'restoreFromRecoveryFile',
       'recoveryPasskeyAvailable',
       'addRecoveryPasskey',
-      'recoveryPasskeyDefaultLabel'
+      'recoveryPasskeyDefaultLabel',
+      'listRecoveryPasskeys',
+      'removeRecoveryPasskey'
     ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }

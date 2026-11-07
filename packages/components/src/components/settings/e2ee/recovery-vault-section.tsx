@@ -38,7 +38,8 @@ type Result =
         | 'e2ee.recovery.replaceFinished'
         | 'e2ee.recovery.replacePending'
         | 'e2ee.recovery.setupDone'
-        | 'e2ee.recovery.passkeyAdded';
+        | 'e2ee.recovery.passkeyAdded'
+        | 'e2ee.recovery.passkeyRemoved';
     }
   | { kind: 'restored'; results: readonly { name: string; outcome: string }[] }
   | { kind: 'created'; vaultId: string }
@@ -63,6 +64,8 @@ export function RecoveryVaultSection() {
     []
   );
   const [naming, setNaming] = useState<string>();
+  const [passkeys, setPasskeys] = useState<readonly { entryId: string; label: string }[]>();
+  const [removing, setRemoving] = useState<{ entryId: string; label: string }>();
   useEffect(() => {
     if (!enabled || !e2ee) return;
     let live = true;
@@ -195,7 +198,38 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.passkeyAdd')}
             </Button>
           )}
+          {passkey && plan?.replaceable && (
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const listed = await e2ee.listRecoveryPasskeys();
+                  if (listed.outcome === 'listed') setPasskeys(listed.passkeys);
+                  return undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.passkeyManage')}
+            </Button>
+          )}
         </div>
+        {passkeys !== undefined && (
+          <div {...stylex.props(styles.body)}>
+            {passkeys.length === 0 ? (
+              <p>{t('e2ee.recovery.passkeyNone')}</p>
+            ) : (
+              passkeys.map((row) => (
+                <div key={row.entryId} {...stylex.props(styles.actions)}>
+                  <span>{row.label}</span>
+                  <Button variant="secondary" disabled={busy} onClick={() => setRemoving(row)}>
+                    {t('e2ee.recovery.passkeyRemove')}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
         {!!plan?.covered.length && (
           <div {...stylex.props(styles.body)}>
             <p>{t('e2ee.recovery.workspaces')}</p>
@@ -346,6 +380,42 @@ export function RecoveryVaultSection() {
           </Alert.Root>
         )}
       </div>
+      <AlertDialog.Root
+        open={removing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(undefined);
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('e2ee.recovery.passkeyRemoveTitle', { name: removing?.label ?? '' })}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t('e2ee.recovery.passkeyRemoveBody')}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                const entryId = removing?.entryId ?? '';
+                setRemoving(undefined);
+                void run(async () => {
+                  const removed = await e2ee.removeRecoveryPasskey(entryId);
+                  if (removed.outcome !== 'removed') return undefined;
+                  setPasskeys(removed.passkeys);
+                  return { kind: 'notice', key: 'e2ee.recovery.passkeyRemoved' };
+                });
+              }}
+            >
+              {t('e2ee.recovery.passkeyRemove')}
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
       <AlertDialog.Root
         open={naming !== undefined}
         onOpenChange={(open) => {
