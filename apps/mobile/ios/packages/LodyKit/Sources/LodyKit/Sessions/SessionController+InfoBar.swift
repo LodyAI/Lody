@@ -22,7 +22,7 @@ extension SessionController {
     infoBar = bar
     var result: [String: Any] = [:]
     result["items"] = [machineItem(session)].compactMap { $0 } + resourceItems
-    if let context = contextItem(bar) { result["context"] = context }
+    if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
         "added": bar.added, "removed": bar.removed, "tap": reviewable,
@@ -65,7 +65,7 @@ extension SessionController {
 
   /// PR number, else branch, else the repository name without its owner (web truncated the
   /// owner first; on a phone it carries nothing). CI trouble tints the PR glyph instead of text.
-  private func contextItem(_ bar: SessionInfoBar) -> [String: Any]? {
+  private func contextItem(_ bar: SessionInfoBar, projectName: String?) -> [String: Any]? {
     guard !bar.repository.isEmpty || !bar.branch.isEmpty || bar.pullRequest != nil else { return nil }
     let name = bar.repository.split(separator: "/").last.map(String.init) ?? bar.repository
     var label = bar.branch.isEmpty ? name : bar.branch
@@ -92,7 +92,8 @@ extension SessionController {
     return [
       "label": label, "symbol": symbol, "tint": tint, "actions": actions,
       "accessibilityLabel": description.filter { !$0.isEmpty }.joined(separator: ", "),
-      "menuTitle": bar.repository,
+      "menuTitle": bar.repository.isEmpty ? (projectName ?? "") : bar.repository,
+      "repository": bar.repository,
       "prStatus": bar.pullRequest?.status ?? "", "prCI": bar.pullRequest?.ci ?? "",
     ]
   }
