@@ -28,6 +28,7 @@ export { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity 
 export {
   makeWorkspaceRecovery,
   abandonWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
   type WorkspaceRecoveryInput,
   type RecoveryCredentialRegistration,
   type RecoverySubmitResult,

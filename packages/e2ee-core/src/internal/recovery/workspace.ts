@@ -1,7 +1,7 @@
 import { Clock, Effect, Result, Schema, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
-import { disposeEpochKey } from '../foundation/epoch-key';
+import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
 import {
   epochHistoryPacket,
   hasVerifiedCheckpoint,
@@ -947,3 +947,27 @@ export const abandonWorkspaceRecovery = Effect.fnUntraced(function* (
   });
   return { revokeOwnRecoveryDevice: owner.revokeOwnRecoveryDevice };
 });
+
+/** Hold epoch keys read through R until a new device installs them. Core releases every
+ * key it hands over, so this keeps independent bytes and returns a fresh key each read. */
+export const memoryRecoveryEpochKeys = () => {
+  const held = new Map<number, Uint8Array>();
+  const fresh = (bytes: Uint8Array) => Result.getOrThrow(Bytes.epochKey(bytes));
+  return {
+    saveAndReload: (epoch: number, key: Bytes.EpochKey) =>
+      Effect.sync(() => {
+        held.get(epoch)?.fill(0);
+        held.set(epoch, copyEpochKeyBytes(key));
+      }),
+    read: (epoch: number) => {
+      const bytes = held.get(epoch);
+      return bytes ? Effect.succeed(fresh(bytes)) : Effect.fail(vaultError('missing'));
+    },
+    /** Fresh keys, owned by the caller. */
+    entries: () => [...held.entries()].map(([epoch, bytes]) => [epoch, fresh(bytes)] as const),
+    dispose: () => {
+      for (const bytes of held.values()) bytes.fill(0);
+      held.clear();
+    },
+  };
+};

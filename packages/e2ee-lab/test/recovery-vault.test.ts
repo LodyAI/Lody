@@ -9,10 +9,18 @@ import { encodeCbor } from '@lody/e2ee-core/protocol';
 import {
   abandonWorkspaceRecovery,
   makeWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
   type RecoveryVault,
   type RecoverySubmitResult,
+  type WorkspaceRecoveryInput,
 } from '@lody/e2ee-core';
-import { recoveryLedger } from '@lody/e2ee-client/recovery-restore';
+import {
+  readRecoveryHistory,
+  recoveryLedger,
+  recoveryRestoreIncomplete,
+  restoreVaultWorkspaces,
+  type VaultRestoreAnchor,
+} from '@lody/e2ee-client/recovery-restore';
 import {
   abandonVaultReplacement,
   planVaultReplacement,
@@ -155,7 +163,32 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
   let envelopeFails = false;
   let envelopeHeld = false;
   const credentials: Uint8Array[] = [];
-  const owner = (vault: RecoveryVault) =>
+  const fetchEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'] = (
+    recipient,
+    epoch,
+    _identity,
+    credential
+  ) =>
+    Effect.gen(function* () {
+      credentials.push(new Uint8Array(credential));
+      if (envelopeFails) return yield* Effect.fail(new Error('synthetic no envelope'));
+      if (envelopeHeld) return { pending: true as const };
+      return {
+        sender: f.owner.publicKey,
+        frame: yield* prepareEpochEnvelope({
+          context: {
+            genesis: f.initial.genesis,
+            epoch: ok(Bytes.epochNumber(epoch)),
+            sender: f.owner.publicKey,
+            recipient,
+          },
+          key: f.epochKey,
+          signer: f.owner,
+          ledger: () => Effect.sync(f.view),
+        }),
+      };
+    });
+  const owner = (vault: RecoveryVault, keys: WorkspaceRecoveryInput['installed'] = installed) =>
     makeWorkspaceRecovery({
       vault,
       local: storage.local,
@@ -164,33 +197,14 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       personalSigner: f.owner,
       ledger: () => Effect.sync(f.view),
       submitOriginal: submit,
-      installed,
+      installed: keys,
       trust: {
         source: 'synthetic device that verified the workspace',
         genesisRecord: f.initial.record,
         head: hex(f.view().head.toBytes()),
         length: f.records.length,
       },
-      fetchCurrentEnvelope: (recipient, epoch, _identity, credential) =>
-        Effect.gen(function* () {
-          credentials.push(new Uint8Array(credential));
-          if (envelopeFails) return yield* Effect.fail(new Error('synthetic no envelope'));
-          if (envelopeHeld) return { pending: true as const };
-          return {
-            sender: f.owner.publicKey,
-            frame: yield* prepareEpochEnvelope({
-              context: {
-                genesis: f.initial.genesis,
-                epoch: ok(Bytes.epochNumber(epoch)),
-                sender: f.owner.publicKey,
-                recipient,
-              },
-              key: f.epochKey,
-              signer: f.owner,
-              ledger: () => Effect.sync(f.view),
-            }),
-          };
-        }),
+      fetchCurrentEnvelope: fetchEnvelope,
     });
   const recoveryDevices = () =>
     [...f.view().inspectState().devices]
@@ -222,8 +236,14 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       ],
       finish,
     });
+  const submitOnce = (record: Uint8Array) =>
+    f.records.some((row) => hex(row) === hex(record))
+      ? Effect.succeed({ outcome: 'Committed' as const, record: new Uint8Array(record) })
+      : submit(record);
   return {
     f,
+    fetchEnvelope,
+    submitOnce,
     local: storage.local,
     seenCredentials: () => credentials,
     owner,
@@ -1321,6 +1341,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
       startIndex,
       recordsHex: records.map(hex),
       nextCursor: null,
+      checkpoint: null,
     });
     const ledger = (pages: readonly ReturnType<typeof page>[]) =>
       Effect.runPromise(
@@ -1333,6 +1354,145 @@ describe('encrypted recovery vault and genuine workflow', () => {
     expect(await ledger([page(other.records)])).toMatchObject({ _tag: 'Failure' });
     expect(await ledger([])).toMatchObject({ _tag: 'Failure' });
   });
+  it('keeps restored keys usable after core releases its own, for a real SQLite install', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const keys = memoryRecoveryEpochKeys();
+            const restorer = yield* r.owner(r.newVault.vault, keys);
+            const restored = yield* restorer.restoreFromRecovery({
+              personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+              submitOriginalAsRecovery: (record) => r.submit(record),
+            });
+            expect(restored.outcome).toBe('Committed');
+            const installed = yield* makeSqliteProtectedEpochKeys({
+              path: join(dir, 'new-device-keys.sqlite'),
+              mode: 'create',
+              genesis: r.f.initial.genesis,
+              recipient: r.f.personal.publicKey,
+              ledger: () => Effect.sync(r.f.view),
+              protector: labSyntheticProtector,
+            });
+            const entries = keys.entries();
+            expect(entries.length).toBeGreaterThan(0);
+            for (const [epoch, key] of entries) yield* installed.saveAndReload(epoch, key);
+            keys.dispose();
+            const read = yield* installed.read(0);
+            expect(
+              ok(commitEpochKey(r.f.initial.genesis, 0, read)).equals(
+                ok(epochHistoryPacket(r.f.view(), 0)).commitment
+              )
+            ).toBe(true);
+            expect(keys.entries()).toHaveLength(0);
+          })
+        )
+      );
+    }));
+  it('reads a ledger longer than one page with a fixed checkpoint', async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const f = yield* fixture();
+        for (let index = 0; index < 34; index++) {
+          const device = yield* generateDevice();
+          const admit = yield* prepareDeviceAdmission({
+            genesis: f.initial.genesis,
+            membershipId: f.membership,
+            encryptionPublicKey: device.enc,
+            kind: 'personal',
+            signer: device,
+          });
+          for (const command of [
+            admit,
+            { _tag: 'RevokeDevice', target: device.publicKey } as const,
+          ])
+            f.records.push(
+              new Uint8Array(
+                yield* signLedgerRecord(
+                  ok(prepareLedgerCommand(f.view(), f.owner.publicKey, command)),
+                  f.owner
+                )
+              )
+            );
+        }
+        expect(f.records.length).toBe(69);
+        const size = 25;
+        const fixed = { head: hex(f.view().head.toBytes()), length: f.records.length };
+        const history = (next?: { readonly cursor: string; readonly checkpoint: typeof fixed }) => {
+          if (next && next.checkpoint?.head !== fixed.head)
+            return Effect.fail(new Error('e2ee_invalid_cursor'));
+          const startIndex = next ? Number(next.cursor) : 0;
+          const end = startIndex + size;
+          return Effect.succeed({
+            startIndex,
+            checkpoint: fixed,
+            recordsHex: f.records.slice(startIndex, end).map(hex),
+            nextCursor: end < f.records.length ? String(end) : null,
+          });
+        };
+        const view = yield* recoveryLedger({
+          genesis: f.initial.genesis,
+          pages: () => readRecoveryHistory(history),
+        })();
+        expect(view.length).toBe(69);
+      })
+    );
+  });
+  it('retries a restore whose keys never installed, then leaves it alone', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            let adoptions = 0;
+            let hasIdentity = false;
+            const keys = memoryRecoveryEpochKeys();
+            const target = {
+              id: 'workspace',
+              name: 'Workspace',
+              genesisHash: hex(r.f.initial.genesis.toBytes()),
+              hasIdentity: () => hasIdentity,
+              connect: (anchor: VaultRestoreAnchor) =>
+                Effect.succeed({
+                  personalSigner: r.f.personal,
+                  personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                  ledger: () => Effect.sync(r.f.view),
+                  installed: keys,
+                  fetchCurrentEnvelope: r.fetchEnvelope,
+                  submitOriginalAsRecovery: (record: Uint8Array) => r.submitOnce(record),
+                  acquirePersonal: () => Effect.fail(new Error('unused')),
+                  recovered: keys.entries,
+                  adopt: () =>
+                    Effect.suspend(() => {
+                      expect(anchor.genesis.equals(r.f.initial.genesis)).toBe(true);
+                      adoptions += 1;
+                      hasIdentity = true;
+                      return adoptions === 1
+                        ? Effect.fail(new Error('synthetic install failure'))
+                        : Effect.void;
+                    }),
+                }),
+            };
+            const run = () =>
+              restoreVaultWorkspaces({
+                vault: r.newVault.vault,
+                local: r.local,
+                targets: [target],
+              });
+            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
+            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Committed' }]);
+            expect(adoptions).toBe(2);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            expect(yield* run()).toEqual([]);
+            expect(adoptions).toBe(2);
+          })
+        )
+      );
+    }));
   it('names the workspaces a device cannot act on', () => {
     expect(
       planVaultReplacement(

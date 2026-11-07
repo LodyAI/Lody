@@ -607,8 +607,11 @@ void test('abandoning needs no file, revokes the new R and keeps the current vau
 })
 
 void test('the plan names workspaces this device cannot act on', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
   const plan = await Effect.runPromise(
     recoveryReplacementPlan({
+      journalPath: join(dir, 'recovery-vault.sqlite'),
+      store: {},
       replacement: {
         state: () => Effect.succeed({ current: 'a'.repeat(64), replacing: null })
       },
@@ -625,6 +628,7 @@ void test('the plan names workspaces this device cannot act on', async () => {
     covered: [{ id: 'here', name: 'Here' }],
     uncovered: [{ id: 'elsewhere', name: 'Elsewhere' }]
   })
+  rmSync(dir, { recursive: true, force: true })
 })
 
 void test('setting up one workspace needs the current vault and reports a slow delivery', async () => {
@@ -682,7 +686,9 @@ void test('a restore sends both credentials and names the R as endorser', async 
         appended.push(request)
         return { status: 'committed' }
       }),
-    history: () => Effect.succeed({ startIndex: 0, recordsHex: [], nextCursor: null }),
+    hasIdentity: () => false,
+    history: () =>
+      Effect.succeed({ startIndex: 0, recordsHex: [], nextCursor: null, checkpoint: null }),
     mailbox: () => ({ fetch: () => Effect.succeed({ items: [] }) }),
     stagedGroup: () => Effect.succeed(null),
     identity: (pin) =>
