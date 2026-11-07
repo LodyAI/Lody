@@ -4,6 +4,16 @@ import { getMainWindow } from './window-state'
 const AUTH_DEBUG_PREFIX = '[electron-auth-debug]'
 const AUTH_DEBUG_CHANNEL = 'lody:auth-debug'
 const MAX_PENDING_RENDERER_EVENTS = 100
+const DIAGNOSTIC_ROUTES = new Set([
+  '/',
+  'auth/callback',
+  'invite/open',
+  'github-install',
+  'checkout-return',
+  'machine/connect',
+  'chat/new',
+  'provider/import'
+])
 
 type AuthDebugMeta = Record<string, unknown>
 
@@ -96,27 +106,27 @@ export function describeUrlForAuthDebug(rawUrl: string | null | undefined): Auth
     const hashParams = parsed.hash.startsWith('#')
       ? new URLSearchParams(parsed.hash.slice(1))
       : new URLSearchParams()
-    const searchKeys = Array.from(parsed.searchParams.keys())
-    const hashKeys = Array.from(hashParams.keys())
     const token = hashParams.get('token')
+    const candidate =
+      parsed.protocol === 'http:' || parsed.protocol === 'https:'
+        ? parsed.pathname.replace(/^\//, '') || '/'
+        : `${parsed.hostname}${parsed.pathname.replace(/\/$/, '')}`
 
     return {
       present: true,
-      protocol: parsed.protocol,
-      host: parsed.host,
-      pathname: parsed.pathname,
+      route: DIAGNOSTIC_ROUTES.has(candidate) ? candidate : 'other',
       hasSearch: parsed.search.length > 0,
-      searchKeys,
+      searchKeyCount: [...parsed.searchParams.keys()].length,
       hasHash: parsed.hash.length > 0,
-      hashKeys,
+      hashKeyCount: [...hashParams.keys()].length,
       hasToken: typeof token === 'string' && token.length > 0,
       tokenLength: token?.length ?? 0,
       urlLength: rawUrl.length
     }
-  } catch (error) {
+  } catch {
     return {
       present: true,
-      parseError: error instanceof Error ? error.message : String(error),
+      parseError: true,
       urlLength: rawUrl.length
     }
   }
