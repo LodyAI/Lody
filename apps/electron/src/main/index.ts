@@ -51,6 +51,11 @@ async function forwardLaunchDeepLinks(): Promise<boolean> {
   return forwarded
 }
 
+let ownsSingleInstanceLock = false
+app.once('will-quit', () => {
+  ownsSingleInstanceLock = false
+})
+
 async function start(): Promise<void> {
   // Same-app launches deliver their URL to the primary; they must not be
   // mistaken for a conflict with the other distribution.
@@ -60,6 +65,7 @@ async function start(): Promise<void> {
     app.quit()
     return
   }
+  ownsSingleInstanceLock = !isolatedE2E
   beginDesktopRunRecord()
   if (!isolatedE2E && process.platform === 'win32') {
     const stop = startDeepLinkIpcListener((url) => launches.push({ url }))
@@ -115,7 +121,19 @@ async function start(): Promise<void> {
     executionHost = borrowDesktopExecutionHost(result.lease)
   }
   // Auth/settings modules open stores at evaluation. Keep this import lazy.
-  const application = await import('./application')
+  const { CoreUpdaterService, setCoreUpdater } = await import('./services/core-updater-service')
+  const core =
+    app.isPackaged && !isolatedE2E
+      ? await CoreUpdaterService.open(
+          process.resourcesPath,
+          `${app.getPath('userData')}/core-ota`,
+          () => ownsSingleInstanceLock && app.hasSingleInstanceLock()
+        )
+      : null
+  if (core) setCoreUpdater(core)
+  const application = core
+    ? await core.loadApplication(() => import('./application'))
+    : await import('./application')
   application.startApplication(executionHost)
   launches.bind(application.handleDesktopLaunch)
   launchAdmission.markReady()

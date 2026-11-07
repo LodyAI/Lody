@@ -1,3 +1,4 @@
+import { getCoreUpdater } from '../../services/core-updater-service'
 import { assertProductWindowSender } from '../assert-sender'
 import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
 import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
@@ -637,7 +638,10 @@ export class AppIpc extends IpcService {
   async notifyRendererMounted() {
     const { event } = getIpcContext()
     const window = findWindow(event.sender)
-    if (window) markRendererMounted(window)
+    if (window && event.senderFrame === event.sender.mainFrame) {
+      markRendererMounted(window)
+      if (window === getMainWindow()) await getCoreUpdater()?.acknowledgeHealthy()
+    }
   }
 
   @IpcMethod()

@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import { createHash, createPublicKey } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -51,7 +53,7 @@ function assertPackagedDeepSeekAssets(packedCliDir) {
  *    ABI-mismatched bindings fail the build instead of crash-looping on user
  *    machines. The runtime probe runs only when the target matches the build host.
  */
-export default async function afterPack(context) {
+async function afterPackInstalled(context) {
   const archName = ARCH_NAMES[context.arch]
   const platform = context.electronPlatformName
 
@@ -392,4 +394,78 @@ function resolvePackedCliRuntimePath({ binaryPath, productFilename, resourcesDir
   }
 
   return helperPath
+}
+
+export default async function afterPack(context, config) {
+  await afterPackInstalled(context)
+  const resourcesDir =
+    context.electronPlatformName === 'darwin' || context.electronPlatformName === 'mas'
+      ? path.join(
+          context.appOutDir,
+          `${context.packager.appInfo.productFilename}.app`,
+          'Contents',
+          'Resources'
+        )
+      : path.join(context.appOutDir, 'resources')
+  if (config) {
+    if (Object.keys(config).sort().join() !== 'arch,channel,feedUrl,platform,product,publicKey')
+      throw new Error('Invalid public Core config fields')
+    const platform = context.electronPlatformName
+    const arch = ARCH_NAMES[context.arch]
+    if (
+      config.platform !== platform ||
+      config.arch !== arch ||
+      config.product !== 'lody-oss' ||
+      !['stable', 'nightly'].includes(config.channel)
+    )
+      throw new Error('Core config target mismatch')
+    const packageVersion = context.packager.appInfo.version
+    const expectedChannel = /nightly/i.test(packageVersion) ? 'nightly' : 'stable'
+    if (config.channel !== expectedChannel)
+      throw new Error('Core channel does not match packaged version')
+    const url = new URL(config.feedUrl)
+    if (url.protocol !== 'https:' || url.username || url.password)
+      throw new Error('Core feed must be HTTPS')
+    if (
+      typeof config.publicKey !== 'string' ||
+      config.publicKey.includes('PRIVATE KEY') ||
+      createPublicKey(config.publicKey).asymmetricKeyType !== 'ed25519'
+    )
+      throw new Error('Core requires an Ed25519 public key')
+    const hash = createHash('sha256')
+    function hashTree(directory, prefix) {
+      for (const name of fs.readdirSync(directory).sort()) {
+        const file = path.join(directory, name)
+        const stat = fs.lstatSync(file)
+        if (stat.isSymbolicLink()) {
+          hash.update(`${prefix}/${name}:link:${fs.readlinkSync(file)}`)
+          continue
+        }
+        if (stat.isDirectory()) hashTree(file, `${prefix}/${name}`)
+        else if (stat.isFile()) {
+          hash.update(`${prefix}/${name}\0${stat.size}\0`)
+          hash.update(fs.readFileSync(file))
+        }
+      }
+    }
+    const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url))
+    const repositoryDirectory = path.resolve(scriptsDirectory, '../../..')
+    hash.update(JSON.stringify(config))
+    hash.update(fs.readFileSync(path.join(repositoryDirectory, 'pnpm-lock.yaml')))
+    // Includes installed Host chunks, Electron executable/frameworks, and native resources.
+    hashTree(context.appOutDir, 'installed-host')
+    hashTree(path.join(scriptsDirectory, 'core-ota'), 'core-host-modules')
+    const hostAbi = hash.digest('hex')
+    const moduleDirectory = path.join(resourcesDir, 'core-ota')
+    fs.mkdirSync(moduleDirectory, { recursive: true })
+    for (const name of ['activation.mjs', 'bootstrap.mjs', 'protocol.mjs', 'download.mjs'])
+      fs.copyFileSync(
+        path.join(scriptsDirectory, 'core-ota', name),
+        path.join(moduleDirectory, name)
+      )
+    fs.writeFileSync(
+      path.join(resourcesDir, 'core-ota-host.json'),
+      JSON.stringify({ schemaVersion: 1, ...config, hostAbi })
+    )
+  }
 }

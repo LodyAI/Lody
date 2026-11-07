@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   isMacPackaging,
   resolvePackagedSparkleFeedUrl,
@@ -111,6 +111,15 @@ function resolveRunner() {
 }
 
 const forwardedArguments = stripArgumentSeparators(process.argv.slice(2))
+let coreOtaConfig
+const coreConfigIndex = forwardedArguments.indexOf('--core-ota-config')
+if (coreConfigIndex !== -1) {
+  const configPath = forwardedArguments[coreConfigIndex + 1]
+  if (!configPath || configPath.startsWith('-'))
+    throw new Error('--core-ota-config requires a public JSON file')
+  coreOtaConfig = JSON.parse(readFileSync(path.resolve(configPath), 'utf8'))
+  forwardedArguments.splice(coreConfigIndex, 2)
+}
 const version = resolveVersion(forwardedArguments)
 const electronBuilderArguments = withExplicitPublishPolicy(forwardedArguments)
 assertPublishPolicyIsExplicit(electronBuilderArguments)
@@ -125,6 +134,9 @@ const localSparkleFeed = Boolean(configuredSparkleFeedUrl?.trim())
 const generatedConfig = {
   extends: baseConfigPath,
   extraMetadata: { version },
+  ...(coreOtaConfig
+    ? { afterPack: path.join(generatedConfigDirectory, 'core-after-pack.mjs') }
+    : {}),
   mac: {
     extendInfo: {
       SUFeedURL: sparkleFeedUrl,
@@ -137,6 +149,12 @@ const generatedConfig = {
     }
   }
 }
+if (coreOtaConfig)
+  writeFileSync(
+    path.join(generatedConfigDirectory, 'core-after-pack.mjs'),
+    `import afterPack from ${JSON.stringify(pathToFileURL(path.join(electronDir, 'scripts/eb-after-pack.mjs')).href)};\nexport default context => afterPack(context, ${JSON.stringify(coreOtaConfig)});\n`
+  )
+
 writeFileSync(generatedConfigPath, `${JSON.stringify(generatedConfig, null, 2)}\n`, 'utf8')
 
 let cleanedUp = false

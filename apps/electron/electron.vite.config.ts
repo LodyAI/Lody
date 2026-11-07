@@ -90,6 +90,7 @@ export default defineConfig(({ mode }) => {
         lib: {
           entry: {
             index: resolve(__dirname, 'src/main/index.ts'),
+            application: resolve(__dirname, 'src/main/application.ts'),
             'native-storage-smoke': resolve(__dirname, 'src/main/native-storage-smoke.mts')
           }
         },
