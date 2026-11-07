@@ -4,6 +4,11 @@ Lody’s new native mobile clients for iOS and Android, developed here alongside
 Lody’s desktop app and CLI. Follow agent conversations, create and send tasks,
 respond to permission requests, and inspect projects and code changes from your phone.
 
+Conversation rows summarize activity in their internal Tabs, so running work,
+permission requests, failures, and unread replies remain visible from the list.
+Tabs stay inside their conversation; independently opened child conversations
+retain their own status.
+
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
 clients currently use Lody Cloud; they are not a mobile frontend for the OSS

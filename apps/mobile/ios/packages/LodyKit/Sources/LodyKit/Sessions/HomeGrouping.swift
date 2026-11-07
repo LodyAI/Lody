@@ -48,8 +48,8 @@ enum HomeStatusGroup: String, CaseIterable, Sendable {
   /// Everything else, including chats whose PR is merged or closed.
   case idle
 
-  init(_ session: SessionItem) {
-    let state = SessionState(session)
+  init(_ session: SessionItem, attention: SessionRows.ListAttention? = nil) {
+    let state = attention?.state ?? SessionState(session)
     let pr = session.pullRequests.last.flatMap { ["open", "draft"].contains($0.status) ? $0 : nil }
     if state == .attention || state == .failed {
       self = .attention
@@ -57,7 +57,7 @@ enum HomeStatusGroup: String, CaseIterable, Sendable {
       self = .running
     } else if let pr, PullRequestCI(pr.ci) == .fail {
       self = .attention
-    } else if SessionRows.isUnread(session) {
+    } else if attention?.unread ?? SessionRows.isUnread(session) {
       self = .finished
     } else if pr?.status == "draft" {
       self = .attention

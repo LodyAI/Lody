@@ -82,24 +82,66 @@ enum SessionRows {
     return row
   }
 
+  struct ListAttention {
+    var state: SessionState
+    var unread: Bool
+    var emphasis: Bool
+
+    init(_ session: SessionItem) {
+      state = SessionState(session)
+      unread = isUnread(session)
+      emphasis = needsEmphasis(session)
+    }
+  }
+
+  /// Display-only summary. Closed Tabs suppress unread, but may still have running work.
+  static func conversationAttention(_ sessions: [SessionItem]) -> [String: ListAttention] {
+    let indexed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    var result = Dictionary(sessions.filter { !isTab($0) }.map { ($0.id, ListAttention($0)) }, uniquingKeysWith: { first, _ in first })
+    let priority: [SessionState] = [.failed, .attention, .live]
+    for tab in sessions where isTab(tab) && !tab.archived && tab.childSessionPlacement != "side-panel" {
+      let id = DirectoryTabs.root(tab, indexed: indexed)
+      guard let owner = indexed[id], !isTab(owner), !owner.archived, owner.machineId == tab.machineId,
+        var summary = result[id] else { continue }
+      let state = SessionState(tab)
+      if let rank = priority.firstIndex(of: state), rank < (priority.firstIndex(of: summary.state) ?? priority.count) {
+        summary.state = state
+      }
+      summary.unread = summary.unread || isUnread(tab)
+      summary.emphasis = summary.emphasis || needsEmphasis(tab)
+      result[id] = summary
+    }
+    return result
+  }
+
   static func treeRows(
     _ sessions: [SessionItem], all: [SessionItem], maxRoots: Int = .max, row: (SessionItem) -> LodyListRow
   ) -> [LodyListRow] {
-    tree(sessions, all: all).prefix(maxRoots).flatMap { group -> [LodyListRow] in
-      var parent = row(group.session)
+    let attention = conversationAttention(all)
+    func displayRow(_ session: SessionItem) -> LodyListRow {
+      var result = row(session)
+      if let summary = attention[session.id], !session.archived {
+        result.badge = summary.state.badge
+        result.imageTint = [.live, .attention, .failed].contains(summary.state) ? summary.state.tint : ""
+        result.unread = summary.emphasis
+      }
+      return result
+    }
+    return tree(sessions, all: all).prefix(maxRoots).flatMap { group -> [LodyListRow] in
+      var parent = displayRow(group.session)
       guard !group.children.isEmpty else { return [parent] }
       let members = group.children
       let urgent = [SessionState.attention, .failed, .live].lazy.compactMap { state in
-        members.first { SessionState($0) == state }
+        members.first { (attention[$0.id]?.state ?? SessionState($0)) == state }
       }.first
-      let status = row(urgent ?? group.children[0])
+      let status = displayRow(urgent ?? group.children[0])
       parent.treeParent = true
       parent.childCount = group.children.count
       parent.collapsedValue = String.localizedStringWithFormat(String(localized: "inbox.session.children", bundle: .lody), group.children.count)
       parent.collapsedBadge = status.badge
       parent.collapsedImageTint = status.imageTint
       return [parent] + group.children.enumerated().map { index, child in
-        var item = row(child)
+        var item = displayRow(child)
         item.parentId = group.session.id
         item.lastChild = index == group.children.count - 1
         // A child almost always shares its opener's project: show it only when it differs.
@@ -224,7 +266,7 @@ enum DirectoryTabs {
     root(current, indexed: Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
   }
 
-  private static func root(_ current: SessionItem, indexed: [String: SessionItem]) -> String {
+  static func root(_ current: SessionItem, indexed: [String: SessionItem]) -> String {
     var id = current.id
     var seen = Set<String>()
     while seen.insert(id).inserted {

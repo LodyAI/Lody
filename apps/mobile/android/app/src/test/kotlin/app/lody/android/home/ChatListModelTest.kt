@@ -17,6 +17,33 @@ class ChatListModelTest {
     private fun session(id: String, project: String, status: String = "idle", archived: Boolean = false, pinned: Boolean = false, at: String) =
         CatalogSession(id, "m", project, "Chat $id", status, archived, pinned, at)
 
+    @Test fun internalTabsContributeStatusWithoutBecomingRows() {
+        val parent = session("parent", "p-zed", at = "2026-10-01T00:00:00Z").copy(userId = "me")
+        val tab = parent.copy(id = "tab", parentSessionId = "parent", status = "running", userId = "other")
+        fun rows(vararg tabs: CatalogSession, owner: String? = null) = ChatListModel.home(
+            snapshot.copy(sessions = listOf(parent) + tabs), HomeGrouping.Status, owner,
+            today = LocalDate.parse("2026-10-01"), zone = ZoneOffset.UTC,
+        ).flatMap { it.chats }
+        assertEquals(listOf("parent"), rows(tab).map { it.id })
+        assertEquals(ChatAttention.Running, rows(tab).single().attention)
+        assertEquals(StatusGroup.Running, rows(tab, owner = "me").single().statusGroup)
+        assertNull(rows(tab.copy(status = "idle")).single().attention)
+        assertEquals(ChatAttention.Failed, rows(tab.copy(status = "error")).single().attention)
+        val waiting = tab.copy(id = "nested", parentSessionId = "tab", status = "requestPermission")
+        assertEquals(ChatAttention.Waiting, rows(tab, waiting).single().attention)
+        assertEquals(StatusGroup.Attention, rows(tab, waiting).single().statusGroup)
+        assertEquals(ChatAttention.Running, rows(tab.copy(isTabClosed = true)).single().attention)
+        assertNull(rows(tab.copy(archived = true)).single().attention)
+        assertNull(rows(tab.copy(childSessionPlacement = "side-panel")).single().attention)
+        assertNull(rows(tab.copy(machineId = "another-machine")).single().attention)
+        val unread = tab.copy(status = "completed", lastMessageAt = 20, lastReadAt = 10)
+        assertEquals(ChatAttention.Unread, rows(unread).single().attention)
+        assertNull(rows(unread.copy(isTabClosed = true)).single().attention)
+        val opened = tab.copy(parentSessionId = null, openedBySessionId = "parent")
+        assertNull(rows(opened).first().attention)
+        assertEquals(ChatAttention.Running, ChatListModel.groups(snapshot.copy(sessions = listOf(parent, tab))).flatMap { it.chats }.single().attention)
+    }
+
     @Test fun pinnedGroupLeadsEveryViewWithoutDuplicates() {
         for (grouping in HomeGrouping.entries) {
             val sections = ChatListModel.home(snapshot, grouping)
@@ -46,7 +73,7 @@ class ChatListModelTest {
         assertEquals(expected, time.single().chats.map { it.id })
         val status = ChatListModel.byStatus(data)
         assertEquals(1, status.size)
-        assertEquals(HomeSection.Header.Status(StatusGroup.Idle), status.single().header)
+        assertEquals(HomeSection.Header.Status(StatusGroup.Attention), status.single().header)
         assertEquals(expected, status.single().chats.map { it.id })
         val projects = ChatListModel.byProject(data)
         assertEquals(1, projects.size)

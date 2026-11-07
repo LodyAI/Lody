@@ -77,7 +77,7 @@
 
 - The Chats bottom bar collapses after a user scroll passes the shared spacing threshold: hide tab labels and inactive tabs, contract the capsule toward the leading edge to show only the active icon, and shrink the separate create button. Keep it compact while scrolling back; restore only at the list top. Other tabs use the expanded bar. Retain accessibility labels and stable bottom content insets during the animation.
 
-- A parent chat always retains its own status. When its children are folded, show the most urgent child status between the family chevron and child count; never replace the parent status with a child status.
+- A parent chat retains its own conversation status, including internal Tabs. When its children are folded, show the most urgent child status between the family chevron and child count; never replace the parent status with a child status.
 
 - On the creation page, tapping outside the composer or opening/selecting a context option dismisses the keyboard. Picker search fields must still accept focus, and a dismissal tap must not swallow the option action. Opening run configuration also clears composer focus. A blank-area tap also closes the expanded context picker; controls and search fields retain their own tap handling.
 
@@ -122,3 +122,10 @@
 - Team list owner avatars sit after the first-line time/status at the trailing edge, including child rows; titles and project details share the leading edge. My tasks still omit owner avatars.
 
 - PR marks use shared `LodyPullRequestIcon` from the design system in lists, composer context and its PR action. Match Web SessionPrIcon: four Lucide status shapes, PR colour independent of CI, s check / f,e cross / p solid dot / x circle-dot, including merged/closed when CI is provided. Keep the 14/16 base, 10/16 verdict and transparent circular cutout; do not replace the whole mark with a CI tint.
+
+- Conversation list attention includes its non-archived internal Tabs on the same
+  machine, with failed, waiting, running, then unread priority. Side-panel sessions
+  and independently opened chats do not contribute. Closed Tabs still contribute
+  active status but not unread. Preserve Tab inputs through owner filters, keep
+  Tabs hidden as list entries, and apply the summary to status grouping as well as
+  row markers without rewriting catalog session state.

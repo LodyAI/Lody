@@ -112,10 +112,12 @@ enum InboxSections {
 
   /// Keep complete families containing the owner's chats, including parent context.
   static func owned(_ sessions: [SessionItem], by owner: String) -> [SessionItem] {
-    SessionRows.tree(sessions, all: sessions).flatMap { family in
+    let included = Set(SessionRows.tree(sessions, all: sessions).flatMap { family in
       let members = [family.session] + family.children
-      return members.contains { $0.userId == owner } ? members : []
-    }
+      return members.contains { $0.userId == owner } ? members.map(\.id) : []
+    })
+    let indexed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return sessions.filter { included.contains(DirectoryTabs.root($0, indexed: indexed)) }
   }
 
   /// Quiet chats beyond this many top-level rows fold behind "Show all" in the status view.
@@ -157,7 +159,7 @@ enum InboxSections {
     let home = HomeRows(catalog, now: now)
     var groups: [HomeStatusGroup: [SessionItem]] = [:]
     for family in home.families {
-      groups[HomeStatusGroup(family.session), default: []] += [family.session] + family.children
+      groups[HomeStatusGroup(family.session, attention: home.attention[family.session.id]), default: []] += [family.session] + family.children
     }
     return HomeStatusGroup.allCases.compactMap { group in
       guard let sessions = groups[group], !sessions.isEmpty else { return nil }
@@ -186,9 +188,11 @@ enum InboxSections {
     let repos: Set<String>
     let repositories: [String: String]
     let visible: [SessionItem]
+    let attention: [String: SessionRows.ListAttention]
 
     init(_ catalog: SessionCatalog, now: Double) {
       self.catalog = catalog
+      attention = SessionRows.conversationAttention(catalog.sessions)
       self.now = now
       names = InboxSections.projectNames(catalog)
       repositories = Dictionary(catalog.projects.compactMap { project in project.repoFullName.map { (project.id, $0) } }, uniquingKeysWith: { first, _ in first })

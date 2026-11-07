@@ -144,8 +144,7 @@ object ChatListModel {
         else -> ""
     }
 
-    fun statusGroup(session: CatalogSession): StatusGroup {
-        val status = attention(session.status)
+    fun statusGroup(session: CatalogSession, status: ChatAttention? = attention(session)): StatusGroup {
         val waiting = status == ChatAttention.Waiting || status == ChatAttention.Failed ||
             (session.awaitingUserSince != null && status != ChatAttention.Running)
         val pr = session.pullRequests.lastOrNull()?.takeIf { it.status == "open" || it.status == "draft" }
@@ -153,7 +152,7 @@ object ChatListModel {
             waiting -> StatusGroup.Attention
             status == ChatAttention.Running -> StatusGroup.Running
             pr != null && ci(pr.ci) == "fail" -> StatusGroup.Attention
-            isUnread(session) -> StatusGroup.Finished
+            status == ChatAttention.Unread -> StatusGroup.Finished
             pr?.status == "draft" -> StatusGroup.Attention
             pr != null -> StatusGroup.PullRequest
             else -> StatusGroup.Idle
@@ -175,7 +174,8 @@ object ChatListModel {
         val scoped = owner?.let { id ->
             val mine = snapshot.sessions.filter { it.userId == id }.mapTo(mutableSetOf()) { it.id }
             val included = families(snapshot).filter { family -> family.any { it.id in mine } }.flatten().mapTo(mutableSetOf()) { it.id }
-            snapshot.copy(sessions = snapshot.sessions.filter { it.id in included })
+            val all = snapshot.sessions.associateBy { it.id }
+            snapshot.copy(sessions = snapshot.sessions.filter { conversation(it.id, all) in included })
         } ?: snapshot
         val pinnedIds = scoped.sessions.filter { it.pinned }.mapTo(mutableSetOf()) { it.id }
         val pinned = families(scoped).filter { family -> family.any { it.id in pinnedIds } }.flatten()
@@ -217,11 +217,12 @@ object ChatListModel {
     private fun homeItems(snapshot: CatalogSnapshot): List<ChatItem> {
         val projects = snapshot.projects.associateBy { it.id }
         val all = snapshot.sessions.associateBy { it.id }
+        val attention = conversationAttention(snapshot.sessions)
         return snapshot.sessions
             .filter { !it.archived && !isTab(it) }
             .map { session ->
                 val project = projects[session.projectId]?.takeUnless { isChat(it.id) }
-                item(session, project?.name.orEmpty(), project?.repoFullName != null).copy(openerId = opener(session, all), repository = project?.repoFullName)
+                item(session, project?.name.orEmpty(), project?.repoFullName != null, attention[session.id]).copy(openerId = opener(session, all), repository = project?.repoFullName)
             }
             .sortedByDescending { it.activityAt ?: Long.MIN_VALUE }
     }
@@ -235,6 +236,22 @@ object ChatListModel {
      * (web `sessionListAtom` drops them from the sidebar entirely; iOS `SessionRows.isTab`).
      */
     fun isTab(session: CatalogSession): Boolean = !session.parentSessionId.isNullOrEmpty()
+
+    /** Display-only aggregation; closing a Tab suppresses unread, not ongoing work. */
+    private fun conversationAttention(sessions: List<CatalogSession>): Map<String, ChatAttention?> {
+        val all = sessions.associateBy { it.id }
+        val priority = listOf(ChatAttention.Failed, ChatAttention.Waiting, ChatAttention.Running, ChatAttention.Unread)
+        val result = sessions.filterNot(::isTab).associate { it.id to attention(it) }.toMutableMap()
+        for (tab in sessions) {
+            if (!isTab(tab) || tab.archived || tab.childSessionPlacement == "side-panel") continue
+            val owner = all[conversation(tab.id, all)] ?: continue
+            if (isTab(owner) || owner.archived || owner.machineId != tab.machineId) continue
+            val candidate = attention(tab) ?: continue
+            val current = result[owner.id]
+            if (current == null || priority.indexOf(candidate) < priority.indexOf(current)) result[owner.id] = candidate
+        }
+        return result
+    }
 
     /**
      * Only opened chats nest under their opener (web `buildOpenedBySessionTree`). A chat opened
@@ -304,19 +321,20 @@ object ChatListModel {
     fun isChat(projectId: String) = projectId.endsWith(":unassigned")
 
     fun groups(snapshot: CatalogSnapshot): List<ChatGroup> {
+        val attention = conversationAttention(snapshot.sessions)
         val visible = snapshot.sessions.filter { !it.archived && !isTab(it) }.sortedByDescending { activityAt(it) ?: Long.MIN_VALUE }
         val (pinned, rest) = visible.partition { it.pinned }
         val groups = mutableListOf<ChatGroup>()
-        if (pinned.isNotEmpty()) groups += ChatGroup(PINNED_ID, "", ChatGroup.Kind.Pinned, pinned.map { item(it) })
+        if (pinned.isNotEmpty()) groups += ChatGroup(PINNED_ID, "", ChatGroup.Kind.Pinned, pinned.map { item(it, displayAttention = attention[it.id]) })
         snapshot.projects
             .filterNot { isChat(it.id) }
             .sortedBy { it.name.lowercase() }
             .forEach { project ->
                 val chats = rest.filter { it.projectId == project.id }
-                if (chats.isNotEmpty()) groups += ChatGroup(project.id, project.name, ChatGroup.Kind.Project, chats.map { item(it) })
+                if (chats.isNotEmpty()) groups += ChatGroup(project.id, project.name, ChatGroup.Kind.Project, chats.map { item(it, displayAttention = attention[it.id]) })
             }
         val chats = rest.filter { isChat(it.projectId) }
-        if (chats.isNotEmpty()) groups += ChatGroup(CHATS_ID, "", ChatGroup.Kind.Chats, chats.map { item(it) })
+        if (chats.isNotEmpty()) groups += ChatGroup(CHATS_ID, "", ChatGroup.Kind.Chats, chats.map { item(it, displayAttention = attention[it.id]) })
         return groups
     }
 
@@ -408,11 +426,11 @@ object ChatListModel {
         }
     }
 
-    private fun item(session: CatalogSession, place: String = "", placeIsRepo: Boolean = false) = ChatItem(
+    private fun item(session: CatalogSession, place: String = "", placeIsRepo: Boolean = false, displayAttention: ChatAttention? = attention(session)) = ChatItem(
         id = session.id,
         ownerId = session.userId,
         title = session.title,
-        attention = attention(session),
+        attention = displayAttention,
         place = place,
         placeIsRepo = placeIsRepo,
         branch = session.branchName.orEmpty(),
@@ -420,6 +438,6 @@ object ChatListModel {
         activityAt = activityAt(session),
         prCi = ci(session.pullRequests.lastOrNull()?.ci),
         projectId = session.projectId,
-        statusGroup = statusGroup(session),
+        statusGroup = statusGroup(session, displayAttention),
     )
 }

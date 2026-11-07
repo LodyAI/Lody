@@ -22,7 +22,7 @@ for grouping in [HomeGrouping.time, .status, .project] {
   precondition(sections[0].rows.map(\.parentId) == ["", "bucket-parent"])
 }
 precondition(InboxSections.home(bucketCatalog, grouping: .time, now: now)[0].id == "week")
-precondition(InboxSections.home(bucketCatalog, grouping: .status, now: now)[0].id == "idle")
+precondition(InboxSections.home(bucketCatalog, grouping: .status, now: now)[0].id == "attention")
 
 var pinnedParent = bucketParent
 pinnedParent.pinned = true
@@ -285,3 +285,48 @@ preferences.removePersistentDomain(forName: preferenceSuite)
 print("PASS: remembered Tabs survive reload, respect scope and fall back from closed/deleted Tabs; viewed watermarks preserve new unread output")
 
 precondition(PullRequestCI("x")?.rawValue == "expected", "Expected checks must differ from running CI, as Web SessionPrIcon")
+
+// Internal Tabs contribute attention to their listed conversation, even under My tasks.
+let tabOwner = SessionItem(id: "tab-owner", userId: "me", projectId: "p", machineId: "m")
+let runningTab = SessionItem(id: "running-tab", status: "running", userId: "other", projectId: "p", parentSessionId: tabOwner.id, machineId: "m")
+func tabRows(_ tabs: [SessionItem], owner: String? = nil) -> [LodyListRow] {
+  InboxSections.home(SessionCatalog(sessions: [tabOwner] + tabs), grouping: .status, owner: owner, now: now).flatMap(\.rows)
+}
+precondition(tabRows([runningTab]).map(\.id) == [tabOwner.id])
+precondition(tabRows([runningTab]).first?.imageTint == "blue", "Running Tab must reach its conversation row")
+precondition(tabRows([runningTab], owner: "me").first?.imageTint == "blue")
+var stoppedTab = runningTab
+stoppedTab.status = "idle"
+precondition(tabRows([stoppedTab]).first?.imageTint == "")
+stoppedTab.status = "error"
+precondition(tabRows([stoppedTab]).first?.imageTint == "danger")
+var waitingTab = runningTab
+waitingTab.id = "nested-tab"
+waitingTab.parentSessionId = runningTab.id
+waitingTab.status = "requestPermission"
+precondition(tabRows([runningTab, waitingTab]).first?.imageTint == "warning")
+let waitingSections = InboxSections.home(SessionCatalog(sessions: [tabOwner, runningTab, waitingTab]), grouping: .status, now: now)
+precondition(waitingSections.first?.id == "attention")
+var closedRunning = runningTab
+closedRunning.isTabClosed = true
+precondition(tabRows([closedRunning]).first?.imageTint == "blue")
+var excludedTab = runningTab
+excludedTab.archived = true
+precondition(tabRows([excludedTab]).first?.imageTint == "")
+excludedTab = runningTab
+excludedTab.childSessionPlacement = "side-panel"
+precondition(tabRows([excludedTab]).first?.imageTint == "")
+excludedTab = runningTab
+excludedTab.machineId = "other-machine"
+precondition(tabRows([excludedTab]).first?.imageTint == "")
+var unreadTab = runningTab
+unreadTab.status = "completed"
+unreadTab.lastMessageAt = 20
+unreadTab.lastReadAt = 10
+precondition(tabRows([unreadTab]).first?.unread == true)
+unreadTab.isTabClosed = true
+precondition(tabRows([unreadTab]).first?.unread == false)
+var separateOpenedChat = runningTab
+separateOpenedChat.parentSessionId = nil
+separateOpenedChat.openedBySessionId = tabOwner.id
+precondition(tabRows([separateOpenedChat]).first?.imageTint == "")
