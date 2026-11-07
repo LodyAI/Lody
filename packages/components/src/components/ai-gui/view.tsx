@@ -1171,6 +1171,17 @@ type AssistantTurnRowsCacheEntry = {
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
+/**
+ * Thought prose is shown only for builtin providers whose ACP adapter is known to
+ * forward model reasoning as `thought` chunks. Custom/registry launch specs can
+ * reuse these agent types with any executable, so they keep thoughts hidden.
+ */
+const THOUGHT_VISIBLE_BUILTIN_AGENTS: ReadonlySet<string> = new Set(['deepseek', 'pi']);
+
+export const providerShowsThoughts = (
+  meta: Pick<SessionMeta, 'cliType' | 'agentType'> | undefined
+): boolean => meta?.cliType === 'builtin' && THOUGHT_VISIBLE_BUILTIN_AGENTS.has(meta.agentType);
+
 // Exported for tests only (chat-virtual-rows-identity.test.ts).
 export const buildChatVirtualRows = ({
   items,
@@ -1807,11 +1818,7 @@ export const SessionChatStreamView = forwardRef<
     ref
   ) => {
     const thoughtVisibilityAtom = useMemo(
-      () =>
-        selectAtom(
-          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
-          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
-        ),
+      () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), providerShowsThoughts),
       [sessionId]
     );
     const showThoughts = useAtomValue(thoughtVisibilityAtom);
@@ -5290,7 +5297,7 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
+  /* Only builtin DSH and Pi expose these thought rows. Reuse answer sizing,
      preserving thought search identity and the separate disclosure label.
      The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
