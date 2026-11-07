@@ -10,8 +10,40 @@
 - `LodyApplication` owns lifecycle and application coordinators. `AuthSession`, `CatalogSession` and `OutboxSession` own native state; feature controllers observe their projections. Keep protocol code in `packages/cloud-runtime` and generated wire types in `packages/lody-core` (`pnpm contract`).
 - Shell pages use transparent headers and soft scroll edges. Native pages bind their scroll view through `LodyScrollEdges`.
 - Preserve user edits. Before destructive revert/restore/rollback, inspect the working tree and obtain explicit confirmation.
-- Verify with `pnpm check`, `pnpm bundle`, and an iOS simulator build when changing native code. Prefer behavioral checks over implementation snapshots.
+- For a native code change, complete verification with `pnpm check`, `pnpm bundle`, and an iOS simulator build before considering the change ready or opening a PR. For a build/install-only request, report the requested build and install result even when the broader verification suite is outside that request. Prefer behavioral checks over implementation snapshots.
 - Do not nest ternary expressions. One `cond ? a : b` is fine; a `?` inside either branch is not. Map a closed set with a dictionary, and use `if` / `switch` for ordered or overlapping conditions. Optional chaining and `??` are not ternaries.
+
+## Agent build and install
+
+A fresh worktree may not have JavaScript dependencies, the `chat-kit` submodule, generated assets, or `Lody.xcodeproj`. Bootstrap it once from the repository root:
+
+```sh
+git submodule update --init --recursive apps/mobile/ios/packages/chat-kit
+cd apps/mobile/ios
+corepack pnpm install --frozen-lockfile
+corepack pnpm prebuild
+```
+
+`pnpm prebuild` is the combined asset and XcodeGen command. Run it after changing app/extension source membership or shared extension references in `project.yml`; never hand-edit the generated project as a source change. If the package-manager wrapper cannot run in a restricted sandbox, its equivalent steps are `node apps/ios/scripts/build-decoder.mjs` and `python3 apps/ios/scripts/prebuild-native.py`.
+
+- Simulator build: run `corepack pnpm verify:build` from `apps/mobile/ios`.
+- Physical-device build: list connected hardware devices with `xcrun devicectl list devices`, then build with automatic signing:
+  ```sh
+  xcodebuild \
+    -project apps/ios/Lody.xcodeproj \
+    -scheme Lody \
+    -configuration Debug \
+    -destination 'id=<device-udid>' \
+    -allowProvisioningUpdates \
+    build
+  ```
+  Normal code signing must stay enabled. The machine needs a valid signing identity and a development provisioning profile that covers the device.
+- Install the built app:
+  ```sh
+  xcrun devicectl device install app --device <device-udid> '<path-to-Lody.app>'
+  ```
+- Do not commit account emails, team identifiers, device names, device UDIDs, provisioning-profile names, credentials, tokens, or absolute user paths. Use placeholders in commands and logs.
+- In restricted agent or CI sandboxes, the default DerivedData and SwiftPM caches may be outside the writable workspace. Reuse one checkout-local cache per checkout, for example `-derivedDataPath .artifacts/device-derived -clonedSourcePackagesDirPath .artifacts/SourcePackages`; never use a fresh per-run temporary cache. If nested build sandboxing is unavailable, `OTHER_SWIFT_FLAGS='$(inherited) -disable-sandbox'` is a local environment workaround, not a project setting.
 
 ## UI baseline
 
@@ -71,7 +103,7 @@
 
 - UI baselines must run without login, user credentials, cloud access, or a connected machine. Add independently resettable Debug scenes using production controllers and `LodyShell.presentNative`; inject deterministic data/service outcomes at their boundary.
 - UI changes must add/update a behavior check in `apps/ios/verification/ui` or reuse the existing native checks. Shared controls must be exercised in each affected host.
-- Local checks omit `--udid` to lease a `Lody * Verify` Simulator. Build with `pnpm verify:build` (one shared Xcode DerivedData per checkout; never pass a per-task `-derivedDataPath` or copy the checkout into the temp directory, and reclaim such leftovers with `pnpm verify:clean`). Wrap build + multi-check flows with `pnpm verify:simulator --name '<current verify>' -- <command>` and use `$LODY_VERIFY_UDID`; never call `simctl create` directly. Explicit `--udid` is for caller-owned devices such as CI. See `apps/ios/verification/ui/README.md`.
+- Local checks omit `--udid` to lease a `Lody * Verify` Simulator. Build with `pnpm verify:build`, reusing one Xcode DerivedData cache per checkout; restricted sandboxes may use the checkout-local fallback in "Agent build and install" but must not create a fresh per-run temporary cache. Reclaim leftover caches with `pnpm verify:clean`. Wrap build + multi-check flows with `pnpm verify:simulator --name '<current verify>' -- <command>` and use `$LODY_VERIFY_UDID`; never call `simctl create` directly. Explicit `--udid` is for caller-owned devices such as CI. See `apps/ios/verification/ui/README.md`.
 - Capture screenshots for visual states and video for temporal behavior. Missing scenes/timeouts fail verification; screenshots alone do not establish visual correctness.
 
 ## Push notifications
