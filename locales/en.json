@@ -1,4 +1,9 @@
 {
+  "sessions.localAttachmentDownload": "Download from original computer",
+  "sessions.localAttachmentDownloading": "Downloading from original computer…",
+  "sessions.localAttachmentDownloadFailed": "Cannot download. Check that the original computer is online and the file still exists.",
+  "sessions.localAttachmentOnly": "Available only on the original computer",
+  "sessions.localAttachmentUnavailable": "Local attachment unavailable",
   "settings.tabs.lodyAgent": "Lody Agent",
   "settings.categories.lodyAgent.description": "Sign in and connect the models Lody Agent uses",
   "lodyAgentSetting.disabled": "Turn on Lody Agent in Beta to use it.",
@@ -4848,6 +4853,8 @@
   "settings.agentRoles.unavailable.machineUnknown": "its machine is not available to you",
   "settings.agentRoles.unavailable.agentConfigMissing": "its agent config no longer exists",
   "settings.agentRoles.unavailable.agentConfigMismatch": "its agent config belongs to another machine",
+  "settings.agentRoles.unavailable.modelUnavailable": "its agent no longer offers the saved model. Edit this Role to pick another",
+  "settings.agentRoles.unavailable.modeUnavailable": "its agent no longer offers the saved permission mode. Edit this Role to pick another",
   "settings.agentRoles.form.name": "Name",
   "settings.agentRoles.form.sectionTarget": "Where it runs",
   "settings.agentRoles.form.sectionTargetHint": "Name and instruction are shared; each machine pins its own agent config, model and memory. A machine the role is not added to never runs it, and nothing falls back to another machine.",

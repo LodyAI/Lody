@@ -159,6 +159,7 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 
 - `apps/cli` — Connect machines and run coding agents
 - `apps/electron` — Lody desktop app
+- [`apps/mobile`](apps/mobile/README.md) — New native iOS and Android clients
 - `packages/components` — Shared workspace UI
 - `packages/ui` — Base UI primitives and StyleX design tokens
 - `packages/platform` — Platform capabilities and integrations
@@ -171,3 +172,17 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `site-docs` — Website, documentation, and blog
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and the community PR size policy.
+
+## Mobile and upstream credit
+
+Lody’s new native mobile clients live in [apps/mobile](apps/mobile/README.md).
+They are under active development and keep independent iOS and Android build
+toolchains; see the mobile README for setup and current scope.
+
+The iOS client is built directly on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**.
+We thank [Innei](https://github.com/Innei) and the upstream contributors for the
+native app, chat experience, application architecture, and Loro/Flock protocol
+runtime that made this work possible. Android also reuses a provenance-tracked
+snapshot of that runtime. This is substantial foundational work, not merely
+inspiration. Upstream licenses, notices, and additional acknowledgements are
+preserved in the [mobile credits](apps/mobile/README.md#credits-and-origins).

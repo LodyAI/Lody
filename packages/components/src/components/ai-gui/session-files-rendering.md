@@ -167,3 +167,9 @@ the extra thumbnail-load gap documented in the
   bridge the handler must not `preventDefault()`: web keeps the browser's menu.
 - Still plain non-zoomable `<img>`, by scope not by accident: tool-call `image`
   content blocks in `view.tsx` and markdown images in `markdown-renderer.tsx`.
+
+Local attachment cards open the registered path on the original desktop. On another
+device, clicking downloads current bytes through the existing authenticated file
+RPC; it never starts from rendering alone. Show a spinner during the request and
+an inline error on failure. Web/desktop uses a browser download, native mobile uses
+the existing share sheet. Anonymous shares retain no download action.

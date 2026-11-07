@@ -13,7 +13,8 @@ import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-i
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
 import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import { createSessionSubmission } from '../src/lib/session-submission';
-import * as localFileSender from '../src/lib/electron-session-file-sender';
+import * as nativeAttachment from '../src/lib/electron-local-attachment';
+import * as electron from '../src/lib/electron';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import {
@@ -994,27 +995,16 @@ describe('locally accepted Roost input', () => {
     let transferReady = false,
       ownerReady = false;
     const transferred: string[] = [];
-    vi.spyOn(localFileSender, 'canUseElectronLocalFileSend').mockReturnValue(true);
-    vi.spyOn(localFileSender, 'sendSessionFileToLocalRuntime').mockImplementation(
-      async ({ file, machineId }) => {
+    vi.spyOn(electron, 'isElectronRenderer').mockReturnValue(true);
+    vi.spyOn(nativeAttachment, 'prepareElectronLocalAttachment').mockImplementation(
+      async ({ attachment, machineId, sessionId, turnId }) => {
         if (!transferReady) throw new Error('Synthetic local transfer unavailable');
-        transferred.push(await file.text());
+        transferred.push(await attachment.source!.text());
         return {
-          ok: true,
-          files: [
-            {
-              type: 'file',
-              transport: 'local',
-              fileId: 'prepared-file',
-              fileName: file.name,
-              mimeType: file.type,
-              sizeBytes: file.size,
-              machineId,
-              sha256: 'a'.repeat(64),
-              textPreview: true,
-              uploadedAt: 1,
-            },
-          ],
+          type: 'local_attachment', referenceId: attachment.localReferenceId!,
+          machineId, sessionId, turnId, kind: attachment.kind,
+          fileName: attachment.name, mimeType: attachment.mimeType,
+          sizeBytes: attachment.source!.size,
         };
       }
     );
@@ -1049,7 +1039,7 @@ describe('locally accepted Roost input', () => {
     );
     await when(pending, () => Boolean(pending.getSnapshot()[0]?.error));
     expect(pending.getSnapshot()).toMatchObject([
-      { id: input.id, attachments: [{ error: 'Missing workspace or auth token' }] },
+      { id: input.id, attachments: [{ error: 'Synthetic local transfer unavailable' }] },
     ]);
     expect(await storage.list()).toEqual([]);
     expect(await owner.history.count()).toBe(0);
@@ -1061,7 +1051,7 @@ describe('locally accepted Roost input', () => {
     expect(frozen).toMatchObject({
       id: input.id,
       state: 'failed',
-      send: { attachments: [{ ready: { fileId: 'prepared-file' } }] },
+      send: { attachments: [{ ready: { type: 'local_attachment', fileName: 'input.txt' } }] },
     });
     expect(frozen?.send.attachments[0]).not.toHaveProperty('source');
     expect(await owner.history.count()).toBe(0);

@@ -1,5 +1,5 @@
 import { Effect, Exit, Fiber, Result } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { accountUserId, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
 import {
@@ -165,7 +165,14 @@ describe('portable account pairing approver key delivery', () => {
       }),
     keyDeliveryEvidence: () => Effect.succeed('e2ee_key_not_sent'),
   });
-  const deliver = async (sessions: (AccountPairingApproverSession | null)[]) => {
+  const fixedRetry = (sleeps: number[]) => ({
+    delays: [10, 20, 40],
+    sleep: (ms: number) => Effect.sync(() => sleeps.push(ms)),
+  });
+  const deliver = async (
+    sessions: (AccountPairingApproverSession | null)[],
+    retry: typeof fixedRetry | null = fixedRetry
+  ) => {
     const events: AccountPairingKeyDeliveryEvent[] = [];
     const sleeps: number[] = [];
     let ended: () => void = () => {};
@@ -180,10 +187,7 @@ describe('portable account pairing approver key delivery', () => {
           events.push(event);
           if (event.state === 'ended' || event.state === 'delivered') ended();
         },
-        keyDeliveryRetry: {
-          delays: [10, 20, 40],
-          sleep: (ms) => Effect.sync(() => sleeps.push(ms)),
-        },
+        ...(retry ? { keyDeliveryRetry: retry(sleeps) } : {}),
       })()
     );
     await Effect.runPromise(workspaces[0]!.deliverKeys!(new Uint8Array(32).fill(2), 'r1'));
@@ -207,6 +211,62 @@ describe('portable account pairing approver key delivery', () => {
       'ended',
     ]);
     expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
+  });
+
+  it('catches up with the ledger before retrying a delivery the mailbox refused as stale', async () => {
+    const rounds = { count: 0 };
+    let ledgerCurrent = false;
+    const session = {
+      ...approverSession(rounds),
+      refresh: () =>
+        Effect.sync(() => {
+          ledgerCurrent = true;
+        }),
+      keyDeliveryEvidence: () =>
+        Effect.succeed(ledgerCurrent ? ('delivered' as const) : ('e2ee_key_not_sent' as const)),
+    };
+    const { events } = await deliver([session, session]);
+    expect(events.at(-1)!.state).toBe('delivered');
+    expect(rounds.count).toBe(2);
+  });
+
+  it('still retries the round when the ledger catch-up fails', async () => {
+    const rounds = { count: 0 };
+    const session = { ...approverSession(rounds), refresh: () => Effect.fail('offline') };
+    const { events } = await deliver([session, session, session, session]);
+    expect(rounds.count).toBe(4);
+    expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
+  });
+
+  it('continues the retries with the default schedule when a ledger catch-up hangs', async () => {
+    vi.useFakeTimers();
+    try {
+      const rounds = { count: 0, released: 0 };
+      let cancelled = 0;
+      const session = {
+        ...approverSession(rounds),
+        refresh: () =>
+          Effect.never.pipe(
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                cancelled += 1;
+              })
+            )
+          ),
+      };
+      const delivered = deliver(
+        Array.from({ length: 9 }, () => session),
+        null
+      );
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+      const { events } = await delivered;
+      expect(rounds.count).toBe(9);
+      expect(rounds.released).toBe(9);
+      expect(cancelled).toBe(8);
+      expect(events.at(-1)!.state).toBe('ended');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ends without another round once the approving session is no longer available to the account', async () => {

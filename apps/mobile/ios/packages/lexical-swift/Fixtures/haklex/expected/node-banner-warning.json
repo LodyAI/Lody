@@ -1,0 +1,17 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "banner",
+        "version": 1,
+        "bannerType": "warning",
+        "content": null
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

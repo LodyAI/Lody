@@ -1,0 +1,1 @@
+日文注音示例：<ruby>漢字<rt>かんじ</rt></ruby> 与 <ruby>東京<rt>とうきょう</rt></ruby>。

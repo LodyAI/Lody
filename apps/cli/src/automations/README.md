@@ -82,18 +82,17 @@ catalog of business conditions.
 
 All other resources/parameters are rejected. A new resource adapter belongs beside
 its existing owner and must define its scope, freshness and admission evidence.
-Programs cannot select another Session or access Node, shell, filesystem, arbitrary
-network endpoints or the daemon environment. Credentials stay with existing source
-owners. The [external checks proposal](../../../../.agents/notes/proposed/architecture/2026-10-28-automation-external-checks.md) explores broader host capabilities, and the [interpreter decision](../../../../.agents/notes/proposed/architecture/2026-10-28-codemode-automation-interpreter.md) records the CodeMode trade-offs. Await every read. See [CI](examples/wait-for-ci.js) and
+Programs cannot select another Session or directly access Node or the daemon environment. Credentials stay with existing source owners. `ctx.fetch(url, options?)` performs an HTTP or HTTPS GET or HEAD and returns `ok`, `status`, `url`, selected `headers`, and repeatable `text()` and `json()` methods. Only `accept` and `accept-language` request headers are accepted. URL credentials and redirects are rejected. A response body is limited to 64 KiB; HTTP error statuses are returned, while transport failures fail the check. Requests can reach services accessible to the Host, including local services, and may repeat. Do not put secrets in program text or use endpoints with side effects. Await every operation. The [interpreter decision](../../../../.agents/notes/proposed/architecture/2026-10-28-codemode-automation-interpreter.md) records the CodeMode trade-offs. See [CI](examples/wait-for-ci.js) and
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
-Each check has a 30-second deadline, at most 32 reads, four concurrent read calls
-and a 128-KiB bound per observation. Cancellation interrupts the interpreter and
-joins in-flight owner reads. Five consecutive check errors
+`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment. Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
+
+Each check has a 30-second deadline, at most 32 read, fetch or exec calls, four concurrent calls
+and a 128-KiB bound per operation. Cancellation interrupts the interpreter and
+joins in-flight operations. Five consecutive check errors
 end the wait as `failed`; successful checks reset the error count. `show` retains
-the error, check count, next check time and continuation state. Host restart retries
-interrupted checks. Checks are read-only and may repeat.
+the error, check count, next check time and continuation state.
 
 CI reads request observations through the existing PR poller, using its credential,
 quota and cooldown owners. Active demand shortens the observation interval under
