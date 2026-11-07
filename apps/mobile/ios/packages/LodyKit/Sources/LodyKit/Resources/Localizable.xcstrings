@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "bar.context.currentBranch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current branch"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前分支"
+          }
+        }
+      }
+    },
     "create.runConfig.plan": {
       "extractionState": "manual",
       "localizations": {

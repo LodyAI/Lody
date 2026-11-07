@@ -38,6 +38,7 @@ struct ChatActionBarState: Decodable, Equatable {
     var tint: String?
     let accessibilityLabel: String
     var menuTitle: String?
+    var repository: String?
     var prStatus: String?
     var prCI: String?
     let actions: [ChatMenuAction]
@@ -257,7 +258,7 @@ struct ChatActionBarContent: View {
       .frame(minHeight: ChatActionBarView.rowHeight)
       .contentShape(Capsule())
     return ContextActionsPopover(
-      actions: actions, title: context?.menuTitle, diff: state.diff, prStatus: context?.prStatus, prCI: context?.prCI,
+      actions: actions, title: context?.menuTitle, repository: context?.repository, diff: state.diff, prStatus: context?.prStatus, prCI: context?.prCI,
       onAction: { onAction("context:" + $0) }, label: label
     )
     .buttonStyle(.plain)
@@ -431,6 +432,7 @@ final class ChatActionBarView: UIView {
 private struct ContextActionsPopover<Label: View>: View {
   let actions: [ChatMenuAction]
   let title: String?
+  let repository: String?
   let diff: ChatActionBarState.Diff?
   let prStatus: String?
   let prCI: String?
@@ -454,12 +456,23 @@ private struct ContextActionsPopover<Label: View>: View {
       .popover(isPresented: $presented, arrowEdge: .bottom) {
         VStack(alignment: .leading, spacing: LodySpacing.xs) {
           if let title, !title.isEmpty {
-            Text(title).font(.subheadline).foregroundStyle(LodyColor.textSecondary)
-              .lineLimit(1).padding(.horizontal, LodySpacing.md)
-              .padding(.vertical, LodySpacing.sm)
+            HStack(spacing: LodySpacing.xs) {
+              if let repository, !repository.isEmpty {
+                RepositoryIcon(repository: repository, size: LodyIconSize.md, opacity: 0.8)
+              } else {
+                Image(systemName: "folder").accessibilityHidden(true)
+              }
+              Text(title).lineLimit(1).truncationMode(.middle)
+            }
+            .font(.subheadline).foregroundStyle(LodyColor.textSecondary)
+            .padding(.horizontal, LodySpacing.md)
+            .padding(.top, LodySpacing.xs)
           }
           if let branch = actions.first(where: { $0.id == "branch" }) {
             HStack(spacing: LodySpacing.xs) {
+              Text(String(localized: "bar.context.currentBranch", bundle: .lody))
+                .font(.footnote).foregroundStyle(LodyColor.textSecondary)
+                .fixedSize()
               Text(branch.title).font(.footnote).foregroundStyle(LodyColor.textSecondary)
                 .lineLimit(1).truncationMode(.middle)
               Spacer(minLength: 0)

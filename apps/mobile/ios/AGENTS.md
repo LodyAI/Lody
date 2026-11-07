@@ -145,7 +145,7 @@
 
 - Every Home grouping (time/project/status) starts with a separate Pinned group when nonempty, within the current owner/project scope. Partition whole visible families before bucketing, so pinned families appear once and retain child folding. Project conversation lists use the same projection; archived chats and hidden Tabs never enter Pinned.
 
-- The repository context popover leads with repository name and a small one-line branch plus trailing copy button. Its aligned action columns show View PR / #number (never localized digit grouping) and All changes / coloured ±counts. Compact capsules omit diff counts without substituting an unexplained dot; short PR labels use intrinsic width.
+- The repository context popover leads with the repository owner logo (folder for local projects) and repository/project name, closely followed by a small one-line “Current branch” label and branch plus trailing copy button. Its aligned action columns show View PR / #number (never localized digit grouping) and All changes / coloured ±counts. Compact capsules omit diff counts without substituting an unexplained dot; short PR labels use intrinsic width.
 
 - Team list owner avatars sit after the first-line time/status at the trailing edge, including child rows; titles and project details share the leading edge. My tasks still omit owner avatars.
 
