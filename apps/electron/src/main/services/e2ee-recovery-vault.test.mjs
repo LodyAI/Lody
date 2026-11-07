@@ -23,6 +23,8 @@ import {
   createAccountRecoveryVault,
   defaultPasskeyLabel,
   enrollRecoveryPasskey,
+  listRecoveryPasskeys,
+  removeRecoveryPasskey,
   passkeyLabel,
   inspectRecoveryFile,
   recoveryReplacementPlan,
@@ -73,11 +75,23 @@ function syntheticService() {
           return response({ outcome: 'Conflict' })
         const next = Result.getOrThrow(decodeRecoveryVaultCiphertext(args.next))
         index.set(args.vaultId, {
+          referenced: args.referencedEntryIds,
           entry: args.next,
           revision: next.revision,
           digest: vaultCiphertextDigest(next)
         })
         return response({ outcome: 'Committed' })
+      }
+      case 'e2eeRecoveryVault:deleteUnreferenced': {
+        const current = index.get(args.vaultId)
+        if (
+          current?.revision !== args.expectedIndex.revision ||
+          current?.digest !== args.expectedIndex.digest ||
+          current.referenced.includes(args.entryId)
+        )
+          throw new Error('referenced')
+        entries.delete(key(args.vaultId, args.entryId))
+        return response({ ok: true })
       }
       case 'e2eeRecoveryVault:replacementState':
         return response(replacement)
@@ -753,7 +767,7 @@ const syntheticAuthenticator = (options = {}) => {
   return {
     available: async () => true,
     register: async (request) => {
-      const credentialId = `credential${credentials.size}A`
+      const credentialId = `${options.prefix ?? 'credential'}${credentials.size}A`
       credentials.set(credentialId, new Uint8Array(request.userHandle))
       return { credentialId, prfEnabled: options.prf ?? true }
     },
@@ -898,6 +912,89 @@ void test('an enrolled passkey keeps the name the user gave it', async () => {
       )
     )
     assert.deepEqual(added, { passkeys: 1, labels: ['Work MacBook'] })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('removing a passkey lists it no more and stops it unlocking the vault', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file, vaultId } = await createdVault(dir, service)
+    service.replacement.current = vaultId
+    const io = (store) => ({ journalPath: join(dir, 'recovery-vault.sqlite'), store })
+    const first = syntheticAuthenticator({ prefix: 'first' })
+    const second = syntheticAuthenticator({ prefix: 'second' })
+    for (const [port, label] of [
+      [first, 'Work MacBook'],
+      [second, 'iPhone']
+    ])
+      await withClient(service, (store) =>
+        Effect.runPromise(enrollRecoveryPasskey({ ...io(store), file, port, label }))
+      )
+    const listed = await withClient(service, (store) =>
+      Effect.runPromise(listRecoveryPasskeys({ ...io(store), unlock: { file } }))
+    )
+    assert.deepEqual(
+      listed.map((row) => row.label),
+      ['Work MacBook', 'iPhone']
+    )
+    const removed = listed.find((row) => row.label === 'Work MacBook')
+    const left = await withClient(service, (store) =>
+      Effect.runPromise(
+        removeRecoveryPasskey({ ...io(store), unlock: { file }, entryId: removed.entryId })
+      )
+    )
+    assert.deepEqual(
+      left.map((row) => row.label),
+      ['iPhone']
+    )
+    const unlockWith = (port) =>
+      withClient(service, (store, client) =>
+        Effect.runPromise(
+          Effect.exit(
+            setupWorkspaceRecovery({
+              ...io(store),
+              unlock: { passkey: port, locator: 'https://synthetic.convex.cloud' },
+              replacement: client.recoveryVaultReplacement(),
+              target: fakeTarget([])
+            })
+          )
+        )
+      )
+    const refused = await unlockWith(first)
+    assert.equal(
+      recoveryVaultFailure(Exit.isFailure(refused) ? refused.cause.reasons[0]?.error : null)
+        .message,
+      'e2ee_recovery_prf-unavailable'
+    )
+    assert.equal(Exit.isSuccess(await unlockWith(second)), true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('removing an unknown passkey changes nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file } = await createdVault(dir, service)
+    const before = service.entries.size
+    const failed = await withClient(service, (store) =>
+      Effect.runPromise(
+        Effect.exit(
+          removeRecoveryPasskey({
+            journalPath: join(dir, 'recovery-vault.sqlite'),
+            store,
+            unlock: { file },
+            entryId: 'a'.repeat(64)
+          })
+        )
+      )
+    )
+    assert.equal(Exit.isFailure(failed), true)
+    assert.equal(service.entries.size, before)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
