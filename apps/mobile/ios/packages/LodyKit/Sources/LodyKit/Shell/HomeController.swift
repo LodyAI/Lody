@@ -162,10 +162,11 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     }
     return false
   }
-  func showPanel(_ content: UIViewController, title: String, from: UIViewController, push: Bool, detents: [Double]) -> Bool {
+  func showPanel(_ content: UIViewController, title: String, from: UIViewController, push: Bool, detents: [Double], onClose: (() -> Void)? = nil) -> Bool {
     guard contains(from) || from.navigationController === inspector, session != nil else { return false }
     if layout == .compact, !push, !panelOpen { return false }
     let next = page(content, title: title)
+    next.onClose = onClose
     if from.navigationController === inspector {
       inspector.pushViewController(next, animated: true)
     } else {
