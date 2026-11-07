@@ -975,6 +975,37 @@ export class E2eeIpc extends IpcService {
       throw error
     })
   }
+  /** A new invitation can reach a removed member before any refresh or token request has
+   * told this device. Its accepted earlier join would refuse the offer as a conflict, so
+   * this device's credential confirms the removal first; local removal erases that join.
+   * A membership that is still current keeps the conflict. Returns whether it was removed. */
+  private async endRemovedMemberJoin(
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
+  ) {
+    const access = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? Effect.gen(function* () {
+            if (!(yield* owner.bootstrap.acceptedMemberJoin(workspaceId))) return null
+            return {
+              accountId: owner.accountId,
+              workspaceId,
+              credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+              status: yield* owner.host.status(workspaceId)
+            }
+          })
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (!access) return false
+    try {
+      await this.endOnAccessLoss(access, cloud, undefined, true)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_member_removed') return true
+      throw error
+    }
+    return false
+  }
   @IpcMethod()
   async prepareMemberJoin(source: E2eeMemberOffer) {
     sender()
@@ -1004,7 +1035,11 @@ export class E2eeIpc extends IpcService {
           : Effect.fail(new Error('e2ee_account_mismatch'))
       )
     }
-    const original = await scope((owner) =>
+    // Removal cleanup replaces the account owner; the new join binds to the current one.
+    const joining = (await this.endRemovedMemberJoin(offer.workspaceId, scope, cloud))
+      ? this.memberScope(offer.workspaceId)
+      : scope
+    const original = await joining((owner) =>
       owner.accountId === cloud.accountId
         ? owner.bootstrap.prepareMemberJoin(offer)
         : Effect.fail(new Error('e2ee_account_mismatch'))

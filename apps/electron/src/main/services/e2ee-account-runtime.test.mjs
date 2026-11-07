@@ -5351,3 +5351,56 @@ void test(
     await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
   }
 )
+void test(
+  'a removed member that has not yet observed its removal can submit a new invitation',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    // An administrator removes the member and invites it again. The member opens the new
+    // invitation before any refresh or token request has told this device of the removal.
+    f.relay.memberRemoved = true
+    const again = await f.ownerApi.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'link', 9_000_000_000_000),
+      'team',
+      false
+    )
+    assert.notEqual(JSON.stringify(again), JSON.stringify(f.offer))
+    const second = await f.joiner.prepareMemberJoin(again)
+    assert.notEqual(second.requestId, first.requestId)
+    assert.notEqual(second.signingPublicKey, first.signingPublicKey)
+    await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
+    // The new request is the retained pending join; the removed one no longer refuses it.
+    assert.equal(
+      JSON.stringify(await f.joiner.pendingMemberJoin('team')),
+      JSON.stringify({ offer: again, requestId: second.requestId })
+    )
+  }
+)
+void test(
+  'a current member refuses another invitation and keeps its workspace',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    const again = await f.ownerApi.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'link', 9_000_000_000_000),
+      'team',
+      false
+    )
+    await assert.rejects(f.joiner.prepareMemberJoin(again), /^Error: e2ee_conflict$/)
+    assert.equal((await f.joiner.open('team')).hasCurrentKey, true)
+  }
+)
