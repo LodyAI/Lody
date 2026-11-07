@@ -209,6 +209,31 @@ describe('portable account pairing approver key delivery', () => {
     expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
   });
 
+  it('catches up with the ledger before retrying a delivery the mailbox refused as stale', async () => {
+    const rounds = { count: 0 };
+    let ledgerCurrent = false;
+    const session = {
+      ...approverSession(rounds),
+      refresh: () =>
+        Effect.sync(() => {
+          ledgerCurrent = true;
+        }),
+      keyDeliveryEvidence: () =>
+        Effect.succeed(ledgerCurrent ? ('delivered' as const) : ('e2ee_key_not_sent' as const)),
+    };
+    const { events } = await deliver([session, session]);
+    expect(events.at(-1)!.state).toBe('delivered');
+    expect(rounds.count).toBe(2);
+  });
+
+  it('still retries the round when the ledger catch-up fails', async () => {
+    const rounds = { count: 0 };
+    const session = { ...approverSession(rounds), refresh: () => Effect.fail('offline') };
+    const { events } = await deliver([session, session, session, session]);
+    expect(rounds.count).toBe(4);
+    expect(events.at(-1)!.code).toBe('e2ee_key_not_sent');
+  });
+
   it('ends without another round once the approving session is no longer available to the account', async () => {
     const rounds = { count: 0 };
     const { events } = await deliver([approverSession(rounds), null]);

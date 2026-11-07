@@ -455,8 +455,12 @@ export function makePortableAccountPairingApprover(input: {
               );
             const release = (current: AccountPairingApproverSession) =>
               releaseQuietly(current, 'account-pairing-key-delivery-release');
-            const attempt = (current: AccountPairingApproverSession) =>
+            // The mailbox refuses a sender behind the ledger, so a retry catches up first.
+            // The round then resends the saved original or supersedes it from the new ledger;
+            // a failed catch-up does not skip the round.
+            const attempt = (current: AccountPairingApproverSession, retry: number) =>
               Effect.gen(function* () {
+                if (retry > 0) yield* Effect.result(current.refresh());
                 const round = yield* Effect.result(current.keyRound());
                 const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
                 if (Result.isSuccess(evidence) && evidence.success === 'delivered')
@@ -478,7 +482,7 @@ export function makePortableAccountPairingApprover(input: {
                   yield* release(current);
                   return report('ended', 'e2ee_key_delivery_owner_changed');
                 }
-                const code = yield* attempt(current);
+                const code = yield* attempt(current, retry);
                 if (code === 'delivered') return report('delivered');
                 if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
                   return report('ended', code);
