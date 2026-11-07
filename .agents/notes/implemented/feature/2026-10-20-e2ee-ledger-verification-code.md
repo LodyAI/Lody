@@ -1,6 +1,6 @@
 # Ledger verification code on the encrypted workspace page
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-10-20-e2ee-ledger-verification-code.zh.md)
@@ -13,7 +13,7 @@ Members of an encrypted workspace had no way to check that the Lody server shows
 
 ## Decisions
 
-- **What the code is.** `ledgerStateDigest(view)` in core returns the digest that `comparisonNote` already computes, `sha256("snapshot-digest/v2" ‖ CBOR[2, genesis, length, head, authorization state])`, without requiring a ledger device as note signer. The control page holds no device key, so it could not call `comparisonNote`. The [whitepaper](../../../../specs/e2ee/whitepaper.md) requires safety codes to bind the actual state: a head alone can accompany a wrong state, for example on a snapshot-bootstrapped client.
+- **What the code is.** `ledgerStateDigest(view)` in core returns the digest that `comparisonNote` already computes, `sha256("snapshot-digest/v4" ‖ CBOR[4, genesis, length, head, authorization state])`, without requiring a ledger device as note signer. The control page holds no device key, so it could not call `comparisonNote`. The [whitepaper](../../../../specs/e2ee/whitepaper.md) requires safety codes to bind the actual state: a head alone can accompany a wrong state, for example on a snapshot-bootstrapped client.
 - **Version** is the number of verified records. The QR payload is `lody-ledger:1:<version>:<head>:<digest>`. The copied text is a header with the version, then the digest in sixteen groups of four.
 - **Comparison** (`e2ee-ledger-verification.ts`):
   - same version and digest (and head, when present): match;
