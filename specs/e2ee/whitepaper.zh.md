@@ -3,7 +3,7 @@
 Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
 Translation: current
 
-Approved revision: 2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-07 后端故障期间的执行新鲜度（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)）；2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
