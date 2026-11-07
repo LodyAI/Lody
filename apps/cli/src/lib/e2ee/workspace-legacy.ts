@@ -1236,8 +1236,10 @@ async function openWorkspaceOwned(
           if (
             page.checkpoint.length !== checkpoint.length ||
             page.checkpoint.headHash !== checkpoint.headHash
-          )
+          ) {
+            opened.executionAuthorization.endOutageWindow();
             throw new Error('e2ee_ledger_checkpoint_changed');
+          }
           // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
           movedBack ||=
             page.checkpoint.length < trusted.length ||
@@ -1255,7 +1257,8 @@ async function openWorkspaceOwned(
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
         // Later key work has its own failures; they do not undo this confirmation.
-        if (!cursor && !closed && !movedBack) {
+        if (movedBack) opened.executionAuthorization.endOutageWindow();
+        else if (!cursor && !closed) {
           confirmRead();
           options.onAuthorityConfirmed?.(startedAt);
         }

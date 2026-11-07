@@ -90,21 +90,32 @@ describe('latest ledger read failures through the Convex SDK', () => {
     expect(await read()).not.toBeInstanceOf(CloudE2eeLedgerOutage);
   });
 
-  it.each([200, 503])(
+  const readFromTruncatedResponse = async (status: number) => {
+    const server = createServer((_request, response) => {
+      response.writeHead(status, { 'content-type': 'application/json', 'content-length': 1024 });
+      response.write('{"status":', () => response.socket?.destroy());
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      network.reply = (url, init) => fetch(url as string, init as RequestInit);
+      return await read(`http://127.0.0.1:${port}`);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  };
+
+  it.each([200, 429, 502, 503])(
     'treats a socket closed after %i response headers as an outage',
     async (status) => {
-      const server = createServer((_request, response) => {
-        response.writeHead(status, { 'content-type': 'application/json', 'content-length': 1024 });
-        response.write('{"status":', () => response.socket?.destroy());
-      });
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      try {
-        const { port } = server.address() as AddressInfo;
-        network.reply = (url, init) => fetch(url as string, init as RequestInit);
-        expect(await read(`http://127.0.0.1:${port}`)).toBeInstanceOf(CloudE2eeLedgerOutage);
-      } finally {
-        await new Promise((resolve) => server.close(resolve));
-      }
+      expect(await readFromTruncatedResponse(status)).toBeInstanceOf(CloudE2eeLedgerOutage);
+    }
+  );
+
+  it.each([401, 403])(
+    'keeps a %i refusal when the socket closes after its headers',
+    async (status) => {
+      expect(await readFromTruncatedResponse(status)).not.toBeInstanceOf(CloudE2eeLedgerOutage);
     }
   );
 

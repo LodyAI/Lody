@@ -328,6 +328,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       ),
       authorizeRead: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'read'),
+      /** A reply moved the ledger back. Ordinary grants are unaffected; a later read reopens it. */
+      endOutageWindow: endWindow,
       /** A background ledger read counts as a successful read once its callback runs. */
       beginLatestRead: () => {
         const started = {

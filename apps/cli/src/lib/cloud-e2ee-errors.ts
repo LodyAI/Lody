@@ -76,8 +76,10 @@ export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown 
       ? new CloudE2eeLedgerOutage({ signInExpired: true, cause })
       : cause;
   }
-  if (httpStatus === undefined || isTransportInterruption(cause))
-    return new CloudE2eeLedgerOutage({ cause });
+  if (httpStatus === undefined) return new CloudE2eeLedgerOutage({ cause });
+  // A refusal already received stands, even if its body was then cut off.
+  if (httpStatus >= 400 && httpStatus < 500 && httpStatus !== 429) return cause;
+  if (isTransportInterruption(cause)) return new CloudE2eeLedgerOutage({ cause });
   const failedUpstream = httpStatus >= 500 || httpStatus === 429;
   return failedUpstream && cause.name === 'Error' && !REFUSAL_TEXT.test(cause.message)
     ? new CloudE2eeLedgerOutage({ cause })

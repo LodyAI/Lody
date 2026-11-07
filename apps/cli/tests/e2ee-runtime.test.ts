@@ -1127,6 +1127,36 @@ describe('machine E2EE local runtime', () => {
         await vi.advanceTimersByTimeAsync(250);
         await host.refresh();
         expect(authorityConfirmations.length).toBeGreaterThan(beforeChangedCheckpoint);
+        // A background read that moves back ends an outage window, and a later read reopens one.
+        const answer = cloud.getHistory;
+        const outageRead = async (): Promise<never> => {
+          throw new CloudE2eeLedgerOutage();
+        };
+        const authorize = () =>
+          Effect.runPromise(host!.authorizeExecution('workspace', fixture.sender));
+        cloud.getHistory = outageRead;
+        const held = await authorize();
+        if (held._tag !== 'Authorized') throw new Error('expected an outage authorization');
+        expect(held.isCurrent?.()).toBe(true);
+        cloud.getHistory = async () => page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(held.isCurrent?.()).toBe(false);
+        cloud.getHistory = outageRead;
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Denied' });
+        cloud.getHistory = async () => page(fixture.records);
+        await host.refresh();
+        cloud.getHistory = outageRead;
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Authorized' });
+        // An ordinary 15-minute grant does not depend on the window.
+        cloud.getHistory = async () => page(fixture.records);
+        await host.refresh();
+        const fresh = await authorize();
+        if (fresh._tag !== 'Authorized') throw new Error('expected a fresh authorization');
+        cloud.getHistory = async () => page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(fresh.isCurrent?.()).toBe(true);
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Authorized' });
+        cloud.getHistory = answer;
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
