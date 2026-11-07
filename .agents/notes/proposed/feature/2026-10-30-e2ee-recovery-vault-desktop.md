@@ -118,6 +118,48 @@ pins Electron 44.9.3.
 A `file://` or custom-scheme renderer cannot call WebAuthn at all. Associated Domains
 is listed for Developer ID apps, but no end-to-end report confirms that it works.
 
+## Feasibility spike: Developer ID, AuthenticationServices and PRF
+
+Static part, 2026-11-07, on Linux. Nothing was built, signed or run on a Mac, so feasibility
+stays unproven. Public sources do not settle it: Apple's [entitlement reference](https://developer.apple.com/tutorials/data/documentation/bundleresources/entitlements/com.apple.developer.associated-domains.md)
+and [passkey guide](https://developer.apple.com/documentation/authenticationservices/supporting-passkeys.md)
+do not discuss Developer ID. [TeamDev's guide](https://teamdev.com/mobrowser/tutorials/features/touch-id/)
+embeds a Developer ID profile for a Chromium app, but for Touch ID keychain groups, not
+`webcredentials`. [Clerk](https://clerk.com/docs/reference/electron/passkeys) and
+[electron-webauthn-mac](https://awesome.ecosyste.ms/projects/github.com%2Fvault12%2Felectron-webauthn-mac)
+describe development signing only.
+
+What the repository shows:
+
+- `apps/electron/electron-builder.yml` uses the hardened runtime and notarization, with
+  `entitlements` for the app and `entitlementsInherit` for nested binaries.
+- `build/entitlements.mac.plist` has no `com.apple.developer.associated-domains`,
+  `com.apple.application-identifier` or `com.apple.developer.team-identifier`, and no profile
+  is embedded. All three are needed. They belong on the main app only, never in the inherit
+  plist.
+- The main app keeps library validation, so the native addon must be signed by the same
+  team. The existing `electron-sparkle-updater` native addon is the packaging precedent.
+
+Whether electron-builder's `mac.provisioningProfile` embeds a Developer ID profile, and whether
+Sparkle updates keep it valid, must be confirmed on the first signed build.
+
+Run these in order on a Mac. Stop at the first failure.
+
+1. **Signing.** Build with the profile and new entitlements. `codesign -d --entitlements - Lody.app`
+   lists the three keys, `spctl -a -vv Lody.app` accepts it, and it launches after notarization.
+   A launch failure here is the main risk.
+2. **Association.** `curl https://app-site-association.cdn-apple.com/a/v1/vault.lody.ai` returns
+   the file, and `sudo swcutil show` lists the app against the domain.
+3. **Ceremony.** A minimal addon creates a platform passkey for `vault.lody.ai` with a PRF
+   input, anchored to the `BrowserWindow`. The system sheet names the RP, and registration
+   reports PRF support.
+4. **PRF.** Assertion returns 32 bytes, the same bytes on a second assertion and on a second
+   Mac through iCloud Keychain.
+5. **Update.** A Sparkle update from one signed build to the next keeps steps 2 to 4 working.
+
+If step 1 or 2 fails, Developer ID cannot carry this path. The fallback is the recovery file on
+macOS, with passkeys only on iPhone and the Web surface, which needs an owner decision.
+
 ## Consequences and limits
 
 All capabilities stay default-off and leave pairing, ledger and workspace behavior
