@@ -169,6 +169,7 @@ function StoryHarness({
   width = 760,
   initialStage,
   withPreview = false,
+  simulatorPreview,
   actionLabels,
   mergeAction = false,
   syncing = false,
@@ -193,6 +194,7 @@ function StoryHarness({
   width?: number;
   initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
+  simulatorPreview?: 'ios' | 'android' | 'both';
   actionLabels?: string[];
   mergeAction?: boolean;
   syncing?: boolean;
@@ -248,6 +250,12 @@ function StoryHarness({
         contextActions={contextActions}
         onOpenAllChanges={fn()}
         onOpenBrowser={withPreview ? fn() : undefined}
+        onOpenIosSimulator={
+          simulatorPreview === 'ios' || simulatorPreview === 'both' ? fn() : undefined
+        }
+        onOpenAndroidEmulator={
+          simulatorPreview === 'android' || simulatorPreview === 'both' ? fn() : undefined
+        }
         diffStat={diffStat}
         syncing={syncing}
       />
@@ -874,3 +882,19 @@ export const OwnedCompactColours: Story = { render: () => <OwnedInfoBarFixture c
 export const OwnedRootPalette: Story = { render: () => <OwnedInfoBarFixture scope="root" /> };
 export const OwnedSubtreePalette: Story = { render: () => <OwnedInfoBarFixture scope="subtree" /> };
 export const OwnedNestedThemes: Story = { render: () => <OwnedInfoBarFixture nested /> };
+export const AndroidPreview: Story = {
+  args: { simulatorPreview: 'android' },
+};
+
+export const BothSimulatorPreviews: Story = {
+  args: { simulatorPreview: 'both' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: /iOS.*Android/ }));
+  },
+};
+
+export const MobileSimulatorPreviews: Story = {
+  ...BothSimulatorPreviews,
+  args: { simulatorPreview: 'both', compactMachineInfo: true, width: 360 },
+};

@@ -39,19 +39,16 @@ describe('Magpie runtime preparation', () => {
     const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, fetcher);
     const config = JSON.parse(codex.env.CODEX_CONFIG ?? '{}');
     expect(config.model_provider).toBe('magpie');
+    expect(config.model_catalog_json).toBeUndefined();
     expect(config.model_providers.magpie).toMatchObject({
       base_url: `${gateway}/v1`,
+      model_catalog_url: `${gateway}/v1/codex/models?agent=lody`,
       requires_openai_auth: false,
       wire_api: 'responses',
     });
-    const catalog = JSON.parse(await readFile(config.model_catalog_json, 'utf8'));
-    expect(catalog.models[0]).toMatchObject({
-      slug: 'vendor/model',
-      context_window: 64000,
-      input_modalities: ['text', 'image'],
-      default_reasoning_level: 'medium',
-    });
     expect(codex.env.CODEX_HOME?.startsWith(directory)).toBe(true);
+    // Codex asks the gateway for the catalog; Lody writes none of its own.
+    expect(await readdir(codex.env.CODEX_HOME ?? '')).toEqual([]);
     const pi = await prepareMagpieRuntime('pi', gateway, undefined, directory, fetcher);
     expect(pi.args).toEqual(['--provider', 'magpie', '--model', 'vendor/model']);
     const piCatalog = JSON.parse(
@@ -66,19 +63,6 @@ describe('Magpie runtime preparation', () => {
       id: 'vendor/model',
       contextWindow: 64000,
       maxTokens: 4096,
-    });
-  });
-  it('passes the discovered Claude models and DSH endpoint through their native contracts', async () => {
-    const directory = await root();
-    const claude = await prepareMagpieRuntime('claude', gateway, undefined, directory, fetcher);
-    expect(JSON.parse(claude.env.CLAUDE_MODEL_CONFIG ?? '{}')).toEqual({
-      availableModels: ['vendor/model'],
-    });
-    expect(claude.env.ANTHROPIC_AUTH_TOKEN).toBe('magpie-lody');
-    const dsh = await prepareMagpieRuntime('deepseek', gateway, undefined, directory, fetcher);
-    expect(dsh.env).toEqual({
-      DEEPSEEK_BASE_URL: `${gateway}/v1`,
-      DEEPSEEK_API_KEY: 'magpie-lody',
     });
   });
   it('loads isolated Kimi and Grok TOML with literal model keys and bounded model selection', async () => {
@@ -169,23 +153,53 @@ describe('Magpie runtime preparation', () => {
     }
     expect(await readdir(directory)).toEqual([]);
   });
+  it('treats missing or incomplete capability metadata as text-only', async () => {
+    const directory = await root();
+    const mixed: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({
+            data: [
+              { id: 'declared-text/model', modalities: { input: ['text'] } },
+              { id: 'output-only/model', modalities: { output: ['text'] } },
+              { id: 'bare/model' },
+              { id: 'vision/model', modalities: { input: ['text', 'image'] } },
+            ],
+          })
+        : fetcher(input, init);
+    expect((await readMagpieModels(gateway, undefined, mixed)).map((m) => m.id)).toEqual([
+      'declared-text/model',
+      'output-only/model',
+      'bare/model',
+      'vision/model',
+    ]);
+    const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, mixed);
+    expect(
+      JSON.parse(codex.env.CODEX_CONFIG ?? '{}').model_providers.magpie.model_catalog_url
+    ).toBe(`${gateway}/v1/codex/models?agent=lody`);
+    const pi = await prepareMagpieRuntime('pi', gateway, undefined, directory, mixed);
+    const piCatalog = JSON.parse(
+      await readFile(join(pi.env.PI_CODING_AGENT_DIR ?? '', 'models.json'), 'utf8')
+    );
+    expect(piCatalog.providers.magpie.models.map((m: { input: string[] }) => m.input)).toEqual([
+      ['text'],
+      ['text'],
+      ['text'],
+      ['text', 'image'],
+    ]);
+    const kimi = await prepareMagpieRuntime('kimi', gateway, undefined, directory, mixed);
+    const k = parseToml(await readFile(join(kimi.env.KIMI_CODE_HOME!, 'config.toml'), 'utf8'));
+    expect(k).toMatchObject({
+      models: {
+        'magpie/output-only/model': { capabilities: ['tool_use'] },
+        'magpie/vision/model': { capabilities: ['tool_use', 'image_in'] },
+      },
+    });
+    const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, mixed);
+    const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
+    expect(g).toMatchObject({ models: { image_description: 'magpie/vision/model' } });
+  });
   it('rejects an oversized response without accepting a partial catalog', async () => {
     const oversized: typeof fetch = async () => new Response('x'.repeat(2 * 1024 * 1024 + 1));
     await expect(readMagpieModels(gateway, undefined, oversized)).rejects.toThrow('too large');
-  });
-  it('does not overwrite a previous Codex snapshot when models change', async () => {
-    const directory = await root();
-    const a = await prepareMagpieRuntime('codex', gateway, undefined, directory, fetcher);
-    const next: typeof fetch = async (input, init) =>
-      String(input).endsWith('/models')
-        ? Response.json({ data: [{ id: 'next/model' }] })
-        : fetcher(input, init);
-    const b = await prepareMagpieRuntime('codex', gateway, undefined, directory, next);
-    const before = JSON.parse(a.env.CODEX_CONFIG ?? '{}');
-    const after = JSON.parse(b.env.CODEX_CONFIG ?? '{}');
-    expect(before.model_catalog_json).not.toBe(after.model_catalog_json);
-    expect(JSON.parse(await readFile(before.model_catalog_json, 'utf8')).models[0].slug).toBe(
-      'vendor/model'
-    );
   });
 });

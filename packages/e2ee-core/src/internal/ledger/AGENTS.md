@@ -8,9 +8,12 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   verification and existing genuine-view proof/permission gates. Proof is consent,
   not account identity or admission. Producer genesis bytes do not prove publication,
   endpoint freshness, key durability or recovery backup.
+- A ledger user ID is the frozen `accountUserId` encoding of an account ID; never change its
+  layout. See [the decision](../../../../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md).
 - Preserve nullable join expiry; no new strict deadline claim or ordinary tolerance
-  change. Reject obsolete RemoveMember/tag2; current tag8 removes a non-Owner member
-  and activates its next epoch atomically under Owner personal authority.
+  change. Reject obsolete RemoveMember/tag2; tag8 retains Owner-personal atomic removal/rotation. Capability 1 declares tag10
+  removal: Owner removes non-Owner; Admin removes only Member/Guest. Preserve epoch,
+  advise rotation, drop all current devices and retain retired identities.
 - Creation borrows already retained key/identity, never generates or stores secrets.
   Capture public fields/capabilities before async work. Do not add secret byte export
   or protection callbacks without the explicitly discussed host trust boundary.
@@ -22,6 +25,8 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   prefixes. A separately trusted endpoint is required, not inferred from remote
   position. Persist records and cursor atomically; no progress on failure.
   Local retention budgets fail closed, without deleting committed history.
+  Optional `LedgerFeedInvalidation` retires RAM grants synchronously with a changed
+  verified head/count publication; it performs no I/O and supplies no authority.
 - Borrowed SDK reads propagate abort and are retained/awaited until settlement.
   Close this Scope before destroying the SDK owner. ACK/CAS and snapshot bootstrap
   remain separate contracts; no fallback append or new snapshot header.
@@ -34,7 +39,7 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   historical replay and rollback protection remain mandatory.
 
 - I/O owners use cooperative fixed-native verification; the same pure replay owns
-  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v2 origin restores without replay. SQL is not authority;
+  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v4 origin restores without replay. SQL is not authority;
   compare the verified head/count pin and current metadata point without scanning
   old rows or SQLite schema/write counters on every operation. Local OS/database
   tampering is outside the whitepaper threat model. Shared SQLite helpers own file
@@ -53,8 +58,18 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
 - `VerifiedLedger` is the single rollback guard: genuine view, same workspace,
   continuation of the newest observed view, containment of the durable pin.
   Unchanged pins are not rewritten; failed pin writes keep the in-memory view.
+- A genuine view may classify a signing key from current plus retained device
+  history for an exact local refusal. Classification is not authority and never
+  replaces signature/policy verification.
 
 Retained origins include their source locator. A pin ahead of the restored view
 must be proved by the suffix; a cache ahead of the pin is rebuildable. Equal
 positions require equal heads. Rebase CAS compares the full tail and removes
 covered records atomically. Verification provenance is never upgraded.
+
+- Owner-approved pre-freeze machine tag4 binds strict UTF-8 machineId (1..256 bytes,
+  no normalization) in both record and possession. No session ID/capability is added.
+  Only a same-member personal device can atomically replace its exact active machine;
+  retain old keys/history. rotationRequired advises key updates; it must not block sends.
+  Current-only, no legacy
+  machine record reader. Snapshot/retained/digest v4 preserve every historical binding.

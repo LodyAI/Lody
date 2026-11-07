@@ -70,16 +70,7 @@ describe('cmdCreateAgentConfigAtom', () => {
       prompt: 'use this provider',
     });
 
-    const result = await Promise.race([
-      createPromise.then((agentId) => ({ status: 'created' as const, agentId })),
-      new Promise<{ status: 'timed-out' }>((resolve) => {
-        setTimeout(() => resolve({ status: 'timed-out' }), 20);
-      }),
-    ]);
-
-    expect(result.status).toBe('created');
-    if (result.status !== 'created') return;
-    const createdId = result.agentId as AgentConfigId;
+    const createdId = await createPromise;
     const rowId = serializeMachineFlockKey(machineFlockKeys.agentConfig(createdId));
     const createdRow = rows.get(rowId);
 

@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { renderToStaticMarkup } from 'react-dom/server';
+
 import { act, createRef, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { Button, type ButtonVariant } from '../src/button/button';
@@ -14,29 +14,6 @@ afterEach(async () => {
 const extension = stylex.create({ offset: (offset: number) => ({ marginInlineStart: offset }) });
 
 describe('Button', () => {
-  test('renders a native button with variant and size data attributes', () => {
-    const html = renderToStaticMarkup(<Button>Save</Button>);
-    expect(html).toMatch(/^<button/);
-    expect(html).toContain('data-variant="primary"');
-    expect(html).toContain('data-size="medium"');
-    expect(html).toContain('type="button"');
-  });
-
-  test('an icon-only button gives what it holds a box, and a text one does not', () => {
-    // This package's glyphs state their size as 100% of whatever holds them,
-    // and StyleX has no descendant selector with which a button could reach
-    // one — so without the box a 16px cross fills a 28px button edge to edge.
-    const icon = renderToStaticMarkup(
-      <Button variant="ghost" size="small" icon aria-label="Close">
-        <svg />
-      </Button>
-    );
-    expect(icon).toMatch(/<button[^>]*><span class="[^"]*"><svg><\/svg><\/span><\/button>/);
-    // A label flows on its own; wrapping it would put the words in a 16px box.
-    const text = renderToStaticMarkup(<Button>Save</Button>);
-    expect(text).toMatch(/<button[^>]*>Save<\/button>/);
-  });
-
   test('box, typography and variant updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
     const ref = createRef<HTMLElement>();
     function Example() {

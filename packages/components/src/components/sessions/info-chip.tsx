@@ -37,6 +37,7 @@ export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?:
  * ("12m", "#2857", "2/5") that some items keep while collapsed.
  */
 const styles = stylex.create({
+  contentWidth: { width: 'max-content' },
   /** The chrome every chip button shares. */
   chipButton: {
     display: 'flex',
@@ -197,6 +198,7 @@ export function PopoverActionChip({
   value,
   content,
   defaultOpen = false,
+  sizing = 'bar',
 }: {
   icon: InfoChipIcon;
   label: string;
@@ -206,6 +208,8 @@ export function PopoverActionChip({
   content: ReactNode | ((close: () => void) => ReactNode);
   /** Storybook/testing aid. */
   defaultOpen?: boolean;
+  /** Compact action menus size to their content and anchor to the chip. */
+  sizing?: 'bar' | 'content';
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -233,14 +237,15 @@ export function PopoverActionChip({
       <Popover.Content
         side="top"
         align="start"
-        // Anchor to the enclosing info-bar pill so the panel shares its edges.
+        // Detail panels share the bar's edges; compact menus follow their chip.
         anchor={() => {
           const button = buttonRef.current;
+          if (sizing === 'content') return button;
           return button?.closest('[data-info-bar-surface]') ?? button;
         }}
         aria-label={label}
         padding="none"
-        xstyle={styles.anchoredPopover}
+        xstyle={[styles.anchoredPopover, sizing === 'content' && styles.contentWidth]}
       >
         {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>

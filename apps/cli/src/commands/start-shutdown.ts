@@ -1,6 +1,7 @@
 import type { Logger } from '@/utils/logger';
+import { TURN_BUDGETS } from '@/session/turn-budgets';
 
-export const START_SHUTDOWN_TIMEOUT_MS = 15_000;
+export const START_SHUTDOWN_TIMEOUT_MS = TURN_BUDGETS.cliShutdownMs;
 
 type ShutdownExit = (code: number) => void;
 export type StartShutdownRequest =
@@ -81,10 +82,6 @@ export function createStartShutdownController(
       return;
     }
 
-    exitRequested = true;
-    clearShutdownTimeout();
-    unregister();
-
     try {
       await options.flushTelemetry();
     } catch (error) {
@@ -92,7 +89,12 @@ export function createStartShutdownController(
         `Telemetry shutdown failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     } finally {
-      options.exit(code);
+      if (!exitRequested) {
+        exitRequested = true;
+        clearShutdownTimeout();
+        unregister();
+        options.exit(code);
+      }
     }
   };
 
@@ -101,7 +103,11 @@ export function createStartShutdownController(
     reason: string
   ) => {
     options.logger.warn(reason);
-    await exitAfterTelemetry(request.exitCode || getExitCodeForSignal(request.signal) || 1);
+    if (exitRequested) return;
+    exitRequested = true;
+    clearShutdownTimeout();
+    unregister();
+    options.exit(request.exitCode || getExitCodeForSignal(request.signal) || 1);
   };
 
   const shutdown = async (request?: StartShutdownRequest) => {

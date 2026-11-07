@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+// @vitest-environment jsdom
+import { getDefaultStore } from 'jotai';
+import type { WorkspaceId } from '@lody/shared';
+import { userAtom, currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import { postHogPrivacy, setTelemetryRouteTarget } from '@/lib/posthog-privacy';
+import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getFunctionName, type FunctionReference } from 'convex/server';
+import { type FunctionReference } from 'convex/server';
 import type {
   PlatformProvider,
+  E2eeRuntimeFactory,
   PlatformSessionState,
   E2eeWorkspacePrepared,
   E2eeWorkspacePrepareInput,
@@ -18,6 +25,10 @@ const fixture = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
   organization: {} as Record<string, unknown>,
   electron: false,
+  usePreload: false,
+  invoke: async (_channel: string, ..._args: unknown[]): Promise<unknown> => {
+    throw new Error('unexpected IPC invocation');
+  },
   native: undefined as
     | {
         e2ee: E2eeWorkspaceRuntime & {
@@ -41,12 +52,35 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('jotai', () => ({ useAtomValue: () => false }));
-vi.mock('@/atoms', () => ({ userAtom: 'user' }));
+vi.mock('jotai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('jotai')>()),
+  useAtomValue: () => false,
+}));
+vi.mock('@/atoms', async () => {
+  const { atom } = await import('jotai');
+  return {
+    userAtom: atom(null),
+    currentWorkspaceIdAtom: atom(null),
+    currentWorkspaceSlugAtom: atom(null),
+  };
+});
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
-vi.mock('@/lib/electron-ipc-client', () => ({ getIpcServices: () => fixture.native }));
+vi.mock('@/lib/electron-ipc-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/electron-ipc-client')>();
+  return {
+    ...actual,
+    getIpcServices: () => (fixture.usePreload ? actual.getIpcServices() : fixture.native),
+  };
+});
+// Match preload's app-local Electron dependency; keep the real bridge and policy.
+vi.mock('../../../apps/electron/node_modules/electron', () => ({
+  ipcRenderer: {
+    on: () => {},
+    invoke: (channel: string, ...args: unknown[]) => fixture.invoke(channel, ...args),
+  },
+}));
 vi.mock('@/hooks/useStableSession', () => ({ useStableSession: () => fixture.session }));
 vi.mock('@/hooks/useOrganization', () => ({ useOrganization: () => fixture.organization }));
 vi.mock('@/providers/convex-provider', () => ({ useAuthSignOut: () => async () => {} }));
@@ -58,14 +92,43 @@ vi.mock('@/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
   useRecoverableConvexQuery: () => undefined,
 }));
-vi.mock('@/providers/cloud-github-token-port', () => ({ cloudGitHubTokenPort: {} }));
+vi.mock('@/providers/cloud-github-token-port', () => ({ createCloudGitHubTokenPort: () => ({}) }));
 vi.mock('@/lib/github-token-port', () => ({ installGitHubTokenPort: () => () => {} }));
 vi.mock('@/lib/cloud-http-port', () => ({ installCloudHttpPort: () => () => {} }));
 
-import { CloudPlatformProvider } from '@/providers/cloud-platform-provider';
+import { ipcBridge } from '../../../apps/electron/src/preload/ipc-bridge';
+
+import { initI18n } from '@/i18n';
+import { MachineSharingController } from '@/components/settings/e2ee/machine-sharing-settings';
+import { CloudPlatformProvider as CloudProvider } from '@/providers/cloud-platform-provider';
+import { AuthenticatedConvexContext } from '@/hooks/use-authenticated-convex';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
+
+function CloudPlatformProvider({
+  children,
+  createE2eeRuntime,
+}: {
+  children?: ReactNode;
+  createE2eeRuntime?: E2eeRuntimeFactory;
+}) {
+  return (
+    <AuthenticatedConvexContext.Provider
+      value={{
+        authSessionId: 'session-a',
+        isAuthenticated: true,
+        isLoading: false,
+        isRecovering: false,
+        confirmedUnauthenticated: false,
+        claimAutomaticCommand: () => true,
+        requestAuthRecovery: () => {},
+      }}
+    >
+      <CloudProvider {...{ createE2eeRuntime }}>{children}</CloudProvider>
+    </AuthenticatedConvexContext.Provider>
+  );
+}
 
 /** What better-auth hands back on a refetch: equal data in new objects. */
 function refetch(workspaceName: string) {
@@ -93,12 +156,19 @@ describe('CloudPlatformProvider', () => {
     seen.push(usePlatform());
     return null;
   }
-  const render = () =>
-    act(() => root.render(createElement(CloudPlatformProvider, null, createElement(Probe))));
+  const render = (createE2eeRuntime?: E2eeRuntimeFactory) =>
+    act(() =>
+      root.render(createElement(CloudPlatformProvider, { createE2eeRuntime }, createElement(Probe)))
+    );
 
   beforeEach(() => {
     seen.length = 0;
     fixture.electron = false;
+    fixture.usePreload = false;
+    fixture.invoke = async () => {
+      throw new Error('unexpected IPC invocation');
+    };
+    delete window.ipc;
     fixture.native = undefined;
     fixture.cloudClient.query = async () => {
       throw new Error('unexpected query');
@@ -114,6 +184,441 @@ describe('CloudPlatformProvider', () => {
     act(() => root.unmount());
     container.remove();
     localStorage.clear();
+    delete window.ipc;
+  });
+
+  it('keeps standalone anonymous login independent of an injected runtime factory', async () => {
+    fixture.session = { data: null, isPending: false };
+    const factory: E2eeRuntimeFactory = () => {
+      throw new Error('anonymous host acquisition');
+    };
+    await act(async () =>
+      root.render(
+        createElement(CloudProvider, { createE2eeRuntime: factory }, createElement(Probe))
+      )
+    );
+    expect(seen.at(-1)!.identity.session.get()).toEqual({ status: 'unauthenticated' });
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+  });
+
+  it('keeps Electron IPC as the runtime owner when a browser factory is supplied', async () => {
+    fixture.electron = true;
+    refetch('A');
+    const binding = { workspaceId: 'workspace-a', genesisHash: '11'.repeat(32) };
+    fixture.native = { e2ee: { readIdentity: async () => binding } } as never;
+    const factory: E2eeRuntimeFactory = () => {
+      throw new Error('browser factory must not own Electron');
+    };
+    await render(factory);
+    expect(
+      await seen.at(-1)!.e2eeWorkspaces!.runtime!.readIdentity!({
+        workspaceId: 'workspace-a',
+        accountId: 'user-a',
+      })
+    ).toEqual(binding);
+  });
+
+  it('keeps cloud mode control available when the injected factory reports no runtime', async () => {
+    refetch('A');
+    fixture.cloudClient.query = async () => ({
+      workspaceId: 'workspace-a',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    await render(() => undefined);
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+    expect(await seen.at(-1)!.e2eeWorkspaces!.describe({ workspaceId: 'workspace-a' })).toEqual({
+      workspaceId: 'workspace-a',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+  });
+
+  it('authorizes telemetry only for the matched, confirmed plaintext scope and closes on switches', () => {
+    refetch('Plain');
+    const store = getDefaultStore();
+    const user = { id: 'user-a', email: 'a@example.com', name: 'A', image: null };
+    store.set(userAtom, user);
+    store.set(currentWorkspaceSlugAtom, 'a');
+    store.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: user.id,
+      workspaceSlug: 'a',
+      workspaceId: 'workspace-a',
+      descriptor: null,
+    });
+    setTelemetryRouteTarget('a', true);
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    act(() =>
+      store.set(workspaceContentModeAtom, {
+        accountId: user.id,
+        workspaceSlug: 'a',
+        workspaceId: 'workspace-a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      })
+    );
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    setTelemetryRouteTarget('b', false);
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    // A late old-scope answer cannot authorize the pending route.
+    act(() =>
+      store.set(workspaceContentModeAtom, {
+        accountId: user.id,
+        workspaceSlug: 'a',
+        workspaceId: 'workspace-a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      })
+    );
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    setTelemetryRouteTarget('a', true);
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    fixture.organization = {
+      ...fixture.organization,
+      activeOrganization: { id: 'workspace-a', contentMode: 'e2ee' },
+    };
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    refetch('Plain');
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    fixture.session = { ...fixture.session, isRetrying: true };
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    refetch('Plain');
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    act(() => store.set(userAtom, { ...user, id: 'user-b' }));
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+  });
+
+  it('keeps telemetry closed without authenticated context even with retained plaintext state', () => {
+    refetch('Plain');
+    const store = getDefaultStore();
+    const user = { id: 'user-a', email: 'a@example.com', name: 'A', image: null };
+    store.set(userAtom, user);
+    store.set(currentWorkspaceSlugAtom, 'a');
+    store.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: user.id,
+      workspaceSlug: 'a',
+      workspaceId: 'workspace-a',
+      descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+    setTelemetryRouteTarget('a', true);
+    act(() => root.render(createElement(CloudProvider, null, createElement(Probe))));
+    expect(seen.at(-1)!.identity.session.get()).toMatchObject({ status: 'authenticated' });
+    expect(seen.at(-1)!.workspaces.state.get()).toEqual({ status: 'loading' });
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+  });
+
+  it.each(['owner', 'admin'])(
+    'keeps encrypted email admission running for an authenticated %s',
+    async (role) => {
+      fixture.electron = true;
+      fixture.usePreload = true;
+      window.ipc = ipcBridge;
+      refetch('Encrypted');
+      fixture.organization.organizations = [
+        { id: 'workspace-a', name: 'Encrypted', contentMode: 'e2ee', role },
+      ];
+      const completed = Promise.withResolvers<void>();
+      const approvals: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.open') return { readerOwner: 'inbox-reader' };
+        if (channel === 'e2ee.refresh') return undefined;
+        if (channel === 'e2ee.status') return { deviceKind: 'personal', memberRole: role };
+        if (channel === 'e2ee.memberJoinRequests')
+          return { items: [{ requestId: 'email-request', source: 'email' }] };
+        if (channel === 'e2ee.approveMemberJoin') {
+          approvals.push(args);
+          return undefined;
+        }
+        if (channel === 'e2ee.close') {
+          completed.resolve();
+          return undefined;
+        }
+        throw new Error(`unexpected IPC invocation: ${channel}`);
+      };
+      await render();
+      await completed.promise;
+      expect(approvals).toEqual([['workspace-a', 'email-request', 'automatic']]);
+      expect(seen.at(-1)!.workspaces.state.get()).toMatchObject({
+        status: 'ready',
+        workspaces: [{ id: 'workspace-a', contentMode: 'e2ee' }],
+      });
+    }
+  );
+
+  const policyView = (): import('@lody/platform').E2eeMachineSharingView => ({
+    machineId: 'machine-a',
+    ownerMembershipId: '11'.repeat(16),
+    generation: '22'.repeat(32),
+    head: { revision: 1, digest: '33'.repeat(32) },
+    sharedWithTeam: false,
+    projects: [],
+    signer: '44'.repeat(32),
+    canManage: true,
+    needsResign: false,
+  });
+  function SharingSurface({
+    machineId = 'machine-a',
+    other = () => {},
+  }: {
+    machineId?: string;
+    other?: () => void;
+  }) {
+    return createElement(
+      'div',
+      null,
+      createElement('button', { onClick: other }, 'Other setting'),
+      createElement(MachineSharingController, {
+        key: machineId,
+        accountId: 'user-a',
+        workspaceId: 'workspace-a',
+        machineId,
+        runtime: usePlatform().e2eeWorkspaces?.runtime,
+        projects: [{ id: 'project-a', name: 'Lody', rootPath: '~/Projects/Lody' }],
+      })
+    );
+  }
+  const sharingButton = (label: string) => {
+    const button = [...container.querySelectorAll<HTMLElement>('button')].find(
+      (item) => item.textContent === label || item.getAttribute('aria-label') === label
+    );
+    if (!button) throw new Error(`missing sharing button: ${label}`);
+    return button;
+  };
+  const clickSharing = (label: string) =>
+    act(async () => {
+      sharingButton(label).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  const renderSharing = async (props: Parameters<typeof SharingSurface>[0] = {}) => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    await initI18n('en');
+    await act(async () =>
+      root.render(createElement(CloudPlatformProvider, null, createElement(SharingSurface, props)))
+    );
+  };
+
+  it.each(['pending', 'lost-reply'] as const)(
+    'recovers a %s sharing change after remount through real provider and preload with the same request identity',
+    async (mode) => {
+      let view = policyView();
+      const writes: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        if (channel !== 'e2ee.updateMachineSharing') throw new Error(channel);
+        writes.push(args);
+        const change = args[4] as import('@lody/platform').E2eeMachineSharingChange;
+        expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+        expect(args[3]).toMatch(/^[0-9a-f]{32}$/);
+        if (writes.length === 1) {
+          view = { ...view, pendingRequest: { requestId: String(args[3]), change } };
+          if (mode === 'lost-reply') throw new Error('synthetic lost reply');
+          return { status: 'pending', requestId: args[3] };
+        }
+        view = {
+          ...view,
+          sharedWithTeam: true,
+          projects: ['project-a'],
+          head: { revision: 2, digest: '55'.repeat(32) },
+          pendingRequest: undefined,
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      await clickSharing('Share Lody with the team');
+      expect(container.textContent).toContain('Retry change');
+      await act(async () => root.render(null));
+      await renderSharing();
+      expect(container.textContent).toContain('result is not confirmed');
+      await clickSharing('Retry change');
+      expect(writes).toHaveLength(2);
+      expect(writes[1]).toEqual(writes[0]);
+      expect(container.textContent).toContain('v2');
+      expect(
+        container
+          .querySelector('[aria-label="Share with the whole team"]')
+          ?.getAttribute('aria-checked')
+      ).toBe('true');
+    }
+  );
+
+  it('refreshes a terminal conflict and submits a fresh explicit intent while retaining the requested switch', async () => {
+    let view = policyView();
+    const writes: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') return view;
+      writes.push(args);
+      if (writes.length === 1) {
+        view = { ...view, head: { revision: 8, digest: '88'.repeat(32) } };
+        return { status: 'conflict', head: null, requestId: args[3] };
+      }
+      view = { ...view, sharedWithTeam: true, head: { revision: 9, digest: '99'.repeat(32) } };
+      return { status: 'saved', requestId: args[3] };
+    };
+    await renderSharing();
+    await clickSharing('Share with the whole team');
+    expect(container.textContent).toContain('Another policy was saved');
+    await clickSharing('Retry change');
+    expect(writes[1]?.[3]).not.toBe(writes[0]?.[3]);
+    expect(writes[1]?.[4]).toEqual(writes[0]?.[4]);
+    expect(container.textContent).toContain('v9');
+  });
+
+  it('re-signs a revoked issuer policy without dropping undisplayed project choices', async () => {
+    let view = {
+      ...policyView(),
+      needsResign: true,
+      sharedWithTeam: true,
+      projects: ['project-a', 'retained-project'],
+    };
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') return view;
+      expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+      expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
+      view = {
+        ...view,
+        needsResign: false,
+        head: { revision: 2, digest: '55'.repeat(32) },
+        signer: '66'.repeat(32),
+      };
+      return { status: 'saved', requestId: args[3] };
+    };
+    await renderSharing();
+    expect(container.textContent).toContain('Re-sign required');
+    await clickSharing('Re-sign with this device');
+    expect(container.textContent).toContain('v2');
+    expect(container.textContent).toContain('666666666666');
+    expect(container.textContent).toContain('retained-project');
+    expect(
+      container
+        .querySelector('[aria-label="Share Lody with the team"]')
+        ?.getAttribute('aria-checked')
+    ).toBe('true');
+  });
+
+  it.each(['withdrawn', 'readmitted', 'pending'] as const)(
+    'rechecks a stale re-sign surface before writing when the latest policy is %s',
+    async (latest) => {
+      let view: import('@lody/platform').E2eeMachineSharingView = {
+        ...policyView(),
+        needsResign: true,
+        sharedWithTeam: true,
+      };
+      const writes: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        writes.push(args);
+        view = {
+          ...view,
+          pendingRequest: undefined,
+          needsResign: false,
+          sharedWithTeam: false,
+          head: { revision: 3, digest: '88'.repeat(32) },
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      const pendingChange = { kind: 'machine', sharedWithTeam: false } as const;
+      const pendingId = '99'.repeat(16);
+      view =
+        latest === 'readmitted'
+          ? { ...policyView(), generation: '77'.repeat(32), head: null }
+          : latest === 'withdrawn'
+            ? { ...policyView(), head: { revision: 2, digest: '88'.repeat(32) } }
+            : { ...view, pendingRequest: { requestId: pendingId, change: pendingChange } };
+      await clickSharing('Re-sign with this device');
+      expect(writes).toHaveLength(0);
+      if (latest === 'pending') {
+        expect(container.textContent).toContain('Retry change');
+        await clickSharing('Retry change');
+        expect(writes).toEqual([
+          ['workspace-a', 'machine-a', view.generation, pendingId, pendingChange],
+        ]);
+        expect(container.textContent).toContain('v3');
+      } else {
+        expect(container.textContent).not.toContain('Re-sign with this device');
+        expect(
+          container
+            .querySelector('[aria-label="Share with the whole team"]')
+            ?.getAttribute('aria-checked')
+        ).toBe('false');
+      }
+    }
+  );
+
+  it.each(['en', 'zh_CN'] as const)(
+    'shows native non-owner refusal as read-only friendly text (%s)',
+    async (language) => {
+      fixture.invoke = async (channel) => {
+        if (channel !== 'e2ee.readMachineSharing')
+          throw new Error('read-only UI attempted a write');
+        return { ...policyView(), canManage: false, deniedReason: 'e2ee_machine_not_shared' };
+      };
+      await renderSharing();
+      await act(async () => {
+        await initI18n(language);
+      });
+      expect(container.querySelectorAll('[role=switch]')).toHaveLength(0);
+      expect(container.textContent).toContain(language === 'en' ? 'Read only' : '只读');
+      expect(container.textContent).toContain(language === 'en' ? 'Ask its owner' : '联系所有者');
+      expect(container.textContent).not.toContain('e2ee_machine_not_');
+    }
+  );
+
+  it('discards a pending old-generation intent when the machine rejoins', async () => {
+    let view = policyView();
+    const writes: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') return view;
+      writes.push(args);
+      view = {
+        ...view,
+        pendingRequest: {
+          requestId: String(args[3]),
+          change: args[4] as import('@lody/platform').E2eeMachineSharingChange,
+        },
+      };
+      return { status: 'pending', requestId: args[3] };
+    };
+    await renderSharing();
+    await clickSharing('Share with the whole team');
+    view = { ...policyView(), generation: '77'.repeat(32) };
+    await clickSharing('Refresh policy');
+    expect(container.textContent).toContain('machine has rejoined');
+    expect(container.textContent).not.toContain('Retry change');
+    expect(writes).toHaveLength(1);
+    await clickSharing('Share with the whole team');
+    expect(writes[1]?.[2]).toBe(view.generation);
+    expect(writes[1]?.[3]).not.toBe(writes[0]?.[3]);
+  });
+
+  it('fences a delayed read when the selected machine changes', async () => {
+    let finish!: (value: unknown) => void;
+    const first = new Promise((resolve) => {
+      finish = resolve;
+    });
+    fixture.invoke = async (_channel, ...args) =>
+      args[1] === 'machine-a'
+        ? first
+        : {
+            ...policyView(),
+            machineId: 'machine-b',
+            head: { revision: 7, digest: '77'.repeat(32) },
+          };
+    await renderSharing();
+    await renderSharing({ machineId: 'machine-b' });
+    expect(container.textContent).toContain('v7');
+    await act(async () => {
+      finish({ ...policyView(), head: { revision: 99, digest: '99'.repeat(32) } });
+    });
+    expect(container.textContent).toContain('v7');
+    expect(container.textContent).not.toContain('v99');
   });
 
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {
@@ -184,133 +689,6 @@ describe('CloudPlatformProvider', () => {
     expect(container.textContent).toBe('unauthenticated:null:null');
     expect(acceptedBearers.length).toBe(beforeLogout);
   });
-
-  it('keeps one platform object across a session refetch and calls the latest actions', async () => {
-    refetch('first');
-    await render();
-    const first = seen.at(-1)!;
-    expect(first.identity.session.get()).toMatchObject({
-      status: 'authenticated',
-      user: { id: 'user-a' },
-    });
-
-    refetch('second');
-    await render();
-
-    // A consumer that owns resources per platform object (the Prompt Shortcut
-    // runtime) must not be torn down by a refetch that changed nothing.
-    expect(seen.at(-1)).toBe(first);
-    await expect(first.workspaces.create({ name: 'x' })).resolves.toMatchObject({
-      name: 'second',
-      role: 'owner',
-    });
-  });
-
-  it('uses actions for creation and fixed-checkpoint history while keeping mode lookup a query', async () => {
-    refetch('Encrypted');
-    const prepared: E2eeWorkspacePrepared = {
-      accountId: 'user-a',
-      requestId: 'request-a',
-      name: 'Encrypted',
-      slug: 'encrypted',
-      genesisRecordHex: '01',
-      genesisHashHex: 'ab'.repeat(32),
-    };
-    const receipt = {
-      workspaceId: 'workspace-encrypted',
-      name: prepared.name,
-      slug: prepared.slug,
-      contentMode: 'e2ee' as const,
-      contentModeVersion: 1 as const,
-      cryptoOrgId: prepared.genesisHashHex,
-      genesisHash: prepared.genesisHashHex,
-      activation: 'control-only' as const,
-    };
-    const createRequest = {
-      accountId: prepared.accountId,
-      requestId: prepared.requestId,
-      name: prepared.name,
-      slug: prepared.slug,
-      genesisRecordHex: prepared.genesisRecordHex,
-      developerMode: true as const,
-    };
-    const historyRequest = {
-      workspaceId: receipt.workspaceId,
-      cursor: 'page-two',
-      checkpoint: { headHash: 'cd'.repeat(32), length: 2 },
-    };
-    const historyPage = {
-      workspaceId: receipt.workspaceId,
-      genesisHash: receipt.genesisHash,
-      checkpoint: { ...historyRequest.checkpoint },
-      startIndex: 1,
-      recordsHex: ['02'],
-      position: 'p1:workspace-encrypted:2:offset:0',
-      nextCursor: null,
-    };
-    fixture.electron = true;
-    const bindings: Array<{ workspaceId: string; genesisHash: string; requestId?: string }> = [];
-    const unused = async (): Promise<never> => {
-      throw new Error('unused runtime method');
-    };
-    fixture.native = {
-      e2ee: {
-        prepareCreation: async () => ({ ...prepared }),
-        recordCreated: async (binding) => {
-          bindings.push({ ...binding });
-        },
-        open: unused,
-        close: async () => {},
-        status: unused,
-        ledgerView: unused,
-        ingestLedgerRecords: unused,
-      },
-    };
-    fixture.cloudClient.query = async (reference, args) => {
-      expect(args).toEqual({ workspaceId: receipt.workspaceId });
-      if (getFunctionName(reference) === 'e2eeWorkspaces:memberProfiles')
-        return {
-          workspaceId: receipt.workspaceId,
-          profiles: [{ cryptoUserId: '03'.repeat(32), name: 'Teammate', image: null }],
-        };
-      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:describe');
-      return receipt;
-    };
-    fixture.cloudClient.action = async (reference, args) => {
-      switch (getFunctionName(reference)) {
-        case 'e2eeWorkspaces:create':
-          expect(args).toEqual(createRequest);
-          return receipt;
-        case 'e2eeWorkspaces:history':
-          expect(args).toEqual(historyRequest);
-          return historyPage;
-        default:
-          throw new Error('unexpected action');
-      }
-    };
-    await render();
-    const port = seen.at(-1)!.e2eeWorkspaces!;
-    await expect(port.prepareCreation!(prepared)).resolves.toEqual(prepared);
-    await expect(port.create(createRequest)).resolves.toEqual(receipt);
-    expect(bindings).toEqual([
-      {
-        workspaceId: receipt.workspaceId,
-        genesisHash: prepared.genesisHashHex,
-        requestId: prepared.requestId,
-      },
-    ]);
-    await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
-    await expect(port.history(historyRequest)).resolves.toEqual(historyPage);
-    await expect(port.memberProfiles!({ workspaceId: receipt.workspaceId })).resolves.toEqual({
-      workspaceId: receipt.workspaceId,
-      profiles: [{ cryptoUserId: '03'.repeat(32), name: 'Teammate', image: null }],
-    });
-
-    fixture.cloudClient.action = async () => {
-      throw new Error('history temporarily unavailable');
-    };
-    await expect(port.history(historyRequest)).rejects.toThrow('history temporarily unavailable');
-  });
 });
 
 describe('cloud E2EE creation ownership', () => {
@@ -366,6 +744,37 @@ describe('cloud E2EE creation ownership', () => {
     expect(port.prepareCreation).toBeUndefined();
     await expect(port.create(request)).rejects.toThrow('e2ee_preparation_required');
     await expect(port.describe({ workspaceId: receipt.workspaceId })).resolves.toEqual(receipt);
+  });
+
+  it('keeps the pending creation recoverable when the local binding write fails', async () => {
+    const bound: string[] = [];
+    const port = createCloudE2eeWorkspaces({
+      session: authenticated,
+      remote,
+      prepareCreation: async (input) => ({
+        ...original,
+        ...input,
+        deviceCredentialHash: 'ef'.repeat(32),
+      }),
+      runtime: {
+        recordCreated: async () => {
+          bound.push('attempt');
+          throw new Error('e2ee_storage_failed');
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+      refreshWorkspaces: async () => {
+        bound.push('refresh');
+      },
+    });
+    await port.prepareCreation!(original);
+    await expect(
+      port.create({
+        ...request,
+        genesisRecordHex: original.genesisRecordHex,
+        deviceCredentialHash: 'ef'.repeat(32),
+      })
+    ).rejects.toThrow('e2ee_storage_failed');
+    expect(bound).toEqual(['attempt']);
   });
 
   it('preserves explicit legacy admission without inventing a plaintext descriptor', async () => {

@@ -61,18 +61,27 @@ const styles = stylex.create({
  * always has a way forward: the caller's retry, or a reload — "refresh the
  * page" means nothing in the mobile app — and a link to the full recovery
  * screen. `gate: null` marks a message that is not a failure, such as a plan
- * limit, which keeps only the caller's retry.
+ * limit, which keeps only the caller's actions: a primary one (`onRetry`) and
+ * an optional quiet way out (`secondaryAction`) for a route that can leave it.
  */
 export function RouteMessage({
   gate,
   title,
   description = '',
   onRetry,
+  actionLabel,
+  secondaryAction,
+  testId,
 }: {
+  testId?: string;
   gate: string | null;
   title: string;
   description?: string;
   onRetry?: () => void;
+  /** Replaces the Retry label for a terminal message's single explicit action. */
+  actionLabel?: string;
+  /** A terminal message's second exit, e.g. signing out of an account at its limit. */
+  secondaryAction?: { label: string; onClick: () => void };
 }) {
   const { t } = useTranslation();
   const observationRef = useRef(useWorkspaceDataScopeState());
@@ -85,17 +94,26 @@ export function RouteMessage({
 
   if (showRecovery && gate !== null) return <FailedScreenRecovery gate={gate} />;
   return (
-    <div {...stylex.props(styles.page)}>
+    <div data-testid={testId} {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.column)}>
         <div {...stylex.props(styles.statement, styles.title)}>{title}</div>
         {description ? (
           <div {...stylex.props(styles.statement, styles.description)}>{description}</div>
         ) : null}
         {gate === null ? (
-          onRetry ? (
-            <Button variant="secondary" onClick={onRetry}>
-              {t('common.retry')}
-            </Button>
+          onRetry || secondaryAction ? (
+            <div {...stylex.props(styles.actions)}>
+              {onRetry ? (
+                <Button variant="secondary" onClick={onRetry}>
+                  {actionLabel ?? t('common.retry')}
+                </Button>
+              ) : null}
+              {secondaryAction ? (
+                <Button variant="ghost" size="small" onClick={secondaryAction.onClick}>
+                  {secondaryAction.label}
+                </Button>
+              ) : null}
+            </div>
           ) : null
         ) : (
           <div {...stylex.props(styles.actions)}>

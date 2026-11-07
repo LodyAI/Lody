@@ -30,16 +30,71 @@ function pinOrderedListValues(element: HTMLElement): () => void {
   };
 }
 
-async function captureShareImage(element: HTMLElement): Promise<Blob> {
+// WebKit can paint positioned HTML inside an SVG foreignObject at the wrong
+// scale when its viewBox is enlarged (WebKit bug 23113). Keep the SVG at 1:1
+// and scale its HTML layout instead. Start from SnapDOM's processed SVG so its
+// WebKit shadow compatibility handling is preserved.
+async function sizeWebKitShareSvg(
+  source: HTMLImageElement,
+  width: number,
+  height: number,
+  vbW: number,
+  vbH: number
+): Promise<HTMLImageElement> {
+  if (!source.src.startsWith('data:image/svg+xml')) throw new Error('SVG rendering failed');
+  const comma = source.src.indexOf(',');
+  if (comma < 0) throw new Error('SVG rendering failed');
+  const document = new DOMParser().parseFromString(
+    decodeURIComponent(source.src.slice(comma + 1)),
+    'image/svg+xml'
+  );
+  const svg = document.documentElement;
+  const foreignObject = Array.from(svg.children).find(
+    (child) => child.localName === 'foreignObject'
+  );
+  const wrapper =
+    foreignObject && Array.from(foreignObject.children).find((child) => child.localName === 'div');
+  if (
+    svg.localName !== 'svg' ||
+    !foreignObject ||
+    !wrapper ||
+    !Number.isFinite(vbW) ||
+    !Number.isFinite(vbH) ||
+    vbW <= 0 ||
+    vbH <= 0
+  )
+    throw new Error('SVG rendering failed');
+  const scale = Math.min(width / vbW, height / vbH);
+  for (const name of ['x', 'y', 'width', 'height']) {
+    const attribute = foreignObject.getAttribute(name);
+    if (attribute === null) throw new Error('SVG rendering failed');
+    const value = Number(attribute);
+    if (!Number.isFinite(value)) throw new Error('SVG rendering failed');
+    foreignObject.setAttribute(name, String(value * scale));
+  }
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  (wrapper as HTMLElement).style.setProperty('zoom', String(scale), 'important');
+  const image = new Image();
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(document))}`;
+  await image.decode();
+  return image;
+}
+
+async function captureShareImage(element: HTMLElement, assertCurrent: () => void): Promise<Blob> {
+  assertCurrent();
   await document.fonts.ready;
+  assertCurrent();
   await Promise.all(Array.from(element.querySelectorAll('img')).map((image) => image.decode()));
   const { snapdom } = await import('@zumer/snapdom');
+  assertCurrent();
   // SnapDOM 2.24 treats absent li[value] as zero when resolving list-item counters.
   const restoreLists = pinOrderedListValues(element);
   let blob: Blob;
   try {
     // Capture the natural-size card inside the scaled preview, without its scroll container.
-    blob = await snapdom.toBlob(element, {
+    const options: import('@zumer/snapdom').SnapdomOptions = {
       type: 'png',
       scale: 2,
       dpr: 1,
@@ -55,19 +110,59 @@ async function captureShareImage(element: HTMLElement): Promise<Blob> {
           },
         },
       ],
-    });
+    };
+    const ua = navigator.userAgent;
+    const webKit =
+      /AppleWebKit/i.test(ua) &&
+      (/iPhone|iPad|iPod/i.test(ua) ||
+        (/Safari/i.test(ua) && !/Chrome|Chromium|Android/i.test(ua)));
+    if (webKit) {
+      // SnapDOM's WebKit shadow workaround rasterizes at natural size before
+      // scaling. Resize its SVG first so the intermediate raster has real detail.
+      const snapshot = await snapdom(element, options);
+      const { vbW, vbH } = snapshot.meta;
+      const scale = Math.min(2, 16384 / vbW, 16384 / vbH, Math.sqrt((16384 * 16384) / (vbW * vbH)));
+      const width = Math.max(1, Math.floor(vbW * scale));
+      const height = Math.max(1, Math.floor(vbH * scale));
+      const processed = await snapshot.toSvg({ width, height });
+      const image = await sizeWebKitShareSvg(processed, width, height, vbW, vbH);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Image rendering failed');
+      context.drawImage(image, 0, 0, width, height);
+      blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (result) => (result ? resolve(result) : reject(new Error('PNG encoding failed'))),
+          'image/png'
+        );
+      });
+    } else {
+      blob = await snapdom.toBlob(element, options);
+    }
   } finally {
     restoreLists();
   }
+  assertCurrent();
   if (blob.type !== 'image/png' || blob.size === 0) throw new Error('PNG encoding failed');
   return blob;
 }
 
-export async function copyShareImage(element: HTMLElement): Promise<void> {
+export async function copyShareImage(
+  element: HTMLElement,
+  assertCurrent: () => void = () => {},
+  admitOutput?: () => Promise<void>
+): Promise<void> {
+  assertCurrent();
   const bridge = getImagePreviewExportBridge();
   if (bridge) {
-    const blob = await captureShareImage(element);
-    const result = await bridge.copyToClipboard({ pngBytes: await blob.arrayBuffer() });
+    const blob = await captureShareImage(element, assertCurrent);
+    const pngBytes = await blob.arrayBuffer();
+    await admitOutput?.();
+    assertCurrent();
+    const result = await bridge.copyToClipboard({ pngBytes });
+    assertCurrent();
     if (!result.copied) throw new Error(result.error || 'Image copy failed');
     return;
   }
@@ -78,8 +173,13 @@ export async function copyShareImage(element: HTMLElement): Promise<void> {
 
   // WebKit revokes transient user activation after an await. Start the clipboard
   // write synchronously and let ClipboardItem await the PNG capture itself.
-  const png = captureShareImage(element);
+  const png = captureShareImage(element, assertCurrent).then(async (blob) => {
+    await admitOutput?.();
+    assertCurrent();
+    return blob;
+  });
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+  assertCurrent();
 }
 
 /**
@@ -98,9 +198,11 @@ export async function copyShareImage(element: HTMLElement): Promise<void> {
 export async function exportShareImage(
   element: HTMLElement,
   title: string | undefined,
-  fallback: string
+  fallback: string,
+  assertCurrent: () => void = () => {},
+  admitOutput?: () => Promise<void>
 ): Promise<{ saved: boolean }> {
-  const blob = await captureShareImage(element);
+  const blob = await captureShareImage(element, assertCurrent);
 
   const name =
     (title?.trim() || fallback)
@@ -110,7 +212,11 @@ export async function exportShareImage(
   const fileName = `${name}.png`;
   const bridge = getImagePreviewExportBridge();
   if (bridge) {
-    const result = await bridge.saveAs({ fileName, bytes: await blob.arrayBuffer() });
+    const bytes = await blob.arrayBuffer();
+    await admitOutput?.();
+    assertCurrent();
+    const result = await bridge.saveAs({ fileName, bytes });
+    assertCurrent();
     if (!result.saved && !result.canceled) throw new Error(result.error || 'Image save failed');
     return { saved: result.saved === true };
   }
@@ -119,13 +225,16 @@ export async function exportShareImage(
     // WKWebView cannot save a blob download. Give the OS an actual PNG file so
     // its share sheet can offer image actions, including Save Image on iOS.
     const { shareFileBytesNatively } = await import('./session-file-native-save');
-    const { shared } = await shareFileBytesNatively(
-      fileName,
-      new Uint8Array(await blob.arrayBuffer())
-    );
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await admitOutput?.();
+    assertCurrent();
+    const { shared } = await shareFileBytesNatively(fileName, bytes);
+    assertCurrent();
     return { saved: shared };
   }
 
+  await admitOutput?.();
+  assertCurrent();
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

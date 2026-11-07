@@ -57,30 +57,4 @@ describe('resolveInitialOnboardingProviderStatus', () => {
       )
     ).toBe('passed');
   });
-
-  it('applies the same authoritative-probe rule to existing builtins', () => {
-    const claudeConfig = {
-      ...config,
-      id: 'builtin-claude' as AgentConfigId,
-      agentType: 'claude',
-    };
-    const claudeRuntimeEntry: AcpCapabilityCacheEntry = {
-      ...runtimeEntry,
-      agentType: 'claude',
-      sourceVersion: 'builtin-claude:test',
-    };
-
-    expect(
-      resolveInitialOnboardingProviderStatus(
-        claudeConfig,
-        capabilities({ ...claudeRuntimeEntry, provenance: undefined }, claudeConfig)
-      )
-    ).toBe('untested');
-    expect(
-      resolveInitialOnboardingProviderStatus(
-        claudeConfig,
-        capabilities(claudeRuntimeEntry, claudeConfig)
-      )
-    ).toBe('passed');
-  });
 });

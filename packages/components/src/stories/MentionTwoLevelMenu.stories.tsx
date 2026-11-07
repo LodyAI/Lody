@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Mention, MentionInput } from '@/ui/mention';
+import { getComposerMentionChip } from '@/components/mentions/mention-chips';
 import { mentionSurface } from '@/ui/mention/mention-surface';
 import type { Mention as MentionRange } from '@/ui/mention/mention-root';
 import type { AgentRoleMentionItem } from '@/components/mentions/mention-agent-role-source';
@@ -29,6 +30,21 @@ import {
   type MachineId,
 } from '@lody/shared';
 
+const sessionRendering = stylex.create({
+  frame: {
+    backgroundColor: 'hsl(var(--input) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  input: {
+    width: '100%',
+    resize: 'none',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-base)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+  },
+});
+
 /* The menu body only renders inside a <Mention> root (its rows read the mention
    context). The harness mounts a forced-open root over a small textarea and
    renders the body directly, so every level and state is screenshot-verifiable
@@ -43,7 +59,9 @@ const menuStory = stylex.create({
   input: {
     width: '100%',
     borderRadius: 'var(--radius-md)',
-    borderWidth:"1px",borderStyle:"solid",borderColor:"hsl(var(--input-border) / 1)",
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--input-border) / 1)',
     backgroundColor: 'hsl(var(--input) / 1)',
     padding: 'calc(var(--spacing) * 2)',
   },
@@ -254,6 +272,14 @@ const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
       availability: { kind: 'unavailable', reason: 'machine_unknown' },
     }),
     'Unavailable: its machine is not available to you'
+  ),
+  toAgentRoleCandidate(
+    roleItem({
+      slug: 'Retired-Model-Reviewer',
+      role: agentRole({ id: 'retired-model-role' as AgentRoleId, name: 'Retired Model Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'model_unavailable' },
+    }),
+    'Unavailable: its agent no longer offers the saved model. Edit this Role to pick another'
   ),
 ];
 
@@ -551,6 +577,46 @@ type Story = StoryObj<typeof meta>;
 export const Categories: Story = {
   args: { search: '' },
 };
+
+/** Real composer decorations with a synthetic mixed-language session reference. */
+export const SessionMentionRendering: Story = {
+  args: { search: '' },
+  render: () => <SessionMentionRenderingHarness />,
+};
+
+function SessionMentionRenderingHarness() {
+  const token = '@讨论-Sample-Agent-Renderer-输入框颜色与光标';
+  const prefix = 'review 这里的改动 ';
+  const [value, setValue] = React.useState(`${prefix}${token} 后续文字`);
+  const [mentions, setMentions] = React.useState<MentionRange[]>([
+    {
+      start: prefix.length,
+      end: prefix.length + token.length,
+      value: 'sample-session',
+      kind: 'session',
+    },
+  ]);
+  return (
+    <div {...stylex.props(sessionRendering.frame)} data-testid="session-mention-rendering">
+      <Mention
+        inputValue={value}
+        onInputValueChange={setValue}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        getMentionChip={getComposerMentionChip}
+      >
+        <MentionInput
+          value={value}
+          onChange={() => {}}
+          aria-label="Message"
+          placeholder="Message"
+          rows={5}
+          xstyle={sessionRendering.input}
+        />
+      </Mention>
+    </div>
+  );
+}
 
 /** `@mention` — one query answered across every category, Files first. */
 export const AggregateSearch: Story = {

@@ -27,8 +27,10 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import type { HomeNowItem, HomeNowList, HomeNowModel, HomeNowReason } from '@/lib/home-now';
 import {
+  HOME_NOW_COLUMN,
   layoutHomeNow,
   type HomeNowBlock,
+  type HomeNowColumn,
   type HomeNowListKey,
   type HomeNowTotals,
 } from '@/lib/home-now-layout';
@@ -543,16 +545,18 @@ export function homeNowTotals(model: HomeNowModel): HomeNowTotals {
 /**
  * What the person's agents are doing right now: what needs the person, what is running, what
  * just finished, and what is worth picking back up, beside the plan usage, since running out is
- * something to act on too. Every list keeps its fixed place, and how much each shows is
- * `layoutHomeNow`'s call: a row budget spent by priority, within the rows the window has room
- * for, in two columns with level bottoms. A row opens its session; "Show all" (or the tile
- * itself, while it hides rows) opens its whole list over its column. A pure picture of its props.
+ * something to act on too. Every list keeps its place — running and just finished swap sides
+ * only for a level board (`solveHomeNowColumn`) — and how much each shows is `layoutHomeNow`'s
+ * call: a row budget spent by priority, within the rows the window has room for, in two columns
+ * with level bottoms. A row opens its session; "Show all" (or the tile itself, while it hides
+ * rows) opens its whole list over its column. A pure picture of its props, `column` included.
  */
 export function NowBoard({
   model,
   agentIcon,
   nowMs,
   maxRows,
+  column = HOME_NOW_COLUMN,
   onOpenSession,
   ...usage
 }: UsageProps & {
@@ -562,6 +566,8 @@ export function NowBoard({
   nowMs: number;
   /** The rows one column has room for (`layoutHomeNow`); unlimited when absent. */
   maxRows?: number;
+  /** Which arrangement to speak with (`solveHomeNowColumn`); the level one when absent. */
+  column?: HomeNowColumn;
   onOpenSession?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -654,7 +660,7 @@ export function NowBoard({
     });
   };
 
-  const layout = layoutHomeNow(homeNowTotals(model), usage.usage != null, maxRows);
+  const layout = layoutHomeNow(homeNowTotals(model), usage.usage != null, maxRows, column);
   const block = (item: HomeNowBlock) => {
     switch (item.kind) {
       case 'usage':

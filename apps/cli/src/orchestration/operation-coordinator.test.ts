@@ -1,3 +1,4 @@
+import { SessionExecutionService } from '../session/session-execution-service';
 import { Cause, Effect, Exit } from 'effect';
 import { CoordinatorWorkflow } from './coordinator-workflow';
 import type { CoordinatorActivity } from './coordinator-activity';
@@ -5,7 +6,7 @@ import type { CoordinatorPorts } from './coordinator-ports';
 import { OperationRepository } from './operation-repository';
 import { operationRepositoryLayer } from './platform/operations';
 import Database from 'better-sqlite3';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { withHistoryPort } from '../../tests/history-port-fixture';
@@ -40,6 +41,9 @@ const roots = new Set<string>();
 const TEST_NOW_MS = Date.parse('2026-07-20T00:00:00Z');
 
 const makeHarness = async (options?: {
+  beforeStoreOpen?: () => void;
+  beforeActivate?: () => void;
+  onAvailabilityChange?: (message: string | undefined) => void;
   deadlineAt?: string;
   author?: import('@lody/shared').AgentMessageAuthor;
   requesterArchived?: boolean;
@@ -271,7 +275,7 @@ const makeHarness = async (options?: {
       options?.afterTurnComplete?.();
     }
   );
-  const logger = { warn: vi.fn(), debug: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
   const syncMachineFlockDoc = vi.fn(
     async () =>
       await (options?.configurationSync?.() ??
@@ -284,9 +288,18 @@ const makeHarness = async (options?: {
     if (synced?.meta) metas.set(targetSessionId, synced.meta);
   });
   const storeLifecycle = { opened: 0, closed: 0 };
+  const openedStores: LodyOperationStore[] = [];
+  let attachedInbox: unknown;
   const storeFactory = () => {
+    options?.beforeStoreOpen?.();
     storeLifecycle.opened += 1;
     const factoryStore = new LodyOperationStore(storePath, options?.now ?? (() => TEST_NOW_MS));
+    openedStores.push(factoryStore);
+    const activate = factoryStore.inbox.activate.bind(factoryStore.inbox);
+    factoryStore.inbox.activate = (activatedWorkspaceId, owner) => {
+      options?.beforeActivate?.();
+      activate(activatedWorkspaceId, owner);
+    };
     const close = factoryStore.close.bind(factoryStore);
     factoryStore.close = () => {
       storeLifecycle.closed += 1;
@@ -349,6 +362,12 @@ const makeHarness = async (options?: {
       syncMachineFlockDoc,
     } as never,
     executionService: {
+      quiesceInboxExecutions: () => {
+        busy = false;
+      },
+      setOperationInbox: (inbox: unknown) => {
+        attachedInbox = inbox;
+      },
       getExecutionSnapshot: () => ({
         hasActiveTurn: busy,
         ...(busy && options?.activeTurnId ? { activeTurnId: options.activeTurnId } : {}),
@@ -358,6 +377,7 @@ const makeHarness = async (options?: {
     dispatchWatcher: { hasPendingDispatch: () => pendingUser } as never,
     logger: logger as never,
     storeFactory,
+    onAvailabilityChange: options?.onAvailabilityChange,
     storePath,
     now: options?.now ?? (() => TEST_NOW_MS),
     ...(options?.workerBootId ? { workerBootId: options.workerBootId } : {}),
@@ -407,6 +427,9 @@ const makeHarness = async (options?: {
     targetSessionId,
     storePath,
     storeLifecycle,
+    openedStores,
+    getAttachedInbox: () => attachedInbox,
+    isBusy: () => busy,
     syncMachineFlockDoc,
     syncRemoteDocOrThrow,
     flockScan,
@@ -439,6 +462,154 @@ afterEach(async () => {
 });
 
 describe('LodyOperationCoordinator', () => {
+  it.each(['open', 'activate', 'watch'])(
+    'degrades after %s failure and recovers without restarting',
+    async (boundary) => {
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
+      let failed = true;
+      const warnings: (string | undefined)[] = [];
+      const fault = () => {
+        if (failed) throw Object.assign(new Error('disk full'), { code: 'SQLITE_FULL' });
+      };
+      const h = await makeHarness({
+        targetInputDurable: false,
+        ...(boundary === 'open'
+          ? { beforeStoreOpen: fault }
+          : boundary === 'activate'
+            ? { beforeActivate: fault }
+            : {}),
+        onAvailabilityChange: (message) => warnings.push(message),
+      });
+      if (boundary === 'watch') {
+        h.setBusy(true);
+        const watch = h.coordinatorOptions.operationStoreWatchFactory;
+        h.coordinatorOptions.operationStoreWatchFactory = (directory, onChange) => {
+          fault();
+          return watch(directory, onChange);
+        };
+      }
+      try {
+        expect(() => h.coordinator.start()).not.toThrow();
+        expect(warnings.at(-1)).toContain('SQLITE_FULL');
+        expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+        await expect(h.coordinator.wake('dependent-call')).rejects.toThrow('INBOX_UNAVAILABLE');
+        await h.coordinator.idle();
+        expect(h.coordinator.hasPendingWorkForRequester(h.requesterSessionId)).toBe(false);
+        // Degraded Inbox runs no turn work, so scheduled messages are not held as busy.
+        expect(h.coordinator.hasTurnWorkForRequester(h.requesterSessionId)).toBe(false);
+        expect(h.histories.get(h.targetSessionId)).toEqual([]);
+        expect(h.storeLifecycle.closed).toBe(h.storeLifecycle.opened);
+        expect(h.getAttachedInbox()).toBeUndefined();
+        if (boundary === 'watch') expect(h.isBusy()).toBe(true);
+        for (const store of h.openedStores)
+          expect(() => store.get(h.requesterSessionId, 'review-round-1')).toThrow();
+        await vi.advanceTimersByTimeAsync(30_000);
+        failed = false;
+        await vi.advanceTimersByTimeAsync(59_999);
+        expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+        await vi.advanceTimersByTimeAsync(1);
+        await h.coordinator.idle();
+        expect(() => h.coordinator.assertInboxAvailable()).not.toThrow();
+        expect(warnings.at(-1)).toBeUndefined();
+        expect(h.getAttachedInbox()).toBeDefined();
+        expect(h.histories.get(h.targetSessionId)?.[0]?.id).toBe('turn-1');
+      } finally {
+        await h.coordinator.stop();
+      }
+      expect(h.storeLifecycle.closed).toBe(h.storeLifecycle.opened);
+    }
+  );
+
+  it('bounds startup backoff and cancels it on stop', async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
+    let failing = true;
+    let attempts = 0;
+    const h = await makeHarness({
+      beforeStoreOpen: () => {
+        attempts++;
+        if (failing) throw new Error('storage unavailable');
+      },
+    });
+    h.coordinator.start();
+    for (const [index, delay] of [
+      30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000,
+    ].entries()) {
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(attempts).toBe(index + 2);
+      expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+    }
+    await h.coordinator.recoverStop();
+    expect(vi.getTimerCount()).toBe(0);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(h.storeLifecycle).toEqual({ opened: 0, closed: 0 });
+    expect(attempts).toBe(8);
+    try {
+      h.coordinator.start();
+      await h.coordinator.idle();
+      expect(() => h.coordinator.assertInboxAvailable()).not.toThrow();
+    } finally {
+      await h.coordinator.stop();
+    }
+    expect(h.storeLifecycle).toEqual({ opened: 1, closed: 1 });
+  });
+
+  it('keeps a newer database byte-for-byte unchanged while degraded', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const h = await makeHarness();
+    const db = new Database(h.storePath);
+    db.prepare("UPDATE orchestration_meta SET value='99' WHERE key='schema_version'").run();
+    db.close();
+    const before = await readFile(h.storePath);
+    try {
+      h.coordinator.start();
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(await readFile(h.storePath)).toEqual(before);
+    } finally {
+      await h.coordinator.recoverStop();
+    }
+  });
+
+  it.each(['INBOX_SCHEMA_UNSUPPORTED', 'INBOX_PROTOCOL_REQUIRED'])(
+    'does not retry or write after %s',
+    async (reason) => {
+      vi.useFakeTimers({
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+      });
+      const h = await makeHarness({
+        beforeActivate: () => {
+          throw new Error(reason);
+        },
+      });
+      const readModes = () => {
+        const db = new Database(h.storePath, { readonly: true });
+        try {
+          return db.prepare('SELECT * FROM inbox_modes').all();
+        } finally {
+          db.close();
+        }
+      };
+      const before = readModes();
+      try {
+        expect(() => h.coordinator.start()).not.toThrow();
+        await vi.advanceTimersByTimeAsync(3_600_000);
+        expect(vi.getTimerCount()).toBe(0);
+        expect(h.storeLifecycle).toEqual({ opened: 1, closed: 1 });
+        expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
+        expect(readModes()).toEqual(before);
+      } finally {
+        await h.coordinator.stop();
+      }
+    }
+  );
+
   it.each([
     undefined,
     {
@@ -944,6 +1115,240 @@ describe('LodyOperationCoordinator', () => {
       }
     }
   );
+
+  it('explains a failed target with its recorded chat failure notice', async () => {
+    const harness = await makeHarness();
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'failed' };
+    targetHistory.push({
+      id: 'system-notice-1',
+      role: 'system',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your usage limit. Try again at 7:20 AM.",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as SessionHistoryInput);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.stop();
+
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'failed',
+                error: {
+                  code: 'TARGET_FAILED',
+                  message:
+                    "Target Turn failed (acp_upstream_api_error): You've hit your usage limit. Try again at 7:20 AM.",
+                  retryable: true,
+                  reason: 'usage_limit',
+                  detail: "You've hit your usage limit. Try again at 7:20 AM.",
+                },
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('keeps context overflow distinct from a usage limit', async () => {
+    const harness = await makeHarness();
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'failed' };
+    targetHistory.push({
+      id: 'system-notice-context',
+      role: 'system',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_internal_error',
+            message: 'API Error: 400 prompt is too long: maximum context length is 200000 tokens',
+          },
+        },
+      ],
+      fileDiff: [],
+    } as SessionHistoryInput);
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    await harness.coordinator.stop();
+
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'failed',
+                error: {
+                  code: 'TARGET_FAILED',
+                  reason: 'context_overflow',
+                  retryable: false,
+                },
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  describe('steer handoff', () => {
+    const steerHandoff = async (
+      successor: { status: SessionHistoryInput['status']; cancellationReason?: 'user_stop' },
+      successorFinished: boolean | 'absent',
+      deadlineAt?: string
+    ) => {
+      const harness = await makeHarness(deadlineAt ? { deadlineAt } : undefined);
+      const targetHistory = harness.histories.get(harness.targetSessionId)!;
+      targetHistory[0] = { ...targetHistory[0]!, status: 'handled' };
+      targetHistory.push(
+        {
+          id: 'assistant:turn-1',
+          role: 'assistant',
+          userTurnId: 'turn-1',
+          timestamp: '2026-07-20T00:00:00.500Z',
+          items: [{ type: 'text', text: 'partial output' }],
+          fileDiff: [],
+          finished: true,
+        },
+        {
+          id: 'turn-steer',
+          role: 'user',
+          timestamp: '2026-07-20T00:00:00.600Z',
+          items: [{ type: 'text', text: 'also cover the edge case' }],
+          fileDiff: [],
+          ...successor,
+        },
+        ...(successorFinished === 'absent'
+          ? []
+          : [
+              {
+                id: 'assistant:turn-steer',
+                role: 'assistant' as const,
+                userTurnId: 'turn-steer',
+                timestamp: '2026-07-20T00:00:00.700Z',
+                items: [{ type: 'text' as const, text: 'final summary' }],
+                fileDiff: [],
+                finished: successorFinished,
+              },
+            ])
+      );
+      harness.metas.set(harness.targetSessionId, {
+        ...harness.metas.get(harness.targetSessionId)!,
+        steerOperationLedger: {
+          'steer:turn-steer': {
+            operationId: 'steer:turn-steer',
+            userTurnId: 'turn-steer',
+            expectedTurnId: 'assistant:turn-1',
+            cancellationPolicy: 'promote',
+            phase: 'settled',
+            delivery: 'applied',
+            status: 'handled',
+            updatedAt: TEST_NOW_MS,
+          },
+        },
+      });
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      await harness.coordinator.stop();
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        return store.get(harness.requesterSessionId, 'review-round-1');
+      } finally {
+        store.close();
+      }
+    };
+
+    it('completes a steered-away target with the successor final reply', async () => {
+      expect(await steerHandoff({ status: 'handled' }, true)).toMatchObject({
+        state: 'finished',
+        completion: {
+          type: 'result',
+          value: {
+            items: [
+              {
+                status: 'succeeded',
+                assistantTurnId: 'assistant:turn-steer',
+                output: { text: 'final summary' },
+              },
+            ],
+          },
+        },
+      });
+    });
+
+    it('keeps waiting for an unfinished successor instead of returning sealed partial output', async () => {
+      expect(
+        await steerHandoff({ status: 'processing' }, false, '2026-07-19T23:59:59.000Z')
+      ).toMatchObject({
+        state: 'finished',
+        completion: {
+          type: 'result',
+          value: { items: [{ status: 'failed', error: { code: 'TARGET_TIMEOUT' } }] },
+        },
+      });
+    });
+
+    it.each(['handled', 'failed'] as const)(
+      'keeps the original result when an applied steer settles %s without a successor turn',
+      async (status) => {
+        // stale-turn after provider acceptance, or a failure before handoff:
+        // no successor turn exists, so the original turn's reply stands.
+        expect(await steerHandoff({ status }, 'absent')).toMatchObject({
+          state: 'finished',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  assistantTurnId: 'assistant:turn-1',
+                  output: { text: 'partial output' },
+                },
+              ],
+            },
+          },
+        });
+      }
+    );
+
+    it('reports a user Stop of the successor as the delegated cancellation', async () => {
+      expect(
+        await steerHandoff({ status: 'canceled', cancellationReason: 'user_stop' }, true)
+      ).toMatchObject({
+        state: 'finished',
+        completion: {
+          type: 'result',
+          value: { items: [{ status: 'cancelled', cancellationReason: 'user_stop' }] },
+        },
+      });
+    });
+  });
 
   it('uses durable local Stop before stale partial output or an expired deadline can return a receipt', async () => {
     const harness = await makeHarness({ deadlineAt: '2026-07-19T00:00:00Z' });
@@ -1491,4 +1896,26 @@ describe('native coordinator failure boundaries', () => {
       }
     }
   );
+});
+
+it('closes Inbox and SQLite even when an execution drain has a release failure', async () => {
+  const h = await makeHarness();
+  h.coordinatorOptions.executionService.drainInboxExecutions = () =>
+    SessionExecutionService.prototype.drainInboxExecutions.call({
+      ownedWork: new Set(),
+      turnRuntimeBySession: new Map([
+        ['failed', { releaseFailure: new Error('terminate failed') }],
+      ]),
+      deps: { logger: h.logger },
+    } as never);
+  h.coordinator.start();
+  await h.coordinator.idle();
+  const internal = h.coordinator as unknown as {
+    inbox: { wake(): Promise<void> };
+    store: LodyOperationStore | null;
+  };
+  const inbox = internal.inbox;
+  await expect(h.coordinator.stop()).resolves.toBeUndefined();
+  expect(internal.store).toBeNull();
+  await expect(inbox.wake()).rejects.toBeDefined();
 });

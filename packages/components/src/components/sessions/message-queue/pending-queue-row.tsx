@@ -6,7 +6,7 @@ import { SessionSendProgressRing } from '@/components/sidebar-row-shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { deriveSessionSendProgress } from '@/lib/session-send-status';
-import { queueSurface } from './surface';
+import { QUEUE_LINE, queueSurface } from './surface';
 import { IconAction, TextAction, queueRowStyles } from './message-queue-row';
 import { themeColors } from '../../../style/theme-colors.stylex';
 import { themeFontSize, themeSpace } from '../../../style/theme-scale.stylex';
@@ -45,8 +45,6 @@ const styles = stylex.create({
     flexShrink: 1,
     flexBasis: '0%',
     overflow: 'hidden',
-    fontSize: themeFontSize.xs,
-    lineHeight: '1.375',
   },
   textInstant: { color: 'hsl(var(--foreground) / 0.8)' },
   textUploading: { color: 'hsl(var(--foreground) / 0.55)' },
@@ -104,15 +102,12 @@ function queuedText(record: PendingSessionSend): string {
 export function PendingQueueRow({
   record,
   index,
-  divided,
   busy,
   onRetry,
   onCancel,
 }: {
   record: PendingSessionSend;
   index: number;
-  /** Draw the divider above: a row, local or real, precedes this one. */
-  divided: boolean;
   busy: boolean;
   onRetry: () => void;
   onCancel: () => void;
@@ -130,7 +125,7 @@ export function PendingQueueRow({
       ? t('sessions.attachmentUploading', { progress: status.progress })
       : t('sessions.sendStatus.sendingWithoutSize');
 
-  const rowProps = stylex.props(queueSurface.row, queueRowStyles.row, divided && styles.divider);
+  const rowProps = stylex.props(queueSurface.row);
 
   return (
     <div {...rowProps} data-pending-queue-row={record.id} data-pending-queue-state={status.state}>
@@ -138,6 +133,7 @@ export function PendingQueueRow({
         aria-hidden="true"
         {...stylex.props(
           queueRowStyles.leadingBox,
+          queueRowStyles.leadingHeight(QUEUE_LINE),
           queueRowStyles.leadingIndex,
           queueRowStyles.leadingIndexMuted
         )}
@@ -157,17 +153,13 @@ export function PendingQueueRow({
         ) : null}
         {/* Muted until it is a real queue item, like an unsent conversation's title. */}
         <div
-          {...stylex.props(
-            queueSurface.text,
-            styles.text,
-            instant ? styles.textInstant : styles.textUploading
-          )}
+          {...stylex.props(queueSurface.text, styles.text, !instant && queueSurface.preparingText)}
           style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
         >
           {queuedText(record)}
         </div>
       </div>
-      <div {...stylex.props(queueSurface.actions, queueSurface.pendingActions, styles.actions)}>
+      <div {...stylex.props(queueSurface.actions, styles.actions)}>
         {failed ? (
           <>
             <CircleAlert

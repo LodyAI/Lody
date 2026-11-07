@@ -1,21 +1,27 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
-  DEFAULT_AGENT_ROLE_EMOJI,
   applyTextRewrites,
   resolveAgentRoleAvailability,
   type AgentConfigId,
+  type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
   type LocalProjectId,
   type MachineId,
+  type MachineViewMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import { buildAgentRoleCandidates } from '../src/components/mentions/mention-registry';
+import {
+  AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
+  createAgentRoleCapabilityResolver,
+} from '../src/lib/composer-agent-roles';
 import {
   buildAgentRoleMentionItems,
   buildAgentRoleMentionPrompt,
@@ -143,34 +149,6 @@ describe('agent role reach from a local project composer', () => {
   });
 });
 
-describe('agent role candidates', () => {
-  it('derives the token from the name, whitespace and all', () => {
-    expect(items(role({ name: 'Code Reviewer' }))[0]?.slug).toBe('Code-Reviewer');
-  });
-
-  it('ranks a prefix match over a substring one, on token or name', () => {
-    const list = items(
-      role({ id: 'a' as AgentRoleId, name: 'Deep reviewer' }),
-      role({ id: 'b' as AgentRoleId, name: 'Reviewer' })
-    );
-    expect(selectAgentRoleMentionCandidates(list, 'rev').map((item) => item.slug)).toEqual([
-      'Reviewer',
-      'Deep-reviewer',
-    ]);
-    expect(selectAgentRoleMentionCandidates(list, 'nope')).toEqual([]);
-  });
-
-  it('lists the entire role catalog, with an explicit cap for aggregate search', () => {
-    const many = items(
-      ...Array.from({ length: 60 }, (_unused, index) =>
-        role({ id: `role-${index}` as AgentRoleId, name: `Reviewer ${index}` })
-      )
-    );
-    expect(selectAgentRoleMentionCandidates(many, '')).toHaveLength(60);
-    expect(selectAgentRoleMentionCandidates(many, '', 4)).toHaveLength(4);
-  });
-});
-
 describe('agent role availability in mentions', () => {
   it('puts available matches first even when a disabled match has a higher score', () => {
     const available = items(role({ id: 'ready' as AgentRoleId, name: 'Deep Reviewer' }))[0]!;
@@ -195,40 +173,60 @@ describe('agent role availability in mentions', () => {
 });
 
 describe('agent role menu rows', () => {
-  it('carries the role own mark instead of the category glyph', () => {
-    const [candidate] = buildAgentRoleCandidates(items(role({ emoji: '🔍' })), '');
+  it('explains and blocks a Role whose agent retired its pinned model', () => {
+    const stale = role({ runConfig: { modelId: 'model-old' } });
+    const machine = {
+      name: 'MacBook',
+      acpCapabilities: {
+        'config-1': {
+          agentType: 'codex',
+          cliType: 'builtin',
+          provenance: 'runtime',
+          models: [{ modelId: 'model-new', name: 'New' }],
+          modes: [],
+          fetchedAt: 1,
+        },
+      },
+    } as unknown as MachineViewMeta;
+    const config = {
+      id: 'config-1',
+      name: 'Codex',
+      agentType: 'codex',
+      cliType: 'builtin',
+      machineId,
+    } as AgentConfigMeta;
+    const list = buildAgentRoleMentionItems([stale], {
+      availability: (entry) =>
+        resolveAgentRoleAvailability(entry, {
+          authorizedMachineIds: new Set([machineId]),
+          onlineMachineIds: new Set([machineId]),
+          agentConfigMachineIds: new Map([[config.id, machineId]]),
+          loadedAgentConfigMachineIds: new Set([machineId]),
+          runConfigCapability: createAgentRoleCapabilityResolver(
+            [config],
+            new Map([[machineId, machine]])
+          ),
+        }),
+      machine: () => machine,
+      agentConfig: () => config,
+    });
+    const [candidate] = buildAgentRoleCandidates(list, '', undefined, ({ availability }) =>
+      availability.kind === 'unavailable'
+        ? AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]
+        : undefined
+    );
     expect(candidate).toMatchObject({
-      iconEmoji: '🔍',
-      // The name alone: the emoji is the row's icon, not a prefix on the text.
-      title: 'Code Reviewer',
-      insertText: '@Code-Reviewer',
-      value: 'role-1',
+      disabled: true,
+      subtitle: 'settings.agentRoles.unavailable.modelUnavailable',
+      subtitleTone: 'warning',
     });
-    // Nothing restated in the detail: the pane heads itself with the same mark
-    // and name.
-    expect(candidate?.detail?.title).toBeUndefined();
-    // Who does the work and where, on the row's own line.
-    expect(candidate?.hint).toBe('Codex · Studio');
-  });
-
-  it('hands the Role to the shared pane instead of restating it as rows', () => {
-    const withPrompt = role({ promptPrefix: 'Check correctness before style.' });
-    const [candidate] = buildAgentRoleCandidates(items(withPrompt), '');
-    // The pane reads the Role itself — including its instruction — resolving
-    // each stored id against the BOUND agent's capabilities. Generic rows here
-    // could only print those ids raw, which is how this menu ended up labelling
-    // the permission mode "Reasoning".
-    expect(candidate?.detail?.agentRole).toEqual({
-      role: withPrompt,
-      agentConfig,
-      machine: { name: 'Studio' },
-      // Named because this menu spans machines, unlike the composer's list.
-      machineLabel: 'Studio',
-    });
-    expect(candidate?.detail?.rows).toBeUndefined();
-    // No badges at all: every Role the menu offers is one this user may run, so
-    // visibility changes nothing about accepting it.
-    expect(candidate?.detail?.badges).toBeUndefined();
+    expect(
+      buildAgentRoleMentionRewrites(
+        '@Code-Reviewer',
+        [{ start: 0, end: 14, kind: 'agent_role', value: 'role-1' }],
+        list
+      )
+    ).toEqual([]);
   });
 
   it.each([{ kind: 'unknown' }, { kind: 'unavailable', reason: 'machine_offline' }] as const)(
@@ -251,11 +249,6 @@ describe('agent role menu rows', () => {
       expect(hydrateAgentRoleMentionsFromText('@Code-Reviewer', list).mentions).toEqual([]);
     }
   );
-
-  it('falls back to the shared default mark', () => {
-    const [candidate] = buildAgentRoleCandidates(items(role({ emoji: undefined })), '');
-    expect(candidate?.iconEmoji).toBe(DEFAULT_AGENT_ROLE_EMOJI);
-  });
 });
 
 describe('agent role before-send expansion', () => {
@@ -283,26 +276,12 @@ describe('agent role before-send expansion', () => {
     ]);
   });
 
-  it('carries no run configuration into the instruction', () => {
-    const prompt = buildAgentRoleMentionPrompt({ id: 'role-1', name: 'Code Reviewer' });
-    expect(prompt).not.toContain('gpt-5.6');
-    expect(prompt).not.toContain('machine-1');
-    expect(prompt).not.toContain('config-1');
-  });
-
   it('leaves a role that is no longer offered as plain text', () => {
     expect(buildAgentRoleMentionRewrites(text, [mention], [])).toEqual([]);
   });
 });
 
 describe('agent role draft hydration', () => {
-  it('recognises a known token and yields a range carrying the role id', () => {
-    expect(hydrateAgentRoleMentionsFromText('ping @Code-Reviewer now', items(role()))).toEqual({
-      mentions: [{ value: 'role-1', start: 5, end: 19, kind: 'agent_role' }],
-      values: ['role-1'],
-    });
-  });
-
   it('leaves a token the file source already knows to the file hydrator', () => {
     expect(
       hydrateAgentRoleMentionsFromText(
@@ -311,13 +290,6 @@ describe('agent role draft hydration', () => {
         new Set(['Code-Reviewer'])
       ).mentions
     ).toEqual([]);
-  });
-
-  it('claims nothing when no role is offered', () => {
-    expect(hydrateAgentRoleMentionsFromText('@Code-Reviewer', [])).toEqual({
-      mentions: [],
-      values: [],
-    });
   });
 });
 

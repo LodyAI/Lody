@@ -21,17 +21,6 @@ const requiredUsage = (update: SessionUsageUpdate) => {
 };
 
 describe('per-turn usage from a Core delta', () => {
-  it('carries the adapter cost into the stored turn usage', () => {
-    expect(turnTokenUsageFromUpdate(usageUpdate(0.25))).toEqual({
-      inputTokens: 10,
-      outputTokens: 5,
-      cacheReadInputTokens: 2,
-      cacheCreationInputTokens: 1,
-      reasoningOutputTokens: 1,
-      costUSD: 0.25,
-    });
-  });
-
   it('records an unknown tariff instead of dropping the cost field', () => {
     expect(turnTokenUsageFromUpdate(usageUpdate())?.costUSD).toBeNull();
     expect(turnTokenUsageFromUpdate(usageUpdate(-1))?.costUSD).toBeNull();

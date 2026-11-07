@@ -339,6 +339,8 @@ export type MobileInlinePickerProps<T extends string = string> = {
   loadingText?: ReactNode;
   /** Render a search input above the options list. */
   searchable?: boolean;
+  /** Filter search matches without reordering a caller-ranked list. */
+  preserveOptionOrder?: boolean;
   searchPlaceholder?: string;
   /** Reports picks made after typing a search term (`picker/search_selected`). */
   searchAnalyticsPicker?: SearchPickerKind;
@@ -351,6 +353,7 @@ export type MobileInlinePickerProps<T extends string = string> = {
      composer chips where the trigger is narrow but the list should be
      wider than the chip. */
   expansionPanelClassName?: string;
+  expansionPanelXstyle?: stylex.StyleXStyles;
   /** When provided, the expansion panel renders into this element via a
      React portal instead of inline below the trigger. Lets composer
      chips (which live in a flex row of multiple chips) project their
@@ -452,6 +455,7 @@ export function MobileInlinePicker<T extends string = string>({
   disabled = false,
   loading = false,
   loadingText,
+  preserveOptionOrder = false,
   searchable = false,
   searchPlaceholder,
   searchAnalyticsPicker,
@@ -459,6 +463,7 @@ export function MobileInlinePicker<T extends string = string>({
   triggerXstyle,
   expansionClassName,
   expansionPanelClassName,
+  expansionPanelXstyle,
   portalContainer,
 }: MobileInlinePickerProps<T>) {
   const coordinator = useContext(PickerCoordinatorContext);
@@ -523,14 +528,15 @@ export function MobileInlinePicker<T extends string = string>({
      `op5` should still find `claude-opus-5`. Ranked, so the best match is the
      one the highlight lands on. An empty query returns `options` itself, which
      is every render without a search field. */
-  const filteredOptions = useMemo(
-    () =>
-      filterFuzzyOptions(options, query, (opt) => ({
-        primary: opt.searchText ?? String(opt.label ?? ''),
-        secondary: [opt.value],
-      })),
-    [options, query]
-  );
+  const filteredOptions = useMemo(() => {
+    const matches = filterFuzzyOptions(options, query, (opt) => ({
+      primary: opt.searchText ?? String(opt.label ?? ''),
+      secondary: [opt.value],
+    }));
+    if (!preserveOptionOrder) return matches;
+    const matchingOptions = new Set(matches);
+    return options.filter((option) => matchingOptions.has(option));
+  }, [options, query, preserveOptionOrder]);
 
   const postHog = usePostHog();
   const handleSelect = (next: T) => {
@@ -806,7 +812,12 @@ export function MobileInlinePicker<T extends string = string>({
           transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
           {...withClassName(stylex.props(styles.expansion), expansionClassName)}
         >
-          <div {...withClassName(stylex.props(styles.panel), expansionPanelClassName)}>
+          <div
+            {...withClassName(
+              stylex.props(styles.panel, expansionPanelXstyle),
+              expansionPanelClassName
+            )}
+          >
             {searchable ? (
               <PickerSearchInput
                 query={query}

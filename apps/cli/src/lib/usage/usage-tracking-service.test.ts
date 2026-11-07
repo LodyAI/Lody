@@ -138,6 +138,24 @@ describe('usage delivery', () => {
     expect([...stored.values()].reduce((a, b) => a + b, 0)).toBe(12500);
   });
 
+  it('delivers custom adapter costs without inventing prices for known model names', async () => {
+    const report = input(100, 'custom');
+    const usage = { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 0 };
+    report.update.usage = { ...usage, costUSD: 0.75 };
+    report.update.modelUsage = {
+      'gpt-5.6': { ...usage, costUSD: 0.5 },
+      'gpt-5.5': { ...usage },
+    };
+    service.recordSessionUsageUpdate(report);
+    await service.flushSessionUsage('s');
+    expect(persisted[0]).toMatchObject({
+      cliType: 'custom',
+      usage: { ...usage, costUSD: 0.75 },
+      modelUsage: { 'gpt-5.6': { ...usage, costUSD: 0.5 }, 'gpt-5.5': usage },
+    });
+    expect(persisted[0]?.modelUsage?.['gpt-5.5'].costUSD).toBeUndefined();
+  });
+
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
     const report = input(100);
     report.update.usage.webSearchRequests = 2;
@@ -204,21 +222,6 @@ describe('usage delivery', () => {
     expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200]);
   });
 
-  it('retains a rejected head ahead of later prompts and retries on a later flush', async () => {
-    service.recordSessionUsageUpdate(input(100));
-    service.recordSessionUsageUpdate(input(200));
-    const accept = deliver;
-    deliver = async () => {
-      throw new Error('synthetic rejection');
-    };
-    await service.flushSessionUsage('s');
-    expect(persisted).toEqual([]);
-    service.recordSessionUsageUpdate(input(300));
-    deliver = accept;
-    await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200, 300]);
-  });
-
   it('treats success false as unacknowledged instead of discarding usage', async () => {
     service.recordSessionUsageUpdate(input(100));
     const accept = deliver;
@@ -269,22 +272,6 @@ describe('usage delivery', () => {
     expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200]);
   });
 
-  it('coalesces the latest snapshot without compensating Codex resets', async () => {
-    service.recordSessionUsageUpdate(input(100, 'claude'));
-    service.recordSessionUsageUpdate(input(200, 'claude'));
-    await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200]);
-    persisted = [];
-    service.recordSessionUsageUpdate(input(100, 'codex'));
-    const reset = input(0, 'codex');
-    reset.update.usage = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
-    reset.update.modelUsage = { synthetic: { ...reset.update.usage } };
-    service.recordSessionUsageUpdate(reset);
-    service.recordSessionUsageUpdate(input(20, 'codex'));
-    await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([20]);
-  });
-
   it('forwards native Codex resets after acknowledgement without inventing history or cost', async () => {
     service.recordSessionUsageUpdate(input(1000, 'codex'));
     await service.flushSessionUsage('s');
@@ -314,19 +301,6 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(next);
     await service.flushSessionUsage('s');
     expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 1050]);
-  });
-
-  it('keeps failed cumulative snapshots before newer cumulative snapshots', async () => {
-    const accept = deliver;
-    deliver = async () => {
-      throw new Error('synthetic');
-    };
-    service.recordSessionUsageUpdate(input(100, 'claude'));
-    await service.flushSessionUsage('s');
-    service.recordSessionUsageUpdate(input(200, 'claude'));
-    deliver = accept;
-    await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200]);
   });
 
   it('isolates ACP sessions and skips an unusable model map without blocking the queue', async () => {

@@ -1005,12 +1005,19 @@ the range that clamps itself, the shell an input builds out of its own `render`,
 and the two Base UI gaps they close are recorded in the
 [UI number and password fields note](../../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).
 
+The removed bridge's [cascade investigation](../../.agents/notes/implemented/architecture/2026-10-31-stylex-cascade-compatibility.md)
+and [font writer investigation](../../.agents/notes/implemented/architecture/2026-11-03-stylex-font-writer-pair.md)
+retain historical precedence evidence. They describe a retired adapter, not the
+current styling API; present callers compose through the actual owner.
+
 ## Scroll area
 
 `ScrollArea` uses Base UI for native wheel/touch scrolling, thumb dragging,
 overflow measurement and cleanup. Its transparent track and rounded thumb use
 the neutral gray ramp, shared by Menu, Select, Textarea, Table and Drawer native
 scroll regions. The component's tokens own width, inset and interaction colors.
+Why one native scrollbar treatment and no second scroll controller:
+[UI scroll area note](../../.agents/notes/implemented/feature/2026-10-21-ui-scroll-area.md).
 
 ```tsx
 import { ScrollArea } from '@lody/ui/scroll-area';
@@ -1028,6 +1035,11 @@ import { ScrollArea } from '@lody/ui/scroll-area';
 a narrow track for tab strips. The viewport ref remains the real native scroll
 element for virtualization, keyboard handling and scroll restoration. Root and
 viewport classes/styles carry caller layout, not thumb appearance.
+`contentFullHeight` lets the owned Content box fill the viewport for a full-height
+fold layout. It adds no wrapper; callers keep scrolling and measurement on the same
+native viewport. See the [integration decision](../../.agents/notes/implemented/architecture/2026-11-07-stylex-main-integration.md)
+for the ownership and verification boundary.
+
 `scrollbarClassName` carries layout or interaction constraints on both tracks,
 such as hiding them during a parent frame's animation; track appearance stays token-owned.
 

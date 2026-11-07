@@ -83,7 +83,6 @@ const storyLayout = stylex.create({
   },
 });
 
-
 const multiFileStyles = stylex.create({
   filePath: {
     fontSize: 'var(--text-xs)',
@@ -513,7 +512,10 @@ function MultiFileDiffListComponent() {
       {additions > 0 && <span {...stylex.props(storyLayoutStyles.canvas)}>+{additions}</span>}
       {deletions > 0 && (
         <span
-          {...stylex.props(multiFileStyles.deletions, additions > 0 ? multiFileStyles.adjacentCount : multiFileStyles.trailingCount)}
+          {...stylex.props(
+            multiFileStyles.deletions,
+            additions > 0 ? multiFileStyles.adjacentCount : multiFileStyles.trailingCount
+          )}
         >
           -{deletions}
         </span>
@@ -528,14 +530,20 @@ function MultiFileDiffListComponent() {
         <button
           type="button"
           onClick={() => setDiffStyle('unified')}
-          {...stylex.props(multiFileStyles.styleChoice, diffStyle === 'unified' ? multiFileStyles.selectedChoice : multiFileStyles.idleChoice)}
+          {...stylex.props(
+            multiFileStyles.styleChoice,
+            diffStyle === 'unified' ? multiFileStyles.selectedChoice : multiFileStyles.idleChoice
+          )}
         >
           Stack
         </button>
         <button
           type="button"
           onClick={() => setDiffStyle('split')}
-          {...stylex.props(multiFileStyles.styleChoice, diffStyle === 'split' ? multiFileStyles.selectedChoice : multiFileStyles.idleChoice)}
+          {...stylex.props(
+            multiFileStyles.styleChoice,
+            diffStyle === 'split' ? multiFileStyles.selectedChoice : multiFileStyles.idleChoice
+          )}
         >
           Split
         </button>

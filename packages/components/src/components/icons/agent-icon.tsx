@@ -22,6 +22,9 @@ import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
 import { ICON_GLYPH_BOX_CLASS, iconSurface } from './surface';
 import bubSvg from '@/assets/bub.svg?raw';
 import dimcodeSvg from '@/assets/dimcode.svg?raw';
+import lodySvg from '@/assets/lody.svg?raw';
+
+const lodyAgentSvg = lodySvg.replace('fill="#E2E8F0"', 'fill="currentColor"');
 
 const registryNameMap = new Map(REGISTRY_ACP_AGENTS.map((a) => [a.id, a.name] as const));
 
@@ -103,11 +106,13 @@ export function AgentIcon({
     if (agentType === 'claude') return <AnthropicIcon className={cls} />;
     if (agentType === 'codex') return <OpenAIIcon className={cls} />;
     if (agentType === 'deepseek') return <DeepSeekIcon className={cls} />;
-    if (agentType === 'bub' || agentType === 'dimcode') {
+    if (agentType === 'bub' || agentType === 'dimcode' || agentType === 'sorbet') {
       return (
         <InlineSvg
           fillParent
-          raw={agentType === 'dimcode' ? dimcodeSvg : bubSvg}
+          raw={
+            agentType === 'sorbet' ? lodyAgentSvg : agentType === 'dimcode' ? dimcodeSvg : bubSvg
+          }
           className={inlineGlyphClass}
         />
       );

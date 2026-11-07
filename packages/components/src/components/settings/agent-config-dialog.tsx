@@ -1,4 +1,5 @@
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
+import { useMachineRpcFeatureReason } from '@/hooks/use-workspace-feature';
 import {
   useCallback,
   useEffect,
@@ -117,6 +118,7 @@ import {
   space,
 } from '@lody/ui/tokens/scales.stylex';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import { LodyAgentConnectionsController } from './lody-agent-connections-controller';
 import { Field } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { BubInstallGuide } from './bub-install-guide';
@@ -1007,6 +1009,16 @@ type AgentTypeOption = {
 const BUILTIN_OPTIONS: AgentTypeOption[] = [
   {
     kind: 'builtin',
+    value: 'builtin:sorbet',
+    label: 'Lody Agent',
+    descriptionKey: 'settings.agent.dialog.option.sorbet.description',
+    descriptionDefault: 'An agent harness for work that outlives one conversation. Built for Lody.',
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    searchKeys: 'lody agent sorbet',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:kimi',
     label: 'Kimi Code',
     descriptionKey: 'settings.agent.dialog.option.kimi.description',
@@ -1311,7 +1323,10 @@ export type AddableProvider = {
  * agents and custom commands stay behind the dialog's own rail.
  */
 export function listAddableProviders(t: Translate): AddableProvider[] {
-  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental).map((option) => ({
+  // Lody Agent is set up from its own settings page, not added beside other providers.
+  const builtins = BUILTIN_OPTIONS.filter(
+    (option) => !option.experimental && option.agentType !== 'sorbet'
+  ).map((option) => ({
     key: option.value,
     label: getOptionLabel(t, option),
     description: getOptionDescription(t, option) ?? option.descriptionDefault,
@@ -1515,6 +1530,28 @@ function resolveInitialTestedCustomKey(
 // =============================================================================
 
 export function AgentConfigDialog(props: AgentConfigDialogProps) {
+  const reason = useMachineRpcFeatureReason(props.machine.id);
+  const { t } = useTranslation();
+  // The header action and retained dialogs must respect the same boundary as
+  // the provider list. Signed file RPC support does not admit provider probes.
+  if (reason) {
+    return (
+      <Dialog.Root
+        open={props.open}
+        onOpenChange={props.onOpenChange}
+        onOpenChangeComplete={props.onOpenChangeComplete}
+      >
+        <Dialog.Content data-machine-id={props.machine.id}>
+          <Dialog.Title>{t('settings.agent.provider.title', 'Agent Provider')}</Dialog.Title>
+          <Dialog.Description>{reason}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+  }
+  return <SupportedAgentConfigDialog {...props} />;
+}
+
+function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const {
     open,
     onOpenChange,
@@ -1529,6 +1566,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     onManagedRuntimeSelected,
   } = props;
   const { t } = useTranslation();
+  const [accountsRefreshVersion, setAccountsRefreshVersion] = useState(0);
   const draftConfigIdRef = useRef<AgentConfigId | null>(null);
   const agentConfigId =
     mode.kind === 'edit'
@@ -1545,7 +1583,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     testingBuiltinSetup &&
     publishedConfig?.machineId === machine.id &&
     publishedConfig.cliType === 'builtin' &&
-    (publishedConfig.agentType === 'bub' || publishedConfig.agentType === 'dimcode');
+    (publishedConfig.agentType === 'bub' ||
+      publishedConfig.agentType === 'dimcode' ||
+      publishedConfig.agentType === 'sorbet');
   const builtinSetup = testingBuiltinSetup
     ? setups.find((setup) => setup.id === agentConfigId)
     : undefined;
@@ -1587,6 +1627,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
   const unsupportedCodexProfile = !!codexAuth && !supportsCodexProfiles;
   const [submitting, setSubmitting] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
@@ -1650,6 +1691,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   useEffect(() => {
     if (open) {
       setTestingBuiltinSetup(false);
+      setSaveFailed(false);
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -1693,7 +1735,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
   const isQueuedBuiltin =
-    isBubBuiltin || (formData.cliType === 'builtin' && formData.agentType === 'dimcode');
+    isBubBuiltin ||
+    (formData.cliType === 'builtin' &&
+      (formData.agentType === 'dimcode' || formData.agentType === 'sorbet'));
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
@@ -1726,8 +1770,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // panel when a live probe reported missing credentials, because that panel is
   // the single way to unblock the creation-time verification gate.
   // Registry and custom providers authenticate through the standard ACP
-  // exchange, but only the agent knows whether it has anything to sign into —
-  // so their panel appears once a live probe reported that auth is required.
+  // exchange. Their agent publishes the available sign-in methods in its
+  // `initialize` response, so the panel offers them directly: `initialize`
+  // lists every way to sign in whether or not the stored credentials still
+  // work, and switching accounts on purpose is a legitimate reason to open it.
+  // `authRequired` now only describes the account state in the hint text.
   // The exchange runs entirely on the daemon, so a machine that predates it
   // answers "Authentication is not supported"; do not offer a button that can
   // only fail.
@@ -1745,7 +1792,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           brandId: resolvedBrandId,
           env: formData.env,
         }) ||
-          (authRequired && usesProtocolAuthentication))
+          usesProtocolAuthentication)
       : authRequired &&
         ((isManagedBuiltin && formData.agentType !== 'pi' && formData.agentType !== 'devin') ||
           usesProtocolAuthentication);
@@ -2491,10 +2538,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const persistConfig = useCallback(async () => {
     try {
       setSubmitting(true);
+      setSaveFailed(false);
       await persistConfigBeforeMachineLaunch();
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to save agent config:', error);
+      setSaveFailed(true);
     } finally {
       setSubmitting(false);
     }
@@ -2548,8 +2597,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const filteredOptions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return ALL_OPTIONS;
-    return ALL_OPTIONS.filter((o) => o.searchKeys.toLowerCase().includes(q));
+    return ALL_OPTIONS.filter(
+      (o) => o.agentType !== 'sorbet' && (!q || o.searchKeys.toLowerCase().includes(q))
+    );
   }, [query]);
 
   const groupedOptions = useMemo(() => {
@@ -3067,6 +3117,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             </div>
           ) : null}
 
+          {saveFailed && (
+            <div role="alert" {...stylex.props(styles.warning)}>
+              <AlertTriangle aria-hidden="true" {...stylex.props(styles.warningMark)} />
+              <div {...stylex.props(styles.warningBody)}>
+                {mode.kind === 'create'
+                  ? t('agents.createConfigError', 'Failed to create configuration')
+                  : t('agents.updateConfigError', 'Failed to update configuration')}
+              </div>
+            </div>
+          )}
+
           {probeError && !isPreset && (
             <div {...stylex.props(styles.warning)}>
               <AlertTriangle aria-hidden="true" {...stylex.props(styles.warningMark)} />
@@ -3084,6 +3145,22 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 {t(
                   'settings.agent.codex.boundChatgptAccount',
                   'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+                )}
+              </p>
+            </Field>
+          ) : null}
+          {mode.kind === 'create' &&
+          formData.cliType === 'builtin' &&
+          formData.agentType === 'sorbet' &&
+          !showAuthenticationPanel ? (
+            <Field
+              label={t('settings.agent.dialog.section.account', 'Account')}
+              icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
+            >
+              <p {...stylex.props(styles.statusText)}>
+                {t(
+                  'settings.agent.dialog.lodyAgentSignInHint',
+                  'After setup, open this provider to sign in and choose an available account.'
                 )}
               </p>
             </Field>
@@ -3120,6 +3197,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 onBeforeStart={persistConfigBeforeMachineLaunch}
                 onAuthenticated={() => {
                   setAuthRequired(false);
+                  setAccountsRefreshVersion((version) => version + 1);
                   setProbeError(null);
                   setManuallyTested(true);
                   if (isCustom && parsedCustomAcp) {
@@ -3132,6 +3210,35 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               />
             </Field>
           ) : null}
+
+          {open &&
+            mode.kind === 'edit' &&
+            formData.cliType === 'builtin' &&
+            formData.agentType === 'sorbet' && (
+              <LodyAgentConnectionsController
+                key={JSON.stringify([machine.id, agentConfigId])}
+                machineId={machine.id}
+                configId={agentConfigId}
+                supported={
+                  machineSupportsProtocolCapability(machine, 'sorbetCredentials', 1) ||
+                  machineSupportsProtocolCapability(machine, 'sorbetCredentialsRemote', 1)
+                }
+                refreshVersion={accountsRefreshVersion}
+                onProvidersChanged={async () => {
+                  // Saving a Provider only matters once the probe reads it, so re-probe
+                  // here and let the refreshed method list reach both panels.
+                  const response = await onRefreshCapabilities({
+                    machineId: machine.id,
+                    configId: agentConfigId,
+                  });
+                  // A Provider without credentials makes the agent require sign-in. That is
+                  // the expected next step, not a failure. Anything else must be visible.
+                  if (!response.success && !response.authRequired)
+                    throw new Error(response.error ?? 'ACP credential discovery failed');
+                  setAccountsRefreshVersion((version) => version + 1);
+                }}
+              />
+            )}
 
           {showBinaryPanel && (
             <div {...stylex.props(surface.formBlock, styles.status)}>
@@ -3418,6 +3525,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       onOpenChangeComplete={onOpenChangeComplete}
     >
       <Dialog.Content
+        data-testid="agent-config-dialog"
+        data-agent-config-id={agentConfigId}
+        data-machine-id={machine.id}
         // The wide header draws the close beside the capability status so they
         // share a centre line. The dialog cross is pinned to the panel padding
         // and sat above that row. On the narrow layout the back button is the close.

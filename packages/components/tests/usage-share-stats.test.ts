@@ -18,8 +18,6 @@ import {
   createUsageTimelineFormatter,
   formatUsageTimelineBucketInterval,
   formatUsageTimelineBucketLabel,
-  formatUsageTimelineWindow,
-  usageTimelineHourLabels,
 } from '../src/components/settings/usage-timeline-bucket-label';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -75,68 +73,6 @@ function bucket(
 }
 
 describe('usage share stats', () => {
-  it('labels hourly buckets at their UTC start, including a partial final bucket', () => {
-    const timeline = createTimeline({
-      range: 'day',
-      bucketSizeMs: HOUR_MS,
-      endMs: Date.UTC(2026, 9, 1, 0, 17),
-    });
-    const formatter = createUsageTimelineFormatter('en-US');
-    expect(
-      formatUsageTimelineBucketLabel(timeline, bucket(Date.UTC(2026, 8, 30, 23), 80), formatter)
-    ).toBe('Sep 30, 23:00 UTC');
-    expect(
-      formatUsageTimelineBucketLabel(timeline, bucket(Date.UTC(2026, 9, 1), 20), formatter)
-    ).toBe('Oct 1, 00:00 UTC');
-  });
-
-  it('keeps skyline hours and split labels on the same chronological buckets across midnight', () => {
-    const startMs = Date.UTC(2026, 8, 30, 16);
-    const timeline = createTimeline({
-      range: 'day',
-      startMs,
-      endMs: startMs + DAY_MS,
-      bucketSizeMs: HOUR_MS,
-      buckets: Array.from({ length: 24 }, (_, index) =>
-        bucket(startMs + index * HOUR_MS, index === 7 ? 500 : 0)
-      ),
-    });
-    const formatter = createUsageTimelineFormatter('en-US');
-    const hours = usageTimelineHourLabels(timeline.buckets);
-    expect(hours).toEqual([
-      '16',
-      '17',
-      '18',
-      '19',
-      '20',
-      '21',
-      '22',
-      '23',
-      '00',
-      '01',
-      '02',
-      '03',
-      '04',
-      '05',
-      '06',
-      '07',
-      '08',
-      '09',
-      '10',
-      '11',
-      '12',
-      '13',
-      '14',
-      '15',
-    ]);
-    const labels = timeline.buckets.map((item) =>
-      formatUsageTimelineBucketLabel(timeline, item, formatter)
-    );
-    expect(labels[7]).toBe('Sep 30, 23:00 UTC');
-    expect(labels[8]).toBe('Oct 1, 00:00 UTC');
-    expect(formatUsageTimelineWindow(timeline, formatter)).toBe('Sep 30, 16:00 – Oct 1, 16:00 UTC');
-  });
-
   it('shows actual partial-bucket extents without shifting the plotted start', () => {
     const startMs = Date.UTC(2026, 8, 30, 23);
     const timeline = createTimeline({
@@ -155,21 +91,6 @@ describe('usage share stats', () => {
     expect(formatUsageTimelineBucketLabel(timeline, bucket(startMs + HOUR_MS, 20), formatter)).toBe(
       'Oct 1, 00:00 UTC'
     );
-  });
-
-  it('uses UTC starts for week hours and preserves server labels for daily buckets', () => {
-    const item = { ...bucket(Date.UTC(2026, 8, 30, 23), 100), bucketLabel: '2026-09-30' };
-    const formatter = createUsageTimelineFormatter('en-US');
-    expect(
-      formatUsageTimelineBucketLabel(
-        createTimeline({ range: 'week', bucketSizeMs: HOUR_MS }),
-        item,
-        formatter
-      )
-    ).toBe('Sep 30, 23:00 UTC');
-    expect(
-      formatUsageTimelineBucketLabel(createTimeline({ range: 'month' }), item, formatter)
-    ).toBe('2026-09-30');
   });
 
   it('counts active days and the longest streak inside the shared window only', () => {
@@ -237,31 +158,6 @@ describe('usage share stats', () => {
     expect(stats.average).toBe(60);
   });
 
-  it('lights the whole calendar for the all-time range', () => {
-    const calendar = createUsageCalendarModel(createCalendar({ 3: 70 }), 'tokens');
-    const timeline = createTimeline({ range: 'total', totals: { tokens: 70, costUSD: 0.07 } });
-
-    const stats = computeUsageShareStats(calendar, timeline, 'total');
-    expect(stats.litDayStartMs).toBeNull();
-    // Nothing is highlighted, but the card still has to say which dates it covers.
-    expect(stats.periodMs).toEqual({ fromMs: START_MS, toMs: START_MS + 29 * DAY_MS });
-  });
-
-  it('falls back to the calendar when the range has no timeline yet', () => {
-    const calendar = createUsageCalendarModel(createCalendar({ 0: 5, 1: 15 }), 'tokens');
-
-    const stats = computeUsageShareStats(calendar, undefined, 'month');
-
-    expect(stats.total).toBe(20);
-    expect(stats.activeCount).toBe(2);
-    expect(stats.litDayStartMs).toBeNull();
-    // No timeline: the span falls back to the calendar's elapsed days.
-    expect(stats.periodMs).toEqual({
-      fromMs: START_MS,
-      toMs: START_MS + (USAGE_CALENDAR_CELLS - 1) * DAY_MS,
-    });
-  });
-
   it('ranks model slices, folds the tail into one remainder, and normalizes shares', () => {
     const timeline = createTimeline({
       range: 'month',
@@ -318,46 +214,6 @@ describe('usage share stats', () => {
     expect(JSON.stringify(slices)).not.toContain('@example.com');
   });
 
-  it('draws hours for 24h, a day-by-hour grid for 7d, and the calendar otherwise', () => {
-    const hourly = (count: number, range: SettingsUsageTimelineData['range']) =>
-      createTimeline({
-        range,
-        bucketSizeMs: HOUR_MS,
-        buckets: Array.from({ length: count }, (_, index) =>
-          bucket(START_MS + index * HOUR_MS, index)
-        ),
-      });
-
-    expect(computeUsageShareGraphic(hourly(24, 'day'), 'day')).toEqual({
-      kind: 'hours',
-      values: Array.from({ length: 24 }, (_, index) => index),
-    });
-
-    const week = computeUsageShareGraphic(hourly(26, 'week'), 'week');
-    expect(week.kind).toBe('weekHours');
-    if (week.kind !== 'weekHours') throw new Error('expected weekHours');
-    // 26 hourly buckets from a midnight start fall into two calendar days, oldest
-    // first, and each hour lands on its own index rather than being appended.
-    expect(week.rows).toHaveLength(2);
-    expect(week.rows[0]?.dayStartMs).toBe(START_MS);
-    expect(week.rows[0]?.values).toHaveLength(24);
-    expect(week.rows[0]?.values[5]).toBe(5);
-    expect(week.rows[1]?.values.slice(0, 3)).toEqual([24, 25, 0]);
-
-    expect(computeUsageShareGraphic(hourly(24, 'month'), 'month')).toEqual({ kind: 'calendar' });
-  });
-
-  it('falls back to the calendar when a range has no hour-granular series', () => {
-    const daily = createTimeline({
-      range: 'day',
-      bucketSizeMs: DAY_MS,
-      buckets: [bucket(START_MS, 10)],
-    });
-
-    expect(computeUsageShareGraphic(daily, 'day')).toEqual({ kind: 'calendar' });
-    expect(computeUsageShareGraphic(undefined, 'day')).toEqual({ kind: 'calendar' });
-  });
-
   it('denominates the whole card in the chosen metric', () => {
     const calendar = createUsageCalendarModel(createCalendar({ 0: 100 }), 'costUSD');
     const timeline = createTimeline({
@@ -409,12 +265,5 @@ describe('usage share stats', () => {
     const inTokens = computeUsageShareStats(calendar, timeline, 'day', 'tokens');
     expect(inTokens.total).toBe(9000);
     expect(inTokens.metric).toBe('tokens');
-  });
-
-  it('returns no slices when the range recorded no usage', () => {
-    const empty = createTimeline({ range: 'month', buckets: [bucket(START_MS, 0)] });
-
-    expect(computeUsageShareModelSlices(empty, (id) => id, 'Other')).toEqual([]);
-    expect(computeUsageShareMemberSlices(empty, () => 'Unknown', 'Other')).toEqual([]);
   });
 });

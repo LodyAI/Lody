@@ -1,4 +1,6 @@
-import { workspaceSupports, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
+import { authorizePlaintextAttachmentUpload } from './attachment-workspace-access';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   buildSessionFileApiUrl,
   buildSessionFileUploadMetadataHeaders,
@@ -201,6 +203,7 @@ const MAX_PART_ATTEMPTS = 3;
 export type SessionFileUploadProgress = SessionFileTransferProgress;
 
 export type UploadSessionFileArgs = {
+  accountId?: string;
   content: WorkspaceStreamsMode;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
@@ -624,7 +627,8 @@ const uploadMultipart = async (args: UploadSessionFileArgs): Promise<SessionFile
 export const uploadSessionFile = async (
   args: UploadSessionFileArgs
 ): Promise<SessionFilePayload> => {
-  if (!workspaceSupports(args.content, 'attachments')) throw new Error('e2ee_attachments_unavailable');
+  requireWorkspaceFeature(args.content, 'attachments');
+  if (args.content.mode === 'protected') throw new Error('e2ee_attachment_requires_preparation');
   // Defensive re-check; the composer validates (and translates) before upload.
   const validationError = validateSessionFile(args.file);
   if (validationError === 'empty') {
@@ -633,6 +637,7 @@ export const uploadSessionFile = async (
   if (validationError === 'too-large') {
     throw new Error(`File must be <= ${SESSION_FILE_MAX_SIZE_MB}MB: ${args.file.name}`);
   }
+  await authorizePlaintextAttachmentUpload(args.workspaceId, args.signal, args.accountId);
   if (shouldUseSingleShotUpload(args.file.size)) {
     return await uploadSingleShot(args);
   }

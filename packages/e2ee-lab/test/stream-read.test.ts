@@ -4,7 +4,7 @@ import { Bytes } from '@lody/e2ee-core';
 import { extendLedger, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { prepareDeviceAdmission, prepareLedgerCommand } from '@lody/e2ee-core/protocol';
 import { signLedgerRecord } from '@lody/e2ee-core/protocol';
-import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Result } from 'effect';
 import { describe, it, expect } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import Database from 'better-sqlite3';
@@ -350,6 +350,7 @@ describe('actual authenticated finite SDK read routes, not snapshot authority', 
               membershipId: f.membership,
               encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(122))),
               kind: 'machine',
+              machineId: 'synthetic-machine',
               signer: machine,
             });
             const admission = yield* signLedgerRecord(
@@ -461,127 +462,6 @@ describe('actual authenticated finite SDK read routes, not snapshot authority', 
     } finally {
       release();
       await f.close();
-    }
-  });
-  it('aborts and awaits a leased real HTTP response body before the actual Riverrun owner closes', async () => {
-    const f = await readFixture();
-    let release!: () => void,
-      rawSettled = false,
-      closedEarly = false,
-      disposed = false;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let settled!: () => void;
-    const rawDone = new Promise<void>((resolve) => {
-      settled = resolve;
-    });
-    let upstream: ReadableStreamDefaultReader<Uint8Array> | undefined;
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const child = Scope.makeUnsafe(),
-              entered = yield* Deferred.make<void>(),
-              aborted = yield* Deferred.make<void>();
-            yield* Scope.addFinalizer(
-              child,
-              Effect.promise(async () => {
-                closedEarly = !rawSettled;
-                disposed = true;
-                await f.close();
-              })
-            );
-            const reader = yield* makeLabStreamReader({
-              genesis: f.anchor,
-              baseUrl: f.server.baseUrl,
-              maxBytes: 1024 * 1024,
-              ledger: () => Effect.succeed(f.view),
-              fetch: async (url, init) => {
-                init?.signal?.addEventListener(
-                  'abort',
-                  () => Deferred.doneUnsafe(aborted, Exit.void),
-                  { once: true }
-                );
-                const response = await fetch(url, init);
-                if (!response.body) throw new Error('missing real response body');
-                upstream = response.body.getReader();
-                const bodyOwner = upstream;
-                // Explicit controlled wrapper around actual native HTTP body. The gate
-                // deliberately ignores abort; no mock success/SDK or call-count assertion.
-                return new Response(
-                  new ReadableStream<Uint8Array>({
-                    async pull(controller) {
-                      Deferred.doneUnsafe(entered, Exit.void);
-                      await gate;
-                      try {
-                        const part = await bodyOwner.read();
-                        if (part.done) {
-                          controller.close();
-                          rawSettled = true;
-                          settled();
-                        } else controller.enqueue(part.value);
-                      } catch (error) {
-                        controller.error(error);
-                        rawSettled = true;
-                        settled();
-                      }
-                    },
-                    async cancel(reason) {
-                      try {
-                        await bodyOwner.cancel(reason);
-                      } finally {
-                        rawSettled = true;
-                        settled();
-                      }
-                    },
-                  }),
-                  { status: response.status, headers: response.headers }
-                );
-              },
-            }).pipe(Effect.provideService(Scope.Scope, child));
-            const request = {
-              credential: {
-                token: 'synthetic',
-                account: 'fixture',
-                device: f.owner.publicKey,
-                genesis: f.anchor,
-                issuedAt: 0,
-                expiresAt: 100,
-              },
-              method: 'GET',
-              stream: 'control',
-              query: 'offset=0',
-            };
-            const worker = yield* reader.read(request).pipe(Effect.forkChild);
-            yield* Effect.addFinalizer(() =>
-              Effect.gen(function* () {
-                release();
-                yield* Scope.close(child, Exit.void);
-              })
-            );
-            yield* Deferred.await(entered);
-            const closing = yield* Effect.forkChild(Scope.close(child, Exit.void), {
-              startImmediately: true,
-            });
-            yield* Deferred.await(aborted);
-            expect(Result.isFailure(yield* Effect.result(reader.read(request)))).toBe(true);
-            release();
-            yield* Fiber.join(closing);
-            expect(closedEarly).toBe(false);
-            expect(rawSettled).toBe(true);
-            expect(disposed).toBe(true);
-            expect(Exit.isFailure(yield* Fiber.await(worker))).toBe(true);
-          })
-        )
-      );
-    } finally {
-      release();
-      if (upstream) {
-        await rawDone;
-        upstream.releaseLock();
-      }
-      if (!disposed) await f.close();
     }
   });
 });

@@ -37,6 +37,13 @@ const styles = stylex.create({
   },
   errorIcon: { flexShrink: 0, width: '14px', height: '14px', marginTop: '2px' },
   errorText: { minWidth: 0, overflowWrap: 'break-word' },
+  disclosure: {
+    margin: 0,
+    paddingInline: '12px',
+    paddingBlock: '8px',
+    fontSize: '0.75rem',
+    color: colors.secondaryLabel,
+  },
   progress: {
     display: 'flex',
     flex: '1 1 0%',
@@ -85,6 +92,7 @@ type SessionBrowserPanelViewProps = {
   onDismissError: () => void;
   navigationPhase?: ManagedNavigationPhase | null;
   suggestedAddress?: string;
+  tunnelDisclosure?: boolean;
   children?: ReactNode;
 };
 
@@ -97,6 +105,7 @@ export function SessionBrowserPanelView({
   onDismissError,
   navigationPhase,
   suggestedAddress,
+  tunnelDisclosure,
   children,
 }: SessionBrowserPanelViewProps) {
   const { t } = useTranslation();
@@ -120,6 +129,14 @@ export function SessionBrowserPanelView({
   return (
     <div {...rootStyle} className={[rootStyle.className, className].filter(Boolean).join(' ')}>
       <SessionBrowserToolbar {...toolbar} previewStatus={toolbarPreviewStatus} />
+      {tunnelDisclosure ? (
+        <p {...stylex.props(styles.disclosure)}>
+          {t(
+            'sessions.browser.tunnelDisclosure',
+            'Page content passes through the tunnel service as plaintext; this preview is not end-to-end encrypted.'
+          )}
+        </p>
+      ) : null}
       {showErrorBanner ? (
         <div role="alert" {...stylex.props(styles.error)}>
           <ShieldAlert {...stylex.props(styles.errorIcon)} />
@@ -139,11 +156,16 @@ export function SessionBrowserPanelView({
         <div role="status" aria-live="polite" {...stylex.props(styles.progress)}>
           <Spinner label={null} size="small" />
           <span>
-            {navigationPhase === 'resolving-machine'
-              ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
-              : navigationPhase === 'creating-tunnel'
-                ? t('sessions.browser.creatingTunnel', 'Establishing a secure preview connection…')
-                : t('sessions.browser.openingLocal', 'Opening the local preview…')}
+            {isMobile
+              ? t('sessions.browser.connectingNetwork', 'Establishing network connection')
+              : navigationPhase === 'resolving-machine'
+                ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
+                : navigationPhase === 'creating-tunnel'
+                  ? t(
+                      'sessions.browser.creatingTunnel',
+                      'Establishing a secure preview connection…'
+                    )
+                  : t('sessions.browser.openingLocal', 'Opening the local preview…')}
           </span>
         </div>
       ) : (

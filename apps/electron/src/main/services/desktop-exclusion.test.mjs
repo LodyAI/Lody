@@ -1,14 +1,97 @@
-import { Cause, Deferred, Effect, Layer } from 'effect'
-import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
-import { acquireDesktopLease } from './desktop-exclusion.ts'
-import { createDesktopLaunchBuffer } from './desktop-launch-buffer.ts'
-import { createDesktopQuitBarrier } from './desktop-shutdown.ts'
+import { acquireDesktopLease, handOffDesktopDeepLink } from './desktop-exclusion.ts'
+
+import { createDesktopLaunchAdmission } from './desktop-launch-admission.ts'
+
+import {
+  createDesktopQuitBarrier,
+  finishUnconfirmedDesktopQuit,
+  recordUnconfirmedDesktopQuit,
+  reportPreviousUnconfirmedDesktopQuit,
+  waitForQuitRecovery
+} from './desktop-shutdown.ts'
 
 const loopback = { host: '127.0.0.1', port: 0 }
+
+void test('unconfirmed quit terminates unattended even when warning marker I/O never settles', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const entered = Promise.withResolvers()
+  let exitCode
+  const quitting = finishUnconfirmedDesktopQuit({
+    record: () => {
+      entered.resolve()
+      return new Promise(() => {})
+    },
+    exit: (code) => {
+      exitCode = code
+    }
+  })
+  await entered.promise
+  t.mock.timers.tick(999)
+  assert.equal(exitCode, undefined)
+  t.mock.timers.tick(1)
+  await quitting
+  assert.equal(exitCode, 1)
+})
+
+void test('unconfirmed quit exits after marker failure without needing a warning acknowledgement', async () => {
+  let exitCode
+  await finishUnconfirmedDesktopQuit({
+    record: async () => {
+      throw new Error('synthetic disk failure')
+    },
+    exit: (code) => {
+      exitCode = code
+    }
+  })
+  assert.equal(exitCode, 1)
+})
+
+void test('quit warning survives notification failure and delivery cannot erase a subsequent quit marker', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-quit-warning-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const marker = join(directory, 'quit-unconfirmed')
+  const previous = `${marker}.previous`
+  let exited = false
+  await finishUnconfirmedDesktopQuit({
+    record: () => recordUnconfirmedDesktopQuit(directory),
+    exit: () => {
+      exited = true
+    }
+  })
+  assert.equal(exited, true)
+  assert.equal(await readFile(marker, 'utf8'), '')
+  await reportPreviousUnconfirmedDesktopQuit(directory, async () => ({ shown: false }))
+  assert.equal(await readFile(previous, 'utf8'), '')
+  const entered = Promise.withResolvers(),
+    delivered = Promise.withResolvers()
+  const notification = reportPreviousUnconfirmedDesktopQuit(directory, () => {
+    entered.resolve()
+    return delivered.promise
+  })
+  await entered.promise
+  // A pending startup notification never owns shutdown, nor its newly written marker.
+  await finishUnconfirmedDesktopQuit({
+    record: () => recordUnconfirmedDesktopQuit(directory),
+    exit: () => {}
+  })
+  delivered.resolve({ shown: true })
+  await notification
+  await assert.rejects(readFile(previous), { code: 'ENOENT' })
+  assert.equal(await readFile(marker, 'utf8'), '')
+  await reportPreviousUnconfirmedDesktopQuit(directory, async () => ({ shown: true }))
+  await assert.rejects(readFile(marker), { code: 'ENOENT' })
+  await assert.rejects(readFile(previous), { code: 'ENOENT' })
+  await reportPreviousUnconfirmedDesktopQuit(directory, async () => {
+    throw new Error('an ordinary launch without a marker must not notify')
+  })
+})
 
 void test('desktop ownership excludes a second owner and can be handed off after close', async (t) => {
   const stable = await acquireDesktopLease(loopback)
@@ -25,10 +108,13 @@ void test('desktop ownership excludes a second owner and can be handed off after
 
 void test('crashing an owner releases the OS lease without deleting a lock file', async (t) => {
   const moduleUrl = new URL('./desktop-exclusion.ts', import.meta.url).href
+  const resolveHookUrl = new URL('../../../scripts/node-test-ts-resolve.mjs', import.meta.url).href
   const child = spawn(
     process.execPath,
     [
       '--experimental-strip-types',
+      '--import',
+      resolveHookUrl,
       '--input-type=module',
       '-e',
       `
@@ -57,35 +143,54 @@ void test('crashing an owner releases the OS lease without deleting a lock file'
   t.after(() => replacement.close())
 })
 
-void test('lease setup errors fail rather than admitting an unprotected desktop', async () => {
-  await assert.rejects(acquireDesktopLease({ host: '127.0.0.1', port: -1 }))
+void test('a lease never accepts cloud callbacks or unsupported routes', async (t) => {
+  let received
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: (url) => {
+      received = url
+      return true
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  assert.equal(
+    await handOffDesktopDeepLink(
+      'ai.lody.nightly://auth/callback#token=synthetic-attempt',
+      endpoint
+    ),
+    false
+  )
+  assert.equal(
+    await handOffDesktopDeepLink('lody://invite/open?invitation=synthetic', endpoint),
+    false
+  )
+  assert.equal(received, undefined)
+
+  assert.equal(
+    await handOffDesktopDeepLink('lody://chat/new?machine=machine-1&project=project-1', endpoint),
+    true
+  )
+  assert.equal(received, 'lody://chat/new?machine=machine-1&project=project-1')
 })
 
-void test('startup retains login and activation events until the application is loaded', () => {
-  const buffer = createDesktopLaunchBuffer()
-  const received = []
-  buffer.push({ url: 'ai.lody.nightly://auth/callback#pending-attempt' })
-  buffer.push({ activate: true })
-  assert.deepEqual(received, [])
-  buffer.bind((event) => received.push(event))
-  buffer.push({ url: 'ai.lody.nightly://workspace/after-ready' })
-  assert.deepEqual(received, [
-    { url: 'ai.lody.nightly://auth/callback#pending-attempt' },
-    { activate: true },
-    { url: 'ai.lody.nightly://workspace/after-ready' }
+void test('concurrent pending handoffs are delivered in arrival order after ready', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const first = admission.accept('lody://session/first')
+  const second = admission.accept('lody://session/second')
+
+  admission.markReady()
+  const third = admission.accept('lody://session/third')
+  assert.equal(await first, true)
+  assert.equal(await second, true)
+  assert.equal(await third, true)
+  assert.deepEqual(delivered, [
+    'lody://session/first',
+    'lody://session/second',
+    'lody://session/third'
   ])
-  assert.throws(() => buffer.bind(() => {}), /already bound/)
-})
-
-void test('startup event buffer bounds memory and retains the most recent login', () => {
-  const buffer = createDesktopLaunchBuffer()
-  for (let i = 0; i < 40; i++) buffer.push({ url: `lody://workspace/${i}` })
-  buffer.push({ url: 'lody://auth/callback#new-attempt' })
-  const received = []
-  buffer.bind((event) => received.push(event))
-  assert.equal(received.length, 32)
-  assert.deepEqual(received[0], { url: 'lody://workspace/9' })
-  assert.deepEqual(received.at(-1), { url: 'lody://auth/callback#new-attempt' })
 })
 
 void test('quit waits for execution exit, retains ownership on failure, and allows retry', async () => {
@@ -166,93 +271,56 @@ void test('quit cancellation preserves services and a later attempt closes rende
   assert.deepEqual(order, ['prepare', 'prepare', 'stop', 'quit'])
 })
 
-void test('quit awaits application Scope cleanup and retries transferred ownership after failed disposal', async () => {
-  const cleaning = Deferred.makeUnsafe()
-  const gate = Deferred.makeUnsafe()
-  const resource = { held: false, denied: true }
-  const leaseFailure = { resource }
-  const owner = makeApplicationRuntime(
-    Layer.effectDiscard(
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          resource.held = true
-        }),
-        () =>
-          Deferred.succeed(cleaning, undefined).pipe(
-            Effect.andThen(Deferred.await(gate)),
-            Effect.andThen(Effect.die(leaseFailure))
-          )
-      )
-    ),
-    {
-      recover: (cause) =>
-        Effect.gen(function* () {
-          assert.ok(
-            cause.reasons.some(
-              (reason) => Cause.isDieReason(reason) && reason.defect === leaseFailure
-            )
-          )
-          if (resource.denied) return yield* Effect.fail(new Error('resource still alive'))
-          resource.held = false
-          return undefined
-        }),
-      project: Cause.squash
-    }
-  )
-  await owner.runtime.runPromise(Effect.void)
-  const failure = Promise.withResolvers()
-  const quit = Promise.withResolvers()
-  const barrier = createDesktopQuitBarrier({
-    stop: () => owner.closeLegacy(),
-    quit: () => quit.resolve(),
-    reportFailure: (error) => failure.resolve(error)
+void test('failed quit restores services before reporting and later quit still completes', async () => {
+  const events = []
+  let failed = true
+  const handler = createDesktopQuitBarrier({
+    stop: async () => {
+      events.push('stop')
+      if (failed) throw new Error('local failure')
+    },
+    recover: async () => {
+      events.push('restore relay', 'restore shell')
+      return true
+    },
+    reportFailure: (_error, recovered) => {
+      assert.equal(recovered, true)
+      events.push('reopen')
+    },
+    quit: () => events.push('quit')
   })
-  let quitCalled = false
-  void quit.promise.then(() => {
-    quitCalled = true
-  })
-  const first = barrier({ preventDefault() {} })
-  await Effect.runPromise(Deferred.await(cleaning))
-  await barrier({ preventDefault() {} })
-  assert.equal(resource.held, true)
-  assert.equal(quitCalled, false)
-  Deferred.doneUnsafe(gate, Effect.void)
-  await first
-  assert.equal(await failure.promise, leaseFailure)
-  assert.equal(quitCalled, false)
-  await barrier({ preventDefault() {} })
-  assert.equal(resource.held, true)
-  assert.equal(quitCalled, false)
-  resource.denied = false
-  await barrier({ preventDefault() {} })
-  await quit.promise
-  assert.equal(resource.held, false)
+  await handler({ preventDefault() {} })
+  assert.deepEqual(events, ['stop', 'restore relay', 'restore shell', 'reopen'])
+  failed = false
+  await handler({ preventDefault() {} })
+  assert.equal(events.at(-1), 'quit')
 })
 
-void test('quit reports cancellation for Stay and for failed cleanup, but not for a quit', async () => {
-  let cancelled = 0
-  let allow = false
-  let failStop = false
-  const quit = Promise.withResolvers()
+void test('unreleased owner keeps quit retryable without reopening ordinary windows', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const pending = Promise.withResolvers()
+  const recovering = Promise.withResolvers()
+  let failed = true
+  const surfaces = []
   const handler = createDesktopQuitBarrier({
-    prepare: async () => allow,
     stop: async () => {
-      if (failStop) throw new Error('CLI still alive')
+      if (failed) throw new Error('owner still alive')
     },
-    quit: () => quit.resolve(),
-    reportFailure: () => {},
-    cancelled: () => {
-      cancelled++
-    }
+    recover: async () => {
+      recovering.resolve()
+      return (await waitForQuitRecovery(pending.promise)) !== null
+    },
+    reportFailure: (_error, recovered) => surfaces.push(recovered ? 'ordinary' : 'restart dialog'),
+    quit: () => surfaces.push('quit')
   })
+  const attempt = handler({ preventDefault() {} })
+  await recovering.promise
+  t.mock.timers.tick(30_000)
+  await attempt
+  pending.resolve(true)
+  await pending.promise
+  assert.deepEqual(surfaces, ['restart dialog'])
+  failed = false
   await handler({ preventDefault() {} })
-  assert.equal(cancelled, 1)
-  allow = true
-  failStop = true
-  await handler({ preventDefault() {} })
-  assert.equal(cancelled, 2)
-  failStop = false
-  await handler({ preventDefault() {} })
-  await quit.promise
-  assert.equal(cancelled, 2)
+  assert.deepEqual(surfaces, ['restart dialog', 'quit'])
 })

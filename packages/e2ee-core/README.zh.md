@@ -9,9 +9,19 @@
 ## 可用范围
 
 服务架构已经支持复用，但当前仍是仓库内的私有包（`private: true`、版本 `0.0.0`），
-尚未发布为独立 SDK，生产 E2EE 组合也未启用。已有 Node SQLite 与 Loro Streams
-适配器；其他运行时需要实现自己的存储和平台适配器。后端端口与 `/host` 规定其他
+尚未发布为独立 SDK，生产 E2EE 组合也未启用。已有 Node SQLite、Loro Streams 与可选的浏览器账本/原件 IndexedDB
+适配器；其他存储和平台保护仍由宿主提供。后端端口与 `/host` 规定其他
 后端需要实现什么，并不负责部署服务器。
+
+protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
+判断。`readMachineSharingHistoryStep` 可在原 personal 签名者撤销后读取历史完整状态，
+供新所有者意图保留项目设置，不授予执行权。host 入口验证不解密的所有者帧，
+platform/cloud-api 定义对应 CAS DTO。这些原语
+尚未接入网络、UI 或执行路径；[共享策略提案](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)
+说明待批准 Spec 增量与后续宿主职责。
+
+Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.md)及 services 入口的
+可选客户端保护/安装端口。可选适配器实现浏览器保护；这些声明不启用产品宿主或原生实现。
 
 ## 从这里开始
 
@@ -35,12 +45,19 @@
 开放通道前须在可信宿主落实这些门槛。重试保留返回的原帧；再次运行 seal 会重新加密。
 本改动不启用产品传输。
 
+共享签名格式为 current-only v2；每份 scope 包含 generation，即连续原子替换链的
+首次机器签名公钥。`verifyMachineSharingGeneration` 通过真实账本位置验证准入原文链，
+其不透明 `machineGeneration` 证据必须传给签发、打开、历史读取、宿主准入和执行判断。
+移除后重新准入使用新资源，从私有默认值和第 1 版开始；原子替换保留原代次。压缩视图
+若缺少这些账本检查点，需用完整已验证终点核验，不能相信服务端提示或旧策略高水位。
+
 | 导入路径 | 内容 | 稳定性 |
 | --- | --- | --- |
 | `@lody/e2ee-core` | 流程（`KeyReceiver`、`EpochPublisher` 等）、它们的错误与结果、`E2eeWorkflows` | 公开 |
 | `@lody/e2ee-core/services` | 需要你实现或提供的端口、端口错误 | 公开 |
 | `@lody/e2ee-core/protocol` | 纯协议：字节、CBOR、账本验证、信封、内容格式 | 公开 |
 | `@lody/e2ee-core/host` | 后端必须执行的规则、暂存线上格式（不依赖 Node API） | 公开 |
+| `@lody/e2ee-core/adapters/indexeddb` | 绑定账号/工作区/genesis 的账本与原件存储；不负责密钥保管 | 公开 |
 | `@lody/e2ee-core/adapters/node-sqlite` | 每个本地存储的 SQLite 实现、参考邮箱后端 | 公开 |
 | `@lody/e2ee-core/adapters/loro-streams` | 基于 Loro / Durable Streams 控制流的 `LedgerLog` / `LedgerFeedSource` | 公开 |
 | `@lody/e2ee-core/cloudflare` | 在 Cloudflare Worker 中导入一次，使严格 Ed25519 在 WebAssembly 中运行（workerd 禁止运行时编译）；其他运行时无需导入 | 公开 |
@@ -94,6 +111,8 @@ src/
   services/                "/services" 端口
   protocol/                "/protocol" 纯协议汇总
   host/                    "/host"     后端合同
+  adapters/indexeddb/      浏览器账本/原件、安装与密钥/快照 journal
+  adapters/browser-custody/ 按作用域的 Web Locks 与持久 AES-GCM 保护
   adapters/node-sqlite/    SQLite 存储、参考邮箱后端
   adapters/loro-streams/   Streams 账本日志与 feed 源
   internal/                实现：foundation、crypto、ledger、keys、submission
@@ -150,3 +169,22 @@ pnpm --filter @lody/e2ee-core check:docs  # 公开导出、命名空间与 servi
 
 Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可共用
 [node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。
+
+[冻结前格式审查](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.zh.md)记录账本格式的未决事项和仅支持当前版本的格式盘点。
+
+浏览器曲线能力由 `@lody/e2ee-core/adapters/browser-crypto` 提供：
+`importBrowserDevice` 导入独立的原始 Ed25519/X25519 私钥，返回由 Scope 持有的
+签名器和不透明 X25519 句柄。它不提供持久保护、设备批准或运行时启用。
+
+IndexedDB 适配器保存账本起点/后缀、pin、提交结果及配对/审批/claim 原件；
+独立客户端数据库保留安装与密钥/快照 journal，browser-custody 提供不可导出的 AES-GCM 保护。审批验证与网络编排仍归宿主。
+
+`@lody/e2ee-core/adapters/browser-custody` 提供写者互斥、持久 KEK 与包装原件；不授予设备权限。详见[服务说明](docs/services.zh.md#浏览器保管与安装)。
+
+```sh
+pnpm --filter @lody/e2ee-core test:browser-custody
+```
+
+可选 [`@lody/e2ee-client`](../e2ee-client/README.zh.md) 通过这些端口组合个人设备审批、
+打开、收钥、管理与 RPC；公开审批分页证据和加密 RPC 原件使用稳定客户端存储，
+store 仍不授予权限。这不启用产品 runtime 装配或原生移动端保管。

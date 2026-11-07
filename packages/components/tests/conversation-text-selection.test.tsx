@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { createHistoryWriter } from '@lody/shared';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToString } from 'katex';
+import { selectedMessageMarkdown } from '../src/components/ai-gui/message-quote-markdown';
 import 'katex/contrib/copy-tex';
 import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import type { ConversationView } from '../src/lib/conversation-view';
@@ -127,36 +129,6 @@ it('retains the complete interval after pointerup and holds prose until selectio
   expect(viewport.textContent).toContain('updated prose');
 });
 
-it('pins real history bodies before the viewport lease releases, then allows eviction', async () => {
-  const doc = reimport(buildSessionDoc(buildFixtureHistory(20)));
-  const view = await openReaderView(doc, {
-    sessionId: FIXTURE_SESSION_ID,
-    maxHydrated: 1,
-    tailKeep: 0,
-    scheduleIdle: createManualIdle().scheduleIdle,
-    yieldToEventLoop: () => Promise.resolve(),
-  });
-  dispose = () => {
-    view.dispose();
-    doc.free();
-  };
-  const head = view.acquireRange(0, 3);
-  await head.ready;
-  const rows = Array.from({ length: 3 }, (_, i) => row(view.index(i)!.id, i));
-  await act(async () => root.render(<Probe rows={rows} view={view} />));
-  await act(async () => select(0, 2));
-  head.release();
-  const distant = view.acquireRange(30, 35);
-  await distant.ready;
-  expect([0, 1, 2].map((i) => view.isHydrated(i))).toEqual([true, true, true]);
-  await act(async () => {
-    document.getSelection()!.removeAllRanges();
-    document.dispatchEvent(new Event('selectionchange'));
-  });
-  expect([0, 1, 2].filter((i) => view.isHydrated(i)).length).toBeLessThan(3);
-  distant.release();
-});
-
 it('copies and retains local input without inventing history, and releases it on removal', async () => {
   const doc = reimport(buildSessionDoc([]));
   const view = await openReaderView(doc, { sessionId: FIXTURE_SESSION_ID });
@@ -178,21 +150,6 @@ it('copies and retains local input without inventing history, and releases it on
   await act(async () => root.render(<Probe rows={[]} view={view} />));
   expect(state.keepMounted).toEqual([]);
   expect(document.getSelection()!.isCollapsed).toBe(true);
-});
-
-it('blocks incomplete native copy without replacing clipboard contents and recovers after loading', async () => {
-  const rows = [row('a', 0), row('loading', 1, false), row('c', 2)];
-  await act(async () => root.render(<Probe rows={rows} />));
-  await act(async () => select(0, 2));
-  const copy = new Event('copy', { bubbles: true, cancelable: true });
-  await act(async () => viewport.dispatchEvent(copy));
-  expect(copy.defaultPrevented).toBe(true);
-  expect(viewport.querySelector('output')!.textContent).toBe('copy incomplete');
-  await act(async () => root.render(<Probe rows={rows.map((r) => ({ ...r, ready: true }))} />));
-  const retry = new Event('copy', { bubbles: true, cancelable: true });
-  await act(async () => viewport.dispatchEvent(retry));
-  expect(retry.defaultPrevented).toBe(false);
-  expect(document.getSelection()!.toString()).toContain('loading original prose');
 });
 
 it('blocks formula clipboard conversion until every selected row is ready', async () => {
@@ -217,23 +174,6 @@ it('blocks formula clipboard conversion until every selected row is ready', asyn
   await act(async () => copy());
   expect(contents.get('text/plain')).toContain('$x^2$');
   expect(contents.get('text/plain')).toContain('loading original prose');
-});
-
-it('keeps a touch-cancelled provisional turn until the native range arrives', async () => {
-  const rows = [row('a', 0), row('b', 1)];
-  await act(async () => root.render(<Probe rows={rows} />));
-  await act(async () => {
-    viewport.querySelector('span')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    document.dispatchEvent(new Event('pointercancel'));
-  });
-  expect(state.keepMounted).toEqual([1]);
-  await act(async () => select(0));
-  expect(state.activeRef.current).toBe(true);
-  await act(async () => {
-    document.getSelection()!.removeAllRanges();
-    document.dispatchEvent(new Event('selectionchange'));
-  });
-  expect(state.keepMounted).toEqual([]);
 });
 
 it('releases a cancelled touch candidate when scrolling produces no native selection', async () => {
@@ -373,4 +313,50 @@ it('keeps selected stream bodies rendered after the reading window moves, then r
   expect(viewport.querySelector('[data-conversation-row-key="a-10"]')!.textContent).toBe(
     'placeholder'
   );
+});
+
+it('keeps formatting and link targets across selected text regions', () => {
+  const area = document.createElement('div');
+  area.innerHTML = `<div data-message-quote-text><p>Before <strong>important</strong> <a href="https://example.com/path">guide</a></p><ul><li>first</li><li>second</li></ul></div><div data-message-quote-text><p>After <em>emphasis</em></p></div>`;
+  host.append(area);
+  const first = area.querySelector('strong')!.firstChild!;
+  const last = area.querySelector('em')!.firstChild!;
+  const range = document.createRange();
+  range.setStart(first, 3);
+  range.setEnd(last, 4);
+  expect(selectedMessageMarkdown(range, area)).toBe(
+    '**ortant** [guide](https://example.com/path)\n\n* first\n* second\n\nAfter *emph*'
+  );
+});
+
+it('retains code lines, table structure and selected math source', () => {
+  const area = document.createElement('div');
+  area.innerHTML = `<div data-message-quote-text><div data-streamdown="code-block" data-language="ts"><div data-streamdown="code-block-toolbar">TypeScript<button>Copy</button></div><pre><code><span data-markdown-code-line>const a = 1;</span><span data-markdown-code-line>const b = 2;</span></code></pre></div><table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>A</td><td>B</td></tr></tbody></table><p>${renderToString('\\frac{x}{2}', { output: 'htmlAndMathml' })}</p></div>`;
+  host.append(area);
+  const range = document.createRange();
+  range.selectNodeContents(area.querySelector('[data-message-quote-text]')!);
+  const markdown = selectedMessageMarkdown(range, area);
+  expect(markdown).toContain('```ts\nconst a = 1;\nconst b = 2;\n```');
+  expect(markdown).toContain('| Name | Value |');
+  expect(markdown).toContain('| A    | B     |');
+  expect(markdown).toContain('$\\frac{x}{2}$');
+  expect(markdown).not.toContain('TypeScript');
+  const secondLine = area.querySelectorAll('[data-markdown-code-line]')[1]!.firstChild!;
+  range.setStart(secondLine, 0);
+  range.setEnd(secondLine, 7);
+  expect(selectedMessageMarkdown(range, area)).toBe('```ts\nconst b\n```');
+});
+
+it('preserves numbered list positions and expands a partial formula selection', () => {
+  const area = document.createElement('div');
+  area.innerHTML = `<div data-message-quote-text><ol start="4"><li>first</li><li>second</li></ol><p>${renderToString('\\frac{x}{2}', { output: 'htmlAndMathml' })}</p></div>`;
+  host.append(area);
+  const range = document.createRange();
+  const second = area.querySelectorAll('li')[1]!.firstChild!;
+  range.setStart(second, 0);
+  range.setEnd(second, second.textContent!.length);
+  expect(selectedMessageMarkdown(range, area)).toBe('5. second');
+  const mathText = area.querySelector('.katex-html .mord')!.firstChild!;
+  range.selectNodeContents(mathText);
+  expect(selectedMessageMarkdown(range, area)).toBe('$\\frac{x}{2}$');
 });

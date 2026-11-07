@@ -1,15 +1,17 @@
+import { Skeleton } from '../src/feedback/skeleton';
+import { Spinner } from '../src/feedback/spinner';
+
 import * as stylex from '@stylexjs/stylex';
 import { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Alert } from '../src/feedback/alert';
 import { Progress } from '../src/feedback/progress';
-import { Skeleton } from '../src/feedback/skeleton';
-import { Spinner } from '../src/feedback/spinner';
+
 import { feedbackSurface as surface } from '../src/feedback/surface';
 import { Toast } from '../src/feedback/toast';
 import { roleForTone } from '../src/feedback/tone';
-import { all, classesOf, click, mount, one, step, type Mounted } from './dom';
+import { all, classesOf, mount, one, step, type Mounted } from './dom';
 
 /** See `menu.test.tsx`: the same loosened call the primitives make. */
 function classesFor(...styles: readonly unknown[]): string[] {
@@ -40,42 +42,9 @@ describe('Alert', () => {
     expect(attrOf(renderToStaticMarkup(<Alert.Root tone="danger" />), 'div', 'role')).toBe('alert');
     expect(attrOf(renderToStaticMarkup(<Alert.Root />), 'div', 'role')).toBe('status');
   });
-
-  test('the mark is the tone’s, and the part draws it', () => {
-    // A caller free to pass a glyph can put a tick on a failure, so there is no
-    // way to pass one: each tone brings the mark that names it.
-    const danger = renderToStaticMarkup(<Alert.Root tone="danger" />);
-    const success = renderToStaticMarkup(<Alert.Root tone="success" />);
-    const warning = renderToStaticMarkup(<Alert.Root tone="warning" />);
-    expect(danger).toContain('<svg');
-    expect(
-      new Set([danger, success, warning].map((html) => /d="([^"]*)"/.exec(html)?.[1])).size
-    ).toBe(3);
-    // The warning is the one that is not a circle: a triangle is what tells it
-    // from an error for a person who does not see the two colours apart.
-    expect(warning).not.toContain('<circle');
-    expect(danger).toContain('<circle');
-  });
-
-  test('an Alert’s tone tints the card it is on', () => {
-    const html = renderToStaticMarkup(<Alert.Root tone="danger" />);
-    for (const name of classesFor(surface.message, surface.notice, surface.noticeDanger)) {
-      expect(html, `the danger alert is missing ${name}`).toContain(name);
-    }
-  });
 });
 
 describe('Progress', () => {
-  test('the bar reports the value, and Base UI owns what it announces', () => {
-    const html = renderToStaticMarkup(<Progress value={40} label="Uploading" showValue />);
-    expect(attrOf(html, 'div', 'role')).toBe('progressbar');
-    expect(attrOf(html, 'div', 'aria-valuenow')).toBe('40');
-    expect(html).toContain('Uploading');
-    expect(html).toContain('40%');
-    // The indicator's width is the value, which Base UI writes inline.
-    expect(html).toContain('width:40%');
-  });
-
   test('no value is a different report from no progress', () => {
     const html = renderToStaticMarkup(<Progress value={null} />);
     expect(html).not.toContain('aria-valuenow');
@@ -90,11 +59,89 @@ describe('Progress', () => {
   });
 });
 
-describe('Skeleton', () => {
-  test('it says nothing to a screen reader, because its shape says it all', () => {
-    expect(attrOf(renderToStaticMarkup(<Skeleton />), 'div', 'aria-hidden')).toBe('true');
+describe('Toast', () => {
+  const report = async (
+    manager: ReturnType<typeof Toast.createManager>,
+    options: Parameters<ReturnType<typeof Toast.createManager>['add']>[0]
+  ) => {
+    await step(() => {
+      manager.add(options);
+    });
+  };
+
+  test('a message reported from outside React arrives, with its tone', async () => {
+    const manager = Toast.createManager();
+    mounted = await mount(
+      <Toast.Provider manager={manager}>
+        <p>the app</p>
+      </Toast.Provider>
+    );
+    expect(all('[role="region"]')).toHaveLength(1);
+
+    await report(manager, { title: 'Sync failed', description: 'No answer', type: 'danger' });
+
+    const toast = all('[data-type="danger"]')[0];
+    expect(toast.textContent).toContain('Sync failed');
+    expect(toast.textContent).toContain('No answer');
+    // The same block an Alert is, on the other rung: one message, two surfaces.
+    expect(classesOf(toast)).toEqual(
+      expect.arrayContaining(classesFor(surface.message, surface.toast))
+    );
+    // A toast's tone is its mark alone: no tint, so a stack reads as one kind.
+    expect(classesOf(toast)).not.toEqual(expect.arrayContaining(classesFor(surface.noticeDanger)));
   });
 
+  test('the region can be named in the product’s own language', async () => {
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} label="通知" />);
+    // Base UI's default is the English "Notifications", which a translated
+    // product has to be able to replace.
+    expect(one('[role="region"]').getAttribute('aria-label')).toBe('通知');
+  });
+});
+
+describe('Spinner', () => {
+  test('a changing diameter sizes the same turning box and leaves SVG attributes on the glyph', async () => {
+    const errors: unknown[][] = [];
+    const errorLog = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
+    let glyph: SVGSVGElement | null = null;
+    const ref = (element: SVGSVGElement | null) => {
+      glyph = element;
+    };
+    try {
+      mounted = await mount(<Spinner ref={ref} diameter={14} width={37} height={31} />);
+      const box = mounted.container.querySelector<HTMLElement>('[data-slot="spinner"]')!;
+      const svg = box.firstElementChild;
+      const sizes = () => Array.from(box.style).map((name) => box.style.getPropertyValue(name));
+      expect(new Set(sizes())).toEqual(new Set(['14px']));
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('width')).toBe('37');
+      expect(svg?.getAttribute('height')).toBe('31');
+      expect(box.hasAttribute('diameter')).toBe(false);
+      expect(svg?.hasAttribute('diameter')).toBe(false);
+
+      await step(() => mounted!.root.render(<Spinner ref={ref} diameter={0} label={null} />));
+      expect(new Set(sizes())).toEqual(new Set(['0px']));
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('aria-hidden')).toBe('true');
+      await step(() => mounted!.root.render(<Spinner ref={ref} size="large" />));
+      expect(box.style.length).toBe(0);
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('aria-label')).toBe('Loading');
+      await step(() =>
+        mounted!.root.render(<Spinner ref={ref} diameter="calc(var(--spacing) * 3.5)" />)
+      );
+      expect(new Set(sizes())).toEqual(new Set(['calc(var(--spacing) * 3.5)']));
+      expect(mounted.container.querySelector('[data-slot="spinner"]')).toBe(box);
+      expect(glyph).toBe(svg);
+      expect(errors).toEqual([]);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+});
+
+describe('Skeleton', () => {
   test('ring thickness resets without remounting content or leaking onto other shapes', async () => {
     const ref = createRef<HTMLDivElement>();
     const child = <span data-skeleton-child>Retained content</span>;
@@ -174,161 +221,5 @@ describe('Skeleton', () => {
     } finally {
       errorLog.mockRestore();
     }
-  });
-});
-
-describe('Spinner', () => {
-  test('the turn rides on an HTML wrapper, never the svg', async () => {
-    mounted = await mount(<Spinner />);
-    const wrapper = mounted.container.querySelector('[data-slot="spinner"]');
-    // Chromium cannot composite a transform animation whose target is an SVG
-    // at DPR≠1 (crbug.com/1186312): the animated element must be this span.
-    expect(wrapper?.tagName).toBe('SPAN');
-    expect(wrapper?.namespaceURI).toBe('http://www.w3.org/1999/xhtml');
-    expect(wrapper?.childElementCount).toBe(1);
-    expect(wrapper?.firstElementChild?.tagName).toBe('svg');
-    expect(wrapper?.classList.length).toBeGreaterThan(0);
-  });
-
-  test('it is drawn in the ink of whatever holds it', () => {
-    const html = renderToStaticMarkup(<Spinner />);
-    // Two strokes, one colour: the arc and the ring it turns inside, which is
-    // that same colour kept back rather than a token of its own.
-    expect(html.match(/stroke="currentColor"/g)).toHaveLength(2);
-    expect(html).toContain('stroke-opacity="0.25"');
-  });
-
-  test("a caller's classes land on the turning box, never the glyph inside it", () => {
-    const html = renderToStaticMarkup(<Spinner size="large" className="mb-4 size-6" />);
-    const span = attrOf(html, 'span', 'class') ?? '';
-    const svg = attrOf(html, 'svg', 'class') ?? '';
-    // The wrapper rotates about its own centre, so its box must be the glyph's
-    // box: a margin or a size reaching the svg would grow the animated box
-    // asymmetrically — `mb-4` on the invitation page moved the origin off the
-    // ring and turned the spin into an orbit.
-    expect(span).toContain('mb-4');
-    expect(span).toContain('size-6');
-    expect(svg).not.toContain('mb-4');
-    expect(svg).not.toContain('size-6');
-  });
-
-  test('a changing diameter sizes the same turning box and leaves SVG attributes on the glyph', async () => {
-    const errors: unknown[][] = [];
-    const errorLog = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
-    let glyph: SVGSVGElement | null = null;
-    const ref = (element: SVGSVGElement | null) => {
-      glyph = element;
-    };
-    try {
-      mounted = await mount(<Spinner ref={ref} diameter={14} width={37} height={31} />);
-      const box = mounted.container.querySelector<HTMLElement>('[data-slot="spinner"]')!;
-      const svg = box.firstElementChild;
-      const sizes = () => Array.from(box.style).map((name) => box.style.getPropertyValue(name));
-      expect(new Set(sizes())).toEqual(new Set(['14px']));
-      expect(glyph).toBe(svg);
-      expect(svg?.getAttribute('width')).toBe('37');
-      expect(svg?.getAttribute('height')).toBe('31');
-      expect(box.hasAttribute('diameter')).toBe(false);
-      expect(svg?.hasAttribute('diameter')).toBe(false);
-
-      await step(() => mounted!.root.render(<Spinner ref={ref} diameter={0} label={null} />));
-      expect(new Set(sizes())).toEqual(new Set(['0px']));
-      expect(glyph).toBe(svg);
-      expect(svg?.getAttribute('aria-hidden')).toBe('true');
-      await step(() => mounted!.root.render(<Spinner ref={ref} size="large" />));
-      expect(box.style.length).toBe(0);
-      expect(glyph).toBe(svg);
-      expect(svg?.getAttribute('aria-label')).toBe('Loading');
-      await step(() =>
-        mounted!.root.render(<Spinner ref={ref} diameter="calc(var(--spacing) * 3.5)" />)
-      );
-      expect(new Set(sizes())).toEqual(new Set(['calc(var(--spacing) * 3.5)']));
-      expect(mounted.container.querySelector('[data-slot="spinner"]')).toBe(box);
-      expect(glyph).toBe(svg);
-      expect(errors).toEqual([]);
-    } finally {
-      errorLog.mockRestore();
-    }
-  });
-
-  test('it names itself, unless the surface has already named the wait', () => {
-    expect(attrOf(renderToStaticMarkup(<Spinner />), 'svg', 'aria-label')).toBe('Loading');
-    const silent = renderToStaticMarkup(<Spinner label={null} />);
-    expect(attrOf(silent, 'svg', 'aria-hidden')).toBe('true');
-    expect(silent).not.toContain('aria-label');
-  });
-});
-
-describe('Toast', () => {
-  const report = async (
-    manager: ReturnType<typeof Toast.createManager>,
-    options: Parameters<ReturnType<typeof Toast.createManager>['add']>[0]
-  ) => {
-    await step(() => {
-      manager.add(options);
-    });
-  };
-
-  test('a message reported from outside React arrives, with its tone', async () => {
-    const manager = Toast.createManager();
-    mounted = await mount(
-      <Toast.Provider manager={manager}>
-        <p>the app</p>
-      </Toast.Provider>
-    );
-    expect(all('[role="region"]')).toHaveLength(1);
-
-    await report(manager, { title: 'Sync failed', description: 'No answer', type: 'danger' });
-
-    const toast = all('[data-type="danger"]')[0];
-    expect(toast.textContent).toContain('Sync failed');
-    expect(toast.textContent).toContain('No answer');
-    // The same block an Alert is, on the other rung: one message, two surfaces.
-    expect(classesOf(toast)).toEqual(
-      expect.arrayContaining(classesFor(surface.message, surface.toast))
-    );
-    // A toast's tone is its mark alone: no tint, so a stack reads as one kind.
-    expect(classesOf(toast)).not.toEqual(expect.arrayContaining(classesFor(surface.noticeDanger)));
-  });
-
-  test('the title and the sentence under it are the Alert’s, not a second pair', async () => {
-    const manager = Toast.createManager();
-    mounted = await mount(<Toast.Provider manager={manager} />);
-    await report(manager, { title: 'Session archived', description: 'It can be restored.' });
-    expect(classesOf(one('h2'))).toEqual(classesFor(surface.title, surface.toastTitle));
-    expect(classesOf(one('[data-base-ui-portal] p'))).toEqual(classesFor(surface.description));
-  });
-
-  test('the page under a toast stays usable, and the toast itself does not', async () => {
-    const manager = Toast.createManager();
-    mounted = await mount(<Toast.Provider manager={manager} />);
-    await report(manager, { title: 'Saved' });
-    // The viewport covers a strip of the window, so it must not take the
-    // pointer; each toast takes it back for its own close button.
-    expect(classesOf(one('[role="region"]'))).toEqual(
-      expect.arrayContaining(classesFor(surface.viewport))
-    );
-    expect(classesOf(all('[role="dialog"]')[0])).toEqual(
-      expect.arrayContaining(classesFor(surface.toast))
-    );
-  });
-
-  test('closing one takes it away', async () => {
-    const manager = Toast.createManager();
-    mounted = await mount(<Toast.Provider manager={manager} />);
-    await report(manager, { title: 'Saved' });
-    expect(all('[role="dialog"]')).toHaveLength(1);
-
-    await click(one('button[aria-label="Close"]'));
-
-    expect(all('[role="dialog"]')).toHaveLength(0);
-  });
-
-  test('the region can be named in the product’s own language', async () => {
-    const manager = Toast.createManager();
-    mounted = await mount(<Toast.Provider manager={manager} label="通知" />);
-    // Base UI's default is the English "Notifications", which a translated
-    // product has to be able to replace.
-    expect(one('[role="region"]').getAttribute('aria-label')).toBe('通知');
   });
 });

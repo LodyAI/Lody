@@ -7,12 +7,18 @@ import { atom } from 'jotai';
  *
  * - `create`: a new project. `seedSourceKey` is the source key of the project
  *   it starts from (`local:<machine>:<id>` or `github:<owner/repo>`), which
- *   becomes its first member; `seedName` names it.
+ *   becomes its first member; `seedName` names it. `onCreated` receives the
+ *   new project's id once it is saved, so the asking surface can select it.
  * - `edit`: an existing multi-repository project.
  * - `delete`: confirm and delete one; its conversations keep their snapshot.
  */
 export type ProjectEditorRequest =
-  | { kind: 'create'; seedSourceKey?: string; seedName?: string }
+  | {
+      kind: 'create';
+      seedSourceKey?: string;
+      seedName?: string;
+      onCreated?: (projectId: string) => void;
+    }
   | { kind: 'edit'; projectId: string }
   | { kind: 'delete'; projectId: string };
 

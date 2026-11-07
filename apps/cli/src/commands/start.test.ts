@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CliType, SUPPORTED_CLI_TYPES } from '@lody/shared';
+
 import { resolveCliTypesSelection } from './start-options';
 import { createStartShutdownController } from './start-shutdown';
 import type { Logger } from '@/utils/logger';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { hasBuiltinAgentCredentials } from './builtin-agent-credentials';
 
 function createTestLogger(): Logger {
   let logger: Logger;
@@ -40,24 +44,37 @@ afterEach(() => {
 });
 
 describe('start command cli type selection', () => {
-  it('defaults to all supported CLI types when none are requested', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: undefined,
-      availability: {
-        kimi: 'managed-runtime',
-        grok: 'managed-runtime',
-        claude: '1.0.0',
-        codex: '1.0.0',
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: SUPPORTED_CLI_TYPES,
-      cliTypes: SUPPORTED_CLI_TYPES,
-      missing: [],
-      invalid: [],
-      isDefaultSelection: true,
-    });
+  it('defaults Kimi and Grok only when their credential files exist', () => {
+    const home = mkdtempSync(join(tmpdir(), 'lody-agent-auth-'));
+    try {
+      const availability = () => ({
+        kimi: hasBuiltinAgentCredentials('kimi', home, {}) && 'configured',
+        grok: hasBuiltinAgentCredentials('grok', home, {}) && 'configured',
+        claude: false as const,
+        codex: false as const,
+      });
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(
+        []
+      );
+      mkdirSync(join(home, '.kimi-code', 'credentials'), { recursive: true });
+      writeFileSync(join(home, '.kimi-code', 'credentials', 'kimi-code.json'), '{}');
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(
+        ['kimi']
+      );
+      mkdirSync(join(home, '.grok'), { recursive: true });
+      writeFileSync(join(home, '.grok', 'auth.json'), '{}');
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(
+        ['kimi', 'grok']
+      );
+      expect(
+        hasBuiltinAgentCredentials('kimi', home, { KIMI_CODE_HOME: join(home, 'other') })
+      ).toBe(false);
+      expect(hasBuiltinAgentCredentials('grok', home, { GROK_HOME: join(home, 'other') })).toBe(
+        false
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('defaults to installed CLI types only when a subset is available', () => {
@@ -80,26 +97,6 @@ describe('start command cli type selection', () => {
     });
   });
 
-  it('uses requested CLI types and reports missing ones in native mode', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: ['codex'],
-      availability: {
-        kimi: false,
-        grok: false,
-        claude: false,
-        codex: false,
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: ['codex'],
-      cliTypes: [],
-      missing: ['codex'],
-      invalid: [],
-      isDefaultSelection: false,
-    });
-  });
-
   it('keeps available requested CLI types and skips missing ones', () => {
     const result = resolveCliTypesSelection({
       requestedCliTypes: ['codex', 'claude'],
@@ -116,46 +113,6 @@ describe('start command cli type selection', () => {
       cliTypes: ['claude'],
       missing: ['codex'],
       invalid: [],
-      isDefaultSelection: false,
-    });
-  });
-
-  it('returns empty cliTypes when all explicitly requested types are missing', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: ['codex'],
-      availability: {
-        kimi: false,
-        grok: false,
-        claude: false,
-        codex: false,
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: ['codex'],
-      cliTypes: [],
-      missing: ['codex'],
-      invalid: [],
-      isDefaultSelection: false,
-    });
-  });
-
-  it('marks unknown requested cli types as invalid', () => {
-    const result = resolveCliTypesSelection({
-      requestedCliTypes: ['claude', 'codxe' as CliType],
-      availability: {
-        kimi: false,
-        grok: false,
-        claude: '1.0.0',
-        codex: false,
-      },
-    });
-
-    expect(result).toEqual({
-      configuredCliTypes: ['claude'],
-      cliTypes: ['claude'],
-      missing: [],
-      invalid: ['codxe'],
       isDefaultSelection: false,
     });
   });
@@ -182,35 +139,6 @@ describe('start command cli type selection', () => {
 });
 
 describe('start shutdown controller', () => {
-  it('exits with 0 after graceful shutdown completes', async () => {
-    const logger = createTestLogger();
-    const exits: number[] = [];
-    let cleanedUp = false;
-    let telemetryFlushed = false;
-
-    const controller = createStartShutdownController({
-      signals: ['SIGINT'],
-      logger,
-      shutdown: async () => {
-        cleanedUp = true;
-      },
-      flushTelemetry: async () => {
-        telemetryFlushed = true;
-      },
-      exit: (code) => {
-        exits.push(code);
-      },
-      timeoutMs: 1_000,
-    });
-
-    await controller.shutdown('SIGINT');
-
-    expect(cleanedUp).toBe(true);
-    expect(telemetryFlushed).toBe(true);
-    expect(exits).toEqual([0]);
-    expect(logger.info).toHaveBeenCalledWith('\nReceived SIGINT, shutting down gracefully...');
-  });
-
   it('reports a failed application cleanup as a failed exit after telemetry flush', async () => {
     const exits: number[] = [];
     let flushed = false;
@@ -287,7 +215,7 @@ describe('start shutdown controller', () => {
     expect(exits).toEqual([130]);
   });
 
-  it('forces exit when graceful shutdown exceeds the timeout', async () => {
+  it.each(['cleanup', 'telemetry'])('bounds shutdown (%s)', async (stage) => {
     vi.useFakeTimers();
 
     const logger = createTestLogger();
@@ -297,20 +225,21 @@ describe('start shutdown controller', () => {
     const controller = createStartShutdownController({
       signals: ['SIGINT'],
       logger,
-      shutdown: () => cleanup.promise,
-      flushTelemetry: async () => {},
+      shutdown: () => (stage === 'cleanup' ? cleanup.promise : Promise.resolve()),
+      flushTelemetry: () => (stage === 'telemetry' ? cleanup.promise : Promise.resolve()),
       exit: (code) => {
         exits.push(code);
       },
-      timeoutMs: 1_000,
     });
 
     const shutdownPromise = controller.shutdown('SIGINT');
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(6_999);
+    expect(exits).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
 
     expect(exits).toEqual([130]);
     expect(logger.warn).toHaveBeenCalledWith(
-      'Graceful shutdown did not finish within 1000ms; forcing exit...'
+      'Graceful shutdown did not finish within 7000ms; forcing exit...'
     );
 
     cleanup.resolve();

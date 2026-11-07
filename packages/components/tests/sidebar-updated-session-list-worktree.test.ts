@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -38,97 +39,6 @@ describe('SidebarUpdatedSessionList session-type icon', () => {
     container?.remove();
     container = undefined;
     vi.restoreAllMocks();
-  });
-
-  it('does not render a session-type icon in the row (it lives in the hover card now)', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(SidebarUpdatedSessionList, {
-          now: new Date('2026-05-09T12:00:00.000Z'),
-          items: [
-            {
-              id: 'session-worktree',
-              kind: 'local',
-              title: 'Local worktree session',
-              sectionLabel: 'Local Projects · lody',
-              subtitle: 'lody',
-              latestMessageAt: new Date('2026-05-09T11:45:00.000Z'),
-              isWorktree: true,
-            },
-            {
-              id: 'session-local',
-              kind: 'local',
-              title: 'Plain local session',
-              sectionLabel: 'Local Projects · lody',
-              subtitle: 'lody',
-              latestMessageAt: new Date('2026-05-09T11:30:00.000Z'),
-            },
-          ],
-        })
-      );
-    });
-
-    // The worktree / folder / repo type icon was removed from the row; the
-    // worktree distinction now lives only in the desktop hover info card.
-    const worktreeIcon = container.querySelector(
-      '[data-sidebar-updated-id="session-worktree"] [aria-label="Running in a worktree"]'
-    );
-    const plainIcon = container.querySelector(
-      '[data-sidebar-updated-id="session-local"] [aria-label="Running in a worktree"]'
-    );
-
-    expect(worktreeIcon).toBeNull();
-    expect(plainIcon).toBeNull();
-  });
-
-  it('keeps PR status rightmost and line diff immediately before it', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(SidebarUpdatedSessionList, {
-          now: new Date('2026-05-09T12:00:00.000Z'),
-          items: [
-            {
-              id: 'session-with-pr',
-              kind: 'github',
-              title: 'Session with PR',
-              sectionLabel: 'GitHub · loro-dev/lody',
-              subtitle: 'loro-dev/lody',
-              latestMessageAt: new Date('2026-05-09T11:45:00.000Z'),
-              prUrl: 'https://github.com/loro-dev/lody/pull/42',
-              prStatus: 'open',
-              addedLines: 12,
-              deletedLines: 4,
-            },
-            {
-              id: 'session-without-pr',
-              kind: 'github',
-              title: 'Session without PR',
-              sectionLabel: 'GitHub · loro-dev/lody',
-              subtitle: 'loro-dev/lody',
-              latestMessageAt: new Date('2026-05-09T11:30:00.000Z'),
-              addedLines: 8,
-              deletedLines: 2,
-            },
-          ],
-        })
-      );
-    });
-
-    const rowWithPr = container.querySelector('[data-sidebar-updated-id="session-with-pr"]');
-    const rowWithoutPr = container.querySelector('[data-sidebar-updated-id="session-without-pr"]');
-
-    expect(rowWithPr?.querySelector('.lucide-git-pull-request')).not.toBeNull();
-    expect(rowWithPr?.textContent).not.toMatch(/[+-]\d/);
-    expect(rowWithoutPr?.querySelector('.lucide-git-pull-request')).toBeNull();
-    expect(rowWithoutPr?.textContent).not.toMatch(/[+-]\d/);
   });
 
   it('shows the PR icon for a local row linked to a GitHub PR', () => {

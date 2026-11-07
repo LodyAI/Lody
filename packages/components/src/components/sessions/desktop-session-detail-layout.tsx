@@ -50,6 +50,36 @@ export type DesktopSessionDetailLayoutProps = {
 const MAIN_COLUMN_MIN_WIDTH_PX = 500;
 
 const styles = stylex.create({
+  resizeIndicator: {
+    pointerEvents: 'none',
+    height: 'calc(var(--spacing) * 7)',
+    width: '3px',
+    flexShrink: 0,
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground))',
+      [stylex.when.ancestor(':is([data-resize-handle-state="hover"]):not(:focus-visible)')]:
+        'color-mix(in oklab, hsl(var(--foreground)) 30%, transparent)',
+      [stylex.when.ancestor(':is([data-resize-handle-state="drag"]):not(:focus-visible)')]:
+        'color-mix(in oklab, hsl(var(--foreground)) 70%, transparent)',
+      [stylex.when.ancestor(':focus-visible')]:
+        'color-mix(in oklab, hsl(var(--foreground)) 50%, transparent)',
+    },
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(
+        ':is([data-resize-handle-state="hover"], [data-resize-handle-state="drag"], :focus-visible)'
+      )]: 1,
+    },
+    scale: {
+      default: null,
+      [stylex.when.ancestor(':is([data-resize-handle-state="drag"], :focus-visible)')]: '1 1.25',
+    },
+    transitionProperty: 'background-color, opacity, scale',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function, ease)',
+  },
+
   root: {
     position: 'relative',
     width: '100%',
@@ -258,19 +288,25 @@ export function DesktopSessionDetailLayout({
         <ResizableHandle
           appearance="edge"
           disabled={!splitSidebarOpen}
-          // Invisible at rest; hover/drag paints a 2px accent line that
-          // covers the side panel's left hairline (see desktopSecondaryPanel
-          // in session-detail.tsx).
+          // The seam is the side panel's own left hairline; the handle paints
+          // nothing at rest. Hover or keyboard focus reveals one small ink
+          // block centred on the seam — focus is taller and darker than hover,
+          // drag darkest — so the divider stays quiet until someone reaches
+          // for it. The 12px hit-area margins (not a wide element) own the
+          // pointer target, so the block never shifts panel geometry.
           hitAreaMargins={{ coarse: 15, fine: 12 }}
           onDragging={setIsResizing}
           className={
             stylex.props(
+              stylex.defaultMarker(),
               styles.resizeHandle,
               splitSidebarOpen ? styles.resizeHandleVisible : styles.resizeHandleHidden
             ).className
           }
           style={{ transitionDuration }}
-        />
+        >
+          <span aria-hidden {...stylex.props(styles.resizeIndicator)} />
+        </ResizableHandle>
         <ResizablePanel
           ref={sidebarPanelRef}
           id="sidebar"

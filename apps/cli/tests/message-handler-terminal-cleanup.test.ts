@@ -58,6 +58,7 @@ type MessageHandlerInternals = {
   ) => Promise<NotificationPresentation | undefined>;
   cleanup: () => Promise<void>;
   codeCollabV2DiffStore: { close: () => Promise<void> };
+  diffBlobStoreReader: { close: () => Promise<void> };
   sessionActivePresence: SessionActivePresenceControllerLegacy;
   handleSessionArchived: (sessionId: SessionId) => Promise<void>;
   readWorktreeOwnerState: (sessionId: SessionId) => Promise<WorktreeOwnerState>;
@@ -335,6 +336,40 @@ describe('MessageHandler terminal cleanup', () => {
     await Effect.runPromise(Scope.close(lease, Exit.void));
     expect(presenceEntries.has(sessionId)).toBe(false);
     await handler.sessionActivePresence.close();
+  });
+
+  it('closes independent shutdown resources before reporting a read-only diff worker failure', async () => {
+    const { handler, sessionManager } = createHarness();
+    const failure = new Error('Synthetic read worker close failed.');
+    vi.spyOn(handler.diffBlobStoreReader, 'close').mockRejectedValue(failure);
+    let writerClosed = false,
+      tunnelsClosed = false,
+      documentsClosed = false;
+    const closeWriter = handler.codeCollabV2DiffStore.close.bind(handler.codeCollabV2DiffStore);
+    vi.spyOn(handler.codeCollabV2DiffStore, 'close').mockImplementation(async () => {
+      await closeWriter();
+      writerClosed = true;
+    });
+    handler.previewService.closeAllActiveTunnelsForCleanup = async () => {
+      tunnelsClosed = true;
+    };
+    sessionManager.cleanUp.mockImplementation(
+      async (options?: { keepWorkspaceDocumentOpen?: boolean }) => {
+        if (!options?.keepWorkspaceDocumentOpen) documentsClosed = true;
+      }
+    );
+    try {
+      await handler.cleanup();
+      throw new Error('Expected cleanup to report failure.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toContain(failure);
+    }
+    expect({ writerClosed, tunnelsClosed, documentsClosed }).toEqual({
+      writerClosed: true,
+      tunnelsClosed: true,
+      documentsClosed: true,
+    });
   });
 
   it('waits for the native Turn lease before closing evidence stores and documents on shutdown', async () => {

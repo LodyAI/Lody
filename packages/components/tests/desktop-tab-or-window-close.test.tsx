@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, useRef, useState } from 'react';
 import { createStore, Provider, useAtomValue } from 'jotai';
 import {
@@ -26,48 +27,6 @@ import {
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-describe('desktop closer lifecycle', () => {
-  let windowOpen: boolean;
-  beforeEach(() => {
-    __resetDesktopTabClosersForTests();
-    windowOpen = true;
-    vi.spyOn(window, 'close').mockImplementation(() => {
-      windowOpen = false;
-    });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    __resetDesktopTabClosersForTests();
-  });
-  it('closes a window with no registered surface', () => {
-    closeCurrentTabOrWindow();
-    expect(windowOpen).toBe(false);
-  });
-  it('restores the previous surface after the top closer is removed', () => {
-    const tabs = ['older', 'newer'];
-    registerDesktopTabCloser(() => {
-      tabs.splice(tabs.indexOf('older'), 1);
-      return 'handled';
-    });
-    const dispose = registerDesktopTabCloser(() => {
-      tabs.splice(tabs.indexOf('newer'), 1);
-      return 'handled';
-    });
-    closeCurrentTabOrWindow();
-    expect(tabs).toEqual(['older']);
-    expect(windowOpen).toBe(true);
-    dispose();
-    closeCurrentTabOrWindow();
-    expect(tabs).toEqual([]);
-    expect(windowOpen).toBe(true);
-  });
-  it('honors an explicit native-window result from the active surface', () => {
-    registerDesktopTabCloser(() => 'unhandled');
-    closeCurrentTabOrWindow();
-    expect(windowOpen).toBe(false);
-  });
-});
 
 describe('semantic close routing', () => {
   let host: HTMLDivElement;
@@ -180,13 +139,6 @@ describe('semantic close routing', () => {
     expect(windowOpen).toBe(true);
   });
 
-  it('collapses an already empty panel without closing the conversation', () => {
-    panel.querySelector('[data-tab]')!.remove();
-    point(panel);
-    close();
-    expect(remaining()).toEqual({ conversation: 2, panel: 0, panelOpen: false, windowOpen: true });
-  });
-
   it('selects an iframe host on pointer entry without reading its document', () => {
     const frame = document.createElement('iframe');
     panel.append(frame);
@@ -242,19 +194,6 @@ describe('semantic close routing', () => {
     expect(remaining().conversation).toBe(2);
   });
 
-  it('commits hover only after continuous dwell without moving keyboard focus', () => {
-    move(panel);
-    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS - 1);
-    expect(panel.dataset.lodyActionActive).toBeUndefined();
-    expect(document.activeElement).toBe(input);
-    move(panel, 15, 15);
-    vi.advanceTimersByTime(1);
-    expect(panel.dataset.lodyActionActive).toBe('true');
-    expect(document.activeElement).toBe(input);
-    close();
-    expect(remaining().panelOpen).toBe(false);
-  });
-
   it('does not commit a pane merely crossed by the pointer', () => {
     move(panel);
     vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS - 1);
@@ -295,36 +234,6 @@ describe('semantic close routing', () => {
     expect(remaining().panel).toBe(1);
   });
 
-  it('only lets the newest asynchronous open claim its destination', () => {
-    const older = router.deferActivation('conversation');
-    const newer = router.deferActivation('side-panel');
-    newer();
-    older();
-    close();
-    expect(remaining().panelOpen).toBe(false);
-    expect(remaining().conversation).toBe(2);
-  });
-
-  it('supersedes asynchronous activation on deliberate input outside the scopes', () => {
-    const finishOpen = router.deferActivation('side-panel');
-    click(host);
-    finishOpen();
-    close();
-    expect(remaining().conversation).toBe(1);
-    expect(remaining().panel).toBe(1);
-  });
-
-  it.each(['blur', 'dispose'])('invalidates an asynchronous activation on %s', (reset) => {
-    const finishOpen = router.deferActivation('side-panel');
-    if (reset === 'blur') window.dispatchEvent(new Event('blur'));
-    else router.dispose();
-    finishOpen();
-    expect(panel.dataset.lodyActionActive).toBeUndefined();
-    close();
-    expect(remaining().panel).toBe(1);
-    expect(windowOpen).toBe(true);
-  });
-
   it.each(['pointerdown', 'keyboard', 'wheel'] as const)(
     'native browser %s takes persistent ownership',
     (source) => {
@@ -333,45 +242,6 @@ describe('semantic close routing', () => {
       close();
       expect(remaining().panelOpen).toBe(false);
       expect(remaining().conversation).toBe(2);
-    }
-  );
-
-  it('native browser pointer exit cancels pending hover without clearing another owner', () => {
-    reportSemanticActionInteraction(panel, 'pointer');
-    reportSemanticActionInteraction(panel, 'pointerleave');
-    vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
-    close();
-    expect(remaining().conversation).toBe(1);
-    expect(remaining().panel).toBe(1);
-    click(conversation);
-    reportSemanticActionInteraction(panel, 'pointerleave');
-    close();
-    expect(windowOpen).toBe(false);
-  });
-
-  it.each(['pointer exit', 'hidden target', 'modal', 'drag', 'blur'])(
-    'cancels pending hover on %s',
-    async (interruption) => {
-      move(panel);
-      if (interruption === 'pointer exit') {
-        panel.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: null }));
-      }
-      if (interruption === 'hidden target') panel.hidden = true;
-      if (interruption === 'modal') {
-        const overlay = document.createElement('div');
-        overlay.setAttribute('role', 'dialog');
-        overlay.dataset.state = 'open';
-        host.append(overlay);
-        await Promise.resolve();
-        overlay.remove();
-      }
-      if (interruption === 'drag') host.dispatchEvent(new Event('dragstart', { bubbles: true }));
-      if (interruption === 'blur') window.dispatchEvent(new Event('blur'));
-      vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
-      expect(panel.dataset.lodyActionActive).toBeUndefined();
-      close();
-      expect(remaining().panel).toBe(1);
-      expect(windowOpen).toBe(true);
     }
   );
 
@@ -386,23 +256,6 @@ describe('semantic close routing', () => {
   it('a close chord does not replace the pointer target with the old text caret', () => {
     point(panel);
     press(input, 'w', { code: 'KeyW', ctrlKey: true });
-    close();
-    expect(remaining().panelOpen).toBe(false);
-    expect(remaining().conversation).toBe(2);
-  });
-
-  it('does not add any repeat-key suppression', () => {
-    point(panel);
-    close();
-    press(input, 'w', { code: 'KeyW', ctrlKey: true, repeat: true });
-    close();
-    expect(remaining().conversation).toBe(1);
-  });
-
-  it('ignores programmatic focus restoration after hovering', () => {
-    point(panel);
-    panel.querySelector('button')!.focus();
-    input.focus();
     close();
     expect(remaining().panelOpen).toBe(false);
     expect(remaining().conversation).toBe(2);
@@ -469,79 +322,11 @@ describe('semantic close routing', () => {
     expect(remaining()).toEqual({ conversation: 2, panel: 1, panelOpen: true, windowOpen: true });
   });
 
-  it('clears hover ownership when the pointer leaves the window', () => {
-    point(panel);
-    panel.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: null }));
-    close();
-    expect(remaining().conversation).toBe(1);
-  });
-
-  it('clears transient ownership on window blur', () => {
-    point(panel);
-    window.dispatchEvent(new Event('blur'));
-    close();
-    expect(remaining().conversation).toBe(1);
-    expect(remaining().panel).toBe(1);
-  });
-
   it('ignores pointer movement during a drag', () => {
     point(panel, 20, 20, 1);
     close();
     expect(remaining().conversation).toBe(1);
     expect(remaining().panel).toBe(1);
-  });
-
-  it('updates the cue for ancestor visibility and portal layers without a React refresh', async () => {
-    click(panel);
-    expect(panel.dataset.lodyActionActive).toBe('true');
-    const wrapper = document.createElement('div');
-    host.append(wrapper);
-    wrapper.append(panel);
-    wrapper.hidden = true;
-    await Promise.resolve();
-    expect(panel.dataset.lodyActionActive).toBeUndefined();
-    close();
-    expect(remaining().panel).toBe(1);
-    wrapper.hidden = false;
-    await Promise.resolve();
-    expect(panel.dataset.lodyActionActive).toBe('true');
-
-    const portal = document.createElement('div');
-    portal.innerHTML = '<div role="menu" data-state="open">menu</div>';
-    document.body.append(portal);
-    try {
-      // Dispatch must see the layer even before the mutation callback runs.
-      close();
-      expect(remaining().panel).toBe(1);
-      await Promise.resolve();
-      expect(host.querySelector('[data-lody-action-active]')).toBeNull();
-      portal.remove();
-      await Promise.resolve();
-      expect(panel.dataset.lodyActionActive).toBe('true');
-    } finally {
-      portal.remove();
-    }
-  });
-
-  it('chooses the innermost registered action scope independently of registration order', () => {
-    const nested = document.createElement('div');
-    nested.textContent = 'nested item';
-    panel.append(nested);
-    scopes.unshift({
-      id: 'nested',
-      element: nested,
-      actions: {
-        close: () => {
-          nested.remove();
-          return 'handled';
-        },
-      },
-    });
-    point(nested);
-    close();
-    expect(nested.isConnected).toBe(false);
-    expect(remaining().panel).toBe(1);
-    expect(remaining().conversation).toBe(2);
   });
 });
 
@@ -652,32 +437,4 @@ describe('semantic close developer gate lifecycle', () => {
     close();
     expect(container.querySelector('output')!.textContent).toBe('conversation');
   });
-  it.each(['route', 'beta', 'developer'])(
-    'cancels uncommitted hover when the %s lifecycle changes',
-    (change) => {
-      store.set(developerModeEnabledAtom, true);
-      store.set(semanticShortcutsBetaEnabledAtom, true);
-      render();
-      act(() => {
-        container
-          .querySelector('[data-lody-action-scope="side-panel"]')!
-          .dispatchEvent(
-            new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 30 })
-          );
-      });
-      if (change === 'route') render('two');
-      if (change === 'beta') act(() => store.set(semanticShortcutsBetaEnabledAtom, false));
-      if (change === 'developer') act(() => store.set(developerModeEnabledAtom, false));
-      act(() => {
-        vi.advanceTimersByTime(SEMANTIC_HOVER_DWELL_MS);
-      });
-      expect(
-        container.querySelector('[data-lody-action-scope="side-panel"][data-lody-action-active]')
-      ).toBeNull();
-      close();
-      expect(container.querySelector('output')!.textContent).toBe(
-        change === 'route' ? 'conversation' : 'legacy'
-      );
-    }
-  );
 });

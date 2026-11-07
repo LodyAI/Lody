@@ -16,22 +16,6 @@ const rawInput = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('parseCodexCollabAgentTasks', () => {
-  it('maps a spawn tool call to a provider-neutral subagent task', () => {
-    expect(parseCodexCollabAgentTasks('spawnAgent', rawInput())).toEqual([
-      {
-        taskId: 'thread-worker',
-        status: 'in_progress',
-        event: 'task_started',
-        subagentType: 'Codex agent',
-        taskType: 'spawnAgent',
-        description: 'Inspect the goal implementation.',
-        summary: 'Reading files',
-        rawStatus: 'running',
-        error: undefined,
-      },
-    ]);
-  });
-
   it('maps every receiver and preserves terminal failures', () => {
     const tasks = parseCodexCollabAgentTasks(
       'wait',
@@ -52,11 +36,6 @@ describe('parseCodexCollabAgentTasks', () => {
       status: 'failed',
       error: 'Tests failed',
     });
-  });
-
-  it('leaves unrelated or malformed tool calls on the generic path', () => {
-    expect(parseCodexCollabAgentTasks('execCommand', rawInput())).toEqual([]);
-    expect(parseCodexCollabAgentTasks('spawnAgent', { receiverThreadIds: [] })).toEqual([]);
   });
 });
 

@@ -21,6 +21,7 @@ import {
 import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import type { ConversationRowComponent, ConversationScrollerProps } from './types';
+import { compensateConversationScroll } from './scroll-compensation';
 
 const isEditableTarget = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
@@ -187,6 +188,18 @@ export function EngineConversationScroller({
       // getBoundingClientRect() reports the visually scaled height there. Use
       // the untransformed border-box height so later rows keep their real gaps.
       measure: (keys) => keys.map((key) => rowElements.current.get(key)?.offsetHeight),
+      // Older WebKit has no reliable end signal; retain immediate compensation
+      // there. Never infer a fling ending from an idle timer.
+      setContentShift:
+        typeof navigator !== 'undefined' &&
+        (/(?:iPhone|iPad|iPod)/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) &&
+        typeof document !== 'undefined' &&
+        'onscrollend' in document.documentElement
+          ? (px) => {
+              if (containerRef.current) containerRef.current.style.marginTop = `${-px}px`;
+            }
+          : undefined,
       setExtent: (px) => {
         if (containerRef.current) containerRef.current.style.height = `${Math.max(0, px)}px`;
       },
@@ -200,11 +213,7 @@ export function EngineConversationScroller({
       scrollBy: (delta) => {
         const element = viewport();
         if (!element) return;
-        if (typeof element.scrollBy === 'function') {
-          element.scrollBy({ top: delta, behavior: 'instant' });
-        } else {
-          element.scrollTop += delta;
-        }
+        compensateConversationScroll(element, delta);
       },
       requestCommit: (sync) => {
         if (sync && !inLayoutEffect.current) flushSync(forceCommit);
@@ -314,6 +323,9 @@ export function EngineConversationScroller({
     handleRef.current = {
       get scrollOffset() {
         return controller.scrollOffset;
+      },
+      get contentOffset() {
+        return controller.contentOffset;
       },
       get scrollSize() {
         return controller.scrollSize;
@@ -447,7 +459,7 @@ export function EngineConversationScroller({
     const canScroll = (upward: boolean) => {
       // Passive wheel delivery can follow its native offset change. Accept
       // either the last observed position or the live position as its origin.
-      const observed = controller.scrollOffset;
+      const observed = controller.physicalScrollOffset;
       return upward
         ? Math.max(observed, element.scrollTop) > 0
         : Math.min(observed, element.scrollTop) < element.scrollHeight - element.clientHeight;
@@ -464,8 +476,12 @@ export function EngineConversationScroller({
       controller.setTouchActive(false, false);
     };
     const onTouchStart = (event: TouchEvent) => {
-      cancelTouch();
-      if (event.touches.length !== 1) return;
+      if (event.touches.length !== 1) {
+        cancelTouch();
+        return;
+      }
+      touchOrigin = null;
+      touchScrolled = false;
       const touch = event.touches[0]!;
       touchOrigin = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
       controller.setTouchActive(true);

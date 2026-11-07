@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
 import {
   Mention,
   MentionContent,
@@ -129,7 +131,14 @@ describe('Mention navigation and insertion', () => {
       ).requestAnimationFrame;
     }
     originalRequestAnimationFrame = undefined;
+    vi.unstubAllGlobals();
+    __resetPlatformCacheForTests();
   });
+
+  function setPlatform(os: 'darwin' | 'linux') {
+    vi.stubGlobal('__LODY_PLATFORM__', { os });
+    __resetPlatformCacheForTests();
+  }
 
   function render(
     items: ItemSpec[],
@@ -176,81 +185,6 @@ describe('Mention navigation and insertion', () => {
     setValue?.call(input, value);
   }
 
-  it('writes the item insertText instead of composing trigger and label', () => {
-    render([{ value: '3312', label: '3312', insertText: '#3312', kind: 'issue' }], '@');
-
-    commit('3312', 0);
-
-    expect(latest.inputValue).toBe('#3312 ');
-    expect(latest.mentions).toEqual([{ value: '3312', start: 0, end: 5, kind: 'issue' }]);
-    expect(latest.values).toEqual(['3312']);
-  });
-
-  it('falls back to trigger and label when the item has no insertText', () => {
-    render([{ value: 'src/app.ts' }], '@');
-
-    commit('src/app.ts', 0);
-
-    expect(latest.inputValue).toBe('@src/app.ts ');
-    expect(latest.mentions).toEqual([{ value: 'src/app.ts', start: 0, end: 11, kind: 'mention' }]);
-  });
-
-  it('records no mention when selecting a navigation item', () => {
-    render([{ value: 'issue', label: 'Issues', navigateText: '@issue:' }], '@');
-
-    commit('issue', 0);
-
-    // Rewrites the trigger span, no trailing space, menu stays up for level two.
-    expect(latest.inputValue).toBe('@issue:');
-    expect(latest.mentions).toEqual([]);
-    expect(latest.values).toEqual([]);
-    expect(latest.open).toBe(true);
-  });
-
-  it('starts destination work synchronously when selecting a navigation item', () => {
-    let navigations = 0;
-    render(
-      [
-        {
-          value: 'skill',
-          label: 'Skills',
-          navigateText: '@skill:',
-          onMentionNavigate: () => {
-            navigations += 1;
-          },
-        },
-      ],
-      '@'
-    );
-
-    commit('skill', 0);
-
-    expect(navigations).toBe(1);
-    expect(latest.inputValue).toBe('@skill:');
-  });
-
-  it('does not start destination work when a navigation item is force-committed', () => {
-    let navigations = 0;
-    render(
-      [
-        {
-          value: 'src/',
-          navigateText: '@src/',
-          insertText: '@src',
-          onMentionNavigate: () => {
-            navigations += 1;
-          },
-        },
-      ],
-      '@src/'
-    );
-
-    commit('src/', 0, { commit: true });
-
-    expect(navigations).toBe(0);
-    expect(latest.inputValue).toBe('@src ');
-  });
-
   it('commits a navigation item through insertText when commit is requested', () => {
     render([{ value: 'src/', navigateText: '@src/', insertText: '@src', kind: 'dir' }], '@src/');
 
@@ -276,6 +210,40 @@ describe('Mention navigation and insertion', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(latest.inputValue).toBe('@');
+  });
+
+  it.each([
+    { key: 'b', boundary: 'end' },
+    { key: 'f', boundary: 'start' },
+  ])('macOS Ctrl+$key crosses a committed file mention from its $boundary', ({ key, boundary }) => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+    const start = boundary === 'end' ? mention.end : mention.start;
+
+    act(() => input.setSelectionRange(start, start));
+    const keydown = pressKey(input, key, { ctrlKey: true });
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
+    expect(latest.inputValue).toBe('@src/file.ts ');
+  });
+
+  it.each([
+    { key: 'ArrowLeft', boundary: 'end' },
+    { key: 'ArrowRight', boundary: 'start' },
+  ])('$key crosses a committed file mention instead of snapping back', ({ key, boundary }) => {
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+    const start = boundary === 'end' ? mention.end : mention.start;
+
+    act(() => input.setSelectionRange(start, start));
+    const keydown = pressKey(input, key);
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
   });
 
   it('leaves Backspace alone inside a path drill-down', () => {
@@ -339,7 +307,7 @@ describe('Mention navigation and insertion', () => {
     expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
   });
 
-  it('keeps mention mirrors aligned while an IME composes before a session mention', () => {
+  it('keeps mention text aligned while an IME composes before a session mention', () => {
     const input = render(
       [{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }],
       '@',
@@ -357,13 +325,13 @@ describe('Mention navigation and insertion', () => {
     });
 
     expect(input.selectionStart).toBe(5);
-    expect(container?.querySelector('[data-mention-layer="background"]')?.textContent).toContain(
+    expect(container?.querySelector('[data-mention-layer="text"]')?.textContent).toContain(
       'zhong@fix-ci'
     );
-    expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
+    expect(container?.querySelector('[data-mention-layer="text"]')).not.toBeNull();
     expect(
       container
-        ?.querySelector('[data-mention-layer="chip"] [data-mention-kind="session"]')
+        ?.querySelector('[data-mention-layer="text"] [data-mention-kind="session"]')
         ?.getAttribute('data-mention-start')
     ).toBe('5');
 
@@ -380,35 +348,10 @@ describe('Mention navigation and insertion', () => {
 
     expect(latest.inputValue).toBe('中@fix-ci ');
     expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
-    expect(container?.querySelector('[data-mention-layer="chip"]')).not.toBeNull();
+    expect(container?.querySelector('[data-mention-layer="text"]')).not.toBeNull();
   });
 
-  it('keeps the native caret above a chip at both edges', () => {
-    const input = render([{ value: 'plan', insertText: '/plan', kind: 'command' }], '/', 1, true);
-    commit('plan', 0);
-
-    act(() => {
-      input.setSelectionRange(5, 5);
-      document.dispatchEvent(new Event('selectionchange'));
-    });
-    expect(container?.querySelector('[data-mention-caret]')).toBeNull();
-    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
-
-    act(() => {
-      input.setSelectionRange(0, 0);
-      document.dispatchEvent(new Event('selectionchange'));
-    });
-    expect(container?.querySelector('[data-mention-caret]')).toBeNull();
-    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
-
-    act(() => {
-      input.setSelectionRange(6, 6);
-      document.dispatchEvent(new Event('selectionchange'));
-    });
-    expect(input.style.getPropertyValue('-webkit-text-fill-color')).toBe('');
-  });
-
-  it('keeps a readonly caret out of the opaque chip interior', () => {
+  it('keeps a readonly caret out of a committed mention', () => {
     const items = [{ value: 'plan', insertText: '/plan', kind: 'command' }];
     const input = render(items, '/', 1, true, true);
     commit('plan', 0);

@@ -1,3 +1,4 @@
+import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -668,6 +669,7 @@ function WorkspaceSlugAvailabilityProbe({
 }
 
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const analytics = useOnboardingAnalytics();
   const platform = usePlatform();
@@ -985,7 +987,10 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         });
         if (mode?.contentMode === 'e2ee') {
           commitWorkspaceContext(null);
-          window.location.assign(`/workspace/e2ee/${encodeURIComponent(mode.workspaceId)}`);
+          void navigate({
+            to: '/workspace/e2ee/$workspaceId',
+            params: { workspaceId: mode.workspaceId },
+          });
           return;
         }
         commitWorkspaceContext(target);
@@ -1018,6 +1023,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       }
     );
   }, [
+    navigate,
     activeWorkspace,
     activeWorkspaceId,
     analytics,
@@ -1198,7 +1204,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       <WorkspaceScreenView
         onOpenEncryptedCreation={
           encryptedCreationEnabled
-            ? () => window.location.assign('/workspace/create?allowExisting=true')
+            ? () => void navigate({ to: '/workspace/create', search: { allowExisting: true } })
             : undefined
         }
         workspaces={workspaces}

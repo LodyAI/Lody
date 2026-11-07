@@ -103,6 +103,17 @@ export function makeLabDocumentSession<TVersion extends JsonObject>(
       if (storageFailure) return storageFailure;
       const original = provider.takeFailure();
       if (original instanceof LabDocumentError) return original;
+      // A rejected snapshot may have been followed by a verified origin read.
+      // Its 410 is the recovery failure; an earlier provider error is not the
+      // cause of missing history and must not turn it into local corruption.
+      if (
+        cause.code === 'protocol_error' &&
+        cause.status === 410 &&
+        cause.context?.source === 'payload_protection' &&
+        cause.context.stage === 'bootstrap' &&
+        cause.context.originalCode === 'gone'
+      )
+        return error('protocol_error', cause);
       if (!original && cause.code === 'internal_error' && cause.context?.stage === 'payload_decode')
         return error('corrupt', cause);
       return error(

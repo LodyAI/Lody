@@ -14,7 +14,9 @@ import {
 } from '@lody/e2ee-core';
 import {
   Bytes,
+  LedgerError,
   hashRecordBytes,
+  getCommittedEpochStagingKey,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   verifyLedgerEffect,
@@ -26,6 +28,7 @@ import {
   InstalledKeyStore,
   KeyProtector,
   KeyMailbox,
+  EpochStagingStore,
   LedgerFeedStore,
   LedgerPinStore,
   LocalStoreError,
@@ -39,13 +42,26 @@ import {
   sqliteReceiveJournal,
   sqliteRepairJournal,
 } from '@lody/e2ee-core/adapters/node-sqlite';
-import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import {
+  makeStreamsUpdateBinding,
+  makeRealtimeContentBinding,
+} from '@lody/e2ee-core/adapters/loro-streams';
 
 /** Safe local failures. Raw errors and decrypted material never cross this boundary. */
 export class CliE2eeRuntimeError extends Data.TaggedError('CliE2eeRuntimeError')<{
-  readonly code: 'invalid-input' | 'storage' | 'local-evidence-conflict' | 'closed';
+  readonly code:
+    | 'invalid-input'
+    | 'storage'
+    | 'local-evidence-conflict'
+    | 'closed'
+    | 'local-history-recovery-required'
+    | 'trusted-pin-unavailable';
 }> {}
 const failure = (code: CliE2eeRuntimeError['code']) => new CliE2eeRuntimeError({ code });
+const pinFailure = (error: LocalStoreError) =>
+  error.store === 'LedgerPinStore' && error.reason === 'corrupt'
+    ? failure('trusted-pin-unavailable')
+    : error;
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
 const unhex = (value: string) => {
   if (!/^(?:[0-9a-f]{2})+$/.test(value)) throw failure('invalid-input');
@@ -54,7 +70,21 @@ const unhex = (value: string) => {
 const sql = <A>(work: () => A) =>
   Effect.try({
     try: work,
-    catch: (error) => (error instanceof CliE2eeRuntimeError ? error : failure('storage')),
+    catch: (error) =>
+      error instanceof CliE2eeRuntimeError
+        ? error
+        : failure(
+            error instanceof Error &&
+              'code' in error &&
+              typeof error.code === 'string' &&
+              (/^(?:SQLITE_CORRUPT(?:_.*)?|SQLITE_NOTADB)$/.test(error.code) ||
+                (error.code === 'ERR_SQLITE_ERROR' &&
+                  'errcode' in error &&
+                  typeof error.errcode === 'number' &&
+                  [11, 26].includes(error.errcode & 0xff)))
+              ? 'local-history-recovery-required'
+              : 'storage'
+          ),
   });
 type FeedOrigin = Parameters<typeof LedgerFeed.layer>[0]['origin'];
 type HistoryRow = { position: number; record: Uint8Array; locator: string | null };
@@ -102,6 +132,11 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   device: NodeE2eeDevice;
   genesisRecord: Uint8Array;
   mailbox?: KeyMailbox['Service'];
+  onVerifiedLedger?: (
+    view: import('@lody/e2ee-core/protocol').LedgerView,
+    generation: number
+  ) => void;
+  staging?: Pick<EpochStagingStore['Service'], 'readGroup'>;
 }) {
   const genesisRecord = new Uint8Array(options.genesisRecord);
   const genesis = yield* Effect.fromResult(
@@ -114,13 +149,20 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const scope = yield* Effect.scope;
   const serial = yield* Semaphore.make(1);
   let closed = false;
+  let executionGeneration = 0;
+  let executionAuthority = new AbortController();
 
   const db = yield* Effect.acquireRelease(
     sql(() => {
       const connection = new DatabaseSync(join(options.directory, 'history.sqlite'));
-      connection.exec(
-        'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY,record BLOB NOT NULL,locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
-      );
+      try {
+        connection.exec(
+          'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY,record BLOB NOT NULL,locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
+        );
+      } catch (error) {
+        connection.close();
+        throw error;
+      }
       connection
         .prepare('INSERT OR IGNORE INTO records(position,record) VALUES(0,?)')
         .run(genesisRecord);
@@ -155,20 +197,24 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       mode: 'create-or-open',
     })
   ).pipe(Layer.provideMerge(base));
-  const local = yield* Layer.buildWithScope(stores, scope);
+  const local = yield* Layer.buildWithScope(stores, scope).pipe(Effect.mapError(pinFailure));
   const pins = Context.get(local, LedgerPinStore);
-  const pin = yield* pins.read();
+  const pin = yield* pins.read().pipe(Effect.mapError(pinFailure));
   const originals = yield* sql(
     () =>
       db
         .prepare('SELECT position,record,locator FROM records ORDER BY position')
         .all() as unknown as HistoryRow[]
   );
+  // Creation journals the genesis original and the cache row; their absence is local damage.
+  const lastOriginal = originals.at(-1);
+  if (!lastOriginal) return yield* failure('storage');
   const endpoint = {
-    head: hashRecordBytes(originals[originals.length - 1]!.record),
+    head: hashRecordBytes(lastOriginal.record),
     length: originals.length,
   };
-  const cache = yield* sql(() => db.prepare('SELECT name,origin FROM cache WHERE id=1').get()!);
+  const cache = yield* sql(() => db.prepare('SELECT name,origin FROM cache WHERE id=1').get());
+  if (!cache) return yield* failure('storage');
   const journalStore = (name: string) =>
     Layer.effect(
       LedgerFeedStore,
@@ -265,7 +311,19 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       anchor: genesis,
       records: originals.map((row) => row.record),
       checkpoint: endpoint,
-    });
+    }).pipe(
+      Effect.mapError((error) =>
+        error instanceof LedgerError &&
+        ![
+          'native-unavailable',
+          'upgrade-required',
+          'unknown-version',
+          'unknown-operation',
+        ].includes(error.code)
+          ? failure('local-history-recovery-required')
+          : error
+      )
+    );
     if (pin && !Result.getOrThrow(hasVerifiedCheckpoint(view, pin)))
       return yield* failure('local-evidence-conflict');
     const name = `ledger-feed-${randomUUID()}.sqlite`;
@@ -274,11 +332,11 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       { kind: 'genesis', record: genesisRecord },
       { length: 1, head: hashRecordBytes(genesisRecord) }
     );
-    if (originals[originals.length - 1]?.locator)
+    if (lastOriginal.locator)
       yield* feed.accept(
         {
           requestOffset: '-1',
-          nextOffset: originals[originals.length - 1]!.locator!,
+          nextOffset: lastOriginal.locator,
           records: originals.map((row) => row.record),
           upToDate: true,
         },
@@ -310,7 +368,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const verified = Context.get(context, VerifiedLedger);
   const installed = Context.get(context, InstalledEpochKeys);
   const history = Context.get(context, InstalledEpochHistory);
-  yield* verified.current();
+  const initialVerifiedView = yield* verified.current();
+  options.onVerifiedLedger?.(initialVerifiedView, executionGeneration);
   const receiving = options.mailbox
     ? yield* Layer.buildWithScope(
         Layer.mergeAll(KeyReceiver.layer, KeyRepair.layer).pipe(
@@ -337,6 +396,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const receiver = receiving ? Context.get(receiving, KeyReceiver) : undefined;
   const repair = receiving ? Context.get(receiving, KeyRepair) : undefined;
   const guard = () => (closed ? Effect.fail(failure('closed')) : Effect.void);
+  let retainedWriteEpoch: number | undefined;
   const status = Effect.fnUntraced(function* () {
     yield* guard();
     const state = yield* feed.current();
@@ -345,7 +405,21 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
     const key = yield* Effect.result(installed.check(epoch));
     if (Result.isFailure(key) && !['missing-key', 'unauthorized'].includes(key.failure.reason))
       return yield* key.failure;
+    let writeEpoch: number | null = Result.isSuccess(key) ? epoch : null;
+    if (Result.isFailure(key) && key.failure.reason === 'missing-key') {
+      for (let candidate = retainedWriteEpoch ?? epoch - 1; candidate >= 0; candidate -= 1) {
+        const older = yield* Effect.result(installed.check(candidate));
+        if (Result.isSuccess(older)) {
+          writeEpoch = candidate;
+          break;
+        }
+        if (older.failure.reason === 'unauthorized') break;
+        if (older.failure.reason !== 'missing-key') return yield* older.failure;
+      }
+    }
+    if (writeEpoch !== null) retainedWriteEpoch = writeEpoch;
     return {
+      writeEpoch,
       length: view.length,
       headHash: hex(view.head.toBytes()),
       position: state.bootstrap ? null : state.offset,
@@ -353,6 +427,10 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       rotationRequired: view.inspectState().epoch.rotationRequired,
       hasCurrentKey: Result.isSuccess(key),
       devicePublicKey: hex(options.device.publicKey.toBytes()),
+      membershipId: (() => {
+        const device = view.inspectState().devices.get(hex(options.device.publicKey.toBytes()));
+        return device ? hex(device.membershipId.toBytes()) : null;
+      })(),
       protection: options.custody.protection,
     };
   });
@@ -365,6 +443,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   );
   return {
     status: () => serial.withPermit(status()),
+    /** Current verified authority only; execution freshness must come from an authenticated read. */
+    executionLedger: () =>
+      serial.withPermit(
+        Effect.gen(function* () {
+          yield* guard();
+          return yield* verified.current();
+        })
+      ),
     pairingEvidence: () =>
       serial.withPermit(
         Effect.gen(function* () {
@@ -402,6 +488,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             )
           )
             return yield* failure('invalid-input');
+          // A new suffix can revoke an active signer, so fence before any
+          // decoding or verification yields. Exact overlap and empty refreshes
+          // cannot advance the ledger; they are still checked below.
+          if (state.bootstrap || page.startIndex + page.recordsHex.length > start) {
+            executionGeneration++;
+            executionAuthority.abort();
+            executionAuthority = new AbortController();
+          }
           const records = yield* sql(() => page.recordsHex.map(unhex));
           const length = page.startIndex + records.length;
           if (
@@ -415,8 +509,9 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
                   db.prepare('SELECT record FROM records WHERE position=?').get(length - 1)
                 )
               : undefined;
-          const head = records.length
-            ? hashRecordBytes(records[records.length - 1]!)
+          const lastRecord = records.at(-1);
+          const head = lastRecord
+            ? hashRecordBytes(lastRecord)
             : previous
               ? hashRecordBytes(previous.record as Uint8Array)
               : state.view.head;
@@ -433,10 +528,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             );
             if (
               existing.length !== overlap ||
-              existing.some(
-                (row, index) =>
-                  !(row.record instanceof Uint8Array) || hex(row.record) !== hex(records[index]!)
-              )
+              existing.some((row, index) => {
+                const incoming = records[index];
+                return (
+                  !(row.record instanceof Uint8Array) ||
+                  incoming === undefined ||
+                  hex(row.record) !== hex(incoming)
+                );
+              })
             )
               return yield* failure('local-evidence-conflict');
           }
@@ -451,7 +550,8 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             },
             { length, head }
           );
-          yield* verified.current();
+          const updatedVerifiedView = yield* verified.current();
+          options.onVerifiedLedger?.(updatedVerifiedView, executionGeneration);
           if (length - compactedAt >= 64) {
             const origin = yield* feed
               .rebase()
@@ -464,14 +564,51 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return yield* status();
         })
       ),
-    binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number) =>
+    sharingAdmissionHistory: (view: import('@lody/e2ee-core/protocol').LedgerView) =>
+      serial.withPermit(
+        guard().pipe(
+          Effect.andThen(
+            sql(() =>
+              db
+                .prepare('SELECT position,record FROM records WHERE position < ? ORDER BY position')
+                .all(view.length)
+                .map((row) => ({
+                  length: Number(row.position) + 1,
+                  record: new Uint8Array(row.record as Uint8Array),
+                }))
+            )
+          )
+        )
+      ),
+    executionGeneration: () => executionGeneration,
+    executionAuthoritySignal: () => executionAuthority.signal,
+    readSharingEpochKey: (epoch: number) => history.read(epoch),
+    binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>
       makeStreamsUpdateBinding({
         genesis,
         resource,
         model,
-        writeEpoch,
+        // A cached provider selection cannot authorize new writes at an old epoch.
+        writeEpoch: 'current',
         signer: options.device,
-        ledger: () => verified.current(),
+        ledger: () =>
+          verified
+            .current()
+            .pipe(
+              Effect.flatMap((view) =>
+                typeof writeEpoch === 'number' && writeEpoch > view.inspectState().epoch.number
+                  ? Effect.fail(failure('invalid-input'))
+                  : Effect.succeed(view)
+              )
+            ),
+        readEpochKey: (epoch) => history.read(epoch),
+      }).pipe(Effect.provideService(VerifiedLedger, verified)),
+    realtimeBinding: (resource: string) =>
+      makeRealtimeContentBinding({
+        genesis,
+        resource,
+        signer: options.device,
+        ledger: () => guard().pipe(Effect.andThen(verified.current())),
         readEpochKey: (epoch) => history.read(epoch),
       }),
     /** Coalescing belongs to the caller's single background refresh owner. */
@@ -479,6 +616,26 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       receiver
         ? Effect.gen(function* () {
             yield* guard();
+            const view = yield* verified.current();
+            const epoch = view.inspectState().epoch.number;
+            const checked = yield* Effect.result(installed.check(epoch));
+            if (options.staging && epoch > 0 && Result.isFailure(checked)) {
+              if (checked.failure.reason !== 'missing-key') return yield* checked.failure;
+              const located = getCommittedEpochStagingKey(view, epoch);
+              if (Result.isSuccess(located)) {
+                // Staging access is optional (late recipients are denied). Mailbox
+                // reception independently authenticates and installs its own envelopes.
+                const group = yield* options.staging
+                  .readGroup(located.success)
+                  .pipe(Effect.catch(() => Effect.succeed(null)));
+                if (
+                  group?.envelopes.some(
+                    (row) => row.recipient === hex(options.device.publicKey.toBytes())
+                  )
+                )
+                  yield* receiver.receiveStagedGroup(group);
+              } else if (view.verification !== 'endorsed-snapshot') return yield* located.failure;
+            }
             if (repair) yield* repair.flush();
             yield* receiver.resume();
             for (let cursor: string | null = null; ;) {
@@ -486,7 +643,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
                 yield* receiver.fetchAndInstall(cursor, 100).pipe(
                   Effect.catchTag('MailboxInstallError', (error) =>
                     Effect.gen(function* () {
-                      if (repair) {
+                      if (repair && error.cryptographicRejection) {
                         yield* repair.enqueue(
                           `rejected:${error.epoch}:${error.frameDigest}`,
                           error.frameDigest
@@ -501,6 +658,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
               cursor = page.next;
             }
             yield* receiver.flushReports();
+            return undefined;
           })
         : Effect.fail(failure('invalid-input')),
     credential: () => options.custody.deviceCredential(genesis, options.device.publicKey),

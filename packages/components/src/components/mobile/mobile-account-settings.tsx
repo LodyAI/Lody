@@ -49,6 +49,11 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  foldColumn: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
+  foldScroll: { minHeight: 0, overflowY: 'auto' },
+  foldDetails: { minHeight: 0, flex: '1 1 0%', overflowY: 'auto' },
+  shrink: { flexShrink: 0 },
+
   destructiveOutline: {
     borderColor: 'color-mix(in oklab, hsl(var(--destructive) / 1) 40%, transparent)',
     backgroundColor: {
@@ -315,6 +320,7 @@ const styles = stylex.create({
   /** The join-requests block keeps the page's own inset. */
   workspaceInset: { marginInline: themeSpace[3] },
 });
+import { useMobileSettingsFold } from './mobile-settings-fold-context';
 
 function formatCliApiKeyTimestamp(
   value: number | null
@@ -391,6 +397,8 @@ export function MobileAccountSettings({
 }: AccountSettingsPureProps) {
   const { t } = useTranslation();
   const isWorkspaceSurface = surface === 'workspace';
+  const settingsFold = useMobileSettingsFold();
+  const fold = settingsFold;
 
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
@@ -620,522 +628,532 @@ export function MobileAccountSettings({
 
   return (
     <>
-      {surface === 'account' ? (
-        <MobileSettingsSection
-          title={t('settings.profile.title')}
-          actions={
-            currentUser?.email ? (
-              <span {...stylex.props(styles.email)}>{currentUser.email}</span>
-            ) : undefined
-          }
+      <div {...stylex.props(fold && styles.foldColumn)}>
+        <div
+          data-workspace-settings-summary
+          {...stylex.props(fold && styles.foldScroll)}
+          style={fold ? { flex: `0 0 ${fold.messageHeight}px` } : undefined}
         >
-          <MobileSettingsRow
-            label={t('settings.profile.name')}
-            stack={canEditUserName && isEditingUserName}
-          >
-            {canEditUserName ? (
-              isEditingUserName ? (
-                <Input
-                  ref={userNameInputRef}
-                  id="profile-name-mobile"
-                  value={userNameDraft}
-                  onChange={(event) => setUserNameDraft(event.target.value)}
-                  onBlur={() => {
-                    void commitUserNameEdit();
-                  }}
-                  onKeyDown={handleUserNameKeyDown}
-                  maxLength={120}
-                  placeholder={t('settings.profile.namePlaceholder')}
-                  disabled={isSavingUserName}
-                  controlHeight="calc(var(--spacing) * 9)"
-                  aria-label={t('settings.profile.name')}
-                />
-              ) : (
-                <button
-                  type="button"
-                  {...stylex.props(styles.nameButton)}
-                  onClick={beginUserNameEdit}
-                  disabled={isSavingUserName}
-                  aria-label={t('settings.profile.nameEditLabel')}
-                >
-                  <span {...stylex.props(styles.nameValue)}>
-                    {userNameBaseline || t('settings.profile.nameEmpty')}
-                  </span>
-                  {isSavingUserName ? (
-                    <Spinner
-                      diameter="calc(var(--spacing) * 3.5)"
-                      className={stylex.props(styles.pendingNameInk).className}
-                    />
-                  ) : (
-                    <Pencil {...stylex.props(styles.namePencil)} />
-                  )}
-                </button>
-              )
-            ) : (
-              <span {...stylex.props(styles.plainValue)}>{userNameBaseline || '—'}</span>
-            )}
-          </MobileSettingsRow>
-          <MobileSettingsRow label={t('settings.profile.avatar.label')} hasDivider>
-            <AvatarEditor
-              kind="user"
-              name={userNameBaseline}
-              image={userImage}
-              email={currentUser?.email}
-              editable={Boolean(onUploadAvatar)}
-              onUpload={(file) => handleUploadAvatar('user', file)}
-            />
-          </MobileSettingsRow>
-          {showLinkedAccounts ? (
-            <MobileSettingsRow label={t('settings.profile.bindings.label')} hasDivider>
-              <LinkedAccountsList
-                accounts={linkedAccounts}
-                loading={isLoadingLinkedAccounts}
-                onConnect={onConnectAccount}
-              />
-            </MobileSettingsRow>
-          ) : null}
-          {onChangePassword && onSetupPassword ? (
-            <MobileSettingsRow
-              label={t('settings.profile.password.label')}
-              helper={
-                hasPasswordCredential
-                  ? t('settings.profile.password.helper')
-                  : t('settings.profile.password.setupHelper')
+          {surface === 'account' ? (
+            <MobileSettingsSection
+              title={t('settings.profile.title')}
+              actions={
+                currentUser?.email ? (
+                  <span {...stylex.props(styles.email)}>{currentUser.email}</span>
+                ) : undefined
               }
-              hasDivider
             >
-              <ChangePasswordButton
-                hasPassword={hasPasswordCredential}
-                onChangePassword={onChangePassword}
-                onVerifyCurrentPassword={onVerifyCurrentPassword}
-                onSetupPassword={onSetupPassword}
-              />
-            </MobileSettingsRow>
-          ) : null}
-          <MobileSettingsRow label={t('settings.account.signOut')} hasDivider>
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={() => {
-                void onSignOut();
-              }}
-            >
-              <LogOut {...stylex.props(styles.buttonIcon)} />
-              {t('settings.account.signOut')}
-            </Button>
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
-
-      {surface === 'account' ? (
-        <>
-          {accountMachinesSlot}
-          {accountBillingSlot}
-        </>
-      ) : null}
-
-      {isWorkspaceSurface ? (
-        <MobileSettingsSection title={t('settings.workspace.title')}>
-          <MobileSettingsRow
-            label={t('settings.account.workspaceName')}
-            stack={canRenameOrganization && isEditingWorkspaceName}
-          >
-            {canRenameOrganization ? (
-              isEditingWorkspaceName ? (
-                <Input
-                  ref={workspaceNameInputRef}
-                  id="workspace-name-mobile"
-                  value={workspaceNameDraft}
-                  onChange={(event) => setWorkspaceNameDraft(event.target.value)}
-                  onBlur={() => {
-                    void commitWorkspaceNameEdit();
-                  }}
-                  onKeyDown={handleWorkspaceNameKeyDown}
-                  maxLength={120}
-                  placeholder={t('settings.account.workspaceNamePlaceholder')}
-                  disabled={isRenamingOrganization}
-                  controlHeight="calc(var(--spacing) * 9)"
-                  aria-label={t('settings.account.workspaceName')}
-                />
-              ) : (
-                <button
-                  type="button"
-                  {...stylex.props(styles.nameButton)}
-                  onClick={beginWorkspaceNameEdit}
-                  disabled={isRenamingOrganization}
-                  aria-label={t('settings.account.workspaceNameEditLabel')}
-                >
-                  <span {...stylex.props(styles.nameValue)}>{workspaceNameBaseline}</span>
-                  {isRenamingOrganization ? (
-                    <Spinner
-                      diameter="calc(var(--spacing) * 3.5)"
-                      className={stylex.props(styles.pendingNameInk).className}
+              <MobileSettingsRow
+                label={t('settings.profile.name')}
+                stack={canEditUserName && isEditingUserName}
+              >
+                {canEditUserName ? (
+                  isEditingUserName ? (
+                    <Input
+                      ref={userNameInputRef}
+                      id="profile-name-mobile"
+                      value={userNameDraft}
+                      onChange={(event) => setUserNameDraft(event.target.value)}
+                      onBlur={() => {
+                        void commitUserNameEdit();
+                      }}
+                      onKeyDown={handleUserNameKeyDown}
+                      maxLength={120}
+                      placeholder={t('settings.profile.namePlaceholder')}
+                      disabled={isSavingUserName}
+                      controlHeight="calc(var(--spacing) * 9)"
+                      aria-label={t('settings.profile.name')}
                     />
                   ) : (
-                    <Pencil {...stylex.props(styles.namePencil)} />
-                  )}
-                </button>
-              )
-            ) : (
-              <span {...stylex.props(styles.plainValue)}>{organization.name}</span>
-            )}
-          </MobileSettingsRow>
-          <MobileSettingsRow label={t('settings.workspace.avatar.label')} hasDivider>
-            <AvatarEditor
-              kind="workspace"
-              name={workspaceNameBaseline}
-              image={workspaceLogo}
-              editable={canRenameOrganization && Boolean(onUploadAvatar)}
-              onUpload={(file) => handleUploadAvatar('workspace', file)}
-            />
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
-
-      {isWorkspaceSurface ? (
-        <MobileSettingsSection
-          title={t('workspace.members.title')}
-          actions={
-            hasAdminPermission ? (
-              <Button
-                size="small"
-                variant="secondary"
-                height="calc(var(--spacing) * 8)"
-                className={stylex.props(styles.actionSpacing).className}
-                onClick={() => setInviteDialogOpen(true)}
-              >
-                <UserPlus {...stylex.props(styles.buttonIcon)} />
-                {t('workspace.members.invite')}
-              </Button>
-            ) : undefined
-          }
-        >
-          {members.map((member, index) => {
-            const isEditable =
-              hasAdminPermission && member.role !== 'owner' && member.userId !== currentUser?.id;
-
-            return (
-              <div
-                key={member.id}
-                {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
-              >
-                <UserAvatar user={member.user} size="large" />
-                <div {...stylex.props(styles.listBody)}>
-                  <p {...stylex.props(styles.listName)}>
-                    {member.user?.name || '—'}
-                    {member.userId === currentUser?.id && (
-                      <span {...stylex.props(styles.listYou)}>
-                        ({t('workspace.members.you', 'you')})
+                    <button
+                      type="button"
+                      {...stylex.props(styles.nameButton)}
+                      onClick={beginUserNameEdit}
+                      disabled={isSavingUserName}
+                      aria-label={t('settings.profile.nameEditLabel')}
+                    >
+                      <span {...stylex.props(styles.nameValue)}>
+                        {userNameBaseline || t('settings.profile.nameEmpty')}
                       </span>
-                    )}
-                  </p>
-                  {member.user?.email ? (
-                    <p {...stylex.props(styles.listMeta)}>{member.user.email}</p>
-                  ) : null}
-                </div>
-                <div {...stylex.props(styles.listActions)}>
-                  {isEditable ? (
-                    <Menu.Root>
-                      <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
-                        {t(`organization.role.${member.role}`)}
-                        <ChevronDown {...stylex.props(styles.chevron)} />
-                      </Menu.Trigger>
-                      <Menu.Content align="end">
-                        <Menu.RadioGroup
-                          value={member.role}
-                          onValueChange={(nextRole) => {
-                            if (nextRole === 'member' || nextRole === 'admin') {
-                              void onUpdateRole(member, nextRole);
-                            }
-                          }}
-                        >
-                          <Menu.RadioItem value="member" indicator="check">
-                            {t('organization.role.member')}
-                          </Menu.RadioItem>
-                          <Menu.RadioItem value="admin" indicator="check">
-                            {t('organization.role.admin')}
-                          </Menu.RadioItem>
-                        </Menu.RadioGroup>
-                      </Menu.Content>
-                    </Menu.Root>
-                  ) : (
-                    <Badge>{t(`organization.role.${member.role}`)}</Badge>
-                  )}
-                  {isEditable && (
-                    <Button
-                      variant="ghost"
-                      icon
-                      aria-label={t('workspace.removeMember.title')}
-                      height="calc(var(--spacing) * 9)"
-                      width="calc(var(--spacing) * 9)"
-                      className={stylex.props(styles.workspaceDestructiveActionInk).className}
-                      onClick={() => {
-                        setUserToDelete(member.id);
-                        setDeleteUserDialogOpen(true);
-                      }}
-                    >
-                      <Trash2 {...stylex.props(styles.smallIcon)} />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </MobileSettingsSection>
-      ) : null}
-
-      {isWorkspaceSurface && pendingInvitations.length > 0 ? (
-        <MobileSettingsSection title={t('workspace.invitations.title')}>
-          {pendingInvitations.map((invitation, index) => (
-            <div
-              key={invitation.id}
-              {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
-            >
-              <div {...stylex.props(styles.inviteMark)}>
-                <Mail {...stylex.props(styles.inviteIcon)} />
-              </div>
-              <div {...stylex.props(styles.listBody)}>
-                {/* Emails have no spaces — `truncate` cut long addresses to an
-                   unreadable stub on narrow phones; wrap them instead. */}
-                <p {...stylex.props(styles.inviteEmail)}>{invitation.email}</p>
-                <div {...stylex.props(styles.inviteMeta)}>
-                  <span>{t(`organization.role.${invitation.role}`)}</span>
-                  <span {...stylex.props(styles.inviteMetaItem)}>
-                    <Clock {...stylex.props(styles.inviteClock)} />
-                    {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
-                  </span>
-                </div>
-              </div>
-              {invitation.status === 'pending' && (
-                <div {...stylex.props(styles.listActions)}>
-                  <Button
-                    variant="ghost"
-                    icon
-                    aria-label={t('workspace.invitations.copyLink')}
-                    height="calc(var(--spacing) * 9)"
-                    width="calc(var(--spacing) * 9)"
-                    className={stylex.props(styles.workspaceActionInk).className}
-                    onClick={() => {
-                      void onCopyInviteLink(getInviteLink(invitation));
-                    }}
-                  >
-                    <Copy {...stylex.props(styles.smallIcon)} />
-                  </Button>
-                  {hasAdminPermission && (
-                    <Button
-                      variant="ghost"
-                      icon
-                      aria-label={t('common.cancel')}
-                      height="calc(var(--spacing) * 9)"
-                      width="calc(var(--spacing) * 9)"
-                      className={stylex.props(styles.workspaceDestructiveActionInk).className}
-                      disabled={cancellingInvitationIds.has(invitation.id)}
-                      onClick={() => {
-                        void (async () => {
-                          setCancellingInvitationIds((prev) => {
-                            const next = new Set(prev);
-                            next.add(invitation.id);
-                            return next;
-                          });
-                          try {
-                            await onCancelInvitation(invitation.id);
-                            setPendingInvitations((prev) =>
-                              prev.filter((inv) => inv.id !== invitation.id)
-                            );
-                          } catch {
-                            // Error already handled by onCancelInvitation (toast shown)
-                          } finally {
-                            setCancellingInvitationIds((prev) => {
-                              const next = new Set(prev);
-                              next.delete(invitation.id);
-                              return next;
-                            });
-                          }
-                        })();
-                      }}
-                    >
-                      {cancellingInvitationIds.has(invitation.id) ? (
-                        <Spinner diameter="calc(var(--spacing) * 3.5)" />
-                      ) : (
-                        <X {...stylex.props(styles.smallIcon)} />
-                      )}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </MobileSettingsSection>
-      ) : null}
-
-      {isWorkspaceSurface && workspaceJoinRequestsSlot ? (
-        <MobileSettingsSection noCard>
-          <div {...stylex.props(styles.workspaceInset)}>{workspaceJoinRequestsSlot}</div>
-        </MobileSettingsSection>
-      ) : null}
-
-      {surface === 'account' && canGenerateCliApiKey ? (
-        <MobileSettingsSection
-          title={t('settings.account.cliAuth.title')}
-          description={t('settings.account.cliAuth.description')}
-          actions={
-            <Button
-              size="small"
-              height="calc(var(--spacing) * 8)"
-              className={stylex.props(styles.actionSpacing).className}
-              onClick={() => {
-                setCliApiKeyDialogOpen(true);
-              }}
-              disabled={!onGenerateCliApiKey}
-            >
-              <KeyRound {...stylex.props(styles.buttonIcon)} />
-              {t('settings.account.cliAuth.generateButton')}
-            </Button>
-          }
-        >
-          {isLoadingCliApiKeys ? (
-            <div {...stylex.props(styles.keyRow)}>
-              <Spinner diameter="calc(var(--spacing) * 3.5)" />
-              {t('settings.account.cliAuth.loadingRecords')}
-            </div>
-          ) : cliApiKeys.length === 0 ? (
-            <div {...stylex.props(styles.keyEmpty)}>{t('settings.account.cliAuth.noRecords')}</div>
-          ) : (
-            cliApiKeys.map((apiKey, index) => {
-              const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
-              const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest);
-              const sourceLabel =
-                apiKey.source === 'auto'
-                  ? t('settings.account.cliAuth.sourceAuto')
-                  : apiKey.source === 'manual'
-                    ? t('settings.account.cliAuth.sourceManual')
-                    : null;
-
-              return (
-                <div
-                  key={apiKey.id}
-                  {...stylex.props(styles.listStack, index > 0 && styles.listRowDivider)}
-                >
-                  <div {...stylex.props(styles.keyBody)}>
-                    <div {...stylex.props(styles.keyTitleLine)}>
-                      <p {...stylex.props(styles.keyNote)}>
-                        {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
-                      </p>
-                      {sourceLabel && <Badge>{sourceLabel}</Badge>}
-                      {createdAt && (
-                        <time dateTime={createdAt.dateTime} {...stylex.props(styles.keyTime)}>
-                          {createdAt.label}
-                        </time>
-                      )}
-                    </div>
-                    {(apiKey.keyPreview || lastRequest) && (
-                      <div {...stylex.props(styles.keyDetails)}>
-                        {apiKey.keyPreview && (
-                          <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>
-                        )}
-                        {lastRequest && (
-                          <span>
-                            {t('settings.account.cliAuth.lastUsed', { at: lastRequest.label })}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <Button
-                      variant="secondary"
-                      size="small"
-                      labelColor="hsl(var(--destructive) / 1)"
-                      xstyle={styles.destructiveOutline}
-                      onClick={() => setCliApiKeyToRevoke(apiKey)}
-                      disabled={revokingCliApiKeyId === apiKey.id}
-                    >
-                      {revokingCliApiKeyId === apiKey.id ? (
+                      {isSavingUserName ? (
                         <Spinner
                           diameter="calc(var(--spacing) * 3.5)"
-                          className={stylex.props(styles.pendingActionSpacing).className}
+                          className={stylex.props(styles.pendingNameInk).className}
                         />
                       ) : (
-                        <Trash2 {...stylex.props(styles.buttonIcon)} />
+                        <Pencil {...stylex.props(styles.namePencil)} />
                       )}
-                      {t('settings.account.cliAuth.revokeButton')}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </MobileSettingsSection>
-      ) : null}
-
-      {isWorkspaceSurface ? (
-        <MobileSettingsSection title={t('workspace.danger.title')}>
-          {role === 'owner' ? workspaceOwnershipSlot : null}
-          {role !== 'owner' && (
-            <MobileSettingsRow
-              label={t('workspace.danger.leaveWorkspace.title')}
-              helper={t('workspace.danger.leaveWorkspace.description')}
-              stack
-            >
-              <Button
-                variant="secondary"
-                size="small"
-                labelColor="hsl(var(--destructive) / 1)"
-                xstyle={styles.destructiveOutline}
-                onClick={() => setLeaveDialogOpen(true)}
-              >
-                {t('workspace.danger.leaveWorkspace.button')}
-              </Button>
-            </MobileSettingsRow>
-          )}
-          {role === 'owner' && (
-            <MobileSettingsRow
-              label={t('workspace.danger.deleteWorkspace.title')}
-              helper={t('workspace.danger.deleteWorkspace.description')}
-              stack
-            >
-              <Button
-                variant="secondary"
-                size="small"
-                labelColor="hsl(var(--destructive) / 1)"
-                xstyle={styles.destructiveOutline}
-                onClick={() => {
-                  // A live subscription blocks deletion; explain instead of
-                  // letting the backend reject the delete.
-                  if (deleteBillingGuard?.kind === 'active-subscription') {
-                    setDeleteBlockedDialogOpen(true);
-                    return;
+                    </button>
+                  )
+                ) : (
+                  <span {...stylex.props(styles.plainValue)}>{userNameBaseline || '—'}</span>
+                )}
+              </MobileSettingsRow>
+              <MobileSettingsRow label={t('settings.profile.avatar.label')} hasDivider>
+                <AvatarEditor
+                  kind="user"
+                  name={userNameBaseline}
+                  image={userImage}
+                  email={currentUser?.email}
+                  editable={Boolean(onUploadAvatar)}
+                  onUpload={(file) => handleUploadAvatar('user', file)}
+                />
+              </MobileSettingsRow>
+              {showLinkedAccounts ? (
+                <MobileSettingsRow label={t('settings.profile.bindings.label')} hasDivider>
+                  <LinkedAccountsList
+                    accounts={linkedAccounts}
+                    loading={isLoadingLinkedAccounts}
+                    onConnect={onConnectAccount}
+                  />
+                </MobileSettingsRow>
+              ) : null}
+              {onChangePassword && onSetupPassword ? (
+                <MobileSettingsRow
+                  label={t('settings.profile.password.label')}
+                  helper={
+                    hasPasswordCredential
+                      ? t('settings.profile.password.helper')
+                      : t('settings.profile.password.setupHelper')
                   }
-                  setDeleteDialogOpen(true);
-                }}
-              >
-                {t('workspace.danger.deleteWorkspace.button')}
-              </Button>
-            </MobileSettingsRow>
-          )}
-        </MobileSettingsSection>
-      ) : null}
+                  hasDivider
+                >
+                  <ChangePasswordButton
+                    hasPassword={hasPasswordCredential}
+                    onChangePassword={onChangePassword}
+                    onVerifyCurrentPassword={onVerifyCurrentPassword}
+                    onSetupPassword={onSetupPassword}
+                  />
+                </MobileSettingsRow>
+              ) : null}
+              <MobileSettingsRow label={t('settings.account.signOut')} hasDivider>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => {
+                    void onSignOut();
+                  }}
+                >
+                  <LogOut {...stylex.props(styles.buttonIcon)} />
+                  {t('settings.account.signOut')}
+                </Button>
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
 
-      {surface === 'account' && showAccountDeletion ? (
-        <MobileSettingsSection title={t('settings.account.accountDeletion.title')}>
-          <MobileSettingsRow
-            label={t('settings.account.accountDeletion.title')}
-            helper={t('settings.account.accountDeletion.description')}
-            stack
-          >
-            <Button
-              variant="secondary"
-              size="small"
-              xstyle={styles.destructiveOutline}
-              labelColor="hsl(var(--destructive) / 1)"
-              onClick={() => setDeleteAccountDialogOpen(true)}
+          {isWorkspaceSurface ? (
+            <MobileSettingsSection title={t('settings.workspace.title')}>
+              <MobileSettingsRow
+                label={t('settings.account.workspaceName')}
+                stack={canRenameOrganization && isEditingWorkspaceName}
+              >
+                {canRenameOrganization ? (
+                  isEditingWorkspaceName ? (
+                    <Input
+                      ref={workspaceNameInputRef}
+                      id="workspace-name-mobile"
+                      value={workspaceNameDraft}
+                      onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+                      onBlur={() => {
+                        void commitWorkspaceNameEdit();
+                      }}
+                      onKeyDown={handleWorkspaceNameKeyDown}
+                      maxLength={120}
+                      placeholder={t('settings.account.workspaceNamePlaceholder')}
+                      disabled={isRenamingOrganization}
+                      controlHeight="calc(var(--spacing) * 9)"
+                      aria-label={t('settings.account.workspaceName')}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      {...stylex.props(styles.nameButton)}
+                      onClick={beginWorkspaceNameEdit}
+                      disabled={isRenamingOrganization}
+                      aria-label={t('settings.account.workspaceNameEditLabel')}
+                    >
+                      <span {...stylex.props(styles.nameValue)}>{workspaceNameBaseline}</span>
+                      {isRenamingOrganization ? (
+                        <Spinner
+                          diameter="calc(var(--spacing) * 3.5)"
+                          className={stylex.props(styles.pendingNameInk).className}
+                        />
+                      ) : (
+                        <Pencil {...stylex.props(styles.namePencil)} />
+                      )}
+                    </button>
+                  )
+                ) : (
+                  <span {...stylex.props(styles.plainValue)}>{organization.name}</span>
+                )}
+              </MobileSettingsRow>
+              <MobileSettingsRow label={t('settings.workspace.avatar.label')} hasDivider>
+                <AvatarEditor
+                  kind="workspace"
+                  name={workspaceNameBaseline}
+                  image={workspaceLogo}
+                  editable={canRenameOrganization && Boolean(onUploadAvatar)}
+                  onUpload={(file) => handleUploadAvatar('workspace', file)}
+                />
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
+        </div>
+        {fold ? <div aria-hidden="true" style={{ flex: `0 0 ${fold.gapHeight}px` }} /> : null}
+        <div data-workspace-settings-details {...stylex.props(fold && styles.foldDetails)}>
+          {surface === 'account' ? (
+            <>
+              {accountMachinesSlot}
+              {accountBillingSlot}
+            </>
+          ) : null}
+
+          {isWorkspaceSurface ? (
+            <MobileSettingsSection
+              title={t('workspace.members.title')}
+              actions={
+                hasAdminPermission ? (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    height="calc(var(--spacing) * 8)"
+                    className={stylex.props(styles.actionSpacing).className}
+                    onClick={() => setInviteDialogOpen(true)}
+                  >
+                    <UserPlus {...stylex.props(styles.buttonIcon)} />
+                    {t('workspace.members.invite')}
+                  </Button>
+                ) : undefined
+              }
             >
-              <Trash2 {...stylex.props(styles.buttonIcon)} />
-              {t('settings.account.accountDeletion.button')}
-            </Button>
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
+              {members.map((member, index) => {
+                const isEditable =
+                  hasAdminPermission &&
+                  member.role !== 'owner' &&
+                  member.userId !== currentUser?.id;
+
+                return (
+                  <div
+                    key={member.id}
+                    {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
+                  >
+                    <UserAvatar user={member.user} size="large" {...stylex.props(styles.shrink)} />
+                    <div {...stylex.props(styles.listBody)}>
+                      <p {...stylex.props(styles.listName)}>
+                        {member.user?.name || '—'}
+                        {member.userId === currentUser?.id && (
+                          <span {...stylex.props(styles.listYou)}>
+                            ({t('workspace.members.you', 'you')})
+                          </span>
+                        )}
+                      </p>
+                      {member.user?.email ? (
+                        <p {...stylex.props(styles.listMeta)}>{member.user.email}</p>
+                      ) : null}
+                    </div>
+                    <div {...stylex.props(styles.listActions)}>
+                      {isEditable ? (
+                        <Menu.Root>
+                          <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
+                            {t(`organization.role.${member.role}`)}
+                            <ChevronDown {...stylex.props(styles.chevron)} />
+                          </Menu.Trigger>
+                          <Menu.Content align="end">
+                            <Menu.RadioGroup
+                              value={member.role}
+                              onValueChange={(nextRole) => {
+                                if (nextRole === 'member' || nextRole === 'admin') {
+                                  void onUpdateRole(member, nextRole);
+                                }
+                              }}
+                            >
+                              <Menu.RadioItem value="member" indicator="check">
+                                {t('organization.role.member')}
+                              </Menu.RadioItem>
+                              <Menu.RadioItem value="admin" indicator="check">
+                                {t('organization.role.admin')}
+                              </Menu.RadioItem>
+                            </Menu.RadioGroup>
+                          </Menu.Content>
+                        </Menu.Root>
+                      ) : (
+                        <Badge>{t(`organization.role.${member.role}`)}</Badge>
+                      )}
+                      {isEditable && (
+                        <Button
+                          variant="ghost"
+                          icon
+                          aria-label={t('workspace.removeMember.title')}
+                          height="calc(var(--spacing) * 9)"
+                          width="calc(var(--spacing) * 9)"
+                          className={stylex.props(styles.workspaceDestructiveActionInk).className}
+                          onClick={() => {
+                            setUserToDelete(member.id);
+                            setDeleteUserDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 {...stylex.props(styles.smallIcon)} />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </MobileSettingsSection>
+          ) : null}
+
+          {isWorkspaceSurface && pendingInvitations.length > 0 ? (
+            <MobileSettingsSection title={t('workspace.invitations.title')}>
+              {pendingInvitations.map((invitation, index) => (
+                <div
+                  key={invitation.id}
+                  {...stylex.props(styles.listRow, index > 0 && styles.listRowDivider)}
+                >
+                  <div {...stylex.props(styles.inviteMark)}>
+                    <Mail {...stylex.props(styles.inviteIcon)} />
+                  </div>
+                  <div {...stylex.props(styles.listBody)}>
+                    {/* Emails have no spaces — `truncate` cut long addresses to an
+                   unreadable stub on narrow phones; wrap them instead. */}
+                    <p {...stylex.props(styles.inviteEmail)}>{invitation.email}</p>
+                    <div {...stylex.props(styles.inviteMeta)}>
+                      <span>{t(`organization.role.${invitation.role}`)}</span>
+                      <span {...stylex.props(styles.inviteMetaItem)}>
+                        <Clock {...stylex.props(styles.inviteClock)} />
+                        {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
+                      </span>
+                    </div>
+                  </div>
+                  {invitation.status === 'pending' && (
+                    <div {...stylex.props(styles.listActions)}>
+                      <Button
+                        variant="ghost"
+                        icon
+                        aria-label={t('workspace.invitations.copyLink')}
+                        height="calc(var(--spacing) * 9)"
+                        width="calc(var(--spacing) * 9)"
+                        className={stylex.props(styles.workspaceActionInk).className}
+                        onClick={() => {
+                          void onCopyInviteLink(getInviteLink(invitation));
+                        }}
+                      >
+                        <Copy {...stylex.props(styles.smallIcon)} />
+                      </Button>
+                      {hasAdminPermission && (
+                        <Button
+                          variant="ghost"
+                          icon
+                          aria-label={t('common.cancel')}
+                          height="calc(var(--spacing) * 9)"
+                          width="calc(var(--spacing) * 9)"
+                          className={stylex.props(styles.workspaceDestructiveActionInk).className}
+                          disabled={cancellingInvitationIds.has(invitation.id)}
+                          onClick={() => {
+                            void (async () => {
+                              setCancellingInvitationIds((prev) => {
+                                const next = new Set(prev);
+                                next.add(invitation.id);
+                                return next;
+                              });
+                              try {
+                                await onCancelInvitation(invitation.id);
+                                setPendingInvitations((prev) =>
+                                  prev.filter((inv) => inv.id !== invitation.id)
+                                );
+                              } catch {
+                                // Error already handled by onCancelInvitation (toast shown)
+                              } finally {
+                                setCancellingInvitationIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(invitation.id);
+                                  return next;
+                                });
+                              }
+                            })();
+                          }}
+                        >
+                          {cancellingInvitationIds.has(invitation.id) ? (
+                            <Spinner diameter="calc(var(--spacing) * 3.5)" />
+                          ) : (
+                            <X {...stylex.props(styles.smallIcon)} />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </MobileSettingsSection>
+          ) : null}
+
+          {isWorkspaceSurface && workspaceJoinRequestsSlot ? (
+            <MobileSettingsSection noCard>
+              <div {...stylex.props(styles.workspaceInset)}>{workspaceJoinRequestsSlot}</div>
+            </MobileSettingsSection>
+          ) : null}
+
+          {surface === 'account' && canGenerateCliApiKey ? (
+            <MobileSettingsSection
+              title={t('settings.account.cliAuth.title')}
+              description={t('settings.account.cliAuth.description')}
+              actions={
+                <Button
+                  size="small"
+                  height="calc(var(--spacing) * 8)"
+                  className={stylex.props(styles.actionSpacing).className}
+                  onClick={() => {
+                    setCliApiKeyDialogOpen(true);
+                  }}
+                  disabled={!onGenerateCliApiKey}
+                >
+                  <KeyRound {...stylex.props(styles.buttonIcon)} />
+                  {t('settings.account.cliAuth.generateButton')}
+                </Button>
+              }
+            >
+              {isLoadingCliApiKeys ? (
+                <div {...stylex.props(styles.keyRow)}>
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" />
+                  {t('settings.account.cliAuth.loadingRecords')}
+                </div>
+              ) : cliApiKeys.length === 0 ? (
+                <div {...stylex.props(styles.keyEmpty)}>
+                  {t('settings.account.cliAuth.noRecords')}
+                </div>
+              ) : (
+                cliApiKeys.map((apiKey, index) => {
+                  const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
+                  const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest);
+                  const sourceLabel =
+                    apiKey.source === 'auto'
+                      ? t('settings.account.cliAuth.sourceAuto')
+                      : apiKey.source === 'manual'
+                        ? t('settings.account.cliAuth.sourceManual')
+                        : null;
+
+                  return (
+                    <div
+                      key={apiKey.id}
+                      {...stylex.props(styles.listStack, index > 0 && styles.listRowDivider)}
+                    >
+                      <div {...stylex.props(styles.keyBody)}>
+                        <div {...stylex.props(styles.keyTitleLine)}>
+                          <p {...stylex.props(styles.keyNote)}>
+                            {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
+                          </p>
+                          {sourceLabel && <Badge>{sourceLabel}</Badge>}
+                          {createdAt && (
+                            <time dateTime={createdAt.dateTime} {...stylex.props(styles.keyTime)}>
+                              {createdAt.label}
+                            </time>
+                          )}
+                        </div>
+                        {(apiKey.keyPreview || lastRequest) && (
+                          <div {...stylex.props(styles.keyDetails)}>
+                            {apiKey.keyPreview && (
+                              <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>
+                            )}
+                            {lastRequest && (
+                              <span>
+                                {t('settings.account.cliAuth.lastUsed', { at: lastRequest.label })}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          xstyle={styles.destructiveOutline}
+                          onClick={() => setCliApiKeyToRevoke(apiKey)}
+                          disabled={revokingCliApiKeyId === apiKey.id}
+                        >
+                          {revokingCliApiKeyId === apiKey.id ? (
+                            <Spinner
+                              diameter="calc(var(--spacing) * 3.5)"
+                              className={stylex.props(styles.pendingActionSpacing).className}
+                            />
+                          ) : (
+                            <Trash2 {...stylex.props(styles.buttonIcon)} />
+                          )}
+                          {t('settings.account.cliAuth.revokeButton')}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </MobileSettingsSection>
+          ) : null}
+
+          {isWorkspaceSurface ? (
+            <MobileSettingsSection title={t('workspace.danger.title')}>
+              {role === 'owner' ? workspaceOwnershipSlot : null}
+              {role !== 'owner' && (
+                <MobileSettingsRow
+                  label={t('workspace.danger.leaveWorkspace.title')}
+                  helper={t('workspace.danger.leaveWorkspace.description')}
+                  stack
+                >
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    xstyle={styles.destructiveOutline}
+                    onClick={() => setLeaveDialogOpen(true)}
+                  >
+                    {t('workspace.danger.leaveWorkspace.button')}
+                  </Button>
+                </MobileSettingsRow>
+              )}
+              {role === 'owner' && (
+                <MobileSettingsRow
+                  label={t('workspace.danger.deleteWorkspace.title')}
+                  helper={t('workspace.danger.deleteWorkspace.description')}
+                  stack
+                >
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    xstyle={styles.destructiveOutline}
+                    onClick={() => {
+                      // A live subscription blocks deletion; explain instead of
+                      // letting the backend reject the delete.
+                      if (deleteBillingGuard?.kind === 'active-subscription') {
+                        setDeleteBlockedDialogOpen(true);
+                        return;
+                      }
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    {t('workspace.danger.deleteWorkspace.button')}
+                  </Button>
+                </MobileSettingsRow>
+              )}
+            </MobileSettingsSection>
+          ) : null}
+
+          {surface === 'account' && showAccountDeletion ? (
+            <MobileSettingsSection title={t('settings.account.accountDeletion.title')}>
+              <MobileSettingsRow
+                label={t('settings.account.accountDeletion.title')}
+                helper={t('settings.account.accountDeletion.description')}
+                stack
+              >
+                <Button
+                  variant="secondary"
+                  size="small"
+                  xstyle={styles.destructiveOutline}
+                  onClick={() => setDeleteAccountDialogOpen(true)}
+                >
+                  <Trash2 {...stylex.props(styles.buttonIcon)} />
+                  {t('settings.account.accountDeletion.button')}
+                </Button>
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
+        </div>
+      </div>
 
       {surface === 'account' ? (
         <Dialog.Root open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>

@@ -1,3 +1,9 @@
+import {
+  uploadEncryptedAttachment,
+  attachmentSha256,
+  encryptedAttachmentPath,
+  type EncryptedAttachment,
+} from '@lody/shared';
 import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
 import type { SessionFileRoot } from '@lody/shared';
 import fs from 'node:fs';
@@ -117,7 +123,8 @@ const SESSION_IMAGE_MIME_TYPE_BY_EXTENSION: Record<
 export class SessionAttachmentTransfer {
   constructor(
     private readonly token: string,
-    private readonly serverBaseUrl?: string
+    private readonly serverBaseUrl?: string,
+    private readonly encrypted?: { token(): Promise<string> }
   ) {}
   private resolveServerBaseUrl(): string {
     const url = this.serverBaseUrl?.trim();
@@ -191,6 +198,22 @@ export class SessionAttachmentTransfer {
     sessionId: SessionId;
     file: UploadableImageFile;
   }): Promise<UploadedSessionImage> {
+    if (this.encrypted) {
+      const result = await this.uploadProtected({
+        ...args,
+        kind: 'image',
+        read: async (offset, length) =>
+          new Uint8Array(args.file.bytes.subarray(offset, offset + length)),
+      });
+      return {
+        imageId: result.encryption.parts[0] ?? '',
+        fileName: args.file.fileName,
+        mimeType: args.file.mimeType,
+        sizeBytes: args.file.sizeBytes,
+        encryption: result.encryption,
+        downloadUrl: result.downloadUrl,
+      };
+    }
     const serverBaseUrl = this.resolveServerBaseUrl();
     const uploadUrl = buildSessionImageApiUrl(
       serverBaseUrl,
@@ -551,6 +574,69 @@ export class SessionAttachmentTransfer {
     );
   }
 
+  private async uploadProtected(args: {
+    workspaceId: WorkspaceId;
+    sessionId: SessionId;
+    file: { fileName: string; mimeType: string; sizeBytes: number };
+    kind: 'image' | 'file';
+    signal?: AbortSignal;
+    read(offset: number, length: number): Promise<Uint8Array>;
+  }): Promise<{ encryption: EncryptedAttachment; sha256: string; downloadUrl: string }> {
+    if (!this.encrypted) throw new Error('e2ee_attachment_unavailable');
+    const token = await this.encrypted.token();
+    const base = this.resolveServerBaseUrl();
+    const result = await uploadEncryptedAttachment({
+      ...args,
+      ...args.file,
+      upload: async (bytes) => {
+        const response = await fetch(
+          buildSessionFileApiUrl(
+            base,
+            encryptedAttachmentPath(getSessionFileUploadApiPath(args.workspaceId), args.kind)
+          ),
+          {
+            method: 'POST',
+            signal: args.signal,
+            headers: {
+              Authorization: `Bearer ${token}`,
+              ...buildSessionFileUploadMetadataHeaders({
+                sessionId: args.sessionId,
+                fileName: 'attachment.bin',
+                mimeType: 'application/octet-stream',
+                sha256: attachmentSha256(bytes),
+                sizeBytes: bytes.length,
+                textPreview: false,
+              }),
+            },
+            body: bytes as Uint8Array<ArrayBuffer>,
+          }
+        );
+        if (!response.ok)
+          throw new Error(`Encrypted attachment upload failed (${response.status})`);
+        const body: unknown = await response.json();
+        const block = SessionInputBlockSchema.parse(
+          body && typeof body === 'object' && 'file' in body ? body.file : undefined
+        );
+        if (block.type !== 'file') throw new Error('Invalid encrypted attachment receipt');
+        return block.fileId;
+      },
+    });
+    return {
+      ...result,
+      downloadUrl: buildSessionFileApiUrl(
+        base,
+        encryptedAttachmentPath(
+          getSessionFileDownloadApiPath(
+            args.workspaceId,
+            args.sessionId,
+            result.encryption.parts[0] ?? ''
+          ),
+          args.kind
+        )
+      ),
+    };
+  }
+
   async uploadValidatedSessionFile(args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
@@ -558,6 +644,42 @@ export class SessionAttachmentTransfer {
     /** Cancels the relay upload mid-flight (backfill revoke, S5/D10). */
     signal?: AbortSignal;
   }): Promise<UploadedSessionFile> {
+    if (this.encrypted) {
+      const handle = await fs.promises.open(
+        args.file.absolutePath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+      );
+      try {
+        const result = await this.uploadProtected({
+          ...args,
+          kind: 'file',
+          read: async (offset, length) => {
+            const bytes = new Uint8Array(length);
+            let filled = 0;
+            while (filled < length) {
+              const next = await handle.read(bytes, filled, length - filled, offset + filled);
+              if (!next.bytesRead) throw new Error('Attachment changed during upload');
+              filled += next.bytesRead;
+            }
+            return bytes;
+          },
+        });
+        if (result.sha256 !== args.file.sha256) throw new Error('Attachment changed during upload');
+        return {
+          type: 'file',
+          fileId: result.encryption.parts[0] ?? '',
+          fileName: args.file.fileName,
+          mimeType: args.file.mimeType,
+          sizeBytes: args.file.sizeBytes,
+          textPreview: args.file.textPreview,
+          transport: 'r2',
+          uploadedAt: Date.now(),
+          ...result,
+        };
+      } finally {
+        await handle.close();
+      }
+    }
     if (shouldUseSingleShotUpload(args.file.sizeBytes)) {
       return await this.uploadSessionFileSingleShot(args);
     }

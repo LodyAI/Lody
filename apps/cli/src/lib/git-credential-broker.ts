@@ -398,7 +398,9 @@ export class GitCredentialBroker {
   private starting?: Promise<GitCredentialBrokerEnv>;
 
   ensureStarted(): Promise<GitCredentialBrokerEnv> {
-    return (this.starting ??= this.start());
+    return (this.starting ??= this.start().finally(() => {
+      this.starting = undefined;
+    }));
   }
 
   private async start(): Promise<GitCredentialBrokerEnv> {

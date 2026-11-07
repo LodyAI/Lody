@@ -4,11 +4,12 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 `AGENTS.md` only. Prefer extending a primitive here over a private replacement in a
 feature directory.
 
-## Drawer popups
+## Drawers
 
-- `DrawerContent` provides a state-backed no-drag host for popups and modals.
-  Keep portals inside that modal and outside scrolling children: body portals
-  inherit Vaul's pointer lock and clicks pass through to the underlying content.
+- Native iOS side drawers stay CSS-sized. Non-chat panels opt into
+  `nativeKeyboardInset`; chat composers own their lift.
+- `DrawerContent` keeps popup/modal hosts state-backed, no-drag, inside the
+  modal and outside scrollers. Body portals inherit pointer lock and pass clicks through.
 
 ## Emoji picker
 

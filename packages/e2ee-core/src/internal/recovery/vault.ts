@@ -19,8 +19,11 @@ import {
   sameCiphertext,
   ciphertextDigest,
   usePrf,
+  useCanonicalSecret,
+  isVerifiedPasskeyRegistration,
   type VaultCiphertext,
   type VerifiedPasskeyPrf,
+  type VerifiedPasskeyRegistration,
 } from './crypto';
 
 /** Shape of the {@link RecoveryVaultStorePort} backend port. */
@@ -34,6 +37,7 @@ const TrustSchema = Schema.Struct({
   length: Schema.Number,
 });
 const PackageSchema = Schema.Struct({
+  formatVersion: Schema.Literal(1),
   genesis: Schema.String,
   membershipId: Schema.String,
   signingPublic: Schema.Uint8Array,
@@ -45,6 +49,30 @@ const PackageSchema = Schema.Struct({
 });
 /** The private recovery package (recovery device keys and vault unlock material) the user keeps offline. Wipe it with `wipeRecoveryPackage` after use. */
 export type RecoveryPrivatePackage = typeof PackageSchema.Type;
+// RFC 8410 OneAsymmetricKey v1 without attributes or public key: the exact
+// 48-byte PKCS#8 that WebCrypto exports for Ed25519 (OID 1.3.101.112) and
+// X25519 (OID 1.3.101.110). Any other DER, version or algorithm is rejected.
+const pkcs8Prefix = (oid: number) =>
+  Uint8Array.of(
+    0x30,
+    0x2e,
+    0x02,
+    0x01,
+    0x00,
+    0x30,
+    0x05,
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    oid,
+    0x04,
+    0x22,
+    0x04,
+    0x20
+  );
+const isRfc8410Pkcs8 = (bytes: Uint8Array, oid: number) =>
+  bytes.length === 48 && bytesEqual(bytes.subarray(0, 16), pkcs8Prefix(oid));
 export function ownRecoveryPackage(input: RecoveryPrivatePackage): RecoveryPrivatePackage {
   const value = Result.getOrThrow(Schema.decodeUnknownResult(PackageSchema)(input));
   fromHex(value.genesis);
@@ -60,10 +88,8 @@ export function ownRecoveryPackage(input: RecoveryPrivatePackage): RecoveryPriva
     value.trust.genesisRecord.length > 8192 ||
     value.signingPublic.length !== 32 ||
     value.encryptionPublic.length !== 32 ||
-    value.signingPrivate.length < 32 ||
-    value.signingPrivate.length > 256 ||
-    value.encryptionPrivate.length < 32 ||
-    value.encryptionPrivate.length > 256
+    !isRfc8410Pkcs8(value.signingPrivate, 0x70) ||
+    !isRfc8410Pkcs8(value.encryptionPrivate, 0x6e)
   )
     throw vaultError('invalid-input');
   return {
@@ -97,11 +123,51 @@ const ReferenceSchema = Schema.Struct({
   generation: Schema.Number,
   retired: Schema.Boolean,
 });
-const IndexSchema = Schema.Struct({ entries: Schema.Array(ReferenceSchema) });
+/** One enrolled passkey. CAS references its wrap, so the service refuses to delete it. */
+export interface RecoveryPasskeyReference {
+  readonly entryId: string;
+  readonly credentialId: string;
+  readonly label: string;
+}
+const PasskeySchema = Schema.Struct({
+  entryId: Schema.String,
+  credentialId: Schema.String,
+  label: Schema.String,
+});
+const MAX_VAULT_PASSKEYS = 8;
+const IndexSchema = Schema.Struct({
+  entries: Schema.Array(ReferenceSchema),
+  passkeys: Schema.optional(Schema.Array(PasskeySchema)),
+});
 export type RecoveryVaultIndex = typeof IndexSchema.Type;
-function parseIndex(input: Uint8Array): RecoveryVaultIndex {
+const passkeysOf = (value: RecoveryVaultIndex): readonly RecoveryPasskeyReference[] =>
+  value.passkeys ?? [];
+/** The index plaintext; a vault with no passkeys keeps its existing bytes. */
+const indexPlain = (
+  entries: readonly RecoveryEntryReference[],
+  passkeys: readonly RecoveryPasskeyReference[]
+) => canonical(passkeys.length > 0 ? { entries, passkeys } : { entries });
+const indexReferences = (
+  entries: readonly RecoveryEntryReference[],
+  passkeys: readonly RecoveryPasskeyReference[]
+) => [...entries.map((ref) => ref.entryId), ...passkeys.map((ref) => ref.entryId)];
+const passkeyEntryId = (vaultId: string, credentialId: string) =>
+  digest(canonical(['vault-v1', vaultId, credentialId]));
+function parseIndex(input: Uint8Array, vaultId: string): RecoveryVaultIndex {
   const value = Result.getOrThrow(Schema.decodeUnknownResult(IndexSchema)(parseCanonical(input)));
   if (value.entries.length > 1024) throw vaultError('invalid-input');
+  const passkeys = passkeysOf(value);
+  if (
+    passkeys.length > MAX_VAULT_PASSKEYS ||
+    new Set(passkeys.map((ref) => ref.entryId)).size !== passkeys.length ||
+    passkeys.some(
+      (ref) =>
+        ref.entryId !== passkeyEntryId(vaultId, ref.credentialId) ||
+        !ref.label ||
+        ref.label.length > 128
+    )
+  )
+    throw vaultError('invalid-input');
   const active = new Set<string>();
   for (const ref of value.entries) {
     fromHex(ref.genesis);
@@ -203,7 +269,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
       return yield* vaultError('rollback');
     const value = yield* Effect.acquireUseRelease(
       attempt(() => decryptVault(master, vaultId, header, 'index')),
-      (plain) => attempt(() => parseIndex(plain)),
+      (plain) => attempt(() => parseIndex(plain, vaultId)),
       (plain) => Effect.sync(() => plain.fill(0))
     );
     if (!pin || pin.revision !== header.revision)
@@ -236,8 +302,9 @@ const makeSession = Effect.fnUntraced(function* (input: {
       attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
       (plain) =>
         attempt(() => {
-          const value = ownRecoveryPackage(
-            Result.getOrThrow(Schema.decodeUnknownResult(PackageSchema)(parseCanonical(plain)))
+          // ownRecoveryPackage returns copies; the decoded temporaries are wiped.
+          const value = useCanonicalSecret(plain, (decoded) =>
+            ownRecoveryPackage(decoded as RecoveryPrivatePackage)
           );
           if (
             value.genesis !== ref.genesis ||
@@ -325,6 +392,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
       existing && ref.entryId === existing.entryId ? { ...ref, retired: true } : ref
     );
     entries.push(candidate);
+    const passkeys = passkeysOf(before.value);
     const intentKey = `vault-v1/${vaultId}/index-intent/${candidate.entryId}`;
     const oldIntent = yield* local.read(intentKey);
     const expected = before.header
@@ -350,14 +418,14 @@ const makeSession = Effect.fnUntraced(function* (input: {
         attempt(() => decryptVault(master, vaultId, next, 'index')),
         (plain) =>
           attempt(() => {
-            const restored = parseIndex(plain);
-            if (!bytesEqual(canonical(restored), canonical({ entries })))
+            const restored = parseIndex(plain, vaultId);
+            if (!bytesEqual(canonical(restored), indexPlain(entries, passkeys)))
               throw vaultError('authentication');
           }),
         (plain) => Effect.sync(() => plain.fill(0))
       );
     } else {
-      const raw = canonical({ entries });
+      const raw = indexPlain(entries, passkeys);
       next = yield* Effect.acquireUseRelease(
         Effect.succeed(raw),
         (plain) =>
@@ -394,7 +462,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
         ? { revision: before.header.revision, digest: ciphertextDigest(before.header) }
         : null,
       next,
-      entries.map((ref) => ref.entryId)
+      indexReferences(entries, passkeys)
     );
     const after = yield* index();
     const savedIntent = yield* local.read(intentKey);
@@ -416,6 +484,38 @@ const makeSession = Effect.fnUntraced(function* (input: {
     // Different workspace updates require an explicit caller retry/merge.
     return { outcome: 'Conflict' as const, reference: null };
   });
+  const commitPasskeys = Effect.fnUntraced(function* (
+    before: Effect.Success<ReturnType<typeof index>>,
+    passkeys: readonly RecoveryPasskeyReference[]
+  ) {
+    const next = yield* Effect.acquireUseRelease(
+      attempt(() => indexPlain(before.value.entries, passkeys)),
+      (plain) =>
+        attempt(() =>
+          encryptVault(
+            master,
+            vaultId,
+            {
+              entryId: indexId(vaultId),
+              revision: (before.header?.revision ?? -1) + 1,
+              previous: before.header ? ciphertextDigest(before.header) : null,
+              purpose: 'index',
+            },
+            plain
+          )
+        ),
+      (plain) => Effect.sync(() => plain.fill(0))
+    );
+    const outcome = yield* store.compareAndSwapIndex(
+      vaultId,
+      before.header
+        ? { revision: before.header.revision, digest: ciphertextDigest(before.header) }
+        : null,
+      next,
+      indexReferences(before.value.entries, passkeys)
+    );
+    if (outcome !== 'Committed') return yield* vaultError('conflict');
+  });
   return Object.freeze({
     vaultId,
     locator,
@@ -425,29 +525,92 @@ const makeSession = Effect.fnUntraced(function* (input: {
       ownedOperation(upload(value, entryId)),
     reserve: (candidate: RecoveryEntryReference) => ownedOperation(reserve(candidate)),
     replace: (candidate: RecoveryEntryReference) => ownedOperation(reserve(candidate, true)),
-    addPasskey: (capability: VerifiedPasskeyPrf) =>
+    listPasskeys: () =>
+      ownedOperation(
+        Effect.map(index(), (before) => passkeysOf(before.value).map((ref) => ({ ...ref })))
+      ),
+    /** Wrap V for a passkey and list it. Safe to retry after any failure: an uploaded
+     * wrap is immutable, so a retry reuses it once it proves to hold this V. */
+    addPasskey: (request: {
+      readonly registration: VerifiedPasskeyRegistration;
+      readonly assertion: VerifiedPasskeyPrf;
+      readonly label: string;
+    }) =>
       ownedOperation(
         Effect.gen(function* () {
           yield* attempt(guard);
-          const id = digest(canonical(['vault-v1', vaultId, capability.credentialId])),
-            prf = yield* attempt(() => usePrf(capability));
-          const entry = yield* Effect.acquireUseRelease(
-            Effect.succeed(prf),
+          const credentialId = request.assertion.credentialId;
+          if (
+            !isVerifiedPasskeyRegistration(request.registration) ||
+            request.registration.credentialId !== credentialId
+          )
+            return yield* vaultError('prf-unavailable');
+          if (!request.label || request.label.length > 128)
+            return yield* vaultError('invalid-input');
+          const id = passkeyEntryId(vaultId, credentialId),
+            before = yield* index(),
+            passkeys = passkeysOf(before.value);
+          if (passkeys.some((ref) => ref.entryId === id)) return id;
+          if (passkeys.length >= MAX_VAULT_PASSKEYS) return yield* vaultError('invalid-input');
+          yield* Effect.acquireUseRelease(
+            attempt(() => usePrf(request.assertion)),
             (key) =>
-              attempt(() =>
-                encryptVault(
-                  key,
-                  vaultId,
-                  { entryId: id, revision: 0, previous: null, purpose: 'prf-wrap' },
-                  master
-                )
-              ),
+              Effect.gen(function* () {
+                let stored = yield* store.readEntry(vaultId, id);
+                if (!stored) {
+                  const entry = yield* attempt(() =>
+                    encryptVault(
+                      key,
+                      vaultId,
+                      { entryId: id, revision: 0, previous: null, purpose: 'prf-wrap' },
+                      master
+                    )
+                  );
+                  yield* store.putImmutable(vaultId, entry);
+                  stored = yield* store.readEntry(vaultId, id);
+                  if (!stored || !sameCiphertext(entry, stored))
+                    return yield* vaultError('storage');
+                }
+                const held = stored;
+                yield* Effect.acquireUseRelease(
+                  attempt(() => decryptVault(key, vaultId, held, 'prf-wrap')),
+                  (opened) =>
+                    bytesEqual(opened, master)
+                      ? Effect.void
+                      : Effect.fail(vaultError('authentication')),
+                  (opened) => Effect.sync(() => opened.fill(0))
+                );
+              }),
             (key) => Effect.sync(() => key.fill(0))
           );
-          yield* store.putImmutable(vaultId, entry);
-          const read = yield* store.readEntry(vaultId, id);
-          if (!read || !sameCiphertext(entry, read)) return yield* vaultError('storage');
+          yield* commitPasskeys(before, [
+            ...passkeys,
+            { entryId: id, credentialId, label: request.label },
+          ]);
           return id;
+        })
+      ),
+    /** Remove a passkey and delete its wrap. This stops future use only: a copied wrap
+     * plus the credential still opens V, so a suspected compromise replaces the vault. */
+    removePasskey: (entryId: string) =>
+      ownedOperation(
+        Effect.gen(function* () {
+          yield* attempt(guard);
+          const before = yield* index(),
+            passkeys = passkeysOf(before.value);
+          if (!passkeys.some((ref) => ref.entryId === entryId))
+            return yield* vaultError('conflict');
+          yield* commitPasskeys(
+            before,
+            passkeys.filter((ref) => ref.entryId !== entryId)
+          );
+          const after = yield* index();
+          if (!after.header) return yield* vaultError('storage');
+          yield* store.deleteUnreferenced(vaultId, entryId, {
+            revision: after.header.revision,
+            digest: ciphertextDigest(after.header),
+          });
+          if (yield* store.readEntry(vaultId, entryId)) return yield* vaultError('storage');
         })
       ),
     cleanupRetired: (entryId: string, confirmation: { readonly confirmedRecoveryLoss: boolean }) =>
@@ -486,9 +649,9 @@ const makeSession = Effect.fnUntraced(function* (input: {
             )
               return yield* vaultError('pending');
           }
-          const plain = canonical({
-            entries: before.value.entries.filter((ref) => ref.entryId !== entryId),
-          });
+          const entries = before.value.entries.filter((ref) => ref.entryId !== entryId),
+            passkeys = passkeysOf(before.value);
+          const plain = indexPlain(entries, passkeys);
           const next = yield* Effect.acquireUseRelease(
             Effect.succeed(plain),
             (value) =>
@@ -512,9 +675,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
               vaultId,
               { revision: before.header.revision, digest: ciphertextDigest(before.header) },
               next,
-              before.value.entries
-                .filter((ref) => ref.entryId !== entryId)
-                .map((ref) => ref.entryId)
+              indexReferences(entries, passkeys)
             )) !== 'Committed'
           )
             return yield* vaultError('conflict');
@@ -540,10 +701,8 @@ const makeSession = Effect.fnUntraced(function* (input: {
             attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
             (plain) =>
               attempt(() => {
-                const value = ownRecoveryPackage(
-                  Result.getOrThrow(
-                    Schema.decodeUnknownResult(PackageSchema)(parseCanonical(plain))
-                  )
+                const value = useCanonicalSecret(plain, (decoded) =>
+                  ownRecoveryPackage(decoded as RecoveryPrivatePackage)
                 );
                 return {
                   reference: {
@@ -570,6 +729,8 @@ export const createRecoveryVault = Effect.fnUntraced(function* (input: {
   locator: string;
   store: RecoveryVaultStore;
   local: RecoveryVaultLocalStore;
+  /** Runs before anything reaches the service, so a failed save leaves no vault behind. */
+  persistFile?: (file: Uint8Array) => Effect.Effect<unknown, unknown>;
 }) {
   if (!input.locator || input.locator.length > 2048) return yield* vaultError('invalid-input');
   const vaultId = yield* attempt(() => hex(random(32))),
@@ -590,11 +751,17 @@ export const createRecoveryVault = Effect.fnUntraced(function* (input: {
             secret.master
           )
         );
+        if (input.persistFile)
+          yield* input
+            .persistFile(new Uint8Array(recoveryFile))
+            .pipe(Effect.mapError(() => vaultError('storage')));
         yield* input.store.putImmutable(vaultId, wrapped);
         const read = yield* input.store.readEntry(vaultId, vaultId);
         if (!read || !sameCiphertext(wrapped, read)) return yield* vaultError('storage');
         const vault = yield* makeSession({
-          ...input,
+          locator: input.locator,
+          store: input.store,
+          local: input.local,
           vaultId,
           master: new Uint8Array(secret.master),
         });
@@ -638,7 +805,7 @@ export const openRecoveryVaultWithPasskey = Effect.fnUntraced(function* (input: 
   store: RecoveryVaultStore;
   local: RecoveryVaultLocalStore;
 }) {
-  const id = digest(canonical(['vault-v1', input.vaultId, input.credential.credentialId])),
+  const id = passkeyEntryId(input.vaultId, input.credential.credentialId),
     key = yield* attempt(() => usePrf(input.credential));
   return yield* Effect.acquireUseRelease(
     Effect.succeed(key),

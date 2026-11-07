@@ -1,13 +1,13 @@
 # iOS simulator side panel
 
 Status: implemented
-Translation: current
+Translation: pending
 
 [中文](2026-09-27-ios-simulator-panel.zh.md)
 
 ## Abstract
 
-Add a dedicated iOS simulator panel to sessions assigned to a macOS machine. Machine RPC lists devices and manages preview preparation, while existing Quick Tunnels carry remote frames. The panel replaces browser navigation and annotation with device selection, connection status, and a small Lody-owned viewer, with Lody-owned device controls and a hardware shell. Browser and simulator require independent endpoint ownership. The first implementation uses MJPEG and a restricted Lody viewer, with no new frontend dependency. A real local service smoke test receives frames and stops cleanly; full remote/mobile acceptance and H.264 remain outside the verified scope.
+Add a dedicated iOS simulator panel to sessions assigned to a macOS machine. Machine RPC lists devices and manages preview preparation, while existing Quick Tunnels carry remote frames. The panel replaces browser navigation and annotation with device selection, connection status, and a small Lody-owned viewer, with Lody-owned device controls and a hardware shell. Browser and simulator require independent endpoint ownership. The shared device-preview core carries H.264 through WebSocket or WebRTC DataChannels into WebCodecs, retaining MJPEG fallback for iOS. Android uses an isolated ADB/scrcpy adapter with the same lifecycle and viewer. Local Android H.264 and shutdown are verified; deployment of the Android managed artifact, external proof signer, and remote/mobile acceptance remain separate release requirements.
 
 ## Requirements and implemented defaults
 
@@ -49,7 +49,7 @@ Home/app switcher/lock, rotation, shake, supported volume/Action buttons, explic
 Unicode input, appearance and simulator deep links. Capture saves a PNG or stages a
 composer attachment without sending. Fit/expanded view and the dependency-free device
 shell stay local; the shell preserves actual screen bounds and adds no duplicate island
-or Home bar. DeviceKit assets are loaded privately from the target Mac; illustrative CSS is only a missing-asset fallback.
+or Home bar. DeviceKit assets are loaded privately from the target Mac; missing assets show content without a drawn shell.
 
 Controls require `iosSimulatorControls: 1` independently of basic preview support.
 Text and deep links can contain credentials, so device actions use exact-origin
@@ -204,7 +204,7 @@ processes were removed. This checks native command acceptance and selected readb
 it does not prove every visible button effect or remote/mobile end-to-end behavior.
 
 The controls UI adds a responsive second toolbar row, mobile More menu, model-aware
-DeviceKit hardware exterior (with a CSS fallback) and draft-only screenshot attachment. It adds no dependency.
+DeviceKit hardware exterior (content-only while artwork is unavailable) and draft-only screenshot attachment. It adds no dependency.
 The final bridge tests cover exact reply identity, serial controls, timeout and
 navigation/unmount cancellation, and state-before-ack rotation without a double turn.
 The viewer's acknowledged absolute angle is the only orientation authority. The UI
@@ -218,7 +218,7 @@ fixed Baguette routes, normalizes geometry/button hit regions and drops upstream
 The private gateway caches bounded geometry/PNG bytes; the initialized viewer transfers
 them to its exact parent. The renderer checks identity, geometry and PNG dimensions,
 creates a revocable object URL and rotates the exterior independently of screen pixels.
-Missing assets retain the drawn fallback. No asset is bundled or publicly published.
+Missing assets show content without a drawn shell. No asset is bundled or publicly published.
 
 For iPhone/iPad, the owned worker writes device-local
 `com.apple.Preferences AutomaticMinimizationEnabled=false` and posts
@@ -596,9 +596,9 @@ open the simulator sidebar on an unconsumed hint. Mobile keeps explicit opening.
 SessionStorage remembers consumption per session for the current browser tab, with a
 mounted-view fallback when storage is unavailable; switching sessions, remounting or
 manually closing the sidebar must not repeatedly open the same hint. A new operation
-can open it again. A Side Chat binds its exact originating Session, with the override
-fenced to the parent and selected top conversation; it never starts its parent's
-preview. No global polling or parsing agent output is introduced.
+can open it again. Side Chats and child tabs bind the main conversation's preview. The daemon
+authorizes both identities on the same machine before resolving ownership, while
+responses retain the original request identity and child cleanup stays independent. No global polling or parsing agent output is introduced.
 
 Tests cover accepted/reused starts and publication failure, simulator-only and combined
 composer actions, and desktop/mobile consumption across session switches and remounts.
@@ -606,3 +606,61 @@ Static security/correctness/scope review and fresh refutation covered this incre
 Physical mobile interaction is not part of this validation.
 
 Validation: standalone public full check passed (CLI 3,453 tests plus four skipped; components 4,709 tests), CLI build and formatting passed, docs check passed. Outer affected checking remains blocked by existing ACP adapter type/dependency errors. No native runtime or Cloud deployment change is required; update the frontend and simulator-host CLI.
+
+## Shared Android adapter boundary
+
+The common lifecycle, gateway, WebRTC DataChannels, flow credits and WebCodecs
+viewer now live in `apps/cli/src/device-preview`. Platform adapters retain native
+capture, discovery and controls. This avoids a second transport/lease owner from
+serve-avd; official scrcpy-server plus Tango provides H.264 and explicit device
+control without running a separate general-purpose web/ADB service. Android IDs
+are case-sensitive AVD names and use `android-emulator/control` with a dedicated
+signed operation, encrypted response context and `androidEmulator: 1` capability.
+Legacy iOS DTOs and viewer message names remain compatible.
+
+One session can own one preview per platform. Encoder conversion is at the adapter:
+Baguette's VideoToolbox reference validation is not applied to scrcpy's Annex-B
+stream. Android uses a single fixed encoder budget with per-viewer flow control;
+this avoids competing viewer requests changing a shared encoder, at the cost of
+not adapting Android source resolution to each viewer. Android requires H.264;
+there is no silent JPEG fallback.
+
+Tango's TCP connector did not settle pending reads on socket destruction. Lody's
+owned connector makes close/error/abort settle those reads. Native control ACKs
+are bounded and cancellation ends their socket owner before joining commands,
+preventing gateway shutdown from waiting on a device it has not yet stopped.
+An unconfirmed capture shutdown fences only that exact device until worker
+restart; revoked endpoint cleanup alone does not block safe device reuse.
+
+The React panel shares lifecycle polling, media, input and screenshot handling.
+Android has separate platform state/preferences and only supported controls;
+its rotation control toggles native orientation rather than promising a signed
+quarter-turn. SDK/AVD installation remains user-owned. The verified server is
+prepared for the public runtime channel; public source cannot deploy the external
+channel or authorize a new operation in the external proof signer.
+
+### Shared binding and idle recovery
+
+The main conversation owns both simulator bindings, so selecting a child or draft
+tab does not remount a different preview. Agent starts publish their discovery hint
+on the same main conversation. Independent opened sessions retain separate bindings.
+
+Android still releases unattended capture after 30 seconds, leaving the AVD running.
+The adapter distinguishes viewer idleness from native exit. The existing operation
+retains only a resume marker; a foreground session-current status request joins
+cleanup, then uses the same serialized start and lease acquisition path. Concurrent
+reopens share the replacement. Stop clears the marker eagerly, cleanup failure
+disables recovery, and another conversation's lease returns occupied. Agent status
+and exact-operation polls never resume. No background retry loop or wire field is
+added. This preserves resource release rather than holding capture alive while hidden.
+
+Local Android defaults to Clear; remote defaults to Balanced. An agent's first
+viewer determines the default, and idle recovery preserves an explicit quality choice.
+The Promise lifecycle remains in the shared core: migrating it would also require
+its existing gateway, proxy and native adapter ownership, outside this fix.
+
+Deterministic coverage exercises shared child occupancy, eager Stop during reopen,
+concurrent recovery, occupied devices, retained quality, and local/remote UI defaults.
+The current native Android smoke could not reach a first frame: scrcpy startup
+exited at the existing 30-second connection deadline. Desktop tab switching and
+sidebar restoration with the rebuilt app remain unverified.

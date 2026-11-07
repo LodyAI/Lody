@@ -32,6 +32,8 @@ export function registerAgentRoleTools(
   register(
     'lody_agent_role_create',
     {
+      summary:
+        'Propose a reusable agent Role with instructions and a machine binding; user Save is required.',
       description: `Propose a new private Agent Role. Resolve exact machineId and agentConfigId using discovery. The Role uses the Agent defaults. ${consent}`,
       inputSchema: AgentRoleCreateProposalSchema,
     },
@@ -40,6 +42,7 @@ export function registerAgentRoleTools(
   register(
     'lody_agent_role_update',
     {
+      summary: 'Propose instruction/name edits to a saved agent Role; user Save is required.',
       description: `Propose changes to a Role you manage. Read it with lody_agent_role_get first. Omitted patch fields stay unchanged; empty description or promptPrefix clears that field. Other Role configuration is preserved. ${consent}`,
       inputSchema: AgentRoleUpdateProposalSchema,
     },

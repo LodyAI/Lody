@@ -24,7 +24,7 @@ export type MembershipId = OwnedBytes<'MembershipId'>;
 export type RequestId = OwnedBytes<'RequestId'>;
 /** A 16-byte stable envelope delivery identifier, reused for retries of the same original. */
 export type DeliveryId = OwnedBytes<'DeliveryId'>;
-/** A 32-byte user identifier; it does not by itself prove an account or membership. */
+/** A 32-byte user identifier encoding an account ID; it does not by itself prove an account or membership. */
 export type UserId = OwnedBytes<'UserId'>;
 /** An unsigned 32-bit integer epoch number; parse with epochNumber before use. */
 export type EpochNumber = number & Brand.Brand<'EpochNumber'>;

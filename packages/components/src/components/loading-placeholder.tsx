@@ -80,7 +80,7 @@ export function LoadingPlaceholder({
       <BootShell
         status={
           <>
-            <div className="lody-boot-shell__status-title">{title}</div>
+            <div data-testid="workspace-loading" className="lody-boot-shell__status-title">{title}</div>
             {description ? <div>{description}</div> : null}
           </>
         }
@@ -94,7 +94,7 @@ export function LoadingPlaceholder({
         <BootLoadingIndicator
           status={
             <>
-              <div className="lody-boot-shell__status-title">{title}</div>
+              <div data-testid="workspace-loading" className="lody-boot-shell__status-title">{title}</div>
               {description ? <div>{description}</div> : null}
             </>
           }

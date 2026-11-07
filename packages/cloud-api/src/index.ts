@@ -7,7 +7,13 @@ import type {
   E2eeAppendRecordReply,
 } from './e2ee-device';
 import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
+import type { E2eeAccountPairingRequests, E2eeAccountPairingReplies } from './e2ee-account-pairing';
+import type { E2eeMemberRequests, E2eeMemberReplies } from './e2ee-members';
+import type { E2eeMachineSharingRequests, E2eeMachineSharingReplies } from './e2ee-machine-sharing';
+export type * from './e2ee-machine-sharing';
+export type * from './e2ee-members';
 export type * from './e2ee-join';
+export type * from './e2ee-account-pairing';
 export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { TerminalOutcome } from '@lody/shared/notifications';
@@ -90,6 +96,9 @@ import type {
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from '@lody/shared';
+
+import type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
+export type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
 
 type Query<Args extends Record<string, unknown>, Result> = FunctionReference<
   'query',
@@ -382,7 +391,7 @@ type UpcomingInvoicePreview = {
  * workspaces and gift/enterprise entitlements that are not billed per seat;
  * `billed` quotes the prorated charge applied when the invitation is accepted.
  */
-type SeatInvitePreview =
+export type SeatInvitePreview =
   | { status: 'not_billed'; reason: 'free' | 'covered' }
   | {
       status: 'billed';
@@ -397,6 +406,33 @@ type SeatInvitePreview =
     };
 
 export type CloudApi = {
+  e2eeMachineSharing: {
+    readHead: Action<E2eeMachineSharingRequests['readHead'], E2eeMachineSharingReplies['readHead']>;
+    readVersion: Action<
+      E2eeMachineSharingRequests['readVersion'],
+      E2eeMachineSharingReplies['readVersion']
+    >;
+    readRequest: Action<
+      E2eeMachineSharingRequests['readRequest'],
+      E2eeMachineSharingReplies['readRequest']
+    >;
+    commit: Action<E2eeMachineSharingRequests['commit'], E2eeMachineSharingReplies['commit']>;
+  };
+  e2eeMembers: {
+    workspaces: Query<Record<string, never>, import('./e2ee-members').E2eeMemberWorkspace[]>;
+    createInvitation: Mutation<
+      E2eeMemberRequests['createInvitation'],
+      E2eeMemberReplies['createInvitation']
+    >;
+    preview: Query<E2eeMemberRequests['preview'], E2eeMemberReplies['preview']>;
+    submit: Mutation<E2eeMemberRequests['submit'], E2eeMemberReplies['submit']>;
+    retire: Mutation<E2eeMemberRequests['retire'], E2eeMemberReplies['retire']>;
+    pending: Query<E2eeMemberRequests['pending'], E2eeMemberReplies['pending']>;
+    read: Query<E2eeMemberRequests['read'], E2eeMemberReplies['read']>;
+    reject: Mutation<E2eeMemberRequests['reject'], E2eeMemberReplies['reject']>;
+    revoke: Mutation<E2eeMemberRequests['revoke'], E2eeMemberReplies['revoke']>;
+    claim: Query<E2eeMemberRequests['claim'], E2eeMemberReplies['claim']>;
+  };
   /** Optional developer-only E2EE control plane; does not authorize content access. */
   e2eeContent: { contentStreamsToken: Action<E2eeContentTokenRequest, E2eeContentToken> };
   e2eeJoinMailbox: {
@@ -407,6 +443,15 @@ export type CloudApi = {
     publish: Mutation<E2eeJoinRequests['publish'], E2eeJoinReplies['publish']>;
     claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
   };
+  /** Account-wide personal device pairing relay; relays and notifies, never approves. */
+  e2eeAccountPairing: {
+    submit: Mutation<E2eeAccountPairingRequests['submit'], E2eeAccountPairingReplies['submit']>;
+    pending: Query<E2eeAccountPairingRequests['pending'], E2eeAccountPairingReplies['pending']>;
+    read: Query<E2eeAccountPairingRequests['read'], E2eeAccountPairingReplies['read']>;
+    decline: Mutation<E2eeAccountPairingRequests['decline'], E2eeAccountPairingReplies['decline']>;
+    publish: Mutation<E2eeAccountPairingRequests['publish'], E2eeAccountPairingReplies['publish']>;
+    claim: Query<E2eeAccountPairingRequests['claim'], E2eeAccountPairingReplies['claim']>;
+  };
   e2eeMailbox: {
     put: Mutation<E2eeMailboxRequests['put'], E2eeMailboxReplies['put']>;
     read: Query<E2eeMailboxRequests['read'], E2eeMailboxReplies['read']>;
@@ -415,8 +460,29 @@ export type CloudApi = {
     report: Mutation<E2eeMailboxRequests['report'], E2eeMailboxReplies['report']>;
     repair: Mutation<E2eeMailboxRequests['repair'], E2eeMailboxReplies['repair']>;
   };
+  e2eeMachinePairing: {
+    begin: Mutation<E2eeMachinePairingRequests['begin'], E2eeMachinePairingStatus>;
+    inspect: Query<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    cancel: Mutation<E2eeMachinePairingRequests['cancel'], E2eeMachinePairingStatus>;
+    authorizeExisting: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    bootstrap: Query<
+      { workspaceId: string; credential: string; machineId: string },
+      | {
+          status: 'authorized';
+          userId: string;
+          workspaces: (WorkspaceSummary & { contentMode: 'e2ee'; genesisHash: string })[];
+        }
+      | { status: 'unauthorized'; reason: string }
+    >;
+    /** The paired machine's own workspace plan, authenticated by its device credential. */
+    workspaceEntitlement: Query<
+      { workspaceId: string; credential: string; machineId: string },
+      | { valid: false; reason: string }
+      | { valid: true; effectivePlanTier: PlanTier; checkoutPending: boolean }
+    >;
+    complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+  };
   e2eeWorkspaces: {
-    accountIdentity: Action<Record<string, never>, { accountId: string; cryptoUserId: string }>;
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
@@ -425,6 +491,7 @@ export type CloudApi = {
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
   e2eeRecoveryVault: {
+    hasAccountVault: Query<Record<string, never>, { exists: boolean }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;

@@ -43,6 +43,8 @@ export type IpcPushMap = {
   'app.windowTarget': ElectronWindowTarget;
   'app.prepareWindowTarget': PreparedWindowTarget;
   'app.activatePreparedWindow': PreparedWindowTarget;
+  /** Re-read hint only: the renderer learns the exact reason from its own refresh. */
+  'e2ee.accessLost': { workspaceId: string };
 };
 
 export type IpcSendMap = {
@@ -80,6 +82,7 @@ export const IPC_PUSH_CHANNELS = {
   appWindowTarget: 'app.windowTarget',
   appPrepareWindowTarget: 'app.prepareWindowTarget',
   appActivatePreparedWindow: 'app.activatePreparedWindow',
+  e2eeAccessLost: 'e2ee.accessLost',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {
@@ -95,6 +98,16 @@ export const IPC_SEND_CHANNELS = {
   appWindowContentReady: 'app.windowContentReady',
   appPreparedWindowState: 'app.preparedWindowState',
 } as const satisfies { [K: string]: keyof IpcSendMap };
+
+/**
+ * E2E-only client-loss probe. Main registers both channels, and preload admits them,
+ * only when an unpackaged `LODY_E2E=1` main passes `argument` to the window.
+ */
+export const E2EE_CLIENT_LOSS_PROBE = {
+  argument: '--lody-e2ee-client-loss-probe',
+  inspect: 'e2ee.inspectClientLoss',
+  effects: 'e2ee.clientLossEffects',
+} as const;
 
 const PUSH_CHANNEL_VALUES: readonly string[] = Object.values(IPC_PUSH_CHANNELS);
 const SEND_CHANNEL_VALUES: readonly string[] = Object.values(IPC_SEND_CHANNELS);

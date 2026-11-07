@@ -6,8 +6,8 @@
   Coalesce pending snapshots, including Grok; never add delta to cumulative totals.
 - Project persistence payloads to token/cost fields; only aggregate usage retains
   contextWindow. Do not forward webSearchRequests or other provider-only fields.
-- Usage eligibility follows the builtin catalog, including `deepseek`, not the
-  managed-runtime download catalog. Local composition still has no cloud service.
+- Usage accepts custom agents as `custom` and builtin agents from the builtin catalog,
+  including `deepseek`. Local composition still has no cloud service.
 - Failed delivery retains the exact payload ahead of newer updates. Concurrent flushes
   share one drain; rejection waits for a later flush instead of spinning.
 - Scoped snapshots carry notification-local Core `_meta.lody.usageScopeId`

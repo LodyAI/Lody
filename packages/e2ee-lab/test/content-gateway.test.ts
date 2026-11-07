@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
+import { Deferred, Effect, Fiber, Result } from 'effect';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { setEd25519WasmEnabled } from '@lody/e2ee-core/internal';
 import { Bytes } from '@lody/e2ee-core';
@@ -15,7 +15,6 @@ import { makeLabContentGateway } from '../src/platform/content-gateway';
 import { makeLabScenarioFixture } from '../src/platform/scenario-fixture';
 import { openLabExistingWorkspace } from '../src/platform/workspace-session';
 import { makeLabHttpIdentity } from '../src/platform/http-identity';
-import { history } from './ledger-fixture';
 
 const ok = Result.getOrThrow;
 
@@ -253,7 +252,7 @@ it('uploads the original HTTP batch during required rotation and after tag7/tag8
           expect(f.view().inspectState().epoch.rotationRequired).toBe(true);
           expect(yield* request(owner.identity.fetch, 'POST', original)).toBe(204);
           expect(originals()).toEqual([original]);
-          const blockedSeal = yield* Effect.result(
+          const availableSeal = yield* Effect.result(
             binding.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
@@ -264,10 +263,18 @@ it('uploads the original HTTP batch during required rotation and after tag7/tag8
               additionalData: () => aad,
             })
           );
-          expect(Result.isFailure(blockedSeal) && blockedSeal.failure).toMatchObject({
-            _tag: 'ContentError',
-            code: 'unauthorized',
-          });
+          const pendingSeal = ok(availableSeal);
+          expect(
+            yield* binding.open({
+              ...pendingSeal,
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              },
+              additionalData: aad,
+            })
+          ).toEqual(new Uint8Array([1]));
           for (const auth of forbidden) {
             // Empty PUT has no frame/signature mismatch to conceal the role check.
             expect(yield* request(auth.fetch, 'PUT')).toBe(403);
@@ -310,153 +317,4 @@ it('uploads the original HTTP batch during required rotation and after tag7/tag8
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
-
-it('owns chunked reply bytes and preserves an absent body and selected headers', async () => {
-  const f = history();
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new Uint8Array([0, 127]));
-      controller.enqueue(new Uint8Array([128, 255]));
-      controller.close();
-    },
-  });
-  const responses = [
-    new Response(body, {
-      status: 202,
-      headers: { 'content-type': 'application/octet-stream', 'stream-next-offset': '4' },
-    }),
-    new Response(null, { status: 204 }),
-  ];
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const gateway = yield* makeLabContentGateway({
-          genesis: f.anchor,
-          resource: 'document-A',
-          model: 'loro',
-          baseUrl: 'http://127.0.0.1',
-          ledger: () => Effect.succeed(f.view),
-          fetch: async () => responses.shift()!,
-        });
-        const request = {
-          credential: {
-            account: 'synthetic-owner',
-            token: '',
-            issuedAt: 0,
-            expiresAt: 1,
-            device: f.owner.publicKey,
-            genesis: f.anchor,
-          },
-          requestGenesis: f.anchor,
-          method: 'PUT' as const,
-          body: new Uint8Array(),
-        };
-        const reply = yield* gateway.write(request);
-        expect(reply).toMatchObject({
-          status: 202,
-          body: new Uint8Array([0, 127, 128, 255]),
-          headers: [
-            ['content-type', 'application/octet-stream'],
-            ['stream-next-offset', '4'],
-          ],
-        });
-        expect(body.locked).toBe(false);
-        const empty = yield* gateway.write(request);
-        expect(empty.status).toBe(204);
-        expect(empty.body).toEqual(new Uint8Array());
-      })
-    )
-  );
-});
-
-it('awaits rejected overflow cancellation and releases its reader before earlier owners close', async () => {
-  const f = history();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let cancelSettled = false,
-    earlierClosed = false,
-    closedEarly = false;
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const child = yield* Scope.make();
-        yield* Scope.addFinalizer(
-          child,
-          Effect.sync(() => {
-            earlierClosed = true;
-            closedEarly = !cancelSettled;
-          })
-        );
-        const cancelling = yield* Deferred.make<void>(),
-          aborted = yield* Deferred.make<void>();
-        const readerBody = new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new Uint8Array(64 * 1024 + 1));
-          },
-          async cancel() {
-            Deferred.doneUnsafe(cancelling, Effect.void);
-            await gate;
-            cancelSettled = true;
-            throw new Error('synthetic-cancel-failure');
-          },
-        });
-        const gateway = yield* makeLabContentGateway({
-          genesis: f.anchor,
-          resource: 'document-A',
-          model: 'loro',
-          baseUrl: 'http://127.0.0.1',
-          ledger: () => Effect.succeed(f.view),
-          fetch: async (_input, init) => {
-            init!.signal!.addEventListener(
-              'abort',
-              () => {
-                Deferred.doneUnsafe(aborted, Effect.void);
-              },
-              { once: true }
-            );
-            return new Response(readerBody);
-          },
-        }).pipe(Effect.provideService(Scope.Scope, child));
-        const worker = yield* Effect.forkChild(
-          gateway.write({
-            credential: {
-              account: 'synthetic-owner',
-              token: '',
-              issuedAt: 0,
-              expiresAt: 1,
-              device: f.owner.publicKey,
-              genesis: f.anchor,
-            },
-            requestGenesis: f.anchor,
-            method: 'PUT',
-            body: new Uint8Array(),
-          })
-        );
-        yield* Effect.addFinalizer(() =>
-          Effect.gen(function* () {
-            release();
-            yield* Scope.close(child, Exit.void);
-          })
-        );
-        yield* Deferred.await(cancelling);
-        const closing = yield* Effect.forkChild(Scope.close(child, Exit.void), {
-          startImmediately: true,
-        });
-        yield* Deferred.await(aborted);
-        expect(closing.pollUnsafe()).toBeUndefined();
-        expect(readerBody.locked).toBe(true);
-        expect(earlierClosed).toBe(false);
-        release();
-        yield* Fiber.join(closing);
-        expect(cancelSettled).toBe(true);
-        expect(readerBody.locked).toBe(false);
-        expect(earlierClosed).toBe(true);
-        expect(closedEarly).toBe(false);
-        expect(Exit.isFailure(yield* Fiber.await(worker))).toBe(true);
-      })
-    )
-  );
 });

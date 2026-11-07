@@ -9,6 +9,8 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## Abstract
 
+Historical implementation: the declaration bridge and its private font writer have been removed. The evidence below describes the former adapter; current ownership is documented in [direct StyleX and framework retirement](2026-10-22-tailwind-to-stylex-migration.md#direct-stylex-and-framework-retirement).
+
 Migrating a font weight without its private writer changes the supported CSS contract. The declaration bridge now accepts one closed `font-medium` pair, inserting both native StyleX declarations into their original rule while preserving class identity, order and registration. One actual ACP selector label passes 24 paired browser states and six build paths. The pair retains Tailwind aliases and ordering; combined Root qualification and all historical visual differences remain separate from that isolated acceptance.
 
 ## Boundary

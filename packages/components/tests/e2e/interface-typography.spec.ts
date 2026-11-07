@@ -6,6 +6,117 @@ const story = '/iframe.html?id=settings-interfacetypography--unified&viewMode=st
 const rhythmStory =
   '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story';
 
+for (const previewScale of [1, 0.65]) {
+  test(`WebKit share export preserves geometry and detail at preview scale ${previewScale}`, async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'webkit', 'Exercises WebKit SVG rasterization');
+    await page.goto('/iframe.html?id=sessions-chatsharecard--markdown-palette&viewMode=story');
+    const result = await page.evaluate(async (scale) => {
+      document.body.innerHTML = `<div style="transform:scale(${scale});transform-origin:top left"><div id="capture" style="box-sizing:border-box;width:392px;padding:16px;background:#183f60;font:15px Arial">
+        <div style="position:relative;padding:24px 20px;background:white;border-radius:22px;box-shadow:0 28px 70px -20px rgba(2,10,18,.6)">
+          <div style="position:absolute;left:260px;top:20px;width:32px;height:18px;background:rgb(255,0,255)"></div>
+          <h2 style="font-size:17px">Exporting a clear conversation</h2>
+          <p>Why does text look blurry in the saved image?</p>
+          <p>Here is a useful answer with small text, punctuation, and fine details: 0123456789.</p>
+          <p>WebKit should render the SVG at the final pixel size before saving the PNG.</p>
+        </div></div></div>`;
+      const path = '/src/lib/share-image-export.ts';
+      const { exportShareImage } = await import(/* @vite-ignore */ path);
+      let captured: Blob | undefined;
+      const createObjectURL = URL.createObjectURL;
+      const click = HTMLAnchorElement.prototype.click;
+      URL.createObjectURL = (blob) => {
+        captured = blob as Blob;
+        return createObjectURL.call(URL, blob);
+      };
+      HTMLAnchorElement.prototype.click = () => {};
+      let withoutShadow: Blob | undefined;
+      try {
+        await exportShareImage(document.getElementById('capture')!, 'test', 'test');
+        const withShadow = captured;
+        document.querySelector<HTMLElement>('#capture > div')!.style.boxShadow = 'none';
+        await exportShareImage(document.getElementById('capture')!, 'test', 'test');
+        withoutShadow = captured;
+        captured = withShadow;
+      } finally {
+        URL.createObjectURL = createObjectURL;
+        HTMLAnchorElement.prototype.click = click;
+      }
+      if (!captured || !withoutShadow) throw new Error('No exported PNG');
+      const image = await createImageBitmap(captured);
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d')!;
+      context.drawImage(image, 0, 0);
+      const original = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      const unshadowed = await createImageBitmap(withoutShadow);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(unshadowed, 0, 0);
+      const plain = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let minX = canvas.width;
+      let minY = canvas.height;
+      let maxX = -1;
+      let maxY = -1;
+      let markerPixels = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const i = (y * canvas.width + x) * 4;
+          if (original[i] > 245 && original[i + 1] < 10 && original[i + 2] > 245) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            markerPixels++;
+          }
+        }
+      }
+      let shadowPixels = 0;
+      for (let i = 0; i < original.length; i += 4) {
+        if (plain[i] - original[i] > 5) shadowPixels++;
+      }
+      const half = document.createElement('canvas');
+      half.width = canvas.width / 2;
+      half.height = canvas.height / 2;
+      half.getContext('2d')!.drawImage(image, 0, 0, half.width, half.height);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(half, 0, 0, canvas.width, canvas.height);
+      const blurred = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      const edges = (pixels: Uint8ClampedArray) => {
+        let sum = 0;
+        for (let y = 110; y < canvas.height - 70; y++) {
+          for (let x = 70; x < canvas.width - 70; x++) {
+            const i = (y * canvas.width + x) * 4;
+            sum += Math.abs(pixels[i] * 2 - pixels[i - 4] - pixels[i + 4]);
+          }
+        }
+        return sum;
+      };
+      return {
+        width: image.width,
+        sharpnessRatio: edges(original) / edges(blurred),
+        shadowPixels,
+        minX,
+        minY,
+        maxX,
+        maxY,
+        markerPixels,
+      };
+    }, previewScale);
+    expect(result.width).toBe(784);
+    expect(result.sharpnessRatio).toBeGreaterThan(1.65);
+    expect(result.shadowPixels).toBeGreaterThan(1000);
+    // The marker is 260px/20px from the card, which starts 16px inside the capture.
+    expect(result.minX).toBe(552);
+    expect(result.minY).toBe(72);
+    expect(result.maxX).toBe(615);
+    expect(result.maxY).toBe(107);
+    expect(result.markerPixels).toBe(64 * 36);
+  });
+}
+
 for (const appTheme of ['light', 'dark'] as const) {
   for (const cardTheme of ['light', 'dark'] as const) {
     test(`share Markdown uses the card palette: ${cardTheme} card in ${appTheme} app`, async ({

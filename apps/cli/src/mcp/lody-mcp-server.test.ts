@@ -6,8 +6,11 @@ import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
@@ -20,6 +23,7 @@ import {
   type AgentRoleId,
   type MachineId,
   type SessionId,
+  type SessionMeta,
   type SessionTurnInputConfig,
   type WorkspaceId,
 } from '@lody/shared';
@@ -173,7 +177,93 @@ const listPublishedToolNames = async (): Promise<string[]> => {
 };
 
 describe('Lody MCP tool catalog', () => {
-  it('publishes bounded catalog retry guidance on every create/chat tool', async () => {
+  it('serves Skills discovery and on-demand content through the App modern HTTP handler', async () => {
+    const handler = createMcpHandler(buildLodyMcpServer);
+    const request = async (method: string, params: Record<string, unknown> = {}) => {
+      const response = await handler.fetch(
+        new Request('http://localhost/mcp', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            'mcp-method': method,
+            'mcp-protocol-version': '2026-07-28',
+            ...(typeof params.name === 'string' ? { 'mcp-name': params.name } : {}),
+            ...(method === 'resources/read' && typeof params.uri === 'string'
+              ? { 'mcp-name': params.uri }
+              : {}),
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method,
+            params: {
+              ...params,
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientInfo': { name: 'lody-test', version: '1' },
+                'io.modelcontextprotocol/clientCapabilities': {},
+              },
+            },
+          }),
+        })
+      );
+      const body: unknown = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(200);
+      return body;
+    };
+    try {
+      expect(await request('server/discover')).toMatchObject({
+        result: {
+          capabilities: { resources: {}, extensions: { 'io.modelcontextprotocol/skills': {} } },
+        },
+      });
+      expect(await request('skills/list')).toMatchObject({
+        result: {
+          resultType: 'complete',
+          cacheScope: 'public',
+          ttlMs: 300_000,
+          skills: [
+            {
+              uri: 'skill://lody-automations/SKILL.md',
+              frontmatter: { name: 'lody-automations' },
+              resources: expect.any(Array),
+            },
+          ],
+        },
+      });
+      expect(
+        await request('skills/get', { uri: 'skill://lody-automations/SKILL.md' })
+      ).toMatchObject({
+        result: {
+          resultType: 'complete',
+          skill: { uri: 'skill://lody-automations/SKILL.md' },
+        },
+      });
+      expect(
+        await request('resources/read', {
+          uri: 'skill://lody-automations/references/commands.schema.json',
+        })
+      ).toMatchObject({
+        result: {
+          contents: [{ mimeType: 'application/json', text: expect.any(String) }],
+        },
+      });
+      expect(
+        await request('resources/read', {
+          uri: 'skill://lody-automations/SKILL.md',
+        })
+      ).toMatchObject({
+        result: {
+          contents: [{ mimeType: 'text/markdown', text: expect.any(String) }],
+        },
+      });
+    } finally {
+      await handler.close();
+    }
+  });
+
+  it('serves bounded catalog retry guidance through help for every create/chat tool', async () => {
     const server = buildLodyMcpServer();
     const client = new Client({ name: 'retry-guidance-test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -186,7 +276,13 @@ describe('Lody MCP tool catalog', () => {
         'lody_session_chat',
         'lody_session_chat_many',
       ]) {
-        const description = tools.find((tool) => tool.name === name)?.description;
+        expect(tools.find((tool) => tool.name === name)?.description).toContain('lody_help');
+        const help = CallToolResultSchema.parse(
+          await client.callTool({ name: 'lody_help', arguments: { command: name } })
+        );
+        const block = help.content.find((item) => item.type === 'text');
+        if (!block || block.type !== 'text') throw new Error('Missing tool help');
+        const { description } = z.object({ description: z.string() }).parse(JSON.parse(block.text));
         expect(description).toContain('wait at least 5 seconds between attempts');
         expect(description).toContain('at most 3 total attempts (the initial call plus 2 retries)');
         expect(description).toContain('reuse the identical request and operationId');
@@ -201,6 +297,7 @@ describe('Lody MCP tool catalog', () => {
   it('publishes session tools and never advertises a Task family', async () => {
     const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
+    expect(names).toContain('lody_help');
     expect(names).toEqual(
       expect.arrayContaining([
         'lody_session_rename',
@@ -430,19 +527,21 @@ describe('session MCP input schemas', () => {
         oneOf: expect.arrayContaining([
           expect.objectContaining({
             type: 'object',
-            properties: expect.objectContaining({ kind: { const: 'chat', type: 'string' } }),
+            properties: expect.objectContaining({
+              kind: expect.objectContaining({ const: 'chat', type: 'string' }),
+            }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'github', type: 'string' },
+              kind: expect.objectContaining({ const: 'github', type: 'string' }),
               repo: expect.objectContaining({ type: 'string' }),
             }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'local', type: 'string' },
+              kind: expect.objectContaining({ const: 'local', type: 'string' }),
               projectId: expect.objectContaining({ type: 'string' }),
             }),
           }),
@@ -796,6 +895,75 @@ describe('session MCP input schemas', () => {
     expect(remote).not.toHaveProperty('useCurrentSessionAsParent');
     expect(remote).not.toHaveProperty('workContext');
     expect(composeAgentRolePrompt('  ', 'Implement this.')).toBe('Implement this.');
+  });
+
+  it('runs a remote Role in the Local Project linked GitHub repository only when the workspace enables it', () => {
+    const frozenInputConfig = {} as SessionTurnInputConfig;
+    const input = {
+      operationId: 'role-review-linked-1',
+      prompt: 'Review this.',
+      agentRoleId: 'reviewer',
+    } as const;
+    const requester = {
+      machineId: 'current-machine',
+      project: {
+        kind: 'local',
+        localProjectId: 'project-id',
+        branch: 'feature/unpushed',
+        githubRepoFullName: 'loro-dev/lody-oss',
+        useWorktree: true,
+      },
+    } as const;
+
+    const linked = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    // The local branch may exist only on the requester's Machine, so the
+    // clone starts from the repository's default branch.
+    expect(linked).toMatchObject({
+      machineId: 'remote-machine',
+      workContext: { kind: 'github', repo: 'loro-dev/lody-oss' },
+    });
+    expect(linked.workContext).not.toHaveProperty('branch');
+    expect(linked).not.toHaveProperty('useCurrentSessionAsParent');
+    expect(
+      buildMcpCreateOptions(linked, {
+        sessionId: 'current-session',
+        machineId: 'current-machine',
+      })
+    ).toMatchObject({ repo: 'loro-dev/lody-oss', machine: 'remote-machine' });
+
+    // An unlisted repository keeps the plain-chat placement.
+    const unlisted = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole()
+    ).input;
+    expect(unlisted).not.toHaveProperty('workContext');
+
+    // An explicit work context or a same-Machine Role is unaffected.
+    const explicit = resolveMcpSessionCreate(
+      { ...input, workContext: { kind: 'chat' } },
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    expect(explicit.workContext).toEqual({ kind: 'chat' });
+    const sameMachine = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      { ...requester, machineId: 'remote-machine' },
+      agentRole(),
+      'loro-dev/lody-oss'
+    ).input;
+    expect(sameMachine.useCurrentSessionAsParent).toBe(true);
+    expect(sameMachine).not.toHaveProperty('workContext');
   });
 
   it('requires only that the Role id exists in the workspace catalog', () => {
@@ -1280,7 +1448,7 @@ describe('session MCP input schemas', () => {
         [{ sessionId: 'current', title: 'Current title' }],
         createMcpContext()
       )
-    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title', scope: 'tab' }]);
     expect(() =>
       resolveSessionRenameItems(
         [
@@ -1293,9 +1461,9 @@ describe('session MCP input schemas', () => {
 
     const results = await applySessionRenameItems(
       [
-        { sessionId: 'session-1' as SessionId, title: 'One' },
-        { sessionId: 'missing' as SessionId, title: 'Missing' },
-        { sessionId: 'session-3' as SessionId, title: 'Three' },
+        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
+        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
+        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
       ],
       async ({ sessionId }) => {
         if (sessionId === 'missing') {
@@ -1309,7 +1477,7 @@ describe('session MCP input schemas', () => {
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One' },
+      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1319,7 +1487,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three' },
+      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
   });
 
@@ -1341,15 +1509,15 @@ describe('session MCP input schemas', () => {
     const results = await persistSessionRenameItems(
       manager,
       [
-        { sessionId: 'session-1' as SessionId, title: 'One' },
-        { sessionId: 'missing' as SessionId, title: 'Missing' },
-        { sessionId: 'session-3' as SessionId, title: 'Three' },
+        { sessionId: 'session-1' as SessionId, title: 'One', scope: 'tab' },
+        { sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' },
+        { sessionId: 'session-3' as SessionId, title: 'Three', scope: 'tab' },
       ],
       'mcp.session_rename_many:current-session-id'
     );
 
     expect(results).toEqual([
-      { sessionId: 'session-1', ok: true, title: 'One' },
+      { sessionId: 'session-1', ok: true, title: 'One', scope: 'tab' },
       {
         sessionId: 'missing',
         ok: false,
@@ -1359,7 +1527,7 @@ describe('session MCP input schemas', () => {
           retryable: false,
         },
       },
-      { sessionId: 'session-3', ok: true, title: 'Three' },
+      { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
     expect(upsertDocMeta.mock.calls).toEqual([
       [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
@@ -1370,6 +1538,60 @@ describe('session MCP input schemas', () => {
       reason: 'mcp.session_rename_many:current-session-id',
       timeoutMs: 30_000,
     });
+  });
+
+  it('renames a tab and its group sidebar title independently', async () => {
+    const rootId = 'root-session' as SessionId;
+    const childId = 'child-session' as SessionId;
+    const metas = new Map<string, Partial<SessionMeta>>([
+      [getSessionRoomId(rootId), { id: rootId, title: 'Generated root', titleSource: 'generated' }],
+      [getSessionRoomId(childId), { id: childId, title: 'Child', parentSessionId: rootId }],
+    ]);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async (roomId: string) => {
+          const meta = metas.get(roomId);
+          return meta ? { meta, exists: true } : undefined;
+        }),
+        upsertDocMeta: vi.fn(async (roomId: string, patch: Partial<SessionMeta>) => {
+          metas.set(roomId, { ...metas.get(roomId), ...patch });
+        }),
+      },
+      waitUntilMetaSynced: vi.fn(async () => true),
+    } as unknown as LoroDocumentManager;
+    const reason = 'mcp.session_rename_many:current-session-id';
+
+    await persistSessionRenameItems(
+      manager,
+      [{ sessionId: rootId, title: 'Root tab', scope: 'tab' }],
+      reason
+    );
+    // The sidebar keeps the name it showed before the tab was renamed.
+    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
+      title: 'Root tab',
+      titleSource: 'user',
+      groupTitle: 'Generated root',
+      groupTitleSource: 'generated',
+    });
+
+    await persistSessionRenameItems(
+      manager,
+      [{ sessionId: rootId, title: 'Sidebar name', scope: 'group' }],
+      reason
+    );
+    expect(metas.get(getSessionRoomId(rootId))).toMatchObject({
+      title: 'Root tab',
+      groupTitle: 'Sidebar name',
+      groupTitleSource: 'user',
+    });
+
+    const [rejected] = await persistSessionRenameItems(
+      manager,
+      [{ sessionId: childId, title: 'Not a group', scope: 'group' }],
+      reason
+    );
+    expect(rejected).toMatchObject({ ok: false, error: { code: 'COMMAND_REJECTED' } });
+    expect(metas.get(getSessionRoomId(childId))).not.toHaveProperty('groupTitle');
   });
 
   it('does not request write confirmation when every session is missing', async () => {
@@ -1385,7 +1607,7 @@ describe('session MCP input schemas', () => {
     await expect(
       persistSessionRenameItems(
         manager,
-        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
+        [{ sessionId: 'missing' as SessionId, title: 'Missing', scope: 'tab' }],
         'mcp.session_rename_many:current-session-id'
       )
     ).resolves.toEqual([
@@ -1525,9 +1747,12 @@ describe('session MCP input schemas', () => {
   });
 
   it('shares one remote Machine presence read across a batch', async () => {
-    const getOnlineMachineIds = vi.fn(async () => new Set(['remote-a', 'remote-b']));
+    const getMachinePresenceView = vi.fn(async () => ({
+      online: new Set(['remote-a', 'remote-b']),
+      synced: true,
+    }));
     const machineLiveness = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds } as never,
+      { getMachinePresenceView } as never,
       createMcpContext()
     );
 
@@ -1538,25 +1763,37 @@ describe('session MCP input schemas', () => {
         machineLiveness('remote-b'),
       ])
     ).resolves.toEqual(['online', 'online', 'online']);
-    expect(getOnlineMachineIds).toHaveBeenCalledTimes(1);
+    expect(getMachinePresenceView).toHaveBeenCalledTimes(1);
   });
 
   it('separates a Machine absent from a joined presence room from one it could not check', async () => {
     const joined = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds: vi.fn(async () => new Set(['remote-a'])) } as never,
+      {
+        getMachinePresenceView: vi.fn(async () => ({
+          online: new Set(['remote-a']),
+          synced: true,
+        })),
+      } as never,
       createMcpContext()
     );
     // A joined room that simply lacks the entry is real evidence of an offline Machine.
     await expect(joined('remote-b')).resolves.toBe('offline');
 
     const unavailable = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds: vi.fn(async () => null) } as never,
+      {
+        getMachinePresenceView: vi.fn(async () => ({
+          online: new Set(['remote-a']),
+          synced: false,
+        })),
+      } as never,
       createMcpContext()
     );
-    // A null snapshot is "presence room unavailable" and must never read as offline:
-    // every dispatch guard blocks on 'offline' alone, so this is what kept a healthy
-    // remote Machine usable while presence was still joining.
+    // An unjoined room cannot prove absence and must never read as offline: every
+    // dispatch guard blocks on 'offline' alone, so this is what kept a healthy remote
+    // Machine usable while presence was still joining or recycling its live read.
     await expect(unavailable('remote-b')).resolves.toBe('unknown');
+    // A heartbeat received before the room left 'joined' still proves liveness.
+    await expect(unavailable('remote-a')).resolves.toBe('online');
     // The local Machine never depends on the presence room to prove its own liveness.
     await expect(unavailable('machine-id')).resolves.toBe('online');
   });

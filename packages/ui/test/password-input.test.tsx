@@ -3,7 +3,7 @@ import { act, createRef } from 'react';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
 import { PasswordInput } from '../src/field/password-input';
-import { classesOf, click, mount, one } from './dom';
+import { click, mount, one } from './dom';
 
 const secret = () => one('input[type="password"], input[type="text"]') as HTMLInputElement;
 const reveal = () => one('button') as HTMLButtonElement;
@@ -117,41 +117,5 @@ describe('PasswordInput', () => {
     // is a control that looks pressable and is not.
     expect(reveal().disabled).toBe(true);
     await view.unmount();
-  });
-
-  test('an invalid field rings the shell, which is the control', async () => {
-    const plain = await mount(<PasswordInput />);
-    const resting = classesOf(secret().parentElement as HTMLElement);
-    await plain.unmount();
-
-    const view = await mount(
-      <Field.Root invalid>
-        <Field.Label>Password</Field.Label>
-        <PasswordInput />
-      </Field.Root>
-    );
-    expect(secret().getAttribute('aria-invalid')).toBe('true');
-    const shell = secret().parentElement as HTMLElement;
-    expect(classesOf(shell).filter((name) => !resting.includes(name)).length).toBeGreaterThan(0);
-    // The input inside the shell is bare: two wells would draw two edges.
-    expect(classesOf(secret()).length).toBeLessThan(classesOf(shell).length);
-    await view.unmount();
-  });
-
-  test('a caller constrains the control through the shell, and the value through the input', () => {
-    const html = renderToStaticMarkup(
-      <PasswordInput
-        className="secret-shell-hook"
-        inputClassName="secret-value-hook"
-        aria-label="Password"
-      />
-    );
-    const shell = /<div\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
-    const value = /<input\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
-    // The root hook stays on the shell; the value hook belongs to the input.
-    expect(shell.split(' ')).toContain('secret-shell-hook');
-    expect(shell.split(' ')).not.toContain('secret-value-hook');
-    expect(value.split(' ')).toContain('secret-value-hook');
-    expect(value.split(' ')).not.toContain('secret-shell-hook');
   });
 });

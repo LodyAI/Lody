@@ -4,7 +4,7 @@ import {
   IOS_SIMULATOR_BEZEL_MAX_BYTES,
   isIosSimulatorBezelPng,
   type IosSimulatorExterior,
-  type IosSimulatorDeviceControl,
+  type DevicePreviewControl as IosSimulatorDeviceControl,
 } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
 import {

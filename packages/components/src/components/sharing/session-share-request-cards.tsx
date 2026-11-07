@@ -17,6 +17,7 @@ import { useSessionShareManagement } from '@/hooks/use-session-share-management'
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { shareSurface } from './surface';
+import { SessionSharePlaintextConfirmation } from './session-share-plaintext-confirmation';
 
 const styles = stylex.create({
   unavailable: {
@@ -192,6 +193,12 @@ function RequestCard({
       setDismissing(false);
     }
   };
+  if (management.plaintextConfirmation)
+    return (
+      <div {...stylex.props(styles.card)}>
+        <SessionSharePlaintextConfirmation management={management} />
+      </div>
+    );
   return (
     <SessionShareConsent
       request={request}

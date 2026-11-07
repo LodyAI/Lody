@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,6 +55,9 @@ describe('mobile layout selection', () => {
     Reflect.deleteProperty(window.navigator, 'userAgent');
     Reflect.deleteProperty(window.navigator, 'userAgentData');
     Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+    Reflect.deleteProperty(window, '__LODY_NATIVE__');
+    Reflect.deleteProperty(document.documentElement, 'clientWidth');
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -98,21 +100,44 @@ describe('mobile layout selection', () => {
     expect(container?.textContent).toBe('desktop:full');
   });
 
-  it('gives a wide phone reported by client hints the desktop renderer', () => {
-    setNavigatorIdentity('Mozilla/5.0 AppleWebKit/537.36 Chrome/140 Safari/537.36', true);
-    setViewportWidth(915);
+  it('uses the resized iOS document when innerWidth lags during a fold', () => {
+    setNavigatorIdentity('Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) Mobile/15E148');
+    Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
+    setViewportWidth(594);
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 594,
+    });
+    const observers: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
     renderLayoutProbe();
-
+    expect(container?.textContent).toBe('mobile:full');
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 867,
+    });
+    flushSync(() => observers.forEach((callback) => callback([], {} as ResizeObserver)));
     expect(container?.textContent).toBe('desktop:full');
   });
 
-  it('keeps a wide tablet on the desktop renderer', () => {
+  it('keeps a portrait iPad on the desktop renderer at 834', () => {
     setNavigatorIdentity(
-      'Mozilla/5.0 (Linux; Android 16; Pixel Tablet) AppleWebKit/537.36 Chrome/140 Safari/537.36'
+      'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'
     );
-    setViewportWidth(1280);
+    setViewportWidth(834);
     renderLayoutProbe();
 
+    // A large tablet is a desktop interaction surface, not a stretched phone:
+    // the mobile new-chat sheet is reserved for the narrow split-view case.
     expect(container?.textContent).toBe('desktop:full');
   });
 

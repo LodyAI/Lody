@@ -181,7 +181,7 @@ function StoryProviders({ children }: { children: ReactNode }) {
 function PhoneFrame({ title, children }: { title: string; children: ReactNode }) {
   return (
     <StoryProviders>
-      <RoutedStory>
+      <RoutedStory initialPath={title === 'Settings' ? '/lody/settings' : '/'}>
         <div {...stylex.props(storyViewport.canvas)}>
           <div {...stylex.props(phoneFrame.frame)}>
             <MobileSettingsLayout

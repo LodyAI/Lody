@@ -12,6 +12,7 @@ const DEFAULT_SIDE_PANEL_STATE: PersistedSidePanelState = {
   tab: null,
   tabs: [],
   sideSessionId: null,
+  split: null,
 };
 
 export type SessionDetailInitialTabState = {

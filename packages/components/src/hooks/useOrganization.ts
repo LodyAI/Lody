@@ -11,7 +11,9 @@ import {
   clearCachedWorkspaceInfo,
   getCachedWorkspaceId,
 } from '@/lib/local-storage-cache';
-import { useSetAtom, useStore } from 'jotai';
+import { atom, useAtom, useSetAtom, useStore } from 'jotai';
+import { useOptionalCloudPlatformQuery } from '../providers/cloud-platform-api';
+import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearSessionRunConfigDraftsAtom,
   sessionRunConfigDraftAccountAtom,
@@ -34,6 +36,8 @@ import { useImplicitLocalWorkspace } from '../providers/local-platform-provider'
 type UseOrganizationOptions = {
   targetSlug?: string;
 };
+
+const selectedEncryptedWorkspaceAtom = atom<{ accountId: string; id: string } | null>(null);
 
 const inFlightSetActiveRequests = new Map<string, Promise<void>>();
 let completedUnobservedSetActiveRequestKey: string | null = null;
@@ -224,17 +228,106 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   } = useStableSession();
   const user = session?.user ?? null;
   const {
-    data: organizationsRaw,
-    isPending: organizationsPending,
+    data: ordinaryOrganizations,
+    isPending: ordinaryOrganizationsPending,
     error: organizationsError,
     refetch: refetchOrganizations,
   } = authClient.useListOrganizations();
   const {
-    data: activeOrganization,
+    data: ordinaryActiveOrganization,
     isPending: activeOrganizationIsPending,
     refetch: refetchActiveOrganization,
     error: activeOrganizationQueryError,
   } = authClient.useActiveOrganization();
+
+  const encryptedDirectory = useOptionalCloudPlatformQuery(
+    cloudOperations.e2eeMembers.workspaces,
+    user ? {} : 'skip'
+  );
+  const retainedDirectory = useRef<{
+    accountId: string;
+    items: typeof encryptedDirectory.data;
+  } | null>(null);
+  if (retainedDirectory.current?.accountId !== user?.id) retainedDirectory.current = null;
+  if (user && encryptedDirectory.data !== undefined)
+    retainedDirectory.current = { accountId: user.id, items: encryptedDirectory.data };
+  // Navigation labels may survive an outage; native credentials/ledger still decide access.
+  const encryptedWorkspaces = encryptedDirectory.data ?? retainedDirectory.current?.items;
+  const [selectedEncryptedWorkspace, setSelectedEncryptedWorkspace] = useAtom(
+    selectedEncryptedWorkspaceAtom
+  );
+  const encryptedOrganizations = useMemo(
+    () =>
+      encryptedWorkspaces?.map((workspace) => ({
+        ...workspace,
+        logo: null,
+        createdAt: LOCAL_ORGANIZATION_EPOCH,
+        metadata: null,
+        members: workspace.members.map((member) => ({
+          ...member,
+          organizationId: workspace.id,
+          createdAt: LOCAL_ORGANIZATION_EPOCH,
+        })),
+        invitations: [],
+      })),
+    [encryptedWorkspaces]
+  );
+  const organizationsRaw = useMemo(() => {
+    if (!ordinaryOrganizations) return ordinaryOrganizations;
+    const encryptedIds = new Set(encryptedOrganizations?.map((workspace) => workspace.id));
+    return [
+      ...ordinaryOrganizations.filter((workspace) => !encryptedIds.has(workspace.id)),
+      ...(encryptedOrganizations ?? []),
+    ];
+  }, [ordinaryOrganizations, encryptedOrganizations]);
+  const directoryNeeded =
+    Boolean(user) &&
+    (targetSlug
+      ? !ordinaryOrganizations?.some(
+          (workspace) =>
+            workspace.slug === targetSlug &&
+            !('contentMode' in workspace && workspace.contentMode === 'e2ee')
+        )
+      : selectedEncryptedWorkspace?.accountId === user?.id || ordinaryOrganizations?.length === 0);
+  const directoryError =
+    directoryNeeded && encryptedWorkspaces === undefined ? encryptedDirectory.error : null;
+  const organizationsPending =
+    ordinaryOrganizationsPending ||
+    (ordinaryOrganizations?.length === 0 && encryptedWorkspaces === undefined && !directoryError);
+  const selectedEncryptedId =
+    selectedEncryptedWorkspace?.accountId === user?.id ? selectedEncryptedWorkspace?.id : null;
+  const encryptedActive = encryptedOrganizations?.find((workspace) =>
+    targetSlug
+      ? workspace.slug === targetSlug
+      : workspace.id === (selectedEncryptedId ?? ordinaryActiveOrganization?.id)
+  );
+  // This roster comes from current ledger projections and the account directory.
+  // It is navigation/display metadata; native device authorization stays separate.
+  const activeOrganization = encryptedActive ?? ordinaryActiveOrganization;
+  useEffect(() => {
+    if (user && targetSlug && encryptedActive && selectedEncryptedId !== encryptedActive.id)
+      setSelectedEncryptedWorkspace({ accountId: user.id, id: encryptedActive.id });
+    else if (
+      user &&
+      targetSlug &&
+      !encryptedActive &&
+      ordinaryActiveOrganization?.slug === targetSlug &&
+      !(
+        'contentMode' in ordinaryActiveOrganization &&
+        ordinaryActiveOrganization.contentMode === 'e2ee'
+      ) &&
+      Array.isArray(ordinaryActiveOrganization.members) &&
+      selectedEncryptedId
+    )
+      setSelectedEncryptedWorkspace(null);
+  }, [
+    encryptedActive,
+    ordinaryActiveOrganization,
+    selectedEncryptedId,
+    setSelectedEncryptedWorkspace,
+    targetSlug,
+    user,
+  ]);
 
   // A partial response is not a full organization. Keep membership-dependent
   // consumers gated and expose a retryable error instead of inventing an empty roster.
@@ -363,7 +456,8 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     !organizationsError &&
     organizationsRetryCount >= maxOrganizationsRetries;
 
-  const organizationsFailureFinal = organizationsErrorFinal || organizationsIdleFinal;
+  const organizationsFailureFinal =
+    organizationsErrorFinal || organizationsIdleFinal || Boolean(directoryError);
 
   // A failed list must not stay failed for the life of the page: with no cached
   // workspace id, the route has nothing else to open with. After the retry burst
@@ -466,7 +560,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     organizations.length > 0 &&
     !resolvedActiveOrganization;
   const organizationsListError = organizationsFailureFinal
-    ? (organizationsError ?? new Error('Failed to load organizations'))
+    ? (organizationsError ??
+      (directoryError
+        ? new Error('Encrypted membership directory is unavailable')
+        : new Error('Failed to load organizations')))
     : null;
   const optimisticWorkspaceId = useMemo(() => {
     if (!user || !targetSlug) {
@@ -494,9 +591,20 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (currentWorkspaceId === organizationId) {
         return;
       }
+      if (encryptedOrganizations?.some((workspace) => workspace.id === organizationId)) {
+        setSelectedEncryptedWorkspace({ accountId: user.id, id: organizationId });
+        return;
+      }
       await setActiveOrganizationOnce(authClient, user.id, organizationId);
+      setSelectedEncryptedWorkspace(null);
     },
-    [authClient, resolvedActiveOrganization?.id, user?.id]
+    [
+      authClient,
+      encryptedOrganizations,
+      resolvedActiveOrganization?.id,
+      setSelectedEncryptedWorkspace,
+      user?.id,
+    ]
   );
 
   /** Switch active organization and surface failure to callers that must await it. */

@@ -22,35 +22,22 @@
  * that is what the addon loader actually gates on, and it stays correct under Electron
  * (Electron 39 reports napi 10 on Node 22.22).
  */
-export const REQUIRED_NODE_API_VERSION = 10;
+import {
+  REQUIRED_NODE_API_VERSION,
+  isNodeApiVersionSupported,
+  isNodeSecurityVersionSupported,
+} from './node-runtime-version';
+export {
+  REQUIRED_NODE_API_VERSION,
+  isNodeApiVersionSupported,
+  isNodeSecurityVersionSupported,
+} from './node-runtime-version';
 
 /** Architectures better-sqlite3 ships a prebuilt binding for (its lib/binding.js). */
 export const SUPPORTED_ARCHS = ['x64', 'arm64'] as const;
 
-/** Exported for tests: `undefined`/unparsable napi fails closed. */
-export function isNodeApiVersionSupported(napi: string | undefined): boolean {
-  const parsed = Number.parseInt(napi ?? '', 10);
-  return Number.isFinite(parsed) && parsed >= REQUIRED_NODE_API_VERSION;
-}
-
 export function isArchSupported(arch: string): boolean {
   return (SUPPORTED_ARCHS as readonly string[]).includes(arch);
-}
-
-/** Standalone Node floors from the October 2026 security release; Electron backports differ. */
-export function isNodeSecurityVersionSupported(nodeVersion: string): boolean {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(nodeVersion);
-  if (match === null) return false;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  const patch = Number(match[3]);
-  const floors: Record<number, readonly [number, number]> = {
-    22: [23, 4],
-    24: [22, 1],
-    26: [12, 1],
-  };
-  const floor = floors[major];
-  return floor !== undefined && (minor > floor[0] || (minor === floor[0] && patch >= floor[1]));
 }
 
 /** Reject unsupported runtimes before CLI application initialization. */

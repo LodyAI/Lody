@@ -13,8 +13,15 @@ import type {
   GitHubUser,
 } from '@lody/shared';
 import { PrTabView, type PrTabViewData } from '@/components/sessions/pr-tab-view';
+import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
+import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
+
+const drawerScene = stylex.create({
+  fullPage: { width: '100%', maxWidth: 'none', inset: 0, borderWidth: 0, borderRadius: 0 },
+});
+
 const prStory = stylex.create({
   back: {
     marginLeft: 'calc(var(--spacing) * -1)',
@@ -33,7 +40,9 @@ const prStory = stylex.create({
     marginInline: 'auto',
     height: '100vh',
     width: 390,
-    borderWidth:"1px",borderStyle:"solid",borderColor:"hsl(var(--border) / 1)",
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 1)',
     backgroundColor: 'hsl(var(--background) / 1)',
     boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
   },
@@ -444,6 +453,49 @@ export const OpenCiPassed: Story = {
     state: 'ready',
     data: baseData,
     ...storyCallbacks,
+  },
+};
+
+export const Stack: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'ready',
+    data: {
+      ...baseData,
+      pullRequest: {
+        ...basePr,
+        stack: {
+          number: 7,
+          position: 2,
+          size: 3,
+          baseRef: 'main',
+          pullRequests: [
+            {
+              number: 41,
+              title: 'Add the data model',
+              state: 'closed',
+              draft: false,
+              merged: true,
+            },
+            {
+              number: 42,
+              title: 'Add the API endpoints',
+              state: 'open',
+              draft: false,
+              merged: false,
+            },
+            {
+              number: 43,
+              title: 'Build the settings UI',
+              state: 'open',
+              draft: true,
+              merged: false,
+            },
+          ],
+        },
+      },
+    },
   },
 };
 
@@ -933,6 +985,27 @@ export const MobileWithBackButton: Story = {
       <div {...stylex.props(prStory.phone)} style={{ maxWidth: '100vw' }}>
         <Story />
       </div>
+    ),
+  ],
+};
+
+/** A native phone's PR drawer owns its keyboard inset outside the workspace root. */
+export const MobileNativeKeyboardDrawer: Story = {
+  args: MobileWithBackButton.args,
+  decorators: [
+    (Story) => (
+      <Drawer direction="right" open repositionInputs>
+        <DrawerContent
+          nativeKeyboardInset
+          xstyle={drawerScene.fullPage}
+          aria-describedby={undefined}
+        >
+          <DrawerTitle visuallyHidden>Pull request</DrawerTitle>
+          <VaulDrawerBody topInset="0px">
+            <Story />
+          </VaulDrawerBody>
+        </DrawerContent>
+      </Drawer>
     ),
   ],
 };

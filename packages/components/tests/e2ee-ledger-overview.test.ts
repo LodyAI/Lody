@@ -7,8 +7,8 @@ import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
 // Frozen synthetic ledger v1 vector signed by fixed test keys.
 const vector = JSON.parse(
   readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
-) as { anchor: string; records: { hex: string }[] };
-const head = '678d8a5fc4bb2ab0ef21032aa8d060056057958f15729fc53569158d07f5c0ce';
+) as { anchor: string; records: { hex: string; hash: string }[] };
+const head = vector.records.at(-1)!.hash;
 
 function history() {
   return appendLedgerHistory(
@@ -16,7 +16,7 @@ function history() {
     {
       workspaceId: 'w',
       genesisHash: vector.anchor,
-      checkpoint: { headHash: head, length: 10 },
+      checkpoint: { headHash: head, length: vector.records.length },
       startIndex: 0,
       nextCursor: null,
       recordsHex: vector.records.map((record) => record.hex),
@@ -34,16 +34,25 @@ describe('readable ledger overview', () => {
       'admitMember',
       'setRole',
       'admitDevice',
+      'admitDevice',
+      'admitDevice',
       'publishEpoch',
       'revokeDevice',
       'removeMemberAndPublishEpoch',
       'admitMember',
       'transferOwner',
+      'declareCapabilities',
+      'removeMember',
     ]);
-    expect(overview.events[4]).toEqual({ type: 'publishEpoch', actor: member(2, '0b'), epoch: 1 });
+    expect(overview.events[6]).toEqual({ type: 'publishEpoch', actor: member(2, '0b'), epoch: 1 });
     // The revoked device was admitted by member 1, so it is shown as theirs.
-    expect(overview.events[5]).toMatchObject({ actor: member(1, '0a'), owner: member(1, '0a') });
-    expect(overview.events[8]).toEqual({
+    expect(overview.events[7]).toMatchObject({ actor: member(1, '0a'), owner: member(1, '0a') });
+    expect(overview.events[12]).toEqual({
+      type: 'removeMember',
+      actor: member(3, '0c'),
+      member: member(1, '0a'),
+    });
+    expect(overview.events[10]).toEqual({
       type: 'transferOwner',
       actor: member(1, '0a'),
       member: member(3, '0c'),
@@ -54,9 +63,8 @@ describe('readable ledger overview', () => {
     const overview = ledgerOverview(history());
     expect(overview.members).toEqual([
       expect.objectContaining({ ...member(3, '0c'), role: 'owner', devices: [expect.anything()] }),
-      expect.objectContaining({ ...member(1, '0a'), role: 'admin', devices: [expect.anything()] }),
     ]);
-    expect(overview.deviceCount).toBe(2);
-    expect(overview.epoch).toEqual({ number: 2, rotationRequired: false });
+    expect(overview.deviceCount).toBe(1);
+    expect(overview.epoch).toEqual({ number: 2, rotationRequired: true });
   });
 });

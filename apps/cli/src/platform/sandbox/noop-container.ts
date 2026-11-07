@@ -61,7 +61,6 @@ export const makeNoopContainer = Effect.fnUntraced(function* (options: {
                 Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
             )
       ),
-    recoveryRoots: registry.rootPids,
     terminateAll: registry.terminateAll,
     applyLimits: () => Effect.void,
     readAccounting: Effect.map(registry.rootPids, (rootPids) => ({

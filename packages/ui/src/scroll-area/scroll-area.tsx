@@ -12,6 +12,8 @@ import { surface } from './surface';
 
 export { nativeScrollbar } from './surface';
 
+const contentStyles = stylex.create({ fill: { height: '100%' } });
+
 export type ScrollAreaAxis = 'vertical' | 'horizontal' | 'both';
 export type ScrollAreaVisibility = 'hover' | 'scroll' | 'always';
 export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'> {
@@ -20,6 +22,8 @@ export interface ScrollAreaProps extends Omit<ComponentProps<'div'>, 'children'>
   visibility?: ScrollAreaVisibility;
   /** A 4px track for narrow horizontal tab strips. */
   compact?: boolean;
+  /** Let a full-height layout fill the content box inside the viewport. */
+  contentFullHeight?: boolean;
   viewportRef?: Ref<HTMLDivElement>;
   viewportClassName?: string;
   viewportXstyle?: stylex.StyleXStyles;
@@ -37,6 +41,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
     visibility = 'hover',
     compact = false,
     className,
+    contentFullHeight = false,
     viewportRef,
     viewportClassName,
     viewportXstyle,
@@ -96,7 +101,10 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(function S
         }}
       >
         <BaseScrollArea.Content
-          {...stylex.props(axis === 'vertical' && surface.verticalContent)}
+          {...stylex.props(
+            axis === 'vertical' && surface.verticalContent,
+            contentFullHeight && contentStyles.fill
+          )}
           style={axis === 'vertical' ? { minWidth: 0 } : undefined}
         >
           {children}

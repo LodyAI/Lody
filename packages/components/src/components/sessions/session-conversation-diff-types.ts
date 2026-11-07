@@ -1,3 +1,4 @@
+import type { SessionFileDiffContentsLoader } from '@/lib/session-file-provider';
 import type { CommentReferencePayload } from '@lody/shared';
 import type { FileDiffMetadata } from '@pierre/diffs';
 import type { DiffTextChunkSource } from '@/lib/diff-text-chunk-source';
@@ -10,9 +11,11 @@ export type Snapshot =
   | { kind: 'filtered' };
 
 export type FileDiffData =
-  | { status: 'ready'; oldSnapshot: Snapshot; newSnapshot: Snapshot }
+  | { status: 'ready'; contentKey?: string; oldSnapshot: Snapshot; newSnapshot: Snapshot }
   | {
       status: 'ready-parsed';
+      contentKey?: string;
+      loadDiffFiles?: SessionFileDiffContentsLoader;
       fileDiff: FileDiffMetadata;
       oldTextLength: number;
       newTextLength: number;

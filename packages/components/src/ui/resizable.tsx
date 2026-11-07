@@ -48,9 +48,9 @@ const styles = stylex.create({
   },
   edge: {
     backgroundColor: 'transparent',
-    transitionProperty:'opacity',
-    transitionDuration:'150ms',
-    transitionTimingFunction:'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     '::after': {
       content: '""',
       insetBlock: 'calc(var(--spacing) * 0)',
@@ -118,8 +118,10 @@ function ResizableHandle({
   withHandle,
   appearance,
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
+  /** Registry grip. Ignored when `children` supplies the handle's own visual. */
   withHandle?: boolean;
   /** A two-pixel leading edge with the session panel's delayed hover and drag ink. */
   appearance?: 'edge';
@@ -133,11 +135,12 @@ function ResizableHandle({
       )}
       {...props}
     >
-      {withHandle && (
-        <div {...stylex.props(styles.grip)}>
-          <GripVerticalIcon {...stylex.props(styles.glyph)} />
-        </div>
-      )}
+      {children ??
+        (withHandle && (
+          <div {...stylex.props(styles.grip)}>
+            <GripVerticalIcon {...stylex.props(styles.glyph)} />
+          </div>
+        ))}
     </ResizablePrimitive.PanelResizeHandle>
   );
 }

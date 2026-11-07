@@ -41,6 +41,10 @@ to govern branch labels. The [contract](../../../../specs/workspace-branch-state
 records the observation points and last-known semantics. Unborn branches are valid;
 detached HEAD and unreadable/non-Git directories do not replace existing metadata.
 
+Observation commands now stop their own process after 15 seconds and warn; failures
+retain prior values and the owner queue admits subsequent work after bounded cleanup.
+Probe and publication remain serialized, so an older result cannot overwrite a new branch.
+
 ## Verification
 
 200 initial tests passed across branch observation, execution, post-processing, Code

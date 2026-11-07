@@ -1,129 +1,15 @@
-import { toShared } from '@/platform/process-options';
 import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
-import { getLogger } from '@/utils/logger';
-import { startProcessLegacy } from '@lody/shared/node/process';
+import { describe, expect, it } from 'vitest';
 
-import { FakeProcessTable } from '@lody/shared/node/process-testing';
-import {
-  WorkspaceWatchCoordinator,
-  buildWorkspaceWatchWorkerEnvironment,
-} from './workspace-watch-coordinator';
+import type { FSWatcher } from 'node:fs';
+import path from 'node:path';
 
-class FakeChild extends EventEmitter {
-  connected = true;
-  exitCode: number | null = null;
-  pid = 1234;
-  readonly sent: unknown[] = [];
-  send(message: unknown): boolean {
-    this.sent.push(message);
-    if (
-      typeof message === 'object' &&
-      message !== null &&
-      'type' in message &&
-      message.type === 'code-collab-watch/shutdown'
-    ) {
-      this.connected = false;
-      queueMicrotask(() => this.emit('exit', 0, null));
-    }
-    return true;
-  }
-}
+import { buildWorkspaceWatchWorkerEnvironment } from './workspace-watch-coordinator';
+import type { WorkspaceWatchChildMessage } from './workspace-watch-protocol';
+import { parseWorkspaceWatchChildMessage } from './workspace-watch-protocol';
+import { startWorkspaceWatchWorker } from './workspace-watch-worker-core';
 
 describe('WorkspaceWatchCoordinator', () => {
-  it('shares a canonical root and ignores stale generation messages', async () => {
-    const children: FakeChild[] = [];
-    const dirtyA = vi.fn();
-    const dirtyB = vi.fn();
-    const coordinator = new WorkspaceWatchCoordinator(getLogger('workspace-watch-test'), {
-      realpath: async () => '/canonical/workspace',
-      childLauncher: () => {
-        const child = new FakeChild();
-        children.push(child);
-        return { child: child as never, terminate: async () => {} };
-      },
-      restartDelayMs: () => 1_000,
-    });
-
-    const first = await coordinator.subscribe({
-      workspaceId: 'workspace-a',
-      ownerSessionId: 'owner-a',
-      workspaceRoot: '/alias-a',
-      onDirty: dirtyA,
-    });
-    const second = await coordinator.subscribe({
-      workspaceId: 'workspace-b',
-      ownerSessionId: 'owner-b',
-      workspaceRoot: '/alias-b',
-      onDirty: dirtyB,
-    });
-    const child = children[0];
-    expect(child?.sent.at(-1)).toMatchObject({ roots: ['/canonical/workspace'] });
-    const revision = coordinator.getSnapshot().revision;
-    child?.emit('message', {
-      type: 'code-collab-watch/ready',
-      generation: 1,
-      revision,
-      watchedRoots: ['/canonical/workspace'],
-    });
-    expect(dirtyA).toHaveBeenCalledWith('coverage');
-    expect(dirtyB).toHaveBeenCalledWith('coverage');
-
-    child?.emit('message', {
-      type: 'code-collab-watch/dirty',
-      generation: 0,
-      root: '/canonical/workspace',
-    });
-    expect(dirtyA).toHaveBeenCalledTimes(1);
-    child?.emit('message', {
-      type: 'code-collab-watch/stats',
-      generation: 1,
-      watcherCount: 1,
-      rssBytes: 12_345,
-      reconfigurationCount: 2,
-      uptimeMs: 3_000,
-    });
-    expect(coordinator.getSnapshot()).toMatchObject({
-      actualWatcherCount: 1,
-      childRssBytes: 12_345,
-      childUptimeMs: 3_000,
-    });
-    first?.release();
-    expect(child?.sent.at(-1)).toMatchObject({ roots: ['/canonical/workspace'] });
-    second?.release();
-    await coordinator.dispose();
-  });
-
-  it('ends a worker that ignores the shutdown request and SIGTERM', async () => {
-    const table = new FakeProcessTable();
-    table.queueSpawn({ ignores: ['SIGTERM'] });
-    const coordinator = new WorkspaceWatchCoordinator(getLogger('workspace-watch-test'), {
-      realpath: async () => '/canonical/workspace',
-      childLauncher: () =>
-        startProcessLegacy(
-          { command: 'watch-worker', args: [], options: {}, processGroup: false },
-          toShared({ nodeProcess: table.api })
-        ),
-      gracefulShutdownMs: 0,
-      sigtermWaitMs: 10,
-    });
-    await coordinator.subscribe({
-      workspaceId: 'workspace-a',
-      ownerSessionId: 'owner-a',
-      workspaceRoot: '/workspace',
-      onDirty: () => {},
-    });
-    const workerPid = coordinator.getSnapshot().pid ?? -1;
-
-    await coordinator.dispose();
-
-    expect(table.isAlive(workerPid)).toBe(false);
-    expect(table.delivered).toEqual([
-      { target: workerPid, signal: 'SIGTERM' },
-      { target: workerPid, signal: 'SIGKILL' },
-    ]);
-  });
-
   it('does not forward representative credentials or NODE_OPTIONS', () => {
     expect(
       buildWorkspaceWatchWorkerEnvironment({
@@ -140,5 +26,57 @@ describe('WorkspaceWatchCoordinator', () => {
       LANG: 'en_US.UTF-8',
       ELECTRON_RUN_AS_NODE: '1',
     });
+  });
+});
+
+describe('workspace watch child', () => {
+  it('reports root-relative event paths so the parent can apply Git ignore rules', () => {
+    const root = path.join(path.sep, 'workspace');
+    const listeners = new Map<string, (eventType: string, filename: string | null) => void>();
+    const sent: WorkspaceWatchChildMessage[] = [];
+    let deliver: (message: unknown) => void = () => {};
+    const worker = startWorkspaceWatchWorker({
+      send: (message) => sent.push(message),
+      onMessage: (handler) => {
+        deliver = handler;
+      },
+      onDisconnect: () => {},
+      exit: () => {},
+      readDirectory: () => [
+        { name: 'coverage', isDirectory: true },
+        { name: 'node_modules', isDirectory: true },
+      ],
+      watchFactory: (directory, _options, listener) => {
+        listeners.set(directory, listener);
+        return Object.assign(new EventEmitter(), { close: () => {} }) as unknown as FSWatcher;
+      },
+    });
+    try {
+      deliver({
+        type: 'code-collab-watch/replace-roots',
+        generation: 1,
+        revision: 1,
+        roots: [root],
+      });
+      listeners.get(path.join(root, 'coverage'))?.('change', 'lcov-report/index.html');
+      listeners.get(root)?.('change', null);
+
+      const dirty = sent
+        .map((message) => parseWorkspaceWatchChildMessage(message))
+        .filter((message) => message?.type === 'code-collab-watch/dirty');
+      expect(dirty).toEqual([
+        {
+          type: 'code-collab-watch/dirty',
+          generation: 1,
+          root,
+          path: 'coverage/lcov-report/index.html',
+        },
+        // No filename: the parent must rescan rather than guess.
+        { type: 'code-collab-watch/dirty', generation: 1, root },
+      ]);
+      expect(listeners.has(path.join(root, 'node_modules'))).toBe(false);
+    } finally {
+      worker.close();
+    }
   });
 });

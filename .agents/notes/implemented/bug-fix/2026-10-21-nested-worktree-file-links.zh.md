@@ -8,15 +8,15 @@ Translation: current
 ## 摘要
 
 [Issue #1788](https://github.com/LodyAI/Lody/issues/1788)：agent 在嵌套 worktree 中写出的
-相对链接按会话 checkout 解析，导致找不到文件或静默打开 checkout 中的同名文件。现在
-Markdown 相对链接会从会话根目录及其内部的同仓库 worktree 收集候选：真实路径唯一时
-直接打开，多个时由用户选择。文件树／Diff 的确定路径以及显式绝对、home、父目录相对
-链接保持原行为。发现过程不扩展授权。
+相对链接可能打开 checkout 中的同名文件。文件预览的发现协议从会话根目录及其内部的
+同仓库 worktree 收集候选，不扩展授权。会话渲染现在通过文件索引确认相对路径并直接
+打开；点击和复制菜单都不调用发现协议。当前行为见[文件界面说明](../../../docs/sessions-file-surfaces.md)。
 
 ## 决策
 
-- **来源决定是否发现。** `session-file-open-target.ts` 只标记 agent 写出的相对 href；
-  共享解析器在信任边界重复校验同一规则。
+- **来源决定是否发现。** 调用者请求发现时，`resolveSessionFileOpenTarget` 标记 agent
+  写出的相对 href；`resolveDirectMarkdownFileOpenTarget` 刻意省略该标记。共享解析器在
+  信任边界重复校验发现来源。
 - **包含关系。** `git worktree list --porcelain -z` 提供根目录、分支和 HEAD。根目录在
   字面和真实路径上都必须位于会话根目录内，不搜索任意子目录。`relativeBase` 只改变
   查找基准，路径策略仍以会话根目录授权，选中路径在读取时重新授权。
@@ -26,17 +26,17 @@ Markdown 相对链接会从会话根目录及其内部的同仓库 worktree 收�
   输出过大（256 KiB）或 worktree 超过 128 个时，退回仅按会话根目录解析（修复前行为），
   不让原本能打开的链接失效。
 - **版本差异。** `markdownFileLinks` v1 协商 `file/preview` 上的
-  `resolveMarkdownLink: true`；对旧远程 daemon，facade 返回 `unsupported_protocol`，
-  渲染端随后按会话根目录照旧打开。同机 Electron 不依赖 daemon 元数据直接解析，保留
-  [独立于 daemon 的预览边界](2026-10-16-daemon-independent-local-file-preview.zh.md)。
-- **选择器。** 显示绝对路径、worktree 根目录、分支／detached HEAD、commit 和修改时间。
-  选择后固定规范路径与行号锚点，不缓存短链接。更新的打开请求或切换会话会丢弃迟到的解析结果。
+  `resolveMarkdownLink: true`；旧远程 daemon 的 facade 返回 `unsupported_protocol`。
+  会话打开不经过这层协商，保留[独立于 daemon 的预览边界](2026-10-16-daemon-independent-local-file-preview.zh.md)。
+- **结果。** 候选包含绝对路径、worktree 根目录、分支／detached HEAD、commit 和修改时间。
+  显式发现调用者必须保留歧义并固定选中的规范路径。会话打开改用索引确认的路径，
+  切换会话或出现更新的打开请求后丢弃迟到结果。
 
 Effect 评估：预览和 Electron 调用者仍为 Promise 边界；只读 Git 查询复用进程层 Legacy
 入口，不宣称完成原生迁移。
 
 ## 限制
 
-长期保留嵌套 worktree 的仓库中，大多数相对链接都会弹出选择器，因为 worktree 共享文件。
-Markdown 链接右键菜单操作（复制路径／打开／定位）在执行时按同样方式解析，并复用选择器。外部 worktree（#472）
-和消息级 cwd 归属不在范围内。
+长期保留嵌套 worktree 时，发现协议可能为常见文件返回多个候选。会话界面要求精确
+索引命中的相对路径或显式绝对路径，避免这层歧义；复制永不解析或重写该路径。
+外部 worktree（#472）和消息级 cwd 归属仍不在发现协议的范围内。

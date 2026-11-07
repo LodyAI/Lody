@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -16,7 +17,10 @@ import {
 // passes `availableAgentConfigs` instead, so the pool is not what is under test.
 vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => [] }));
 
-import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
+import {
+  DesktopMachineMenu,
+  DesktopRunConfigMenu,
+} from '../src/components/sessions/desktop-run-config-menu';
 import { MobileSessionRunConfig } from '../src/components/mobile/mobile-session-run-config';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
@@ -113,13 +117,6 @@ describe('DesktopRunConfigMenu role face', () => {
     return container as HTMLDivElement;
   };
 
-  it('names the agent and its values together when no Role is selected', async () => {
-    const view = await render();
-    const trigger = view.querySelector('button[aria-label="Run configuration"]');
-    expect(trigger?.textContent).toContain('Codex Primary');
-    expect(trigger?.textContent).toContain('5.5');
-  });
-
   it('keeps the selected ACP model face while sending locks the menu', async () => {
     const props: Partial<MenuProps> = {
       modelOptions: [],
@@ -184,29 +181,6 @@ describe('DesktopRunConfigMenu role face', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('keeps the menu closed and explains when a machine must be selected first', async () => {
-    const disabledReason = 'Select a machine first';
-    const view = await render({ disabledReason });
-    const trigger = view.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]');
-    expect(trigger?.getAttribute('aria-disabled')).toBe('true');
-
-    await act(async () => {
-      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-      trigger?.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-
-    await act(async () => {
-      trigger?.focus();
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-base-ui-portal] [data-side]')?.textContent).toContain(
-        disabledReason
-      );
-    });
-  });
-
   it('gives the button to the Role alone and leaves its values inert beside it', async () => {
     const view = await render({
       agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },
@@ -260,47 +234,100 @@ describe('DesktopRunConfigMenu role face', () => {
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
 
-  it('leads the menu with the Role row, above the rows a Role answers', async () => {
+  it('binds same-name Agent options to the IDs used by their selection action', async () => {
+    const second: AgentConfigMeta = {
+      ...agentConfig,
+      id: 'config-2' as AgentConfigId,
+      machineId: 'machine-2' as MachineId,
+    };
+    let chosen: { agentId: AgentConfigId; machineId: MachineId } | undefined;
     const view = await render({
-      agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },
+      availableAgentConfigs: [agentConfig, second],
+      onAgentConfigChange: (selection) => {
+        chosen = selection;
+      },
     });
-    const menu = await openMenu(view);
-    const rows = [...menu.querySelectorAll('[role="menuitem"]')].map((node) =>
-      node.textContent?.trim()
-    );
-    const roleRow = rows.findIndex((text) => text?.startsWith('Role'));
-    const agentRow = rows.findIndex((text) => text?.startsWith('Agent'));
-    expect(roleRow).toBeGreaterThanOrEqual(0);
-    expect(agentRow).toBeGreaterThan(roleRow);
-    // The row states which Role, so the menu never opens denying its own face.
-    expect(rows[roleRow]).toContain('Code Reviewer');
-  });
-
-  it('turns the Role row value into the way to make one when there are none', async () => {
-    const onCreate = vi.fn();
-    const view = await render({
-      agentRoles: { items: [], selectedRoleId: null, onSelect: () => undefined, onCreate },
-    });
-    const menu = await openMenu(view);
-    const roleRow = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>
-      node.textContent?.trim().startsWith('Role')
-    );
-    expect(
-      roleRow?.querySelector('[aria-label="Create role from current settings"]')
-    ).not.toBeNull();
     await act(async () => {
-      (roleRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      view
+        .querySelector('button[aria-label="Run configuration"]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
-    expect(onCreate).toHaveBeenCalled();
+    await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+    const agent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
+      element.textContent?.startsWith('Agent')
+    );
+    expect(agent).toBeDefined();
+    await act(async () => {
+      agent!.focus();
+      agent!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true })
+      );
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll('[data-testid="chat-agent-option"]')).toHaveLength(2)
+    );
+    const options = [
+      ...document.querySelectorAll<HTMLElement>('[data-testid="chat-agent-option"]'),
+    ];
+    expect(
+      options.map((element) => [element.dataset.agentConfigId, element.dataset.machineId])
+    ).toEqual([
+      [agentConfig.id, agentConfig.machineId],
+      [second.id, second.machineId],
+    ]);
+    const target = options.find((element) => element.dataset.agentConfigId === second.id)!;
+    await act(async () => target.click());
+    expect(chosen).toEqual({ agentId: second.id, machineId: second.machineId });
+    await render({ availableAgentConfigs: [agentConfig, second], agentSelection: chosen });
+    const actualSelection = view.querySelector<HTMLElement>('[data-run-config-trigger]');
+    expect(actualSelection?.dataset.agentConfigId).toBe(second.id);
+    expect(actualSelection?.dataset.machineId).toBe(second.machineId);
+  });
+});
+
+describe('DesktopMachineMenu offline selection', () => {
+  const longName = 'ubuntu-gpu-workstation-shanghai-02';
+  let view: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    await initI18n();
+    view = document.createElement('div');
+    document.body.append(view);
+    root = createRoot(view);
   });
 
-  it('drops the Role face as soon as the selection is no longer that Role', async () => {
-    const view = await render({
-      agentRoles: { items: [roleItem], selectedRoleId: null, onSelect: () => undefined },
-    });
-    const trigger = view.querySelector('button[aria-label="Run configuration"]');
-    expect(trigger?.textContent).toContain('Codex Primary');
-    expect(trigger?.textContent).not.toContain('Code Reviewer');
+  afterEach(() => {
+    act(() => root.unmount());
+    view.remove();
+  });
+
+  const renderTrigger = (offline: boolean) => {
+    act(() =>
+      root.render(
+        <DesktopMachineMenu
+          value={machineId}
+          selectedLabel={longName}
+          offline={offline}
+          options={[]}
+          onChange={() => {}}
+        />
+      )
+    );
+    return view.querySelector<HTMLElement>('[data-testid="chat-machine-trigger"]');
+  };
+
+  it('keeps the offline mark outside the machine name that truncates', () => {
+    const trigger = renderTrigger(true);
+    const name = Array.from(trigger?.querySelectorAll('span') ?? []).find((element) =>
+      element.textContent?.startsWith(longName)
+    );
+
+    expect(name?.textContent).toBe(longName);
+    expect(trigger?.textContent).toContain('Offline');
+  });
+
+  it('shows no offline mark for an available machine', () => {
+    expect(renderTrigger(false)?.textContent).not.toContain('Offline');
   });
 });

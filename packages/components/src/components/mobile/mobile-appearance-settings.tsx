@@ -22,12 +22,13 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
+import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { buildConversationFontSizeChoices } from '@/components/settings/conversation-font-size-options';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { Switch } from '@lody/ui/switch';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { withOneSignal } from '@/lib/onesignal';
+import { withPush } from '@/lib/push-notifications';
 import { useTheme, type Theme } from '../../theme-provider';
 // The theme tokens are imported by path, not by the `@/` alias: the StyleX
 // compiler links a theme file on its own and does not follow bundler aliases.
@@ -230,10 +231,10 @@ export function MobileAppearanceSettings() {
       if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
         return;
       }
-      void withOneSignal((oneSignal) => {
-        void oneSignal.User.setLanguage(next === 'en' ? 'en' : 'zh');
+      void withPush((pushClient) => {
+        void pushClient.User.setLanguage(next === 'en' ? 'en' : 'zh');
       }).catch((error: unknown) => {
-        console.error('Failed to sync OneSignal language', error);
+        console.error('Failed to sync Push language', error);
       });
     },
     [i18n, setLanguage]
@@ -241,88 +242,99 @@ export function MobileAppearanceSettings() {
 
   return (
     <MobileInlinePickerCoordinator>
-      <MobileSettingsSection>
-        <MobileInlinePickerRowSlot>
-          <MobileSettingsRow label={t('settings.theme.label')}>
-            <ThemeModeMenuTrigger
-              value={theme}
-              onChange={handleThemeChange}
-              selectedLabel={selectedThemeLabel}
-              selectedIcon={themeIconFor(theme)}
-            />
-          </MobileSettingsRow>
-        </MobileInlinePickerRowSlot>
-        <MobileInlinePickerRowSlot>
-          <MobileSettingsRow label={t('settings.language.label')} hasDivider>
-            <MobileSettingsPickerTrigger
-              id="settings-language"
-              ariaLabel={String(t('settings.language.label'))}
-              value={language}
-              options={languageOptions}
-              onChange={handleLanguageChange}
-              triggerLabel={selectedLanguageLabel}
-            />
-          </MobileSettingsRow>
-        </MobileInlinePickerRowSlot>
-      </MobileSettingsSection>
+      <MobileSettingsFoldPanels
+        upper={
+          <>
+            <MobileSettingsSection>
+              <MobileInlinePickerRowSlot>
+                <MobileSettingsRow label={t('settings.theme.label')}>
+                  <ThemeModeMenuTrigger
+                    value={theme}
+                    onChange={handleThemeChange}
+                    selectedLabel={selectedThemeLabel}
+                    selectedIcon={themeIconFor(theme)}
+                  />
+                </MobileSettingsRow>
+              </MobileInlinePickerRowSlot>
+              <MobileInlinePickerRowSlot>
+                <MobileSettingsRow label={t('settings.language.label')} hasDivider>
+                  <MobileSettingsPickerTrigger
+                    id="settings-language"
+                    ariaLabel={String(t('settings.language.label'))}
+                    value={language}
+                    options={languageOptions}
+                    onChange={handleLanguageChange}
+                    triggerLabel={selectedLanguageLabel}
+                  />
+                </MobileSettingsRow>
+              </MobileInlinePickerRowSlot>
+              <MobileInlinePickerRowSlot>
+                <MobileSettingsRow
+                  label={t('settings.conversationFontSize.label', 'Font size')}
+                  hasDivider
+                >
+                  <MobileSettingsPickerTrigger
+                    id="settings-conversation-font-size"
+                    ariaLabel={String(t('settings.conversationFontSize.label', 'Font size'))}
+                    value={String(conversationFontSize)}
+                    options={fontSizeOptions}
+                    onChange={handleFontSizeChange}
+                    triggerLabel={selectedFontSizeLabel}
+                  />
+                </MobileSettingsRow>
+              </MobileInlinePickerRowSlot>
+            </MobileSettingsSection>
+          </>
+        }
+        lower={
+          <>
+            <MobileSettingsSection>
+              <MobileSettingsRow
+                label={t('settings.inlineMath.label', 'Render inline math')}
+                helper={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
+              >
+                <Switch
+                  checked={inlineMathEnabled}
+                  onCheckedChange={setInlineMathEnabled}
+                  aria-label={t('settings.inlineMath.label', 'Render inline math')}
+                />
+              </MobileSettingsRow>
+              <MobileSettingsRow
+                label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
+                helper={t(
+                  'settings.extendedCodeLanguages.helper',
+                  'Adds more syntax grammars, including Lean and Rocq. Each grammar loads when first used and can slow that render.'
+                )}
+                hasDivider
+              >
+                <Switch
+                  checked={extendedCodeLanguagesEnabled}
+                  onCheckedChange={setExtendedCodeLanguagesEnabled}
+                  aria-label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
+                />
+              </MobileSettingsRow>
+            </MobileSettingsSection>
 
-      <MobileSettingsSection>
-        <MobileInlinePickerRowSlot>
-          <MobileSettingsRow label={t('settings.conversationFontSize.label', 'Font size')}>
-            <MobileSettingsPickerTrigger
-              id="settings-conversation-font-size"
-              ariaLabel={String(t('settings.conversationFontSize.label', 'Font size'))}
-              value={String(conversationFontSize)}
-              options={fontSizeOptions}
-              onChange={handleFontSizeChange}
-              triggerLabel={selectedFontSizeLabel}
-            />
-          </MobileSettingsRow>
-        </MobileInlinePickerRowSlot>
-        <MobileSettingsRow
-          label={t('settings.inlineMath.label', 'Render inline math')}
-          helper={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
-          hasDivider
-        >
-          <Switch
-            checked={inlineMathEnabled}
-            onCheckedChange={setInlineMathEnabled}
-            aria-label={t('settings.inlineMath.label', 'Render inline math')}
-          />
-        </MobileSettingsRow>
-        <MobileSettingsRow
-          label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
-          helper={t(
-            'settings.extendedCodeLanguages.helper',
-            'Adds more syntax grammars, including Lean and Rocq. Each grammar loads when first used and can slow that render.'
-          )}
-          hasDivider
-        >
-          <Switch
-            checked={extendedCodeLanguagesEnabled}
-            onCheckedChange={setExtendedCodeLanguagesEnabled}
-            aria-label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
-          />
-        </MobileSettingsRow>
-      </MobileSettingsSection>
+            <MobileSettingsSection>
+              <MobileSettingsRow
+                label={t('settings.fontLigatures.label', 'Font ligatures')}
+                helper={t(
+                  'settings.fontLigatures.helper',
+                  'Applies to conversation, code, and tool output.'
+                )}
+              >
+                <Switch
+                  checked={fontLigaturesEnabled}
+                  onCheckedChange={setFontLigaturesEnabled}
+                  aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+                />
+              </MobileSettingsRow>
+            </MobileSettingsSection>
 
-      <MobileSettingsSection>
-        <MobileSettingsRow
-          label={t('settings.fontLigatures.label', 'Font ligatures')}
-          helper={t(
-            'settings.fontLigatures.helper',
-            'Applies to conversation, code, and tool output.'
-          )}
-        >
-          <Switch
-            checked={fontLigaturesEnabled}
-            onCheckedChange={setFontLigaturesEnabled}
-            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
-          />
-        </MobileSettingsRow>
-      </MobileSettingsSection>
-
-      <MobileAppIconSettings />
+            <MobileAppIconSettings />
+          </>
+        }
+      />
     </MobileInlinePickerCoordinator>
   );
 }

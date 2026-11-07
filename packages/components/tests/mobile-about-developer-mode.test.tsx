@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -11,6 +12,7 @@ import {
   inboxFeatureEnabledAtom,
 } from '../src/atoms/settings';
 import { MobileAboutSettings } from '../src/components/mobile/mobile-about-settings';
+
 import { useVisibleSettingsTabs } from '../src/components/settings/settings-tabs';
 import { TestCloudPlatformProvider } from './test-platform';
 import { initI18n } from '../src/i18n';

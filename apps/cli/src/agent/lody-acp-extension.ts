@@ -1,6 +1,7 @@
 import {
   isAskUserQuestionPermissionRequest,
   normalizePersistedRateLimit,
+  parseLodyMessagePhase,
   type AgentConfigCliType,
 } from '@lody/shared';
 import type {
@@ -12,6 +13,8 @@ import {
   LODY_EXTENSION_METHODS,
   LODY_SUBAGENT_EVENT_METHOD,
   isLodySubagentEvent,
+  isLodyPromptSuggestion,
+  type LodyPromptSuggestion,
   type LodySubagentEvent,
   MAX_USAGE_SCOPE_ID_LENGTH,
   normalizeLodyExtensionMethod,
@@ -83,6 +86,7 @@ const LodyCapabilitiesSchema = z
     sessionHistory: VersionOneSchema.optional(),
     worktreeProject: VersionOneSchema.optional(),
     sessionActivity: VersionOneSchema.optional().catch(undefined),
+    promptSuggestions: VersionOneSchema.optional().catch(undefined),
   })
   .partial();
 
@@ -159,8 +163,6 @@ const LegacyProposedPlanSchema = z.object({
   isLatest: z.boolean(),
 });
 
-const MessagePhaseSchema = z.enum(['commentary', 'final_answer']);
-
 const LEGACY_METHODS = {
   usageUpdate: '_acp_ext:session_usage_update',
   rateLimitsUpdate: '_acp_ext:session_rate_limits',
@@ -174,6 +176,7 @@ export type LodyExtensionEvent =
   | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | { readonly type: 'sessionActivity'; readonly update: LodySessionActivityUpdate }
+  | { readonly type: 'promptSuggestion'; readonly update: LodyPromptSuggestion }
   | {
       readonly type: 'legacyProposedPlan';
       readonly plan: z.infer<typeof LegacyProposedPlanSchema>;
@@ -217,16 +220,7 @@ export function parseRateLimitsSnapshot(value: unknown): RateLimitsSnapshot {
   return RateLimitsSnapshotSchema.parse(value);
 }
 
-export function parseLodyMessagePhase(
-  meta: Record<string, unknown> | null | undefined
-): z.infer<typeof MessagePhaseSchema> | undefined {
-  const canonical = z.object({ messagePhase: MessagePhaseSchema }).safeParse(meta?.lody);
-  if (canonical.success) return canonical.data.messagePhase;
-
-  // One-release compatibility for Codex runtimes predating Core v0.1.
-  const legacy = z.object({ phase: MessagePhaseSchema }).safeParse(meta?.codex);
-  return legacy.success ? legacy.data.phase : undefined;
-}
+export { parseLodyMessagePhase };
 
 const UsageScopeIdSchema = z.string().min(1).max(MAX_USAGE_SCOPE_ID_LENGTH);
 
@@ -264,12 +258,17 @@ export function parseLodyExtensionMessage(args: {
       type: 'usage',
       update,
       ...(scopeId
-        ? { accountingId: `${args.sessionId}:scope:${encodeURIComponent(scopeId)}` }
+        ? { accountingId: `${update.sessionId}:scope:${encodeURIComponent(scopeId)}` }
         : {}),
     };
   }
   if (method === LODY_EXTENSION_METHODS.rateLimitsUpdate) {
     return { type: 'rateLimits', snapshot: parseRateLimitsSnapshot(args.params) };
+  }
+  if (method === LODY_EXTENSION_METHODS.sessionPromptSuggestion) {
+    return isLodyPromptSuggestion(args.params)
+      ? { type: 'promptSuggestion', update: args.params }
+      : null;
   }
   if (method === LODY_EXTENSION_METHODS.sessionActivityUpdate) {
     return { type: 'sessionActivity', update: SessionActivityUpdateSchema.parse(args.params) };

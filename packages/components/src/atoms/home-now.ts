@@ -1,5 +1,10 @@
 import { atom } from 'jotai';
-import { findFreshSessionPresenceState, type SessionMeta, type SessionStatus } from '@lody/shared';
+import {
+  findFreshSessionPresenceState,
+  getSessionGroupTitle,
+  type SessionMeta,
+  type SessionStatus,
+} from '@lody/shared';
 import {
   getEffectiveSessionActivitySummary,
   getLatestPullRequestInfo,
@@ -80,7 +85,7 @@ export const homeNowInputAtom = atom((get) => {
     if (!activity.isWorking && !activity.isWaitingPermission && lastAt < horizon) continue;
     rows.push({
       id: session.id,
-      title: session.title?.trim() || null,
+      title: getSessionGroupTitle(session) || null,
       cliType: session.cliType,
       agentType: session.agentType,
       lastAt,

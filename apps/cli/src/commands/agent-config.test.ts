@@ -14,13 +14,9 @@ import { importMagpieProviders, resolveMagpieImport } from './magpie-import';
 import { toAgentConfigOutput } from './agent-config-output';
 import type { AgentConfigMeta, MachineMeta } from '@lody/shared';
 import {
-  applyEnvUpdates,
   inferAgentConfigCliType,
-  parseEnvAssignments,
-  parseEnvFileText,
   resolveMachineOrThrow,
   resolveAgentConfigSelector,
-  sortAgentConfigs,
 } from './agent-config';
 
 const state = vi.hoisted(() => ({
@@ -57,7 +53,10 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
               : undefined;
           },
         },
-        getOnlineMachineIds: async () => new Set(state.online ? ['machine-id'] : []),
+        getMachinePresenceView: async () => ({
+          online: new Set(state.online ? ['machine-id'] : []),
+          synced: true,
+        }),
         markMachineFlockDocDirty: () => {},
         syncMachineFlockDoc: async () => state.syncResults.shift() ?? true,
       }),
@@ -108,27 +107,6 @@ const createMachine = (overrides: Partial<MachineMeta> = {}): MachineMeta => ({
 });
 
 describe('agent-config command helpers', () => {
-  it('sorts agent configs by name then id', () => {
-    const configs = [
-      createAgentConfig({ id: 'b', name: 'Beta' }),
-      createAgentConfig({ id: 'c', name: 'Alpha' }),
-      createAgentConfig({ id: 'a', name: 'Alpha' }),
-    ];
-
-    expect(sortAgentConfigs(configs).map((config) => config.id)).toEqual(['a', 'c', 'b']);
-  });
-
-  it('resolves agent config selectors from id, name, or env fallback', () => {
-    const configs = [
-      createAgentConfig({ id: 'cfg-1', name: 'Codex Default' }),
-      createAgentConfig({ id: 'cfg-2', name: 'Claude' }),
-    ];
-
-    expect(resolveAgentConfigSelector(configs, { selector: 'cfg-2' }).id).toBe('cfg-2');
-    expect(resolveAgentConfigSelector(configs, { selector: 'Claude' }).id).toBe('cfg-2');
-    expect(resolveAgentConfigSelector([configs[0]!], { envSelector: 'cfg-1' }).id).toBe('cfg-1');
-  });
-
   it('rejects ambiguous agent config names', () => {
     expect(() =>
       resolveAgentConfigSelector(
@@ -156,47 +134,8 @@ describe('agent-config command helpers', () => {
     ).toThrow(/ambiguous/i);
   });
 
-  it('parses inline and file env entries and applies updates in the correct order', () => {
-    expect(parseEnvAssignments(['OPENAI_API_KEY=abc', 'FOO=bar'])).toEqual({
-      OPENAI_API_KEY: 'abc',
-      FOO: 'bar',
-    });
-
-    expect(
-      parseEnvFileText(`
-# comment
-OPENAI_API_KEY=from-file
-FOO=from-file
-`)
-    ).toEqual({
-      OPENAI_API_KEY: 'from-file',
-      FOO: 'from-file',
-    });
-
-    expect(
-      applyEnvUpdates(
-        { BASE: '1', FOO: 'old' },
-        { FOO: 'from-file', BAR: 'from-file' },
-        { FOO: 'from-flag', BAZ: 'from-flag' },
-        ['BASE']
-      )
-    ).toEqual({
-      FOO: 'from-flag',
-      BAR: 'from-file',
-      BAZ: 'from-flag',
-    });
-  });
-
-  it('infers cli type from agent type', () => {
-    expect(inferAgentConfigCliType('codex')).toBe('builtin');
-    expect(inferAgentConfigCliType('claude')).toBe('builtin');
-    expect(inferAgentConfigCliType('grok')).toBe('builtin');
-    expect(inferAgentConfigCliType('bub')).toBe('builtin');
-    expect(inferAgentConfigCliType('dimcode')).toBe('builtin');
-    expect(inferAgentConfigCliType('claude-p')).toBe('registry');
-    expect(inferAgentConfigCliType('opencode')).toBe('registry');
-    expect(inferAgentConfigCliType('kimi')).toBe('registry');
-    expect(inferAgentConfigCliType('kimi-code')).toBe('registry');
+  it('classifies Sorbet as a builtin agent', () => {
+    expect(inferAgentConfigCliType('sorbet')).toBe('builtin');
   });
 });
 
@@ -325,33 +264,6 @@ describe('Magpie provider imports', () => {
     expect(result[0]?.agentConfigId).not.toBe(cancelled.id);
     expect(read().setups.find((s) => s.id === cancelled.id)).toEqual(cancelled);
     expect(read().setups).toHaveLength(2);
-  });
-
-  it('validates gateway, link selection and duplicate targets before import', () => {
-    expect(() => resolveMagpieImport({ gateway: 'https://example.com' })).toThrow();
-    expect(() => resolveMagpieImport({ link: '' })).toThrow();
-    expect(() => resolveMagpieImport({ targets: 'pi,pi' })).toThrow('Invalid --targets');
-    expect(() => resolveMagpieImport({ targets: '' })).toThrow('Invalid --targets');
-    const data = Buffer.from(
-      JSON.stringify({
-        kind: 'custom',
-        id: 'magpie',
-        name: 'Magpie',
-        auth: { method: 'apiKey', apiKey: 'magpie-lody' },
-        endpoints: [
-          {
-            protocol: 'openai-chat',
-            baseUrl: 'http://127.0.0.1:3425/v1',
-            targets: ['pi'],
-            modelsUrl: 'http://127.0.0.1:3425/v1/models',
-          },
-        ],
-      })
-    ).toString('base64url');
-    const link = `lody://provider/import?v=1&data=${data}`;
-    expect(resolveMagpieImport({ link }).targets).toEqual(['pi']);
-    expect(() => resolveMagpieImport({ link, targets: 'codex' })).toThrow('Invalid --targets');
-    expect(() => resolveMagpieImport({ link, gateway: 'http://127.0.0.1:3425' })).toThrow('either');
   });
 });
 

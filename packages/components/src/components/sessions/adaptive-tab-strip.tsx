@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 
 export const ACTIVE_TAB_MIN_WIDTH = 180;
 
@@ -613,7 +613,7 @@ export function AdaptiveTabStrip({
   return (
     <div
       ref={viewportRef}
-      className={cn(viewportStyles.className, viewportClassName)}
+      className={clsx(viewportStyles.className, viewportClassName)}
       style={viewportStyles.style}
       data-adaptive-tab-strip-viewport=""
       onPointerDown={() => {
@@ -635,7 +635,7 @@ export function AdaptiveTabStrip({
         <div
           {...props}
           ref={stripRef}
-          className={cn(stripStyles.className, className)}
+          className={clsx(stripStyles.className, className)}
           style={
             {
               ...stripStyles.style,
@@ -701,7 +701,7 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
       <div
         {...props}
         ref={ref}
-        className={cn(itemStyles.className, className)}
+        className={clsx(itemStyles.className, className)}
         style={{ ...itemStyles.style, ...style, ...layoutStyle }}
         data-adaptive-tab-strip-item={itemId}
       />

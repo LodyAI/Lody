@@ -45,6 +45,7 @@ export const BUILTIN_AGENTS = [
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
   { agentType: 'dimcode', displayName: 'Dimcode' },
+  { agentType: 'sorbet', displayName: 'Lody Agent' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -74,6 +75,7 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'>
   // keeps running its isolated title agent.
   bub: 'none',
   dimcode: 'none',
+  sorbet: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -376,7 +378,24 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 10;
+// 11: provider command previews come only from probes, never project sessions.
+export const ACP_CAPABILITY_CACHE_VERSION = 11;
+
+/**
+ * One sign-in method an ACP agent advertised in its `initialize` response.
+ *
+ * Persisted with the capability cache so the account panel can offer the
+ * agent's own sign-in methods without starting an authentication attempt
+ * first. `args` is display-only; the Machine resolves the trusted executable
+ * and arguments itself.
+ */
+export type AcpAuthMethodSummary = {
+  type: 'agent' | 'env_var' | 'terminal';
+  id?: string;
+  name?: string;
+  description?: string;
+  args?: string[];
+};
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -410,8 +429,17 @@ export type AcpCapabilityCacheEntry = {
    * stored in the capability row itself; see `acp-model-capabilities.ts`.
    */
   declaredModelControls?: Record<string, AcpModelControls>;
-  /** Available slash commands advertised by the agent. */
+  /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
+  /**
+   * Sign-in methods the agent advertised in its `initialize` response.
+   *
+   * `undefined` means no probe has asked yet; an empty array means the agent was
+   * asked and advertised none. Only agent-driven (registry/custom/Devin)
+   * providers record this: built-in providers sign in with their own native
+   * login command, which the adapter's method list does not describe.
+   */
+  authMethods?: AcpAuthMethodSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
   /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
@@ -437,6 +465,27 @@ export const isAcpCapabilityCacheEntryCurrent = (
 ): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
 
 /**
+ * Prefix of the capability source version Lody stamps for builtin Sorbet; the build
+ * segment follows it, optionally suffixed with `+<probe capability>`.
+ */
+const SORBET_SOURCE_VERSION_PREFIX = 'builtin-sorbet:@sorbetai/acp@';
+
+/** Sorbet builds that could not discover sign-in methods, so their probe wrote none. */
+const SORBET_STALE_AUTH_DISCOVERY_VERSIONS: ReadonlySet<string> = new Set(['0.1.0-alpha.4']);
+
+/**
+ * The Sorbet build an entry came from: the installed version when the npx cache could
+ * name it, otherwise the dist-tag Lody launched through. `undefined` for other agents.
+ */
+const readSorbetBuildVersion = (entry: AcpCapabilityCacheEntry): string | undefined => {
+  if (entry.cliType !== 'builtin' || entry.agentType !== 'sorbet') return undefined;
+  const sourceVersion = entry.sourceVersion;
+  if (!sourceVersion?.startsWith(SORBET_SOURCE_VERSION_PREFIX)) return undefined;
+  const [build] = sourceVersion.slice(SORBET_SOURCE_VERSION_PREFIX.length).split('+', 1);
+  return build ? build : undefined;
+};
+
+/**
  * A parsed capability entry remains readable regardless of the producer's cache version.
  * `cacheVersion` is a refresh hint, not a data-compatibility gate: mixed-version clients
  * keep using fields they understand while a newer probe converges the stored entry.
@@ -446,6 +495,20 @@ export const getReadableAcpCapabilityCacheEntry = (
 ): AcpCapabilityCacheEntry | undefined => {
   if (!entry) {
     return undefined;
+  }
+  // Sorbet is on a floating dist-tag, so the build that wrote an entry is only knowable
+  // from the version stamped into `sourceVersion`. Drop the method list those early
+  // builds could not discover; every other entry keeps the list it reported.
+  if (
+    SORBET_STALE_AUTH_DISCOVERY_VERSIONS.has(readSorbetBuildVersion(entry) ?? '') &&
+    entry.authMethods !== undefined
+  ) {
+    const { authMethods: _staleAuthMethods, ...compatible } = entry;
+    entry = compatible;
+  }
+  if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
+    const { availableCommands: _projectCommands, ...compatible } = entry;
+    entry = compatible;
   }
   // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
   // non-Codex agents. Preserve every other understood field from older entries,
@@ -642,7 +705,10 @@ export const isManagedBuiltinAgentType = (
  * Dimcode uses the same verification path with its npx-managed package.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'dimcode';
+  isManagedBuiltinAgentType(agentType) ||
+  agentType === 'bub' ||
+  agentType === 'dimcode' ||
+  agentType === 'sorbet';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
@@ -1383,6 +1449,10 @@ export type ChatFailedMeta = {
   code?: ChatFailedCode;
   /** Human-readable error message */
   message?: string;
+  /** Quota reset instant named by the provider or its capacity observation. */
+  resetAt?: string;
+  /** Epoch-seconds form used by provider capacity observations. */
+  resetAtEpochSeconds?: number;
 };
 
 /**
@@ -1509,6 +1579,7 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;
   fileName?: string;
@@ -1563,6 +1634,7 @@ export function isSessionFileSourcePath(value: string): boolean {
 }
 
 export type SessionFilePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   type: 'file';
   /** Unique identifier; also the relay-store key. Generated by the uploader. */
   fileId: string;
@@ -1746,6 +1818,7 @@ export type MessageContent =
   | {
       type: 'text';
       text: string;
+      messagePhase?: 'commentary' | 'final_answer';
       /** Mention regions of `text`. See `message-text-spans.ts`. */
       spans?: MessageTextSpan[];
     }
@@ -1951,6 +2024,8 @@ export type ACPSessionConfig = ACPTurnConfig & {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
+  /** Attribution only; the Host checks its durable Invocation receipt at admission. */
+  _lodyAutomation?: import('./automations/contracts').AutomationOrigin;
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

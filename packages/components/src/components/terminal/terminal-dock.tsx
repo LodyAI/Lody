@@ -11,7 +11,7 @@ import * as stylex from '@stylexjs/stylex';
 import { control, space } from '@lody/ui/tokens/scales.stylex';
 
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { LocalTerminalPanel } from './local-terminal-panel';
 import {
   terminalControllerAtom,
@@ -619,7 +619,7 @@ export function TerminalDock({
 
   return (
     <div
-      className={cn(
+      className={clsx(
         stylex.props(styles.root, !isResizing && styles.heightTransition).className,
         className
       )}
@@ -639,7 +639,9 @@ export function TerminalDock({
           {/* Top tab strip: terminal tabs (+ new) fill the width left of the
               collapse chevron. */}
           <div {...stylex.props(styles.header)}>
-            <div className={cn('lody-terminal-tab-strip', stylex.props(styles.tabStrip).className)}>
+            <div
+              className={clsx('lody-terminal-tab-strip', stylex.props(styles.tabStrip).className)}
+            >
               {sessionId
                 ? terminals.map((term) => {
                     const isActive = term.terminalId === activeId && view === 'terminal';

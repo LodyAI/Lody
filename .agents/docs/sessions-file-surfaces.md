@@ -16,10 +16,18 @@ session's workspace root; absolute/home paths need no root. Remote targets retai
 bounded Machine RPC reads. Indexing and saving still require the daemon. See the
 [implementation decision](../notes/implemented/bug-fix/2026-10-16-daemon-independent-local-file-preview.md).
 
-Relative Markdown links first resolve candidates across the session root and its
-nested Git worktrees: a unique match opens directly, several show a picker, and the
-chosen canonical path becomes the viewer identity. Old daemons and failed Git
-discovery fall back to the session root. Tree/Diff and explicit paths skip this.
+Conversation Markdown treats relative paths as candidates until the owning Session's
+index confirms an exact file; absolute paths need no index. Clicking opens the
+known target directly, without Git worktree discovery. Invalid targets copy the
+original path and show copy feedback. The context-menu Copy Path action also copies
+the authored path directly, independent of index/daemon availability. Line anchors
+are navigation metadata, not part of the copied path. The
+[nested-worktree discovery protocol](../notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md)
+remains available to explicit protocol callers; conversation clicks and menus do
+not invoke it. A failed conversation index attempt records the original error and
+releases its optional cache lease, so the next Files/Changes acquire can rebuild
+the failed resource. Link confirmation resumes when the conversation is shown
+again; it does not run a background retry loop.
 
 Rendered Markdown file previews enable Session links only when their caller supplies
 the navigation switch. SessionDetail derives it from the same callback used by chat.
@@ -97,6 +105,8 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   the cursor at line 1 and cancel navigation. The line decoration uses Monaco's
   themed `rangeHighlight` class. See the
   [first-click navigation fix](../notes/implemented/bug-fix/2026-10-05-file-link-line-navigation.md).
+  Find action tooltips stay on one line while Find is open to prevent overlap in
+  narrow editors; see the [tooltip decision](../notes/implemented/bug-fix/2026-09-16-session-monaco-find-tooltip.md).
   The save hook compares the complete editor text with the accepted open/refresh
   snapshot or successful save result. Undo to that baseline clears Unsaved, disables
   Save, enables Refresh and releases leave protection; redo restores pending edits.
@@ -177,7 +187,9 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   notice with its file actions. The viewer starts at fit width and offers page
   thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
   and expandable search. Thumbnail rendering follows the visible sidebar range;
-  file actions remain in the existing side-panel menu.
+  file actions remain in the existing side-panel menu. The PDF viewer owns its
+  scrollport in a definite-height panel and reapplies fit zoom on resize; see
+  [PDF side-panel layout](../notes/implemented/bug-fix/2026-10-24-pdf-side-panel-layout.md).
   Keep the project-owned, bundled Worker entry and its `WorkerMessageHandler`
   export for the main-thread fallback. Clear the viewer document before aborting
   its lifetime. The PDF.js patch makes global selection listeners belong to all
@@ -190,7 +202,32 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   rendered Markdown must opt into native selection through
   `data-native-selection-allow`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
-  turn diff RPC: `specs/code-collab-v2.md`.
+  turn diff RPC: `packages/shared/src/code-collab.ts`.
+- Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests
+  identify immutable Git/store/disk bytes and leave All Changes bodies deferred
+  until visible. Reads assemble raw byte ranges, verify the full hash, then decode.
+  Remote large files start with bounded partial patches; Pierre's expand action
+  hydrates full files through the same verified cache. Ordinary remote blobs use
+  bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
+  invalidate individual entries even if line counts stay equal; comparison-base
+  changes and the first publication after restart invalidate changed paths. Opens
+  revalidate metadata even with unchanged index hints. Writer diff activity separately
+  renews index publication; encrypted diff calls retain writer authority and execution claims. Hunk-budget overflow falls back
+  to full blobs. Expired context loaders renew once; changed identities refresh the
+  entire comparison and base header. Other expansion failures offer retry. Unsupported
+  non-regular files, operational errors and file-read containment refusals stay local
+  to their file; request authorization and validation still reject. A descriptor
+  capture retries single-file stale errors once; permission refusals retain their
+  category. Completed Branch manifests update the
+  provider's live Changes list and notify the sidebar summary without awaiting
+  history or writing shared Flock rows. Failed/partial/superseded results and other
+  scopes cannot replace that list. Comparison refresh retains the coherent old
+  batch until its manifest completes, reuses unchanged content/viewer context,
+  preserves card state and viewport anchoring, and remounts only a failed viewer
+  on retry. Partial loaders stay out of the immutable turn cache.
+  Older machines keep the existing RPCs. See the
+  [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md)
+  and [protocol/privacy draft](../../specs/remote-diff-delivery.md).
 - DOCX, XLSX, and PPTX enter through the static `SessionFileOfficePreview` shell.
   An active preview schedules a bounded read at idle and then imports only that
   format's renderer and worker-backed engine. The local resource URL is read
@@ -219,7 +256,10 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   the surface discards unfinished preparation. Context uses existing expandable
   text drafts and images use existing attachments. These are captured snapshots,
   without revision-aware source navigation. Existing image drafts can be marked
-  up and replaced after acceptance. See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
+  up and replaced after acceptance. Markup exports a size-bounded JPEG on white;
+  attachments sent without accepting markup keep their original format, and document crops stay PNG.
+  See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
+  and [markup JPEG decision](../notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
 - **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
   diff panel, inner Monaco/Markdown remain static imports). The old
   `lazy(() => import())` wrappers produced stale-chunk load failures in the

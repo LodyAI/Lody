@@ -121,4 +121,4 @@ tuning shortcut are in [`README.md`](README.md).
   display-only, synthetic mock data plus the page locale, no app or network
   imports, and fully rendered in the prerendered HTML. Register the component in
   `components/mdx.tsx`; rationale:
-  [docs preview note](../.agents/notes/proposed/feature/2026-10-06-docs-embedded-product-previews.md).
+  [docs preview note](../.agents/notes/implemented/feature/2026-10-06-docs-embedded-product-previews.md).

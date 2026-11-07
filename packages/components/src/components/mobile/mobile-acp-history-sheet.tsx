@@ -1,4 +1,5 @@
 import { control } from '@lody/ui/tokens/scales.stylex';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Locale } from 'date-fns';
@@ -396,6 +397,7 @@ export function MobileAcpHistorySheet({
   onHistorySelectionChange,
 }: MobileAcpHistorySheetProps) {
   const { t, i18n } = useTranslation();
+  const maxHeight = useFoldAwareSheetHeight(88);
   const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
@@ -467,7 +469,11 @@ export function MobileAcpHistorySheet({
   return (
     <>
       <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-        <DrawerContent className="mobile-acp-history-sheet" xstyle={styles.sheet}>
+        <DrawerContent
+          style={{ maxHeight }}
+          className="mobile-acp-history-sheet"
+          xstyle={styles.sheet}
+        >
           <div {...stylex.props(sheetSurface.column)}>
             {/* Header: provider chip centered, close on right */}
             <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>

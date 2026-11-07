@@ -1,9 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
   getSessionRoomId,
   type MachineId,
+  type MessageQueueItem,
   type SessionHistory,
   type SessionId,
 } from '@lody/shared';
@@ -14,7 +16,18 @@ import {
   migrateLegacySessionSends,
 } from '../src/lib/legacy-session-send-migration';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
-import { dispatchUserTurn, writeUserTurn } from '../src/lib/session-send-delivery';
+import {
+  dispatchUserTurn,
+  QUEUED_ORIGINAL_DEADLINE_MS,
+  removeQueuedOriginal,
+  replaceQueueItem,
+  sealEditedQueueItem,
+  writeUserTurn,
+} from '../src/lib/session-send-delivery';
+import { EncryptedPrepareTimeout } from '../src/lib/encrypted-dispatch-outcome';
+import { createEncryptedDispatchLegacy } from '../src/providers/encrypted-dispatch-legacy';
+import { QueueSignalError, SessionInputNotSentError } from '../src/lib/session-accepted-inputs';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 
 const SESSION = 'session' as SessionId;
 const BROKEN = 'broken' as SessionId;
@@ -114,6 +127,7 @@ function fixture() {
         if (sessionId === BROKEN) throw new Error('Session document unavailable');
         await open(sessionId).sessionData.commands.appendTurn(entry);
       },
+      enqueueSessionMessage: async () => {},
     },
     requestSessionDispatchTurn: async () => ({ accepted: true }),
   } as unknown as SessionSendRuntime;
@@ -125,6 +139,7 @@ function fixture() {
   const factory = new IDBFactory();
   return {
     runtime,
+    sessionDocs,
     snapshot: () => sessionDocs.get(SESSION)!.export({ mode: 'snapshot' }),
     factory,
     metas,
@@ -212,11 +227,845 @@ it.each(['rpc-lost', 'oversized'] as const)(
   }
 );
 
-it('does not create the database when it is absent', async () => {
-  const f = fixture();
-  await f.migrate();
-  expect(await databaseNames(f.factory)).toEqual([]);
+it.each(['accepted', 'transport-failed', 'prepare-failed'] as const)(
+  'retains encrypted RPC originals and durable activation when acceleration is %s',
+  async (mode) => {
+    const f = fixture();
+    const input = entry('encrypted-human');
+    f.runtime.contentMode = 'e2ee';
+    f.runtime.requestSessionDispatchTurn = async () => {
+      throw new Error('plaintext RPC must not run');
+    };
+    const original = {
+      requestId: '01'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '02'.repeat(300),
+      requesterDevice: '03'.repeat(32),
+      expiresAt: 1234,
+    };
+    let sawDurableOriginal = false;
+    f.runtime.prepareEncryptedDispatch = async () => {
+      if (mode === 'prepare-failed') throw new Error('synthetic host failure');
+      return {
+        original,
+        send: async () => {
+          sawDurableOriginal =
+            f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id) ===
+            original.frameHex;
+          if (mode === 'transport-failed') throw new Error('synthetic transport failure');
+          return {
+            type: 'session/dispatch-turn_response',
+            sessionId: SESSION,
+            userTurnId: input.id,
+            accepted: true,
+            disposition: 'accepted',
+          };
+        },
+      };
+    };
+    await writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'history' },
+    });
+    await dispatchUserTurn(f.runtime, SESSION, input.id);
+    expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
+    expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+      mode === 'prepare-failed' ? undefined : original.frameHex
+    );
+    expect(sawDurableOriginal).toBe(mode !== 'prepare-failed');
+    const restored = new LoroDoc();
+    try {
+      const source = f.sessionDocs.get(SESSION);
+      if (!source) throw new Error('missing fixture doc');
+      restored.import(source.export({ mode: 'snapshot' }));
+      expect(restored.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+        mode === 'prepare-failed' ? undefined : original.frameHex
+      );
+    } finally {
+      restored.free();
+    }
+  }
+);
+
+it.each(['history', 'dispatch'] as const)(
+  'never writes executable %s input after the host reports a known machine withdrawal',
+  async (kind) => {
+    const f = fixture();
+    const input = entry('withdrawn-human');
+    f.runtime.contentMode = 'e2ee';
+    const prepared: string[] = [];
+    // The real renderer boundary over a host that already verified the withdrawn policy.
+    const rpc = createEncryptedDispatchLegacy({
+      workspaceId: 'workspace',
+      prepare: async (machineId) => {
+        prepared.push(machineId);
+        throw new Error(
+          "Error invoking remote method 'e2ee:prepareDispatch': Error: e2ee_machine_not_shared"
+        );
+      },
+      accept: async () => {
+        throw new Error('no dispatch may be accepted');
+      },
+      client: async () => {
+        throw new Error('no transport may open');
+      },
+    });
+    cleanup.push(() => rpc.close());
+    f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+    await expect(
+      writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind } })
+    ).rejects.toBeInstanceOf(SessionInputNotSentError);
+    expect(prepared).toEqual([MACHINE]);
+    // Nothing a machine could discover through history or activation exists.
+    expect(f.turns().some((turn) => turn.id === input.id)).toBe(false);
+    expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
+    expect(f.sessionDocs.get(SESSION)?.getMap('humanInputReceipts').get(input.id)).toBeUndefined();
+  }
+);
+
+/** The real renderer boundary over a scripted host: each prepare takes the next reply. */
+function encryptedHost(f: ReturnType<typeof fixture>) {
+  f.runtime.contentMode = 'e2ee';
+  const replies: Array<() => Promise<never>> = [];
+  const pending: Array<(error: Error) => void> = [];
+  let entered: () => void = () => {};
+  const rpc = createEncryptedDispatchLegacy({
+    workspaceId: 'workspace',
+    prepare: () => (replies.shift() ?? (() => new Promise<never>(() => {})))(),
+    accept: async () => {
+      throw new Error('no dispatch may be accepted');
+    },
+    client: async () => {
+      throw new Error('no transport may open');
+    },
+  });
+  cleanup.push(() => rpc.close());
+  f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+  const ipc = (code: string) =>
+    new Error(`Error invoking remote method 'e2ee:prepareDispatch': Error: ${code}`);
+  return {
+    reject: (code: string) => replies.push(() => Promise.reject(ipc(code))),
+    // A slow host whose answer the test releases explicitly; resolves once it is asked.
+    hold: () =>
+      new Promise<void>((resolve) => {
+        entered = resolve;
+        replies.push(
+          () =>
+            new Promise<never>((_resolve, reject) => {
+              pending.push(reject);
+              entered();
+            })
+        );
+      }),
+    release: (code: string) => pending.shift()?.(ipc(code)),
+  };
+}
+const send = (f: ReturnType<typeof fixture>, input: SessionHistory) =>
+  writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind: 'dispatch' } });
+const turnStatus = (f: ReturnType<typeof fixture>, id: string) =>
+  f.turns().find((turn) => turn.id === id)?.status;
+
+const queueRow = (input: SessionHistory) => ({
+  task: 'queued',
+  userId: input.userId,
+  userTurnId: input.id,
+  timestamp: input.timestamp,
+  acpSessionConfig: input.inputConfig,
+  isEditing: false,
 });
+const queuedOriginal = (f: ReturnType<typeof fixture>, id: string) =>
+  f.sessionDocs.get(SESSION)?.getMap('queueDispatchOriginals').get(id);
+const preparedOriginal = (frameHex: string) => ({
+  original: {
+    requestId: '01'.repeat(16),
+    targetMachineId: MACHINE,
+    frameHex,
+    requesterDevice: '03'.repeat(32),
+    expiresAt: 1234,
+  },
+  send: async () => null,
+});
+
+it('stores the signed original before an encrypted queue row', async () => {
+  const f = fixture();
+  const input = entry('queued-human');
+  f.runtime.contentMode = 'e2ee';
+  const order: string[] = [];
+  const enqueue = f.runtime.writer.enqueueSessionMessage;
+  f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
+    order.push(`row:${String(queuedOriginal(f, input.id))}`);
+    await enqueue(sessionId, item);
+  };
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0a'.repeat(32));
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
+  expect(order).toEqual([`row:${'0a'.repeat(32)}`]);
+});
+
+it('waits for a slow host before writing an encrypted queue row', async () => {
+  const f = fixture();
+  const input = entry('queued-slow');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => {
+    throw new EncryptedPrepareTimeout(Promise.resolve(preparedOriginal('0b'.repeat(32))));
+  };
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
+  expect(queuedOriginal(f, input.id)).toBe('0b'.repeat(32));
+});
+
+it.each(['failed', 'unavailable'] as const)(
+  'does not write an encrypted queue row when preparation is %s',
+  async (mode) => {
+    const f = fixture();
+    const input = entry('queued-unsigned');
+    f.runtime.contentMode = 'e2ee';
+    let wrote = false;
+    f.runtime.writer.enqueueSessionMessage = async () => {
+      wrote = true;
+    };
+    f.runtime.prepareEncryptedDispatch =
+      mode === 'failed'
+        ? async () => {
+            throw new Error('synthetic host failure');
+          }
+        : undefined;
+    await expect(
+      writeUserTurn(f.runtime, {
+        sessionId: SESSION,
+        entry: input,
+        delivery: { kind: 'queue' },
+        queue: queueRow(input),
+      })
+    ).rejects.toBeInstanceOf(SessionInputNotSentError);
+    expect(wrote).toBe(false);
+  }
+);
+
+it('removes the stored original when the queue row cannot be written', async () => {
+  const f = fixture();
+  const input = entry('queued-half-written');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0d'.repeat(32));
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    throw new Error('synthetic write failure');
+  };
+  await expect(
+    writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'queue' },
+      queue: queueRow(input),
+    })
+  ).rejects.toThrow('synthetic write failure');
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+const failingEnqueue = (f: ReturnType<typeof fixture>, error: Error, commit: boolean) => {
+  f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
+    if (commit)
+      await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
+        store.setState((draft: { mq?: unknown[] }) => {
+          draft.mq = [...(draft.mq ?? []), item];
+        })
+      );
+    throw error;
+  };
+};
+const queuedSend = (f: ReturnType<typeof fixture>, input: SessionHistory, signal?: AbortSignal) => {
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch ??= async () => preparedOriginal('0f'.repeat(32));
+  return writeUserTurn(
+    f.runtime,
+    { sessionId: SESSION, entry: input, delivery: { kind: 'queue' }, queue: queueRow(input) },
+    signal
+  );
+};
+
+it('reports a queued send as written when only its signal failed', async () => {
+  const f = fixture();
+  const input = entry('queued-committed');
+  failingEnqueue(f, new QueueSignalError('synthetic signal failure'), true);
+  await queuedSend(f, input);
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('reports a queued send as written when its row already left the queue', async () => {
+  const f = fixture();
+  const input = entry('queued-promoted-early');
+  failingEnqueue(f, new QueueSignalError('synthetic signal failure'), false);
+  await queuedSend(f, input);
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('surfaces any other failure after the row committed and keeps its original', async () => {
+  const f = fixture();
+  const input = entry('queued-unknown');
+  failingEnqueue(f, new Error('synthetic store failure'), true);
+  await expect(queuedSend(f, input)).rejects.toThrow('synthetic store failure');
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('surfaces an abort raised by the queue write', async () => {
+  const f = fixture();
+  const input = entry('queued-abort-error');
+  failingEnqueue(f, new DOMException('stopped', 'AbortError'), true);
+  await expect(queuedSend(f, input)).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+it('keeps the original and the write failure when the cleanup check fails', async () => {
+  const f = fixture();
+  const input = entry('queued-unreadable');
+  failingEnqueue(f, new Error('synthetic store failure'), false);
+  const prepare = f.runtime.prepareEncryptedDispatch;
+  f.runtime.prepareEncryptedDispatch = prepare ?? (async () => preparedOriginal('0f'.repeat(32)));
+  const withSessionStore = f.runtime.sendResources.withSessionStore;
+  let reads = 0;
+  f.runtime.sendResources.withSessionStore = ((sessionId, work) =>
+    withSessionStore(sessionId, (store, signal) => {
+      reads += 1;
+      // Prepare stores the original on the first access; every later read is unavailable.
+      if (reads > 2) throw new Error('synthetic read failure');
+      return work(store, signal);
+    })) as typeof withSessionStore;
+  await expect(queuedSend(f, input)).rejects.toThrow('synthetic store failure');
+  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+});
+
+it('treats a send aborted after its row committed as written', async () => {
+  const f = fixture();
+  const input = entry('queued-abort-after');
+  const abort = new AbortController();
+  let wrote = false;
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    wrote = true;
+    abort.abort();
+  };
+  await queuedSend(f, input, abort.signal);
+  expect(wrote).toBe(true);
+});
+
+const queueWriter = (fails: number) => {
+  let attempts = 0;
+  const writer = createDirectWorkspaceWriter({
+    repo: {
+      upsertDocMeta: async () => {
+        attempts += 1;
+        if (attempts <= fails) throw new Error('synthetic meta failure');
+      },
+    } as never,
+    acquireSessionStore: async () =>
+      ({ setState: () => {}, doc: { frontiers: () => [] } }) as never,
+    releaseSessionStoreRef: () => {},
+    acquirePreviewVisualCommentStore: async () => ({}) as never,
+    releasePreviewVisualCommentStoreRef: () => {},
+  });
+  return { writer, attempts: () => attempts };
+};
+
+it.each(['frontiers', 'release'] as const)(
+  'classifies a %s failure after the row was written as a signal failure',
+  async (stage) => {
+    const state: { mq?: Record<string, unknown>[] } = {};
+    const writer = createDirectWorkspaceWriter({
+      repo: { upsertDocMeta: async () => {} } as never,
+      acquireSessionStore: async () =>
+        ({
+          setState: (update: (draft: typeof state) => void) => update(state),
+          doc: {
+            frontiers: () => {
+              if (stage === 'frontiers') throw new Error('synthetic frontiers failure');
+              return [];
+            },
+          },
+        }) as never,
+      releaseSessionStoreRef: () => {
+        if (stage === 'release') throw new Error('synthetic release failure');
+      },
+      acquirePreviewVisualCommentStore: async () => ({}) as never,
+      releasePreviewVisualCommentStoreRef: () => {},
+    });
+    await expect(
+      writer.enqueueSessionMessage(SESSION, { userTurnId: `written-${stage}` })
+    ).rejects.toBeInstanceOf(QueueSignalError);
+    expect(state.mq?.map((item) => item.userTurnId)).toEqual([`written-${stage}`]);
+  }
+);
+
+it('surfaces a write failure before the row exists unchanged', async () => {
+  const writer = createDirectWorkspaceWriter({
+    repo: { upsertDocMeta: async () => {} } as never,
+    acquireSessionStore: async () =>
+      ({
+        setState: () => {
+          throw new Error('synthetic commit failure');
+        },
+      }) as never,
+    releaseSessionStoreRef: () => {},
+    acquirePreviewVisualCommentStore: async () => ({}) as never,
+    releasePreviewVisualCommentStoreRef: () => {},
+  });
+  await expect(writer.enqueueSessionMessage(SESSION, { userTurnId: 'unwritten' })).rejects.toThrow(
+    'synthetic commit failure'
+  );
+});
+
+it('stops a queued send aborted after its original was stored', async () => {
+  const f = fixture();
+  const input = entry('queued-abort-before-row');
+  const abort = new AbortController();
+  let wrote = false;
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    wrote = true;
+  };
+  const withSessionStore = f.runtime.sendResources.withSessionStore;
+  f.runtime.sendResources.withSessionStore = ((sessionId, work) =>
+    withSessionStore(sessionId, async (store, signal) => {
+      const result = await work(store, signal);
+      if (store.getState().queueDispatchOriginals?.[input.id]) abort.abort();
+      return result;
+    })) as typeof withSessionStore;
+  await expect(queuedSend(f, input, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  expect(wrote).toBe(false);
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('retries the queue signal within its bound', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { writer, attempts } = queueWriter(2);
+    const sent = writer.enqueueSessionMessage(SESSION, { userTurnId: 'retried' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await sent;
+    expect(attempts()).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('reports an exhausted queue signal as a signal failure', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { writer, attempts } = queueWriter(100);
+    const sent = writer.enqueueSessionMessage(SESSION, { userTurnId: 'exhausted' });
+    const outcome = expect(sent).rejects.toBeInstanceOf(QueueSignalError);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await outcome;
+    expect(attempts()).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('drops the new original when an encrypted queue edit cannot be written', async () => {
+  const f = fixture();
+  const input = entry('queued-failed-edit');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('11'.repeat(32));
+  let written = '';
+  f.runtime.writer.updateSessionMessage = async (_sessionId, _cid, patch) => {
+    written = String(patch.userTurnId);
+    throw new Error('synthetic edit failure');
+  };
+  const current = { ...queueRow(input), $cid: 'cid' } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  await expect(replaceQueueItem(f.runtime, SESSION, 'cid', current, edited)).rejects.toThrow(
+    'synthetic edit failure'
+  );
+  expect(written).not.toBe(input.id);
+  expect(queuedOriginal(f, written)).toBeUndefined();
+});
+
+it('replaces the original of a written encrypted queue edit', async () => {
+  const f = fixture();
+  const input = entry('queued-written-edit');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('12'.repeat(32));
+  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
+    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
+      draft.queueDispatchOriginals = { [input.id]: '13' };
+    })
+  );
+  let written = '';
+  f.runtime.writer.updateSessionMessage = async (sessionId, _cid, patch) => {
+    written = String(patch.userTurnId);
+    await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
+      store.setState((draft: { mq?: unknown[] }) => {
+        draft.mq = [...(draft.mq ?? []), patch];
+      })
+    );
+  };
+  const current = { ...queueRow(input), $cid: 'cid' } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  await replaceQueueItem(f.runtime, SESSION, 'cid', current, edited);
+  expect(queuedOriginal(f, written)).toBe('12'.repeat(32));
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('keeps the original of a Turn already promoted to history', async () => {
+  const f = fixture();
+  f.runtime.contentMode = 'e2ee';
+  await f.append(entry('queued-promoted'));
+  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
+    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
+      draft.queueDispatchOriginals = { 'queued-promoted': '10' };
+    })
+  );
+  await removeQueuedOriginal(f.runtime, SESSION, 'queued-promoted');
+  expect(queuedOriginal(f, 'queued-promoted')).toBe('10');
+});
+
+it('stops waiting for a host that never answers a queued send', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const input = entry('queued-unanswered');
+    f.runtime.contentMode = 'e2ee';
+    let wrote = false;
+    f.runtime.writer.enqueueSessionMessage = async () => {
+      wrote = true;
+    };
+    f.runtime.prepareEncryptedDispatch = async () => {
+      throw new EncryptedPrepareTimeout(new Promise(() => {}));
+    };
+    const sent = writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'queue' },
+      queue: queueRow(input),
+    });
+    const outcome = expect(sent).rejects.toBeInstanceOf(SessionInputNotSentError);
+    await vi.advanceTimersByTimeAsync(QUEUED_ORIGINAL_DEADLINE_MS);
+    await outcome;
+    expect(wrote).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('stops waiting for a queued original when the send is aborted', async () => {
+  const f = fixture();
+  const input = entry('queued-aborted');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = () => new Promise(() => {});
+  const abort = new AbortController();
+  const sent = writeUserTurn(
+    f.runtime,
+    { sessionId: SESSION, entry: input, delivery: { kind: 'queue' }, queue: queueRow(input) },
+    abort.signal
+  );
+  abort.abort();
+  await expect(sent).rejects.toBeDefined();
+});
+
+it('leaves an ordinary workspace queue row unsigned', async () => {
+  const f = fixture();
+  const input = entry('queued-plain');
+  let wrote = false;
+  f.runtime.writer.enqueueSessionMessage = async () => {
+    wrote = true;
+  };
+  await writeUserTurn(f.runtime, {
+    sessionId: SESSION,
+    entry: input,
+    delivery: { kind: 'queue' },
+    queue: queueRow(input),
+  });
+  expect(wrote).toBe(true);
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+});
+
+it('gives an edited encrypted queue row a new Turn and its own original', async () => {
+  const f = fixture();
+  const input = entry('queued-before-edit');
+  f.runtime.contentMode = 'e2ee';
+  const prepared: { userTurnId: string; inputConfig: unknown }[] = [];
+  f.runtime.prepareEncryptedDispatch = async (_machine, args) => {
+    prepared.push(args);
+    return preparedOriginal('0c'.repeat(32));
+  };
+  const current = {
+    ...queueRow(input),
+    $cid: 'cid',
+    operationId: `queue:${input.id}`,
+  } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    task: 'changed',
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  const sealed = await sealEditedQueueItem(f.runtime, SESSION, current, edited);
+  expect(sealed.userTurnId).not.toBe(input.id);
+  expect(sealed.operationId).toBe(`queue:${sealed.userTurnId}`);
+  expect(prepared).toHaveLength(1);
+  expect(prepared[0]).toMatchObject({
+    userTurnId: sealed.userTurnId,
+    inputConfig: { prompt: 'changed' },
+  });
+  expect(queuedOriginal(f, sealed.userTurnId!)).toBe('0c'.repeat(32));
+  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
+    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
+      draft.queueDispatchOriginals = { ...draft.queueDispatchOriginals, [input.id]: '0e' };
+    })
+  );
+  await removeQueuedOriginal(f.runtime, SESSION, input.id);
+  expect(queuedOriginal(f, input.id)).toBeUndefined();
+  const toggled = { ...current, isEditing: true } as MessageQueueItem;
+  expect(await sealEditedQueueItem(f.runtime, SESSION, current, toggled)).toBe(toggled);
+  expect(prepared).toHaveLength(1);
+});
+
+it('keeps a verified withdrawal after a later unverifiable prepare', async () => {
+  const f = fixture();
+  const host = encryptedHost(f);
+  host.reject('e2ee_machine_not_shared');
+  await expect(send(f, entry('first'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+  // The host's policy refresh then fails; that unknown cannot release the withdrawal.
+  host.reject('e2ee_host_operation_failed');
+  await expect(send(f, entry('retry'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+  expect(f.turns()).toEqual([]);
+  expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
+});
+
+it('keeps a verified withdrawal when a later prepare outlasts its deadline', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const host = encryptedHost(f);
+    host.reject('e2ee_machine_not_shared');
+    await expect(send(f, entry('first'))).rejects.toBeInstanceOf(SessionInputNotSentError);
+    const asked = host.hold();
+    const retry = send(f, entry('retry'));
+    const refused = expect(retry).rejects.toBeInstanceOf(SessionInputNotSentError);
+    await asked;
+    await vi.advanceTimersByTimeAsync(200);
+    await refused;
+    expect(f.turns()).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('settles timed-out input that a late verified withdrawal reaches before any machine claims it', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = fixture();
+    const host = encryptedHost(f);
+    const asked = host.hold();
+    const written = send(f, entry('late'));
+    await asked;
+    await vi.advanceTimersByTimeAsync(200);
+    // No withdrawal was known: the unknown outcome keeps the durable write.
+    await written;
+    expect(turnStatus(f, 'late')).toBe('pending');
+    vi.useRealTimers();
+    host.release('e2ee_machine_not_shared');
+    await vi.waitFor(() => expect(turnStatus(f, 'late')).toBe('canceled'));
+    expect(f.turns().find((turn) => turn.id === 'late')?.items).toEqual(entry('late').items);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(['pending', 'seen', 'processing'] as const)(
+  'accelerates an activated %s turn once when credential confirmation outlasts 300ms',
+  async (status) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fixture();
+    f.runtime.contentMode = 'e2ee';
+    const input = entry(`slow-host-${status}`);
+    const original = {
+      requestId: '04'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '05'.repeat(300),
+      requesterDevice: '06'.repeat(32),
+      expiresAt: 4_102_444_800_000,
+    };
+    const answered = Promise.withResolvers<void>();
+    const asked = Promise.withResolvers<void>();
+    const appended = Promise.withResolvers<string>();
+    const frames: string[] = [];
+    const activated = Promise.withResolvers<void>();
+    const upsert = f.runtime.writer.upsertDocMeta;
+    f.runtime.writer.upsertDocMeta = async (roomId, patch) => {
+      await upsert(roomId, patch);
+      if (patch.latestUserMsgId === input.id) activated.resolve();
+    };
+    // A host whose credential-confirmed preparation answers only after the renderer deadline.
+    const rpc = createEncryptedDispatchLegacy({
+      workspaceId: 'workspace',
+      prepare: async () => {
+        asked.resolve();
+        await answered.promise;
+        return original;
+      },
+      accept: async () => {
+        throw new Error('no response is delivered');
+      },
+      client: async () =>
+        ({
+          ensureJsonStream: async () => undefined,
+          readJsonLive: (
+            _stream: string,
+            _state: unknown,
+            _batch: unknown,
+            options: { signal: AbortSignal }
+          ) =>
+            new Promise<void>((resolve) =>
+              options.signal.addEventListener('abort', () => resolve())
+            ),
+          appendJson: async (_stream: string, value: { id: string }) => {
+            frames.push(value.id);
+            appended.resolve(value.id);
+          },
+        }) as unknown as LoroStreamsJsonStreamClient,
+    });
+    cleanup.push(() => rpc.close());
+    f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+    let dispatched: Promise<void> | undefined;
+    try {
+      // Keep the pre-write probe and real Loro commit in this end-to-end send control.
+      const written = writeUserTurn(f.runtime, {
+        sessionId: SESSION,
+        entry: input,
+        delivery: { kind: 'history' },
+      });
+      await asked.promise;
+      await vi.advanceTimersByTimeAsync(200);
+      await written;
+      dispatched = dispatchUserTurn(f.runtime, SESSION, input.id);
+      await vi.advanceTimersByTimeAsync(200);
+      await activated.promise;
+      expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
+      expect(frames).toEqual([]);
+      // The daemon may claim the durable input before native preparation returns.
+      await f.runtime.sendResources.withSessionStore(SESSION, async (store) => {
+        await store.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: input.id,
+          status,
+        });
+      });
+      expect(turnStatus(f, input.id)).toBe(status);
+      await vi.advanceTimersByTimeAsync(101);
+      answered.resolve();
+      expect(
+        await Promise.race([appended.promise, dispatched.then(() => 'settled unaccelerated')])
+      ).toBe(original.requestId);
+      expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+        original.frameHex
+      );
+      await rpc.close();
+      await dispatched;
+      expect(frames).toEqual([original.requestId]);
+    } finally {
+      vi.useRealTimers();
+      answered.resolve();
+      await rpc.close();
+      await dispatched;
+    }
+  }
+);
+
+it.each(['canceled', 'handled', 'failed'] as const)(
+  'drops a late encrypted preparation when the real persisted turn is %s',
+  async (status) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fixture();
+    f.runtime.contentMode = 'e2ee';
+    const asked = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    const original = {
+      requestId: '07'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '08'.repeat(300),
+      requesterDevice: '09'.repeat(32),
+      expiresAt: 4_102_444_800_000,
+    };
+    const frames: unknown[] = [];
+    const appended = Promise.withResolvers<void>();
+    const rpc = createEncryptedDispatchLegacy({
+      workspaceId: 'workspace',
+      prepare: async () => {
+        asked.resolve();
+        await answer.promise;
+        return original;
+      },
+      accept: async () => {
+        throw new Error('unused');
+      },
+      client: async () =>
+        ({
+          ensureJsonStream: async () => undefined,
+          readJsonLive: (_s: string, _st: unknown, _b: unknown, options: { signal: AbortSignal }) =>
+            new Promise<void>((resolve) =>
+              options.signal.addEventListener('abort', () => resolve())
+            ),
+          appendJson: async (_s: string, value: unknown) => {
+            frames.push(value);
+            appended.resolve();
+          },
+        }) as unknown as LoroStreamsJsonStreamClient,
+    });
+    cleanup.push(() => rpc.close());
+    f.runtime.prepareEncryptedDispatch = (machine, input) => rpc.prepare(machine, input);
+    let dispatched: Promise<void> | undefined;
+    try {
+      await f.append(entry('canceled-late'));
+      dispatched = dispatchUserTurn(f.runtime, SESSION, 'canceled-late');
+      await asked.promise;
+      await vi.advanceTimersByTimeAsync(200);
+      await f.runtime.sendResources.withSessionStore(SESSION, async (store) => {
+        await store.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: 'canceled-late',
+          status,
+        });
+      });
+      expect(turnStatus(f, 'canceled-late')).toBe(status);
+      answer.resolve();
+      expect(
+        await Promise.race([dispatched.then(() => 'dropped'), appended.promise.then(() => 'sent')])
+      ).toBe('dropped');
+      expect(
+        f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get('canceled-late')
+      ).toBeUndefined();
+      expect(frames).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      answer.resolve();
+      await rpc.close();
+      await dispatched;
+    }
+  }
+);
 
 it('appends a saved dispatch record whose turn is absent, activates it and deletes the database', async () => {
   const f = fixture();

@@ -41,7 +41,7 @@ const provider = {
     ipcRenderer.invoke('e2ee-benchmark:provider-seal', {
       context: request.context,
       plaintext: request.plaintext,
-      aad: request.additionalData(new Uint8Array([3]))
+      aad: request.additionalData(new Uint8Array([request.context.kind === 'snapshot' ? 4 : 3]))
     }),
   open: async (request) => {
     const start = now()
@@ -54,6 +54,7 @@ const provider = {
   }
 }
 async function firstSync(fixture, kind, index) {
+  if (fixture.trace) ipcRenderer.send('e2ee-benchmark:trace', `${kind}:${index}:start`)
   const start = now(),
     name = `e2ee-benchmark-${kind}-${index}`
   const db = await openDb(name),
@@ -62,10 +63,15 @@ async function firstSync(fixture, kind, index) {
     load: () => Promise.resolve(null),
     save: (cursor) =>
       new Promise((resolve, reject) => {
+        if (fixture.trace)
+          ipcRenderer.send('e2ee-benchmark:trace', `${kind}:${index}:save:${cursor.nextOffset}`)
         const tx = db.transaction('replica', 'readwrite')
         tx.objectStore('replica').put(doc.export({ mode: 'snapshot' }), 'state')
         tx.objectStore('replica').put(cursor, 'cursor')
-        tx.oncomplete = () => resolve()
+        tx.oncomplete = () => {
+          if (fixture.trace) ipcRenderer.send('e2ee-benchmark:trace', `${kind}:${index}:saved`)
+          resolve()
+        }
         tx.onerror = tx.onabort = () => reject(new Error('benchmark_db_persist'))
       })
   }
@@ -75,7 +81,7 @@ async function firstSync(fixture, kind, index) {
   const measuredAdapter = new Proxy(adapter, {
     get(target, key) {
       const value = target[key]
-      if (key !== 'applyRemoteUpdates' || typeof value !== 'function')
+      if (!['applyRemoteUpdates', 'applySnapshot'].includes(key) || typeof value !== 'function')
         return typeof value === 'function' ? value.bind(target) : value
       return (...args) => {
         const start = now()
@@ -88,6 +94,10 @@ async function firstSync(fixture, kind, index) {
     }
   })
   const sdk = new StreamsCrdt({
+    snapshotCodec: {
+      compress: async (bytes) => (await import(modules.zstdModule)).compress(bytes),
+      decompress: async (bytes) => (await import(modules.zstdModule)).decompress(bytes)
+    },
     streamUrl: `${fixture.streamBaseUrl}/${kind}`,
     adapter: measuredAdapter,
     remoteCursorStore: cursorStore,
@@ -101,7 +111,11 @@ async function firstSync(fixture, kind, index) {
   })
   try {
     const result = await sdk.catchup()
-    if (!result.ok || doc.getText('text').length !== fixture.textLength)
+    if (
+      !result.ok ||
+      doc.getText('text').length !== fixture.textLength ||
+      (fixture.historyEdits > 0 && doc.getMap('data').get('revision') !== fixture.historyEdits)
+    )
       throw new Error('benchmark_first_sync')
     const elapsed = now() - start
     const [state, cursor] = await Promise.all(
@@ -119,11 +133,16 @@ async function firstSync(fixture, kind, index) {
     const restored = new LoroDoc()
     try {
       restored.import(state)
-      if (restored.getText('text').length !== fixture.textLength)
+      if (
+        restored.getText('text').length !== fixture.textLength ||
+        (fixture.historyEdits > 0 &&
+          restored.getMap('data').get('revision') !== fixture.historyEdits)
+      )
         throw new Error('benchmark_durable_document_mismatch')
     } finally {
       restored.free()
     }
+    if (fixture.trace) ipcRenderer.send('e2ee-benchmark:trace', `${kind}:${index}:done:${elapsed}`)
     return { elapsed, ...phases }
   } finally {
     currentPhases = null
@@ -148,11 +167,11 @@ contextBridge.exposeInMainWorld('e2eeBenchmark', {
       protectedMs = []
     for (let index = 0; index < 12; index++) {
       let start = now()
-      importDocument(fixture.largePlain, fixture.textLength)
+      importDocument(fixture.largePlain, fixture.updateTextLength)
       plain.push(now() - start)
       start = now()
       const opened = await ipcRenderer.invoke('e2ee-benchmark:open', fixture.largeSealed)
-      importDocument(opened, fixture.textLength)
+      importDocument(opened, fixture.updateTextLength)
       protectedMs.push(now() - start)
     }
     const plaintext = stats(plain.slice(2)),
@@ -189,7 +208,7 @@ contextBridge.exposeInMainWorld('e2eeBenchmark', {
       representativeBinding: stats(measuredPhases.map((x) => x.bindingMs)),
       ipcFraction:
         stats(protectedSamples.map((x) => x.ipcMs)).medianMs / sdkFirstSyncProtected.medianMs,
-      note: 'IPC = actual invoke elapsed minus actual main binding; includes serialization, scheduling and IPC. CRDT import wraps actual adapter.applyRemoteUpdates. Authentication (including strict signature verification) and AEAD are separately measured representative native operations, not additive critical-path traces. Both arms disable snapshots.'
+      note: 'IPC = actual invoke elapsed minus actual main binding; includes serialization, scheduling and IPC. CRDT import wraps actual adapter.applyRemoteUpdates. Authentication (including strict signature verification) and AEAD are separately measured representative native operations, not additive critical-path traces. Snapshot and incremental import are measured. Representative crypto phases use the last captured SDK update frame; they are not snapshot critical-path spans.'
     }
 
     return {
@@ -197,6 +216,9 @@ contextBridge.exposeInMainWorld('e2eeBenchmark', {
       smallBatchBytes: fixture.small.byteLength,
       largeUpdateBytes: fixture.largePlain.byteLength,
       textLength: fixture.textLength,
+      snapshotFirst: fixture.snapshotFirst,
+      snapshotSizes: fixture.snapshotSizes,
+      historyEdits: fixture.historyEdits,
       fixtureSha256: fixture.fixtureSha256,
       sealIncludingIpc: stats(seal),
       firstSyncPlaintext: plaintext,

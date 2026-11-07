@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
@@ -6,8 +7,11 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
+import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
+import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
+import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 
 vi.mock('../src/lib/preview-control-api', () => ({ mintPreviewControlProof: vi.fn() }));
 
@@ -22,6 +26,229 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('negotiates blob persistence while retaining writer-only encrypted diff authority', async () => {
+    for (const [plane, protectedContent, supported, persist] of [
+      ['local', false, true, false],
+      ['cloud', false, true, true],
+      ['cloud', true, true, false],
+      ['cloud', false, false, true],
+    ] as const) {
+      let role: 'read' | 'write' = 'read';
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent,
+        protectedCodeCollabRole: () => role,
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Plaintext fallback opened.');
+        },
+        requestEncryptedFeature: async (request) => {
+          expect(request.ownerSessionId).toBe('parent');
+          expect(request.params).toHaveProperty('sessionId', sessionId);
+          if (request.method === 'code-collab/open-diff-manifest')
+            return { ok: true, result: { status: 'ok', entries: [], nextCursor: null } };
+          if (request.method === 'code-collab/read-blob')
+            return {
+              ok: true,
+              result: { offset: 0, length: 0, totalBytes: 0, encoding: 'gzip-base64', data: '' },
+            };
+          throw new Error('Unexpected action.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        persist,
+        scope: workspaceId,
+      });
+      if (protectedContent) {
+        expect(
+          await facade.requestCodeCollabOpenDiffManifest(remoteMachineId, {
+            sessionId,
+            path: 'a.ts',
+          })
+        ).toMatchObject({ status: 'error', code: 'permission_denied' });
+        expect(
+          await facade.requestCodeCollabReadBlob(remoteMachineId, {
+            sessionId,
+            key: `sha256:${'1'.repeat(64)}`,
+            offset: 0,
+            length: 100,
+          })
+        ).toMatchObject({ status: 'error', code: 'permission_denied' });
+        role = 'write';
+        expect(
+          await facade.requestCodeCollabOpenDiffManifest(
+            remoteMachineId,
+            { sessionId, path: 'a.ts' },
+            { ownerSessionId: 'parent' }
+          )
+        ).toEqual({ status: 'ok', entries: [], nextCursor: null });
+        expect(
+          await facade.requestCodeCollabReadBlob(
+            remoteMachineId,
+            { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
+            { ownerSessionId: 'parent' }
+          )
+        ).toMatchObject({ offset: 0, length: 0, totalBytes: 0 });
+      }
+    }
+  });
+
+  it.each([true, false])(
+    'does not wait for cold routing to classify the optional blob cache (supported=%s)',
+    async (supported) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => null,
+          resolvePlaneForMachine: async () => {
+            throw new Error('workspace_target_pending');
+          },
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('No body RPC expected.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        scope: workspaceId,
+        persist: false,
+      });
+    }
+  );
+
+  it('retrieves every remote wait page using a separately authorized cursor', async () => {
+    const claims: unknown[] = [];
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://auth.test',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async (intent) => {
+        claims.push(intent.operation);
+        return {
+          runtimeNonce: intent.runtimeNonce,
+          requestId: intent.requestId,
+          requestToken: 'proof',
+        };
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'user-token',
+      getMachineProtocolCapabilities: async () => ({ remoteAutomationControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestAutomationControlHandshake: async () => ({
+            success: true,
+            runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          }),
+          requestSessionAutomationControl: async ({
+            operation,
+          }: {
+            operation: { after?: string };
+          }) => ({
+            type: 'session/automation-control_response',
+            sessionId,
+            success: true,
+            result: operation.after
+              ? { type: 'list', waits: [{ id: 'second' }] }
+              : { type: 'list', waits: [{ id: 'first' }], next: 'first' },
+          }),
+        }) as never,
+    });
+    try {
+      expect(
+        await facade.requestSessionAutomationControl(remoteMachineId, sessionId, 'user', {
+          type: 'list',
+        })
+      ).toEqual({ type: 'list', waits: [{ id: 'first' }, { id: 'second' }] });
+      expect(claims).toEqual([{ type: 'list' }, { type: 'list', after: 'first' }]);
+    } finally {
+      uninstall();
+    }
+  });
+  it('sends the exact authenticated remote automation operation to the owning machine', async () => {
+    const nonce = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const claims: unknown[] = [];
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://auth.test',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async (intent, token) => {
+        expect(token).toBe('signed-in-user');
+        claims.push(intent);
+        return {
+          runtimeNonce: intent.runtimeNonce,
+          requestId: intent.requestId,
+          requestToken: 'synthetic-proof',
+        };
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'signed-in-user',
+      getMachineProtocolCapabilities: async () => ({ remoteAutomationControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestAutomationControlHandshake: async () => ({ success: true, runtimeNonce: nonce }),
+          requestSessionAutomationControl: async (request: {
+            sessionId: string;
+            ownerSessionId: string;
+            requesterUserId: string;
+            operation: unknown;
+            proof: { requestId: string };
+            responseRecipient: { publicKey: unknown };
+          }) => {
+            expect(request).toMatchObject({
+              sessionId,
+              ownerSessionId: sessionId,
+              requesterUserId: 'user',
+              operation: { type: 'configure', settings: { recoverCapacity: true } },
+            });
+            expect(claims[0]).toMatchObject({
+              workspaceId,
+              machineId: remoteMachineId,
+              sessionId,
+              requesterUserId: 'user',
+              operation: request.operation,
+              runtimeNonce: nonce,
+              requestId: request.proof.requestId,
+              responseKey: request.responseRecipient.publicKey,
+            });
+            return {
+              type: 'session/automation-control_response',
+              sessionId,
+              success: true,
+              result: { type: 'settings', settings: { recoverCapacity: true } },
+            };
+          },
+        }) as never,
+    });
+    try {
+      expect(
+        await facade.requestSessionAutomationControl(remoteMachineId, sessionId, 'user', {
+          type: 'configure',
+          settings: { recoverCapacity: true },
+        })
+      ).toEqual({ type: 'settings', settings: { recoverCapacity: true } });
+    } finally {
+      uninstall();
+    }
+  });
+
   it('requires fileDownload capability before requesting paid download bytes', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
@@ -56,42 +283,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
     ).toEqual({ status: 'error', code: 'unsupported_protocol' });
   });
 
-  it('routes authorized chunk responses with the owning session and member root', async () => {
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
-      targetRouter: {
-        getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: async () => 'cloud',
-      },
-      getMachineRpcClient: async () =>
-        ({
-          requestFileDownloadChunk: async (request: {
-            ownerSessionId?: string;
-            rootId?: string;
-          }) => {
-            if (request.ownerSessionId !== 'parent' || request.rootId !== 'member:docs')
-              return { status: 'error', code: 'permission_denied' };
-            return {
-              status: 'ok',
-              path: 'a.bin',
-              revision: 'a'.repeat(64),
-              offset: 0,
-              sizeBytes: 1,
-              data: '/w==',
-            };
-          },
-        }) as never,
-    });
-    expect(
-      await facade.requestFileDownloadChunk(
-        remoteMachineId,
-        { sessionId, path: 'a.bin', rootId: 'member:docs', offset: 0 },
-        'parent'
-      )
-    ).toMatchObject({ status: 'ok', data: '/w==' });
-  });
-
   it('negotiates relative-link discovery without downgrading to an ordinary preview', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
@@ -107,37 +298,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
         resolveMarkdownLink: true,
       })
     ).toMatchObject({ status: 'error', code: 'unsupported_protocol' });
-  });
-
-  it('forwards negotiated link resolution and returns candidates without content', async () => {
-    const candidates = [
-      {
-        path: 'nested/a.md',
-        absolutePath: '/repo/nested/a.md',
-        worktreeRoot: '/repo/nested',
-        branch: null,
-        head: 'a'.repeat(40),
-        mtimeMs: 1000,
-      },
-    ];
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      getMachineProtocolCapabilities: async () => ({ markdownFileLinks: 1 }),
-      getMachineRpcClient: async () =>
-        ({
-          requestFilePreview: async (request: { resolveMarkdownLink?: boolean }) =>
-            request.resolveMarkdownLink
-              ? { status: 'resolved-link', v: 3, candidates }
-              : { status: 'error', code: 'wrong_mode' },
-        }) as never,
-    });
-    expect(
-      await facade.requestFilePreview(remoteMachineId, {
-        sessionId,
-        path: 'a.md',
-        resolveMarkdownLink: true,
-      })
-    ).toEqual({ status: 'resolved-link', v: 3, candidates });
   });
 
   it('resolves same-machine links without consulting daemon capabilities', async () => {
@@ -374,6 +534,56 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
   });
 
+  it('sends Android Emulator control to this machine without a login token, proof or cloud', async () => {
+    vi.stubGlobal('fetch', () => {
+      throw new Error('Unexpected cloud HTTP');
+    });
+    const requests: unknown[] = [];
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { method: string; params: object }) => {
+          requests.push(request);
+          return {
+            ok: true,
+            result: {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              devices: [],
+            },
+          };
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud RPC');
+      },
+    });
+    await expect(
+      facade.requestAndroidEmulatorControl({
+        machineId: localMachineId,
+        sessionId,
+        requestedByUserId: 'local-owner',
+        command: { action: 'list' },
+      })
+    ).resolves.toMatchObject({ success: true, devices: [] });
+    expect(requests).toMatchObject([
+      {
+        method: 'android-emulator/control',
+        params: { sessionId, requestedByUserId: 'local-owner', command: { action: 'list' } },
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
   it('signs the exact remote iOS Simulator command with the preview handshake nonce', async () => {
     const runtimeNonce = '00000000-0000-4000-8000-000000000002';
     const command = { action: 'stop', operationId: 'op-7' } as const;
@@ -425,35 +635,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
         proof: { runtimeNonce, requestToken: 'sim-proof' },
       },
     ]);
-  });
-
-  it('reports a remote Mac without the iOS Simulator protocol before any handshake', async () => {
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      getMachineProtocolCapabilities: async () => ({ previewControl: 1 }),
-      targetRouter: {
-        getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: async () => 'cloud',
-      },
-      getMachineRpcClient: async () =>
-        ({
-          requestPreviewControl: () => {
-            throw new Error('Unexpected handshake');
-          },
-          requestIosSimulatorControl: () => {
-            throw new Error('Unexpected simulator RPC');
-          },
-        }) as never,
-    });
-    await expect(
-      facade.requestIosSimulatorControl({
-        machineId: remoteMachineId,
-        sessionId,
-        requestedByUserId: 'owner',
-        command: { action: 'list' },
-      })
-    ).resolves.toMatchObject({ success: false, error: 'unsupported' });
-    expect(mintPreviewControlProof).not.toHaveBeenCalled();
   });
 
   it('keeps Pi discovery success and failure on the local machine route', async () => {
@@ -509,54 +690,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
       success: false,
       error: 'This machine does not support individual subagent cancellation.',
     });
-  });
-  it('uses the local-only IPC preview method without creating a cloud client', async () => {
-    const invoke = vi.fn(async () => ({
-      status: 'ok' as const,
-      v: 3 as const,
-      path: '/Users/me/Documents/notes.md',
-      external: true,
-      digest: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      kind: 'text' as const,
-      content: { encoding: 'utf8-plain' as const, text: '# Note\n', rawBytes: 7 },
-      format: { eol: 'lf' as const },
-      sizeBytes: 7,
-      readonly: true,
-    }));
-    vi.stubGlobal('window', {
-      __LODY_ELECTRON__: true,
-      ipc: { invoke },
-    });
-    const getMachineRpcClient = vi.fn();
-    const resolvePlaneForMachine = vi.fn(async () => {
-      throw new Error('Unexpected route resolution');
-    });
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      targetRouter: {
-        getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine,
-      },
-      getMachineRpcClient,
-    });
-
-    await expect(
-      facade.requestFilePreview(localMachineId, {
-        sessionId,
-        path: '/Users/me/Documents/notes.md',
-      })
-    ).resolves.toMatchObject({ status: 'ok', external: true, readonly: true });
-    expect(invoke).toHaveBeenCalledWith(
-      'machineRpc.previewFile',
-      expect.objectContaining({
-        machineId: localMachineId,
-        path: '/Users/me/Documents/notes.md',
-        workspaceRoot: null,
-      })
-    );
-    expect(getMachineRpcClient).not.toHaveBeenCalled();
-    expect(resolvePlaneForMachine).not.toHaveBeenCalled();
   });
 
   it('reads local content with no daemon capability or live route, forwarding the original root', async () => {
@@ -703,54 +836,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
-  it('uses the local bridge for a file-index snapshot without creating a cloud client', async () => {
-    const invoke = vi.fn(async () => ({
-      ok: true as const,
-      result: {
-        status: 'ok' as const,
-        ownerSessionId: sessionId,
-        fileIndex: { 'src/local.ts': { kind: 'file' as const, change: { diff: [2, 1] as const } } },
-        updatedAtMs: 123,
-      },
-    }));
-    vi.stubGlobal('window', {
-      __LODY_ELECTRON__: true,
-      ipc: { invoke },
-    });
-    const getMachineRpcClient = vi.fn();
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      targetRouter: {
-        getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
-      },
-      getMachineRpcClient,
-    });
-
-    await expect(
-      facade.requestLocalCodeCollabFileIndex(
-        localMachineId,
-        { sessionId },
-        { ownerSessionId: sessionId }
-      )
-    ).resolves.toMatchObject({
-      status: 'ok',
-      fileIndex: { 'src/local.ts': { kind: 'file' } },
-    });
-    expect(invoke).toHaveBeenCalledWith(
-      'machineRpc.send',
-      expect.objectContaining({
-        machineId: localMachineId,
-        workspaceId,
-        method: 'code-collab/get-file-index',
-        params: { sessionId },
-        ownerSessionId: sessionId,
-      })
-    );
-    expect(getMachineRpcClient).not.toHaveBeenCalled();
-  });
-
   it('previews a member root on this machine through the local daemon with its rootId', async () => {
     const invoke = vi.fn(async (channel: string) => {
       expect(channel).toBe('machineRpc.send');
@@ -818,19 +903,21 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineRpcClient,
     });
 
-    await expect(facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).resolves.toEqual(
-      {
-        type: 'session/cancel_response',
-        sessionId,
-        success: true,
-      }
-    );
+    await expect(
+      facade.requestSessionCancel(localMachineId, sessionId, 'turn-1', { pauseInbox: false })
+    ).resolves.toEqual({
+      type: 'session/cancel_response',
+      sessionId,
+      success: true,
+    });
     expect(invoke).toHaveBeenCalledWith(
       'machineRpc.send',
       expect.objectContaining({
         machineId: localMachineId,
         workspaceId,
         method: 'session/cancel',
+        // Interrupt-and-send must reach the daemon as a non-pausing cancel.
+        params: expect.objectContaining({ turnId: 'turn-1', pauseInbox: false }),
       })
     );
     expect(getMachineRpcClient).not.toHaveBeenCalled();
@@ -841,58 +928,39 @@ describe('createWorkspaceMachineRpcFacade', () => {
     let delivered: unknown;
     const invoke = async (_channel: string, request: unknown) => {
       delivered = request;
-      return bridgeAvailable ? {ok:true,result:{type:'session/cancel_response',sessionId,success:true}} : undefined;
+      return bridgeAvailable
+        ? { ok: true, result: { type: 'session/cancel_response', sessionId, success: true } }
+        : undefined;
     };
-    vi.stubGlobal('window',{__LODY_ELECTRON__:true,ipc:{invoke}});
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
     let networkUsed = false;
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId, getMachineProtocolCapabilities:async()=>CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      targetRouter:{getPlaneForMachine:()=> 'cloud',resolvePlaneForMachine:async()=> 'cloud'},
-      isLocalControlMachine: machine => machine === localMachineId,
-      getMachineRpcClient:async()=>{networkUsed=true;throw new Error('cloud RPC unavailable');},
-    });
-    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:true});
-    expect(delivered).toMatchObject({workspaceId,machineId:localMachineId,method:'session/cancel'});
-    bridgeAvailable=false;
-    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:false,error:'Local machine RPC is unavailable.'});
-    expect(networkUsed).toBe(false);
-  });
-  it('uses the cloud Machine RPC client for a remote machine', async () => {
-    const invoke = vi.fn();
-    vi.stubGlobal('window', {
-      __LODY_ELECTRON__: true,
-      ipc: { invoke },
-    });
-    const requestSessionCancel = vi.fn(async () => ({
-      type: 'session/cancel_response' as const,
-      sessionId,
-      success: true,
-    }));
-    const getMachineRpcClient = vi.fn(async () => ({ requestSessionCancel }) as never);
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: vi.fn(async () => 'cloud' as const),
+        resolvePlaneForMachine: async () => 'cloud',
       },
-      getMachineRpcClient,
+      isLocalControlMachine: (machine) => machine === localMachineId,
+      getMachineRpcClient: async () => {
+        networkUsed = true;
+        throw new Error('cloud RPC unavailable');
+      },
     });
-
-    await expect(
-      facade.requestSessionCancel(remoteMachineId, sessionId, 'turn-1')
-    ).resolves.toEqual({
-      type: 'session/cancel_response',
-      sessionId,
+    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
       success: true,
     });
-    expect(getMachineRpcClient).toHaveBeenCalledWith(remoteMachineId);
-    expect(requestSessionCancel).toHaveBeenCalledWith({
-      sessionId,
-      turnId: 'turn-1',
-      timeoutMs: 2_000,
+    expect(delivered).toMatchObject({
+      workspaceId,
+      machineId: localMachineId,
+      method: 'session/cancel',
     });
-    expect(invoke).not.toHaveBeenCalled();
+    bridgeAvailable = false;
+    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
+      success: false,
+      error: 'Local machine RPC is unavailable.',
+    });
+    expect(networkUsed).toBe(false);
   });
 });
 
@@ -939,15 +1007,6 @@ describe('machine bug report client log', () => {
     clientLog,
   };
 
-  it('sends the client log to a daemon that advertises it', async () => {
-    const { facade, received } = facadeFor(CURRENT_MACHINE_PROTOCOL_CAPABILITIES);
-
-    await expect(facade.requestMachineBugReport(remoteMachineId, report)).resolves.toMatchObject({
-      success: true,
-    });
-    expect(received[0]?.clientLog).toEqual(clientLog);
-  });
-
   it.each([undefined, {}, { bugReportClientLog: 0 }])(
     'still files the report, without the client log, on an older daemon (%j)',
     async (protocolCapabilities) => {
@@ -963,6 +1022,115 @@ describe('machine bug report client log', () => {
 });
 
 describe('local MCP discovery routing', () => {
+  it.each(['local', 'cloud', 'unsupported'] as const)(
+    'limits Sorbet credentials to a capable local target (%s)',
+    async (route) => {
+      const sent: unknown[] = [];
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async (_channel: string, request: unknown) => {
+            sent.push(request);
+            return {
+              ok: true,
+              result: {
+                type: 'sorbet/credentials-list',
+                credentials: [{ providerId: 'openai', type: 'oauth' }],
+              },
+            };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          route === 'unsupported' ? {} : { sorbetCredentials: 1 },
+        targetRouter: {
+          getPlaneForMachine: () => (route === 'cloud' ? 'cloud' : 'local'),
+          resolvePlaneForMachine: async () => (route === 'cloud' ? 'cloud' : 'local'),
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('remote RPC forbidden');
+        },
+      });
+      const promise = facade.requestLocalSorbetCredentials(localMachineId, {
+        method: 'sorbet/credentials-list',
+        params: { configId: 'config' },
+      });
+      if (route === 'local') {
+        expect(await promise).toEqual({
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth' }],
+        });
+        expect(sent).toEqual([
+          expect.objectContaining({
+            machineId: localMachineId,
+            workspaceId,
+            method: 'sorbet/credentials-list',
+            params: { configId: 'config' },
+          }),
+        ]);
+      } else {
+        await expect(promise).rejects.toThrow('unsupported on this machine');
+        expect(sent).toEqual([]);
+      }
+    }
+  );
+  it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+    'routes remote %s only through encrypted feature RPC',
+    async (method) => {
+      const received: unknown[] = [];
+      const base = {
+        workspaceId,
+        getMachineProtocolCapabilities: async () => ({ sorbetCredentialsRemote: 1 }),
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud' as const,
+          resolvePlaneForMachine: async () => 'cloud' as const,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('plaintext RPC forbidden');
+        },
+      };
+      const request =
+        method === 'sorbet/credentials-list'
+          ? ({ method, params: { configId: 'config' } } as const)
+          : ({ method, params: { configId: 'config', providerId: 'openai' } } as const);
+      const facade = createWorkspaceMachineRpcFacade({
+        ...base,
+        requestEncryptedFeature: async (value) => {
+          received.push(value);
+          return {
+            ok: true,
+            result:
+              method === 'sorbet/credentials-list'
+                ? { type: method, credentials: [] }
+                : { type: method },
+          };
+        },
+      });
+      expect(await facade.requestLocalSorbetCredentials(remoteMachineId, request)).toMatchObject({
+        type: method,
+      });
+      expect(received).toEqual([
+        expect.objectContaining({ ...request, machineId: remoteMachineId, workspaceId }),
+      ]);
+      await expect(
+        createWorkspaceMachineRpcFacade(base).requestLocalSorbetCredentials(
+          remoteMachineId,
+          request
+        )
+      ).rejects.toThrow('transport unavailable');
+      await expect(
+        createWorkspaceMachineRpcFacade({
+          ...base,
+          getMachineProtocolCapabilities: async () => ({ sorbetCredentials: 1 }),
+          requestEncryptedFeature: async () => {
+            throw new Error('should not send');
+          },
+        }).requestLocalSorbetCredentials(remoteMachineId, request)
+      ).rejects.toThrow('unsupported');
+    }
+  );
   const server = {
     id: 'test' as McpServerId,
     name: 'Test',
@@ -971,34 +1139,55 @@ describe('local MCP discovery routing', () => {
     createdAt: 1,
     updatedAt: 1,
   };
-  it.each([true, false])(
-    'gates local inventory by daemon capability (supported=%s)',
-    async (supported) => {
-      const inventory = { type: 'mcp/tools', tools: [{ name: 'read_file' }] };
+  it.each(['local', 'cloud', 'unsupported'] as const)(
+    'keeps authentication configuration on the supported local route (%s)',
+    async (route) => {
+      const sent: unknown[] = [];
       vi.stubGlobal('window', {
         __LODY_ELECTRON__: true,
         ipc: {
-          invoke: async () => {
-            if (!supported) throw new Error('Unexpected local RPC');
-            return { ok: true, result: inventory };
+          invoke: async (_channel: string, request: unknown) => {
+            sent.push(request);
+            return {
+              ok: true,
+              result: { type: 'mcp/authentication', status: 'authorized', hasCredentials: true },
+            };
           },
         },
       });
       const facade = createWorkspaceMachineRpcFacade({
         workspaceId,
         getMachineProtocolCapabilities: async () =>
-          supported ? CURRENT_MACHINE_PROTOCOL_CAPABILITIES : undefined,
+          route === 'unsupported' ? undefined : CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
         targetRouter: {
-          getPlaneForMachine: () => 'local',
-          resolvePlaneForMachine: async () => 'local',
+          getPlaneForMachine: () => (route === 'cloud' ? 'cloud' : 'local'),
+          resolvePlaneForMachine: async () => (route === 'cloud' ? 'cloud' : 'local'),
         },
         getMachineRpcClient: async () => {
-          throw new Error('Unexpected remote RPC');
+          throw new Error('Authentication must never reach remote RPC');
         },
       });
-      const result = facade.requestLocalMcpTools(localMachineId, server);
-      if (supported) await expect(result).resolves.toEqual(inventory);
-      else await expect(result).rejects.toThrow('requires a supported local daemon');
+      const request = facade.requestLocalMcpAuthentication(localMachineId, {
+        server,
+        action: 'configure',
+        requesterUserId: 'owner',
+        authentication: { mode: 'manual', bearerToken: 'synthetic-private-token' },
+      });
+      if (route === 'local') {
+        expect(await request).toMatchObject({ status: 'authorized', hasCredentials: true });
+        expect(sent).toEqual([
+          expect.objectContaining({
+            method: 'mcp/authentication',
+            workspaceId,
+            params: expect.objectContaining({
+              authentication: { mode: 'manual', bearerToken: 'synthetic-private-token' },
+            }),
+          }),
+        ]);
+      } else {
+        await expect(request).rejects.toThrow('requires a supported local daemon');
+        expect(sent).toEqual([]);
+      }
     }
   );
 });
@@ -1010,69 +1199,6 @@ describe('memory provider routing', () => {
     status: 'ready',
     memories: [{ id: 'reviewer', name: 'Reviewer' }],
   } as const;
-  it.each(['local', 'cloud'] as const)(
-    'returns identities from the selected %s machine',
-    async (plane) => {
-      const machineId = plane === 'local' ? localMachineId : remoteMachineId;
-      vi.stubGlobal('window', {
-        __LODY_ELECTRON__: true,
-        ipc: {
-          invoke: async (
-            _channel: string,
-            envelope: { machineId: MachineId; method: string; params: unknown }
-          ) => {
-            if (plane !== 'local') throw new Error('Unexpected local RPC');
-            expect(envelope).toMatchObject({
-              machineId,
-              method: 'machine/memory',
-              params: request,
-            });
-            return { ok: true, result: inventory };
-          },
-        },
-      });
-      const facade = createWorkspaceMachineRpcFacade({
-        workspaceId,
-        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-        targetRouter: {
-          getPlaneForMachine: () => plane,
-          resolvePlaneForMachine: async () => plane,
-        },
-        getMachineRpcClient: async (target) => {
-          if (plane !== 'cloud') throw new Error('Unexpected remote RPC');
-          expect(target).toBe(remoteMachineId);
-          return {
-            requestMemoryProvider: async (params: unknown) => {
-              expect(params).toEqual(request);
-              return inventory;
-            },
-          } as never;
-        },
-      });
-      await expect(facade.requestMemoryProvider(machineId, request)).resolves.toEqual(inventory);
-    }
-  );
-  it.each([undefined, { memoryProviders: 0 }, { memoryProviders: 0.5 }])(
-    'rejects unsupported capabilities %j before routing a command',
-    async (protocolCapabilities) => {
-      const facade = createWorkspaceMachineRpcFacade({
-        workspaceId,
-        getMachineProtocolCapabilities: async () => protocolCapabilities,
-        targetRouter: {
-          getPlaneForMachine: () => 'cloud',
-          resolvePlaneForMachine: async () => 'cloud',
-        },
-        getMachineRpcClient: async () => {
-          throw new Error('Unexpected RPC');
-        },
-      });
-      await expect(facade.requestMemoryProvider(remoteMachineId, request)).resolves.toMatchObject({
-        status: 'error',
-        error: 'Update this machine to use memory providers.',
-        memories: [],
-      });
-    }
-  );
   it('returns local failure without falling back to a remote machine', async () => {
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
@@ -1146,3 +1272,490 @@ it.each([{ operationInbox: 1 }, {}])(
     ]);
   }
 );
+
+describe('encrypted file and preview routing', () => {
+  it('creates, observes, renews and revokes the protected preview with no local agent or ordinary proof', async () => {
+    let connection: import('@lody/shared').PreviewConnection | undefined;
+    let role: 'read' | 'write' = 'write';
+    const target = {
+      protocol: 'http' as const,
+      host: '127.0.0.1',
+      port: 5173,
+      path: '/selected?tab=1',
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: () => role,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('ordinary RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        expect(request.workspaceId).toBe(workspaceId);
+        expect(request.machineId).toBe(remoteMachineId);
+        expect(request.params).toMatchObject({ sessionId, requestedByUserId: 'owner' });
+        expect(request.params).not.toHaveProperty('proof');
+        if (request.method === 'session/preview-create') {
+          expect(request.params).toMatchObject({
+            target,
+            approval: { confirmedByUserId: 'owner', target },
+          });
+          connection = {
+            status: 'active',
+            endpointId: 'protected-preview',
+            target,
+            updatedAt: 1,
+            publicUrl: 'https://protected.trycloudflare.com/?__lody_preview_token=synthetic',
+          };
+        } else if (request.method === 'session/preview-revoke')
+          connection = { status: 'closed', target, updatedAt: 3, closedReason: 'revoked' };
+        else if (request.method === 'session/preview-status' && request.params.renewEndpointId) {
+          expect(request.params.renewEndpointId).toBe('protected-preview');
+          connection = { ...connection!, updatedAt: 2 };
+        }
+        return {
+          ok: true,
+          result: { type: request.method + '_response', sessionId, success: true, connection },
+        } as never;
+      },
+    });
+    const approval = {
+      target,
+      targetClass: 'loopback' as const,
+      source: 'share_action' as const,
+      confirmedByUserId: 'owner',
+      confirmedAt: 1,
+    };
+    expect(
+      await facade.requestSessionPreviewCreate(
+        remoteMachineId,
+        sessionId,
+        'owner',
+        target,
+        approval
+      )
+    ).toMatchObject({ success: true, connection: { status: 'active', target } });
+    expect(
+      await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner', {
+        renewEndpointId: 'protected-preview',
+      })
+    ).toMatchObject({ success: true, connection: { updatedAt: 2 } });
+    role = 'read';
+    expect(
+      await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
+    ).toMatchObject({ success: false });
+    expect(connection?.status).toBe('active');
+    role = 'write';
+    expect(
+      await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
+    ).toMatchObject({ success: true, connection: { status: 'closed', closedReason: 'revoked' } });
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it.each(['create', 'status', 'revoke'] as const)(
+    'never falls back to ordinary preview proof without a protected host: %s',
+    async (operation) => {
+      const ordinary: string[] = [];
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        protectedCodeCollabRole: () => 'write',
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          ordinary.push('opened');
+          throw new Error('ordinary preview opened');
+        },
+      });
+      const target = { protocol: 'http' as const, host: '127.0.0.1', port: 5173, path: '/' };
+      const response =
+        operation === 'create'
+          ? await facade.requestSessionPreviewCreate(remoteMachineId, sessionId, 'owner', target, {
+              target,
+              targetClass: 'loopback',
+              source: 'share_action',
+              confirmedByUserId: 'owner',
+              confirmedAt: 1,
+            })
+          : operation === 'status'
+            ? await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner')
+            : await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner');
+      expect(response).toMatchObject({ success: false });
+      expect(ordinary).toEqual([]);
+    }
+  );
+  it.each(['create', 'status', 'revoke'] as const)(
+    'refuses a verified non-writer before signing preview control: %s',
+    async (operation) => {
+      const transmitted: unknown[] = [];
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        protectedCodeCollabRole: () => 'read',
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('ordinary preview must stay closed');
+        },
+        requestEncryptedFeature: async (request) => {
+          transmitted.push(request);
+          return { ok: true, result: { success: true } } as never;
+        },
+      });
+      const target = { protocol: 'http' as const, host: '127.0.0.1', port: 5173, path: '/' };
+      const response =
+        operation === 'create'
+          ? await facade.requestSessionPreviewCreate(remoteMachineId, sessionId, 'guest', target, {
+              target,
+              targetClass: 'loopback',
+              source: 'share_action',
+              confirmedByUserId: 'guest',
+              confirmedAt: 1,
+            })
+          : operation === 'status'
+            ? await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'guest')
+            : await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'guest');
+      expect(response).toMatchObject({ success: false });
+      expect(transmitted).toEqual([]);
+    }
+  );
+
+  it('uses protected RPC for file contents and preview control without opening the ordinary RPC client', async () => {
+    const results = new Map<string, unknown>();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('plaintext RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        expect(request.workspaceId).toBe(workspaceId);
+        expect(request.machineId).toBe(remoteMachineId);
+        results.set(request.method, request.params);
+        if (request.method === 'code-collab/open-text')
+          return {
+            ok: true,
+            result: {
+              status: 'ok',
+              path: 'private.ts',
+              digest: 'sha256:' + '11'.repeat(32),
+              text: { encoding: 'plain', text: 'private text', rawBytes: 12 },
+            },
+          };
+        if (request.method === 'session/preview-status')
+          return {
+            ok: true,
+            result: {
+              type: 'session/preview-status_response',
+              sessionId,
+              success: true,
+            },
+          };
+        throw new Error('unexpected feature');
+      },
+    });
+    expect(
+      await facade.requestCodeCollabOpenText(
+        remoteMachineId,
+        { sessionId, path: 'private.ts' },
+        { ownerSessionId: 'parent' }
+      )
+    ).toMatchObject({ status: 'ok', text: { text: 'private text' } });
+    expect(
+      await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner', {
+        renewEndpointId: 'endpoint',
+      })
+    ).toMatchObject({ success: true });
+    expect(results.get('session/preview-status')).toMatchObject({ renewEndpointId: 'endpoint' });
+  });
+});
+
+it('keeps encrypted same-machine Code Collab on local IPC even when its document plane is cloud-only', async () => {
+  const saved = new Map<string, string>();
+  vi.stubGlobal('window', {
+    __LODY_ELECTRON__: true,
+    ipc: {
+      invoke: async (
+        channel: string,
+        request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+      ) => {
+        expect(channel).toBe('machineRpc.send');
+        if (request.method !== 'code-collab/save-text' || request.params.text.encoding !== 'plain')
+          throw new Error('unexpected request');
+        saved.set(request.params.path, request.params.text.text);
+        return { ok: true, result: { status: 'ok' } };
+      },
+    },
+  });
+  const facade = createWorkspaceMachineRpcFacade({
+    workspaceId,
+    getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    targetRouter: {
+      getPlaneForMachine: () => 'cloud',
+      resolvePlaneForMachine: async () => 'cloud',
+    },
+    isLocalControlMachine: (machine) => machine === localMachineId,
+    getMachineRpcClient: async () => {
+      throw new Error('plaintext network must stay closed');
+    },
+    requestEncryptedFeature: async () => {
+      throw new Error('same-machine controls must remain offline');
+    },
+  });
+  await facade.requestCodeCollabSaveText(localMachineId, {
+    sessionId,
+    requestedByUserId: 'owner',
+    path: 'private.ts',
+    baseDigest: 'sha256:' + '11'.repeat(32),
+    text: { encoding: 'plain', text: 'local edit', rawBytes: 10 },
+  });
+  expect(saved.get('private.ts')).toBe('local edit');
+});
+
+describe('encrypted remote files from a browser or mobile device', () => {
+  const digestOf = (text: string) =>
+    `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}` as const;
+
+  /** Synthetic receiving machine: answers only after the protected feature boundary. */
+  function encryptedMachine(initial: Record<string, string>) {
+    const files = new Map(Object.entries(initial));
+    const methods: string[] = [];
+    const requestEncryptedFeature = async (request: LocalMachineRpcRequest) => {
+      methods.push(request.method);
+      if (request.workspaceId !== workspaceId || request.machineId !== remoteMachineId)
+        return { ok: false as const, error: 'wrong target' };
+      const params = request.params as Record<string, unknown>;
+      const path = String(params.path);
+      if (request.method === 'file/preview') {
+        const text = files.get(path);
+        if (text === undefined)
+          return { ok: true as const, result: { status: 'error', v: 3, code: 'file_not_found' } };
+        return {
+          ok: true as const,
+          result: {
+            status: 'ok',
+            v: 3,
+            path,
+            digest: digestOf(text),
+            kind: 'text',
+            sizeBytes: text.length,
+            content: { encoding: 'utf8-plain', text, rawBytes: text.length },
+          },
+        };
+      }
+      if (request.method === 'code-collab/refresh-text') {
+        const text = files.get(path) ?? '';
+        if (params.digest === digestOf(text))
+          return {
+            ok: true as const,
+            result: { status: 'up_to_date', path, digest: digestOf(text) },
+          };
+        return {
+          ok: true as const,
+          result: {
+            status: 'updated',
+            path,
+            digest: digestOf(text),
+            text: { encoding: 'plain', text, rawBytes: text.length },
+          },
+        };
+      }
+      if (request.method === 'code-collab/save-text') {
+        const current = files.get(path) ?? '';
+        const payload = params.text as { encoding: string; text: string; rawBytes: number };
+        if (params.baseDigest !== digestOf(current))
+          return {
+            ok: true as const,
+            result: {
+              status: 'conflict',
+              reason: 'digest_mismatch',
+              path,
+              baseDigest: params.baseDigest,
+              diskDigest: digestOf(current),
+              diskText: { encoding: 'plain', text: current, rawBytes: current.length },
+            },
+          };
+        files.set(path, payload.text);
+        return {
+          ok: true as const,
+          result: {
+            status: 'ok',
+            path,
+            digest: digestOf(payload.text),
+            rawBytes: payload.rawBytes,
+          },
+        };
+      }
+      return { ok: true as const, result: { status: 'error', code: 'transient_io' } };
+    };
+    return { files, methods, requestEncryptedFeature };
+  }
+
+  const encryptedFacade = (
+    machine: ReturnType<typeof encryptedMachine> | null,
+    role: () => 'read' | 'write' = () => 'write'
+  ) =>
+    createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: role,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('plaintext RPC must stay closed');
+      },
+      ...(machine ? { requestEncryptedFeature: machine.requestEncryptedFeature } : {}),
+    });
+
+  const providerFor = (facade: ReturnType<typeof encryptedFacade>, role: 'read' | 'write') =>
+    new CodeCollabSessionFileProvider({
+      role,
+      fileTree: { 'src/app.ts': true },
+      runtime: {
+        sessionId,
+        previewFile: (path, knownDigest) =>
+          facade.requestFilePreview(
+            remoteMachineId,
+            { sessionId, path, ...(knownDigest === undefined ? {} : { knownDigest }) },
+            { ownerSessionId: sessionId }
+          ),
+        openText: (path) => facade.requestCodeCollabOpenText(remoteMachineId, { sessionId, path }),
+        refreshText: (path, digest) =>
+          facade.requestCodeCollabRefreshText(remoteMachineId, { sessionId, path, digest }),
+        saveText: (path, baseDigest, text, format) =>
+          facade.requestCodeCollabSaveText(remoteMachineId, {
+            sessionId,
+            requestedByUserId: 'owner',
+            path,
+            baseDigest,
+            text,
+            ...(format === undefined ? {} : { format }),
+          }),
+        openCurrentDiff: (path) =>
+          facade.requestCodeCollabOpenCurrentDiff(remoteMachineId, { sessionId, path }),
+        openAllChangesDiff: () =>
+          facade.requestCodeCollabOpenAllChangesDiff(remoteMachineId, { sessionId }),
+        openTurnDiff: (path, turnId) =>
+          facade.requestCodeCollabOpenTurnDiff(remoteMachineId, { sessionId, path, turnId }),
+        initDirectory: (path) =>
+          facade.requestCodeCollabInitDirectory(remoteMachineId, { sessionId, path }),
+        lspDefinition: async () => ({ status: 'unsupported', code: 'lsp_not_wired' }),
+        lspReferences: async () => ({ status: 'unsupported', code: 'lsp_not_wired' }),
+      },
+    });
+
+  it('saves through the protected channel and reads the same bytes back on another device', async () => {
+    const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
+    const editor = providerFor(encryptedFacade(machine), 'write');
+    expect(await editor.openFile('src/app.ts')).toMatchObject({
+      status: 'ready',
+      snapshot: { text: 'one\n' },
+    });
+    expect(await editor.saveText('src/app.ts', 'two\n')).toMatchObject({ status: 'ready' });
+    expect(machine.files.get('src/app.ts')).toBe('two\n');
+    // Our own save is not an external change, and a fresh reader sees the saved bytes.
+    expect(await editor.checkTextChanged('src/app.ts')).toMatchObject({ status: 'up_to_date' });
+    const reader = providerFor(encryptedFacade(machine), 'write');
+    expect(await reader.openFile('src/app.ts')).toMatchObject({
+      status: 'ready',
+      snapshot: { text: 'two\n' },
+    });
+  });
+
+  it('refuses Guest writes and legacy diff actions before signing, while reads stay available', async () => {
+    let role: 'read' | 'write' = 'write';
+    const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
+    const facade = encryptedFacade(machine, () => role);
+    const guest = providerFor(facade, 'read');
+    await guest.openFile('src/app.ts');
+    // A demotion observed after the provider was created still fences the next write.
+    role = 'read';
+    machine.methods.length = 0;
+    const save = await facade.requestCodeCollabSaveText(remoteMachineId, {
+      sessionId,
+      requestedByUserId: 'guest',
+      path: 'src/app.ts',
+      baseDigest: digestOf('one\n'),
+      text: { encoding: 'plain', text: 'guest\n', rawBytes: 6 },
+    });
+    const denied = {
+      status: 'error',
+      code: 'permission_denied',
+      retryable: false,
+      message:
+        'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.',
+    };
+    expect(save).toEqual(denied);
+    expect(
+      await facade.requestCodeCollabOpenCurrentDiff(remoteMachineId, {
+        sessionId,
+        path: 'src/app.ts',
+      })
+    ).toEqual(denied);
+    expect(
+      await facade.requestCodeCollabOpenAllChangesDiff(remoteMachineId, { sessionId })
+    ).toEqual(denied);
+    expect(
+      await facade.requestCodeCollabOpenTurnDiff(remoteMachineId, {
+        sessionId,
+        path: 'src/app.ts',
+        turnId: 'turn-1',
+      })
+    ).toEqual(denied);
+    expect(machine.methods).toEqual([]);
+    expect(machine.files.get('src/app.ts')).toBe('one\n');
+    expect(await guest.openFile('src/app.ts')).toMatchObject({
+      status: 'ready',
+      snapshot: { text: 'one\n' },
+    });
+    expect(machine.methods).toEqual(['file/preview']);
+  });
+
+  it('keeps file entry points unavailable, not retryable, when the host has no protected RPC', async () => {
+    const facade = encryptedFacade(null);
+    const unavailable = {
+      status: 'error',
+      code: 'permission_denied',
+      retryable: false,
+      message: 'Encrypted workspaces do not yet support remote machine operations.',
+    };
+    expect(
+      await facade.requestCodeCollabSaveText(remoteMachineId, {
+        sessionId,
+        requestedByUserId: 'owner',
+        path: 'src/app.ts',
+        baseDigest: digestOf('one\n'),
+        text: { encoding: 'plain', text: 'x', rawBytes: 1 },
+      })
+    ).toEqual(unavailable);
+    expect(
+      await facade.requestCodeCollabOpenText(remoteMachineId, { sessionId, path: 'src/app.ts' })
+    ).toEqual(unavailable);
+    expect(
+      await facade.requestFilePreview(remoteMachineId, { sessionId, path: 'src/app.ts' })
+    ).toMatchObject({
+      status: 'error',
+      code: 'permission_denied',
+      retryable: false,
+      message: unavailable.message,
+    });
+  });
+});

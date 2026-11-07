@@ -65,8 +65,10 @@ Provider 和准备任务复用原 ID；重新执行命令可以显式重试失�
 目录变化不会热更新已运行的 Agent。
 
 - Claude 接收 Anthropic 端点、标识 token 和 `CLAUDE_MODEL_CONFIG` 模型目录。
-- Codex 在 Lody 自有、按网关隔离的 Codex home 中使用 Responses Provider 和生成的
-  原生模型目录，不复用 ChatGPT 账号绑定。
+- Codex 在 Lody 自有、按网关隔离的 Codex home 中使用 Responses Provider，其
+  `model_catalog_url` 指向 Magpie 提供的 Codex 形状目录
+  （`<gateway>/v1/codex/models`），能力投影由 Magpie 完成，不在本地重复生成，
+  也不复用 ChatGPT 账号绑定。
 - Pi 在 Lody 自有隔离配置中使用生成的 `models.json` 和 OpenAI Chat Completions，
   不导入原生全局配置中的扩展和设置。
 - Kimi Code 在隔离 `KIMI_CODE_HOME/config.toml` 中生成 Provider 和模型目录。

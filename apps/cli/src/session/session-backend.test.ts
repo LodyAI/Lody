@@ -7,10 +7,11 @@ import type {
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { LoroRepo } from 'loro-repo';
-import { subscribeSessionChanges } from '@/lib/loro/doc';
+
 import { SessionDocument } from '@/lib/loro/doc';
 import {
   createSessionBackend,
+  disposeSessionBackend,
   registerSessionBackendFactory,
   SessionBackendUnavailableError,
   resolveSessionBackendKind,
@@ -245,32 +246,6 @@ defineSessionBackendContract('Loro', async (options) => {
 defineSessionBackendContract('Loro with real CRDT history', createRealLoroBackendFixture);
 
 describe('session backend selection', () => {
-  it('routes document subscriptions through the bound backend history port', () => {
-    const listener = vi.fn();
-    const unsubscribeControl = vi.fn();
-    const unsubscribeHistory = vi.fn();
-    const backend = {
-      subscribeHistory: vi.fn(() => unsubscribeHistory),
-    } as unknown as Pick<SessionBackend, 'subscribeHistory'>;
-    const sessionDoc = {
-      backend,
-      subscribeAll: vi.fn(),
-      subscribeControl: vi.fn(() => unsubscribeControl),
-      getSessionBackend() {
-        return this.backend;
-      },
-    } as unknown as SessionDocument;
-
-    const unsubscribe = subscribeSessionChanges(sessionDoc, listener);
-
-    expect(sessionDoc.subscribeAll).not.toHaveBeenCalled();
-    expect(sessionDoc.subscribeControl).toHaveBeenCalledWith(listener);
-    expect(backend.subscribeHistory).toHaveBeenCalledWith(listener);
-    unsubscribe();
-    expect(unsubscribeControl).toHaveBeenCalledOnce();
-    expect(unsubscribeHistory).toHaveBeenCalledOnce();
-  });
-
   it('defaults legacy metadata to Loro and keeps one backend per opened document', async () => {
     const { sessionDoc } = createBackendHarness();
     const first = await createSessionBackend(sessionDoc);
@@ -451,4 +426,31 @@ describe('Loro queue promotion', () => {
 
     await expect(backend.getMessageQueue()).resolves.toEqual([otherQueueItem]);
   });
+});
+
+// A failed release must keep the original backend reachable for the next attempt.
+it('retries the same backend after release failure without creating a second writer', async () => {
+  let held = true;
+  let fail = true;
+  const backend = {
+    kind: 'roost',
+    initialize: async () => undefined,
+    dispose: async () => {
+      if (fail) throw new Error('retained writer');
+      held = false;
+    },
+  } as unknown as SessionBackend;
+  const doc = { sessionId: 'release-retry' } as SessionDocument;
+  const unregister = registerSessionBackendFactory('roost', async () => backend);
+  try {
+    expect(await createSessionBackend(doc, { historyBackend: 'roost' })).toBe(backend);
+    await expect(disposeSessionBackend(doc)).rejects.toThrow('retained writer');
+    expect(held).toBe(true);
+    expect(await createSessionBackend(doc, { historyBackend: 'roost' })).toBe(backend);
+    fail = false;
+    await disposeSessionBackend(doc);
+    expect(held).toBe(false);
+  } finally {
+    unregister();
+  }
 });

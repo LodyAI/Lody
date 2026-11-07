@@ -27,6 +27,15 @@ lives in its `README.md`.
 5. **Before send.** One hook rewrites the ranges that need rewriting, and the
    resulting spans are frozen into the message.
 
+## Scheduled task prompts
+
+`ScheduleMentionForm` connects the shared mention input to `ScheduleForm`'s prompt
+slot. Its sources follow the task's project (or destination chat's project) and
+selected Agent. Saving runs `useMentionPromptExpansion` before handing the prompt
+to the schedule repository, so the stored string contains durable Session links,
+Role instructions and Skill paths instead of display tokens. Reopening shows that
+stored text; schedule documents do not persist composer ranges or transcript spans.
+
 ## Menu placement
 
 The main desktop chat composer follows the textarea's laid-out caret and
@@ -67,6 +76,21 @@ expose a temporary zero caret during refocus; starting an asynchronous Shortcut
 before that focus cycle lets the empty-query handler cancel it. Preparation keeps
 the menu open for loading and retry feedback. See the
 [touch focus note](../notes/implemented/bug-fix/2026-10-07-shortcut-touch-focus.md).
+
+Committed mentions are atomic caret ranges. Left and Right Arrow cross a mention
+without placing the caret inside it. On macOS, the default Emacs text-navigation
+bindings Control+B and Control+F use that same movement at a mention edge; away
+from mentions, the browser retains its normal shortcut behavior. Other macOS
+Emacs bindings such as Control+A/E and Control+P/N move by line, so this
+character-movement rule leaves them with the browser. See the
+[caret navigation decision](../notes/implemented/bug-fix/2026-10-27-mention-emacs-caret-navigation.md).
+
+The decorated input has one visible text painter: a character-aligned mirror
+renders prose, references, and selection together. The native textarea stays
+above it with transparent text and native spelling decorations disabled; it
+owns editing, clipboard semantics, accessibility, and the caret. Moving to a
+reference boundary never changes that stacking order. Placeholder text remains
+native. A primitive without a chip resolver retains native text and highlights.
 
 ## Ranking
 

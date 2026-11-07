@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { MOBILE_LAYOUT_BREAKPOINT } from '@lody/shared/layout';
 import { detectAppDeviceClass, isDesktopLayoutShell } from '@/lib/device-class';
+import { isNativeIOSAppShell } from '@/lib/native-platform';
 
 /**
  * Which layout family renders: the mobile renderer or the desktop renderer.
@@ -50,13 +51,20 @@ export function ForceDesktopLayoutProvider({ children }: { children: React.React
   return React.createElement(ForceMobileLayoutContext.Provider, { value: false }, children);
 }
 
+function viewportWidth(): number {
+  // WKWebView can report the previous innerWidth during a fold while its
+  // document has already resized, especially with the keyboard open.
+  if (isNativeIOSAppShell()) return document.documentElement.clientWidth || window.innerWidth;
+  return window.innerWidth;
+}
+
 export function checkIsMobileDevice(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
 
   if (detectAppDeviceClass() === 'desktop' || isDesktopLayoutShell()) return false;
-  return window.innerWidth < MOBILE_LAYOUT_BREAKPOINT;
+  return viewportWidth() < MOBILE_LAYOUT_BREAKPOINT;
 }
 
 /**
@@ -70,20 +78,20 @@ export function checkIsCompactDesktop(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
-  return window.innerWidth < MOBILE_LAYOUT_BREAKPOINT && !checkIsMobileDevice();
+  return viewportWidth() < MOBILE_LAYOUT_BREAKPOINT && !checkIsMobileDevice();
 }
 
 function useViewportLayoutFlags(): { isMobile: boolean; belowBreakpoint: boolean } {
   const [flags, setFlags] = React.useState(() => ({
     isMobile: checkIsMobileDevice(),
-    belowBreakpoint: typeof window !== 'undefined' && window.innerWidth < MOBILE_LAYOUT_BREAKPOINT,
+    belowBreakpoint: typeof window !== 'undefined' && viewportWidth() < MOBILE_LAYOUT_BREAKPOINT,
   }));
 
   React.useEffect(() => {
     const update = () => {
       const next = {
         isMobile: checkIsMobileDevice(),
-        belowBreakpoint: window.innerWidth < MOBILE_LAYOUT_BREAKPOINT,
+        belowBreakpoint: viewportWidth() < MOBILE_LAYOUT_BREAKPOINT,
       };
       // Bail out on unchanged flags: continuous resize fires per frame but
       // only a breakpoint crossing may re-render subscribed surfaces.
@@ -102,11 +110,19 @@ function useViewportLayoutFlags(): { isMobile: boolean; belowBreakpoint: boolean
     // because on mobile orientation changes matchMedia can fire before
     // window.innerWidth reflects the new dimensions
     window.addEventListener('resize', update);
+    // WebKit may update the document after firing resize. Observe the real
+    // document width as well so a fold does not leave the old layout mounted.
+    const observer =
+      isNativeIOSAppShell() && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(update)
+        : undefined;
+    observer?.observe(document.documentElement);
 
     update();
     return () => {
       mql.removeEventListener('change', update);
       window.removeEventListener('resize', update);
+      observer?.disconnect();
     };
   }, []);
 

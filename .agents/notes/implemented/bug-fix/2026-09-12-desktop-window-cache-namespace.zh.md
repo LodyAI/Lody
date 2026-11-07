@@ -12,7 +12,7 @@ PR: https://github.com/LodyAI/Lody/pull/641
 
 Loro Streams 的持久化游标表示对应本地副本已可靠写入的远端位置。多窗口实现只为 `lody-loro-repo-db-*` 增加了窗口 id，`lody-loro-stream-cursors-*` 和 eager-sync high-water 仍只使用 workspace id。两个窗口因此拥有不同 Repo，却共享声明本地数据已落盘的检查点，破坏了游标与副本必须一一对应的耐久性约束。
 
-该路径属于[桌面多窗口实现提案](../../proposed/feature/2026-09-10-desktop-windows.zh.md)中明确未实测的托管多工作区场景；[桌面多窗口 Spec](../../../../specs/desktop-windows.zh.md)允许同一工作区存在多个窗口，因此聚焦或复用已有窗口不能作为同步正确性的替代方案。
+该路径属于[桌面多窗口实现提案](../feature/2026-09-10-desktop-windows.zh.md)中明确未实测的托管多工作区场景；[桌面多窗口 Spec](../../../../specs/desktop-windows.zh.md)允许同一工作区存在多个窗口，因此聚焦或复用已有窗口不能作为同步正确性的替代方案。
 
 ## 决策
 

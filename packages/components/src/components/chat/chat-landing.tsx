@@ -1,7 +1,13 @@
 import { SessionLimitNotice } from './session-limit-notice';
+import { McpDefaultsRecovery } from './mcp-defaults-recovery';
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
-import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
+import { bindAgentRoleTarget, getSessionGroupTitle, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -62,8 +68,13 @@ import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/rea
 import { usePostHog } from '@posthog/react';
 import {
   ArrowUp,
+  ChevronsUpDown,
+  Folders,
   FolderOpen,
-  Github as GithubIcon,
+  CircleSlash2,
+  FolderPlus,
+  ArrowUpRight,
+  GitBranch,
   LockKeyhole,
   Monitor,
   PanelLeft,
@@ -72,6 +83,7 @@ import {
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
@@ -103,7 +115,11 @@ import {
   localProbeAttemptedAtom,
   localProbeResultAtom,
 } from '@/atoms/local-probe';
-import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
+import {
+  lodyPresenceNowMsAtom,
+  lodyPresenceStatesAtom,
+  lodyPresenceSyncStateAtom,
+} from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -128,11 +144,12 @@ import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
-import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
+import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   getChatLandingAgentSelectionsForMachine,
   readChatLandingDefaults,
+  recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
 import {
@@ -221,7 +238,10 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { HomeDashboardHost } from './home/home-dashboard-host';
-import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
+import {
+  getSessionCreationNavigation,
+  MOBILE_NEW_CHAT_PROMPT_ID,
+} from './submission/use-composer-navigation-focus';
 import { BranchSelector } from './chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -235,6 +255,87 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const landingStyles = stylex.create({
+  inlineValue: {
+    display: 'flex',
+    minWidth: 0,
+    width: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    textAlign: 'start',
+  },
+  inlineIcon: { flexShrink: 0, color: colors.tertiaryLabel },
+  inlineValueText: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflowWrap: 'anywhere',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: colors.label,
+  },
+  inlineChevron: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  inlineTrigger: {
+    minHeight: 'calc(var(--spacing) * 11)',
+    borderRadius: field.radiusMedium,
+    backgroundColor: field.background,
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    boxShadow: field.well,
+  },
+  inlinePanel: {
+    borderColor: colors.separator,
+    backgroundColor: colors.secondaryBackground,
+    boxShadow: 'none',
+  },
+  inlineSummary: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  inlineBranchRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+  },
+  inlineWorktree: { paddingTop: 'calc(var(--spacing) * 1)' },
+  inlineBranchBody: { minWidth: 0, flex: '1 1 0%' },
+  inlineBranchTrigger: {
+    height: 'calc(var(--spacing) * 8)',
+    borderRadius: field.radiusMedium,
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+    paddingInline: 'calc(var(--spacing) * 2)',
+  },
+  inlineBranchGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  inlineBranchLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  inlineBranchChevron: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+  },
+  inlineComposer: { display: 'flex', minHeight: 0, flexDirection: 'column' },
+  inlineNotice: {
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingTop: 'calc(var(--spacing) * 2)',
+  },
+  minHeightZero: { minHeight: 0 },
   branchTrigger: { minWidth: 'calc(var(--spacing) * 0)', maxWidth: '100%' },
   nonShrinking: { flexShrink: 0 },
   usageTrigger: { height: 'calc(var(--spacing) * 8)', flexShrink: 0 },
@@ -418,10 +519,11 @@ import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { buildHomeWeekUsage, type HomeWeekUsageOption } from '@/lib/home-week-usage';
 import { createMachinePairing } from '@/lib/cli-api-key';
-import { ContextSwitch, type SessionContextType } from './context-switch';
+import type { SessionContextType } from './context-switch';
 import {
   UNIFIED_PROJECT_OPTION_RENDER_LIMIT,
   UnifiedProjectSelectorView,
+  GitHubOwnerAvatarIcon,
   buildUnifiedLocalProjectOptions,
   type LocalProjectSelection,
   type UnifiedProjectGroupOption,
@@ -482,10 +584,23 @@ import {
   MobileNewChatSheet,
   type MobileNewChatSheetContentProps,
 } from '@/components/mobile/mobile-new-chat-sheet';
+import { MobileFooterRail } from '@/components/mobile/mobile-footer-rail';
+import {
+  MobileInlinePicker,
+  MobileInlinePickerCoordinator,
+} from '@/components/mobile/mobile-inline-picker';
+import {
+  getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
+} from '@/components/mobile/mobile-new-chat-project-options';
+import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
+import {
+  resolveMobileNewChatBranchLabel,
+  resolveMobileNewChatTargetLabel,
+} from '@/components/mobile/mobile-new-chat-target';
 import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
-import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
@@ -499,15 +614,8 @@ import {
 } from '@/lib/local-project-rpc-file-provider';
 import { GitHubRepoFileProvider } from '@/lib/github-repo-file-provider';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { Tabs } from '@lody/ui/tabs';
-import { Folder as FolderIcon, GitBranch as GitBranchIcon } from 'lucide-react';
 import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
-import {
-  MobileInlinePicker,
-  MobileInlinePickerCoordinator,
-  MobileInlinePickerRowSlot,
-  type MobileInlinePickerOption,
-} from '@/components/mobile/mobile-inline-picker';
+import type { MobileNativeSelectOption } from '@/components/mobile/mobile-native-select';
 import {
   buildChildSessionsByParent,
   buildSidebarOpenerRowResolver,
@@ -559,12 +667,15 @@ import {
   getSharingReviewTeamLooksEmpty,
   shouldRetrySharingReviewConflict,
   shouldReportLocalProjectUnavailable,
+  getChatLandingSelectedMachineState,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
 } from './chat-landing-derived';
 
 interface ChatLandingProps {
+  /** Committed mobile session surface; route completion alone is not presentation. */
+  mobilePresentedSessionId?: string;
   workspaceSlug: string;
   preSelectedContext?: 'local' | 'github' | 'chat' | 'group';
   preSelectedMachine?: string;
@@ -739,6 +850,7 @@ export function ChatLanding(props: ChatLandingProps) {
 }
 
 function WorkspaceChatLanding({
+  mobilePresentedSessionId,
   workspaceSlug,
   preSelectedContext: preSelectedContextProp,
   preSelectedMachine,
@@ -821,7 +933,9 @@ function WorkspaceChatLanding({
     controlConnectionState === 'syncing';
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
@@ -852,18 +966,20 @@ function WorkspaceChatLanding({
     visibleAllActiveSessions
   );
   const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
-  const showProjectSharing = shouldShowSessionSharing({
-    workspaceId,
-    activeWorkspaceId: activeOrganization?.id ?? null,
-    memberCount: activeOrganization?.members.length ?? null,
-  });
-  const inboxRows = useCloudQuery(
+  const showProjectSharing =
+    legacyQueriesEnabled &&
+    shouldShowSessionSharing({
+      workspaceId,
+      activeWorkspaceId: activeOrganization?.id ?? null,
+      memberCount: activeOrganization?.members.length ?? null,
+    });
+  const inboxRows = useLegacyWorkspaceQuery(
     cloudOperations.inbox.listMine,
     showProjectSharing && workspaceId ? { workspaceId } : 'skip'
   );
-  const sharingReviewServerState = useCloudQuery(
+  const sharingReviewServerState = useLegacyWorkspaceQuery(
     cloudOperations.inbox.getSharingReviewState,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const sharingReviewInboxRevisionRef = useRef<string | null>(null);
   const sharingReviewReconcileRef = useRef({
@@ -875,10 +991,14 @@ function WorkspaceChatLanding({
   if (sharingReviewInboxReady) {
     sharingReviewInboxRevisionRef.current = sharingReviewServerState?.sourceRevision ?? null;
   }
-  const reconcileSharingReview = useCloudMutation(cloudOperations.inbox.reconcileSharingReview);
-  const markInboxItemRead = useCloudMutation(cloudOperations.inbox.markRead);
-  const dismissInboxItem = useCloudMutation(cloudOperations.inbox.dismiss);
-  const suppressSharingReview = useCloudMutation(cloudOperations.inbox.suppressSharingReview);
+  const reconcileSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.reconcileSharingReview
+  );
+  const markInboxItemRead = useLegacyWorkspaceMutation(cloudOperations.inbox.markRead);
+  const dismissInboxItem = useLegacyWorkspaceMutation(cloudOperations.inbox.dismiss);
+  const suppressSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.suppressSharingReview
+  );
   const handleShareLocalProjectWithTeam = useCallback(
     async (selection: LocalProjectSelection) => {
       if (!workspaceId) throw new Error('Workspace is not ready');
@@ -936,23 +1056,26 @@ function WorkspaceChatLanding({
   const localProbeResult = useAtomValue(localProbeResultAtom);
   const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
   const onlineMachineIds = useOnlineMachineIds();
+  const presenceSynced = useAtomValue(lodyPresenceSyncStateAtom) === 'synced';
+  const presenceSyncedRef = useRef(presenceSynced);
+  presenceSyncedRef.current = presenceSynced;
   const onlineMachineIdsRef = useRef(onlineMachineIds);
   onlineMachineIdsRef.current = onlineMachineIds;
   const isPresenceMachineOnline = useCallback(
     (machineId: string) => onlineMachineIds.has(machineId as MachineId),
     [onlineMachineIds]
   );
-  const freshRepositories = useCloudQuery(
+  const freshRepositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const billingEntitlement = useCloudQuery(
     cloudOperations.billing.getWorkspaceBillingEntitlement,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const workspaceReposWithStatus = useCloudQuery(
+  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   ) as
     | {
         repoFullName: string;
@@ -961,11 +1084,20 @@ function WorkspaceChatLanding({
       }[]
     | null
     | undefined;
-  const repositories = freshRepositories ?? cachedRepositories ?? undefined;
+  const repositories = useMemo(
+    () =>
+      legacyQueriesEnabled
+        ? (freshRepositories ?? cachedRepositories ?? undefined)
+        : legacyQueryStatus === 'blocked'
+          ? []
+          : undefined,
+    [legacyQueriesEnabled, legacyQueryStatus, freshRepositories, cachedRepositories]
+  );
   const isElectron = isElectronRenderer();
   const launchMode = useMemo(() => detectAppLaunchMode(isElectron), [isElectron]);
   const hasGitHubRepos = (repositories?.length ?? 0) > 0;
-  const repositoriesReady = freshRepositories !== undefined;
+  const repositoriesReady =
+    legacyQueryStatus === 'blocked' || (legacyQueriesEnabled && freshRepositories !== undefined);
   const sharingReviewState = useMemo(() => {
     const privateMachineIds = Array.from(accessByMachineId.values())
       .filter((access) => access.ownerUserId === userId && !access.sharedWithTeam)
@@ -1094,7 +1226,7 @@ function WorkspaceChatLanding({
         reconcileWriterId: writerId,
         reconcileAttempt: attempt,
       });
-    })();
+    })().catch((error) => console.error('Failed to reconcile sharing review', error));
     return cancel;
   }, [
     activeOrganization?.id,
@@ -1298,11 +1430,16 @@ function WorkspaceChatLanding({
       setAddProjectInitialMachineId(null);
     }
   }, []);
-  /* Mobile-only: controls the bottom-sheet composer launched from the
-     home screen's new-chat chip. The sheet hosts the same composer +
-     selectors as the desktop landing — opening it doesn't navigate,
-     so the home tab list stays visible underneath. */
+  /* The new-chat page sits over the mounted home or project screen. */
   const [mobileNewChatOpen, setMobileNewChatOpen] = useState(false);
+  const [restoreMobileProject, setRestoreMobileProject] = useState(false);
+  const [mobileCreatedSessionId, setMobileCreatedSessionId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (mobileCreatedSessionId && mobilePresentedSessionId === mobileCreatedSessionId) {
+      setMobileNewChatOpen(false);
+      setMobileCreatedSessionId(null);
+    }
+  }, [mobileCreatedSessionId, mobilePresentedSessionId]);
 
   /* Mobile-only: controls the bottom-sheet workspace switcher launched
      from the home screen's workspace pill. Replaces the inline dropdown
@@ -2462,6 +2599,7 @@ function WorkspaceChatLanding({
     executorConfigs,
     machines,
     selectableMachines,
+    presenceSynced,
     visibleMachinesLoading,
     docMetaCacheReady,
     repositories,
@@ -2726,6 +2864,7 @@ function WorkspaceChatLanding({
           projectMachineId: project.machineId,
           visibleLocalMachineId,
           targetMachine: machinesRef.current.get(project.machineId),
+          presenceSynced: presenceSyncedRef.current,
           isMachineOnline: (machineId) => onlineMachineIdsRef.current.has(machineId),
         })
       ) {
@@ -2801,9 +2940,16 @@ function WorkspaceChatLanding({
       projectMachineId: selectedLocalProjectMachineId,
       visibleLocalMachineId,
       targetMachine: machines.get(selectedLocalProjectMachineId),
+      presenceSynced,
       isMachineOnline: isPresenceMachineOnline,
     });
-  }, [isPresenceMachineOnline, machines, selectedLocalProjectMachineId, visibleLocalMachineId]);
+  }, [
+    isPresenceMachineOnline,
+    machines,
+    presenceSynced,
+    selectedLocalProjectMachineId,
+    visibleLocalMachineId,
+  ]);
   const localGitStateLoadKey = useMemo(
     () =>
       getLocalProjectGitStateLoadKey({
@@ -3019,8 +3165,6 @@ function WorkspaceChatLanding({
   }, [activeLocalGitState, contextType, repoBranches, t]);
 
   const currentBranch = contextType === 'local' ? selectedLocalBranch : selectedBranch;
-  const currentBranchLabel =
-    branchOptions.find((option) => option.value === currentBranch)?.label ?? currentBranch;
   const setCurrentBranch =
     contextType === 'local' ? handleSelectedLocalBranchChange : setSelectedBranch;
 
@@ -3136,10 +3280,6 @@ function WorkspaceChatLanding({
   }, [openAddProjectDialog]);
 
   const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
-  const handleCreateProject = useCallback(
-    () => requestProjectEditor({ kind: 'create' }),
-    [requestProjectEditor]
-  );
 
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
@@ -3196,7 +3336,7 @@ function WorkspaceChatLanding({
   );
 
   // ── Submit ──
-  const handleSubmit = async () => {
+  const handleSubmit = async (withoutMcp = false) => {
     if (submitting) return;
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
@@ -3231,16 +3371,13 @@ function WorkspaceChatLanding({
     }
     // The selection still comes from defaults that were never read; sending now
     // would create the conversation with no MCP servers instead of its defaults.
-    if (!mcpSelection.ready) {
+    if (!mcpSelection.ready && !withoutMcp) {
       captureSessionInputBlocked('mcp_defaults_not_ready');
-      setComposerError(
-        mcpSelection.defaultsFailed
-          ? t(
-              'chat.validation.mcpDefaultsFailed',
-              'Default MCP servers couldn’t be read, so this conversation can’t be created yet.'
-            )
-          : t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
-      );
+      if (!mcpSelection.defaultsFailed) {
+        setComposerError(
+          t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
+        );
+      }
       return;
     }
     const scopedMachineId =
@@ -3253,7 +3390,11 @@ function WorkspaceChatLanding({
           : null;
     if (!scopedMachineId || selectedAgent.machineId !== scopedMachineId) {
       captureSessionInputBlocked('missing_machine');
-      setComposerError(t('chat.validation.missingMachine'));
+      setComposerError(
+        selectedMachineState === 'offline'
+          ? t('chat.validation.machineOffline', 'The selected machine is offline.')
+          : t('chat.validation.missingMachine')
+      );
       return;
     }
     const machine = machines.get(scopedMachineId);
@@ -3305,12 +3446,6 @@ function WorkspaceChatLanding({
     try {
       setSubmitting(true);
       setComposerStatus(null);
-      // Preserve React draft state until startSession is accepted, but clear the
-      // controlled element immediately so click/Enter feedback cannot wait for
-      // the first local writer await.
-      if (promptTextareaRef.current) {
-        promptTextareaRef.current.value = '';
-      }
 
       let project: ProjectRef | undefined;
       let repoFullNameForMentions: string | undefined;
@@ -3412,7 +3547,7 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? (selectedModelId ?? undefined) : undefined,
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
-        mcpServerIds: mcpSelection.selectedIds,
+        mcpServerIds: withoutMcp ? [] : mcpSelection.selectedIds,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
         memory: activeAgentRole?.runConfig.memory,
@@ -3469,6 +3604,11 @@ function WorkspaceChatLanding({
         pendingHistoryEntry,
         attachments
       );
+      mcpSelection.acceptSend(sessionId, withoutMcp);
+      if (mobileNewChatOpen) {
+        setMobileCreatedSessionId(sessionId);
+        setRestoreMobileProject(false);
+      }
       // Admission owns the snapshot now; later preference/navigation failures must not resend it.
       setPrompt('');
       clearPastedTextDrafts();
@@ -3478,6 +3618,7 @@ function WorkspaceChatLanding({
       if (!historyEntry || typeof historyEntry !== 'object' || !('id' in historyEntry)) {
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
+      recordChatLandingProjectUse(workspaceId, desktopProjectSelection);
       persistAgentSessionDefaults(selectedAgent.agentId, {
         modeId: modeOptions.length > 0 ? selectedModeId : null,
         modelId: modelOptions.length > 0 ? selectedModelId : null,
@@ -3634,15 +3775,15 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
-      if (mobileNewChatOpen) {
-        // The mobile base ChatLanding stays mounted beneath the session drawer.
-        // Close the sheet explicitly on successful start so keyboard-submit and
-        // button-submit leave the same clean underlying state.
-        promptTextareaRef.current?.blur();
-        setMobileNewChatOpen(false);
-      }
+      // The mobile host acknowledges its committed session surface before
+      // dismissing the new-chat page; navigation may resolve before portals paint.
       await navigate(
-        getSessionCreationNavigation(workspaceSlug, sessionId, usesMobileKeyboardAction)
+        getSessionCreationNavigation(
+          workspaceSlug,
+          sessionId,
+          usesMobileKeyboardAction,
+          promptTextareaRef.current != null && promptTextareaRef.current === document.activeElement
+        )
       );
     } catch (error) {
       capturePostHogEvent(postHog, 'session/start_failed', {
@@ -3710,16 +3851,27 @@ function WorkspaceChatLanding({
   };
 
   // ── Selector nodes ──
-  // Only constrain to selectedMachineId if it still refers to a valid online machine.
-  const isSelectedMachineValid = useMemo(() => {
-    if (!selectedMachineId) return false;
-    return isChatLandingMachineReachable({
-      machineId: selectedMachineId,
-      localMachineId: visibleLocalMachineId,
+  // Only constrain to selectedMachineId unless it is definitely offline or gone.
+  const selectedMachineOnlineStatus = useMachineOnlineStatus(selectedMachineId);
+  const selectedMachineState = useMemo(
+    () =>
+      getChatLandingSelectedMachineState({
+        machineId: selectedMachineId,
+        localMachineId: visibleLocalMachineId,
+        machines,
+        isMachineOnline: isPresenceMachineOnline,
+        onlineStatus: selectedMachineOnlineStatus,
+      }),
+    [
+      selectedMachineId,
       machines,
-      isMachineOnline: isPresenceMachineOnline,
-    });
-  }, [selectedMachineId, machines, visibleLocalMachineId, isPresenceMachineOnline]);
+      visibleLocalMachineId,
+      isPresenceMachineOnline,
+      selectedMachineOnlineStatus,
+    ]
+  );
+  const isSelectedMachineValid =
+    selectedMachineState === 'available' || selectedMachineState === 'unknown';
 
   // The agent selector must always be scoped to exactly one machine.
   const localProjectMachineId =
@@ -3728,12 +3880,6 @@ function WorkspaceChatLanding({
     () => (selectedMachineId && isSelectedMachineValid ? selectedMachineId : localProjectMachineId),
     [localProjectMachineId, selectedMachineId, isSelectedMachineValid]
   );
-  const localProjectSelectorMachineId =
-    contextType === 'local' ? (selectedMachineId ?? localProjectMachineId) : null;
-  const localProjectSelectorEmptyText = t(
-    getEmptyLocalProjectsMessageKey(Boolean(localProjectSelectorMachineId))
-  );
-
   const { showBranchSelector, isBranchDisabled, branchSelectorKey } =
     getChatLandingBranchSelectorState({
       contextType,
@@ -3893,6 +4039,19 @@ function WorkspaceChatLanding({
       setContextType('local');
     },
     [handleSelectedLocalProjectChange, selectProjectGroup]
+  );
+  // The project just created is what the user meant to work in.
+  const handleCreateProject = useCallback(
+    () =>
+      requestProjectEditor({
+        kind: 'create',
+        onCreated: (projectId) => handleDesktopProjectChange({ kind: 'group', projectId }),
+      }),
+    [handleDesktopProjectChange, requestProjectEditor]
+  );
+  const handleEditProjectGroup = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'edit', projectId }),
+    [requestProjectEditor]
   );
   const desktopProjectGroupOptions = useMemo<UnifiedProjectGroupOption[]>(
     () =>
@@ -4144,7 +4303,9 @@ function WorkspaceChatLanding({
       })),
     [accessByMachineId, selectableMachines, showProjectSharing]
   );
-  const desktopSelectedMachineId = scopedMachineId;
+  // An offline selection stays visible and marked rather than reading as unset.
+  const desktopSelectedMachineId =
+    selectedMachineState === 'offline' ? selectedMachineId : scopedMachineId;
   const desktopSelectedMachineLabel = desktopSelectedMachineId
     ? machines.get(desktopSelectedMachineId)?.name
     : null;
@@ -4194,6 +4355,7 @@ function WorkspaceChatLanding({
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
           selectedLabel={desktopSelectedMachineLabel}
+          offline={selectedMachineState === 'offline'}
           options={desktopMachineOptions}
           onChange={handleMachineChange}
           disabled={isInitialDataLoading}
@@ -4209,6 +4371,7 @@ function WorkspaceChatLanding({
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
           onCreateProject={handleCreateProject}
+          onEditProjectGroup={handleEditProjectGroup}
           onShareLocalProjectWithTeam={
             showProjectSharing ? handleShareLocalProjectWithTeam : undefined
           }
@@ -4235,7 +4398,9 @@ function WorkspaceChatLanding({
           disabledReason={
             scopedMachineId
               ? undefined
-              : t('chat.machineSelector.selectFirst', 'Select a machine first')
+              : selectedMachineState === 'offline'
+                ? t('chat.machineSelector.offline', 'Offline')
+                : t('chat.machineSelector.selectFirst', 'Select a machine first')
           }
           fallbackAgent={{
             cliType: selectedConfig?.cliType,
@@ -4292,254 +4457,177 @@ function WorkspaceChatLanding({
 
   const bottomBarNode = null;
 
-  /* ── Mobile-sheet (new-chat bottom sheet) selector nodes ──
-     The sheet drives every selector through the unified
-     `MobileInlinePicker` — a chip-style trigger that expands a drawer
-     of options inline below it. We bypass the desktop selector
-     desktop selector components
-     and feed the picker raw option arrays here so the interaction +
-     animation are identical across machine / project / branch / model /
-     thinking / agent / permission. The pill switchers (类型, 模式) stay
-     as Tabs since they're already inline. */
-
-  /* ── Machine ── */
+  /* Mobile target options retain the same machine and project scoping as desktop. */
   const mobileSheetOnlineMachines = useOnlineMachines();
-  const mobileSheetMachineOptions = useMemo<MobileInlinePickerOption<MachineId>[]>(() => {
-    return mobileSheetOnlineMachines.map((m) => ({
-      value: m.id as MachineId,
-      label: m.name,
-      searchText: m.name,
-      icon: (
-        <Monitor {...stylex.props(landingStyles.glyph14)} strokeWidth={1.8} aria-hidden="true" />
-      ),
-    }));
-  }, [mobileSheetOnlineMachines]);
-  const mobileSheetSelectedMachineLabel = useMemo(() => {
-    if (!selectedMachineId) return null;
-    return mobileSheetMachineOptions.find((opt) => opt.value === selectedMachineId)?.label ?? null;
-  }, [mobileSheetMachineOptions, selectedMachineId]);
-  const mobileSheetMachineNode = (
-    <MobileInlinePicker<MachineId>
-      id="mobile-sheet-machine"
-      value={selectedMachineId}
-      onChange={(id) => handleMachineChange(id)}
-      options={mobileSheetMachineOptions}
-      disabled={hasNoMachine}
-      loading={isInitialDataLoading}
-      ariaLabel={t('chat.machineSelector.placeholder', 'Machine')}
-      emptyText={t('chat.machineSelector.emptyText', 'No machines online')}
-      searchable={mobileSheetMachineOptions.length > 5}
-      searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
-      triggerContent={
-        <>
-          <Monitor {...stylex.props(landingStyles.glyph14Muted)} aria-hidden="true" />
-          <span {...stylex.props(landingStyles.truncate)}>
-            {isInitialDataLoading
-              ? t('chat.machineSelector.loading', 'Loading machine...')
-              : (mobileSheetSelectedMachineLabel ??
-                t('chat.machineSelector.placeholder', 'Machine'))}
-          </span>
-        </>
-      }
-    />
+  const mobileProjectSelectedMachineId =
+    selectedMachineId && (isSelectedMachineValid || selectedMachineState === 'offline')
+      ? selectedMachineId
+      : (selectedLocalProject?.machineId ?? null);
+  const mobileSheetSelectedMachineLabel = mobileProjectSelectedMachineId
+    ? (machines.get(mobileProjectSelectedMachineId)?.name ?? null)
+    : null;
+  const mobileProjectMachines = useMemo(() => {
+    const onlineIds = new Set(mobileSheetOnlineMachines.map((machine) => machine.id));
+    const localMachineIds = new Set(
+      [...visibleLocalProjectMap.values()].map((entry) => entry.machineId)
+    );
+    return [...machines.values()]
+      .filter(
+        (machine) =>
+          onlineIds.has(machine.id) ||
+          localMachineIds.has(machine.id) ||
+          machine.id === mobileProjectSelectedMachineId ||
+          machine.id === activeAgentRole?.machineId
+      )
+      .map((machine) => ({
+        id: machine.id,
+        name: machine.name,
+        online: onlineIds.has(machine.id),
+        disabledReason:
+          !onlineIds.has(machine.id) && machine.id !== mobileProjectSelectedMachineId
+            ? t('chat.machineSelector.offline', 'Offline')
+            : undefined,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [
+    activeAgentRole?.machineId,
+    machines,
+    mobileProjectSelectedMachineId,
+    mobileSheetOnlineMachines,
+    t,
+    visibleLocalProjectMap,
+  ]);
+  const mobileProjectFolders = useMemo(
+    () =>
+      [...visibleLocalProjectMap.values()].map((entry) => ({
+        machineId: entry.machineId,
+        localProjectId: entry.project.id,
+        name: entry.project.name,
+        rootPath: entry.project.rootPath,
+        lastUsedAt: mobileSheetRecency.byProject.get(entry.key) ?? entry.project.lastOpenedAtMs,
+      })),
+    [mobileSheetRecency.byProject, visibleLocalProjectMap]
+  );
+  const mobileProjectRepos = useMemo(
+    () =>
+      [...(repositories ?? [])].map((repository) => ({
+        fullName: repository.fullName,
+        description: repository.description ?? undefined,
+        lastUsedAt: mobileSheetRecency.byRepo.get(repository.fullName),
+      })),
+    [mobileSheetRecency.byRepo, repositories]
+  );
+  const mobileProjectGroups = useMemo(
+    () =>
+      desktopProjectGroupOptions.map((group) => ({
+        projectId: group.projectId,
+        name: group.name,
+        memberCount: group.memberCount,
+        availability: group.availability,
+        disabledReason: group.disabledReason,
+        lastUsedAt: group.lastUsedAt,
+      })),
+    [desktopProjectGroupOptions]
   );
 
-  /* ── Project (per context) ── */
-  const mobileSheetGitHubRepoOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    if (contextType !== 'github') return [];
-    const repos = [...(repositories ?? [])].sort((a, b) =>
-      compareChatLandingRepositoryByRecency(a, b, mobileSheetRecency.byRepo)
-    );
-    return repos.map((repo) => ({
-      value: repo.fullName,
-      label: repo.fullName,
-      searchText: repo.fullName,
-      description: repo.description ?? undefined,
-      icon: (
-        <GithubIcon {...stylex.props(landingStyles.glyph14)} strokeWidth={1.8} aria-hidden="true" />
-      ),
-    }));
-  }, [contextType, repositories, mobileSheetRecency]);
-  const mobileSheetLocalProjectOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    if (contextType !== 'local') return [];
-    const entries = [...visibleLocalProjectMap.values()]
-      .filter(
-        (entry) =>
-          !localProjectSelectorMachineId || entry.machineId === localProjectSelectorMachineId
-      )
-      .sort((left, right) =>
-        compareChatLandingLocalProjectByRecency(left, right, mobileSheetRecency.byProject)
-      );
-    return entries.map((entry) => ({
-      value: buildLocalProjectKey(entry.machineId, entry.project.id),
-      label: entry.project.name,
-      searchText: `${entry.project.name} ${entry.project.rootPath}`,
-      description: entry.project.rootPath,
-      icon: (
-        <FolderOpen {...stylex.props(landingStyles.glyph14)} strokeWidth={1.8} aria-hidden="true" />
-      ),
-    }));
-  }, [contextType, localProjectSelectorMachineId, visibleLocalProjectMap, mobileSheetRecency]);
-  const mobileSheetSelectedLocalProjectKey = selectedLocalProject
-    ? buildLocalProjectKey(selectedLocalProject.machineId, selectedLocalProject.localProjectId)
-    : null;
-  const mobileSheetSelectedRepoLabel = selectedRepo ?? null;
-  const mobileSheetSelectedLocalProjectLabel = useMemo(() => {
-    if (!mobileSheetSelectedLocalProjectKey) return null;
-    return (
-      mobileSheetLocalProjectOptions.find((opt) => opt.value === mobileSheetSelectedLocalProjectKey)
-        ?.label ?? null
-    );
-  }, [mobileSheetLocalProjectOptions, mobileSheetSelectedLocalProjectKey]);
-  const mobileSheetProjectNode =
-    contextType === 'github' ? (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-repo"
-        value={selectedRepo ?? null}
-        onChange={(repo) => {
-          setSelectedRepo(repo);
-          setContextType('github');
-        }}
-        options={mobileSheetGitHubRepoOptions}
-        ariaLabel={t('chat.repoPlaceholder', 'Repository')}
-        emptyText={t(
-          'chat.mobileHome.emptyGitHubProjects',
-          '当前 workspace 没有已授权的 GitHub 仓库'
-        )}
-        searchable={mobileSheetGitHubRepoOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.repoSearchPlaceholder', 'Search repositories')}
-        triggerContent={
-          <>
-            <GithubIcon {...stylex.props(landingStyles.glyph14Muted)} aria-hidden="true" />
-            <span {...stylex.props(landingStyles.truncate)}>
-              {mobileSheetSelectedRepoLabel ?? t('chat.repoPlaceholder', 'Repository')}
-            </span>
-          </>
-        }
-      />
-    ) : (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-local-project"
-        value={mobileSheetSelectedLocalProjectKey}
-        onChange={(key) => {
-          const opt = visibleLocalProjectMap.get(key);
-          if (!opt) return;
-          handleSelectedLocalProjectChange({
-            machineId: opt.machineId,
-            localProjectId: opt.project.id,
-          });
-          setContextType('local');
-        }}
-        options={mobileSheetLocalProjectOptions}
-        ariaLabel={t('chat.validation.missingProject', 'Select a project')}
-        emptyText={localProjectSelectorEmptyText}
-        searchable={mobileSheetLocalProjectOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.localProjectSearchPlaceholder', 'Search projects')}
-        triggerContent={
-          <>
-            <FolderOpen {...stylex.props(landingStyles.glyph14Muted)} aria-hidden="true" />
-            <span {...stylex.props(landingStyles.truncate)}>
-              {mobileSheetSelectedLocalProjectLabel ??
-                t('chat.validation.missingProject', 'Select a project')}
-            </span>
-          </>
-        }
-      />
-    );
+  useLayoutEffect(() => {
+    if (!restoreMobileProject || !mobileNewChatOpen || submitting || !workspaceId || !defaultsReady)
+      return;
+    if (visibleLocalProjectsLoading || visibleMachinesLoading || !docMetaCacheReady) return;
+    const remembered = readChatLandingDefaults(workspaceId)?.lastUsedProject;
+    if (
+      (!remembered || remembered.kind === 'github') &&
+      !repositoriesReady &&
+      repositories === undefined
+    )
+      return;
+    const options = getMobileProjectOptions({
+      folders: mobileProjectFolders,
+      repositories: mobileProjectRepos,
+      groups: mobileProjectGroups,
+      machineId:
+        remembered?.kind === 'local'
+          ? (remembered.machineId as MachineId)
+          : mobileProjectSelectedMachineId,
+      query: '',
+    });
+    setRestoreMobileProject(false);
+    const selection = resolveMobileNewChatDefaultProject(remembered, options);
+    if (selection.kind === 'local' && selection.machineId !== mobileProjectSelectedMachineId) {
+      if (activeAgentRole) handleAgentRoleSelect(null);
+      handleMachineChange(selection.machineId);
+    }
+    handleDesktopProjectChange(selection);
+  }, [
+    restoreMobileProject,
+    mobileNewChatOpen,
+    submitting,
+    workspaceId,
+    defaultsReady,
+    visibleLocalProjectsLoading,
+    visibleMachinesLoading,
+    docMetaCacheReady,
+    repositoriesReady,
+    repositories,
+    mobileProjectFolders,
+    mobileProjectRepos,
+    mobileProjectGroups,
+    mobileProjectSelectedMachineId,
+    handleDesktopProjectChange,
+    activeAgentRole,
+    handleAgentRoleSelect,
+    handleMachineChange,
+  ]);
 
+  const mobileSheetSelectedProjectName = useMemo(() => {
+    if (desktopProjectSelection.kind === 'group') {
+      return (
+        desktopProjectGroupOptions.find(
+          (group) => group.projectId === desktopProjectSelection.projectId
+        )?.name ?? null
+      );
+    }
+    if (desktopProjectSelection.kind === 'local') {
+      const key = buildLocalProjectKey(
+        desktopProjectSelection.machineId,
+        desktopProjectSelection.localProjectId
+      );
+      return (
+        desktopLocalProjectOptions.find((project) => project.key === key)?.name ??
+        visibleLocalProjectMap.get(key)?.project.name ??
+        null
+      );
+    }
+    return null;
+  }, [
+    desktopLocalProjectOptions,
+    desktopProjectGroupOptions,
+    desktopProjectSelection,
+    visibleLocalProjectMap,
+  ]);
+  const mobileSheetTargetLabel =
+    desktopProjectSelection.kind === 'group'
+      ? (mobileSheetSelectedProjectName ??
+        String(t('chat.validation.missingProject', 'Select a project')))
+      : resolveMobileNewChatTargetLabel({
+          contextType,
+          repoFullName: selectedRepo,
+          projectName: mobileSheetSelectedProjectName,
+          labels: {
+            noProject: String(t('chat.mobileNewChat.noProject', 'No project selected')),
+            project: String(t('chat.validation.missingProject', 'Select a project')),
+            repository: String(t('chat.repoPlaceholder', 'Repository')),
+          },
+        });
   /* ── Branch ── */
-  const mobileSheetBranchOptions = useMemo<MobileInlinePickerOption<string>[]>(
+  const mobileSheetBranchOptions = useMemo<MobileNativeSelectOption<string>[]>(
     () =>
       branchOptions.map((opt) => ({
         value: opt.value,
         label: opt.label,
-        searchText: opt.label,
-        description: opt.description,
-        icon: (
-          <GitBranchIcon
-            {...stylex.props(landingStyles.glyph14)}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        ),
       })),
     [branchOptions]
   );
-  const mobileSheetBranchNode = showBranchSelector ? (
-    <MobileInlinePicker<string>
-      id="mobile-sheet-branch"
-      key={branchSelectorKey}
-      value={currentBranch}
-      onChange={(value) => setCurrentBranch(value)}
-      options={mobileSheetBranchOptions}
-      disabled={isBranchDisabled}
-      loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : false}
-      loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-      ariaLabel={t('chat.branchPlaceholder', 'Branch')}
-      emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
-      searchable={mobileSheetBranchOptions.length > 5}
-      searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
-      triggerContent={
-        <>
-          <GitBranchIcon
-            {...stylex.props(landingStyles.glyph14Muted)}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          <span {...stylex.props(landingStyles.truncate)}>
-            {currentBranchLabel ?? t('chat.branchPlaceholder', 'Branch')}
-          </span>
-        </>
-      }
-    />
-  ) : null;
-
-  /* Project and branch now live on their own rows in the new-chat
-     sheet (see `MobileNewChatSheet` `perTypeNode` + `branchNode`
-     slots), so the previous side-by-side wrapper is gone. The two
-     nodes are passed individually to the sheet. */
-
-  /* Local-only: workdir mode lives on its own row in the sheet as a
-     pill switcher (本地文件 / 新工作树), matching the visual pattern of
-     the type pill above. The desktop WorkdirModeSelector dropdown is too
-     small to read at a glance on a phone and doesn't surface both
-     options without an extra tap. */
-  /* Workdir mode pills: icon+label as a tight group, centered in each
-     equal-width segment (same affinity pattern as the Type ContextSwitch).
-     The track, the pill and the dimming of an unavailable choice are the
-     primitive's; a stretched strip is what splits the width between them. */
-  const mobileSheetWorkdirModeNode =
-    contextType === 'local' && selectedLocalProject ? (
-      <Tabs.Root
-        value={effectiveWorkdirMode}
-        onValueChange={(value) => handleWorkdirModeChange(value as WorkdirMode)}
-      >
-        <Tabs.List size="large" stretch>
-          <Tabs.Tab value="local">
-            <FolderIcon {...stylex.props(landingStyles.glyph14)} aria-hidden="true" />
-            <span>{t('chat.mobileNewChat.workdirLocalLabel', '本地文件')}</span>
-          </Tabs.Tab>
-          <Tabs.Tab
-            value="worktree"
-            disabled={!worktreeAvailable || worktreeLoading}
-            title={worktreeUnavailableReason}
-            aria-busy={worktreeLoading || undefined}
-          >
-            {worktreeLoading ? (
-              <Spinner size="small" label={null} />
-            ) : (
-              <GitBranchIcon {...stylex.props(landingStyles.glyph14)} aria-hidden="true" />
-            )}
-            <span>{t('chat.mobileNewChat.workdirWorktreeLabel', '新工作树')}</span>
-          </Tabs.Tab>
-        </Tabs.List>
-      </Tabs.Root>
-    ) : null;
-
-  /* ── Composer footer: same MobileSessionRunConfig as the in-session
-     composer (agent / model / reasoning / permission / Plan / Fast in one
-     sheet). Usage stays in the footer; the old below-composer agent +
-     permission + plan row is gone. */
   const mobileSheetFooterSelectorNode = (
     <ErrorBoundary
       name="MobileSheetFooterSelector"
@@ -4547,36 +4635,33 @@ function WorkspaceChatLanding({
       resetKeys={[workspaceId, selectedAgent?.agentId]}
       fallback={null}
     >
-      <div {...stylex.props(landingStyles.mobileFooterRow)}>
-        {/* flex-1 + overflow so the run-config button can shrink; only the
-            model label inside it truncates. Usage stays full-width. */}
-        <div {...stylex.props(landingStyles.mobileFooterRunConfig)}>
-          <MobileSessionRunConfig
-            agentSelection={selectedAgent}
-            allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
-            agentLocked={false}
-            onAgentConfigChange={setSelectedAgent}
-            modelOptions={modelOptions}
-            selectedModelId={selectedModelId}
-            onModelChange={setSelectedModelName}
-            modeOptions={modeOptions}
-            selectedModeId={selectedModeId}
-            onModeChange={setSelectedModeId}
-            configOptionSelectors={configOptionSelectors}
-            configOptionValues={configOptionValues}
-            onConfigOptionChange={handleConfigOptionChange}
-            fallbackAgent={{
-              cliType: selectedConfig?.cliType,
-              agentType: selectedConfig?.agentType,
-            }}
-            agentRoles={{
-              items: composerAgentRoleItems,
-              selectedRoleId: activeAgentRole?.id ?? null,
-              onSelect: handleAgentRoleSelect,
-              onCreate: handleAgentRoleCreate,
-            }}
-          />
-        </div>
+      <MobileFooterRail>
+        <MobileSessionRunConfig
+          disabled={submitting}
+          agentSelection={selectedAgent}
+          allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
+          agentLocked={false}
+          onAgentConfigChange={setSelectedAgent}
+          modelOptions={modelOptions}
+          selectedModelId={selectedModelId}
+          onModelChange={setSelectedModelName}
+          modeOptions={modeOptions}
+          selectedModeId={selectedModeId}
+          onModeChange={setSelectedModeId}
+          configOptionSelectors={configOptionSelectors}
+          configOptionValues={configOptionValues}
+          onConfigOptionChange={handleConfigOptionChange}
+          fallbackAgent={{
+            cliType: selectedConfig?.cliType,
+            agentType: selectedConfig?.agentType,
+          }}
+          agentRoles={{
+            items: composerAgentRoleItems,
+            selectedRoleId: activeAgentRole?.id ?? null,
+            onSelect: handleAgentRoleSelect,
+            onCreate: handleAgentRoleCreate,
+          }}
+        />
         <SessionUsagePopover
           onRefreshQuota={refreshQuota}
           rateLimits={selectedRateLimits}
@@ -4588,41 +4673,8 @@ function WorkspaceChatLanding({
           showRateLimitWithoutContext
           xstyle={landingStyles.usageTrigger}
         />
-      </div>
+      </MobileFooterRail>
     </ErrorBoundary>
-  );
-  /* New-chat no longer needs a below-composer selector row — every run
-     knob lives inside MobileSessionRunConfig. */
-  const mobileSheetBelowComposerNode = null;
-
-  /* Mobile-sheet Type row: same ContextSwitch as desktop. Icon+label are a
-     tight centered pair inside each equal-width pill (not icon-left /
-     label-centered, which broke icon–label affinity). */
-  const mobileSheetContextSwitchNode = (
-    <ContextSwitch
-      value={contextType}
-      onChange={setContextType}
-      tone={tone}
-      localLabel={t('chat.contextSwitch.localProjects', 'Local')}
-      githubLabel={t('chat.contextSwitch.github', 'GitHub')}
-      chatLabel={t('chat.contextSwitch.chat', 'Chat')}
-      /* The mobile new-chat sheet is a compact launcher — empty Local/GitHub tabs must
-         NOT carry the desktop's
-         "Open project" / "Connect GitHub" affordance, whose onClick navigates
-         away (and was firing on hover/click/Enter). Omit onClick so the tab
-         stays plainly disabled with only an explanatory tooltip. */
-      localDisabled={hasLocalProjects ? undefined : { label: localProjectSelectorEmptyText }}
-      githubDisabled={
-        !hasGitHubRepos
-          ? {
-              label: t(
-                'chat.mobileHome.emptyGitHubProjects',
-                '当前 workspace 没有已授权的 GitHub 仓库'
-              ),
-            }
-          : undefined
-      }
-    />
   );
 
   // ── Hints ──
@@ -5204,7 +5256,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
+          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -5657,7 +5709,9 @@ function WorkspaceChatLanding({
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
       if (!item) return;
-      void markInboxItemRead({ itemId: item._id });
+      void markInboxItemRead({ itemId: item._id }).catch((error) =>
+        console.error('Failed to mark inbox item read', error)
+      );
       if (item.kind === 'sharing_review') {
         if (sharingReviewState.actionTarget === 'machines') {
           openSettings('machines');
@@ -5685,7 +5739,10 @@ function WorkspaceChatLanding({
   const handleMobileInboxItemDismiss = useCallback(
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
-      if (item) void dismissInboxItem({ itemId: item._id });
+      if (item)
+        void dismissInboxItem({ itemId: item._id }).catch((error) =>
+          console.error('Failed to dismiss inbox item', error)
+        );
     },
     [dismissInboxItem, inboxRows]
   );
@@ -5824,14 +5881,18 @@ function WorkspaceChatLanding({
      but our session-action helpers want the branded type. */
   const handleMobileChatTogglePin = useCallback(
     (chatId: string, nextPinned: boolean) => {
-      void setSessionPinned(chatId as SessionId, nextPinned);
+      void setSessionPinned(chatId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [setSessionPinned]
   );
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const handleMobileChatArchive = useCallback(
     (chatId: string) => {
-      void archiveSessionWithConfirmation(chatId as SessionId);
+      void archiveSessionWithConfirmation(chatId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [archiveSessionWithConfirmation]
   );
@@ -6113,7 +6174,7 @@ function WorkspaceChatLanding({
         }
         return {
           id: session.id,
-          title: session.title?.trim() || t('sessions.untitled', 'Untitled session'),
+          title: getSessionGroupTitle(session) || t('sessions.untitled', 'Untitled session'),
           kind,
           branchName: session.branchName?.trim() || null,
           prNumber: prInfo.number,
@@ -6411,7 +6472,9 @@ function WorkspaceChatLanding({
               type="button"
               {...stylex.props(landingStyles.sharingReviewPrimary)}
               onClick={() => {
-                void markInboxItemRead({ itemId: sharingReviewRow._id });
+                void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
+                  console.error('Failed to mark sharing review read', error)
+                );
                 openSettings(sharingReviewState.actionTarget ?? 'projects');
               }}
             >
@@ -6423,7 +6486,11 @@ function WorkspaceChatLanding({
           <button
             type="button"
             {...stylex.props(landingStyles.sharingReviewSecondary)}
-            onClick={() => void suppressSharingReview({ itemId: sharingReviewRow._id })}
+            onClick={() =>
+              void suppressSharingReview({ itemId: sharingReviewRow._id }).catch((error) =>
+                console.error('Failed to suppress sharing review', error)
+              )
+            }
           >
             {t('inbox.sharingReview.neverRemind', "Don't remind me again")}
           </button>
@@ -6432,7 +6499,11 @@ function WorkspaceChatLanding({
       <button
         type="button"
         {...stylex.props(landingStyles.sharingReviewDismiss)}
-        onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
+        onClick={() =>
+          void dismissInboxItem({ itemId: sharingReviewRow._id }).catch((error) =>
+            console.error('Failed to dismiss sharing review', error)
+          )
+        }
         aria-label={t('common.dismiss', 'Dismiss')}
       >
         <X {...stylex.props(landingStyles.glyph16)} aria-hidden="true" />
@@ -6484,7 +6555,11 @@ function WorkspaceChatLanding({
       />
     ) : null;
   const composerNoticeNode =
-    e2eeLocalAgentNode || sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
+    mcpSelection.defaultsFailed ||
+    e2eeLocalAgentNode ||
+    sharingReviewNoticeNode ||
+    sessionLimitNoticeNode ||
+    canMigratePi ? (
       <>
         <PiProviderMigrationCard
           count={migratablePiProviders.length}
@@ -6493,41 +6568,208 @@ function WorkspaceChatLanding({
           canMigrate={canMigratePi}
           onConfirm={() => void confirmPiMigration()}
         />
+        {mcpSelection.defaultsFailed ? (
+          <McpDefaultsRecovery
+            onRetry={mcpSelection.retryDefaults}
+            onSendWithoutMcp={() => void handleSubmit(true)}
+            disabled={submitting}
+          />
+        ) : null}
         {e2eeLocalAgentNode}
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>
     ) : null;
 
+  const mobileProjectChoices = getMobileProjectOptions({
+    folders: mobileProjectFolders,
+    repositories: mobileProjectRepos,
+    groups: mobileProjectGroups,
+    machineId: mobileProjectSelectedMachineId,
+    query: '',
+  });
+  const mobileInlineProjects = [
+    {
+      value: 'none',
+      label: t('chat.mobileNewChat.noProject', 'No project selected'),
+      icon: <CircleSlash2 {...stylex.props(landingStyles.glyph16)} />,
+      selection: { kind: 'none' } as UnifiedProjectSelection,
+    },
+    ...mobileProjectChoices.map((option) => ({
+      ...option,
+      searchText: `${option.label} ${option.description ?? ''}`,
+      disabled: Boolean(option.disabledReason),
+      icon:
+        option.selection.kind === 'group' ? (
+          <Folders {...stylex.props(landingStyles.glyph16)} />
+        ) : option.selection.kind === 'local' ? (
+          <FolderOpen {...stylex.props(landingStyles.glyph16)} />
+        ) : (
+          <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
+        ),
+    })),
+    {
+      value: '__add_local__',
+      icon: <FolderPlus {...stylex.props(landingStyles.glyph16)} />,
+      label: t('chat.contextSwitch.addProject', 'Add a folder'),
+      selection: null,
+    },
+    {
+      value: '__connect_github__',
+      icon: <ArrowUpRight {...stylex.props(landingStyles.glyph16)} />,
+      label: t('repos.connectMore', 'Connect more GitHub projects'),
+      selection: null,
+    },
+  ];
+  const mobileInlineProjectValue =
+    desktopProjectSelection.kind === 'group'
+      ? `group:${desktopProjectSelection.projectId}`
+      : desktopProjectSelection.kind === 'local'
+        ? `local:${desktopProjectSelection.machineId}:${desktopProjectSelection.localProjectId}`
+        : desktopProjectSelection.kind === 'github'
+          ? `github:${desktopProjectSelection.repoFullName}`
+          : 'none';
+  const mobileInlineValue = (icon: ReactNode, value: string) => (
+    <span {...stylex.props(landingStyles.inlineValue)}>
+      <span {...stylex.props(landingStyles.inlineIcon)}>{icon}</span>
+      <span {...stylex.props(landingStyles.inlineValueText)}>{value}</span>
+      <ChevronsUpDown {...stylex.props(landingStyles.inlineChevron)} aria-hidden="true" />
+    </span>
+  );
+  const mobileProjectIcon =
+    desktopProjectSelection.kind === 'group' ? (
+      <Folders {...stylex.props(landingStyles.glyph16)} />
+    ) : desktopProjectSelection.kind === 'local' ? (
+      <FolderOpen {...stylex.props(landingStyles.glyph16)} />
+    ) : desktopProjectSelection.kind === 'github' ? (
+      <GitHubOwnerAvatarIcon repoFullName={desktopProjectSelection.repoFullName} />
+    ) : (
+      <CircleSlash2 {...stylex.props(landingStyles.glyph16)} />
+    );
+  const mobileLocalGitProject =
+    contextType === 'local' && !!selectedLocalProject && activeLocalGitState?.git === true;
+  const mobileBranchVisible = mobileLocalGitProject || (contextType === 'github' && !!selectedRepo);
+  const mobileBranchLabel = resolveMobileNewChatBranchLabel({
+    contextType,
+    currentBranch: activeLocalGitState?.git ? activeLocalGitState.currentBranch : null,
+    selectedBranch: currentBranch,
+    useWorktree: effectiveWorkdirMode === 'worktree',
+    labels: {
+      local: t('chat.branchLocal'),
+      remote: t('chat.branchRemote'),
+      placeholder: t('chat.branchPlaceholder', 'Branch'),
+    },
+  });
   const mobileNewChatSheetContentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: t('chat.mobileNewChat.title', '新建对话'),
-      closeAriaLabel: t('common.close', 'Close'),
-      machineLabel: t('chat.mobileNewChat.machineLabel', '机器'),
-      contextTypeLabel: t('chat.mobileNewChat.contextTypeLabel', '类型'),
-      perTypeLabel:
-        contextType === 'github'
-          ? t('chat.mobileNewChat.repoLabel', '仓库')
-          : t('chat.mobileNewChat.projectLabel', '项目'),
-      branchLabel: t('chat.mobileNewChat.branchLabel', '分支'),
-      secondaryPerTypeLabel: t('chat.mobileNewChat.workdirModeLabel', '模式'),
+      backAriaLabel: t('common.back', 'Back'),
     },
+    targetNode: t('chat.mobileNewChat.title', 'New chat'),
     coordinator: MobileInlinePickerCoordinator,
-    machineNode: mobileSheetMachineNode,
-    contextTypeNode: mobileSheetContextSwitchNode,
-    /* Project / repo on its own row; branch on its own row below
-         (split per the user's design ask — chips no longer share a row
-         and so don't truncate on narrow phones). */
-    perTypeNode: contextType === 'chat' ? null : mobileSheetProjectNode,
-    branchNode: contextType === 'chat' ? null : mobileSheetBranchNode,
-    secondaryPerTypeNode: mobileSheetWorkdirModeNode,
+    summary: (
+      <div {...stylex.props(landingStyles.inlineSummary)}>
+        <MobileInlinePicker
+          id="new-machine"
+          value={mobileProjectSelectedMachineId}
+          options={mobileProjectMachines.map((machine) => ({
+            value: machine.id,
+            label: machine.name,
+            disabled: Boolean(machine.disabledReason),
+            description:
+              machine.disabledReason ??
+              (activeAgentRole && machine.id !== mobileProjectSelectedMachineId
+                ? t(
+                    'chat.mobileNewChat.switchClearsRole',
+                    'Changing machine clears the selected Role'
+                  )
+                : undefined),
+          }))}
+          onChange={(id) => {
+            setRestoreMobileProject(false);
+            if (id !== mobileProjectSelectedMachineId) {
+              if (activeAgentRole) handleAgentRoleSelect(null);
+              handleMachineChange(id);
+            }
+          }}
+          ariaLabel={t('chat.mobileNewChat.machineLabel', 'Machine')}
+          triggerXstyle={landingStyles.inlineTrigger}
+          expansionPanelXstyle={landingStyles.inlinePanel}
+          triggerContent={mobileInlineValue(
+            <Monitor {...stylex.props(landingStyles.glyph16)} />,
+            mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')
+          )}
+        />
+        <MobileInlinePicker
+          id="new-project"
+          preserveOptionOrder
+          value={mobileInlineProjectValue}
+          options={mobileInlineProjects}
+          onChange={(value) => {
+            setRestoreMobileProject(false);
+            const item = mobileInlineProjects.find((entry) => entry.value === value);
+            if (value === '__add_local__') handleAddLocalProject();
+            else if (value === '__connect_github__') handleConnectGitRepo();
+            else if (item?.selection) handleDesktopProjectChange(item.selection);
+          }}
+          ariaLabel={t('chat.projectPicker.title', 'Project')}
+          searchable
+          searchPlaceholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
+          triggerXstyle={landingStyles.inlineTrigger}
+          expansionPanelXstyle={landingStyles.inlinePanel}
+          triggerContent={mobileInlineValue(mobileProjectIcon, mobileSheetTargetLabel)}
+        />
+        {mobileBranchVisible ? (
+          <div {...stylex.props(landingStyles.inlineBranchRow)}>
+            {mobileLocalGitProject ? (
+              <div {...stylex.props(landingStyles.inlineWorktree)}>
+                <WorktreeCheckboxPill
+                  checked={effectiveWorkdirMode === 'worktree'}
+                  onCheckedChange={(checked) =>
+                    handleWorkdirModeChange(checked ? 'worktree' : 'local')
+                  }
+                  loading={worktreeLoading}
+                  disabled={!worktreeAvailable || worktreeLoading}
+                  disabledReason={worktreeUnavailableReason}
+                />
+              </div>
+            ) : null}
+            <div {...stylex.props(landingStyles.inlineBranchBody)}>
+              <MobileInlinePicker
+                id="new-branch"
+                value={currentBranch}
+                onChange={setCurrentBranch}
+                options={mobileSheetBranchOptions}
+                disabled={
+                  isBranchDisabled || (mobileLocalGitProject && effectiveWorkdirMode !== 'worktree')
+                }
+                loading={contextType === 'local' && (loadingLocalGitState || runtimeInitializing)}
+                searchable
+                ariaLabel={t('chat.branchPlaceholder', 'Branch')}
+                triggerXstyle={landingStyles.inlineBranchTrigger}
+                expansionPanelXstyle={landingStyles.inlinePanel}
+                triggerContent={
+                  <>
+                    <GitBranch {...stylex.props(landingStyles.inlineBranchGlyph)} />
+                    <span {...stylex.props(landingStyles.inlineBranchLabel)}>
+                      {mobileBranchLabel}
+                    </span>
+                    <ChevronsUpDown {...stylex.props(landingStyles.inlineBranchChevron)} />
+                  </>
+                }
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    ),
     composer: (
       <ErrorBoundary
         name="MobileNewChatSheetComposer"
         variant="section"
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
-        <MobileInlinePickerRowSlot>
+        <div {...stylex.props(landingStyles.inlineComposer)}>
           <input
             ref={attachmentInputRef}
             type="file"
@@ -6535,14 +6777,18 @@ function WorkspaceChatLanding({
             {...stylex.props(landingStyles.hidden)}
             onChange={handleAttachmentInputChange}
           />
-          {composerNoticeNode}
+          {composerNoticeNode ? (
+            <div {...stylex.props(landingStyles.inlineNotice)}>{composerNoticeNode}</div>
+          ) : null}
           <ChatComposer
             tone={tone}
             variant="session"
+            autoResize
+            xstyle={landingStyles.minHeightZero}
             mentionSource={mentionSource}
             availableCommands={availableCommands}
             skillAgent={skillAgent}
-            promptId="chat-prompt-mobile-sheet"
+            promptId={MOBILE_NEW_CHAT_PROMPT_ID}
             promptRef={promptTextareaRef}
             promptValue={submitting ? '' : prompt}
             onPromptChange={setPrompt}
@@ -6553,8 +6799,11 @@ function WorkspaceChatLanding({
             promptPlaceholder={promptPlaceholder}
             compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
-            promptRows={4}
+            preservePromptFocus={usesMobileKeyboardAction}
+            promptRows={2}
+            maxRows={11}
             promptEnterKeyHint={promptEnterKeyHint}
+            focusOnContainerClick
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
             onMentionRangesChange={handleMentionRangesChange}
@@ -6576,10 +6825,14 @@ function WorkspaceChatLanding({
                 type="button"
                 icon
                 variant="ghost"
+                size="medium"
+                shape="pill"
                 onClick={() => {
                   void handleSubmit();
                 }}
+                onMouseDown={(event) => event.preventDefault()}
                 disabled={submitDisabled}
+                data-testid="composer-send"
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */
@@ -6592,19 +6845,22 @@ function WorkspaceChatLanding({
                 )}
               </Button>
             }
-            autoResize
-            maxRows={6}
           />
-        </MobileInlinePickerRowSlot>
+        </div>
       </ErrorBoundary>
     ),
-    belowComposerNode: mobileSheetBelowComposerNode,
   };
 
   const mobileNewChatSheetNode = (
     <MobileNewChatSheet
       open={mobileNewChatOpen}
-      onOpenChange={setMobileNewChatOpen}
+      onOpenChange={(open) => {
+        setMobileNewChatOpen(open);
+        if (!open) {
+          setMobileCreatedSessionId(null);
+          setRestoreMobileProject(false);
+        }
+      }}
       {...mobileNewChatSheetContentProps}
     />
   );
@@ -6667,7 +6923,10 @@ function WorkspaceChatLanding({
              sheet reads the current project context from chat-landing
              state, so it lands preselected without needing extra
              props. */
-          onNewChat={() => setMobileNewChatOpen(true)}
+          onNewChat={() => {
+            setRestoreMobileProject(false);
+            setMobileNewChatOpen(true);
+          }}
           showArchived={mobileProjectShowArchived}
           onShowArchivedToggle={() => setMobileProjectShowArchived((prev) => !prev)}
           /* The Files tab shares the project header: it renders the
@@ -6696,25 +6955,27 @@ function WorkspaceChatLanding({
              cleanup scripts. */
           settingsTabContent={
             mobileProjectContext.kind === 'local' ? (
-              <>
-                <MobileProjectEditSection
-                  seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
-                  seedName={mobileProjectContext.name}
-                />
-                <MobileLocalProjectSettings
-                  machineId={mobileProjectContext.machineId}
-                  projectId={mobileProjectContext.projectId}
-                  onRemoved={handleMobileProjectBack}
-                />
-              </>
+              <MobileLocalProjectSettings
+                machineId={mobileProjectContext.machineId}
+                projectId={mobileProjectContext.projectId}
+                onRemoved={handleMobileProjectBack}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             ) : (
-              <>
-                <MobileProjectEditSection
-                  seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
-                  seedName={mobileProjectContext.name}
-                />
-                <MobileGithubProjectSettings repoFullName={mobileProjectContext.fullName} />
-              </>
+              <MobileGithubProjectSettings
+                repoFullName={mobileProjectContext.fullName}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             )
           }
         />
@@ -6938,9 +7199,9 @@ function WorkspaceChatLanding({
              home screen behind the overlay so the user can cancel and
              return to the project / chat list without navigation. */
           onNewChat={() => {
-            if (selectedMobileHomeTab === 'chat') {
-              setContextType('chat');
-            }
+            setRestoreMobileProject(
+              !prompt.trim() && imageItems.length === 0 && fileItems.length === 0
+            );
             setMobileNewChatOpen(true);
           }}
           showArchived={mobileHomeShowArchived}
@@ -6983,11 +7244,18 @@ function WorkspaceChatLanding({
             <MobileCreateWorkspaceSheet
               open={mobileCreateWorkspaceOpen}
               onOpenChange={setMobileCreateWorkspaceOpen}
-              onCreated={(createdSlug) => {
-                void navigate({
-                  to: '/$workspaceName/chat',
-                  params: { workspaceName: createdSlug },
-                });
+              onCreated={(createdSlug, createdWorkspaceId) => {
+                void navigate(
+                  createdWorkspaceId
+                    ? {
+                        to: '/workspace/e2ee/$workspaceId',
+                        params: { workspaceId: createdWorkspaceId },
+                      }
+                    : {
+                        to: '/$workspaceName/chat',
+                        params: { workspaceName: createdSlug },
+                      }
+                );
               }}
             />
           </>

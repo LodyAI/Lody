@@ -1,10 +1,14 @@
+import {
+  useLegacyWorkspaceAction,
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
-import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -32,7 +36,6 @@ import { invalidateGitHubTokensForWorkspace } from '@/lib/github-token';
 import { GitHubPersonalIdentitySettingsCard } from '@/components/settings/integrations-setting';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 // The theme tokens are imported by path, not by the `@/` alias: the StyleX
 // compiler links a theme file on its own and does not follow bundler aliases.
@@ -41,6 +44,9 @@ import { themeSpace } from '../../style/theme-scale.stylex';
 import { mobileSurface } from './surface';
 
 const styles = stylex.create({
+  foldPage: { height: '100%', minHeight: 0, paddingTop: 0, paddingBottom: 0 },
+  unfoldPage: { paddingBottom: '24px', paddingTop: '4px' },
+
   spinnerInk: { color: 'hsl(var(--muted-foreground) / 1)' },
   searchInput: {
     borderRadius: 'var(--radius-md)',
@@ -136,6 +142,8 @@ const styles = stylex.create({
   /** The arrow inside a button. */
   buttonArrow: { height: themeSpace[3.5], width: themeSpace[3.5] },
 });
+import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
+import { useMobileSettingsFold } from './mobile-settings-fold-context';
 
 export function MobileIntegrationsSettings() {
   // Hidden from the settings list without 'githubIntegration' (open-source
@@ -149,6 +157,7 @@ export function MobileIntegrationsSettings() {
 
 function MobileCloudIntegrationsSettings() {
   const { t } = useTranslation();
+  const fold = useMobileSettingsFold();
   const getConvexErrorMessage = useConvexErrorMessage();
   const {
     workspaceId: currentWorkspaceId,
@@ -173,16 +182,18 @@ function MobileCloudIntegrationsSettings() {
   const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
   const [repoSearch, setRepoSearch] = useState('');
-  const personalOperationSettings = useCloudQuery(
+  const personalOperationSettings = useLegacyWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
-  const createGitHubInstallState = useCloudAction(cloudOperations.github.createGitHubInstallState);
-  const setRepoEnabled = useCloudMutation(cloudOperations.github.setRepoEnabled);
-  const setPersonalOperationPreference = useCloudMutation(
+  const createGitHubInstallState = useLegacyWorkspaceAction(
+    cloudOperations.github.createGitHubInstallState
+  );
+  const setRepoEnabled = useLegacyWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+  const setPersonalOperationPreference = useLegacyWorkspaceMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(
+  const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
@@ -417,211 +428,226 @@ function MobileCloudIntegrationsSettings() {
   ]);
 
   return (
-    <div id="github" {...stylex.props(styles.page)}>
-      {/* GitHub App section: identity card + connect action. The
+    <div id="github" {...stylex.props(styles.page, fold ? styles.foldPage : styles.unfoldPage)}>
+      <MobileSettingsFoldPanels
+        upper={
+          <>
+            {/* GitHub App section: identity card + connect action. The
            "Connect" Button is a row-level child like the iOS Settings
            "Connect Account" affordance, and we surface the admin-only
            hint as the row's helper text when the user can't manage. */}
-      <MobileSettingsSection title={t('settings.tabs.github')}>
-        <MobileSettingsRowGroup>
-          <MobileSettingsRow
-            label={
-              <div {...stylex.props(mobileSurface.identity)}>
-                <div {...stylex.props(mobileSurface.identityTile, styles.identityTileStrong)}>
-                  <Github {...stylex.props(mobileSurface.identityGlyph)} />
-                </div>
-                <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
-                  GitHub App
-                </span>
-              </div>
-            }
-            helper={!canManage ? t('settings.integrations.github.adminOnlyHint') : undefined}
-          >
-            {canManage ? (
-              <Button
-                size="small"
-                onClick={() => {
-                  void handleConnectGitHub();
-                }}
-                disabled={showGitHubConnectSpinner || !workspaceAuthReady}
-              >
-                {showGitHubConnectSpinner ? (
-                  <Spinner diameter="calc(var(--spacing) * 3.5)" />
-                ) : null}
-                {t('settings.integrations.github.connect')}
-                {!showGitHubConnectSpinner ? (
-                  <ArrowUpRight {...stylex.props(styles.buttonArrow)} />
-                ) : null}
-              </Button>
-            ) : undefined}
-          </MobileSettingsRow>
-        </MobileSettingsRowGroup>
-      </MobileSettingsSection>
+            <MobileSettingsSection title={t('settings.tabs.github')}>
+              <MobileSettingsRowGroup>
+                <MobileSettingsRow
+                  label={
+                    <div {...stylex.props(mobileSurface.identity)}>
+                      <div {...stylex.props(mobileSurface.identityTile, styles.identityTileStrong)}>
+                        <Github {...stylex.props(mobileSurface.identityGlyph)} />
+                      </div>
+                      <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
+                        GitHub App
+                      </span>
+                    </div>
+                  }
+                  helper={!canManage ? t('settings.integrations.github.adminOnlyHint') : undefined}
+                >
+                  {canManage ? (
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        void handleConnectGitHub();
+                      }}
+                      disabled={showGitHubConnectSpinner || !workspaceAuthReady}
+                    >
+                      {showGitHubConnectSpinner ? (
+                        <Spinner diameter="calc(var(--spacing) * 3.5)" />
+                      ) : null}
+                      {t('settings.integrations.github.connect')}
+                      {!showGitHubConnectSpinner ? (
+                        <ArrowUpRight {...stylex.props(styles.buttonArrow)} />
+                      ) : null}
+                    </Button>
+                  ) : undefined}
+                </MobileSettingsRow>
+              </MobileSettingsRowGroup>
+            </MobileSettingsSection>
 
-      {/* Personal identity. The toggle row owns the on/off state and
+            {/* Personal identity. The toggle row owns the on/off state and
            the row's helper text mirrors the desktop card's lead line.
            When enabled, the authorization status panel is appended
            below the row inside the same card so the card visually
            groups "the preference + its consequence". */}
-      <MobileSettingsSection
-        title={t('settings.integrations.github.personalIdentitySection', 'Personal Identity')}
-      >
-        <MobileSettingsRowGroup>
-          <MobileSettingsRow
-            label={t(
-              'settings.integrations.github.personalIdentityRowLabel',
-              'Act as me on GitHub'
-            )}
-            helper={t(
-              'settings.integrations.github.personalIdentityDescription',
-              'Act as you for PRs, comments, and merges.'
-            )}
-          >
-            {updatingPersonalPreference ? (
-              <Spinner
-                diameter="calc(var(--spacing) * 4)"
-                className={stylex.props(styles.spinnerInk).className}
-              />
-            ) : (
-              <Switch
-                checked={personalIdentityEnabled}
-                onCheckedChange={(checked) => {
-                  void handleTogglePersonalIdentity(checked);
-                }}
-                disabled={
-                  !workspaceAuthReady ||
-                  personalOperationSettings === undefined ||
-                  (!canAuthorizePersonalGitHub &&
-                    personalAuthorizationState !== 'authorized' &&
-                    !personalIdentityEnabled)
-                }
-              />
-            )}
-          </MobileSettingsRow>
-        </MobileSettingsRowGroup>
-        {personalIdentityEnabled ? (
-          <div {...stylex.props(styles.identityPanel)}>
-            <GitHubPersonalIdentitySettingsCard
-              enabled={personalIdentityEnabled}
-              authorizationState={personalAuthorizationState}
-              githubAccountId={personalGithubAccountId}
-              profile={personalGithubProfile}
-              settingsLoading={personalOperationSettings === undefined}
-              updating={updatingPersonalPreference}
-              authorizing={authorizingPersonalGitHub}
-              workspaceReady={workspaceAuthReady}
-              canAuthorize={canAuthorizePersonalGitHub}
-              onToggle={(checked) => {
-                void handleTogglePersonalIdentity(checked);
-              }}
-              onAuthorize={() => {
-                void handleAuthorizePersonalGitHub();
-              }}
-            />
-          </div>
-        ) : null}
-      </MobileSettingsSection>
-
-      {/* Authorized repositories — the heading carries the enabled/
+            <MobileSettingsSection
+              title={t('settings.integrations.github.personalIdentitySection', 'Personal Identity')}
+            >
+              <MobileSettingsRowGroup>
+                <MobileSettingsRow
+                  label={t(
+                    'settings.integrations.github.personalIdentityRowLabel',
+                    'Act as me on GitHub'
+                  )}
+                  helper={t(
+                    'settings.integrations.github.personalIdentityDescription',
+                    'Act as you for PRs, comments, and merges.'
+                  )}
+                >
+                  {updatingPersonalPreference ? (
+                    <Spinner
+                      diameter="calc(var(--spacing) * 4)"
+                      className={stylex.props(styles.spinnerInk).className}
+                    />
+                  ) : (
+                    <Switch
+                      checked={personalIdentityEnabled}
+                      onCheckedChange={(checked) => {
+                        void handleTogglePersonalIdentity(checked);
+                      }}
+                      disabled={
+                        !workspaceAuthReady ||
+                        personalOperationSettings === undefined ||
+                        (!canAuthorizePersonalGitHub &&
+                          personalAuthorizationState !== 'authorized' &&
+                          !personalIdentityEnabled)
+                      }
+                    />
+                  )}
+                </MobileSettingsRow>
+              </MobileSettingsRowGroup>
+              {personalIdentityEnabled ? (
+                <div {...stylex.props(styles.identityPanel)}>
+                  <GitHubPersonalIdentitySettingsCard
+                    enabled={personalIdentityEnabled}
+                    authorizationState={personalAuthorizationState}
+                    githubAccountId={personalGithubAccountId}
+                    profile={personalGithubProfile}
+                    settingsLoading={personalOperationSettings === undefined}
+                    updating={updatingPersonalPreference}
+                    authorizing={authorizingPersonalGitHub}
+                    workspaceReady={workspaceAuthReady}
+                    canAuthorize={canAuthorizePersonalGitHub}
+                    onToggle={(checked) => {
+                      void handleTogglePersonalIdentity(checked);
+                    }}
+                    onAuthorize={() => {
+                      void handleAuthorizePersonalGitHub();
+                    }}
+                  />
+                </div>
+              ) : null}
+            </MobileSettingsSection>
+          </>
+        }
+        lower={
+          <>
+            {/* Authorized repositories — the heading carries the enabled/
            total count chip (analogous to the desktop badge). The search
            input + repo rows live inside the same rounded card so the
            list reads as one continuous group. We drop the desktop
            ScrollArea: on mobile the outer settings layout already owns
            a scroll region, and a nested scroller would trap gestures. */}
-      <MobileSettingsSection
-        title={t('settings.integrations.github.authorizedReposTitle', 'Authorized Repositories')}
-        actions={
-          repos.length > 0 ? (
-            <Badge>
-              {searchQuery && filteredRepos.length !== repos.length
-                ? `${filteredRepos.length} / ${repos.length}`
-                : `${enabledCount} / ${repos.length}`}{' '}
-              {t('settings.integrations.github.repoBadge')}
-            </Badge>
-          ) : undefined
-        }
-      >
-        {repos.length > 5 ? (
-          <div {...stylex.props(styles.searchBar)}>
-            <div {...stylex.props(styles.searchField)}>
-              <Search {...stylex.props(styles.searchIcon)} />
-              <Input
-                type="search"
-                value={repoSearch}
-                onChange={(event) => setRepoSearch(event.target.value)}
-                placeholder={t('repos.search')}
-                xstyle={styles.searchInput}
-              />
-            </div>
-          </div>
-        ) : null}
-        {workspaceReposLoading ? (
-          <div {...stylex.props(styles.notice)}>
-            <Spinner diameter="calc(var(--spacing) * 4)" />
-            {t('settings.integrations.github.loading')}
-          </div>
-        ) : repos.length === 0 ? (
-          <div {...stylex.props(styles.emptyNotice)}>
-            {t(
-              'settings.integrations.github.noAuthorizedRepos',
-              'No repositories authorized yet. Install the GitHub App to get started.'
-            )}
-          </div>
-        ) : filteredRepos.length === 0 ? (
-          <div {...stylex.props(styles.emptyNotice)}>
-            {t('settings.integrations.github.noRepos')}
-          </div>
-        ) : (
-          <MobileSettingsRowGroup>
-            {filteredRepos.map((repo) => (
-              <MobileSettingsRow
-                key={repo.repoFullName}
-                label={
-                  <div
-                    {...stylex.props(
-                      styles.repoIdentity,
-                      (!canManage || !workspaceAuthReady) && styles.repoIdentityDisabled
-                    )}
-                  >
-                    <Book {...stylex.props(styles.repoIcon)} />
-                    <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
-                      {repo.repoFullName}
-                    </span>
-                    {repo.private && <Badge>{t('settings.integrations.github.private')}</Badge>}
+            <MobileSettingsSection
+              title={t(
+                'settings.integrations.github.authorizedReposTitle',
+                'Authorized Repositories'
+              )}
+              actions={
+                repos.length > 0 ? (
+                  <Badge>
+                    {searchQuery && filteredRepos.length !== repos.length
+                      ? `${filteredRepos.length} / ${repos.length}`
+                      : `${enabledCount} / ${repos.length}`}{' '}
+                    {t('settings.integrations.github.repoBadge')}
+                  </Badge>
+                ) : undefined
+              }
+            >
+              {repos.length > 5 ? (
+                <div {...stylex.props(styles.searchBar)}>
+                  <div {...stylex.props(styles.searchField)}>
+                    <Search {...stylex.props(styles.searchIcon)} />
+                    <Input
+                      type="search"
+                      value={repoSearch}
+                      onChange={(event) => setRepoSearch(event.target.value)}
+                      placeholder={t('repos.search')}
+                      xstyle={styles.searchInput}
+                    />
                   </div>
-                }
-              >
-                <Switch
-                  checked={repo.enabled}
-                  onCheckedChange={(checked) => {
-                    void handleToggleRepo(repo.repoFullName, checked);
-                  }}
-                  disabled={!canManage || !workspaceAuthReady}
-                />
-              </MobileSettingsRow>
-            ))}
-          </MobileSettingsRowGroup>
-        )}
-      </MobileSettingsSection>
+                </div>
+              ) : null}
+              {workspaceReposLoading ? (
+                <div {...stylex.props(styles.notice)}>
+                  <Spinner diameter="calc(var(--spacing) * 4)" />
+                  {t('settings.integrations.github.loading')}
+                </div>
+              ) : repos.length === 0 ? (
+                <div {...stylex.props(styles.emptyNotice)}>
+                  {t(
+                    'settings.integrations.github.noAuthorizedRepos',
+                    'No repositories authorized yet. Install the GitHub App to get started.'
+                  )}
+                </div>
+              ) : filteredRepos.length === 0 ? (
+                <div {...stylex.props(styles.emptyNotice)}>
+                  {t('settings.integrations.github.noRepos')}
+                </div>
+              ) : (
+                <MobileSettingsRowGroup>
+                  {filteredRepos.map((repo) => (
+                    <MobileSettingsRow
+                      key={repo.repoFullName}
 
-      <p {...stylex.props(styles.hint)}>
-        {t('settings.integrations.github.missingReposHint')}{' '}
-        <a
-          href="https://github.com/settings/installations"
-          target="_blank"
-          rel="noreferrer"
-          {...stylex.props(styles.hintLink)}
-          onClick={(event) => {
-            if (isElectronRenderer()) {
-              event.preventDefault();
-              void openExternalUrl('https://github.com/settings/installations');
-            }
-          }}
-        >
-          {t('settings.integrations.github.missingReposHintAction')}
-          <ArrowUpRight {...stylex.props(styles.hintIcon)} />
-        </a>
-      </p>
+                      label={
+                        <div
+                          {...stylex.props(
+                            styles.repoIdentity,
+                            (!canManage || !workspaceAuthReady) && styles.repoIdentityDisabled
+                          )}
+                        >
+                          <Book {...stylex.props(styles.repoIcon)} />
+                          <span {...stylex.props(mobileSurface.identityLabel, styles.identityName)}>
+                            {repo.repoFullName}
+                          </span>
+                          {repo.private && (
+                            <Badge>{t('settings.integrations.github.private')}</Badge>
+                          )}
+                        </div>
+                      }
+                    >
+                      <Switch
+                        checked={repo.enabled}
+                        onCheckedChange={(checked) => {
+                          void handleToggleRepo(repo.repoFullName, checked);
+                        }}
+                        disabled={!canManage || !workspaceAuthReady}
+                      />
+                    </MobileSettingsRow>
+                  ))}
+                </MobileSettingsRowGroup>
+              )}
+            </MobileSettingsSection>
+
+            <p {...stylex.props(styles.hint)}>
+              {t('settings.integrations.github.missingReposHint')}{' '}
+              <a
+                href="https://github.com/settings/installations"
+                target="_blank"
+                rel="noreferrer"
+                {...stylex.props(styles.hintLink)}
+                onClick={(event) => {
+                  if (isElectronRenderer()) {
+                    event.preventDefault();
+                    void openExternalUrl('https://github.com/settings/installations');
+                  }
+                }}
+              >
+                {t('settings.integrations.github.missingReposHintAction')}
+                <ArrowUpRight {...stylex.props(styles.hintIcon)} />
+              </a>
+            </p>
+          </>
+        }
+      />
     </div>
   );
 }

@@ -160,7 +160,7 @@ const styles = stylex.create({
     overflowY: 'auto',
     overscrollBehavior: 'contain',
   },
-  listDocked: { maxHeight: 'none', overflowY: 'visible' },
+  listDocked: { maxHeight: 'none', overflowX: 'clip', overflowY: 'visible' },
   level: { display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 },
   levelDeeper: {
     animationName: { default: enterDeeper, [REDUCED_MOTION]: 'none' },
@@ -250,6 +250,7 @@ const styles = stylex.create({
     fontWeight: 400,
     whiteSpace: 'normal',
   },
+  noteWarning: { color: colors.warning },
   /** Trailing metadata — `#3312`, a key, a scope — in the caption step. */
   trailing: {
     flexShrink: 0,
@@ -652,7 +653,14 @@ function CandidateRow({
           {candidate.hint ? <span {...stylex.props(styles.hint)}>{candidate.hint}</span> : null}
         </span>
         {candidate.subtitle ? (
-          <span {...stylex.props(styles.note)}>{candidate.subtitle}</span>
+          <span
+            {...stylex.props(
+              styles.note,
+              candidate.subtitleTone === 'warning' && styles.noteWarning
+            )}
+          >
+            {candidate.subtitle}
+          </span>
         ) : null}
         {candidate.disabledReason ? (
           <span {...stylex.props(styles.note)}>{candidate.disabledReason}</span>
@@ -747,6 +755,7 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
           agentConfig={detail.agentRole.agentConfig}
           machine={detail.agentRole.machine}
           machineLabel={detail.agentRole.machineLabel}
+          availability={detail.agentRole.availability}
           xstyle={styles.roleDetail}
         />
       </div>
@@ -1113,6 +1122,7 @@ export function MentionTwoLevelMenu({
   menuSide = 'bottom',
   anchor = 'caret',
   mobileDocked = true,
+  mobilePanelPlacement = 'above-composer',
 }: {
   categories: MentionCategory[];
   surface?: MentionSurface;
@@ -1125,6 +1135,8 @@ export function MentionTwoLevelMenu({
    *  for an editor mid-conversation where "dock above the composer" has no
    *  bottom-anchored composer to sit over. */
   mobileDocked?: boolean;
+  /** Full-height composers dock the mobile panel above their footer. */
+  mobilePanelPlacement?: 'above-composer' | 'bottom';
 }) {
   const context = useMentionContext('MentionTwoLevelMenu');
   const isMobileViewport = useIsMentionMobile();
@@ -1248,6 +1260,7 @@ export function MentionTwoLevelMenu({
       dockedOnMobile={mobileDocked}
       fitViewport={anchor === 'caret'}
       style={anchor === 'caret' ? { overflowY: 'auto', overscrollBehavior: 'contain' } : undefined}
+      mobilePanelPlacement={mobilePanelPlacement}
       className={stylex.props(width.menu, detail && width.menuWithDetail).className}
     >
       <MentionTwoLevelMenuBody

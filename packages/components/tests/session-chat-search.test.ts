@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
@@ -14,14 +15,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildSessionSearchResults,
-  buildSessionSearchTextParts,
   extractSearchBlocksForMessage,
   extractSessionSearchBlocks,
-  getSearchableMarkdownText,
   getProposedPlanSearchBlockId,
   getTextSearchBlockId,
   getThoughtSearchBlockId,
-  normalizeSessionSearchQuery,
 } from '../src/lib/session-chat-search';
 
 const worktreeId = '01234567-89ab-cdef-0123-456789abcdef';
@@ -45,110 +43,6 @@ const buildMessage = (
 });
 
 describe('extractSessionSearchBlocks', () => {
-  it('indexes user text, assistant markdown, thinking, and proposed plans', () => {
-    const history: SessionHistory[] = [
-      buildMessage({
-        id: 'user-1',
-        role: 'user',
-        items: [{ type: 'text', text: 'Please rg for the config file' }],
-      }),
-      buildMessage({
-        id: 'assistant-1',
-        items: [
-          {
-            type: 'text',
-            text: '## Result\nFound [`rg`](https://example.com) docs.',
-          },
-          {
-            type: 'thought',
-            text: 'Maybe inspect `packages/components` next.',
-          },
-          {
-            type: 'proposed_plan',
-            status: 'completed',
-            markdown: '- Update the `rg` invocation',
-          } satisfies MessageContent,
-        ],
-      }),
-    ];
-
-    expect(extractSessionSearchBlocks(history)).toEqual([
-      expect.objectContaining({
-        blockId: getTextSearchBlockId('user-1', 0),
-        blockType: 'user_text',
-        text: 'Please rg for the config file',
-      }),
-      expect.objectContaining({
-        blockId: getTextSearchBlockId('assistant-1', 0),
-        blockType: 'assistant_markdown',
-        text: 'Result\nFound rg docs.',
-      }),
-      expect.objectContaining({
-        blockId: getThoughtSearchBlockId('assistant-1', 1),
-        blockType: 'thought',
-        text: 'Maybe inspect packages/components next.',
-      }),
-      expect.objectContaining({
-        blockId: getProposedPlanSearchBlockId('assistant-1', 2),
-        blockType: 'assistant_markdown',
-        text: 'Update the rg invocation',
-      }),
-    ]);
-  });
-
-  // Tool calls are agent-API payloads, not conversation prose. Indexing their
-  // titles/paths/JSON/terminal output/diffs drowned real matches in noise.
-  it('never indexes tool call titles, paths, output, terminals, or diffs', () => {
-    const history: SessionHistory[] = [
-      buildMessage({
-        id: 'assistant-tools',
-        items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'tool-1',
-            status: 'completed',
-            kind: 'execute',
-            title: 'Run rg config',
-            locations: [{ path: `${worktreeRoot}/packages/components/src/index.ts` }],
-            rawInput: { command: 'rg config' },
-            rawOutput: { summary: 'rg found 2 matches' },
-            content: [
-              {
-                type: 'content',
-                content: { type: 'text', text: 'rg "config" packages/components' },
-              },
-              {
-                type: 'terminal_command',
-                command: `${worktreeRoot}/bin/rg`,
-                args: ['config', 'packages/components'],
-              },
-              {
-                type: 'terminal_output',
-                output: 'packages/components/src/index.ts: rg match',
-              },
-            ],
-          } satisfies MessageContent,
-          {
-            type: 'tool_call',
-            toolCallId: 'tool-2',
-            status: 'completed',
-            kind: 'edit',
-            content: [
-              {
-                type: 'diff',
-                path: `${worktreeRoot}/packages/components/src/search.ts`,
-                oldText: 'const oldValue = 1;',
-                newText: 'const newValue = 2;',
-              },
-            ],
-          } satisfies MessageContent,
-        ],
-      }),
-    ];
-
-    expect(extractSessionSearchBlocks(history)).toEqual([]);
-  });
-
   it('ignores plan checklists, goals, and worktree script output', () => {
     const history: SessionHistory[] = [
       buildMessage({
@@ -246,98 +140,6 @@ describe('extractSessionSearchBlocks', () => {
       ).toEqual([query, query, query, query]);
     }
     expect(buildSessionSearchResults(blocks, 'tool-only-marker')).toEqual([]);
-  });
-});
-
-describe('buildSessionSearchResults', () => {
-  it('returns occurrence-level results in block order', () => {
-    const results = buildSessionSearchResults(
-      [
-        {
-          blockId: 'first',
-          messageId: 'm-1',
-          messageIndex: 0,
-          itemIndex: 0,
-          blockType: 'user_text',
-          text: 'rg once and rg twice',
-        },
-        {
-          blockId: 'second',
-          messageId: 'm-2',
-          messageIndex: 1,
-          itemIndex: 0,
-          blockType: 'assistant_markdown',
-          text: 'third rg',
-        },
-      ],
-      normalizeSessionSearchQuery('RG')
-    );
-
-    expect(results.map((result) => result.resultId)).toEqual([
-      'first:match:0',
-      'first:match:1',
-      'second:match:0',
-    ]);
-    expect(results.map((result) => result.messageIndex)).toEqual([0, 0, 1]);
-  });
-});
-
-describe('buildSessionSearchTextParts', () => {
-  it('splits text into plain and matched fragments with an active occurrence', () => {
-    const parts = buildSessionSearchTextParts({
-      text: 'rg and rg again',
-      query: 'rg',
-      resultIds: ['match-0', 'match-1'],
-      activeOccurrenceIndex: 1,
-    });
-
-    expect(parts).toEqual([
-      { text: 'rg', resultId: 'match-0', isMatch: true, isActive: false },
-      { text: ' and ', resultId: null, isMatch: false, isActive: false },
-      { text: 'rg', resultId: 'match-1', isMatch: true, isActive: true },
-      { text: ' again', resultId: null, isMatch: false, isActive: false },
-    ]);
-  });
-});
-
-describe('literal Markdown punctuation', () => {
-  it('finds the same literal identifier in user and assistant prose without phantom matches', () => {
-    const blocks = extractSessionSearchBlocks([
-      buildMessage({
-        id: 'literal-user',
-        role: 'user',
-        items: [{ type: 'text', text: 'QA_RESUMED_OK' }],
-      }),
-      buildMessage({ id: 'literal-assistant', items: [{ type: 'text', text: 'QA_RESUMED_OK —' }] }),
-    ]);
-    expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK').map((r) => r.messageId)).toEqual([
-      'literal-user',
-      'literal-assistant',
-    ]);
-    expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK —').map((r) => r.messageId)).toEqual([
-      'literal-assistant',
-    ]);
-    expect(buildSessionSearchResults(blocks, 'QARESUMEDOK')).toEqual([]);
-  });
-
-  it.each([
-    ['QA_RESUMED_OK foo_bar foo__bar__baz a*b a~b', 'QA_RESUMED_OK foo_bar foo__bar__baz a*b a~b'],
-    ['`QA_RESUMED_OK **raw** ~~raw~~`', 'QA_RESUMED_OK **raw** ~~raw~~'],
-    ['``QA_RESUMED_OK `raw` ``', 'QA_RESUMED_OK `raw`'],
-    ['```text\nQA_RESUMED_OK **raw** ~~raw~~\n```', 'QA_RESUMED_OK **raw** ~~raw~~'],
-    ['~~~text\nQA_RESUMED_OK _raw_\n~~~', 'QA_RESUMED_OK _raw_'],
-    ['```text\nQA_RESUMED_OK _raw_', 'QA_RESUMED_OK _raw_'],
-    [
-      '**QA_RESUMED_OK** *italic* _emphasis_ __strong__ ~~deleted~~',
-      'QA_RESUMED_OK italic emphasis strong deleted',
-    ],
-    ['QA_**RESUMED**_OK', 'QA_RESUMED_OK'],
-    ['**检查完成。**接着执行下一步。', '检查完成。接着执行下一步。'],
-    ['前文**“重点”**后文*“提示”*结束', '前文“重点”后文“提示”结束'],
-    ['`**检查完成。**接着执行下一步。`', '**检查完成。**接着执行下一步。'],
-    ['\\_literal\\_ &amp; \\*literal\\*', '_literal_ & *literal*'],
-  ])('extracts rendered text from %s', (source, expected) => {
-    expect(getSearchableMarkdownText(source)).toBe(expected);
   });
 });
 

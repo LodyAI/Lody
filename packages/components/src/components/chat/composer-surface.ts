@@ -33,3 +33,37 @@ export const composerSurfaceStyles = stylex.create({
     transitionTimingFunction: ease.standard,
   },
 });
+
+const styles = stylex.create({
+  shell: {
+    position: 'relative',
+    flexShrink: 0,
+    paddingTop: 0,
+    paddingBottom:
+      'calc(0.5rem + max(0px, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)) - var(--native-keyboard-height, 0px)))',
+    backgroundColor: colors.background,
+    transitionProperty: 'margin-bottom, padding-bottom',
+    transitionDuration: '250ms',
+    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
+  },
+  shellKeyboardLift: { marginBottom: 'var(--native-keyboard-height, 0px)' },
+  shellEdgeBackLayer: { zIndex: 40 },
+});
+
+/** Both new-chat and in-session composers own exactly one keyboard/safe-area inset. */
+export function getSessionChatInputAreaShellStyles({
+  protectFromEdgeBackZone = false,
+  liftAboveKeyboard = false,
+}: { protectFromEdgeBackZone?: boolean; liftAboveKeyboard?: boolean } = {}): stylex.StyleXStyles {
+  return [
+    styles.shell,
+    liftAboveKeyboard && styles.shellKeyboardLift,
+    protectFromEdgeBackZone && styles.shellEdgeBackLayer,
+  ];
+}
+
+export function getSessionChatInputAreaShellClassName(
+  options: { protectFromEdgeBackZone?: boolean; liftAboveKeyboard?: boolean } = {}
+): string {
+  return stylex.props(getSessionChatInputAreaShellStyles(options)).className ?? '';
+}

@@ -236,7 +236,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                       {t('sessions.usage.extraBalance', 'Extra usage balance')}
                     </span>
                     <span {...stylex.props(styles.mono)}>
-                      {formatMoney(wallet.balanceCents, wallet.currency, i18n.language)}
+                      {formatMoney(wallet.balanceCents, wallet.currency, intlLocale)}
                     </span>
                   </div>
                   <div {...stylex.props(styles.walletRow, styles.stack1)}>
@@ -244,12 +244,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                       {t('sessions.usage.monthlySpend', 'Monthly spend')}
                     </span>
                     <span {...stylex.props(styles.mono)}>
-                      {formatMoney(wallet.monthlyUsedCents, wallet.currency, i18n.language)}
+                      {formatMoney(wallet.monthlyUsedCents, wallet.currency, intlLocale)}
                       {wallet.monthlyChargeLimitEnabled
                         ? ` / ${formatMoney(
                             wallet.monthlyChargeLimitCents,
                             wallet.currency,
-                            i18n.language
+                            intlLocale
                           )}`
                         : ''}
                     </span>

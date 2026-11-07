@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act } from 'react';
-import { createPortal } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { createStore, Provider } from 'jotai';
-import type { ScheduleRegistryRow } from '@lody/shared';
+
+import type { ScheduleRegistryRow, ScheduleRuntimeRow } from '@lody/shared';
 import en from '../../../locales/en.json';
-import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
-import { navigationSidebarVisibleAtom } from '../src/atoms/layout-state';
+
 import { ScheduleListView } from '../src/components/schedules/schedule-view';
 
 const layout = vi.hoisted(() => ({ mobile: false, macElectron: false }));
@@ -74,7 +73,8 @@ describe('schedule list rows', () => {
     onToggle: vi.fn(),
     onRun: vi.fn(),
     onDelete: vi.fn(),
-    onColumnWidthsChange: vi.fn(),
+    onClearEnded: vi.fn(),
+    onOpenSession: vi.fn(),
   };
   beforeAll(async () => {
     if (!i18next.isInitialized)
@@ -112,6 +112,59 @@ describe('schedule list rows', () => {
     )!;
   const buttonIn = (row: Element, label: string) =>
     row.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+  it.each([false, true])(
+    'keeps saved rows visible with a retry action (retrying=%s)',
+    (retrying) => {
+      const retry = vi.fn();
+      act(() =>
+        root.render(
+          <ScheduleListView
+            rows={[timed]}
+            runtimes={[]}
+            ready
+            error="REGISTRY_UNAVAILABLE"
+            retrying={retrying}
+            onRetry={retry}
+            {...handlers}
+          />
+        )
+      );
+      expect(rowOf('Nightly review')).toBeTruthy();
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'Showing saved tasks'
+      );
+      const button = [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === (retrying ? 'Retrying…' : 'Retry')
+      )!;
+      expect(button.disabled).toBe(retrying);
+      act(() => button.click());
+      expect(retry).toHaveBeenCalledTimes(retrying ? 0 : 1);
+    }
+  );
+
+  it('offers retry instead of claiming an unavailable registry is empty', () => {
+    const retry = vi.fn();
+    act(() =>
+      root.render(
+        <ScheduleListView
+          rows={[]}
+          runtimes={[]}
+          ready
+          error="REGISTRY_UNAVAILABLE"
+          onRetry={retry}
+          {...handlers}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Schedules could not be loaded.');
+    expect(container.textContent).not.toContain('No schedules yet');
+    const button = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Retry'
+    )!;
+    act(() => button.click());
+    expect(retry).toHaveBeenCalledOnce();
+  });
 
   it.each([
     ['America/Los_Angeles', '2:21 AM'],
@@ -158,221 +211,141 @@ describe('schedule list rows', () => {
     expect(handlers.onToggle).toHaveBeenCalledWith(timed);
   });
 
-  it('offers run, pause and delete from the row’s context menu', () => {
-    act(() => {
-      rowOf('Nightly review').dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })
-      );
-    });
-    const items = [...document.querySelectorAll('[role="menuitem"]')];
-    expect(items.map((item) => item.textContent)).toEqual([
-      en['schedules.open'],
-      en['schedules.runNow'],
-      en['schedules.pause'],
-      en['schedules.delete'],
-    ]);
-    act(() => (items[3] as HTMLElement).click());
-    expect(handlers.onDelete).toHaveBeenCalledWith(timed);
+  const runtime = (row: ScheduleRegistryRow, extra: Partial<ScheduleRuntimeRow> = {}) => ({
+    scheduleId: row.scheduleId,
+    machineId: row.machineId,
+    activationId: row.activationId,
+    observedDefinitionFingerprint: row.definitionFingerprint,
+    updatedAt: 0,
+    ...extra,
   });
+  const message = (scheduleId: string, title: string): ScheduleRegistryRow =>
+    ({
+      ...base,
+      scheduleId,
+      title,
+      scheduledMessage: true,
+      trigger: { kind: 'once', at: '2026-09-06T10:00:00.000Z' },
+      destination: { kind: 'existing_session', sessionId: 'chat-1' },
+    }) as ScheduleRegistryRow;
+  const sent = message('sent', 'Ask for the CI summary');
+  const pending = message('pending', 'Remind me to ship');
+  const paused = {
+    ...timed,
+    scheduleId: 'p',
+    title: 'Weekly report',
+    enabled: false,
+  } as ScheduleRegistryRow;
+  const blocked = {
+    ...timed,
+    scheduleId: 'b',
+    title: 'Release notes',
+    projectKey: 'loro-dev/lody',
+  } as ScheduleRegistryRow;
+  const renderList = (props: Partial<Parameters<typeof ScheduleListView>[0]> = {}) =>
+    act(() =>
+      root.render(
+        <ScheduleListView
+          // Filters are initial state: a new key starts a fresh list.
+          key={JSON.stringify(props.initialFilters ?? null)}
+          rows={[manual, timed, paused, blocked, sent, pending]}
+          runtimes={[
+            runtime(timed, { nextScheduledAt: Date.parse('2026-09-06T13:00:00Z') }),
+            runtime(blocked, { queueState: 'blocked', blockedCode: 'PERMISSION_UNAVAILABLE' }),
+            runtime(sent, {
+              messageState: 'sent',
+              lastDispatch: {
+                scheduledFor: 0,
+                dispatchedAt: Date.parse('2026-09-06T00:00:00Z'),
+                sessionId: 'chat-1',
+              },
+            }),
+            runtime(pending, { messageState: 'pending' }),
+          ]}
+          ready
+          now={NOW}
+          contextForRow={(row) => ({
+            ...context(),
+            project: row.projectKey ?? null,
+            chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
+          })}
+          {...handlers}
+          {...props}
+        />
+      )
+    );
+  const titles = () =>
+    [...container.querySelectorAll('[data-schedule-row]')].map(
+      (row) => row.querySelector('button span:nth-child(2)')?.textContent
+    );
 
-  it('resizes a column from the header with the keyboard, within bounds', () => {
-    const handle = container.querySelector<HTMLElement>(
-      `[role="separator"][aria-label="Resize ${en['schedules.column.name']}"]`
+  it('clears only finished scheduled messages, and opens a message’s chat from its row', () => {
+    renderList();
+    const clear = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.startsWith('Clear finished')
     )!;
-    act(() => {
-      handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    act(() => clear.click());
+    expect(handlers.onClearEnded).toHaveBeenCalledWith([sent]);
+    const chat = rowOf('Remind me to ship').querySelector<HTMLButtonElement>(
+      'button[title="Open chat “CI triage”"]'
+    )!;
+    act(() => chat.click());
+    expect(handlers.onOpenSession).toHaveBeenCalledWith('chat-1');
+    expect(handlers.onOpen).not.toHaveBeenCalled();
+  });
+
+  it('deletes a finished message from its row without opening it', () => {
+    renderList();
+    act(() => buttonIn(rowOf('Ask for the CI summary'), en['schedules.delete'])!.click());
+    expect(handlers.onDelete).toHaveBeenCalledWith(sent);
+    expect(buttonIn(rowOf('Remind me to ship'), en['schedules.delete'])).toBeNull();
+  });
+
+  it('shows a scheduled message’s text instead of its stored title', () => {
+    renderList({
+      contentForRow: (row) =>
+        row.scheduleId === 'pending' ? 'Actually review the release notes' : undefined,
     });
-    expect(handlers.onColumnWidthsChange).toHaveBeenLastCalledWith({
-      name: 316,
-      frequency: 150,
-      next: 140,
+    const row = rowOf('Actually review the release notes');
+    expect(row.textContent).not.toContain('Remind me to ship');
+    expect(row.querySelector('[title="Actually review the release notes"]')).not.toBeNull();
+  });
+
+  it('shows a scheduled message at the viewer’s clock, not the machine clock', () => {
+    renderList({
+      viewerTimeZone: 'Asia/Shanghai',
+      contextForRow: (row) => ({
+        ...context(),
+        project: row.projectKey ?? null,
+        timeZone: 'UTC',
+        chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
+      }),
     });
-    for (let i = 0; i < 40; i += 1)
-      act(() => {
-        handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-      });
-    expect(handle.getAttribute('aria-valuenow')).toBe('72');
-  });
-
-  it('closes the open schedule on a blank click, but not from a row, a control or a popup', () => {
-    const onBlankClick = vi.fn();
-    const portal = document.createElement('div');
-    document.body.append(portal);
-    act(() =>
-      root.render(
-        <ScheduleListView
-          rows={[manual, timed]}
-          runtimes={[]}
-          ready
-          now={NOW}
-          contextForRow={context}
-          {...handlers}
-          selectedId="t"
-          onBlankClick={onBlankClick}
-          renderBody={(table) => (
-            <div data-testid="split">
-              {table}
-              <div data-schedule-detail="">
-                <span data-testid="detail-text">Editor</span>
-              </div>
-              {/* A menu or select popup: portalled out, yet its clicks bubble here. */}
-              {createPortal(<span data-testid="popup">Option</span>, portal)}
-            </div>
-          )}
-        />
-      )
-    );
-    const click = (element: Element) =>
-      act(() => {
-        element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-    click(rowOf('Nightly review').querySelector('span')!);
-    click(container.querySelector('input')!);
-    click(container.querySelector('[data-testid="detail-text"]')!);
-    click(portal.querySelector('[data-testid="popup"]')!);
-    expect(onBlankClick).not.toHaveBeenCalled();
-    click(container.querySelector('header')!);
-    click(container.querySelector('[data-testid="split"]')!);
-    expect(onBlankClick).toHaveBeenCalledTimes(2);
-    portal.remove();
-  });
-
-  it('clears the status bar on the edge-to-edge list and stays flush when embedded', () => {
-    const header = () => container.querySelector('header')!;
-    const embeddedClass = header().className;
-    expect(header().hasAttribute('data-safe-area-inset')).toBe(false);
-    act(() =>
-      root.render(
-        <ScheduleListView
-          insetSafeArea
-          rows={[manual, timed]}
-          runtimes={[]}
-          ready
-          now={NOW}
-          contextForRow={context}
-          {...handlers}
-        />
-      )
-    );
-    expect(header().hasAttribute('data-safe-area-inset')).toBe(true);
-    // The safe-area rule replaces the fixed 44px height. jsdom does not
-    // apply the StyleX sheet, so the class change is the check.
-    expect(header().className).not.toBe(embeddedClass);
-  });
-
-  it('uses the home search text and hides the standalone header', () => {
-    act(() =>
-      root.render(
-        <ScheduleListView
-          hideHeader
-          query="night"
-          rows={[manual, timed]}
-          runtimes={[]}
-          ready
-          now={NOW}
-          contextForRow={context}
-          {...handlers}
-        />
-      )
-    );
-    expect(container.querySelector('header')).toBeNull();
-    expect(container.textContent).toContain('Nightly review');
-    expect(container.textContent).not.toContain('Deploy checklist');
+    expect(rowOf('Remind me to ship').textContent).toContain('6:00 PM');
+    expect(rowOf('Nightly review').textContent).toContain('Runs ');
   });
 });
 
-describe('schedule list sidebar chrome', () => {
-  let container: HTMLDivElement;
-  let root: Root;
-  const handlers = {
-    onOpen: vi.fn(),
-    onNew: vi.fn(),
-  };
-
-  beforeAll(async () => {
-    if (!i18next.isInitialized)
-      await i18next.use(initReactI18next).init({
-        lng: 'en',
-        resources: { en: { translation: en } },
-        interpolation: { escapeValue: false },
-      });
-  });
-
-  beforeEach(() => {
-    layout.mobile = false;
-    layout.macElectron = false;
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
-  });
-
-  afterEach(() => {
-    act(() => root.unmount());
-    container.remove();
-    window.localStorage.removeItem('lody-sidebar-collapsed');
-  });
-
-  function render(store: ReturnType<typeof createStore>) {
-    act(() =>
-      root.render(
-        <Provider store={store}>
-          <ScheduleListView
-            rows={[manual]}
-            runtimes={[]}
-            ready
-            now={NOW}
-            contextForRow={context}
-            {...handlers}
-          />
-        </Provider>
-      )
+describe('run history of a schedule that posts into one chat', () => {
+  it('lists the chat’s turns stamped with this schedule, newest first, with their reply state', async () => {
+    const { pickScheduleChatRuns } =
+      await import('../src/components/schedules/use-schedule-chat-runs');
+    const turn = (id: string, role: 'user' | 'assistant', extra: Record<string, unknown> = {}) =>
+      ({ id, role, timestamp: `2026-09-0${id.slice(-1)}T00:00:00Z`, ...extra }) as never;
+    const runs = pickScheduleChatRuns(
+      [
+        turn('u1', 'user', { scheduleRun: { scheduleId: 'journal', turnId: 'u1', title: 'J' } }),
+        turn('a1', 'assistant', { userTurnId: 'u1', endedAt: 1 }),
+        turn('u2', 'user'),
+        turn('u3', 'user', { scheduleRun: { scheduleId: 'other', turnId: 'u3', title: 'O' } }),
+        turn('u4', 'user', { scheduleRun: { scheduleId: 'journal', turnId: 'u4', title: 'J' } }),
+        turn('a4', 'assistant', { userTurnId: 'u4' }),
+      ],
+      'journal'
     );
-  }
-
-  it('hides the expand control while the navigation sidebar is on screen', () => {
-    const store = createStore();
-    store.set(sidebarCollapsedAtom, false);
-    render(store);
-    expect(container.querySelector('button[aria-label="Show navigation sidebar"]')).toBeNull();
-    expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
-      false
-    );
-  });
-
-  it('shows the expand control on desktop when the navigation sidebar is hidden', () => {
-    const store = createStore();
-    store.set(sidebarCollapsedAtom, true);
-    render(store);
-    const toggle = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Show navigation sidebar"]'
-    );
-    expect(toggle).not.toBeNull();
-    expect(store.get(navigationSidebarVisibleAtom)).toBe(false);
-    act(() => toggle!.click());
-    expect(store.get(navigationSidebarVisibleAtom)).toBe(true);
-    expect(store.get(sidebarCollapsedAtom)).toBe(false);
-  });
-
-  it('keeps the expand control off the mobile list', () => {
-    layout.mobile = true;
-    const store = createStore();
-    store.set(sidebarCollapsedAtom, true);
-    render(store);
-    expect(container.querySelector('button[aria-label="Show navigation sidebar"]')).toBeNull();
-  });
-
-  it('insets the header beside macOS traffic lights when the sidebar is hidden', () => {
-    layout.macElectron = true;
-    const store = createStore();
-    store.set(sidebarCollapsedAtom, true);
-    render(store);
-    expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
-      true
-    );
-    store.set(sidebarCollapsedAtom, false);
-    render(store);
-    expect(container.querySelector('header')?.hasAttribute('data-beside-traffic-lights')).toBe(
-      false
-    );
+    expect(runs.map((run) => [run.turnId, run.state])).toEqual([
+      ['u4', 'running'],
+      ['u1', 'done'],
+    ]);
   });
 });

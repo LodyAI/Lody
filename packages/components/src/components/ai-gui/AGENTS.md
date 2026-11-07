@@ -28,29 +28,33 @@ Ownership: [README.md](README.md).
   target Turn and subscribe only to its title; `progressMessageId` prevents
   duplicates. Share a five-card scroller; retain full hydration.
   Keep concrete cards; hide contentless successes and their empty batch rows.
+- The scroll-to-latest control reveals its arrow during live work on hover or keyboard
+  focus through StyleX ancestor selectors; never add presence state for that swap.
 
 ## Turn Folding And Layout
 
-- Finished turns keep the answer/result tail visible and fold earlier work;
-  streaming turns stay expanded.
-- The final answer is the contiguous text run before trailing never-collapsed
-  items. Walk backward over adjacent text blocks to the first non-text boundary.
+- Work regions start expanded while streaming and may be folded by the reader.
+  Finished turns keep the final contiguous text run before trailing attachments,
+  plans and notices visible, and fold earlier text with thoughts and tool calls.
+  Apply this rule per plan segment regardless of ACP phase or provider.
+  Interrupted work without a visible result stays expanded. Expanded details keep
+  chronological order, with the header before the first work item.
 - Plan approval cuts a live turn by ACP kind `switch_mode`, never title.
   `plan-surface.ts` prefers nonempty `rawInput.plan` over replaceable tool content.
   Keep `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility and expansion
   keys per segment. Only the last segment shows duration; earlier segments say
   "Finished working".
-- `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
-  final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
-  turn with no answer stays expanded; `message.finished` cannot prove
-  completion alone. A reused entry reopening upstream
+- A finished `shouldUseWorkedGroup` requires foldable work and visible final
+  content outside `workBlockKeys`. A cancelled/interrupted or tool-only turn
+  with no answer stays expanded; `message.finished` cannot prove completion
+  alone. A reused entry reopening upstream
   must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
 - Thought/tool timelines are compact, transparent, 13px and glyph-free; verbs label
   steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
   (desktop: hover-only, body type, no fill). Only builtin DSH shows thoughts:
   separate groups default thoughts open and tools closed; explicit toggles win.
-  DSH prose uses answer typography and shared work folding. Other providers
+  DSH thought prose uses answer typography, secondary ink and shared work folding. Other providers
   hide thoughts. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
@@ -67,8 +71,11 @@ Ownership: [README.md](README.md).
   Fork controls and loading need a finished turn.
 - `ConversationColumn` owns the gutter; row shells add no horizontal pad. EVERY
   row shares one rail: prose, process labels/steps, live status and the mobile
-  footer sit at `conversation.railInset`; expansion never shifts content right.
+  footer sit at `conversation.railInset`; thought prose aligns with its label.
   Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
+- The trailing row (`trailingContent`: pending sends, continuation notes) is
+  full-bleed like the scroller, so each item mounts its own `ConversationColumn`.
+  Stream rows never rely on the row shell for width or gutter.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
   User rows own `responseGap`; assistant tails own `roundGap` (desktop: including
   footer/metadata; mobile: below the footer).
@@ -81,6 +88,11 @@ Ownership: [README.md](README.md).
   group toggles never scroll, and each jump issues once; the engine holds its row at top.
 
 ## Content Contracts
+
+- Conversation file-path candidates become interactive only for an absolute path
+  or an exact match in the owning Session's file index. Unconfirmed relative paths
+  keep their text/code presentation. Open known targets directly; copy actions use
+  the authored path without file resolution or a worktree picker.
 
 - Child cancel requires subagentCancellation/subagentEvents v1, `support.cancel`
   and an exact parent turn; never Stop the parent or invent state. Dialogs reuse

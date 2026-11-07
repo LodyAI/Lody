@@ -83,7 +83,20 @@ Browser 用一个地址栏状态控件呈现连接状态，以不同图标和可
 
 Quick Tunnel 地址临时、无 SLA、上限为 200 个在途请求，且不支持 SSE；异常明确
 呈现。cloudflared 使用产品管理的固定版本并校验完整性，不调用未知 PATH 二进制或
-安装系统服务。不包含 iOS 模拟器，也不新增应用 Cookie/OAuth 兼容承诺。
+安装系统服务。不包含 iOS 模拟器。
+
+应用 Cookie 在本地按 Session 和目标 origin 隔离、远程按端点隔离后，随 HTTP
+和 WebSocket 请求转发。本地查看器按 Session 和目标使用独立、稳定的 localhost
+子域；端点重建后名称保持稳定，凭证值仍重新生成。应用设置 Cookie 时，代理在
+最后重新下发凭证，使 Chromium 配额紧张时优先淘汰应用 Cookie。Chromium 对每个
+嵌入站点和分区的 Cookie 限额约为 10 KiB；这一结果不涵盖其他浏览器或 JavaScript
+直接写入 Cookie。代理移除 Domain，
+保留 Path 和过期属性，并强制 Secure、SameSite=None 和 Partitioned；端点凭证
+Cookie 不会到达应用。这会放宽应用的 SameSite 防护：端点 token 和保留外来
+Origin 不能替代应用的 CSRF 防护，仅依赖 SameSite 的应用需要额外检查。
+Cookie 改名对通过 document.cookie 读写的应用脚本不透明，浏览器也不再按
+__Host- 和 __Secure- 名称前缀执行限制；不保证 OAuth 或
+所有浏览器兼容。本地查看器主机与已批准的开发目标分开；目标仍只能是回环地址。
 
 实施进行中。验收需要 HTTP/WS 行为测试、确定性的闲置/取消测试、支持客户端的真实
 iframe 鉴权、Browser 恢复测试、二进制生命周期验证，以及独立实网性能测量。

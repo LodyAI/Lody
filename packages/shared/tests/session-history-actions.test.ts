@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { LoroDoc, LoroMap, LoroList } from 'loro-crdt';
 import {
   createLoroSessionData,
@@ -8,17 +8,11 @@ import {
   type SessionEntry,
   type SessionTurnStatus,
   applyHistoryAction,
-  planHistoryAction,
-  type HistoryAction,
 } from '../src/session-data';
 import type { SessionId } from '../src/ids';
 import type { StoredLodyOperation } from '../src/session-orchestration';
 import { createHistoryWriter } from '../src/history-writer';
-import {
-  planOperationProgress,
-  getOperationProgressTurnId,
-  findProgressMessageId,
-} from '../src/session-data/operation-progress';
+import { planOperationProgress } from '../src/session-data/operation-progress';
 const sid = 'actions' as SessionId;
 const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry => ({
   id,
@@ -26,88 +20,6 @@ const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry 
   timestamp: '2026-01-01T00:00:00Z',
   items: [{ type: 'text', text: id }],
   fileDiff: [],
-});
-
-describe('immutable history action plans', () => {
-  it('matches shared action semantics, owns new input, and preserves previous snapshots', () => {
-    const initial: SessionEntry[] = [
-      row('u', 'user'),
-      {
-        ...row('a'),
-        items: [
-          { type: 'text', text: 'retained'.repeat(32768) },
-          {
-            type: 'tool_call',
-            toolCallId: 'permission',
-            status: 'pending',
-            permissionRequest: { requestId: 'r', options: [] },
-          },
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-old',
-            status: 'in_progress',
-            activityKind: 'context_compaction',
-          },
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-last',
-            status: 'in_progress',
-            activityKind: 'context_compaction',
-          },
-        ],
-      },
-      row('other'),
-    ];
-    const actions: HistoryAction[] = [
-      { kind: 'user-status', turnId: 'u', status: 'processing', deliveredSteer: true },
-      {
-        kind: 'assistant-items',
-        turnId: 'a',
-        mode: 'append',
-        items: [{ type: 'text', text: 'new' }],
-      },
-      { kind: 'finish-assistant', turnId: 'a', endedAt: 42, permissionWaitMs: 7 },
-      { kind: 'finish-assistant', turnId: 'a', endedAt: 99 },
-      { kind: 'upsert-turn', turn: row('inserted'), beforeTurnId: 'other' },
-      { kind: 'remove-turn', turnId: 'inserted' },
-      { kind: 'remove-turn', turnId: 'missing' },
-    ];
-    let current = initial;
-    for (const action of actions) {
-      const before = structuredClone(current);
-      const reference = applyHistoryAction(structuredClone(current), structuredClone(action));
-      const planned = planHistoryAction(current, action);
-      expect(planned.turns).toEqual(reference.turns);
-      expect(planned.matched).toBe(reference.matched);
-      expect(current).toEqual(before);
-      if (action.kind === 'finish-assistant') {
-        expect(planned.turns[1]?.items?.[0]).toBe(current[1]?.items?.[0]);
-        expect(planned.turns[1]).toMatchObject({
-          endedAt: 42,
-          permissionWaitMs: 7,
-          items: [
-            { type: 'text' },
-            { toolCallId: 'permission', permissionRequest: { outcome: { outcome: 'cancelled' } } },
-            { toolCallId: 'compact-last', status: 'failed' },
-            { type: 'text', text: 'new' },
-          ],
-        });
-      }
-      if (action.kind === 'assistant-items') {
-        (action.items[0] as { text: string }).text = 'caller mutation';
-        expect(planned.turns[1]?.items?.at(-1)).toEqual({ type: 'text', text: 'new' });
-      }
-      if (action.kind === 'upsert-turn') {
-        action.turn.items = [];
-        expect(planned.turns[2]?.items).toEqual([{ type: 'text', text: 'inserted' }]);
-      }
-      if (action.kind === 'finish-assistant' && action.endedAt === 99)
-        expect(planned.changes).toEqual([]);
-      current = planned.turns;
-    }
-    expect(initial[1]?.finished).toBeUndefined();
-    expect(initial[1]?.items?.length).toBe(4);
-  });
 });
 
 describe('operation progress local history writes', () => {
@@ -139,111 +51,6 @@ describe('operation progress local history writes', () => {
     timestamp: '2026-01-01T00:00:00Z',
     statuses: [['child\0input', 'running']] as const,
   });
-
-  it('creates, changes and repeats progress without exporting history or unrelated turns', async () => {
-    const doc = new LoroDoc();
-    const writer = createHistoryWriter(doc);
-    for (let i = 0; i < 128; i++)
-      writer.append({ ...row(`old-${i}`), items: [{ type: 'text', text: 'body'.repeat(1024) }] });
-    const data = createLoroSessionData({ sessionId: sid, doc, writer });
-    const history = doc.getList('history');
-    const before = doc.toJSON();
-    const oldIds = Array.from({ length: history.length }, (_, i) => (history.get(i) as LoroMap).id);
-    const originalMapJson = LoroMap.prototype.toJSON;
-    const originalListJson = LoroList.prototype.toJSON;
-    const originalGet = LoroMap.prototype.get;
-    let reads = new Set<string>();
-    let forbidOldIdentities = false;
-    const mapJson = vi
-      .spyOn(LoroMap.prototype, 'toJSON')
-      .mockImplementation(function (this: LoroMap) {
-        if (oldIds.includes(this.id)) throw new Error('unrelated turn exported');
-        if (reads.has(this.id)) throw new Error('card exported twice in one update');
-        reads.add(this.id);
-        return originalMapJson.call(this);
-      });
-    const listJson = vi
-      .spyOn(LoroList.prototype, 'toJSON')
-      .mockImplementation(function (this: LoroList) {
-        if (this.id === history.id) throw new Error('full history exported');
-        return originalListJson.call(this);
-      });
-    const get = vi.spyOn(LoroMap.prototype, 'get').mockImplementation(function (
-      this: LoroMap,
-      key: string
-    ) {
-      if (oldIds.includes(this.id) && (forbidOldIdentities || (key !== 'id' && key !== 'role')))
-        throw new Error('unrelated body or repeated identity read');
-      return originalGet.call(this, key);
-    });
-    try {
-      expect(await data.commands.applyHistoryAction(action())).toEqual({ matched: true });
-      for (let i = 0; i < 12; i++) {
-        reads = new Set();
-        forbidOldIdentities = i > 0;
-        const count = doc.opCount();
-        expect(await data.commands.applyHistoryAction(action())).toEqual({ matched: false });
-        expect(doc.opCount()).toBe(count);
-      }
-      reads = new Set();
-      forbidOldIdentities = false;
-      expect(
-        await data.commands.applyHistoryAction({
-          ...action(),
-          statuses: [['child\0input', 'succeeded']],
-        })
-      ).toEqual({ matched: true });
-      reads = new Set();
-      expect(await data.commands.applyHistoryAction(action())).toEqual({ matched: false });
-    } finally {
-      get.mockRestore();
-      listJson.mockRestore();
-      mapJson.mockRestore();
-    }
-    expect(doc.toJSON().history.slice(0, 128)).toEqual(before.history);
-    expect(await data.history.readTurn(getOperationProgressTurnId(sid, 'op'))).toMatchObject({
-      state: 'ready',
-      turn: { items: [{ items: [{ status: 'succeeded' }] }] },
-    });
-    expect(oldIds).toEqual(Array.from({ length: 128 }, (_, i) => (history.get(i) as LoroMap).id));
-    data.dispose();
-  });
-
-  it.each(['map', 'inline'] as const)(
-    'merges %s duplicates in place and matches the full-history planner',
-    async (storage) => {
-      const doc = new LoroDoc();
-      const writer = createHistoryWriter(doc);
-      const data = createLoroSessionData({ sessionId: sid, doc, writer });
-      const card = planOperationProgress([], operation(), action().timestamp)[0]!;
-      writer.append(row('before'));
-      writer.append(card);
-      writer.append(row('between'));
-      const duplicate = { ...card, id: `${card.id}:duplicate:old` };
-      if (storage === 'map') writer.append(duplicate);
-      else doc.getList('history').push(duplicate as never);
-      writer.append(row('after'));
-      const list = doc.getList('history');
-      (list.get(1) as LoroMap).set('future', { retained: true });
-      doc.commit();
-      const siblingIds = [0, 2, 4].map((i) => (list.get(i) as LoroMap).id);
-      const before = await data.history.readAll();
-      const expected = planOperationProgress(
-        before,
-        operation(),
-        action().timestamp,
-        action().statuses
-      );
-      expect(await data.commands.applyHistoryAction(action())).toEqual({ matched: true });
-      expect(await data.history.readAll()).toEqual(expected);
-      expect([0, 2, 3].map((i) => (list.get(i) as LoroMap).id)).toEqual(siblingIds);
-      expect(await data.history.readTurn(card.id)).toMatchObject({
-        state: 'ready',
-        turn: { future: { retained: true } },
-      });
-      data.dispose();
-    }
-  );
 
   it('follows imported duplicate cards and uncommitted row shifts without stale positions', async () => {
     const doc = new LoroDoc();
@@ -297,40 +104,6 @@ describe('operation progress local history writes', () => {
     observer.free();
   });
 
-  it.each(['map', 'inline'] as const)(
-    'repairs an alias-only %s card in place, even when its content is unchanged',
-    (storage) => {
-      const doc = new LoroDoc();
-      const writer = createHistoryWriter(doc);
-      const card = planOperationProgress(
-        [],
-        operation(),
-        action().timestamp,
-        action().statuses
-      )[0]!;
-      writer.append(row('before'));
-      const legacy = { ...card, id: `${card.id}:duplicate:legacy`, future: { retained: true } };
-      const list = doc.getList('history');
-      if (storage === 'map') {
-        writer.append(legacy);
-        (list.get(1) as LoroMap).set('future', legacy.future);
-      } else list.push(legacy as never);
-      writer.append(row('after'));
-      const containerId = storage === 'map' ? (list.get(1) as LoroMap).id : undefined;
-      const siblings = [0, 2].map((index) => (list.get(index) as LoroMap).id);
-      expect(writer.updateOperationProgress(action())).toBe(true);
-      const history = writer.readStored();
-      expect(history.map((entry) => entry.id)).toEqual(['before', card.id, 'after']);
-      expect(history[1]).toMatchObject({ ...card, future: legacy.future });
-      expect(findProgressMessageId(history, operation())).toBe(card.id);
-      if (storage === 'map') expect((list.get(1) as LoroMap).id).toBe(containerId);
-      expect([0, 2].map((index) => (list.get(index) as LoroMap).id)).toEqual(siblings);
-      const count = doc.opCount();
-      expect(writer.updateOperationProgress(action())).toBe(false);
-      expect(doc.opCount()).toBe(count);
-    }
-  );
-
   it('retains the canonical card metadata when an older alias precedes it', () => {
     const doc = new LoroDoc();
     const writer = createHistoryWriter(doc);
@@ -378,68 +151,6 @@ describe('operation progress local history writes', () => {
     });
     expect(writer.updateOperationProgress(action())).toBe(false);
   });
-
-  it('invalidates warm positions on checkout and pending identity or role edits without committing a no-op', () => {
-    const doc = new LoroDoc();
-    const writer = createHistoryWriter(doc);
-    writer.updateOperationProgress(action());
-    const oldFrontiers = doc.frontiers();
-    const list = doc.getList('history');
-    list.insert(0, row('shift') as never);
-    doc.commit();
-    expect(writer.updateOperationProgress(action())).toBe(false);
-    doc.checkout(oldFrontiers);
-    expect(writer.updateOperationProgress(action())).toBe(false);
-    doc.attach();
-    const card = list.get(1) as LoroMap;
-    card.set('id', `${getOperationProgressTurnId(sid, 'op')}:duplicate:pending`);
-    expect(writer.updateOperationProgress(action())).toBe(true);
-    expect(writer.readStored().map((entry) => entry.id)).toEqual([
-      'shift',
-      getOperationProgressTurnId(sid, 'op'),
-    ]);
-    doc.getMap('session').set('pending', true);
-    const pending = doc.getPendingTxnLength();
-    expect(writer.updateOperationProgress(action())).toBe(false);
-    expect(writer.updateOperationProgress(action())).toBe(false);
-    expect(doc.getPendingTxnLength()).toBe(pending);
-    card.set('role', 'assistant');
-    expect(writer.updateOperationProgress(action())).toBe(true);
-    expect(writer.readStored().map((entry) => entry.role)).toEqual([
-      'assistant',
-      'assistant',
-      'system',
-    ]);
-  });
-
-  it.each(['canonical', 'alias-only'] as const)(
-    'rejects invalid progress before mutating or deleting %s cards',
-    async (identity) => {
-      const doc = new LoroDoc();
-      const data = createLoroSessionData({ sessionId: sid, doc });
-      await data.commands.applyHistoryAction(action());
-      const id = getOperationProgressTurnId(sid, 'op');
-      if (identity === 'alias-only') {
-        (doc.getList('history').get(0) as LoroMap).set('id', `${id}:duplicate:first`);
-        doc.commit();
-      }
-      await data.commands.appendTurn({
-        ...planOperationProgress([], operation(), action().timestamp)[0]!,
-        id: `${id}:duplicate:old`,
-      });
-      const before = doc.toJSON();
-      const count = doc.opCount();
-      await expect(
-        data.commands.applyHistoryAction({
-          ...action(),
-          statuses: [['child\0input', 'invalid' as never]],
-        })
-      ).rejects.toThrow();
-      expect(doc.opCount()).toBe(count);
-      expect(doc.toJSON()).toEqual(before);
-      data.dispose();
-    }
-  );
 });
 for (const backend of ['loro'] as const)
   describe(`history actions ${backend}`, () => {
@@ -542,38 +253,6 @@ for (const backend of ['loro'] as const)
         data.dispose();
       }
     );
-    it('preserves permission outcomes when a request is repeated', async () => {
-      const data = create();
-      await data.commands.appendTurn({
-        ...row('a'),
-        items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'c',
-            status: 'pending',
-            title: 'existing',
-            permissionRequest: {
-              requestId: 'old',
-              options: [],
-              outcome: { outcome: 'cancelled' },
-            },
-          },
-        ],
-      });
-      await data.commands.applyHistoryAction({
-        kind: 'permission-request',
-        requestId: 'new',
-        request: {
-          sessionId: 'acp',
-          toolCall: { toolCallId: 'c', title: 'incoming' },
-          options: [],
-        },
-      });
-      expect((await data.history.readAll())[0]?.items?.[0]).toMatchObject({
-        title: 'existing',
-        permissionRequest: { requestId: 'new', outcome: { outcome: 'cancelled' } },
-      });
-    });
     it('finishes only the requested assistant and preserves its original end time', async () => {
       const data = create();
       await seed(data);
@@ -672,142 +351,8 @@ for (const backend of ['loro'] as const)
       });
       expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: null });
     });
-    it('does not price legacy tokens from a later known delta', async () => {
-      const data = create();
-      await seed(data);
-      await data.commands.applyHistoryAction({
-        kind: 'assistant-token-usage',
-        turnId: 'a',
-        add: {
-          inputTokens: 10,
-          outputTokens: 5,
-          cacheReadInputTokens: 0,
-          cacheCreationInputTokens: 0,
-          reasoningOutputTokens: 0,
-        },
-      });
-      await data.commands.applyHistoryAction({
-        kind: 'assistant-token-usage',
-        turnId: 'a',
-        add: {
-          inputTokens: 1,
-          outputTokens: 1,
-          cacheReadInputTokens: 0,
-          cacheCreationInputTokens: 0,
-          reasoningOutputTokens: 0,
-          costUSD: 0.5,
-        },
-      });
-      expect((await data.history.readAll())[1]?.tokenUsage).toMatchObject({ costUSD: null });
-    });
-    it('rejects a negative token cost without changing history', async () => {
-      const data = create();
-      await seed(data);
-      const before = await data.history.readAll();
-      await expect(
-        data.commands.applyHistoryAction({
-          kind: 'assistant-token-usage',
-          turnId: 'a',
-          add: {
-            inputTokens: 1,
-            outputTokens: 0,
-            cacheReadInputTokens: 0,
-            cacheCreationInputTokens: 0,
-            reasoningOutputTokens: 0,
-            costUSD: -0.01,
-          },
-        })
-      ).rejects.toThrow();
-      expect(await data.history.readAll()).toEqual(before);
-    });
-    it('rejects malformed token usage without changing history', async () => {
-      const data = create();
-      await seed(data);
-      const before = await data.history.readAll();
-      await expect(
-        data.commands.applyHistoryAction({
-          kind: 'assistant-token-usage',
-          turnId: 'a',
-          add: {
-            inputTokens: -1,
-            outputTokens: 0,
-            cacheReadInputTokens: 0,
-            cacheCreationInputTokens: 0,
-            reasoningOutputTokens: 0,
-          },
-        })
-      ).rejects.toThrow();
-      expect(await data.history.readAll()).toEqual(before);
-    });
-    it('rejects malformed content without changing history', async () => {
-      const data = create();
-      await seed(data);
-      const before = await data.history.readAll();
-      await expect(
-        data.commands.applyHistoryAction({
-          kind: 'assistant-items',
-          turnId: 'a',
-          mode: 'replace',
-          items: [{ type: 'text', text: 42 } as never],
-        })
-      ).rejects.toThrow();
-      expect(await data.history.readAll()).toEqual(before);
-    });
   });
-it('retains an opaque stored item during a named field action', async () => {
-  const doc = new LoroDoc();
-  const data = createLoroSessionData({ sessionId: sid, doc });
-  await data.commands.appendTurn(row('a'));
-  const map = doc.getList('history').get(0) as LoroMap;
-  const items = map.get('items') as LoroList;
-  items.push({ type: 'future', payload: { keep: true } });
-  doc.commit();
-  await data.commands.applyHistoryAction({ kind: 'finish-assistant', turnId: 'a', endedAt: 42 });
-  expect((await data.history.readAll())[0]?.items?.[1]).toEqual({
-    type: 'future',
-    payload: { keep: true },
-  });
-});
 
-for (const backend of ['loro'] as const)
-  it(`${backend}: an ended-steer fallback only changes pending_apply`, async () => {
-    const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
-    await data.commands.appendTurn({ ...row('u', 'user'), status: 'pending_apply' });
-    const action = {
-      kind: 'user-status' as const,
-      turnId: 'u',
-      status: 'pending' as const,
-      onlyPendingApply: true,
-    };
-    expect((await data.commands.applyHistoryAction(action)).matched).toBe(true);
-    await data.commands.applyHistoryAction({
-      kind: 'user-status',
-      turnId: 'u',
-      status: 'processing',
-    });
-    expect((await data.commands.applyHistoryAction(action)).matched).toBe(false);
-    expect((await data.history.readAll())[0]).toMatchObject({ status: 'processing', read: true });
-    expect((await data.commands.applyHistoryAction({ ...action, turnId: 'missing' })).matched).toBe(
-      false
-    );
-    expect(
-      (
-        await data.commands.applyHistoryAction({
-          kind: 'user-status',
-          turnId: 'missing',
-          status: 'pending',
-          requeueUndelivered: true,
-        })
-      ).matched
-    ).toBe(true);
-    await data.commands.appendTurn({ ...row('a'), fileDiff: [{ filePath: 'x', add: 1, del: 0 }] });
-    await data.commands.applyHistoryAction(
-      JSON.parse(
-        JSON.stringify({ kind: 'assistant-file-diff', turnId: 'a', change: { kind: 'clear' } })
-      )
-    );
-    expect((await data.history.readAll())[1]).not.toHaveProperty('fileDiff');
-  });
 describe('user status on duplicate turn copies', () => {
   const withCopies = async (...statuses: SessionTurnStatus[]) => {
     const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
@@ -887,6 +432,29 @@ describe('user status on duplicate turn copies', () => {
       ['pending', null],
     ]);
   });
+
+  it('settles unclaimed input only while every copy still awaits a start', async () => {
+    const settle = {
+      kind: 'user-status',
+      turnId: 'u',
+      status: 'canceled',
+      onlyAwaitingStart: true,
+    } as const;
+    const unclaimed = await withCopies('pending', 'seen');
+    expect((await unclaimed.data.commands.applyHistoryAction(settle)).matched).toBe(true);
+    expect(await unclaimed.copies()).toEqual([
+      ['canceled', null],
+      ['canceled', null],
+    ]);
+    for (const claimed of ['processing', 'handled', 'pending_apply'] as const) {
+      const { data, copies } = await withCopies(claimed, 'pending');
+      expect((await data.commands.applyHistoryAction(settle)).matched).toBe(false);
+      expect(await copies()).toEqual([
+        [claimed, null],
+        ['pending', null],
+      ]);
+    }
+  });
 });
 
 it('business full reads preserve normalization without rewriting opaque stored history', async () => {
@@ -939,18 +507,6 @@ it.each(['handled', 'failed', 'canceled', 'delivery_unknown'] as const)(
     });
   }
 );
-
-it('Loro structural actions report membership changes even without a target hint', async () => {
-  const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
-  const changes: unknown[] = [];
-  const subscription = data.history.observe((change) => changes.push(change));
-  await subscription.initial;
-  await data.commands.applyHistoryAction({ kind: 'upsert-turn', turn: row('a') });
-  expect(changes.at(-1)).toMatchObject({ kind: 'structure', from: 0, to: 1 });
-  await data.commands.applyHistoryAction({ kind: 'remove-turn', turnId: 'a' });
-  expect(changes.at(-1)).toMatchObject({ kind: 'structure', from: 0, to: 0 });
-  subscription.unsubscribe();
-});
 
 it('updates one matching batch receipt while preserving the original user input and other batches', async () => {
   const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });

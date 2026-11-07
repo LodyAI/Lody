@@ -1,8 +1,11 @@
 import { control } from '@lody/ui/tokens/scales.stylex';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import * as stylex from '@stylexjs/stylex';
 import {
+  SCHEDULE_CUSTOM_HOURS_MAX,
+  SCHEDULE_CUSTOM_MINUTES_MAX,
   SCHEDULE_HOUR_STEPS,
   SCHEDULE_MINUTE_STEPS,
   SCHEDULE_RECURRENCE_KINDS,
@@ -15,6 +18,7 @@ import {
   type ScheduleRecurrenceKind,
   type ScheduleWeekday,
 } from '@lody/shared';
+import { NumberField } from '@lody/ui/number-field';
 import { Select } from '@lody/ui/select';
 import { describeRecurrence, weekdayNames } from './schedule-format';
 import { PropertyRow, ghostValueStyles } from './schedule-property-row';
@@ -31,6 +35,16 @@ const DARK_SCOPE =
   ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
+  stepRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[2],
+  },
+  stepField: { width: 'calc(var(--spacing) * 20)', flexShrink: 0 },
+  numeric: { fontVariantNumeric: 'tabular-nums' },
+  stepUnit: { flexShrink: 0, fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
   days: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: themeSpace[1] },
   dateGrid: {
     display: 'grid',
@@ -101,6 +115,9 @@ const styles = stylex.create({
     '::-webkit-calendar-picker-indicator': { display: 'none' },
   },
 });
+
+/** The "Every" menu's last entry; selecting it reveals a typed number. */
+const CUSTOM_STEP = 'custom';
 
 /** Small square toggles; one row of seven for weekdays, a 7-wide grid for dates. */
 function DayToggles({
@@ -212,16 +229,28 @@ export function ScheduleRecurrenceEditor({
     ? `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
     : '';
   const shortWeekdays = weekdayNames(i18n.language, 'narrow');
-  const stepItems =
-    value.kind === 'minutes' || value.kind === 'hours'
-      ? (value.kind === 'minutes' ? SCHEDULE_MINUTE_STEPS : SCHEDULE_HOUR_STEPS).map((step) => ({
+  const isStep = value.kind === 'minutes' || value.kind === 'hours';
+  const presetSteps: readonly number[] = isStep
+    ? value.kind === 'minutes'
+      ? SCHEDULE_MINUTE_STEPS
+      : SCHEDULE_HOUR_STEPS
+    : [];
+  // "Custom" is kept per kind: choosing it on minutes must not leave hours in
+  // custom mode. A stored step that is not a preset always opens as custom.
+  const [customKind, setCustomKind] = useState<'minutes' | 'hours' | null>(null);
+  const isCustomStep = isStep && (customKind === value.kind || !presetSteps.includes(value.every));
+  const stepItems = isStep
+    ? [
+        ...presetSteps.map((step) => ({
           value: String(step),
           label:
             value.kind === 'minutes'
               ? t('schedules.everyMinutes', { count: step, defaultValue: '{{count}} minutes' })
               : t('schedules.everyHours', { count: step, defaultValue: '{{count}} hours' }),
-        }))
-      : [];
+        })),
+        { value: CUSTOM_STEP, label: t('schedules.repeat.custom', 'Custom') },
+      ]
+    : [];
   const longWeekdays = weekdayNames(i18n.language, 'long');
 
   if (value.kind === 'unsupported') {
@@ -292,28 +321,74 @@ export function ScheduleRecurrenceEditor({
         {value.kind === 'minutes' || value.kind === 'hours' ? (
           <Reveal key="every" id="every">
             <PropertyRow label={t('schedules.repeat.every', 'Every')}>
-              <Select.Root
-                value={String(value.every)}
-                disabled={disabled}
-                items={stepItems}
-                // A controlled Select can emit an empty value while its option
-                // list is swapped (hours → minutes); that is not a choice.
-                onValueChange={(every) => {
-                  const step = Number(every);
-                  if (Number.isInteger(step) && step > 0) onChange({ ...value, every: step });
-                }}
-              >
-                <Select.Trigger size="small" aria-label={t('schedules.repeat.every', 'Every')}>
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  {stepItems.map((item) => (
-                    <Select.Item key={item.value} value={item.value}>
-                      {item.label}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
+              <div {...stylex.props(styles.stepRow)}>
+                {isCustomStep ? (
+                  <>
+                    <NumberField.Root
+                      className={stylex.props(styles.stepField).className}
+                      value={value.every}
+                      min={1}
+                      max={
+                        value.kind === 'minutes'
+                          ? SCHEDULE_CUSTOM_MINUTES_MAX
+                          : SCHEDULE_CUSTOM_HOURS_MAX
+                      }
+                      step={1}
+                      disabled={disabled}
+                      // An emptied field is not a choice; the last whole number stays.
+                      onValueChange={(next) => {
+                        if (next === null || !Number.isFinite(next)) return;
+                        const every = Math.round(next);
+                        if (every >= 1 && every !== value.every) onChange({ ...value, every });
+                      }}
+                    >
+                      <NumberField.Input
+                        size="small"
+                        className={stylex.props(styles.numeric).className}
+                        aria-label={
+                          value.kind === 'minutes'
+                            ? t('schedules.repeat.customMinutes', 'Number of minutes')
+                            : t('schedules.repeat.customHours', 'Number of hours')
+                        }
+                      />
+                    </NumberField.Root>
+                    <span {...stylex.props(styles.stepUnit)}>
+                      {value.kind === 'minutes'
+                        ? t('schedules.repeat.unitMinutes', 'minutes')
+                        : t('schedules.repeat.unitHours', 'hours')}
+                    </span>
+                  </>
+                ) : null}
+                <Select.Root
+                  value={isCustomStep ? CUSTOM_STEP : String(value.every)}
+                  disabled={disabled}
+                  items={stepItems}
+                  // A controlled Select can emit an empty value while its option
+                  // list is swapped (hours → minutes); that is not a choice.
+                  onValueChange={(every) => {
+                    if (every === CUSTOM_STEP) {
+                      setCustomKind(value.kind);
+                      return;
+                    }
+                    const step = Number(every);
+                    if (Number.isInteger(step) && step > 0) {
+                      setCustomKind(null);
+                      onChange({ ...value, every: step });
+                    }
+                  }}
+                >
+                  <Select.Trigger size="small" aria-label={t('schedules.repeat.every', 'Every')}>
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {stepItems.map((item) => (
+                      <Select.Item key={item.value} value={item.value}>
+                        {item.label}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              </div>
             </PropertyRow>
           </Reveal>
         ) : null}

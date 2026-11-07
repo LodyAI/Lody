@@ -8,6 +8,17 @@ import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
+
+const batchFrame = stylex.create({
+  frame: {
+    width: '720px',
+    maxWidth: 'calc(100vw - 2rem)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 6)',
+  },
+});
+
 const migrationStyles = stylex.create({
   relation: { width: '640px', maxWidth: 'calc(100vw - 2rem)' },
   column: {
@@ -405,6 +416,64 @@ export const ManyCreatedSessions: Story = {
       </div>
     );
   },
+};
+
+export const FailedAndMixedBatchResults: Story = {
+  args: operationStoryArgs,
+  render: () => (
+    <div {...stylex.props(batchFrame.frame)}>
+      {[false, true].map((mixed) => (
+        <MessageRowView
+          key={String(mixed)}
+          sessionId={'storybook-opener' as SessionId}
+          message={{
+            id: `batch-failure-${mixed}`,
+            role: 'system',
+            timestamp: '2026-10-28T09:00:00.000Z',
+            read: true,
+            items: [
+              {
+                type: 'operation_completion',
+                operationId: `batch-failure-${mixed}`,
+                deliveryId: `batch-failure-${mixed}`,
+                operationKind: 'session_create_many',
+                completion: {
+                  type: 'result',
+                  value: {
+                    items: [
+                      ...(mixed
+                        ? [
+                            {
+                              status: 'succeeded' as const,
+                              label: 'Completed review',
+                              assistantTurnId: 'assistant-turn',
+                              target: {
+                                sessionId: 'storybook-success' as SessionId,
+                                userTurnId: 'turn',
+                              },
+                            },
+                          ]
+                        : []),
+                      {
+                        status: 'failed',
+                        label: 'Unavailable catalog',
+                        error: {
+                          code: 'INVALID_ITEM',
+                          message: 'Synthetic catalog failure',
+                          retryable: false,
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+          onNavigateSession={() => {}}
+        />
+      ))}
+    </div>
+  ),
 };
 
 export const CompletedWorkBatch: Story = {

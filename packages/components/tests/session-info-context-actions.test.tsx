@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -104,10 +105,7 @@ describe('ContextChip actions', () => {
     expect(onOpenPr).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the highest-priority action directly and folds the rest into a menu', async () => {
-    const onCreatePr = vi.fn();
-    const onCommitAndPush = vi.fn();
-
+  it('labels the PR with the number in its URL', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -115,68 +113,22 @@ describe('ContextChip actions', () => {
       root?.render(
         createElement(ContextChip, {
           mode: 'stage',
-          projectName: 'loro-dev/lody',
-          branch: 'feat/info-bar-actions',
-          workspaceLocation: { kind: 'worktree', path: '/tmp/lody-worktree' },
-          diffStat: { add: 12, del: 4 },
-          actions: [
-            { id: 'create-pr', label: 'Create PR', onClick: onCreatePr },
-            {
-              id: 'commit-and-push',
-              label: 'Commit & Push',
-              onClick: onCommitAndPush,
-            },
-          ],
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+            number: 12,
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
         })
       );
     });
 
-    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
-    const createPrButton = buttons.find((button) => button.textContent === 'Create PR');
-    const commitButton = buttons.find((button) => button.textContent === 'Commit & Push');
-    const menuButton = buttons.find(
-      (button) => button.getAttribute('aria-label') === 'More actions'
-    );
-
-    expect(createPrButton).toBeInstanceOf(HTMLButtonElement);
-    expect(commitButton).toBeUndefined();
-    expect(menuButton).toBeInstanceOf(HTMLButtonElement);
-    // One flat tinted surface in both themes — the bar keeps controls flat.
-    // The tint, the borderless edge and the absence of a focus indicator are
-    // the component's own StyleX style now (`styles.actionsShell`,
-    // `styles.actionButton`), not class names a test can read.
-    expect(createPrButton?.parentElement).not.toBeNull();
-    expect(menuButton?.parentElement).toBe(createPrButton?.parentElement);
-
-    await act(async () => createPrButton?.click());
-
-    expect(onCreatePr).toHaveBeenCalledTimes(1);
-    expect(onCommitAndPush).not.toHaveBeenCalled();
-
-    await act(async () => {
-      menuButton?.dispatchEvent(
-        new TestPointerEvent('mousedown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-
-    const menuItems = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(menuItems.map((item) => item.textContent)).toEqual(['Commit & Push']);
-
-    await act(async () => {
-      menuItems[0]?.focus();
-      menuItems[0]?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    });
-
-    expect(onCommitAndPush).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('#2894');
+    expect(container.textContent).not.toContain('#12');
   });
 
-  it('does not render an overflow trigger for a single action', async () => {
+  it('summarizes CI from session metadata even when live runs disagree', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -184,37 +136,49 @@ describe('ContextChip actions', () => {
       root?.render(
         createElement(ContextChip, {
           mode: 'stage',
-          projectName: 'loro-dev/lody',
-          actions: [{ id: 'merge-pr', label: 'Merge PR', onClick: vi.fn() }],
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
+          prCiState: 's',
+          prCiRuns: [{ name: 'test', status: 'failure' }],
         })
       );
     });
 
-    expect(container.textContent).toContain('Merge PR');
-    expect(container.querySelector('button[aria-label="More actions"]')).toBeNull();
+    expect(
+      container.querySelector('[data-pr-ci-verdict]')?.getAttribute('data-pr-ci-verdict')
+    ).toBe('success');
+    expect(
+      container.querySelector('button[aria-label^="CI checks"]')?.getAttribute('aria-label')
+    ).toBe('CI checks · CI passed');
   });
 
-  it('keeps the location tooltip stable across context rerenders', async () => {
+  it('gives no CI verdict when session metadata has no CI code yet', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          branch: 'feature',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/2894',
+            status: 'open',
+          } as SessionPullRequestMeta,
+          onOpenPr: vi.fn(),
+          prCiRuns: [{ name: 'test', status: 'failure' }],
+        })
+      );
+    });
 
-    for (let render = 0; render < 20; render += 1) {
-      await act(async () => {
-        root?.render(
-          createElement(ContextChip, {
-            mode: 'stage',
-            projectName: 'loro-dev/lody',
-            branch: `fix/location-tooltip-${render}`,
-            workspaceLocation: { kind: 'worktree', path: '/tmp/lody-worktree' },
-          })
-        );
-      });
-    }
-
-    expect(container.querySelector('button[aria-label="Worktree"]')).toBeInstanceOf(
-      HTMLButtonElement
-    );
+    expect(container.querySelector('[data-pr-ci-verdict]')).toBeNull();
+    expect(
+      container.querySelector('button[aria-label^="CI checks"]')?.getAttribute('aria-label')
+    ).toBe('CI checks');
   });
 
   it('keeps a demoted merge action reachable from the overflow menu', async () => {

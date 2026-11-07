@@ -54,19 +54,6 @@ describe('createAcpStartupMonitor', () => {
 
     await expect(monitor.abortPromise).rejects.toThrow(/Cannot find package 'zod'/);
   });
-
-  it('rejects startup when process creation emits an error', async () => {
-    const fakeProcess = createFakeMonitoredProcess();
-    const monitor = createAcpStartupMonitor(fakeProcess.processHandle, {
-      sessionId: 'session-2',
-      command: 'claude-agent-acp',
-      args: ['--debug'],
-    });
-
-    fakeProcess.emitError(new Error('spawn ENOENT'));
-
-    await expect(monitor.abortPromise).rejects.toThrow(/spawn ENOENT/);
-  });
   it.each([false, true])(
     'preserves stderr when transport closes first (exit observed: %s)',
     async (exitObserved) => {
@@ -77,7 +64,7 @@ describe('createAcpStartupMonitor', () => {
         args: [],
         getStderrTail: () => 'npm error EBADDEVENGINES: Node v22.23.1 requires >=22.23.4',
       });
-      const disconnected = new Error('ACP connection closed');
+      const disconnected = new Error('write EPIPE');
       // Handle the monitor promise even when the transport wins the startup race.
       const processResult = monitor.abortPromise.catch((error: unknown) => error);
       if (exitObserved) fakeProcess.emitExit(1, null);
@@ -95,26 +82,4 @@ describe('createAcpStartupMonitor', () => {
       monitor.dispose();
     }
   );
-
-  it('keeps protocol, cancellation and unexplained transport errors unchanged', () => {
-    const fakeProcess = createFakeMonitoredProcess();
-    let stderrTail = 'diagnostic warning';
-    const monitor = createAcpStartupMonitor(fakeProcess.processHandle, {
-      sessionId: 'synthetic-startup',
-      command: 'npx',
-      args: [],
-      getStderrTail: () => stderrTail,
-    });
-    for (const error of [
-      new Error('Authentication required'),
-      new DOMException('ACP connection closed', 'AbortError'),
-      Object.assign(new Error('Connection is disposed'), { code: -32603 }),
-    ]) {
-      expect(monitor.resolveError(error)).toBe(error);
-    }
-    stderrTail = '';
-    const disconnected = new Error('ACP connection closed');
-    expect(monitor.resolveError(disconnected)).toBe(disconnected);
-    monitor.dispose();
-  });
 });

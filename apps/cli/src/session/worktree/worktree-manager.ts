@@ -19,9 +19,14 @@ import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
 
+import { CommandTimedOut } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from './git-execution';
+import {
+  BEST_EFFORT_FETCH_TIMEOUT_MS,
+  WorktreeGitCommandFailed,
+  WorktreeGitExecutionFailed,
+} from './git-execution';
 import { WorktreeObservations, worktreeObservationLayer } from './worktree-observations';
 import {
   LocalWorktreePreparation,
@@ -376,9 +381,14 @@ export class WorktreeManager {
     }
   }
 
-  private runGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
+  private runGit(
+    args: string[],
+    cwd: string,
+    env?: NodeJS.ProcessEnv,
+    timeout?: number
+  ): Promise<string> {
     return worktreeGitLegacy.run(
-      { args, cwd, env },
+      { args, cwd, env, timeout },
       { logger: this.logger, logPrefix: `[${this.repoId}]`, nodeProcess: this.nodeProcess }
     );
   }
@@ -746,7 +756,8 @@ export class WorktreeManager {
       await this.runGit(
         ['fetch', 'origin', '--prune'],
         this.bareGitDir,
-        buildBrokerAuthEnv(brokerAuth)
+        buildBrokerAuthEnv(brokerAuth),
+        fetchMode === 'best-effort' ? BEST_EFFORT_FETCH_TIMEOUT_MS : undefined
       );
       let originHead: string | null = null;
       let originMain: string | null = null;
@@ -775,6 +786,16 @@ export class WorktreeManager {
         } origin/master=${originMaster ?? 'unknown'})`
       );
     } catch (error) {
+      // A bare timeout is projected only after the process Scope released.
+      // Mixed timeout/release failures retain ProcessCleanupFailed and still escape.
+      if (
+        fetchMode === 'best-effort' &&
+        error instanceof WorktreeGitExecutionFailed &&
+        error.cause instanceof CommandTimedOut
+      ) {
+        this.logger.warn(`[${this.repoId}] Fetch timed out; continuing from local refs`);
+        return;
+      }
       rethrowWorktreeGitInfrastructureFailure(error);
       const message = error instanceof Error ? error.message : 'Unknown error';
       await this.diagnoseGitHubGitAuthFailure({
@@ -1481,49 +1502,105 @@ export class WorktreeManager {
 
   async initializeMissingProjectSubmodules(
     workdir: string,
-    brokerAuth?: GitCredentialBrokerAuth
+    brokerAuth?: GitCredentialBrokerAuth,
+    selectedSubmodulePaths: readonly string[] = []
   ): Promise<void> {
-    await withRepoLock(this.repoId, async () => {
-      if (!fs.existsSync(path.join(workdir, '.gitmodules'))) return;
-      const entries = await this.runGit(
-        ['config', '--null', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'],
-        workdir
-      ).catch((error: unknown) => {
-        if (error instanceof WorktreeGitCommandFailed && error.code === 1 && !error.signal)
-          return '';
-        throw error;
-      });
-      if (!entries) return;
-      // Submodule update follows the index, not residual entries in .gitmodules.
-      const index = await this.runGit(['ls-files', '--stage', '-z'], workdir);
-      const gitlinks = new Set(
-        index.split('\0').flatMap((entry) => {
-          const match = /^160000 [0-9a-f]{40,64} 0\t([\s\S]+)$/.exec(entry);
-          return match ? [match[1]] : [];
-        })
-      );
-      const missing: string[] = [];
-      for (const entry of entries.split('\0').filter(Boolean)) {
-        const memberPath = entry.slice(entry.indexOf('\n') + 1);
-        if (!isSafeProjectPath(memberPath)) throw new Error('Invalid project group submodule path');
-        if (!gitlinks.has(memberPath)) continue;
-        const directory = path.join(workdir, memberPath);
-        if (
-          fs.existsSync(directory) &&
-          realpathIfExists(directory) !== path.join(realpathIfExists(workdir), memberPath)
-        )
-          throw new Error('Project group submodule path is a symlink');
-        if (fs.existsSync(path.join(directory, '.git'))) continue;
-        missing.push(memberPath);
-      }
-      if (missing.length) {
-        await this.runGit(
-          ['submodule', 'update', '--init', '--recursive', '--jobs', '4', '--', ...missing],
-          workdir,
-          buildBrokerAuthEnv(brokerAuth)
-        );
-      }
+    await withRepoLock(this.repoId, () =>
+      this.initializeProjectSubmodulesLocked(
+        workdir,
+        brokerAuth,
+        this.source.kind === 'local-shared' ? this.source.originalRootPath : undefined,
+        selectedSubmodulePaths
+      )
+    );
+  }
+
+  /** Retain the same mutation lease through descendants; selected Members have their own owner. */
+  private async initializeProjectSubmodulesLocked(
+    workdir: string,
+    brokerAuth: GitCredentialBrokerAuth | undefined,
+    localSource: string | undefined,
+    selectedSubmodulePaths: readonly string[] = []
+  ): Promise<void> {
+    if (!fs.existsSync(path.join(workdir, '.gitmodules'))) return;
+    const entries = await this.runGit(
+      ['config', '--null', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'],
+      workdir
+    ).catch((error: unknown) => {
+      if (error instanceof WorktreeGitCommandFailed && error.code === 1 && !error.signal) return '';
+      throw error;
     });
+    if (!entries) return;
+    // Submodule update follows the index, not residual entries in .gitmodules.
+    const index = await this.runGit(['ls-files', '--stage', '-z'], workdir);
+    const gitlinks = new Set(
+      index.split('\0').flatMap((entry) => {
+        const match = /^160000 [0-9a-f]{40,64} 0\t([\s\S]+)$/.exec(entry);
+        return match ? [match[1]] : [];
+      })
+    );
+    const missing: string[] = [];
+    for (const entry of entries.split('\0').filter(Boolean)) {
+      const newline = entry.indexOf('\n');
+      const memberPath = entry.slice(newline + 1);
+      if (!isSafeProjectPath(memberPath)) throw new Error('Invalid project group submodule path');
+      if (!gitlinks.has(memberPath) || selectedSubmodulePaths.includes(memberPath)) continue;
+      const directory = path.join(workdir, memberPath);
+      if (
+        fs.existsSync(directory) &&
+        realpathIfExists(directory) !== path.join(realpathIfExists(workdir), memberPath)
+      )
+        throw new Error('Project group submodule path is a symlink');
+      const candidate = localSource ? path.join(localSource, memberPath) : undefined;
+      if (fs.existsSync(path.join(directory, '.git'))) {
+        // A previous attempt may have finished this parent before a child failed.
+        // Inspect descendants without checking out or resetting this populated parent.
+        const actualRoot = await this.runGit(['rev-parse', '--show-toplevel'], directory);
+        if (realpathIfExists(actualRoot) !== realpathIfExists(directory))
+          throw new Error('Invalid project group submodule checkout');
+        await this.initializeProjectSubmodulesLocked(directory, brokerAuth, candidate);
+        continue;
+      }
+      let reference: string | undefined;
+      if (candidate && fs.existsSync(path.join(candidate, '.git'))) {
+        // Resolve relative URLs with Git, without fetching or changing the source.
+        await this.runGit(['submodule', 'init', '--', memberPath], workdir);
+        const configKey = entry.slice(0, newline).replace(/\.path$/, '.url');
+        const url = await this.runGit(['config', '--get', configKey], workdir);
+        reference = await worktreeGitLegacy.findProjectSubmoduleReference(candidate, url, {
+          logger: this.logger,
+          nodeProcess: this.nodeProcess,
+        });
+      }
+      if (!reference) {
+        missing.push(memberPath);
+        continue;
+      }
+      // Never pass one reference to a recursive update: each descendant has its own objects.
+      // Keep sibling mutations serialized because Git writes their parent's module config.
+      await this.runGit(
+        [
+          'submodule',
+          'update',
+          '--init',
+          '--reference',
+          reference,
+          '--dissociate',
+          '--',
+          memberPath,
+        ],
+        workdir,
+        buildBrokerAuthEnv(brokerAuth)
+      );
+      await this.initializeProjectSubmodulesLocked(directory, brokerAuth, reference);
+    }
+    if (missing.length) {
+      await this.runGit(
+        ['submodule', 'update', '--init', '--recursive', '--jobs', '4', '--', ...missing],
+        workdir,
+        buildBrokerAuthEnv(brokerAuth)
+      );
+    }
   }
 
   /** Git requires --force even after deinit; allow it only for the clean saved branch. */

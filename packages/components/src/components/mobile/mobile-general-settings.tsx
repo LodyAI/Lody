@@ -27,12 +27,13 @@ import {
   MobileInlinePickerRowSlot,
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
+import { MobileSettingsFoldPanels } from './mobile-settings-fold-panels';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import {
-  getOneSignalPermissionState,
-  getOneSignalPushSubscriptionOptedIn,
-  initOneSignal,
-} from '@/lib/onesignal';
+  getPushPermissionState,
+  getPushSubscriptionOptedIn,
+  initPush,
+} from '@/lib/push-notifications';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { ClearCacheConfirmDialog, useClearCache } from '@/components/settings/clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -126,11 +127,11 @@ export function MobileGeneralSettings() {
   const [notificationSupported, setNotificationSupported] = useState(isNative);
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [oneSignalReady, setOneSignalReady] = useState(false);
+  const [pushClientReady, setPushReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const isSwitchDisabled = isElectron
     ? !notificationSupported || isProcessing
-    : !notificationSupported || !oneSignalReady || isProcessing;
+    : !notificationSupported || !pushClientReady || isProcessing;
 
   const readElectronNotificationPermission =
     useCallback(async (): Promise<ElectronNotificationPermissionStatusResult> => {
@@ -192,18 +193,16 @@ export function MobileGeneralSettings() {
       };
     }, []);
 
-  const readOneSignalPushSubscriptionEnabled = useCallback(async (): Promise<
-    boolean | undefined
-  > => {
+  const readPushSubscriptionEnabled = useCallback(async (): Promise<boolean | undefined> => {
     if (typeof window === 'undefined' || isElectron) {
       return undefined;
     }
 
-    const oneSignal = await initOneSignal().catch(() => null);
-    if (!oneSignal) {
+    const pushClient = await initPush().catch(() => null);
+    if (!pushClient) {
       return undefined;
     }
-    return getOneSignalPushSubscriptionOptedIn(oneSignal);
+    return getPushSubscriptionOptedIn(pushClient);
   }, [isElectron]);
 
   const syncNotificationPermission = useCallback(async () => {
@@ -226,28 +225,28 @@ export function MobileGeneralSettings() {
     if (isNative) {
       // notificationSupported is seeded from isNative, so it is already true here.
       try {
-        const oneSignal = await initOneSignal();
-        const supported = Boolean(oneSignal);
-        setOneSignalReady(supported);
+        const pushClient = await initPush();
+        const supported = Boolean(pushClient);
+        setPushReady(supported);
 
-        if (!oneSignal) {
+        if (!pushClient) {
           setPermissionStatus('default');
           setNotificationsEnabled(false);
           return;
         }
 
-        const currentPermission = await getOneSignalPermissionState(oneSignal);
+        const currentPermission = await getPushPermissionState(pushClient);
         setPermissionStatus(currentPermission);
         if (currentPermission !== 'granted') {
           setNotificationsEnabled(false);
           return;
         }
 
-        const pushSubscriptionEnabled = await getOneSignalPushSubscriptionOptedIn(oneSignal);
+        const pushSubscriptionEnabled = await getPushSubscriptionOptedIn(pushClient);
         setNotificationsEnabled(pushSubscriptionEnabled ?? false);
       } catch (error) {
         console.error('Failed to sync native notification permission', error);
-        setOneSignalReady(false);
+        setPushReady(false);
         setPermissionStatus('default');
         setNotificationsEnabled(false);
       }
@@ -269,14 +268,14 @@ export function MobileGeneralSettings() {
       return;
     }
 
-    const webPushSubscriptionEnabled = await readOneSignalPushSubscriptionEnabled();
+    const webPushSubscriptionEnabled = await readPushSubscriptionEnabled();
     if (typeof webPushSubscriptionEnabled === 'boolean') {
       setNotificationsEnabled(webPushSubscriptionEnabled);
       return;
     }
 
-    if (!oneSignalReady) {
-      // Web push status is managed by OneSignal subscription state, not browser permission only.
+    if (!pushClientReady) {
+      // Web push status is managed by Push subscription state, not browser permission only.
       setNotificationsEnabled(false);
       return;
     }
@@ -287,9 +286,9 @@ export function MobileGeneralSettings() {
     electronCompletionNotificationsEnabled,
     isElectron,
     isNative,
-    oneSignalReady,
+    pushClientReady,
     readElectronNotificationPermission,
-    readOneSignalPushSubscriptionEnabled,
+    readPushSubscriptionEnabled,
   ]);
 
   useEffect(() => {
@@ -327,12 +326,12 @@ export function MobileGeneralSettings() {
   }, [electronCompletionNotificationsEnabled, isElectron, syncNotificationPermission]);
 
   useEffect(() => {
-    if (isElectron || !oneSignalReady) {
+    if (isElectron || !pushClientReady) {
       return undefined;
     }
     void syncNotificationPermission();
     return undefined;
-  }, [isElectron, oneSignalReady, syncNotificationPermission]);
+  }, [isElectron, pushClientReady, syncNotificationPermission]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
@@ -340,19 +339,19 @@ export function MobileGeneralSettings() {
     }
 
     let active = true;
-    void initOneSignal()
-      .then((oneSignal) => {
-        if (!active || !oneSignal?.Notifications) {
+    void initPush()
+      .then((pushClient) => {
+        if (!active || !pushClient?.Notifications) {
           return;
         }
-        setOneSignalReady(true);
+        setPushReady(true);
       })
       .catch((error: unknown) => {
         if (!active) {
           return;
         }
-        setOneSignalReady(false);
-        console.error('OneSignal init failed', error);
+        setPushReady(false);
+        console.error('Push init failed', error);
       });
 
     return () => {
@@ -404,11 +403,11 @@ export function MobileGeneralSettings() {
     if (!notificationSupported) {
       return t('settings.notifications.reason.notSupported');
     }
-    if (!isElectron && !oneSignalReady) {
+    if (!isElectron && !pushClientReady) {
       return t('settings.notifications.reason.notReady');
     }
     return undefined;
-  }, [isElectron, notificationSupported, oneSignalReady, t]);
+  }, [isElectron, notificationSupported, pushClientReady, t]);
 
   const desktopHint = useMemo(() => {
     return t(getDesktopNotificationHintKey(electronPlatform));
@@ -504,13 +503,13 @@ export function MobileGeneralSettings() {
         return;
       }
 
-      if (!oneSignalReady) {
+      if (!pushClientReady) {
         toast.error(t('settings.notifications.notReady'));
         return;
       }
 
-      const oneSignal = await initOneSignal();
-      if (!oneSignal?.Notifications) {
+      const pushClient = await initPush();
+      if (!pushClient?.Notifications) {
         toast.error(t('settings.notifications.notReady'));
         return;
       }
@@ -523,7 +522,7 @@ export function MobileGeneralSettings() {
           source: 'mobile_settings',
         });
 
-        const result = (await oneSignal.Notifications.requestPermission()) ? 'granted' : 'denied';
+        const result = (await pushClient.Notifications.requestPermission()) ? 'granted' : 'denied';
         setPermissionStatus(result);
 
         if (result !== 'granted') {
@@ -544,9 +543,11 @@ export function MobileGeneralSettings() {
         });
 
         if (user) {
-          await oneSignal.User.PushSubscription.optIn();
-          await oneSignal.login(user?.id);
-          setNotificationsEnabled(true);
+          await pushClient.User.PushSubscription.optIn();
+          await pushClient.login(user?.id);
+          const registered = await getPushSubscriptionOptedIn(pushClient);
+          setNotificationsEnabled(registered);
+          if (!registered) throw new Error('Push registration was not confirmed');
           // push/subscribed + push/token_registered (spec §8f.3, P0).
           capturePostHogEvent(postHog, 'push/subscribed', {
             surface: pushSurface,
@@ -558,7 +559,7 @@ export function MobileGeneralSettings() {
           });
         }
       } else {
-        await oneSignal.User.PushSubscription.optOut();
+        await pushClient.User.PushSubscription.optOut();
         setNotificationsEnabled(false);
       }
     } catch (error) {
@@ -599,188 +600,208 @@ export function MobileGeneralSettings() {
 
   return (
     <>
-      <MobileInlinePickerCoordinator>
-        {/* Notifications surface above the keyboard-action row because
+      <MobileSettingsFoldPanels
+        upper={
+          <>
+            <MobileInlinePickerCoordinator>
+              {/* Notifications surface above the keyboard-action row because
             users come here far more often to fix "I'm not getting
             notifications" than to flip the return-key behavior. */}
-        <MobileSettingsSection>
-          <MobileSettingsRow
-            label={
-              isElectron
-                ? t('settings.notifications.enableToggleDesktop')
-                : t('settings.notifications.enableToggle')
-            }
-            helper={
-              <div {...stylex.props(styles.helper)}>
-                <span>{permissionLabel}</span>
-                {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
-                {isElectron && permissionStatus !== 'granted' ? <span>{desktopHint}</span> : null}
-                {!notificationSupported ? (
-                  <span {...stylex.props(styles.helperError)}>
-                    {isElectron
-                      ? t('settings.notifications.unsupportedDesktop')
-                      : t('settings.notifications.unsupported')}
-                  </span>
-                ) : null}
-              </div>
-            }
-          >
-            {isProcessing ? (
-              <span {...stylex.props(styles.spinnerBox)}>
-                <Spinner size="small" label={t('common.loading', 'Loading...')} />
-              </span>
-            ) : (
-              <Switch
-                id="notification-toggle"
-                checked={notificationsEnabled}
-                disabled={isSwitchDisabled}
-                onCheckedChange={(checked) => {
-                  void handleToggleNotifications(checked);
-                }}
-              />
-            )}
-          </MobileSettingsRow>
-        </MobileSettingsSection>
+              <MobileSettingsSection>
+                <MobileSettingsRow
+                  label={
+                    isElectron
+                      ? t('settings.notifications.enableToggleDesktop')
+                      : t('settings.notifications.enableToggle')
+                  }
+                  helper={
+                    <div {...stylex.props(styles.helper)}>
+                      <span>{permissionLabel}</span>
+                      {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
+                      {isElectron && permissionStatus !== 'granted' ? (
+                        <span>{desktopHint}</span>
+                      ) : null}
+                      {!notificationSupported ? (
+                        <span {...stylex.props(styles.helperError)}>
+                          {isElectron
+                            ? t('settings.notifications.unsupportedDesktop')
+                            : t('settings.notifications.unsupported')}
+                        </span>
+                      ) : null}
+                    </div>
+                  }
+                >
+                  {isProcessing ? (
+                    <span {...stylex.props(styles.spinnerBox)}>
+                      <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                    </span>
+                  ) : (
+                    <Switch
+                      id="notification-toggle"
+                      checked={notificationsEnabled}
+                      disabled={isSwitchDisabled}
+                      onCheckedChange={(checked) => {
+                        void handleToggleNotifications(checked);
+                      }}
+                    />
+                  )}
+                </MobileSettingsRow>
+              </MobileSettingsSection>
 
-        {isNativeIOS ? (
-          <MobileSettingsSection title={t('settings.liveActivities.title', 'Dynamic Island')}>
-            <MobileSettingsRow
-              label={t('settings.liveActivities.enableToggle', 'Enable Dynamic Island')}
-              helper={t(
-                'settings.liveActivities.description',
-                'Show running conversations and permission requests in Live Activities.'
-              )}
-            >
-              <Switch
-                id="ios-live-activities-toggle"
-                checked={iosLiveActivitiesEnabled}
-                onCheckedChange={setIosLiveActivitiesEnabled}
-              />
-            </MobileSettingsRow>
-          </MobileSettingsSection>
-        ) : null}
+              {isNativeIOS ? (
+                <MobileSettingsSection title={t('settings.liveActivities.title', 'Dynamic Island')}>
+                  <MobileSettingsRow
+                    label={t('settings.liveActivities.enableToggle', 'Enable Dynamic Island')}
+                    helper={t(
+                      'settings.liveActivities.description',
+                      'Show running conversations and permission requests in Live Activities.'
+                    )}
+                  >
+                    <Switch
+                      id="ios-live-activities-toggle"
+                      checked={iosLiveActivitiesEnabled}
+                      onCheckedChange={setIosLiveActivitiesEnabled}
+                    />
+                  </MobileSettingsRow>
+                </MobileSettingsSection>
+              ) : null}
 
-        {showMobileInputSettings ? (
-          <MobileSettingsSection title={t('settings.input.title')}>
-            <MobileInlinePickerRowSlot>
-              <MobileSettingsRow label={t('settings.input.mobileKeyboardAction.label')}>
-                <MobileSettingsPickerTrigger
-                  id="settings-keyboard-action"
-                  ariaLabel={String(t('settings.input.mobileKeyboardAction.label'))}
-                  value={selectedMobileKeyboardAction}
-                  options={keyboardActionOptions}
-                  onChange={(value) => {
-                    if (isMobileKeyboardAction(value)) {
-                      setMobileKeyboardAction(value);
-                    }
-                  }}
-                  triggerLabel={selectedKeyboardActionLabel}
+              {showMobileInputSettings ? (
+                <MobileSettingsSection title={t('settings.input.title')}>
+                  <MobileInlinePickerRowSlot>
+                    <MobileSettingsRow label={t('settings.input.mobileKeyboardAction.label')}>
+                      <MobileSettingsPickerTrigger
+                        id="settings-keyboard-action"
+                        ariaLabel={String(t('settings.input.mobileKeyboardAction.label'))}
+                        value={selectedMobileKeyboardAction}
+                        options={keyboardActionOptions}
+                        onChange={(value) => {
+                          if (isMobileKeyboardAction(value)) {
+                            setMobileKeyboardAction(value);
+                          }
+                        }}
+                        triggerLabel={selectedKeyboardActionLabel}
+                      />
+                    </MobileSettingsRow>
+                  </MobileInlinePickerRowSlot>
+                </MobileSettingsSection>
+              ) : null}
+            </MobileInlinePickerCoordinator>
+          </>
+        }
+        lower={
+          <>
+            <MobileSettingsSection title={t('settings.general.sessions.title', 'Sessions')}>
+              <MobileSettingsRowGroup>
+                <MobileSettingsRow
+                  label={t(
+                    'settings.general.sessions.queuedMessageBehavior.label',
+                    'Queued message behavior'
+                  )}
+                  helper={t(
+                    'settings.general.sessions.queuedMessageBehavior.helper',
+                    'Choose whether messages sent while the agent is working wait in the queue or steer the active response.'
+                  )}
+                  stack
+                >
+                  <QueuedMessageBehaviorControl
+                    value={queuedMessageBehavior}
+                    onChange={setQueuedMessageBehavior}
+                    xstyle={styles.queuedBehavior}
+                  />
+                </MobileSettingsRow>
+                <MobileSettingsRow
+                  label={t(
+                    'settings.general.sessions.codeOnlyLineChanges.label',
+                    'Show code-only line changes'
+                  )}
+                >
+                  <Switch
+                    id="session-sidebar-code-changes-only-toggle"
+                    checked={sessionSidebarCodeChangesOnly}
+                    onCheckedChange={setSessionSidebarCodeChangesOnly}
+                  />
+                </MobileSettingsRow>
+                <MobileSettingsRow
+                  label={
+                    <p {...stylex.props(styles.rowLabel)}>{t('settings.cache.clearCache.label')}</p>
+                  }
+                  helper={t('settings.cache.clearCache.description')}
+                  onClick={() => clearCache.setDialogOpen(true)}
                 />
-              </MobileSettingsRow>
-            </MobileInlinePickerRowSlot>
-          </MobileSettingsSection>
-        ) : null}
-      </MobileInlinePickerCoordinator>
+              </MobileSettingsRowGroup>
+            </MobileSettingsSection>
 
-      <MobileSettingsSection title={t('settings.general.sessions.title', 'Sessions')}>
-        <MobileSettingsRowGroup>
-          <MobileSettingsRow
-            label={t(
-              'settings.general.sessions.queuedMessageBehavior.label',
-              'Queued message behavior'
+            {isElectron && (
+              <MobileSettingsSection title={t('settings.general.autoLaunch.title', 'Startup')}>
+                <MobileSettingsRowGroup>
+                  <MobileSettingsRow
+                    label={t('settings.general.autoLaunch.label', 'Launch at startup')}
+                  >
+                    {autoLaunch.enabledLoading ? (
+                      <span {...stylex.props(styles.spinnerBox)}>
+                        <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                      </span>
+                    ) : (
+                      <Switch
+                        id="auto-launch-toggle"
+                        checked={autoLaunch.enabled}
+                        disabled={!autoLaunch.supported || autoLaunch.loading}
+                        onCheckedChange={(checked) => {
+                          void autoLaunch.updateEnabled(checked);
+                        }}
+                      />
+                    )}
+                  </MobileSettingsRow>
+                  <MobileSettingsRow
+                    label={t(
+                      'settings.general.autoLaunch.hideWindowLabel',
+                      'Hide window on auto-launch'
+                    )}
+                    helper={t(
+                      'settings.general.autoLaunch.hideWindowHelper',
+                      'Keep the main window hidden when Lody starts automatically after sign-in'
+                    )}
+                  >
+                    {autoLaunch.hideWindowLoading ? (
+                      <span {...stylex.props(styles.spinnerBox)}>
+                        <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                      </span>
+                    ) : (
+                      <Switch
+                        id="auto-launch-hide-window-toggle"
+                        checked={autoLaunch.hideWindowOnAutoLaunch}
+                        disabled={!autoLaunch.enabled || autoLaunch.loading}
+                        onCheckedChange={(checked) => {
+                          void autoLaunch.updateHideWindow(checked);
+                        }}
+                      />
+                    )}
+                  </MobileSettingsRow>
+                  <MobileSettingsRow
+                    label={t('settings.general.preventSleep.label', 'Prevent sleep')}
+                  >
+                    <Switch
+                      id="prevent-sleep-toggle"
+                      checked={preventSleepEnabled}
+                      onCheckedChange={(checked) => {
+                        void (async () => {
+                          setPreventSleepEnabled(checked);
+                          const result =
+                            await getIpcServices()?.app.setPreventSleepEnabled(checked);
+                          if (typeof result?.enabled === 'boolean') {
+                            setPreventSleepEnabled(result.enabled);
+                          }
+                        })();
+                      }}
+                    />
+                  </MobileSettingsRow>
+                </MobileSettingsRowGroup>
+              </MobileSettingsSection>
             )}
-            helper={t(
-              'settings.general.sessions.queuedMessageBehavior.helper',
-              'Choose whether messages sent while the agent is working wait in the queue or steer the active response.'
-            )}
-            stack
-          >
-            <QueuedMessageBehaviorControl
-              value={queuedMessageBehavior}
-              onChange={setQueuedMessageBehavior}
-              xstyle={styles.queuedBehavior}
-            />
-          </MobileSettingsRow>
-          <MobileSettingsRow
-            label={t(
-              'settings.general.sessions.codeOnlyLineChanges.label',
-              'Show code-only line changes'
-            )}
-          >
-            <Switch
-              id="session-sidebar-code-changes-only-toggle"
-              checked={sessionSidebarCodeChangesOnly}
-              onCheckedChange={setSessionSidebarCodeChangesOnly}
-            />
-          </MobileSettingsRow>
-          <MobileSettingsRow
-            label={<p {...stylex.props(styles.rowLabel)}>{t('settings.cache.clearCache.label')}</p>}
-            helper={t('settings.cache.clearCache.description')}
-            onClick={() => clearCache.setDialogOpen(true)}
-          />
-        </MobileSettingsRowGroup>
-      </MobileSettingsSection>
-
-      {isElectron && (
-        <MobileSettingsSection title={t('settings.general.autoLaunch.title', 'Startup')}>
-          <MobileSettingsRowGroup>
-            <MobileSettingsRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
-              {autoLaunch.enabledLoading ? (
-                <span {...stylex.props(styles.spinnerBox)}>
-                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                </span>
-              ) : (
-                <Switch
-                  id="auto-launch-toggle"
-                  checked={autoLaunch.enabled}
-                  disabled={!autoLaunch.supported || autoLaunch.loading}
-                  onCheckedChange={(checked) => {
-                    void autoLaunch.updateEnabled(checked);
-                  }}
-                />
-              )}
-            </MobileSettingsRow>
-            <MobileSettingsRow
-              label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
-              helper={t(
-                'settings.general.autoLaunch.hideWindowHelper',
-                'Keep the main window hidden when Lody starts automatically after sign-in'
-              )}
-            >
-              {autoLaunch.hideWindowLoading ? (
-                <span {...stylex.props(styles.spinnerBox)}>
-                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                </span>
-              ) : (
-                <Switch
-                  id="auto-launch-hide-window-toggle"
-                  checked={autoLaunch.hideWindowOnAutoLaunch}
-                  disabled={!autoLaunch.enabled || autoLaunch.loading}
-                  onCheckedChange={(checked) => {
-                    void autoLaunch.updateHideWindow(checked);
-                  }}
-                />
-              )}
-            </MobileSettingsRow>
-            <MobileSettingsRow label={t('settings.general.preventSleep.label', 'Prevent sleep')}>
-              <Switch
-                id="prevent-sleep-toggle"
-                checked={preventSleepEnabled}
-                onCheckedChange={(checked) => {
-                  void (async () => {
-                    setPreventSleepEnabled(checked);
-                    const result = await getIpcServices()?.app.setPreventSleepEnabled(checked);
-                    if (typeof result?.enabled === 'boolean') {
-                      setPreventSleepEnabled(result.enabled);
-                    }
-                  })();
-                }}
-              />
-            </MobileSettingsRow>
-          </MobileSettingsRowGroup>
-        </MobileSettingsSection>
-      )}
-
+          </>
+        }
+      />
       <ClearCacheConfirmDialog
         open={clearCache.dialogOpen}
         onOpenChange={clearCache.setDialogOpen}

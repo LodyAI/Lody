@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { link, lstat, mkdir, open, rename, unlink, readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
@@ -25,6 +25,8 @@ export interface KekWrapper {
 /** Stable custody failures; native errors and private material are never included. */
 export class NodeE2eeCustodyError extends Data.TaggedError('NodeE2eeCustodyError')<{
   readonly code:
+    | 'permissions'
+    | 'identity-lost'
     | 'unavailable'
     | 'basic-text'
     | 'closed'
@@ -32,7 +34,18 @@ export class NodeE2eeCustodyError extends Data.TaggedError('NodeE2eeCustodyError
     | 'corrupt'
     | 'invalid-input'
     | 'rewrap-failed';
-}> {}
+}> {
+  /** Content-free local repair guidance; native causes never leave custody. */
+  override get message() {
+    if (this.code === 'permissions')
+      return 'e2ee_permissions: Restore owner-only directory/file permissions (700/600 on macOS/Linux; owner-only ACL on Windows), then retry.';
+    if (this.code === 'unavailable' || this.code === 'basic-text')
+      return 'e2ee_unavailable: Unlock the OS keychain or Secret Service/KWallet, then retry. OS protection must be available; file protection is not selected on reopen.';
+    if (this.code === 'identity-lost' || this.code === 'corrupt')
+      return `e2ee_${this.code}: Restore the original files or explicitly reset the local workspace identity and pair again with another authorized device. Originals are never replaced by retry.`;
+    return `e2ee_${this.code}`;
+  }
+}
 const fail = (code: NodeE2eeCustodyError['code']) => new NodeE2eeCustodyError({ code });
 const domain = Buffer.from('lody-e2ee/desktop-custody/v1\0');
 const installedPurpose = Buffer.from('lody-e2ee/local-epoch-key/v1\0');
@@ -49,7 +62,14 @@ function native<A>(work: () => Promise<A>) {
   return Effect.uninterruptible(
     Effect.tryPromise({
       try: work,
-      catch: (cause) => (cause instanceof NodeE2eeCustodyError ? cause : fail('storage')),
+      catch: (cause) =>
+        cause instanceof NodeE2eeCustodyError
+          ? cause
+          : ['EACCES', 'EPERM'].includes((cause as NodeJS.ErrnoException)?.code ?? '')
+            ? fail('permissions')
+            : (cause as NodeJS.ErrnoException)?.code === 'ENOENT'
+              ? fail('identity-lost')
+              : fail('storage'),
     })
   );
 }
@@ -71,13 +91,8 @@ async function readOwned(path: string, maximum: number) {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await handle.stat();
-    if (
-      !info.isFile() ||
-      info.size < 1 ||
-      info.size > maximum ||
-      (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
-    )
-      throw fail('corrupt');
+    if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) throw fail('permissions');
+    if (!info.isFile() || info.size < 1 || info.size > maximum) throw fail('corrupt');
     return new Uint8Array(await handle.readFile());
   } finally {
     await handle.close();
@@ -341,6 +356,7 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
     track(async () => {
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const info = await lstat(directory);
+      if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) throw fail('permissions');
       if (
         !info.isDirectory() ||
         info.isSymbolicLink() ||
@@ -358,6 +374,12 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           wrapped = await readOwned(file, 8192);
         } catch (cause) {
           if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+          if (
+            (await readdir(directory)).some(
+              (name) => name.endsWith('.device') || name.endsWith('.sealed')
+            )
+          )
+            throw fail('identity-lost');
           const candidate = random(new Uint8Array(32));
           try {
             const encoded = await wrap(Buffer.from(candidate).toString('hex'));
@@ -625,13 +647,52 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
   }
   const credentialContext = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
     new Uint8Array(Buffer.concat([credentialPurpose, genesis.toBytes(), key.toBytes()]));
-  const credentialPath = (genesis: Bytes.GenesisHash) =>
-    join(directory, `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`);
-  const readCredential = async (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) => {
-    const opened = unseal(await readOwned(credentialPath(genesis), 1024));
+  const credentialPath = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
+    join(
+      directory,
+      `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}-${Buffer.from(key.toBytes()).toString('hex')}.sealed`
+    );
+  const readCredential = async (
+    genesis: Bytes.GenesisHash,
+    key: Bytes.SigningPublicKey,
+    preparing = false
+  ) => {
+    let blob: Uint8Array;
+    let legacy = false;
     try {
-      if (!equal(opened.aad, credentialContext(genesis, key)) || opened.body.length !== 32)
+      blob = await readOwned(credentialPath(genesis, key), 1024);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+      legacy = true;
+      try {
+        blob = await readOwned(
+          join(
+            directory,
+            `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`
+          ),
+          1024
+        );
+      } catch (legacyCause) {
+        if (preparing && (legacyCause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw legacyCause;
+      }
+    }
+    const opened = unseal(blob);
+    try {
+      const expected = credentialContext(genesis, key);
+      if (opened.body.length !== 32) throw fail('corrupt');
+      if (!equal(opened.aad, expected)) {
+        // The old location is read-only. A genuine other identity's credential
+        // is retained evidence, never the replacement identity's credential.
+        if (
+          legacy &&
+          preparing &&
+          opened.aad.length === expected.length &&
+          equal(opened.aad.subarray(0, -32), expected.subarray(0, -32))
+        )
+          return undefined;
         throw fail('corrupt');
+      }
       return Buffer.from(opened.body).toString('hex');
     } finally {
       opened.body.fill(0);
@@ -645,24 +706,22 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       native(() =>
         track(async () => {
           const genesis = ownGenesis(inputGenesis);
-          try {
-            const credential = await readCredential(genesis, key);
+          const retained = await readCredential(genesis, key, true);
+          if (retained !== undefined)
             return {
-              credential,
+              credential: retained,
               credentialHash: createHash('sha256')
-                .update(Buffer.from(credential, 'hex'))
+                .update(Buffer.from(retained, 'hex'))
                 .digest('hex'),
             };
-          } catch (cause) {
-            if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
-          }
           const raw = random(new Uint8Array(32));
           try {
-            await publish(credentialPath(genesis), seal(raw, credentialContext(genesis, key)));
+            await publish(credentialPath(genesis, key), seal(raw, credentialContext(genesis, key)));
           } finally {
             raw.fill(0);
           }
           const credential = await readCredential(genesis, key);
+          if (credential === undefined) throw fail('corrupt');
           return {
             credential,
             credentialHash: createHash('sha256')
@@ -673,7 +732,13 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
       ),
     /** Reopen a previously retained access credential. Missing/corrupt data never regenerates it. */
     deviceCredential: (inputGenesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
-      native(() => track(() => readCredential(ownGenesis(inputGenesis), key))),
+      native(() =>
+        track(async () => {
+          const credential = await readCredential(ownGenesis(inputGenesis), key);
+          if (credential === undefined) throw fail('corrupt');
+          return credential;
+        })
+      ),
     installed: protector('installed'),
     candidate: protector('candidate'),
     /** Only local signing is available before binding. No private handles export. */
@@ -709,6 +774,34 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (!validKind(kind)) throw fail('invalid-input');
           const genesis = ownGenesis(inputGenesis);
           return decodeDevice(genesis, kind, await readOwned(pathFor(genesis, kind), 32768));
+        })
+      ),
+    /** Terminal host-confirmed removal only, after all workspace users drain. Deletes
+     * this exact incarnation; a different retained key is a later identity and is spared.
+     * Missing originals make cleanup retryable, never recreate them. Shared KEK remains. */
+    forgetDevice: (
+      inputGenesis: Bytes.GenesisHash,
+      key: Bytes.SigningPublicKey,
+      kind: 'personal' | 'machine'
+    ) =>
+      native(() =>
+        track(async () => {
+          if (!validKind(kind)) throw fail('invalid-input');
+          const genesis = ownGenesis(inputGenesis);
+          const file = pathFor(genesis, kind);
+          try {
+            const retained = await decodeDevice(genesis, kind, await readOwned(file, 32768));
+            if (!retained.publicKey.equals(key)) return false;
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+          }
+          await unlink(file).catch((cause) => {
+            if (cause.code !== 'ENOENT') throw cause;
+          });
+          await unlink(credentialPath(genesis, key)).catch((cause) => {
+            if (cause.code !== 'ENOENT') throw cause;
+          });
+          return true;
         })
       ),
     stop: () =>

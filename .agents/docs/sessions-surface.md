@@ -53,6 +53,9 @@ this page is the full text of the rules summarised there.
   Header "Open in" / "Copy Path" launchers live here; shared launcher/path
   helpers are `../../lib/session-path-launchers.ts`,
   `../../lib/session-open-in-ide-path.ts`, and `../../lib/session-workspace-path.ts`.
+  Header "Copy URL" uses `buildAppSessionUrl` for the selected conversation’s
+  HTTPS page; "Copy deeplink" uses the workspace-scoped `lody://session/…` address.
+  The mobile menu offers the same two actions. Neither action publishes history.
   Header "Copy path" derives paths from the machine Flock doc `['dotlodyPath']`,
   falling back to local-project `rootPath`; `MachineMeta.workspacePaths[sessionId]` is
   legacy fallback only and must not get new writes.
@@ -84,3 +87,14 @@ this page is the full text of the rules summarised there.
   restoring the conversation to its tail must not unsubscribe before a query
   result arrives or discard an open editor. Workspace, user and surface visibility
   still gate the requests. Conversation provenance remains `leadingContent`.
+
+Session continuation uses the target machine's advertised protocol capability before
+starting reads: `sessionAutomations` for local IPC, `remoteAutomationControl` for
+remote control. Missing capabilities hide its settings and notes without polling;
+metadata updates enable the reader after a CLI upgrade. When a read fails, existing
+continuation notes are marked unavailable and the reader retries in the background;
+the conversation does not add a standalone warning for a failed poll. Settings reads
+are tracked independently: the last confirmed settings remain visible but disabled
+when they cannot be refreshed. An uncertain cancellation or settings change is reported
+and followed by a fresh read. Workspace content and ownership admission remain unchanged; see the
+[continuation availability decision](../notes/implemented/feature/2026-10-30-session-continuation-general-availability.md).

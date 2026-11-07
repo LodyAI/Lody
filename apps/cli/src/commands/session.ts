@@ -1,5 +1,19 @@
-import { readProjectDefaultMcpIds, syncMcpCatalog } from '@/lib/workspace-mcp-store';
-import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
+import { selectTranscriptHistoryPositions } from '@lody/shared/session-data';
+import type { SessionBackend } from '@/session/session-backend';
+import {
+  readProjectDefaultMcpIds,
+  syncMcpCatalog,
+  waitForMcpDefaultCatalog,
+} from '@/lib/workspace-mcp-store';
+import { getDaemonWorkspace, readEncryptedMachineAccess } from '@/lib/session-command-environment';
+import type { SessionSteerResponse } from '@lody/shared';
+import {
+  buildSessionGroupRenamePatch,
+  buildSessionTabRenamePatch,
+  normalizeMcpServerIdSelection,
+  resolveSessionConversationConfig,
+} from '@lody/shared';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import {
   getMachineRoomId,
   machineSupportsProtocolCapability,
@@ -12,6 +26,12 @@ import {
   type MachineFlockFreshness,
 } from './session-catalog-read';
 export { MachineFlockReadUnavailableError } from './session-catalog-read';
+import {
+  MachineOfflineError,
+  readMachinePresence,
+  type MachinePresence,
+} from './session-machine-presence';
+export { MachineOfflineError } from './session-machine-presence';
 import { normalizeSessionTurnInputConfig } from '@lody/shared';
 import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
 import { buildCommandInputBlocks, type SessionInputAttachment } from '@/lib/session-input-content';
@@ -33,7 +53,6 @@ import {
   type PreparedSessionInput,
 } from '@/lib/prepared-session-input';
 import { Command, Option } from 'commander';
-import { sessionInboxRecoveryCommand } from './session-inbox-recovery';
 import {
   SessionDiscoveryFilterShape,
   matchesSessionDiscovery,
@@ -106,7 +125,7 @@ import {
   deriveDraftSessionTitle,
   NEW_SESSION_HISTORY_BACKEND,
 } from '@lody/shared';
-import type { SessionTurn } from '@lody/shared/session-data';
+import { readSessionHistoryMetadata, type SessionTurn } from '@lody/shared/session-data';
 import { AuthClient } from '@/lib/auth';
 import {
   dispatchLocalControl,
@@ -118,8 +137,10 @@ import {
   listAliveRoomIds,
   LocalDaemonAvailabilityError,
   normalizeCliValue,
+  listWorkspaceCandidates,
   printJson,
   resolveStructuredOutputMode as resolveOutputMode,
+  resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
   syncDocForRead,
   syncCommandTime,
@@ -160,7 +181,7 @@ import {
 import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
-import { createSessionBackend } from '@/session/session-backend';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
 import { Effect } from 'effect';
 import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
 import { acquireSessionObservation } from './session-observe-runtime';
@@ -174,6 +195,29 @@ export type DelegatedSessionRequester = {
 };
 
 /** Delegation without provenance must never be recorded as human input. */
+/**
+ * Encrypted workspaces: classify an Agent-delegated input before writing it. Owner
+ * work is unchanged; a shared member's derivation returns the origin to record as
+ * the signed `derivedFrom`, so the start re-authorizes that member. Anything the
+ * daemon cannot verify is refused rather than written as machine-owned work.
+ */
+async function classifyDelegatedEncryptedInput(
+  manager: LoroDocumentManager,
+  delegatedRequester: DelegatedSessionRequester | undefined,
+  targetMachineId: string
+): Promise<{ sessionId: string; userTurnId: string } | undefined> {
+  if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
+  const author = delegatedRequester.author;
+  const daemon = getDaemonWorkspace();
+  if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
+    throw new Error('e2ee_derivation_unavailable');
+  const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
+  return (await daemon.classifyEncryptedDerivation(origin, { machineId: targetMachineId })) ===
+    'member'
+    ? origin
+    : undefined;
+}
+
 const resolveSessionInputAuthor = (
   userId: string,
   delegatedRequester?: DelegatedSessionRequester
@@ -307,6 +351,7 @@ type ListOptions = CommonOptions &
 
 type RenameOptions = CommonOptions & {
   title?: string;
+  group?: boolean;
 };
 
 type HistoryOptions = CommonOptions & {
@@ -657,6 +702,46 @@ export function selectSessionTranscriptEntries(
   return selected;
 }
 
+/** Count visible rows and hydrate the requested transcript positions. */
+export async function readSessionTranscript(
+  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection' | 'readHistoryTranscript'>,
+  options: { all?: boolean; limit?: number; reverse?: boolean }
+): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
+  if (options.all) {
+    const transcript = toSessionTranscriptEntries(await backend.readHistory());
+    return {
+      total: transcript.length,
+      entries: selectSessionTranscriptEntries(transcript, options),
+    };
+  }
+  let total = 0,
+    positions: number[] = [];
+  let selected: SessionHistoryInput[];
+  if (backend.readHistoryTranscript) {
+    const result = await backend.readHistoryTranscript(options);
+    total = result.total;
+    positions = result.positions;
+    selected = result.entries;
+  } else {
+    selected = await backend.readHistorySelection(
+      (rows) => {
+        const result = selectTranscriptHistoryPositions(rows, options);
+        total = result.total;
+        positions = result.positions;
+        return positions;
+      },
+      { transcriptVisibility: true }
+    );
+  }
+  return {
+    total,
+    entries: selected.flatMap((entry, index) => {
+      const formatted = toSessionTranscriptEntry(positions[index]!, entry);
+      return formatted ? [formatted] : [];
+    }),
+  };
+}
+
 export function renderSessionTranscript(entries: SessionTranscriptEntry[]): string {
   if (entries.length === 0) {
     return 'No visible history found.';
@@ -943,7 +1028,19 @@ const billingEntitlementCache = new Map<
   }
 >();
 
-async function getWorkspaceBillingEntitlementBestEffort(
+/**
+ * After a failed or timed-out read, the plan stays unknown (fail open) for this long
+ * without asking again, so a persistently offline machine does not make every
+ * command wait for the read deadline. A failure is never cached as a plan.
+ */
+const BILLING_ENTITLEMENT_RETRY_AFTER_MS = 30_000;
+const billingEntitlementRetryAfter = new Map<
+  string,
+  { port: NonNullable<LoroDocumentManager['cloudBilling']>; until: number }
+>();
+
+/** @internal Exported for the quota fail-open tests. */
+export async function getWorkspaceBillingEntitlementBestEffort(
   manager: LoroDocumentManager,
   workspace: WorkspaceSummary
 ): Promise<WorkspaceBillingEntitlement | null> {
@@ -952,6 +1049,8 @@ async function getWorkspaceBillingEntitlementBestEffort(
     return null;
   }
   const now = getServerNow();
+  const retryAfter = billingEntitlementRetryAfter.get(workspace.id);
+  if (retryAfter?.port === port && retryAfter.until > now) return null;
   let entry = billingEntitlementCache.get(workspace.id);
   if (!entry || entry.port !== port || entry.expiresAt <= now) {
     entry = {
@@ -962,12 +1061,18 @@ async function getWorkspaceBillingEntitlementBestEffort(
     billingEntitlementCache.set(workspace.id, entry);
   }
   try {
-    return await entry.entitlement;
+    const entitlement = await entry.entitlement;
+    billingEntitlementRetryAfter.delete(workspace.id);
+    return entitlement;
   } catch (error) {
     // A failure must not be cached for the rest of the TTL.
     if (billingEntitlementCache.get(workspace.id) === entry) {
       billingEntitlementCache.delete(workspace.id);
     }
+    billingEntitlementRetryAfter.set(workspace.id, {
+      port,
+      until: getServerNow() + BILLING_ENTITLEMENT_RETRY_AFTER_MS,
+    });
     getLogger('session').warn(
       `Billing entitlement unavailable; allowing local operation: ${formatErrorMessage(error)}`
     );
@@ -1010,12 +1115,15 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   workspace: WorkspaceSummary;
   sessionDoc: SessionDocument;
   userTurnId?: string;
-}): Promise<SessionHistory[] | undefined> {
+}): Promise<Awaited<ReturnType<typeof readSessionHistoryMetadata>> | undefined> {
   // Same ordering as session create: settle the plan before reading the doc.
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
   const backend = await createSessionBackend(args.sessionDoc, await args.sessionDoc.getMetaState());
-  const [history, queue] = await Promise.all([backend.readHistory(), backend.getMessageQueue()]);
+  const [history, queue] = await Promise.all([
+    readSessionHistoryMetadata(backend.history),
+    backend.getMessageQueue(),
+  ]);
   if (
     args.userTurnId &&
     (history.some((entry) => entry.id === args.userTurnId) ||
@@ -1257,27 +1365,21 @@ export function filterAuthorizedLocalProjectCandidates<T extends LocalProjectSel
   return localProjects.filter((project) => authorizedLocalProjectIds.has(project.id));
 }
 
-async function resolveWorkspaceOrThrow(
-  auth: AuthContext,
-  selector?: string
-): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
-  const effectiveSelector =
-    normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
-}
-
 async function resolveWorkspaceForSessionOrThrow(
   auth: AuthContext,
   sessionId: SessionId,
   options?: ResolveWorkspaceForSessionOptions
 ): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
+  const offline = typeof options === 'object' && options.offline === true;
   const selector = typeof options === 'string' ? options : options?.workspace;
-  const shouldSync = typeof options === 'object' && options.offline !== true;
+  const shouldSync = !offline;
   const syncReason = typeof options === 'object' ? options.reason : undefined;
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
+  const workspaces = await listWorkspaceCandidates(auth, {
+    offline,
+    selector: effectiveSelector,
+  });
   const sessionExistsInWorkspace = async (workspace: WorkspaceSummary): Promise<boolean> =>
     await withWorkspaceManager(auth, workspace, async (manager) => {
       if (shouldSync) {
@@ -1357,7 +1459,7 @@ async function resolveRunningAssistantTurnId(
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  const history = await backend.readHistory();
+  const history = await readSessionHistoryMetadata(backend.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1371,13 +1473,22 @@ export async function appendUserPromptHistory(args: {
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
-}): Promise<{ id: string; timestamp: string; inputConfig?: SessionTurnInputConfig }> {
+  /** Offer the turn to a running turn: write `pending_apply` without activation. */
+  steer?: boolean;
+  /** Encrypted shared-member derivation origin; part of the signed input. */
+  derivedFrom?: { sessionId: string; userTurnId: string };
+}): Promise<{
+  id: string;
+  timestamp: string;
+  inputConfig?: SessionTurnInputConfig;
+  existingStatus?: SessionHistory['status'];
+}> {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await backend.readHistory());
-    const existing = history.find((entry) => entry.id === historyId);
+    const candidate = args.knownHistory?.find((entry) => entry.id === historyId);
+    const existing = candidate ?? (await readHistoryEntry(backend, historyId));
     if (existing) {
       if (
         existing.role !== 'user' ||
@@ -1400,6 +1511,7 @@ export async function appendUserPromptHistory(args: {
         id: historyId,
         timestamp: existing.timestamp,
         ...(existing.inputConfig ? { inputConfig: existing.inputConfig } : {}),
+        existingStatus: existing.status,
       };
     }
   }
@@ -1409,15 +1521,17 @@ export async function appendUserPromptHistory(args: {
     role: 'user',
     author: args.author ?? { v: 1, kind: 'human', userId },
     timestamp,
-    status: 'pending',
+    status: args.steer ? 'pending_apply' : 'pending',
     read: false,
     userId,
     items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
     inputConfig,
+    ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
     fileDiff: [],
     finished: true,
   };
-  await backend.appendUserTurn(entry);
+  if (args.steer) await backend.appendHistoryTurn(entry);
+  else await backend.appendUserTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -2156,7 +2270,10 @@ async function resolveSessionTurnDispatchDefaults(
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  return resolveTurnDispatchDefaultsFromHistory(await backend.readHistory(), agentConfig);
+  return resolveTurnDispatchDefaultsFromHistory(
+    await readSessionHistoryMetadata(backend.history),
+    agentConfig
+  );
 }
 
 export function resolveEffectiveSessionChatDispatchConfig(args: {
@@ -2374,11 +2491,18 @@ async function ensureLocalRuntimeAvailable(
   }
 }
 
-async function ensureTargetMachineOnline(args: {
+/**
+ * Rejects only a target that presence reports definitively offline. Delivery
+ * runs through the synced Session document, so no one-shot RPC probe gates it:
+ * an unanswered probe during a transport slowdown is not evidence of offline.
+ * Resolves to the presence that admitted the target (`online` or `unknown`).
+ */
+export async function ensureTargetMachineNotOffline(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-}): Promise<void> {
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
+}): Promise<MachinePresence> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (
@@ -2386,41 +2510,15 @@ async function ensureTargetMachineOnline(args: {
       args.machineId !== environment.auth.machineId
     )
       throw new Error('Target machine is unavailable in this workspace');
-    return;
+    return 'online';
   }
   if (args.machineId === args.auth.machineId) {
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
-    return;
+    return 'online';
   }
-
-  const status = await withMachineRpcClient(
-    args,
-    async (client) => await client.requestMachineStatus({ timeoutMs: 10_000 })
-  ).catch((error: unknown) => {
-    throw new Error(
-      `Machine ${args.machineId} is offline or unreachable: ${formatErrorMessage(error)}`
-    );
-  });
-  if (!status?.success) {
-    throw new Error(
-      `Machine ${args.machineId} is offline or unavailable${
-        status?.error ? `: ${status.error}` : '.'
-      }`
-    );
-  }
-}
-
-async function getMachineOnlineState(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-}): Promise<{ online: boolean; message?: string }> {
-  try {
-    await ensureTargetMachineOnline(args);
-    return { online: true };
-  } catch (error) {
-    return { online: false, message: formatErrorMessage(error) };
-  }
+  const presence = await readMachinePresence(args.manager, args.machineId);
+  if (presence === 'offline') throw new MachineOfflineError({ machineId: args.machineId });
+  return presence;
 }
 
 export async function readSessionMachineAccess(args: {
@@ -2503,6 +2601,12 @@ async function readResolvedSessionMachineAccess(args: {
   requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
+  const encrypted = await readEncryptedMachineAccess({
+    machineId: args.machineId,
+    requesterUserId: args.requester.userId,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+  if (encrypted) return encrypted;
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (args.auth !== environment.auth) throw new Error('Session command identity mismatch');
@@ -3291,10 +3395,11 @@ async function resolveCreateContext(args: {
     requester: args.requester,
   });
   if (args.skipMachineAvailabilityCheck !== true) {
-    await ensureTargetMachineOnline({
+    await ensureTargetMachineNotOffline({
       auth: args.auth,
       workspaceId,
       machineId: targetMachine.id,
+      manager: args.manager,
     });
   }
   const agentConfig = await resolveAgentConfigForCreate({
@@ -3442,7 +3547,16 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
     dispatchConfig.mcpServerIds !== undefined
       ? [...dispatchConfig.mcpServerIds]
       : await (async () => {
-          if (!args.localOnly) await syncMcpCatalog(args.manager, args.workspaceId);
+          if (!args.localOnly) {
+            if (
+              getDaemonWorkspace()?.manager === args.manager ||
+              args.manager.hasWorkspaceCatalogReader?.()
+            ) {
+              await waitForMcpDefaultCatalog(args.manager, args.workspaceId);
+            } else {
+              await syncMcpCatalog(args.manager, args.workspaceId);
+            }
+          }
           return readProjectDefaultMcpIds(
             args.manager.repo,
             args.workspaceId,
@@ -3752,7 +3866,10 @@ export async function prepareSessionInput(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),
@@ -3795,10 +3912,16 @@ export async function prepareSessionInput(
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta;
 
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    options.delegatedRequester,
+    targetMachine.id
+  );
   const userTurn: SessionHistoryInput = {
     id: options.userTurnId ?? uuidV4(),
     role: 'user',
     timestamp: meta.createdAt,
+    ...(derivedFrom ? { derivedFrom } : {}),
     // Legacy daemons only understand pending input. Host-owned automation
     // always uses the inert prepared protocol; remote creates negotiate it.
     status:
@@ -3996,13 +4119,45 @@ async function validateSessionChatTargetForRequester(args: {
     requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
   });
-  await ensureTargetMachineOnline({
+  await ensureTargetMachineNotOffline({
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
+    manager: args.manager,
   });
   return session;
 }
+
+// Cold token/gateway lookup and subscription setup need more time than an offer.
+const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * What actually happened to an Agent chat at send time. Advisory: absent when
+ * the outcome is uncertain or was decided by an earlier attempt or replay.
+ */
+export type SessionChatDelivery = 'steered' | 'queued' | 'dispatched';
+
+const withDelivery = <T extends object>(
+  result: T,
+  delivery: SessionChatDelivery | undefined
+): T & { delivery?: SessionChatDelivery } => (delivery ? { ...result, delivery } : result);
+
+/** Maps a steer verdict to a receipt; rejected steers become ordinary input. */
+export const deliveryFromSteerResponse = (
+  response: Pick<SessionSteerResponse, 'applied' | 'disposition'>
+): SessionChatDelivery | undefined => {
+  if (response.applied) return 'steered';
+  switch (response.disposition) {
+    case 'unsupported':
+      return 'queued';
+    // stale-turn is ambiguous: promoted to the queue, or consumed after the
+    // provider accepted it too late. Report nothing rather than a false queue.
+    case 'no-active-turn':
+      return 'dispatched';
+    default:
+      return undefined;
+  }
+};
 
 export async function sendSessionChatResult(
   auth: AuthContext,
@@ -4021,6 +4176,8 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
+    /** Agent chat: steer a running turn instead of queueing behind it. */
+    steerActiveTurn?: boolean;
   },
   delegatedRequester?: DelegatedSessionRequester,
   input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
@@ -4029,6 +4186,7 @@ export async function sendSessionChatResult(
   machineId: MachineId;
   workspaceId: WorkspaceId;
   userTurnId: string;
+  delivery?: SessionChatDelivery;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
   const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
@@ -4057,7 +4215,7 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
-  const historyForDefaults = quotaHistory ?? (await backend.readHistory());
+  const historyForDefaults = quotaHistory ?? (await readSessionHistoryMetadata(backend.history));
   const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
     historyForDefaults,
     session
@@ -4116,13 +4274,32 @@ export async function sendSessionChatResult(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),
     }));
   const inputBlocks = buildCommandInputBlocks(prompt, attachments);
+  const environment = getSessionCommandEnvironment();
+  const derivedFrom = await classifyDelegatedEncryptedInput(
+    manager,
+    delegatedRequester,
+    session.machineId
+  );
+  const remoteMachine = session.machineId !== auth.machineId;
+  // A shared member's derivation never steers another principal's running turn.
+  const steerTurnId =
+    orchestration?.steerActiveTurn && !derivedFrom
+      ? remoteMachine
+        ? resolveActiveAssistantTurnId(historyForDefaults)
+        : environment?.host.readActiveTurnId(sessionId)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
+    steer: steerTurnId !== undefined,
+    ...(derivedFrom ? { derivedFrom } : {}),
     inputBlocks,
     sessionDoc,
     prompt,
@@ -4147,9 +4324,126 @@ export async function sendSessionChatResult(
       }),
     },
     preallocatedId: orchestration?.userTurnId,
-    knownHistory: quotaHistory,
   });
   const userTurnId = userTurn.id;
+  const result = {
+    sessionId,
+    machineId: session.machineId,
+    workspaceId: workspace.id as WorkspaceId,
+    userTurnId,
+  };
+  // Local steer recovery stays execution-owned. A remote replay may instead be
+  // an orphan left by a sender crash or failed fallback write; never offer it twice.
+  if (userTurn.existingStatus === 'pending_apply') {
+    if (!remoteMachine) return result;
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    if (!promoted.matched) return result;
+  }
+  if (
+    remoteMachine &&
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    // Bound setup separately: cold connections must not consume the offer's
+    // five-second response budget. Late setup must never send after fallback.
+    let accepting = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const inputConfig = userTurn.inputConfig;
+    const setupTimeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        accepting = false;
+        resolve(null);
+      }, REMOTE_STEER_CONNECT_TIMEOUT_MS);
+    });
+    const request = withMachineRpcClient(
+      { auth, workspaceId: workspace.id as WorkspaceId, machineId: session.machineId },
+      async (client) => {
+        if (!accepting) return null;
+        clearTimeout(timer);
+        timer = undefined;
+        return client.requestSessionSteer({
+          sessionId,
+          expectedTurnId: steerTurnId,
+          userTurnId,
+          userId: requesterUserId,
+          timestamp: userTurn.timestamp,
+          inputConfig,
+          timeoutMs: 5_000,
+        });
+      }
+    );
+    try {
+      const response = await Promise.race([request, setupTimeout]);
+      if (response?.applied) {
+        await backend.applyHistoryAction({
+          kind: 'user-status',
+          turnId: userTurnId,
+          status: 'processing',
+          deliveredSteer: true,
+          onlyPendingApply: true,
+        });
+        return { ...result, delivery: 'steered' };
+      }
+      if (response?.recoveryOwned) {
+        return withDelivery(result, deliveryFromSteerResponse(response));
+      }
+    } catch {
+      // Setup, transport and response failures never fail the accepted chat.
+    } finally {
+      accepting = false;
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    // An RPC lost before arrival has no execution-owned recovery. pending_apply
+    // is skipped forever by dispatch, so prefer a possible duplicate follow-up
+    // over an orphan. Never retry the steer; preserve any already-settled status.
+    getLogger('session').warn(
+      `Remote steer unconfirmed; queueing follow-up ${sessionId}/${userTurnId}`
+    );
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    const current = await readHistoryEntry(backend, userTurnId);
+    if (!promoted.matched && current?.status !== 'pending' && current?.status !== 'seen')
+      return result;
+  }
+  if (
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    !remoteMachine &&
+    environment &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    const response = await environment.host.steerSession({
+      sessionId,
+      expectedTurnId: steerTurnId,
+      userTurnId,
+      userId: requesterUserId,
+      timestamp: userTurn.timestamp,
+      inputConfig: userTurn.inputConfig,
+    });
+    return withDelivery(result, deliveryFromSteerResponse(response));
+  }
+  // A busy target without an applied steer (including an unconfirmed remote one)
+  // runs this input after the current turn. Retries keep their earlier outcome.
+  const ordinaryDelivery: SessionChatDelivery | undefined =
+    !orchestration?.steerActiveTurn || derivedFrom || userTurn.existingStatus !== undefined
+      ? undefined
+      : steerTurnId === undefined
+        ? 'dispatched'
+        : 'queued';
   const completionAbortController = structuredOutput ? new AbortController() : undefined;
   const completionPromise = structuredOutput
     ? waitForTurnCompletion({
@@ -4192,6 +4486,7 @@ export async function sendSessionChatResult(
       machineId: session.machineId,
       workspaceId: workspace.id as WorkspaceId,
       userTurnId,
+      ...(ordinaryDelivery ? { delivery: ordinaryDelivery } : {}),
       completionPromise,
     };
   } catch (error) {
@@ -4266,18 +4561,23 @@ async function readSessionLiveStatus(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
 }): Promise<{
   machineOnline: boolean;
   liveStatus: SessionStatusResult['liveStatus'];
 }> {
-  const machineOnline = await getMachineOnlineState(args);
-  if (!machineOnline.online) {
+  let presence: MachinePresence;
+  try {
+    presence = await ensureTargetMachineNotOffline(args);
+  } catch (error) {
     return {
       machineOnline: false,
-      liveStatus: deriveSessionLiveStatus(machineOnline),
+      liveStatus: deriveSessionLiveStatus({ online: false, message: formatErrorMessage(error) }),
     };
   }
-
+  // Presence owns online/offline; the live-status RPC only adds freshness. With
+  // unknown presence, an answered RPC is the only online evidence.
+  const unknownPresence = presence === 'unknown';
   try {
     const response = await withMachineRpcClient(
       args,
@@ -4286,7 +4586,7 @@ async function readSessionLiveStatus(args: {
     );
     if (!response?.success) {
       return {
-        machineOnline: true,
+        machineOnline: !unknownPresence || response !== null,
         liveStatus: deriveSessionLiveStatus({
           online: true,
           message: response?.error ?? 'Target machine did not answer the live status request.',
@@ -4303,7 +4603,7 @@ async function readSessionLiveStatus(args: {
     };
   } catch (error) {
     return {
-      machineOnline: true,
+      machineOnline: !unknownPresence,
       liveStatus: deriveSessionLiveStatus({
         online: true,
         message: formatErrorMessage(error),
@@ -4314,11 +4614,14 @@ async function readSessionLiveStatus(args: {
 
 export type SessionLiveStatusBatchItem = {
   sessionId: SessionId;
-  machineOnline: boolean;
+  /** Three-state; an unanswered RPC never turns unknown presence into offline. */
+  machinePresence: MachinePresence;
   state?: string;
   fresh: boolean;
   observedAt?: number;
   reason?: string;
+  /** Present only when the owning daemon supports and could read it. */
+  activity?: SessionLiveActivity;
 };
 
 /** Reuse one Machine RPC client for every Session owned by that Machine. */
@@ -4326,6 +4629,9 @@ export async function readSessionLiveStatusesMany(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'> & {
+    repo?: Pick<LoroDocumentManager['repo'], 'getDocMeta'>;
+  };
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
@@ -4337,7 +4643,7 @@ export async function readSessionLiveStatusesMany(args: {
           ? await environment.host.readLiveStatus(session.id)
           : {
               sessionId: session.id,
-              machineOnline: false,
+              machinePresence: 'offline',
               fresh: false,
               reason: 'Machine unavailable in local workspace',
             }
@@ -4354,22 +4660,38 @@ export async function readSessionLiveStatusesMany(args: {
   const output = new Map<SessionId, SessionLiveStatusBatchItem>();
   await Promise.all(
     [...groups].map(async ([machineId, sessions]) => {
-      const online = await getMachineOnlineState({
-        auth: args.auth,
-        workspaceId: args.workspaceId,
-        machineId,
-      });
-      if (!online.online) {
+      let presence: MachinePresence;
+      try {
+        presence = await ensureTargetMachineNotOffline({ ...args, machineId });
+      } catch (error) {
+        const reason = formatErrorMessage(error);
+        // Definite presence absence, or this machine's own runtime being down, is offline;
+        // a presence read failure proves nothing about the target.
+        const failedPresence: MachinePresence =
+          error instanceof MachineOfflineError || machineId === args.auth.machineId
+            ? 'offline'
+            : 'unknown';
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: false,
+            machinePresence: failedPresence,
             fresh: false,
-            ...(online.message ? { reason: online.message } : {}),
+            reason,
           });
         }
         return;
       }
+      const unknownPresence = presence === 'unknown';
+      // Older daemons reject the activity flag, so only ask machines advertising it.
+      const includeActivity = await args.manager.repo
+        ?.getDocMeta(getMachineRoomId(machineId))
+        .then((record) =>
+          machineSupportsProtocolCapability(
+            record?.meta as MachineMeta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity
+          )
+        )
+        .catch(() => false);
       try {
         const responses = await withMachineRpcClient(
           { auth: args.auth, workspaceId: args.workspaceId, machineId },
@@ -4380,6 +4702,7 @@ export async function readSessionLiveStatusesMany(args: {
                 response: await client.requestSessionLiveStatus({
                   sessionId: session.id,
                   timeoutMs: 10_000,
+                  ...(includeActivity ? { includeActivity: true } : {}),
                 }),
               }))
             )
@@ -4387,13 +4710,16 @@ export async function readSessionLiveStatusesMany(args: {
         for (const { session, response } of responses) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: true,
+            machinePresence: unknownPresence && response === null ? 'unknown' : 'online',
             fresh: response?.success === true,
             ...(response?.state ? { state: response.state } : {}),
             ...(response?.success === true && typeof response.observedAtMs === 'number'
               ? { observedAt: response.observedAtMs }
               : {}),
             ...(!response?.success && response?.error ? { reason: response.error } : {}),
+            ...(response?.success === true && response.activity
+              ? { activity: response.activity }
+              : {}),
           });
         }
       } catch (error) {
@@ -4401,7 +4727,7 @@ export async function readSessionLiveStatusesMany(args: {
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: true,
+            machinePresence: presence,
             fresh: false,
             reason,
           });
@@ -4421,13 +4747,14 @@ async function buildSessionStatusResult(
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-  const history = await backend.readHistory();
+  const history = await readSessionHistoryMetadata(backend.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
     workspaceId: workspace.id as WorkspaceId,
     machineId: session.machineId,
     sessionId,
+    manager,
   });
 
   return {
@@ -5007,7 +5334,12 @@ export async function cancelSessionTurn(args: {
       activeTurnId: turnId,
     };
 
-  await ensureTargetMachineOnline({ auth, workspaceId, machineId: session.machineId });
+  await ensureTargetMachineNotOffline({
+    auth,
+    workspaceId,
+    machineId: session.machineId,
+    manager,
+  });
 
   const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
   const inboxCancel = getSessionCancelProtocolFields(
@@ -5116,7 +5448,9 @@ const sessionListCommand = new Command('list')
   .action(async (options: ListOptions) => {
     await runSessionCommand(options, async () => {
       const auth = getAuthContextOrThrow();
-      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
+      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace, {
+        offline: options.offline,
+      });
       if (options.openedBy && options.openedByCurrent === true) {
         throw new Error('Pass either --opened-by or --opened-by-current, not both.');
       }
@@ -5398,8 +5732,7 @@ const sessionHistoryCommand = new Command('history')
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
         const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
-        const transcript = toSessionTranscriptEntries(await backend.readHistory());
-        const entries = selectSessionTranscriptEntries(transcript, {
+        const { total, entries } = await readSessionTranscript(backend, {
           all: options.all,
           limit: options.limit,
           reverse: options.reverse,
@@ -5410,7 +5743,7 @@ const sessionHistoryCommand = new Command('history')
             ok: true,
             workspaceId: workspace.id,
             sessionId,
-            total: transcript.length,
+            total,
             returned: entries.length,
             entries,
           });
@@ -5510,6 +5843,10 @@ const sessionRenameCommand = new Command('rename')
   .description('Rename a session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--title <title>', 'New session title')
+  .option(
+    '--group',
+    "Rename the root session's conversation group in the sidebar instead of its tab"
+  )
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID')
@@ -5535,14 +5872,22 @@ const sessionRenameCommand = new Command('rename')
           options.workspace
         );
         await withWorkspaceManager(auth, workspace, async (manager) => {
-          await resolveSessionMetaOrThrow(manager, sessionId);
-          await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
-            title,
-          } satisfies Partial<SessionMeta>);
+          const meta = await resolveSessionMetaOrThrow(manager, sessionId);
+          if (options.group && meta.parentSessionId) {
+            throw new Error(
+              `Session ${sessionId} is a child tab; only a root session has a group title.`
+            );
+          }
+          await manager.repo.upsertDocMeta(
+            getSessionRoomId(sessionId),
+            options.group
+              ? buildSessionGroupRenamePatch(title)
+              : buildSessionTabRenamePatch(meta, title)
+          );
           await ensureWorkspaceMetaSynced(manager, `session.rename:${sessionId}`);
 
           if (options.json) {
-            printJson({ ok: true, sessionId, title });
+            printJson({ ok: true, sessionId, title, scope: options.group ? 'group' : 'tab' });
             return;
           }
 
@@ -5673,7 +6018,6 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionRenameCommand)
   .addCommand(sessionArchiveCommand)
   .addCommand(sessionRestoreCommand)
-  .addCommand(sessionInboxRecoveryCommand)
   .addCommand(sessionDeleteCommand);
 
 export async function readSessionMcpIdsForAuthoring(
@@ -5685,5 +6029,8 @@ export async function readSessionMcpIdsForAuthoring(
   await syncDocForRead(manager, getSessionRoomId(sessionId), 'session-mcp-selection');
   const doc = await manager.getOrCreateSessionDoc(sessionId);
   const backend = await createSessionBackend(doc, await doc.getMetaState());
-  return resolveSessionConversationConfig(await backend.readHistory()).mcpServerIds ?? [];
+  return (
+    resolveSessionConversationConfig(await readSessionHistoryMetadata(backend.history))
+      .mcpServerIds ?? []
+  );
 }

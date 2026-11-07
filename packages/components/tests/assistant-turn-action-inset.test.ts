@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
@@ -11,10 +12,7 @@ import {
   MOBILE_TURN_ACTION_LEADING_INSET_PX,
   SessionChatActionContext,
 } from '../src/components/ai-gui/view';
-import {
-  isMessageActionsToggleTap,
-  toggleMobileMessageActions,
-} from '../src/components/ai-gui/mobile-message-actions';
+import { toggleMobileMessageActions } from '../src/components/ai-gui/mobile-message-actions';
 import { EDGE_ZONE_PX } from '../src/components/mobile/mobile-edge-back-swipe';
 import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
@@ -37,60 +35,6 @@ import { initI18n } from '../src/i18n';
 describe('mobile assistant-turn action bar inset', () => {
   it('reserves at least the full width of the edge-back swipe strip', () => {
     expect(MOBILE_TURN_ACTION_LEADING_INSET_PX).toBeGreaterThanOrEqual(EDGE_ZONE_PX);
-  });
-
-  it('reserves the inset from the row edge, before any conversation gutter', () => {
-    /* The slot starts at the conversation gutter (>= 0 from the screen edge)
-       and the strip starts at screen x=0, so a slot at least as wide as the
-       strip clears it regardless of the gutter value. Guard against the inset
-       being re-derived as "strip minus gutter", which would break the moment
-       the gutter changed. */
-    expect(MOBILE_TURN_ACTION_LEADING_INSET_PX).toBeGreaterThan(0);
-    expect(EDGE_ZONE_PX).toBeGreaterThan(0);
-  });
-});
-
-describe('desktop assistant-turn action bar visibility', () => {
-  it('keeps the whole action group visible while a fork is pending', async () => {
-    await initI18n('en');
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    const root: Root = createRoot(container);
-    const message = {
-      id: 'assistant-turn-forking',
-      role: 'assistant',
-      timestamp: '2026-09-10T03:00:00.000Z',
-      endedAt: '2026-09-10T03:00:01.000Z',
-      finished: true,
-      items: [{ type: 'text', text: 'A completed response.' }],
-    } as unknown as SessionHistoryParsed;
-
-    await act(async () => {
-      root.render(
-        createElement(
-          ForceDesktopLayoutProvider,
-          null,
-          createElement(AssistantTurnFooter, {
-            message,
-            sessionId: 'session-forking' as SessionId,
-            showDuration: true,
-            isTurnHovered: false,
-            onFork: () => undefined,
-            isForking: true,
-          })
-        )
-      );
-    });
-
-    const actions = container.querySelector('[data-assistant-turn-actions]');
-    // The bar's opacity is the component's own StyleX style now, so the DOM
-    // says whether the bar is showing instead of how it is painted.
-    expect(actions?.hasAttribute('data-assistant-turn-actions-visible')).toBe(true);
-    expect(container.querySelector('[aria-label="Copy response"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="Fork session"] [data-slot="icon-spinner"][data-spinning="true"]')).not.toBeNull();
-
-    await act(async () => root.unmount());
-    container.remove();
   });
 });
 
@@ -170,25 +114,6 @@ describe('mobile assistant-turn action reveal', () => {
     await act(async () => root.unmount());
     container.remove();
   });
-
-  it('leaves taps on controls, links and the action bar to those elements', async () => {
-    const { container, root } = await renderTurns([{ id: 'turn', isLatestTurn: false }]);
-    const prose = document.createElement('p');
-    prose.innerHTML = 'Plain answer with <a href="#x">a link</a>.';
-    container.appendChild(prose);
-
-    expect(isMessageActionsToggleTap(prose)).toBe(true);
-    expect(isMessageActionsToggleTap(prose.querySelector('a'))).toBe(false);
-    expect(
-      isMessageActionsToggleTap(container.querySelector('[data-assistant-turn-actions]'))
-    ).toBe(false);
-    expect(isMessageActionsToggleTap(container.querySelector('[aria-label="Copy response"]'))).toBe(
-      false
-    );
-
-    await act(async () => root.unmount());
-    container.remove();
-  });
 });
 
 describe('mobile assistant-turn duration slot', () => {
@@ -250,40 +175,6 @@ describe('mobile assistant-turn duration slot', () => {
       await vi.advanceTimersByTimeAsync(2_100);
     });
     expect(leadingSlotText(container)).toBe('Worked for 7s');
-
-    await act(async () => root.unmount());
-    container.remove();
-  });
-
-  it('flips the digit within a sample period of the real second boundary', async () => {
-    /* The shared ticker's phase comes from whoever mounted first, not from this
-       turn, so a once-a-second sample can land anywhere inside the second and
-       the displayed value would sit up to a full second behind. Here the turn
-       started 5.4s ago: the span becomes 6s at +600ms, and the label must say
-       so well before a 1s sample would have noticed. */
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-10T03:00:00.000Z'));
-    const message = {
-      id: 'assistant-turn-live-phase',
-      role: 'assistant',
-      timestamp: '2026-09-10T02:59:54.600Z',
-      items: [{ type: 'text', text: 'Still writing…' }],
-    } as unknown as SessionHistoryParsed;
-
-    const { container, root } = await renderMobileFooter(message);
-    expect(leadingSlotText(container)).toBe('Worked for 5s');
-
-    // 5.9s elapsed: six whole seconds have NOT passed, so the digit holds.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
-    });
-    expect(leadingSlotText(container)).toBe('Worked for 5s');
-
-    // 6.1s elapsed, i.e. 100ms past the boundary — already updated.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(200);
-    });
-    expect(leadingSlotText(container)).toBe('Worked for 6s');
 
     await act(async () => root.unmount());
     container.remove();

@@ -1,14 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
-import { QueuedScheduledMessagePreview } from './queued-scheduled-message-preview';
 import { SessionInfoBar } from '../components/sessions/session-info-bar';
-import { QuotaContinueView } from '../components/schedules/quota-continue-action';
-import {
-  ScheduledMessageInfoChip,
-  ScheduledMessageTimeDialog,
-} from '../components/schedules/scheduled-message-time';
+import { ConversationColumn } from '../components/shared/conversation-column';
+import { ScheduledMessageTimeDialog } from '../components/schedules/scheduled-message-time';
+import { formatUpcoming } from '../components/schedules/schedule-format';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
-import { Clock, ArrowUp, Bot, Github } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { ArrowUp, Bot, Github } from 'lucide-react';
 
 import {
   ChatComposer,
@@ -23,7 +21,29 @@ import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SettingsStoryProviders } from './settings-story-shell';
+
+const mergedStoryLayout = stylex.create({
+  part1: {
+    display: 'flex',
+    minHeight: '100vh',
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBottom: 'calc(var(--spacing) * 6)',
+  },
+  suggestionWidth: {
+    marginInline: 'auto',
+    width: '100%',
+    maxWidth: 'var(--container-3xl, 48rem)',
+  },
+  mobileSuggestionWidth: {
+    maxWidth: 390,
+  },
+});
+
 const composerScene = stylex.create({
   glyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
   softGlyph: { opacity: 0.7 },
@@ -576,6 +596,72 @@ function DemoComposer({
   );
 }
 
+const LONG_PROMPT_SUGGESTION =
+  'Add a regression test for the reconnect path that drops the socket mid-turn, ' +
+  'verify the queued prompt is replayed exactly once after the session resumes, ' +
+  'then run the focused suite and summarize any flaky timing assumptions you find ' +
+  'in the transport fixtures.';
+
+function PromptSuggestionPreview({
+  mobile = false,
+  suggestion = 'Add a regression test for the reconnect path, then run the focused suite.',
+}: {
+  mobile?: boolean;
+  suggestion?: string;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const composer = (
+    <ChatComposer
+      tone="light"
+      variant="session"
+      promptRef={promptRef}
+      promptValue={prompt}
+      onPromptChange={setPrompt}
+      promptSuggestion={suggestion}
+      primaryAction={
+        <Button icon aria-label="Send">
+          <ArrowUp size={16} />
+        </Button>
+      }
+      autoResize
+      maxRows={11}
+    />
+  );
+  return (
+    <div {...stylex.props(mergedStoryLayout.part1)}>
+      <div
+        {...stylex.props(
+          mergedStoryLayout.suggestionWidth,
+          mobile && mergedStoryLayout.mobileSuggestionWidth
+        )}
+      >
+        {mobile ? (
+          <ForceMobileLayoutProvider force>{composer}</ForceMobileLayoutProvider>
+        ) : (
+          composer
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const SessionPromptSuggestion: Story = {
+  render: () => <PromptSuggestionPreview />,
+};
+
+export const SessionPromptSuggestionMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile />,
+};
+
+export const SessionPromptSuggestionLong: Story = {
+  render: () => <PromptSuggestionPreview suggestion={LONG_PROMPT_SUGGESTION} />,
+};
+
+export const SessionPromptSuggestionLongMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile suggestion={LONG_PROMPT_SUGGESTION} />,
+};
+
 export const LandingDark: Story = {
   render: () => (
     <div {...stylex.props(storyLayout.frame)}>
@@ -763,13 +849,8 @@ export const LandingWithPastedText: Story = {
   ),
 };
 
-function ScheduledSendPreview({
-  pickerInitiallyOpen = false,
-  infoInitiallyOpen = false,
-}: {
-  pickerInitiallyOpen?: boolean;
-  infoInitiallyOpen?: boolean;
-}) {
+function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitiallyOpen?: boolean }) {
+  const { t, i18n } = useTranslation();
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(
     'Review these files tomorrow morning and summarize the remaining issues.'
@@ -786,32 +867,39 @@ function ScheduledSendPreview({
             name: 'MacBook Pro',
             onlineStatus: 'online',
           }}
-          scheduledMessage={
-            at ? (
-              <ScheduledMessageInfoChip
-                at={at}
-                timeZone="Asia/Shanghai"
-                defaultOpen={infoInitiallyOpen}
-                onEdit={() => setPicker(true)}
-              />
-            ) : null
-          }
         />
-        <ChatComposer
-          variant="session"
-          promptRef={promptRef}
-          tone="light"
-          promptValue={text}
-          onPromptChange={setText}
-          onAttachmentAddClick={() => {}}
-          onScheduleSend={() => setPicker(true)}
-          primaryAction={
-            <Button icon aria-label="Schedule send">
-              <Clock size={16} />
-            </Button>
-          }
-          autoResize
-        />
+        <ConversationColumn>
+          <ChatComposer
+            variant="session"
+            promptRef={promptRef}
+            tone="light"
+            promptValue={text}
+            onPromptChange={setText}
+            onAttachmentAddClick={() => {}}
+            onScheduleSend={() => setPicker(true)}
+            secondaryAction={
+              at
+                ? {
+                    label: t('scheduledMessage.composerAction', {
+                      time: formatUpcoming(
+                        Date.parse(at),
+                        'Asia/Shanghai',
+                        Date.parse('2026-10-27T08:00:00Z'),
+                        i18n.language
+                      ),
+                    }),
+                    onClick: () => setPicker(true),
+                  }
+                : undefined
+            }
+            primaryAction={
+              <Button icon aria-label="Send">
+                <ArrowUp size={16} />
+              </Button>
+            }
+            autoResize
+          />
+        </ConversationColumn>
       </div>
       {picker ? (
         <ScheduledMessageTimeDialog
@@ -845,50 +933,6 @@ export const ScheduledSendDark: Story = {
   globals: { theme: 'dark' },
   render: () => <ScheduledSendPreview />,
 };
-
-function QuotaContinuePreview() {
-  const [saved, setSaved] = useState(false);
-  const [text, setText] = useState('Keep this draft while waiting for quota.');
-  return (
-    <div {...stylex.props(storyLayout.row5)}>
-      <div {...stylex.props(storyLayout.frame6)}>
-        <QuotaContinueView saved={saved} pending={false} onClick={() => setSaved(true)} />
-        <ChatComposer
-          variant="session"
-          tone="light"
-          promptValue={text}
-          onPromptChange={setText}
-          onAttachmentAddClick={() => {}}
-          onScheduleSend={() => {}}
-          primaryAction={
-            <Button icon aria-label="Send">
-              <ArrowUp size={16} />
-            </Button>
-          }
-        />
-      </div>
-    </div>
-  );
-}
-export const QuotaContinue: Story = { render: () => <QuotaContinuePreview /> };
-export const QuotaContinueDark: Story = {
-  globals: { theme: 'dark' },
-  render: () => <QuotaContinuePreview />,
-};
-
-export const ScheduledSendInfo: Story = {
-  render: () => <ScheduledSendPreview infoInitiallyOpen />,
-};
-
-export const QueuedScheduledMessage: Story = { render: () => <QueuedScheduledMessagePreview /> };
-
-export const QueuedTimeLeading: Story = {
-  render: () => <QueuedScheduledMessagePreview variant="start" />,
-};
-export const QueuedTimeAiry: Story = {
-  render: () => <QueuedScheduledMessagePreview variant="airy" />,
-};
-
 // Source-projected test input: the actual landing owner's Spinner JSX and stable
 // Button props, hosted by real ChatComposer. This does not run its controller/RPC.
 function PendingLandingSpinnerProjection({ tone }: { tone: 'light' | 'dark' }) {

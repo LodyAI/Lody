@@ -1,3 +1,4 @@
+import { EncryptedAttachmentSchema, type EncryptedAttachment } from '@lody/shared';
 import os from 'os';
 import fs from 'fs';
 import type { Dirent } from 'fs';
@@ -323,32 +324,52 @@ export const writeSessionFileBlobBackfillMarker = async (args: {
   sessionId: string;
   fileId: string;
   relayFileId: string;
+  encryption?: EncryptedAttachment;
   homeDir?: string;
 }): Promise<void> => {
   const markerPath = getBackfillMarkerPath(args);
   const tempPath = `${markerPath}.${process.pid}.${getServerNow()}.tmp`;
-  await fs.promises.writeFile(tempPath, JSON.stringify({ relayFileId: args.relayFileId }), {
-    mode: 0o600,
-  });
+  await fs.promises.writeFile(
+    tempPath,
+    JSON.stringify({
+      relayFileId: args.relayFileId,
+      ...(args.encryption ? { encryption: args.encryption } : {}),
+    }),
+    {
+      mode: 0o600,
+    }
+  );
   await fs.promises.rename(tempPath, markerPath);
 };
 
-export const readSessionFileBlobBackfillMarker = async (args: {
+export const readSessionFileBlobBackfillReceipt = async (args: {
   workspaceId: string;
   sessionId: string;
   fileId: string;
   homeDir?: string;
-}): Promise<string | null> => {
+}): Promise<{ relayFileId: string; encryption?: EncryptedAttachment } | null> => {
+  let raw: string;
   try {
-    const raw = await fs.promises.readFile(getBackfillMarkerPath(args), 'utf8');
-    const parsed = JSON.parse(raw) as { relayFileId?: unknown };
-    return typeof parsed.relayFileId === 'string' && parsed.relayFileId.length > 0
-      ? parsed.relayFileId
-      : null;
-  } catch {
-    return null;
+    raw = await fs.promises.readFile(getBackfillMarkerPath(args), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
+  const parsed = JSON.parse(raw) as { relayFileId?: unknown; encryption?: unknown };
+  if (typeof parsed.relayFileId !== 'string' || !parsed.relayFileId)
+    throw new Error('Invalid attachment backfill receipt');
+  return {
+    relayFileId: parsed.relayFileId,
+    ...(parsed.encryption === undefined
+      ? {}
+      : { encryption: EncryptedAttachmentSchema.parse(parsed.encryption) }),
+  };
 };
+
+export const readSessionFileBlobBackfillMarker = async (
+  args: Parameters<typeof readSessionFileBlobBackfillReceipt>[0]
+): Promise<string | null> =>
+  (await readSessionFileBlobBackfillReceipt(args).catch(() => null))?.relayFileId ?? null;
 
 /** Age of a blob on disk in ms (from mtime), or null when it does not exist. */
 export const getSessionFileBlobAgeMs = async (args: {

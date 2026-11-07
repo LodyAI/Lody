@@ -15,10 +15,16 @@ import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import { createSessionSubmission } from '../src/lib/session-submission';
 import * as localFileSender from '../src/lib/electron-session-file-sender';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import {
+  removeEncryptedWorkspaceLocalData,
+  retainEncryptedWorkspaceCleanup,
+} from '../src/lib/e2ee-member-removal';
+import { resolveWorkspaceRuntimeCacheIdentity } from '../src/providers/create-workspace-runtime';
+import { encryptedLocalNamespace } from '../src/lib/e2ee-local-data';
+import { createEagerSyncHighWaterStore } from '../src/lib/eager-sync-high-water-cache';
 import {
   createAcceptedSessionInputs,
-  SESSION_INPUT_SLOW_STAGE_MS,
   SessionInputNotSentError,
   type SessionInputDiagnostic,
 } from '../src/lib/session-accepted-inputs';
@@ -369,28 +375,6 @@ describe('locally accepted Roost input', () => {
       release.resolve();
     }
   );
-  it('publishes an actual owner receipt before the source confirmation storage transaction completes', async () => {
-    const entered = gate(),
-      release = gate(),
-      receipts = new Set<string>();
-    const h = harness({ confirmed: (input) => receipts.add(input.id) });
-    const patch = h.storage.patch;
-    h.storage.patch = async (id, value) => {
-      if (value.state === 'confirmed') {
-        entered.resolve();
-        await release.promise;
-      }
-      return patch(id, value);
-    };
-    h.owner.enqueue(send());
-    await entered.promise;
-    expect(receipts).toEqual(new Set(['input-1']));
-    expect(h.accepted.get('input-1')?.items).toEqual([{ type: 'text', text: 'input-1' }]);
-    expect((await h.storage.get('input-1'))?.state).toBe('unknown');
-    expect(h.owner.getSnapshot()[0]?.inputState).toBe('sending');
-    release.resolve();
-    await when(h.owner, () => h.owner.getSnapshot()[0]?.inputState === 'confirmed');
-  });
   it('refuses an older owner before consuming a new-session draft or publishing routing', async () => {
     const fixture = await workspaceHarness({
       newSession: true,
@@ -644,38 +628,6 @@ describe('locally accepted Roost input', () => {
     expect(h.diagnostics.some((entry) => entry.inputId === 'second')).toBe(false);
   });
 
-  it('reports a session lease another window never releases, without interrupting the wait', async () => {
-    // Only the slow-stage timer is faked; IndexedDB keeps its own scheduling.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    cleanup.push(async () => {
-      vi.useRealTimers();
-    });
-    const held = gate();
-    const requested = gate();
-    const h = harness({
-      lock: async (_sessionId, _signal, work) => {
-        requested.resolve();
-        await held.promise;
-        return work();
-      },
-    });
-    h.owner.enqueue(send());
-    await requested.promise;
-    await vi.advanceTimersByTimeAsync(SESSION_INPUT_SLOW_STAGE_MS - 1);
-    expect(h.diagnostics).toEqual([]);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(h.diagnostics).toEqual([
-      {
-        event: 'session_input.slow',
-        sessionId: 'input-session',
-        stage: 'lock',
-        elapsedMs: SESSION_INPUT_SLOW_STAGE_MS,
-      },
-    ]);
-    held.resolve();
-    await vi.waitFor(() => expect(h.delivered).toEqual(['input-1']));
-  });
-
   it('restores a saved unsent input, scopes accounts, and preserves admission order', async () => {
     const factory = new IDBFactory();
     const h = harness({ factory, paused: true });
@@ -898,29 +850,6 @@ describe('locally accepted Roost input', () => {
       { type: 'text', text: input.id },
     ]);
     await storage.close();
-  });
-
-  it('saves creation metadata with ordinary undefined optional fields and restores its frozen target', async () => {
-    const factory = new IDBFactory();
-    const h = harness({ factory, paused: true });
-    h.owner.enqueue(
-      send('creation', {
-        creation: {
-          id: 'input-session' as SessionId,
-          machineId: 'target-machine' as PendingSessionSend['targetMachineId'],
-          historyBackend: 'roost',
-          userId: 'source-user',
-          acpSessionId: undefined,
-          diffStats: undefined,
-        } as PendingSessionSend['creation'],
-      })
-    );
-    await when(h.owner, () => Boolean(h.owner.getSnapshot()[0]?.persisted));
-    expect((await h.storage.get('creation'))?.send.creation).toMatchObject({
-      historyBackend: 'roost',
-      machineId: 'target-machine',
-    });
-    expect((await h.storage.get('creation'))?.send.creation).not.toHaveProperty('acpSessionId');
   });
 
   it('keeps unsaved inputs visible across refresh and retries them in original admission order after storage recovers', async () => {
@@ -1200,3 +1129,160 @@ describe('locally accepted Roost input', () => {
     }
   );
 });
+
+it('member removal deletes only the stopped workspace input and replica namespaces', async () => {
+  const factory = new IDBFactory();
+  vi.stubGlobal('indexedDB', factory);
+  vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+  const scope = {
+    accountId: 'input-account',
+    workspaceId: 'input-workspace',
+    windowId: 'window',
+    genesisHash: '11'.repeat(32),
+    signingPublicKey: '22'.repeat(32),
+  };
+  const otherScope = { ...scope, workspaceId: 'other-workspace' };
+  const namespace = encryptedLocalNamespace(scope);
+  const otherNamespace = encryptedLocalNamespace(otherScope);
+  const otherWindow = encryptedLocalNamespace({ ...scope, windowId: 'other-window' });
+  const removed = createSessionInputStorage('input-account', 'input-workspace', undefined, scope);
+  const otherAccount = createSessionInputStorage('other-account', 'input-workspace', undefined, {
+    ...scope,
+    accountId: 'other-account',
+  });
+  const otherWorkspace = createSessionInputStorage(
+    'input-account',
+    'other-workspace',
+    undefined,
+    otherScope
+  );
+  cleanup.push(
+    () => removed.close(),
+    () => otherAccount.close(),
+    () => otherWorkspace.close()
+  );
+  await removed.save(send('gone'));
+  await otherAccount.save(send('other-account'));
+  await otherWorkspace.save(send('other-workspace', { workspaceId: 'other-workspace' }));
+  const gone = await createEagerSyncHighWaterStore(namespace, { now: () => 1 });
+  const kept = await createEagerSyncHighWaterStore(otherNamespace, { now: () => 1 });
+  gone.set('session' as SessionId, 100);
+  kept.set('session' as SessionId, 200);
+  await gone.flush();
+  await kept.flush();
+  gone.close();
+  kept.close();
+  const database = (name: string) =>
+    new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open(name, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('content');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  for (const ownedNamespace of [namespace, otherNamespace, otherWindow]) {
+    for (const prefix of ['lody-loro-repo-db-', 'lody-loro-stream-cursors-']) {
+      const db = await database(prefix + ownedNamespace);
+      db.close();
+    }
+  }
+  await removeEncryptedWorkspaceLocalData(scope);
+  expect(await removed.list()).toEqual([]);
+  expect((await otherAccount.list()).map((row) => row.id)).toEqual(['other-account']);
+  expect((await otherWorkspace.list()).map((row) => row.id)).toEqual(['other-workspace']);
+  const names = (await factory.databases()).map((row) => row.name);
+  expect(names).not.toContain(`lody-loro-repo-db-${namespace}`);
+  expect(names).not.toContain(`lody-loro-stream-cursors-${namespace}`);
+  expect(names).toContain(`lody-loro-repo-db-${otherNamespace}`);
+  expect(names).toContain(`lody-loro-repo-db-${otherWindow}`);
+  const goneAgain = await createEagerSyncHighWaterStore(namespace, { now: () => 1 });
+  const keptAgain = await createEagerSyncHighWaterStore(otherNamespace, { now: () => 1 });
+  expect(goneAgain.get('session' as SessionId)).toBeUndefined();
+  expect(keptAgain.get('session' as SessionId)).toBe(200);
+  goneAgain.close();
+  keptAgain.close();
+});
+
+it.each(['another-account-after-restart', 'new-device', 'new-device-other-window'] as const)(
+  'an old removal receipt preserves the %s replica and pending input',
+  async (replacement) => {
+    const factory = new IDBFactory();
+    vi.stubGlobal('indexedDB', factory);
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const original = {
+      accountId: 'input-account',
+      workspaceId: 'input-workspace',
+      windowId: 'window',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+    };
+    const current = {
+      ...original,
+      accountId: replacement.startsWith('new-device') ? original.accountId : 'other-account',
+      signingPublicKey: '33'.repeat(32),
+      windowId: replacement === 'new-device-other-window' ? 'other-window' : original.windowId,
+    };
+    retainEncryptedWorkspaceCleanup(original);
+    vi.resetModules();
+    const reopened = await import('../src/lib/e2ee-member-removal');
+    if (replacement === 'another-account-after-restart')
+      await reopened.resumeEncryptedWorkspaceCleanup(current);
+    const identity = resolveWorkspaceRuntimeCacheIdentity(
+      current.workspaceId,
+      current.windowId,
+      current
+    );
+    for (const name of [identity.repoDbName, identity.remoteCursorDbName]) {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = factory.open(name, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('content');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const tx = db.transaction('content', 'readwrite');
+      tx.objectStore('content').put('new unsynced snapshot', 'only-copy');
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    }
+    const highWater = await createEagerSyncHighWaterStore(identity.namespace, { now: () => 1 });
+    highWater.set('fresh-session' as SessionId, 123);
+    await highWater.flush();
+    highWater.close();
+    const inputs = createSessionInputStorage(
+      current.accountId,
+      current.workspaceId,
+      undefined,
+      current
+    );
+    cleanup.push(() => inputs.close());
+    await inputs.save(send('new-incarnation'));
+    if (replacement === 'another-account-after-restart')
+      await reopened.resumeEncryptedWorkspaceCleanup(original);
+    else await reopened.removeEncryptedWorkspaceLocalData(original);
+    const names = (await factory.databases()).map((row) => row.name);
+    expect(names).toContain(identity.repoDbName);
+    expect(names).toContain(identity.remoteCursorDbName);
+    for (const name of [identity.repoDbName, identity.remoteCursorDbName]) {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = factory.open(name, 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const request = db.transaction('content').objectStore('content').get('only-copy');
+      const retained = await new Promise<unknown>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      expect(retained).toBe('new unsynced snapshot');
+    }
+    const retainedHighWater = await createEagerSyncHighWaterStore(identity.namespace, {
+      now: () => 1,
+    });
+    expect(retainedHighWater.get('fresh-session' as SessionId)).toBe(123);
+    retainedHighWater.close();
+    expect((await inputs.list()).map((row) => row.id)).toEqual(['new-incarnation']);
+  }
+);

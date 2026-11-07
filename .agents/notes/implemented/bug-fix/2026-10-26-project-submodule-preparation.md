@@ -113,6 +113,42 @@ setup and GC still have unfinished Promise dependencies in the migration ledger,
 so this fix keeps their existing owner and registered Legacy Git boundary. It does
 not claim a broader lifecycle migration or change its dependency ledger.
 
+## Object reuse for unselected descendants
+
+Unselected submodules used ordinary recursive clone even when the local parent
+already contained complete copies. The same `--reference` / `--dissociate`
+optimization now applies to those corresponding source paths, with the existing
+remote and gitlink remaining authoritative. No local URL replaces the clone
+remote. A candidate must be an independent checkout of the same repository,
+without symlink traversal, promisor configuration, shallow history or alternates.
+An unavailable or unsupported optional source skips the optimization; command
+infrastructure and mixed failure Causes still propagate. A clone failure remains
+a preparation failure, with completed checkouts retained for a later retry.
+
+Each reference applies only to its repository. Initialization descends after the
+parent has dissociated, and leaves populated checkouts at their existing HEAD.
+This also resumes missing descendants after an earlier failure. Selected Members
+are excluded from their parent's traversal because their own manager retains
+credentials and mutation ownership. Unsupported missing siblings keep Git's
+four-job recursive update. Reference-backed siblings remain serialized to avoid
+concurrent mutation of parent Git configuration.
+
+Direct local clones with hardlinked objects were rejected: the requested benefit
+does not justify adding a second long-lived object-sharing model to this path.
+The chosen optimization preserves independent object storage after creation and
+ordinary remote fetching when local objects are insufficient. It does not promise
+offline operation or a fixed startup duration. Source deletion or concurrent GC
+*during* borrowing can still fail initialization; no source-wide lock or destructive
+automatic cleanup is introduced. Existing Project ownership drains started work,
+and retries inspect retained checkouts rather than resetting them.
+
+The real-Git regression in
+[`workspace-git-service.test.ts`](../../../../apps/cli/src/session/workspace-git-service.test.ts)
+allows remote ref advertisement but rejects object-pack transfer, proving that
+complete local objects actually avoid the transfer. It exercises a failed nested
+initialization and retry, then removes the source stores and checks the resulting
+repositories. Unsupported source layouts retain ordinary clone behavior.
+
 ## Validation and limits
 
 The owning real-Git suite now covers partial-source checkout without hydration,
@@ -120,14 +156,8 @@ linked/shallow sources, stale configuration beside a real submodule, failed clon
 archive and restore, missing backup receipts, incomplete checkouts, unknown content,
 explicit gitlink removal and escaped ancestors. Replacing the three production
 files with the pre-fix source makes the four primary regression cases fail with
-their respective Git errors. Six related real-Git suites pass 130 cases, including
-39 in the owning suite. Full workspace types, lint and formatting pass. The full
-`pnpm check` reaches workspace tests and stops on eleven E2EE HTTP tests because
-the sandbox denies loopback listening; that entire eleven-test file passes when
-rerun outside the sandbox. This does not establish a green complete test run.
-Documentation check passes with the pinned ACP sources present; the original
-working checkout retains its 84 pre-existing missing-submodule link errors.
-Tests use a temporary standalone copy with the locked dependencies and exact
-submodule source revisions, without real Git remotes or application restart.
-Existing user repositories and conversations are not modified. Live desktop
-acceptance was not performed.
+their respective Git errors. The owning suite uses synthetic local repositories and does not depend on live
+remotes or timing thresholds. Performance varies with available local objects,
+remote negotiation and repacking; the tests establish behavior rather than a
+startup-time guarantee. Desktop acceptance and concurrent source-GC recovery are
+not established by these fixtures.

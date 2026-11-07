@@ -31,7 +31,7 @@ import { PrTabView } from '@/components/sessions/pr-tab-view';
 import { TerminalDock } from '@/components/terminal/terminal-dock';
 import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { StableSessionContext } from '@/hooks/useStableSession';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import {
   DEFAULT_TOUR_IDENTITY,
   TOUR_ANNOTATION_ANCHOR,
@@ -521,7 +521,7 @@ function TourWindow({
     <div
       data-tour-anchor="window"
       {...windowProps}
-      className={cn(windowProps.className, className)}
+      className={clsx(windowProps.className, className)}
     >
       {/* Window chrome. The tour is a WINDOW on a desk, not a fullscreen slab:
           nobody runs their editor fullscreen, and a frameless rectangle reads

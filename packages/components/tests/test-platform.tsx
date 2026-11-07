@@ -1,4 +1,9 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
+import { userAtom } from '../src/atoms';
+import { setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import type { WorkspaceId } from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -36,5 +41,36 @@ export const TEST_CLOUD_PLATFORM: PlatformProvider = {
 export function TestCloudPlatformProvider({ children }: { children: ReactNode }) {
   return (
     <PlatformContext.Provider value={TEST_CLOUD_PLATFORM}>{children}</PlatformContext.Provider>
+  );
+}
+
+/** Explicit synthetic ordinary admission for tests of legacy remote APIs.
+ * The default cloud provider intentionally supplies no mode verdict. */
+export function TestOrdinaryWorkspaceProvider({
+  workspaceId,
+  children,
+}: {
+  workspaceId: string;
+  children?: ReactNode;
+}) {
+  const store = useMemo(() => {
+    const value = createStore();
+    value.set(userAtom, { id: 'test-cloud-account' } as never);
+    value.set(setWorkspaceContextAtom, {
+      workspaceId: workspaceId as WorkspaceId,
+      slug: workspaceId,
+    });
+    value.set(workspaceContentModeAtom, {
+      accountId: 'test-cloud-account',
+      workspaceId,
+      workspaceSlug: workspaceId,
+      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+    return value;
+  }, [workspaceId]);
+  return (
+    <TestCloudPlatformProvider>
+      <Provider store={store}>{children}</Provider>
+    </TestCloudPlatformProvider>
   );
 }

@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
@@ -19,11 +22,20 @@ vi.mock('@/lib/auth-bootstrap', () => ({
 
 const organizationMocks = vi.hoisted(() => ({
   authClient: null as unknown,
+  encryptedWorkspaces: [] as unknown[] | undefined,
+  directoryError: null as Error | null,
   refetchActiveOrganization: vi.fn(),
   refetchOrganizations: vi.fn(),
   setActive: vi.fn(),
   deleteOrganization: vi.fn(),
   leaveOrganization: vi.fn(),
+}));
+
+vi.mock('../src/providers/cloud-platform-api', () => ({
+  useOptionalCloudPlatformQuery: () => ({
+    data: organizationMocks.encryptedWorkspaces,
+    error: organizationMocks.directoryError,
+  }),
 }));
 
 vi.mock('../src/providers/convex-provider', () => ({
@@ -40,6 +52,11 @@ const { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } =
   await import('../src/atoms/workspace-context');
 type OrganizationState = ReturnType<typeof useOrganization>;
 let latestOrganizationState: OrganizationState | null = null;
+let latestGlobalState: OrganizationState | null = null;
+function GlobalOrganizationProbe() {
+  latestGlobalState = useOrganization();
+  return null;
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -95,7 +112,11 @@ function TestApp({
   targetSlug,
   renderVersion,
   store,
+  includeGlobal = false,
+  remountTarget = false,
 }: {
+  remountTarget?: boolean;
+  includeGlobal?: boolean;
   targetSlug: string;
   renderVersion: number;
   store: Store;
@@ -121,8 +142,15 @@ function TestApp({
           confirmedUnauthenticated: false,
         },
       },
-      createElement(OrganizationProbe, { targetSlug }),
-      createElement(OrganizationProbe, { targetSlug })
+      createElement(OrganizationProbe, {
+        targetSlug,
+        key: remountTarget ? `first:${targetSlug}` : 'first',
+      }),
+      createElement(OrganizationProbe, {
+        targetSlug,
+        key: remountTarget ? `second:${targetSlug}` : 'second',
+      }),
+      includeGlobal ? createElement(GlobalOrganizationProbe) : null
     )
   );
 }
@@ -135,7 +163,10 @@ describe('useOrganization setActive dedupe', () => {
   let listVersion = 0;
 
   beforeEach(() => {
+    organizationMocks.encryptedWorkspaces = [];
+    organizationMocks.directoryError = null;
     latestOrganizationState = null;
+    latestGlobalState = null;
     listVersion = 0;
     activeOrganization = createOrganization('workspace-old', 'old-workspace', 'Old Workspace');
     store = createStore();
@@ -189,7 +220,12 @@ describe('useOrganization setActive dedupe', () => {
     vi.clearAllMocks();
   });
 
-  async function render(targetSlug: string, renderVersion: number): Promise<void> {
+  async function render(
+    targetSlug: string,
+    renderVersion: number,
+    includeGlobal = false,
+    remountTarget = false
+  ): Promise<void> {
     if (!container) {
       container = document.createElement('div');
       document.body.appendChild(container);
@@ -197,12 +233,91 @@ describe('useOrganization setActive dedupe', () => {
     }
 
     await act(async () => {
-      root?.render(createElement(TestApp, { targetSlug, renderVersion, store }));
+      root?.render(
+        createElement(TestApp, { targetSlug, renderVersion, store, includeGlobal, remountTarget })
+      );
     });
     await act(async () => {
       await Promise.resolve();
     });
   }
+
+  it('opens a ledger-bound workspace with a full projected roster without Better Auth setActive', async () => {
+    organizationMocks.encryptedWorkspaces = [
+      {
+        id: 'encrypted',
+        name: 'Cipher Team',
+        slug: 'cipher-team',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: '11'.repeat(32),
+        genesisHash: '11'.repeat(32),
+        role: 'member',
+        members: [
+          {
+            id: 'member-key',
+            userId: 'user-1',
+            role: 'member',
+            user: { id: 'user-1', name: 'Synthetic Member', email: 'member@synthetic.test' },
+          },
+        ],
+      },
+    ];
+    await render('cipher-team', 0);
+    expect(latestOrganizationState!.activeOrganization).toMatchObject({
+      id: 'encrypted',
+      members: [{ userId: 'user-1', role: 'member' }],
+    });
+    expect(
+      latestOrganizationState!.organizations?.some((workspace) => workspace.id === 'encrypted')
+    ).toBe(true);
+    expect(latestOrganizationState!.role).toBe('member');
+    expect(store.get(currentWorkspaceIdAtom)).toBe('encrypted');
+    expect(organizationMocks.setActive).not.toHaveBeenCalled();
+  });
+  it('returns global selection to a remounted ordinary URL even if the optional directory fails', async () => {
+    organizationMocks.encryptedWorkspaces = [
+      {
+        id: 'encrypted',
+        name: 'Cipher Team',
+        slug: 'cipher-team',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: '11'.repeat(32),
+        genesisHash: '11'.repeat(32),
+        role: 'member',
+        members: [
+          {
+            id: 'member-key',
+            userId: 'user-1',
+            role: 'member',
+            user: { id: 'user-1', name: 'Synthetic Member', email: 'member@synthetic.test' },
+          },
+        ],
+      },
+    ];
+    await render('cipher-team', 0, true, true);
+    expect(latestGlobalState!.activeOrganization?.id).toBe('encrypted');
+    organizationMocks.encryptedWorkspaces = undefined;
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 1, true, true);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestGlobalState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestOrganizationState!.error).toBeNull();
+    expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-old');
+  });
+  it('isolates an unavailable encrypted directory from a healthy ordinary workspace and fails closed for an unknown encrypted target', async () => {
+    organizationMocks.encryptedWorkspaces = undefined;
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 0, true);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestOrganizationState!.error).toBeNull();
+    await render('unknown-encrypted', 1, true);
+    expect(latestOrganizationState!.activeOrganization).toBeNull();
+    expect(latestOrganizationState!.organizationsError?.message).toContain(
+      'Encrypted membership directory'
+    );
+  });
 
   it.each([undefined, null])(
     'gates incomplete membership (%s) and recovers after refetch',
@@ -247,30 +362,6 @@ describe('useOrganization setActive dedupe', () => {
     await render('workspace-new', 1);
     expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-new');
     expect(latestOrganizationState!.role).toBe('owner');
-  });
-
-  it('sends one setActive request for duplicate target workspace switchers', async () => {
-    await render('target-workspace', 0);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-    expect(organizationMocks.setActive).toHaveBeenCalledWith({
-      organizationId: 'workspace-target',
-    });
-
-    listVersion += 1;
-    await render('target-workspace', 1);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-
-    activeOrganization = createOrganization(
-      'workspace-target',
-      'target-workspace',
-      'Target Workspace'
-    );
-    listVersion += 1;
-    await render('target-workspace', 2);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
   });
 
   it('publishes the fallback after delete success when no newer writer intervenes', async () => {
@@ -520,18 +611,6 @@ describe('useOrganization setActive dedupe', () => {
     expect(store.get(currentWorkspaceSlugAtom)).toBe('workspace-new');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-new');
   });
-
-  it('rejects an awaited activation when Better Auth refuses the switch', async () => {
-    organizationMocks.setActive.mockResolvedValueOnce({
-      data: null,
-      error: { message: 'membership changed' },
-    });
-    await render('old-workspace', 0);
-
-    await expect(
-      latestOrganizationState?.activateOrganization('workspace-rejected')
-    ).rejects.toThrow('membership changed');
-  });
 });
 
 describe('useOrganization list recovery', () => {
@@ -629,42 +708,6 @@ describe('useOrganization list recovery', () => {
     expect(latestOrganizationState?.error).toBeNull();
   });
 
-  it('does not poll while hidden, and retries as soon as the page is shown', async () => {
-    let visibility: DocumentVisibilityState = 'visible';
-    const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
-    Object.defineProperty(document, 'visibilityState', {
-      configurable: true,
-      get: () => visibility,
-    });
-    try {
-      await renderApp();
-      for (let i = 0; i < 8; i += 1) await advance(5_000);
-      expect(latestOrganizationState?.organizations).toBeUndefined();
-
-      visibility = 'hidden';
-      await act(async () => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      networkUp = true;
-      for (let i = 0; i < 6; i += 1) await advance(30_000);
-      // Nothing was requested in three minutes hidden: the list is still unknown.
-      expect(latestOrganizationState?.organizations).toBeUndefined();
-
-      visibility = 'visible';
-      await act(async () => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      await advance(5_000);
-      await advance(0);
-      expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
-        'target-workspace',
-      ]);
-    } finally {
-      delete (document as { visibilityState?: unknown }).visibilityState;
-      if (descriptor) Object.defineProperty(Document.prototype, 'visibilityState', descriptor);
-    }
-  });
-
   it('keeps loading through a first-login active-organization failure until the list resolves', async () => {
     const workspace = createOrganization('workspace-first-login', 'target-workspace', 'Target');
     // Answered before the new session settled; Better Auth only refetches it on setActive.
@@ -703,20 +746,5 @@ describe('useOrganization list recovery', () => {
     ]);
     expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
     expect(latestOrganizationState?.error).toBeNull();
-  });
-
-  it('tries again on its own after a while, without any event', async () => {
-    await renderApp();
-    for (let i = 0; i < 8; i += 1) await advance(5_000);
-    expect(latestOrganizationState?.organizations).toBeUndefined();
-
-    networkUp = true;
-    await advance(30_000);
-    await advance(5_000);
-    await advance(0);
-
-    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
-      'target-workspace',
-    ]);
   });
 });

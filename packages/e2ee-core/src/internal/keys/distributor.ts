@@ -59,9 +59,20 @@ const fromLedger = (error: VerifiedLedgerError) =>
   fail(
     error.reason === 'rollback' ? 'rollback' : error.reason === 'corrupt' ? 'corrupt' : 'storage'
   );
-/** Storage damage stops a whole batch; anything else only blocks the one task. */
+/**
+ * Storage damage fails a whole batch; anything else only blocks the one task. Steps
+ * for different recipients already running beside the damaged one still finish:
+ * each is an idempotent insert or an exact retry of its saved original.
+ */
 const fatal = (error: unknown) =>
   error instanceof DistributionError && (error.reason === 'storage' || error.reason === 'corrupt');
+
+/**
+ * Bound on recipients whose mailbox round trips run at once. Per-recipient steps
+ * stay ordered; only different recipients overlap, so a round costs a few round
+ * trips instead of several per device.
+ */
+const RECIPIENT_CONCURRENCY = 8;
 
 const taskId = (delivery: string, revision: number) =>
   keyId(
@@ -319,11 +330,17 @@ export class KeyDistributor extends Context.Service<
         const selected = targets.slice(0, limit),
           blocked: string[] = [];
         let scheduled = 0;
-        for (const target of selected) {
-          const attempted = yield* Effect.result(schedule(epoch, target));
+        // Recipients are independent: their mailbox hints overlap. Every outcome is
+        // still checked in target order, and storage damage fails the whole page.
+        const attempts = yield* Effect.forEach(
+          selected,
+          (target) => Effect.result(schedule(epoch, target)),
+          { concurrency: RECIPIENT_CONCURRENCY }
+        );
+        for (const [index, attempted] of attempts.entries()) {
           if (Result.isFailure(attempted)) {
             if (fatal(attempted.failure)) return yield* attempted.failure;
-            blocked.push(target);
+            blocked.push(selected[index]!);
           } else if (attempted.success) scheduled++;
         }
         yield* gate.guard;
@@ -375,8 +392,13 @@ export class KeyDistributor extends Context.Service<
         if (!boundedPage(limit, cursor)) return yield* fail('invalid-input');
         const page = yield* store(journal.pending(cursor, limit));
         const blocked: string[] = [];
-        for (const id of page.ids) {
-          const attempt = yield* Effect.result(deliver(id));
+        // Each task owns one recipient's slot and original, so their put/read/status
+        // round trips overlap. Outcomes are checked in page order as before.
+        const attempts = yield* Effect.forEach(page.ids, (id) => Effect.result(deliver(id)), {
+          concurrency: RECIPIENT_CONCURRENCY,
+        });
+        for (const [index, attempt] of attempts.entries()) {
+          const id = page.ids[index]!;
           if (Result.isFailure(attempt)) {
             if (fatal(attempt.failure)) return yield* attempt.failure;
             blocked.push(id);

@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PanelRight } from 'lucide-react';
 import {
@@ -8,6 +8,7 @@ import {
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
+  type SidePanelTabSplit,
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { Button } from '@lody/ui/button';
 const storyLayoutStylesStyles = stylex.create({
@@ -70,6 +71,53 @@ const storyLayout = stylex.create({
   frame2: {
     'min-height': 'calc(var(--spacing) * 0)',
     flex: '1',
+  },
+});
+import {
+  SIDE_PANEL_SPLIT_RATIO_VAR,
+  SidePanelSplitHandle,
+} from '@/components/sessions/side-panel-split-handle';
+
+const mergedStoryLayout = stylex.create({
+  part1: {
+    minHeight: '100vh',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  part2: {
+    display: 'flex',
+    height: 520,
+    width: 720,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderLeftStyle: 'solid',
+    borderLeftWidth: 1,
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  part3: {
+    borderBottomStyle: 'solid',
+    borderBottomWidth: 1,
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  part4: {
+    position: 'relative',
+    display: 'flex',
+    flex: 1,
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    ':is(*) > :not(:last-child)': {
+      borderInlineEndStyle: 'solid',
+      borderInlineEndWidth: 1,
+      borderInlineEndColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    },
+  },
+  part5: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
@@ -172,6 +220,81 @@ function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
   );
 }
 
+const DEVICE_TABS: SessionSidePanelTabItem[] = [
+  { id: 'files', label: 'Files', kind: 'files', closeable: true },
+  { id: 'ios-simulator', label: 'iOS Simulator', kind: 'ios-simulator', closeable: true },
+  { id: 'browser', label: 'Browser', kind: 'browser', closeable: true },
+  { id: 'android-emulator', label: 'Android Emulator', kind: 'android-emulator', closeable: true },
+];
+
+function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | null }) {
+  const [tabs, setTabs] = useState(DEVICE_TABS);
+  const [activeTabId, setActiveTabId] = useState<string | null>('ios-simulator');
+  const [split, setSplit] = useState<SidePanelTabSplit | null>(initialSplit);
+  const [ratio, setRatio] = useState(0.5);
+  const splitShown = split?.includes(activeTabId ?? '') ?? false;
+  const shownIds = splitShown && split ? split : [activeTabId];
+
+  return (
+    <div {...stylex.props(mergedStoryLayout.part1)}>
+      <div {...stylex.props(mergedStoryLayout.part2)}>
+        <SessionSidePanelTabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabSelect={setActiveTabId}
+          onTabClose={(tabId) => {
+            setTabs((current) => current.filter((tab) => tab.id !== tabId));
+            setSplit((current) => (current?.includes(tabId) ? null : current));
+            setActiveTabId((current) =>
+              current === tabId
+                ? getSidePanelTabCloseFallback(
+                    tabs.map((tab) => tab.id),
+                    tabId
+                  )
+                : current
+            );
+          }}
+          closeTabLabel={(label) => `Close ${label}`}
+          split={split}
+          onTabsSplit={(next, draggedTabId) => {
+            setSplit(next);
+            setActiveTabId(draggedTabId);
+          }}
+          onTabUnsplit={(tabId) => {
+            setSplit(null);
+            setActiveTabId(tabId);
+          }}
+          xstyle={mergedStoryLayout.part3}
+        />
+        <div
+          {...stylex.props(mergedStoryLayout.part4)}
+          style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: ratio } as CSSProperties}
+        >
+          {shownIds.map((id, index) => (
+            <div
+              key={id}
+              {...stylex.props(mergedStoryLayout.part5)}
+              style={{
+                flexBasis:
+                  shownIds.length > 1 ? `${(index === 0 ? ratio : 1 - ratio) * 100}%` : '100%',
+              }}
+            >
+              {tabs.find((tab) => tab.id === id)?.label}
+            </div>
+          ))}
+          {splitShown ? (
+            <SidePanelSplitHandle
+              ratio={ratio}
+              label="Resize split view"
+              onRatioChange={setRatio}
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const meta = {
   title: 'Sessions/SessionSidePanelTabBar',
   component: SessionSidePanelTabBar,
@@ -196,6 +319,14 @@ export const UnifiedTabs: Story = {
 };
 
 export const PendingTab: Story = { render: () => <SidePanelTabBarStory pending /> };
+/** Drag one device tab onto the other to pair them; drag a member out to split them again. */
+export const DeviceTabs: Story = {
+  render: () => <DeviceSplitStory initialSplit={null} />,
+};
+
+export const DeviceSplit: Story = {
+  render: () => <DeviceSplitStory initialSplit={['ios-simulator', 'android-emulator']} />,
+};
 
 export const EmptyState: Story = {
   render: () => (

@@ -44,7 +44,11 @@ Parent rules apply. `CLAUDE.md` is a symlink; edit this file only.
 - `lib/session-share-publisher.ts` is app-only: hydrate all sources before
   synchronous capture, copy attachments under app authority, and release every
   source lease. Never import it from the anonymous entry. Workspace E2EE will
-  decrypt here before plaintext publication, not on a server or reader.
+  decrypt here before plaintext publication, not on a server or reader. Encrypted
+  publication requires explicit confirmation of the runtime, workspace/root, selected
+  session set and share revision before capture or upload, including updates and MCP
+  approvals. Invalidate changed scopes and reject unavailable selections; ordinary
+  workspaces retain their existing flow. [Decision](../../../../../.agents/notes/implemented/feature/2026-10-28-e2ee-share-plaintext-consent.md).
 - `lib/session-share-secrets.ts` owns device-local credentials scoped by
   user/workspace/share and credential version. Ordinary cache clear preserves them.
   Missing credentials require reset, never recovery from cloud data or Flock.

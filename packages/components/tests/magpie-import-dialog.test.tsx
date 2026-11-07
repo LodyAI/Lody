@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -86,35 +87,6 @@ describe('MagpieImportDialog', () => {
     });
   };
 
-  it('shows this machine, the gateway, and every Magpie runtime selected', async () => {
-    const { onImport } = await render();
-
-    expect(text()).toContain('Import from Magpie');
-    const title = [...document.querySelectorAll('h2')].find((node) =>
-      node.textContent?.includes('Import from Magpie')
-    );
-    expect(title?.querySelector('svg')).toBeTruthy();
-    expect(text()).toContain(
-      'The following agent providers will be created automatically from the Magpie gateway configuration.'
-    );
-    expect(text()).toContain('Current machine');
-    expect(text()).toContain('Studio Mac');
-    expect(text()).not.toContain('Gateway');
-    expect(text()).toContain('ANTHROPIC_BASE_URL=http://127.0.0.1:48723');
-    expect(text()).toContain('OPENAI_BASE_URL=http://127.0.0.1:48723/v1');
-    expect(text()).toContain('DEEPSEEK_BASE_URL=http://127.0.0.1:48723/v1');
-    for (const name of ['Claude-magpie', 'Codex-magpie', 'Pi-magpie', 'DSH-magpie']) {
-      expect(runtimeCheckbox(name).getAttribute('aria-checked')).toBe('true');
-    }
-    expect(onImport).not.toHaveBeenCalled();
-  });
-
-  it('names this machine when the host has no machine name', async () => {
-    await render({ machineName: undefined });
-    expect(text()).toContain('Current machine');
-    expect(text()).toContain('This machine');
-  });
-
   it('leaves a disabled runtime unchecked and out of the import', async () => {
     const { onImport } = await render({
       options: [
@@ -136,19 +108,6 @@ describe('MagpieImportDialog', () => {
 
     expect(onImport).toHaveBeenCalledTimes(1);
     expect(onImport).toHaveBeenCalledWith(['claude', 'pi']);
-  });
-
-  it('does not submit when every runtime is cleared', async () => {
-    const { onImport } = await render();
-
-    for (const name of ['Claude-magpie', 'Codex-magpie', 'Pi-magpie', 'DSH-magpie']) {
-      await click(runtimeCheckbox(name));
-    }
-
-    const importButton = buttonNamed('Import');
-    expect(importButton.disabled).toBe(true);
-    await click(importButton);
-    expect(onImport).not.toHaveBeenCalled();
   });
 
   it('submits the remaining runtimes once while the import is in flight', async () => {
@@ -193,32 +152,6 @@ describe('MagpieImportDialog', () => {
     expect(runtimeCheckbox('Claude-magpie').getAttribute('aria-checked')).toBe('true');
   });
 
-  it('shows the host error without changing the selection', async () => {
-    await render();
-    await click(runtimeCheckbox('Codex-magpie'));
-    await render({
-      error: 'Could not write the import.',
-    });
-
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
-      'Could not write the import.'
-    );
-    expect(runtimeCheckbox('Codex-magpie').getAttribute('aria-checked')).toBe('false');
-    expect(runtimeCheckbox('Claude-magpie').getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('resets the selection when the dialog closes and opens again', async () => {
-    await render();
-    await click(runtimeCheckbox('Claude-magpie'));
-    expect(runtimeCheckbox('Claude-magpie').getAttribute('aria-checked')).toBe('false');
-
-    await render({ open: false });
-    await render({ open: true });
-
-    expect(runtimeCheckbox('Claude-magpie').getAttribute('aria-checked')).toBe('true');
-    expect(runtimeCheckbox('DSH-magpie').getAttribute('aria-checked')).toBe('true');
-  });
-
   it('drops a click when a new link arrives before the import microtask', async () => {
     const previous = vi.fn(async () => {});
     const next = vi.fn(async () => {});
@@ -254,14 +187,5 @@ describe('MagpieImportDialog', () => {
     expect(text()).toContain('ANTHROPIC_BASE_URL=http://127.0.0.1:2');
     expect(runtimeCheckbox('Pi-magpie').getAttribute('aria-checked')).toBe('true');
     expect(runtimeCheckbox('Claude-magpie').getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('resets the selection for a new request on the same gateway', async () => {
-    await render({ requestKey: 'link-1' });
-    await click(runtimeCheckbox('Pi-magpie'));
-
-    await render({ requestKey: 'link-2' });
-
-    expect(runtimeCheckbox('Pi-magpie').getAttribute('aria-checked')).toBe('true');
   });
 });

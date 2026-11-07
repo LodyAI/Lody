@@ -457,7 +457,8 @@ function isACPSessionConfig(value: unknown): boolean {
     agentType === 'kimi' ||
     agentType === 'deepseek' ||
     agentType === 'bub' ||
-    agentType === 'dimcode';
+    agentType === 'dimcode' ||
+    agentType === 'sorbet';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||
@@ -518,6 +519,13 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.turnId === 'string'
+    );
+  }
+
+  if (value.type === 'machine/dsh-providers') {
+    return (
+      typeof value.machineId === 'string' &&
+      Object.keys(value).every((key) => ['type', 'machineId'].includes(key))
     );
   }
 
@@ -591,6 +599,10 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       (value.action === 'start'
         ? typeof value.configId === 'string' &&
           value.configId.trim().length > 0 &&
+          (typeof value.methodId === 'undefined' ||
+            (typeof value.methodId === 'string' &&
+              value.methodId.trim().length > 0 &&
+              value.methodId.length <= 1024)) &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&
@@ -826,6 +838,16 @@ export function isLocalSessionControlResponse(
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
       isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'machine/dsh-providers_response') {
+    return (
+      Array.isArray(value.providers) &&
+      value.providers.every(
+        (item) =>
+          isObjectRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+      )
     );
   }
 

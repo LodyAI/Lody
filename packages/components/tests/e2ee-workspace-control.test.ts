@@ -1,6 +1,8 @@
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
+import { ClientCustodyError } from '@lody/e2ee-core/services';
+import { PersonalHostError } from '@lody/e2ee-client';
 import {
   encodeCbor,
   hashRecordBytes,
@@ -16,7 +18,6 @@ import {
 } from '../src/lib/e2ee-ledger-history';
 import {
   createPreparedE2eeWorkspace,
-  e2eeCreationChoice,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
 } from '../src/lib/create-e2ee-workspace';
@@ -93,7 +94,7 @@ function historyFixture(commitment = 6) {
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
   // A genuine Owner capability declaration that this client version cannot verify past.
-  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [1]]]);
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [2]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -382,6 +383,18 @@ const failureOf = (run: () => unknown) => {
   }
   throw new Error('expected a failure');
 };
+it('does not infer custody recovery from an error message or unwrap a mixed runtime failure', () => {
+  expect(classifyE2eeControlFailure(new Error('LOCKED indeterminate'))).toMatchObject({
+    kind: 'network',
+  });
+  expect(
+    classifyE2eeControlFailure({
+      _tag: 'PersonalRuntimeFailure',
+      code: 'runtime-failed',
+      cause: { reasons: [new ClientCustodyError({ reason: 'locked' }), new Error('close failed')] },
+    })
+  ).toMatchObject({ kind: 'network' });
+});
 
 describe('encrypted workspace recovery classification', () => {
   it('shows the verified prefix and stops at a capability declaration instead of reporting corruption', () => {
@@ -437,6 +450,10 @@ describe('encrypted workspace recovery classification', () => {
 
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
+    expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
+      kind: 'identity-conflict',
+      code: 'pin-mismatch',
+    });
     expect(
       failureOf(() =>
         appendLedgerHistory(null, fixture.firstPage, {
@@ -602,66 +619,6 @@ describe('encrypted workspace recovery classification', () => {
   });
 });
 
-describe('encrypted workspace creation gate', () => {
-  it('requires both developer toggles for new creation but keeps a saved request resumable', () => {
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: false,
-        selected: true,
-        resumable: false,
-        savedRequests: 0,
-      })
-    ).toEqual({
-      showOption: false,
-      encrypt: false,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: true,
-        selected: false,
-        resumable: false,
-        savedRequests: 0,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: false,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: true,
-        selected: true,
-        resumable: false,
-        savedRequests: 0,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: true,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: false,
-        selected: false,
-        resumable: true,
-        savedRequests: 1,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: true,
-    });
-    expect(
-      e2eeCreationChoice({
-        featureEnabled: false,
-        selected: false,
-        resumable: false,
-        savedRequests: 1,
-      })
-    ).toEqual({
-      showOption: true,
-      encrypt: false,
-    });
-  });
-});
-
 describe('saved creation requests after a server refusal', () => {
   const pending = { accountId: 'account', requestId: 'request-1', name: 'n', slug: 's' };
   const refusing = (failure: unknown) =>
@@ -774,4 +731,65 @@ it('keeps the prepared credential hash immutable before invoking the cloud creat
   await expect(port.create(original)).rejects.toThrow('synthetic temporary outage');
   await expect(port.create(original)).rejects.toThrow('synthetic temporary outage');
   expect(received).toEqual([original, original]);
+});
+
+it('checks observed checkpoints against the verified view when native originals are sparse', () => {
+  const fixture = historyFixture();
+  const storage = new MemoryStorage();
+  const prefix = appendLedgerHistory(null, fixture.firstPage, fixture.expected);
+  const before = appendLedgerHistory(prefix, fixture.secondPage, fixture.expected);
+  retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', before);
+  const extended = appendLedgerHistory(
+    null,
+    {
+      ...fixture.firstPage,
+      recordsHex: [
+        ...fixture.firstPage.recordsHex,
+        ...fixture.secondPage.recordsHex,
+        bytesToHex(fixture.third),
+      ],
+      checkpoint: { length: 3, headHash: bytesToHex(hashRecordBytes(fixture.third).toBytes()) },
+      nextCursor: null,
+    },
+    fixture.expected
+  );
+  // Native snapshot origins intentionally omit raw records; the genuine view
+  // still proves the same prefix after qualification from signed originals.
+  expect(
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...extended, records: [] })
+  ).toBe(true);
+  expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-1')?.length).toBe(3);
+  const fork = historyFixture(8);
+  const forked = appendLedgerHistory(
+    null,
+    {
+      ...fork.firstPage,
+      recordsHex: [
+        ...fork.firstPage.recordsHex,
+        ...fork.secondPage.recordsHex,
+        bytesToHex(fork.third),
+      ],
+      checkpoint: { length: 3, headHash: bytesToHex(hashRecordBytes(fork.third).toBytes()) },
+      nextCursor: null,
+    },
+    fork.expected
+  );
+  expect(() =>
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...forked, records: [] })
+  ).toThrow('Ledger history changed');
+  expect(() =>
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...prefix, records: [] })
+  ).toThrow('Ledger history rolled back');
+  resetObservedLedgerProgress(storage, 'account', 'workspace-1');
+  expect(
+    retainObservedLedgerCheckpoint(storage, 'account', 'workspace-1', { ...extended, records: [] })
+  ).toBe(true);
+  expect(readObservedLedgerCheckpoint(storage, 'account', 'workspace-1')?.length).toBe(3);
+});
+
+it('shows a portable continuity conflict as stopped verification rather than a network failure', () => {
+  expect(classifyE2eeControlFailure(new PersonalHostError({ code: 'history-conflict' }))).toEqual({
+    kind: 'progress-conflict',
+    code: 'history-conflict',
+  });
 });

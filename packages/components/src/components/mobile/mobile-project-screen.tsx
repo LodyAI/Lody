@@ -40,6 +40,8 @@ import {
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import {
   MobileWorkspaceTabBar,
@@ -84,6 +86,15 @@ const darkColors = {
 } as const;
 
 const styles = stylex.create({
+  statusBox: {
+    display: 'flex',
+    width: '16px',
+    height: '16px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  foldScroll: { overflowY: 'hidden', paddingBottom: 0 },
   selectionCheck: { pointerEvents: 'none' },
   statusRunning: { color: 'hsl(var(--primary) / 1)' },
   /** A react-icon, sized to fill its box. */
@@ -862,7 +873,11 @@ function StatusIndicator({
     );
   }
   if (hasUnreadMessages) {
-    return <span data-unread-dot="" {...stylex.props(styles.unreadDot)} aria-label="unread" />;
+    return (
+      <span data-unread-dot="" {...stylex.props(styles.statusBox)} aria-label="unread">
+        <span {...stylex.props(styles.unreadDot)} />
+      </span>
+    );
   }
   return null;
 }
@@ -1210,6 +1225,12 @@ export function MobileProjectScreen({
   /* Scroll container handed to `MobileWorkspaceTabBar` so the dock
      collapses while the user scrolls. */
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  const setListRef = useCallback((element: HTMLDivElement | null) => {
+    listScrollRef.current = element;
+    setListElement(element);
+  }, []);
+  const settingsFold = useHorizontalFoldLayout(listElement, selectedProjectTab === 'settings');
   const [filesScrollSignal, setFilesScrollSignal] =
     useState<MobileWorkspaceTabBarScrollSignal | null>(null);
   const handleFilesScrollActivity = useCallback((scrollTop: number) => {
@@ -1354,7 +1375,13 @@ export function MobileProjectScreen({
           ) : null}
         </AnimatePresence>
 
-        <div ref={listScrollRef} {...withClassName(stylex.props(styles.scroll), 'scrollbar-pro')}>
+        <div
+          ref={setListRef}
+          {...withClassName(
+            stylex.props(styles.scroll, settingsFold && styles.foldScroll),
+            'scrollbar-pro'
+          )}
+        >
           {selectedProjectTab === 'chat' ? (
             visibleConversations.length === 0 ? (
               <>
@@ -1411,8 +1438,9 @@ export function MobileProjectScreen({
             )
           ) : null}
           {selectedProjectTab === 'files' ? renderedFilesTabContent : null}
-          {selectedProjectTab === 'settings'
-            ? (settingsTabContent ?? (
+          {selectedProjectTab === 'settings' ? (
+            <MobileSettingsFoldContext.Provider value={settingsFold}>
+              {settingsTabContent ?? (
                 <ProjectTabPlaceholder
                   icon={
                     <SettingsIcon
@@ -1424,8 +1452,9 @@ export function MobileProjectScreen({
                   title={labels.settingsTabPlaceholderTitle ?? labels.settingsTab ?? '设置'}
                   body={labels.settingsTabPlaceholderBody ?? '即将上线'}
                 />
-              ))
-            : null}
+              )}
+            </MobileSettingsFoldContext.Provider>
+          ) : null}
         </div>
 
         {showProjectTabBar ? (

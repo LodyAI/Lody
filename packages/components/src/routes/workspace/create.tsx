@@ -7,7 +7,7 @@ import {
 } from '@/lib/referral-attribution';
 import { ConvexError } from 'convex/values';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useCloudAction, usePlatform, usePlatformSession } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
@@ -30,8 +30,13 @@ import { usePostHog } from '@posthog/react';
 import { CreateWorkspacePage } from '@/components/pages/create-workspace-page';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
-import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
+import {
+  getPreferredOrdinaryWorkspaceSlug,
+  getPreferredWorkspaceSlug,
+  readPreferredWorkspaceSlug,
+} from '@/lib/workspace';
 import { RouteMessage } from '@/components/route-message';
+import { useAuthSignOut } from '../../providers/convex-provider';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -154,6 +159,19 @@ function CreateWorkspaceAuthed({
     if (!organizationsLoading) setOrgSettled(true);
   }, [organizationsLoading]);
   const navigate = useNavigate();
+  const signOut = useAuthSignOut();
+  const followRedirect = useCallback(
+    (target: string) => {
+      const appOrigin = getAppOriginForUrlParsing();
+      const url = new URL(target, appOrigin);
+      if (url.origin === appOrigin) {
+        void navigate({ href: `${url.pathname}${url.search}${url.hash}`, replace: true });
+      } else {
+        window.location.assign(target);
+      }
+    },
+    [navigate]
+  );
   const [workspaceName, setWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -210,6 +228,7 @@ function CreateWorkspaceAuthed({
       if (event.key !== null && !event.key.startsWith('lody-e2ee-pending-creation:')) return;
       try {
         setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        setIntentReadFailed(false);
       } catch {
         setIntentReadFailed(true);
       }
@@ -217,9 +236,9 @@ function CreateWorkspaceAuthed({
     window.addEventListener('storage', refresh);
     return () => window.removeEventListener('storage', refresh);
   }, [accountId]);
-  // Unreadable saved encrypted requests block creation only for a user who has
-  // encrypted creation on. Otherwise they are treated as no saved requests:
-  // regular creation never shows encryption copy or waits on encrypted storage.
+  // Individual unreadable intents stay isolated in storage. A failure to read
+  // storage itself still blocks encrypted creation because intent durability
+  // cannot be established.
   const intentBlocked = intentReadFailed && creationEnabled;
 
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
@@ -261,6 +280,7 @@ function CreateWorkspaceAuthed({
     orgSettled,
     postHog,
     redirect,
+    followRedirect,
     willRenderCreateForm,
   ]);
 
@@ -292,10 +312,11 @@ function CreateWorkspaceAuthed({
     'organization.unableToResolveWorkspace',
     'Unable to find a workspace to open. Please try again or contact support.'
   );
-  const workspaceReturnSlug =
-    organizations && organizations.length > 0
-      ? getPreferredWorkspaceSlug(activeOrganization, organizations, readPreferredWorkspaceSlug())
-      : null;
+  const workspaceReturnSlug = getPreferredOrdinaryWorkspaceSlug(
+    activeOrganization,
+    organizations,
+    readPreferredWorkspaceSlug()
+  );
 
   // 检查用户是否已有组织，如果有则重定向
   useEffect(() => {
@@ -310,7 +331,7 @@ function CreateWorkspaceAuthed({
       organizations.length > 0
     ) {
       if (redirect) {
-        window.location.href = redirect;
+        followRedirect(redirect);
       } else {
         const targetSlug = getPreferredWorkspaceSlug(activeOrganization, organizations);
         if (targetSlug) {
@@ -343,6 +364,7 @@ function CreateWorkspaceAuthed({
     organizations,
     organizationsLoading,
     redirect,
+    followRedirect,
     navigate,
     missingSlugMessage,
   ]);
@@ -366,11 +388,31 @@ function CreateWorkspaceAuthed({
   }
 
   if (hidesBillingUi && paidRequired && !currentPending) {
+    // This replaces the whole form, including its way back, so it carries both
+    // exits itself: the previous workspace when there is one, and the account.
     return (
       <RouteMessage
         gate={null}
         title={t('organization.mobileWorkspaceLimitReachedTitle')}
         description={t('organization.mobileWorkspaceLimitReachedDescription')}
+        actionLabel={t('organization.backToPreviousWorkspace')}
+        onRetry={
+          workspaceReturnSlug
+            ? () => {
+                void navigate({
+                  to: '/$workspaceName/chat',
+                  params: { workspaceName: workspaceReturnSlug },
+                  replace: true,
+                });
+              }
+            : undefined
+        }
+        secondaryAction={{
+          label: t('organization.signOut'),
+          onClick: () => {
+            void signOut();
+          },
+        }}
       />
     );
   }
@@ -434,6 +476,7 @@ function CreateWorkspaceAuthed({
         // response reuses these exact fields after reload, including its slug.
         savePendingE2eeWorkspace(localStorage, intent);
         setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        setIntentReadFailed(false);
         setPendingCreation(intent);
         const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
         if (accountRef.current !== accountId) return;
@@ -500,7 +543,7 @@ function CreateWorkspaceAuthed({
         duration_ms: getDurationSinceMs(startMs),
       });
       if (redirect) {
-        window.location.href = redirect;
+        followRedirect(redirect);
       } else {
         const existingSlug = getPreferredWorkspaceSlug(activeOrganization, organizations);
         const targetSlug = createdWorkspace?.slug || workspaceSlug || existingSlug;

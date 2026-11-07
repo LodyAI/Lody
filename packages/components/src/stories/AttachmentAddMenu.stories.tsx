@@ -1,3 +1,5 @@
+import { Provider, createStore } from 'jotai';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -268,5 +270,51 @@ export const ScopedDisabled: Story = {
     <ScopedFrame>
       <AttachmentAddMenu {...args} />
     </ScopedFrame>
+  ),
+};
+
+export const EncryptedWorkspace: Story = {
+  render: (args) => (
+    <Frame>
+      <AttachmentAddMenu {...args} />
+    </Frame>
+  ),
+  args: { isMobile: false, onAddAttachment: noop, onScheduleSend: noop },
+  decorators: [
+    (Story) => {
+      const [store] = useState(() => {
+        const value = createStore();
+        value.set(workspaceContentModeAtom, {
+          accountId: 'storybook',
+          workspaceSlug: 'encrypted',
+          workspaceId: 'encrypted',
+          descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+        } as never);
+        return value;
+      });
+      return (
+        <Provider store={store}>
+          <Story />
+        </Provider>
+      );
+    },
+  ],
+};
+
+export const EncryptedWorkspaceMobile: Story = {
+  ...EncryptedWorkspace,
+  args: { ...EncryptedWorkspace.args, isMobile: true },
+};
+
+export const ScheduledSendUnavailable: Story = {
+  args: {
+    isMobile: false,
+    onScheduleSend: noop,
+    scheduleDisabledReason: 'Update the target machine CLI to schedule messages.',
+  },
+  render: (args) => (
+    <Frame>
+      <AttachmentAddMenu {...args} />
+    </Frame>
   ),
 };

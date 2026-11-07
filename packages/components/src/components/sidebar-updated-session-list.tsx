@@ -116,8 +116,8 @@ export type SidebarUpdatedItem = {
    * Sidebar row this one nests under — the opener's ROOT Session when the opener
    * is a child Tab, otherwise the opener itself. It is also the root route for
    * precise child-Tab navigation; it never replaces `openedBySessionId`.
-   * Nesting is still resolved WITHIN one rendered section, so a pinned opener
-   * and an unpinned opened Session (different sections) both stay top-level.
+   * Nesting is resolved within one rendered section; desktop section placement
+   * keeps pinned openers together with their visible opened Sessions.
    */
   openedByRowSessionId?: string | null;
   /**
@@ -866,7 +866,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   // other actions in both organize modes — keeping it consistent rather than
   // inventing a new mobile entry point here.
   // Reverse leg of the opened-by relationship. Available even when the row is
-  // NOT nested (opener pinned into the other section, archived, or filtered
+  // NOT nested (opener archived or filtered
   // out), which is exactly when the tree cannot show the link.
   const openerSessionId = normalizeSessionRowId(item.openedBySessionId);
   const openerRootSessionId = normalizeSessionRowId(item.openedByRowSessionId) ?? openerSessionId;

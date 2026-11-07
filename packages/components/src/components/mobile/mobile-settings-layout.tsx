@@ -14,6 +14,8 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import type { MobileWorkspaceTab, MobileWorkspaceTabBarLabels } from './mobile-workspace-tabbar';
 import { MobileDrillPageLayout, useMobileDrillAnimatedBack } from './mobile-drill-page-layout';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 
 export type MobileSettingsLayoutProps = {
   title: string;
@@ -37,6 +39,7 @@ export type MobileSettingsLayoutProps = {
  * `pb-safe-*` utilities resolve to.
  */
 const styles = stylex.create({
+  foldHidden: { overflow: 'hidden' },
   /**
    * The drill header: a sticky bar over the scrolling body, laid out as
    * three columns so the title sits between the back chip and an empty slot.
@@ -173,6 +176,17 @@ function SettingsInnerContent({
 }) {
   const location = useLocation();
   const pathname = location.pathname;
+  const [main, setMain] = useState<HTMLElement | null>(null);
+  const isCategoryList = /\/settings\/?$/.test(pathname);
+  const isUsagePage = /\/settings\/ai-usage\/?$/.test(pathname);
+  const isWorkspacePage = /\/settings\/workspace\/?$/.test(pathname);
+  const isFoldDetailPage = /\/settings\/(account|appearance|preferences|about|github)\/?$/.test(
+    pathname
+  );
+  const fold = useHorizontalFoldLayout(
+    main,
+    isCategoryList || isUsagePage || isWorkspacePage || isFoldDetailPage || isAgentConfigTab
+  );
 
   /* Suppress the inner drill on the very first commit: the outer
      `MobileDrillPageLayout` already animates the whole settings
@@ -193,12 +207,20 @@ function SettingsInnerContent({
   );
 
   return (
-    <main {...stylex.props(styles.main)}>
-      {isAgentConfigTab ? (
-        <div {...stylex.props(styles.fillMinHeight)}>{body}</div>
-      ) : (
-        <ScrollArea className={stylex.props(styles.fill).className}>{body}</ScrollArea>
-      )}
+    <main ref={setMain} {...stylex.props(styles.main)}>
+      <MobileSettingsFoldContext.Provider value={fold}>
+        {isAgentConfigTab ? (
+          <div {...stylex.props(styles.fillMinHeight, fold && styles.foldHidden)}>{body}</div>
+        ) : (
+          <ScrollArea
+            className={stylex.props(styles.fill).className}
+            contentFullHeight={Boolean(fold)}
+            viewportStyle={fold ? { overflowY: 'hidden' } : undefined}
+          >
+            {body}
+          </ScrollArea>
+        )}
+      </MobileSettingsFoldContext.Provider>
     </main>
   );
 }

@@ -6,7 +6,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 const SlotContext = createContext<RefCallback<HTMLDivElement> | null>(null);
 
 const styles = stylex.create({
-  slot: { flexShrink: 0, minWidth: 0 },
+  slot: { flexShrink: 0, minWidth: 0, ':is(*):not(:empty)': { marginLeft: space[1] } },
   // Without a sidebar host (for example during startup), keep the entry reachable.
   floating: {
     position: 'fixed',

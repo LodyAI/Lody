@@ -19,6 +19,15 @@ this page is the full text of the rules summarised there.
   Tunnel readiness uses a proxy response marker independent of HTML injection; injection
   overhead that exceeds the response limit leaves the original document intact.
 
+- Encrypted remote previews reuse the signed feature RPC for create, status/renewal
+  and revoke. Missing host support and a verified non-writer are refused before
+  signing; the receiving machine still checks current authority. No ordinary
+  preview-control proof is minted for this path. The Browser shows the tunnel
+  disclosure before creation and while viewing: page bytes pass through the tunnel
+  service as plaintext, even though preview controls and comments remain protected.
+  This entry does not depend on a local Agent. Public-browser navigation retains
+  its declared host capability and cannot fall back to a preview iframe.
+
 - Complete `.html` / `.htm` viewer text may switch between Monaco source and Managed Preview without
   a Machine RPC endpoint. Build a policy-owned `srcdoc` from the current complete viewer text,
   inject the shared annotation runtime, and run it in uncached static-document mode
@@ -110,7 +119,11 @@ this page is the full text of the rules summarised there.
   when remote sharing expires. The endpoint owner, not the panel, enforces the one-hour deadline.
   An empty Browser must always say WHY it is empty — a bare globe reads as a broken panel. With no
   reported candidate the empty state names that (the agent never called `lody_report_preview_candidate`,
-  which is the common case, not a bug); with one, it points at the address bar.
+  which is the common case, not a bug); with one, an idle desktop panel points at the address bar. Mobile Browser clicks
+  request candidate navigation automatically. While that request waits for the initial
+  status read or candidate document, and while its endpoint is being opened, the mobile
+  panel shows “Establishing network connection” instead of address-entry instructions.
+  Explicitly reopening an existing Browser retains its current page.
   Annotation mode installs a full-viewport transparent interaction layer inside the managed page;
   it must remain the pointer target while hit-testing temporarily ignores it to inspect the page
   below. Do not revert to listener-only interception, which lets page pointer handlers activate.

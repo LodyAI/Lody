@@ -1,9 +1,11 @@
+import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
 import {
   getMachineRoomId,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isSessionHistoryStatusAwaitingStart,
   machineSupportsSessionInputAcceptance,
+  normalizeSessionInputBlocks,
   machineSupportsSessionInputDispatch,
   type MachineId,
   type MachineMeta,
@@ -18,6 +20,7 @@ import {
   SessionInputNotSentError,
 } from '../lib/session-accepted-inputs';
 import { createSessionInputStorage } from '../lib/session-input-storage';
+import { encryptedLocalInstance, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { recordClientLog } from '../lib/client-log';
 import {
   deliverUserTurn,
@@ -33,13 +36,18 @@ export function createWorkspacePendingSends(args: {
   runtime: SessionSendRuntime;
   accountId: string;
   workspaceId: string;
+  localIdentity?: E2eeLocalDataIdentity;
   paused?: boolean;
   token(): string | null;
   localMachineId(): MachineId | null;
   onDelivered?(sessionId: SessionId, turnId: string): void;
 }) {
   const { runtime } = args;
-  const scope = JSON.stringify([args.accountId, args.workspaceId]);
+  if (runtime.contentMode === 'e2ee' && !args.localIdentity)
+    throw new Error('e2ee_local_identity_required');
+  const scope = args.localIdentity
+    ? encryptedLocalInstance(args.localIdentity)
+    : JSON.stringify([args.accountId, args.workspaceId]);
   const channel =
     typeof BroadcastChannel === 'undefined'
       ? null
@@ -65,7 +73,12 @@ export function createWorkspacePendingSends(args: {
   };
   const inputOwner = createAcceptedSessionInputs({
     resources: runtime.sendResources,
-    storage: createSessionInputStorage(args.accountId, args.workspaceId),
+    storage: createSessionInputStorage(
+      args.accountId,
+      args.workspaceId,
+      undefined,
+      args.localIdentity
+    ),
     paused: args.paused,
     lock: async <T>(
       sessionId: import('@lody/shared').SessionId,
@@ -188,6 +201,7 @@ export function createWorkspacePendingSends(args: {
         signal,
         resources: runtime.sendResources,
         token: args.token,
+        attachmentToken: runtime.attachmentToken,
         localMachineId: args.localMachineId,
         update: publish,
         report: (id, progress) =>
@@ -200,6 +214,11 @@ export function createWorkspacePendingSends(args: {
     },
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {
+        if (runtime.contentMode === 'e2ee')
+          assertProtectedAttachmentReferences([
+            ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
+            ...send.attachments.flatMap((item) => (item.ready ? [item.ready] : [])),
+          ]);
         if (send.historyBackend !== 'roost') return writeUserTurn(runtime, send, owned);
         const predecessors = (await barriers.get(send.id)) ?? [];
         if (!send.queue) {
@@ -265,17 +284,14 @@ export function createWorkspacePendingSends(args: {
     hasPendingCreation: (sessionId: string) =>
       snapshot.some((send) => send.sessionId === sessionId && send.creation),
     enqueue(send: Parameters<typeof held.enqueue>[0]) {
-      if (
-        runtime.contentMode === 'e2ee' &&
-        (send.historyBackend === 'roost' ||
-          send.attachments.some(
-            (attachment) =>
-              !attachment.ready ||
-              attachment.ready.type !== 'file' ||
-              attachment.ready.transport !== 'local'
-          ))
-      )
-        throw new Error('e2ee_feature_unavailable');
+      if (send.workspaceId !== args.workspaceId) throw new Error('attachment_workspace_mismatch');
+      if (runtime.contentMode === 'e2ee') {
+        if (send.historyBackend === 'roost') throw new Error('e2ee_feature_unavailable');
+        assertProtectedAttachmentReferences([
+          ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
+          ...send.attachments.flatMap((item) => (item.ready ? [item.ready] : [])),
+        ]);
+      }
       admissionOrder.set(send.id, ++nextAdmission);
       if (
         send.historyBackend === 'roost' &&

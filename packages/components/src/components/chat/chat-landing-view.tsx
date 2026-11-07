@@ -525,6 +525,7 @@ export function ChatLandingView({
         size="medium"
         shape="pill"
         icon
+        data-testid="composer-send"
         onClick={onSubmit}
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}
@@ -664,7 +665,14 @@ export function ChatLandingView({
       dropHandlers={dropZone.handlers}
       navRootRef={navRootRef}
       contextSwitch={contextSwitch}
-      ambient={ambient}
+      ambient={
+        ambient == null ? null : (
+          // The boards are optional; a failure there must never take the composer with it.
+          <ErrorBoundary name="ChatLandingAmbient" variant="inline">
+            {ambient}
+          </ErrorBoundary>
+        )
+      }
       composer={composerNode}
       noMachineHint={noMachineHintNode}
       agentConfigHint={agentConfigHintNode}

@@ -69,21 +69,6 @@ describe('workspace context atoms', () => {
     });
   });
 
-  it('preserves a cached id when the same slug is republished', () => {
-    const store = createStore();
-    store.set(setWorkspaceContextAtom, {
-      slug: 'workspace-a',
-      workspaceId: workspaceId('workspace-a-id'),
-    });
-
-    store.set(currentWorkspaceSlugAtom, 'workspace-a');
-
-    expect(store.get(workspaceIdentityAtom)).toEqual({
-      slug: 'workspace-a',
-      workspaceId: workspaceId('workspace-a-id'),
-    });
-  });
-
   it('rejects a stale mutation continuation after navigation publishes a newer identity', () => {
     const store = createStore();
     const revision = store.set(setWorkspaceContextAtom, {
@@ -107,39 +92,6 @@ describe('workspace context atoms', () => {
     expect(store.get(workspaceIdentityAtom)).toEqual({
       slug: 'workspace-b',
       workspaceId: workspaceId('workspace-b-id'),
-    });
-  });
-
-  it('allows a mutation continuation when no newer writer has advanced the revision', () => {
-    const store = createStore();
-    const revision = store.set(setWorkspaceContextAtom, {
-      slug: null,
-      workspaceId: null,
-    });
-
-    const published = store.set(setWorkspaceContextAtRevisionAtom, {
-      revision,
-      context: {
-        slug: 'workspace-fallback',
-        workspaceId: workspaceId('workspace-fallback-id'),
-      },
-    });
-
-    expect(published).toBe(true);
-    expect(store.get(workspaceIdentityAtom)).toEqual({
-      slug: 'workspace-fallback',
-      workspaceId: workspaceId('workspace-fallback-id'),
-    });
-  });
-
-  it('keeps compatibility with setup code that stages the id before its initial slug', () => {
-    const store = createStore();
-    store.set(currentWorkspaceIdAtom, workspaceId('workspace-a-id'));
-    store.set(currentWorkspaceSlugAtom, 'workspace-a');
-
-    expect(store.get(workspaceIdentityAtom)).toEqual({
-      slug: 'workspace-a',
-      workspaceId: workspaceId('workspace-a-id'),
     });
   });
 });

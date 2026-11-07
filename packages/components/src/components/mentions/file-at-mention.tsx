@@ -10,14 +10,8 @@ import { useMentionFileSearch } from './file-search/use-file-search';
 import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
-import {
-  captureMentionFileFetchError,
-  getRepoMentionAnalyticsId,
-  normalizeGithubFetchErrorCode,
-} from '@/components/mentions/mention-analytics';
 import { buildPathSuggestions } from './file-search/engine';
 export * from './file-search/engine';
 import {
@@ -27,7 +21,6 @@ import {
   readCachedRepoFilePaths,
   type RepoFilePathsCacheEntry,
 } from '@/lib/repo-file-paths-cache';
-import { cn } from '@/lib/utils';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
 import {
   Mention,
@@ -73,12 +66,6 @@ export function hydrateFileMentionsFromText(text: string, knownPaths: Set<string
 
 export function useRepoFilePaths(repoFullName?: string) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const postHog = usePostHog();
-  const postHogRef = React.useRef(postHog);
-  React.useEffect(() => {
-    postHogRef.current = postHog;
-  }, [postHog]);
-
   const [data, setData] = React.useState<{
     entry: RepoFilePathsCacheEntry | null;
     status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'error';
@@ -112,23 +99,7 @@ export function useRepoFilePaths(repoFullName?: string) {
       }
 
       try {
-        const entry = await fetchRepoFilePaths(
-          workspaceIdValue,
-          repoFullNameValue,
-          undefined,
-          (err, durationMs) => {
-            // Unknown visibility: hash the repo, and count the shared attempt once.
-            captureMentionFileFetchError(
-              postHogRef.current,
-              { workspaceId: workspaceIdValue },
-              {
-                errorCode: normalizeGithubFetchErrorCode(err),
-                repo: getRepoMentionAnalyticsId(repoFullNameValue, false),
-                durationMs,
-              }
-            );
-          }
-        );
+        const entry = await fetchRepoFilePaths(workspaceIdValue, repoFullNameValue);
         if (cancelled) return;
         setData({ entry, status: 'ready' });
       } catch (err) {
@@ -356,7 +327,7 @@ export const FileAtMentionTextarea = React.forwardRef<
           ref={ref}
           value={value}
           containerClassName={containerClassName}
-          className={cn(stylex.props(styles.input).className, className)}
+          className={className}
           {...props}
         />
         <FileAtMentionMenu
@@ -419,7 +390,6 @@ function FileAtMentionHydrator({
 
 const pulse = stylex.keyframes({ '50%': { opacity: 0.5 } });
 const styles = stylex.create({
-  input: { resize: 'none' },
   root: { width: '100%' },
   label: {
     position: 'absolute',

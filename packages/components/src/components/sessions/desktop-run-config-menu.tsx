@@ -134,12 +134,14 @@ const COMPACT_OPTION_SUBMENU_BOUNDS = {
 /* Option row with a trailing check. Title only — no description — so submenus
    stay as compact as the parent. Selecting keeps the menu OPEN. */
 function OptionItem({
+  identity,
   icon,
   label,
   selected,
   disabled,
   onSelect,
 }: {
+  identity?: Pick<AgentConfigMeta, 'id' | 'machineId'>;
   icon?: ReactNode;
   label: string;
   selected: boolean;
@@ -148,6 +150,9 @@ function OptionItem({
 }) {
   return (
     <Menu.Item
+      data-testid={identity ? 'chat-agent-option' : undefined}
+      data-agent-config-id={identity?.id}
+      data-machine-id={identity?.machineId}
       disabled={disabled}
       role="menuitemradio"
       aria-checked={selected}
@@ -245,6 +250,7 @@ export function DesktopMachineMenu({
   value,
   visibleLocalMachineId = null,
   selectedLabel,
+  offline = false,
   options,
   onChange,
   disabled = false,
@@ -254,6 +260,8 @@ export function DesktopMachineMenu({
   value: MachineId | null;
   visibleLocalMachineId?: MachineId | null;
   selectedLabel?: string | null;
+  /** The selected machine is definitely offline; never set for an unknown status. */
+  offline?: boolean;
   options: ReadonlyArray<DesktopMachineMenuOption>;
   onChange: (machineId: MachineId) => void;
   disabled?: boolean;
@@ -272,12 +280,16 @@ export function DesktopMachineMenu({
       <Menu.Trigger
         disabled={isDisabled}
         title={disabledReason}
+        data-testid="chat-machine-trigger"
         aria-label={t('chat.machineSelector.placeholder', 'Machine')}
         render={<Button type="button" variant="secondary" size="mini" />}
       >
         <Monitor {...stylex.props(surface.glyph14)} aria-hidden="true" />
-        <span {...stylex.props(surface.truncate, styles.machineName)}>{label}</span>
+        <span {...stylex.props(surface.contextLabel, surface.truncate, styles.machineName)}>
+          {label}
+        </span>
         {selectedIsLocal ? <Badge>{t('chat.machineSelector.local', 'Local')}</Badge> : null}
+        {offline ? <Badge>{t('chat.machineSelector.offline', 'Offline')}</Badge> : null}
         {selectedOption?.isPrivate ? (
           <LockKeyhole {...stylex.props(surface.glyph12, surface.hint)} aria-hidden="true" />
         ) : null}
@@ -293,6 +305,8 @@ export function DesktopMachineMenu({
         {options.map((option) => (
           <Menu.Item
             key={option.value}
+            data-testid="chat-machine-option"
+            data-machine-id={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             icon={Monitor}
@@ -695,6 +709,8 @@ export function DesktopRunConfigMenu({
                 aria-label={runConfigButtonAriaLabel}
                 aria-disabled
                 data-run-config-trigger=""
+                data-agent-config-id={selectedAgentConfig?.id}
+                data-machine-id={selectedAgentConfig?.machineId}
                 {...stylex.props(surface.trigger, surface.triggerCompact, surface.triggerInert)}
               >
                 {triggerFace}
@@ -707,6 +723,8 @@ export function DesktopRunConfigMenu({
         <Menu.Trigger
           aria-label={runConfigButtonAriaLabel}
           data-run-config-trigger=""
+          data-agent-config-id={selectedAgentConfig?.id}
+          data-machine-id={selectedAgentConfig?.machineId}
           className={triggerClassName}
           render={<button type="button" />}
         >
@@ -813,6 +831,7 @@ export function DesktopRunConfigMenu({
                   {agentOptions.map(({ config }) => (
                     <OptionItem
                       key={`${config.id}:${config.machineId}`}
+                      identity={config}
                       icon={
                         <AgentIcon
                           cliType={config.cliType}

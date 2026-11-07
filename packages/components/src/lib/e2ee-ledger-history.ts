@@ -6,6 +6,7 @@ import {
   hashRecordBytes,
   verifyLedger,
   restoreVerifiedState,
+  exportVerifiedState,
   type DecodedRecord,
   type LedgerView,
 } from '@lody/e2ee-core/protocol';
@@ -211,6 +212,8 @@ export function ledgerRecordFields(
       return { ...base, successorMembershipId: bytesToHex(op.successorMembershipId.toBytes()) };
     case 'publishEpoch':
       return { ...base, epoch: op.epoch, commitment: bytesToHex(op.commitment.toBytes()) };
+    case 'removeMember':
+      return { ...base, membershipId: bytesToHex(op.membershipId.toBytes()) };
     case 'removeMemberAndPublishEpoch':
       return {
         ...base,
@@ -224,12 +227,13 @@ export function ledgerRecordFields(
   throw new Error('Unsupported ledger operation');
 }
 
-/** Decode the main process's own verified public view for display. Authority stays in the host. */
+/** Decode the host's own public state. Complete originals recover prefix hashes
+ * omitted by retained-state serialization, at the exact same head and state digest. */
 export function hostLedgerHistory(
   input: import('@lody/platform').E2eeRuntimeLedgerView
 ): VerifiedLedgerHistory {
   const status = input.status;
-  const view = Result.getOrThrow(
+  let view = Result.getOrThrow(
     restoreVerifiedState({
       bytes: hexToBytes(input.stateHex),
       genesis: Result.getOrThrow(Bytes.genesisHash(hexToBytes(status.genesisHash))),
@@ -262,6 +266,19 @@ export function hostLedgerHistory(
       throw new E2eeHistoryError('local-conflict', 'history-changed');
     return { index: position, rawHex, hash, body: Result.getOrThrow(decodeRecord(bytes)).body };
   });
+  if (records.length === view.length && positions.every((position, index) => position === index)) {
+    const replayed = Result.getOrThrow(
+      verifyLedger({
+        anchor: view.genesis,
+        records: input.recordsHex.map(hexToBytes),
+        checkpoint: { head: view.head, length: view.length },
+      })
+    );
+    const state = Result.getOrThrow(exportVerifiedState(replayed));
+    if (bytesToHex(state.stateDigest.toBytes()) !== status.stateDigest)
+      throw new E2eeHistoryError('local-conflict', 'history-changed');
+    view = replayed;
+  }
   return {
     view,
     records,

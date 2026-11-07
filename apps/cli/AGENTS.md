@@ -10,6 +10,13 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 - Node 22 native TLA only; fixed 2048 MiB. Build CLI/workers then ACP in separate
   Vite processes; ACP preserves dist. Keep maps, flat entries, transitive package
   and CJS chunks; no app in vendor chunks.
+- The production bundle inlines `@loro-dev/streams-crdt` into `chunks/`. Its zstd
+  runtime resolves `./zstd.wasm` from that module, so `copy:wasm` places the file
+  beside each emitted module that references it and refuses a CLI-root-only copy.
+  Initialization failure rejects and is not cached. A waiter timeout does not
+  restart an in-flight or already-started wasm runtime. A pending init retains
+  the Loro document held by the snapshot upload.
+  [Decision](../../.agents/notes/implemented/bug-fix/2026-11-03-cli-zstd-wasm-init-hang.md).
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.
@@ -47,6 +54,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
 - Strict tsconfig, no `any` or non-null assertions, Zod at every foreign boundary:
   context/cli-type-safety.md.
+- Shared start/probe/load promises share only in-flight attempts or successes; a failure must not be
+  cached until restart. An unprovable local fact degrades its own action instead of blocking unrelated
+  work, and every user-path wait is bounded ([rules](../../.agents/docs/failure-containment.md#rules)).
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).

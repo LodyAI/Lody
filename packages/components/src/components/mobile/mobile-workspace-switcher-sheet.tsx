@@ -9,6 +9,7 @@ import { WorkspaceAvatar } from '@/components/workspace-avatar';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import { sheetSurface } from './sheet-surface';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 export type MobileWorkspaceSwitcherWorkspace = {
   id: string;
@@ -176,6 +177,7 @@ export function MobileWorkspaceSwitcherSheet({
   onInviteMembers,
   labels = {},
 }: MobileWorkspaceSwitcherSheetProps) {
+  const maxHeight = useFoldAwareSheetHeight(80);
   const title = labels.title ?? '工作空间';
   const description = labels.description;
   const workspacesHeading = labels.workspacesHeading ?? 'Workspaces';
@@ -184,7 +186,11 @@ export function MobileWorkspaceSwitcherSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="mobile-workspace-switcher-sheet" xstyle={styles.sheet}>
+      <DrawerContent
+        style={{ maxHeight }}
+        className="mobile-workspace-switcher-sheet"
+        xstyle={styles.sheet}
+      >
         <div {...stylex.props(sheetSurface.columnAuto)}>
           <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerTitle>
           <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>

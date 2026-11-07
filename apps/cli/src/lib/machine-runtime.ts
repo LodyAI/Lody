@@ -1,4 +1,6 @@
-import { workspaceSupports } from '@lody/shared/workspace-streams-content';
+import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
@@ -35,7 +37,60 @@ export interface MachineRuntimeOptions {
 }
 
 export class MachineRuntime {
+  /** Trusted encrypted ingress only; actual side effects still enter the shared execution gate. */
+  async offerEncryptedRpcTurn(input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) {
+    if (!this.options.handlerConfig.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
+    return this.requireHandler().offerEncryptedRpcTurn(input);
+  }
+  /** Verified encrypted feature ingress reuses same-member machine authority. */
+  async handleEncryptedFeatureRpc(
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+    context?: EncryptedFeatureContext
+  ) {
+    if (
+      (request.method === 'sorbet/credentials-list' ||
+        request.method === 'sorbet/credentials-logout') &&
+      !context
+    )
+      throw new Error('e2ee_feature_unavailable');
+    const config = this.options.handlerConfig;
+    if (
+      !config.encryptedWorkspace ||
+      request.workspaceId !== config.workspaceId ||
+      request.machineId !== config.machineId
+    )
+      throw new Error('e2ee_feature_scope');
+    if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
+      throw new Error('e2ee_feature_requester');
+    if (isE2eeReadQuery(request.method, request.params)) {
+      if (!context) throw new Error('e2ee_rpc_unavailable');
+      return this.requireHandler().readEncryptedMachineRequest(request, context);
+    }
+    if (request.method === 'machine/acp-interaction') {
+      if (!context?.authority || context.authority.signal.aborted || !context.authority.isCurrent())
+        throw new Error('e2ee_feature_unavailable');
+      return this.requireHandler().handleEncryptedAcpInteraction(request, context);
+    }
+    return this.dispatchLocalMachineRpc(request, context?.signal);
+  }
   private handler: MessageHandler | null = null;
+  private clientLossHandler: MessageHandler | null = null;
+  inspectClientLoss() {
+    const handler = this.handler ?? this.clientLossHandler;
+    if (!handler) return null;
+    const observed = handler.inspectClientLoss();
+    const processor = this.messageProcessor.inspectClientLoss();
+    return {
+      intakeClosed: processor.stopped && observed.watcherStopped,
+      pending: {
+        processorActive: processor.active,
+        processorQueued: processor.queued,
+        watcherChecks: observed.watcherChecks,
+        executionTurns: observed.executionTurns,
+        executionBookkeeping: observed.executionBookkeeping,
+      },
+    };
+  }
   private sessionManager: SessionManager | null = null;
   private readonly messageProcessor: MessageProcessor;
   private gcManager: SessionGCManager | null = null;
@@ -232,6 +287,11 @@ export class MachineRuntime {
     });
   }
 
+  async prepareForShutdown(): Promise<void> {
+    this.messageProcessor.stop();
+    await this.handler?.prepareForShutdown();
+  }
+
   async cleanup(): Promise<void> {
     this.options.workspaceDocument.clearMachineMonitorProvider();
     this.resourceMonitor = null;
@@ -243,9 +303,11 @@ export class MachineRuntime {
     this.messageProcessor.stop();
     this.handler?.cancelPendingPermissionRequests();
     this.handler?.cancelPendingHistoryWatches();
+    await this.prepareForShutdown();
     await this.messageProcessor.drainWithTimeout(5000);
 
     if (this.handler) {
+      if (daemonLossProbeEnabled) this.clientLossHandler = this.handler;
       await this.handler.cleanup();
       this.handler = null;
     } else {
@@ -341,21 +403,16 @@ export class MachineRuntime {
   }
 
   async dispatchLocalMachineRpc(
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     if (
-      !workspaceSupports(
-        { mode: this.options.handlerConfig.encryptedWorkspace ? 'protected' : 'plaintext' },
-        'code-collab-index'
-      ) &&
-      (message.method.startsWith('code-collab/') ||
-        message.method === 'session/dispatch-turn' ||
-        message.method.startsWith('ios-simulator/') ||
-        message.method.startsWith('file/'))
+      this.options.handlerConfig.encryptedWorkspace &&
+      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
     )
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
-    return await handler.handleLocalMachineRpc(message);
+    return await handler.handleLocalMachineRpc(message, signal);
   }
 
   private initializeGCManager(): void {

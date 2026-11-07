@@ -1,3 +1,5 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, X } from 'lucide-react';
@@ -130,6 +132,8 @@ export function MobileDeleteWorkspaceSheet({
   warningText = null,
 }: MobileDeleteWorkspaceSheetProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
+  const maxHeight = useFoldAwareSheetHeight(92, true);
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -161,10 +165,9 @@ export function MobileDeleteWorkspaceSheet({
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
         className="mobile-delete-workspace-sheet"
-        xstyle={styles.sheet}
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
         style={{
-          transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'bottom',
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
         <div {...stylex.props(sheetSurface.columnAuto)}>
@@ -206,7 +209,11 @@ export function MobileDeleteWorkspaceSheet({
             })}
           </DrawerDescription>
 
-          <div {...stylex.props(styles.body)}>
+          <div
+            ref={keyboard.scrollRef}
+            style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
+            {...stylex.props(styles.body)}
+          >
             {warningText ? <p {...stylex.props(styles.warning)}>{warningText}</p> : null}
             <div {...stylex.props(styles.confirmCard)}>
               <UiField.Label

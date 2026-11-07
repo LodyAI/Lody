@@ -57,6 +57,17 @@ Use these traces with `cli-supervisor` state transitions to distinguish local pr
 failure from backend reconnecting with an available runtime. See the
 [identity investigation](../../.agents/notes/implemented/bug-fix/2026-10-11-sidebar-machine-order-stability.md).
 
+### Test builds
+
+For a local test artifact, run `pnpm --dir apps/electron build:app:test` after
+building and syncing the embedded CLI. Run `pnpm check` separately. This explicit
+entry uses `scripts/electron.vite.test.config.ts`, skips duplicate typechecking and
+minification, disables source maps and compressed-size reporting, and targets
+native modern renderer syntax. Outputs are isolated under `.test-build/electron/out` at the repository root and include `test-build.json`.
+Main externals, renderer entries, CSP and native probes are preserved. These
+artifacts are for tests; normal build and packaging commands retain the original
+release configuration.
+
 ### Cloud browser login
 
 Cloud composition uses a main-process login coordinator; the OSS composition never

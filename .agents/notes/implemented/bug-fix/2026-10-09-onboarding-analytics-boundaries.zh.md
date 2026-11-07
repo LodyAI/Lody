@@ -25,8 +25,8 @@ Chat Landing 中，桌面引导拥有独立 screens 和 flow provider。直接�
 [Spec](../../../../specs/onboarding-analytics.zh.md) 中明确持久完成漏斗分子。
 尝试编号仅覆盖一次路由挂载，不是全局编号；重载可能沿用 flow id 但重新计数。
 
-审查还发现 workspace auth 路由中的历史 `account_ready` 和 `cli_ready`，它们属于另一条
-独立 auth/app 工作线，本次不修改。[Blueprint 提案](../../proposed/feature/2026-09-26-blueprint-onboarding.zh.md)
+工作区认证就绪由独立的 [auth/app 契约](../../../../specs/auth-session-analytics.zh.md) 负责：
+`app/active` 替代重复的 `account_ready`，`cli_ready` 继续记录后续的机器就绪变化。[Blueprint 提案](../../rejected/feature/2026-09-26-blueprint-onboarding.zh.md)
 不是生产引导，不替代本次契约。
 
 ## 验证与限制

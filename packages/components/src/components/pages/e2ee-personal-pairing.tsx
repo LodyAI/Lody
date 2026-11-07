@@ -1,3 +1,5 @@
+import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { E2eeIdentityRecovery } from './e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -18,6 +20,7 @@ const styles = stylex.create({
 });
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
+  | 'resetIdentity'
   | 'personalPairingOffer'
   | 'preparePersonalJoin'
   | 'pendingPersonalJoin'
@@ -27,32 +30,74 @@ type Runtime = Pick<
   | 'cancelPersonalJoin'
 >;
 type Preview = Awaited<ReturnType<NonNullable<Runtime['inspectPersonalJoin']>>>;
+type Prepared = Awaited<ReturnType<NonNullable<Runtime['preparePersonalJoin']>>>;
+type Submission = { offer: E2eePersonalPairingOffer; result: Promise<Prepared> };
+
+/** In-flight registrations by runtime, account and workspace. Main saves the request
+ * before its server `begin` commits, so a remounted card (the control route swaps the
+ * full page for the approval guide) must join this registration, not treat the saved
+ * request as claimable. The runtime survives an account switch without a renderer
+ * reload, so the account is part of the key: another account never joins, displays or
+ * acts on this registration. Entries leave the map when their registration settles. */
+const submissions = new WeakMap<object, Map<string, Submission>>();
+const submissionKey = (accountId: string, workspaceId: string) =>
+  JSON.stringify([accountId, workspaceId]);
+const inFlight = (runtime: Runtime, accountId: string, workspaceId: string) =>
+  submissions.get(runtime)?.get(submissionKey(accountId, workspaceId));
+const submit = (
+  runtime: Runtime,
+  accountId: string,
+  offer: E2eePersonalPairingOffer
+): Submission => {
+  let entries = submissions.get(runtime);
+  if (!entries) submissions.set(runtime, (entries = new Map()));
+  const key = submissionKey(accountId, offer.workspaceId);
+  const submission = { offer, result: runtime.preparePersonalJoin!(offer) };
+  entries.set(key, submission);
+  const settle = () => {
+    if (entries.get(key) === submission) entries.delete(key);
+  };
+  submission.result.then(settle, settle);
+  return submission;
+};
 
 /** Host-verified evidence is displayed before a separate approval click. An
  * invitation is imported only after the person transfers the existing host's pin. */
 export function E2eePersonalPairing(props: {
+  /** The signed-in account whose local custody owns this card's requests. */
+  accountId: string;
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
+  /** Display only: a successful host read-open already admitted this device. */
+  approved?: boolean;
   onJoined: () => void;
 }) {
-  // A workspace owns its pending originals and async UI results. Never carry
-  // the previous workspace's session into a route switch.
-  return <PersonalPairingSession key={props.workspaceId} {...props} />;
+  // An account's workspace owns its pending originals and async UI results. Never
+  // carry the previous account's or workspace's session into a switch.
+  return (
+    <PersonalPairingSession key={submissionKey(props.accountId, props.workspaceId)} {...props} />
+  );
 }
 
 function PersonalPairingSession({
+  accountId,
   workspaceId,
   runtime,
   canApprove,
+  approved,
   onJoined,
 }: {
+  accountId: string;
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
+  approved?: boolean;
   onJoined: () => void;
 }) {
   const { t } = useTranslation();
+  const [recoveryError, setRecoveryError] = useState('');
+  const [custodyMessage, setCustodyMessage] = useState<string>();
   const [offer, setOffer] = useState<E2eePersonalPairingOffer | null>(null);
   const [input, setInput] = useState('');
   const [joining, setJoining] = useState<{
@@ -77,7 +122,9 @@ function PersonalPairingSession({
   const currentRuntime = useRef(runtime);
   currentRuntime.current = runtime;
   const isLive = () => live.current && currentRuntime.current === runtime;
-  const [recovering, setRecovering] = useState(Boolean(runtime.pendingPersonalJoin));
+  const [recovering, setRecovering] = useState(
+    Boolean(runtime.pendingPersonalJoin || inFlight(runtime, accountId, workspaceId))
+  );
   useEffect(() => {
     live.current = true;
     return () => {
@@ -86,17 +133,45 @@ function PersonalPairingSession({
   }, []);
   useEffect(() => {
     let cancelled = false;
-    setRecovering(Boolean(runtime.pendingPersonalJoin));
-    if (runtime.pendingPersonalJoin) {
-      void runtime.pendingPersonalJoin(workspaceId).then(
-        (pending) => {
+    const submission = inFlight(runtime, accountId, workspaceId);
+    setRecovering(Boolean(runtime.pendingPersonalJoin || submission));
+    if (runtime.pendingPersonalJoin || submission) {
+      const pendingJoin = runtime.pendingPersonalJoin;
+      void (async () => {
+        if (!submission) return { pending: await pendingJoin!(workspaceId) };
+        // The saved request is claimable only after its own registration settles.
+        try {
+          const result = await submission.result;
+          return result.status === 'cancelled' || result.status === 'conflict'
+            ? { terminal: result.status }
+            : { pending: { ...result, offer: submission.offer } };
+        } catch (error) {
+          // Same as the starting card: keep the saved request reachable, show the failure.
+          return { pending: (await pendingJoin?.(workspaceId)) ?? null, failure: error };
+        }
+      })().then(
+        (recovered) => {
           if (cancelled) return;
-          setJoining(pending);
-          if (pending) setPhase('waiting');
+          if ('terminal' in recovered) {
+            setJoining(null);
+            setPhase(recovered.terminal === 'cancelled' ? 'cancelled' : 'conflict');
+          } else if ('failure' in recovered) {
+            setJoining(recovered.pending);
+            setRecoveryError(recovered.failure instanceof Error ? recovered.failure.message : '');
+            setCustodyMessage(
+              custodyFailureMessage(classifyE2eeControlFailure(recovered.failure).kind)
+            );
+            setPhase('error');
+          } else {
+            setJoining(recovered.pending);
+            if (recovered.pending) setPhase('waiting');
+          }
           setRecovering(false);
         },
-        () => {
+        (error) => {
           if (cancelled) return;
+          setRecoveryError(error instanceof Error ? error.message : '');
+          setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
           setPhase('error');
           setRecovering(false);
         }
@@ -105,28 +180,35 @@ function PersonalPairingSession({
     return () => {
       cancelled = true;
     };
-  }, [runtime, workspaceId]);
+  }, [runtime, accountId, workspaceId]);
   const work = async (operation: () => Promise<void>) => {
     if (busy.current || recovering) return;
     busy.current = true;
     setPhase('busy');
+    setCustodyMessage(undefined);
     try {
       await operation();
-    } catch {
-      if (isLive()) setPhase('error');
+    } catch (error) {
+      if (isLive()) {
+        setRecoveryError(error instanceof Error ? error.message : '');
+        setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
+        setPhase('error');
+      }
     } finally {
       busy.current = false;
     }
   };
-  if (
-    !runtime.preparePersonalJoin ||
-    !runtime.personalPairingOffer ||
-    !runtime.inspectPersonalJoin ||
-    !runtime.approvePersonalJoin ||
-    !runtime.claimPersonalJoin ||
-    !runtime.cancelPersonalJoin
-  )
-    return null;
+  const canRequest = Boolean(
+    runtime.preparePersonalJoin && runtime.claimPersonalJoin && runtime.cancelPersonalJoin
+  );
+  const canEndorse = Boolean(
+    canApprove &&
+    runtime.personalPairingOffer &&
+    runtime.inspectPersonalJoin &&
+    runtime.approvePersonalJoin &&
+    runtime.cancelPersonalJoin
+  );
+  if ((!canRequest && !canEndorse) || (approved && !canEndorse)) return null;
   const createOffer = () =>
     work(async () => {
       const value = await runtime.personalPairingOffer!(workspaceId);
@@ -141,7 +223,7 @@ function PersonalPairingSession({
       if (value.workspaceId !== workspaceId) throw new Error('wrong_workspace');
       let result;
       try {
-        result = await runtime.preparePersonalJoin!(value);
+        result = await submit(runtime, accountId, value).result;
       } catch (error) {
         // begin may fail after the host saved its immutable request. Recover
         // the actual session so cancellation/reconciliation remains reachable.
@@ -214,12 +296,27 @@ function PersonalPairingSession({
     });
   return (
     <Card.Root>
+      {phase === 'error' && (
+        <E2eeIdentityRecovery
+          error={recoveryError}
+          runtime={runtime}
+          workspaceId={workspaceId}
+          onReset={() => {
+            setRecoveryError('');
+            setJoining(null);
+            setPhase('idle');
+            onJoined();
+          }}
+        />
+      )}
       <Card.Header>
-        <Card.Title>{t('e2ee.pair.title')}</Card.Title>
+        <Card.Title>
+          {t(canEndorse ? 'e2ee.pair.title' : 'e2ee.pair.desktopApprovalRequired')}
+        </Card.Title>
         <Card.Description>{t('e2ee.pair.help')}</Card.Description>
       </Card.Header>
       <div {...stylex.props(styles.actions)}>
-        {canApprove && !offer && (
+        {canEndorse && !offer && (
           <Button
             variant="secondary"
             disabled={phase === 'busy' || recovering}
@@ -252,7 +349,7 @@ function PersonalPairingSession({
           </Button>
         </>
       )}
-      {!canApprove && !joining && (
+      {canRequest && !canEndorse && !joining && (
         <>
           <Textarea
             aria-label={t('e2ee.pair.code')}
@@ -272,7 +369,9 @@ function PersonalPairingSession({
       {preview && (
         <>
           <p>{t('e2ee.pair.compare')}</p>
-          <p {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
+          <p data-testid="e2ee-pair-preview-key" {...stylex.props(styles.code)}>
+            {preview.signingPublicKey}
+          </p>
           <Button
             disabled={phase === 'busy' || phase === 'published'}
             onClick={() => void approve()}
@@ -284,11 +383,13 @@ function PersonalPairingSession({
       {joining && (
         <>
           {joining.signingPublicKey && (
-            <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
+            <p data-testid="e2ee-pair-joining-key" {...stylex.props(styles.code)}>
+              {joining.signingPublicKey}
+            </p>
           )}
           <div {...stylex.props(styles.actions)}>
             <Button
-              disabled={phase === 'busy' || phase === 'cancelled'}
+              disabled={phase === 'busy' || phase === 'cancelled' || recovering}
               onClick={() => void claim()}
             >
               {t('e2ee.pair.claim')}
@@ -312,7 +413,7 @@ function PersonalPairingSession({
       )}
       {phase !== 'idle' && phase !== 'busy' && (
         <p role={phase === 'error' ? 'alert' : 'status'} {...stylex.props(styles.error)}>
-          {t(`e2ee.pair.${phase}`)}
+          {t(phase === 'error' && custodyMessage ? custodyMessage : `e2ee.pair.${phase}`)}
         </p>
       )}
     </Card.Root>

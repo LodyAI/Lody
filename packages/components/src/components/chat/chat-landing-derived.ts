@@ -492,6 +492,30 @@ export function isChatLandingMachineReachable({
   return machines.has(machineId) && isMachineOnline(machineId);
 }
 
+export type ChatLandingSelectedMachineState = 'none' | 'available' | 'unknown' | 'offline';
+
+/**
+ * Only 'offline' may stop a send. 'unknown' means presence cannot answer, so the
+ * chat proceeds and fails against the machine's own deadline if it really is down.
+ */
+export function getChatLandingSelectedMachineState({
+  machineId,
+  localMachineId,
+  machines,
+  isMachineOnline,
+  onlineStatus,
+}: Omit<ChatLandingMachineReachableArgs, 'machineId'> & {
+  machineId: string | null;
+  onlineStatus: 'online' | 'offline' | 'unknown';
+}): ChatLandingSelectedMachineState {
+  if (!machineId) return 'none';
+  if (isChatLandingMachineReachable({ machineId, localMachineId, machines, isMachineOnline })) {
+    return 'available';
+  }
+  if (!machines.has(machineId)) return 'none';
+  return onlineStatus === 'offline' ? 'offline' : 'unknown';
+}
+
 export function getChatLandingHasAnyOnlineMachine({
   localMachineId,
   machines,
@@ -753,4 +777,19 @@ export function getChatLandingSelectionSyncDecision({
   if (!urlNamesSelection || !intentApplied) return 'skip';
   if (!armed) return 'arm';
   return selectionKey === urlKey ? 'skip' : 'sync';
+}
+
+export function compareUnifiedProjectOptions(
+  left: { label: string; value: string; lastUsedAt?: number },
+  right: { label: string; value: string; lastUsedAt?: number }
+): number {
+  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
+    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
+  } else if (left.lastUsedAt !== undefined) {
+    return -1;
+  } else if (right.lastUsedAt !== undefined) {
+    return 1;
+  }
+  const labelComparison = left.label.localeCompare(right.label);
+  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
 }

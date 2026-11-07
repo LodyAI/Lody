@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { WorkspaceProject } from '@lody/shared';
@@ -14,6 +14,7 @@ import {
   useWorkspaceProjects,
 } from '@/hooks/use-workspace-projects';
 import { addProjectGroupMember, EMPTY_PROJECT_GROUP_FORM_VALUE } from '@/lib/project-group-form';
+import { resolveProjectEditorSource } from '@/lib/project-member-sources';
 import {
   openProjectGroupEditorForCreate,
   openProjectGroupEditorForEdit,
@@ -37,9 +38,12 @@ export function ProjectEditorHost() {
   const [editor, setEditor] = useState<ProjectGroupEditorState | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceProject | null>(null);
   const [removing, setRemoving] = useState(false);
+  // Belongs to the open create editor; a later request replaces or clears it.
+  const onCreatedRef = useRef<((projectId: string) => void) | undefined>(undefined);
 
   useEffect(() => {
     if (!request) return;
+    onCreatedRef.current = request.kind === 'create' ? request.onCreated : undefined;
     if (request.kind === 'edit' || request.kind === 'delete') {
       const project = projects.find((candidate) => candidate.id === request.projectId);
       if (!project) {
@@ -54,8 +58,8 @@ export function ProjectEditorHost() {
       return;
     }
     const created = openProjectGroupEditorForCreate();
-    // A folder with a GitHub remote is listed under its repository, so its
-    // own key finds the repository row and the seed becomes a repository Member.
+    // A folder's catalog row may be merged with other machines' copies. Keep
+    // the entry point's exact folder identity when seeding the editor.
     const seed = request.seedSourceKey ? byKey.get(request.seedSourceKey) : undefined;
     setEditor(
       seed
@@ -63,7 +67,7 @@ export function ProjectEditorHost() {
             ...created,
             value: addProjectGroupMember(
               { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: request.seedName ?? seed.label },
-              seed.source,
+              resolveProjectEditorSource(request.seedSourceKey!, seed),
               seed.label
             ),
           }
@@ -91,6 +95,9 @@ export function ProjectEditorHost() {
         editor={editor}
         onChange={setEditor}
         onClose={() => setEditor(null)}
+        onSaved={(project, { created }) => {
+          if (created) onCreatedRef.current?.(project.id);
+        }}
       />
       <AlertDialog.Root
         open={pendingRemoval !== null}

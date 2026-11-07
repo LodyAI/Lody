@@ -20,6 +20,28 @@ const isBashTask = (task: SubagentTask): boolean =>
   task.actor === 'local_bash' || task.taskType === 'local_bash';
 
 /**
+ * Provider task types that run a command or watch something rather than an
+ * agent. `taskKind` cannot tell these apart: Claude publishes `background` for
+ * any backgrounded run, an agent's included, and `subagent` for the rest.
+ */
+const NON_AGENT_TASK_TYPES = new Set(['local_bash', 'mcp_task', 'monitor_mcp']);
+
+/** Which tab of the panel a task belongs on. */
+export type TaskGroup = 'subagents' | 'tasks';
+
+/**
+ * An agent run is a subagent; a shell command, MCP task, monitor or scheduled
+ * wakeup is a task. An unrecognised type stays with the subagents, where the
+ * panel listed every task before it was split.
+ */
+export const groupOf = (task: SubagentTask): TaskGroup => {
+  if (task.taskKind === 'scheduled') return 'tasks';
+  if (task.subagentType || task.run) return 'subagents';
+  const type = task.taskType ?? task.actor;
+  return type && NON_AGENT_TASK_TYPES.has(type) ? 'tasks' : 'subagents';
+};
+
+/**
  * A task's state. A task carrying a normalized run reads its snapshot, which
  * can say cancelled or unknown; a legacy task has only the four-state status.
  */

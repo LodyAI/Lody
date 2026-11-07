@@ -118,20 +118,18 @@ export function homeWeekUsageFixture(kind: 'steady' | 'nearReset' = 'steady'): H
   const nowSeconds = HOME_WEEK_NOW.getTime() / 1000;
   return {
     name: null,
-    windows: [
-      {
-        usedPercent: kind === 'nearReset' ? 91 : 38,
-        remainingPercent: kind === 'nearReset' ? 9 : 62,
-        windowDurationSeconds: 5 * HOUR_SECONDS,
-        resetsAtEpochSeconds: nowSeconds + (kind === 'nearReset' ? 0.4 : 2.5) * HOUR_SECONDS,
-      },
-      {
-        usedPercent: kind === 'nearReset' ? 72 : 21,
-        remainingPercent: kind === 'nearReset' ? 28 : 79,
-        windowDurationSeconds: 7 * 24 * HOUR_SECONDS,
-        resetsAtEpochSeconds: nowSeconds + (kind === 'nearReset' ? 20 : 98) * HOUR_SECONDS,
-      },
-    ],
+    window: {
+      usedPercent: kind === 'nearReset' ? 91 : 38,
+      remainingPercent: kind === 'nearReset' ? 9 : 62,
+      windowDurationSeconds: 5 * HOUR_SECONDS,
+      resetsAtEpochSeconds: nowSeconds + (kind === 'nearReset' ? 0.4 : 2.5) * HOUR_SECONDS,
+    },
+    otherWindow: {
+      usedPercent: kind === 'nearReset' ? 72 : 21,
+      remainingPercent: kind === 'nearReset' ? 28 : 79,
+      windowDurationSeconds: 7 * 24 * HOUR_SECONDS,
+      resetsAtEpochSeconds: nowSeconds + (kind === 'nearReset' ? 20 : 98) * HOUR_SECONDS,
+    },
   };
 }
 

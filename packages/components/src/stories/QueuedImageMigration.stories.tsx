@@ -168,6 +168,7 @@ function Fixture({
         agentRoleRevision: undefined,
         agentRoleSnapshot: undefined,
         chainDepth: undefined,
+        _lodyAutomation: undefined,
       },
     }),
     [image]

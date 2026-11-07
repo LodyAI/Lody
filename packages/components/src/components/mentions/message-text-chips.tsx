@@ -3,8 +3,8 @@ import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 
-import { sanitizeMessageTextSpans, type MessageTextSpan } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import { readMessageQuote, sanitizeMessageTextSpans, type MessageTextSpan } from '@lody/shared';
+import { clsx } from 'clsx';
 import {
   getMentionKindIcon,
   MENTION_CHIP_CLASS_NAME,
@@ -78,6 +78,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignSelf: 'center',
   },
+  snapshot: { whiteSpace: 'pre-wrap' },
 });
 
 /**
@@ -120,8 +121,13 @@ function MessageTextChip({
   onToggle?: () => void;
 }) {
   const isBoxed = Boolean(onToggle);
-  const className = cn(
-    stylex.props(!isBoxed && styles.chip, onToggle && styles.toggle).className,
+  const chipProps = stylex.props(
+    !isBoxed && styles.chip,
+    onToggle && styles.toggle,
+    isBoxed && styles.pasteButton
+  );
+  const className = clsx(
+    chipProps.className,
     span.kind === 'pasted_text' ? MENTION_NEUTRAL_CHIP_CLASS_NAME : MENTION_CHIP_CLASS_NAME
   );
   // A frozen mark (an Agent Role's emoji) stands in for the kind's icon, so the
@@ -136,7 +142,10 @@ function MessageTextChip({
   ) : (
     getMentionKindIcon(span.kind, {
       path: span.target,
-      className: cn(MENTION_ICON_CLASS_NAME, stylex.props(!isBoxed && styles.inlineIcon).className),
+      className: clsx(
+        MENTION_ICON_CLASS_NAME,
+        stylex.props(!isBoxed && styles.inlineIcon).className
+      ),
     })
   );
   // Split by grapheme rather than code point so a surrogate pair, combining
@@ -163,15 +172,13 @@ function MessageTextChip({
   );
 
   return onToggle ? (
-    <button
-      type="button"
-      className={cn(stylex.props(styles.pasteButton).className, className)}
-      onClick={onToggle}
-    >
+    <button type="button" {...chipProps} className={className} onClick={onToggle}>
       {content}
     </button>
   ) : (
-    <span className={className}>{content}</span>
+    <span {...chipProps} className={className}>
+      {content}
+    </span>
   );
 }
 
@@ -206,7 +213,8 @@ export function MessageTextWithChips({
       );
     }
 
-    const isExpanded = span.kind === 'pasted_text' && expanded.has(span.start);
+    const expandable = span.kind === 'pasted_text' || span.kind === 'message_quote';
+    const isExpanded = expandable && expanded.has(span.start);
     const start = span.start;
     nodes.push(
       <React.Fragment key={`s-${start}`}>
@@ -214,11 +222,13 @@ export function MessageTextWithChips({
           span={span}
           label={
             isExpanded
-              ? t('sessions.messageChip.collapsePastedText', 'Collapse pasted text')
+              ? span.kind === 'message_quote'
+                ? t('composer.collapseMessageQuote', 'Collapse quote')
+                : t('sessions.messageChip.collapsePastedText', 'Collapse pasted text')
               : span.label
           }
           onToggle={
-            span.kind === 'pasted_text'
+            expandable
               ? () =>
                   setExpanded((prev) => {
                     const next = new Set(prev);
@@ -229,7 +239,13 @@ export function MessageTextWithChips({
               : undefined
           }
         />
-        {isExpanded ? text.slice(span.start, span.end) : null}
+        {isExpanded ? (
+          <span {...stylex.props(styles.snapshot)}>
+            {span.kind === 'message_quote'
+              ? readMessageQuote(text.slice(span.start, span.end), span.quoteVersion)
+              : text.slice(span.start, span.end)}
+          </span>
+        ) : null}
       </React.Fragment>
     );
 

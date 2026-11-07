@@ -23,9 +23,12 @@ export async function mintPreviewControlProof(
     body: JSON.stringify(request),
     signal: AbortSignal.timeout(10_000),
   });
-  if (response.status === 400 && intent.operation.action === 'ios-simulator')
+  if (
+    response.status === 400 &&
+    (intent.operation.action === 'ios-simulator' || intent.operation.action === 'android-emulator')
+  )
     throw new Error(
-      'Preview authorization failed (400): the Cloud authorization service rejected the validated iOS Simulator protocol. Update the connected Cloud backend to the matching version.'
+      'Preview authorization failed (400): the Cloud authorization service rejected the validated device preview protocol. Update the connected Cloud backend to the matching version.'
     );
   if (!response.ok) throw new Error(`Preview authorization failed (${response.status}).`);
   const token = TokenResponse.parse(await response.json());

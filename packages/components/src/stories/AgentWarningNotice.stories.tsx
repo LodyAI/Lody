@@ -18,8 +18,11 @@ const storyLayout = stylex.create({
  * The `agent_warning` system notice, rendered through the real `MessageRowView`
  * system-message path inside the shared conversation column.
  *
- * The real always-open banner colors its triangle and title. Agent-provided
- * detail wraps inside the conversation column, including explicit newlines.
+ * It sits among prose and tool rows, so it takes the conversation's soft-well
+ * material rather than an outlined alert: a low tone tint, the status colour on
+ * the glyph and label, and the body at the well's leading edge. The long and
+ * multi-line cases are here because an agent warning is arbitrary runtime text —
+ * it wraps rather than clipping, and it must not stretch the column.
  */
 const meta = {
   title: 'Sessions/AgentWarningNotice',
@@ -42,7 +45,7 @@ type Story = StoryObj<typeof meta>;
 
 const sessionId = 'agent-warning-session' as SessionId;
 
-const warningMessage = (message: string): SessionHistoryParsed => ({
+const warningMessage = (message: string, source = 'acp'): SessionHistoryParsed => ({
   id: `agent-warning-${message.length}`,
   role: 'system',
   timestamp: '2026-09-20T22:41:00.000Z',
@@ -51,7 +54,7 @@ const warningMessage = (message: string): SessionHistoryParsed => ({
     {
       type: 'system_notice',
       name: 'agent_warning',
-      meta: { message, source: 'acp' },
+      meta: { message, source },
     },
   ],
 });
@@ -60,6 +63,30 @@ const warningMessage = (message: string): SessionHistoryParsed => ({
 export const Short: Story = {
   args: {
     message: warningMessage('Context is nearly full; older turns may be dropped.'),
+    sessionId,
+  },
+};
+
+export const StopRequestFailed: Story = {
+  args: {
+    message: warningMessage('The agent connection rejected cancellation.', 'sessionCancelFailed'),
+    sessionId,
+  },
+};
+
+export const StopTerminationFailed: Story = {
+  args: {
+    message: warningMessage(
+      'Process termination failed: the process is still alive.',
+      'sessionTerminationFailed'
+    ),
+    sessionId,
+  },
+};
+
+export const StopTimedOut: Story = {
+  args: {
+    message: warningMessage('ACP prompt cancellation timed out', 'sessionStopTimedOut'),
     sessionId,
   },
 };

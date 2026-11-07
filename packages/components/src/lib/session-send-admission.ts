@@ -1,6 +1,10 @@
+import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
+import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
+import { requireWorkspaceFeature } from './workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   getMachineRoomId,
+  normalizeSessionInputBlocks,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   machineSupportsSessionInputDispatch,
@@ -34,14 +38,39 @@ export async function acceptSessionUserTurn(
   attachments?: SessionAttachmentDraft[],
   onAccepted?: () => void
 ): Promise<'written' | 'pending'> {
-  if (runtime.contentMode === 'e2ee' && attachments?.some(attachment => !attachment.ready || (attachment.ready.type !== 'file' || attachment.ready.transport !== 'local'))) throw new Error('e2ee_attachments_unavailable');
+  // Do not consume a draft into a provisional plaintext namespace that may be
+  // retired when the workspace is classified as encrypted.
+  await runtime.waitForContentAdmission?.();
+  if (
+    attachments?.some(
+      (attachment) =>
+        !attachment.ready ||
+        attachment.ready.type !== 'file' ||
+        attachment.ready.transport !== 'local'
+    )
+  ) {
+    if (runtime.contentMode !== 'e2ee')
+      await authorizePlaintextAttachmentPreparation(runtime.workspaceId, undefined, entry.userId);
+    requireWorkspaceFeature(
+      { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'attachments'
+    );
+  }
+  if (runtime.contentMode === 'e2ee') {
+    const blocks = normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, '');
+    assertProtectedAttachmentReferences([
+      ...blocks,
+      ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
+    ]);
+  }
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
   const found = creation ? undefined : await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
   if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
   const meta = creation ?? (found?.meta as SessionMeta | undefined);
   const roostBackend = meta?.historyBackend === 'roost';
-  if (runtime.contentMode === 'e2ee' && roostBackend) throw new Error('e2ee_history_backend_unavailable');
+  if (runtime.contentMode === 'e2ee' && roostBackend)
+    throw new Error('e2ee_history_backend_unavailable');
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
     let targetMachineId = creation?.machineId;
     if (!targetMachineId) {

@@ -98,7 +98,9 @@ state and keyboard handling.
   retains the last committed presentation. With no owners and navigation settled,
   the provider releases the frame and clears that memory so later session navigation
   cannot revive it. Static BootShell and `WorkspaceCard`
-  share frame geometry. `DocumentStyle` replaces the inline first-paint sheet
+  share frame geometry. Desktop web headers share the macOS row geometry across the
+  card rim; see [header alignment](../../../../.agents/notes/implemented/bug-fix/2026-10-29-web-header-alignment.md).
+  `DocumentStyle` replaces the inline first-paint sheet
   after commit and keeps live CSS mutable during updates; React's immutable
   `style href` resources cannot own it. The card's content `LoadingPlaceholder` retains the
   same mark while workspace data resolves. See [startup intent](../../../../specs/app-startup-landing.md),
@@ -247,6 +249,12 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 `sessions/session-chat-interface.tsx` owns the editor instance both the control
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
+
+## Terminal colors
+
+`terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
+probe with transitions disabled, so the global reduced-motion rule cannot blank a
+terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
 
 ## PR auto-archive
 

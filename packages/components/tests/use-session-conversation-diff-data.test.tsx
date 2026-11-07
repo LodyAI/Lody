@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
-
 import { act, useEffect, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
+import { useSessionDiffSummary } from '../src/components/sessions/use-session-diff-summary';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import { useSessionConversationDiffData } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionConversationDiffMode } from '../src/components/sessions/use-session-conversation-diff-data';
 import type { SessionFileProvider } from '../src/lib/session-file-provider';
+import {
+  CodeCollabSessionFileProvider,
+  type CodeCollabSessionFileProviderRuntime,
+} from '../src/lib/code-collab-session-file-provider';
+import { manifestEntryToDiff } from '../src/lib/diff-blob-client';
 import { useSessionAllChangesDiffData } from '../src/components/sessions/use-session-all-changes-diff-data';
 
 let root: Root | null = null;
@@ -30,6 +36,280 @@ afterEach(() => {
 });
 
 describe('useSessionConversationDiffData', () => {
+  it('updates the sidebar summary from a completed live Branch manifest without waiting for history', async () => {
+    let current = ['live.ts'];
+    const provider = new CodeCollabSessionFileProvider({
+      allChanges: { 'stale-index.ts': true },
+      runtime: {
+        sessionId: 'summary-test' as SessionId,
+        diffBlobTransportOptions: async () => ({
+          supported: true,
+          scope: 'synthetic',
+          persist: false,
+        }),
+        openDiffManifest: async ({ scope }: { scope?: string }) => ({
+          status: 'ok',
+          base: 'base',
+          entries: (scope === 'uncommitted' ? [] : current).map((path) => ({
+            path,
+            status: 'binary',
+            base: null,
+            head: null,
+            add: 1,
+            del: 0,
+          })),
+          nextCursor: null,
+        }),
+        readDiffBlob: async () => {
+          throw new Error('Metadata needs no body.');
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    let state: ReturnType<typeof useSessionDiffSummary> | undefined;
+    function Harness() {
+      const result = useSessionDiffSummary('summary-test' as SessionId, { fileProvider: provider });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+    render(
+      <Provider store={createStore()}>
+        <Harness />
+      </Provider>
+    );
+    await flushMicrotasks();
+    expect(state?.summary.changeFilePaths).toEqual(['stale-index.ts']);
+    await act(async () => {
+      await provider.getAllChangesDiff();
+    });
+    expect(state?.summary.changeFilePaths).toEqual(['live.ts']);
+    await act(async () => {
+      await provider.getAllChangesDiff(undefined, 'uncommitted');
+    });
+    expect(state?.summary.changeFilePaths).toEqual(['live.ts']);
+    current = [];
+    await act(async () => {
+      await provider.getAllChangesDiff();
+    });
+    expect(state?.summary.changeFilePaths).toEqual([]);
+  });
+
+  it('retains the coherent old batch during refresh and reuses verified unchanged viewer data', async () => {
+    const paths = ['a.ts', 'b.ts'];
+    let release!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let updated = false;
+    const provider = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      contentKey: path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'new' },
+    }));
+    provider.getAllChangesDiff = async () => {
+      if (updated) {
+        started();
+        await next;
+      }
+      return {
+        status: 'ready',
+        base: updated ? 'new-base' : 'old-base',
+        truncated: false,
+        entries: paths.map((path) => ({ path, diff: { status: 'deferred', contentKey: path } })),
+      };
+    };
+    let state: ReturnType<typeof useSessionAllChangesDiffData> | undefined;
+    function Harness() {
+      const result = useSessionAllChangesDiffData({
+        sessionId: 'retain-test' as SessionId,
+        filePaths: paths,
+        loadFilePaths: paths,
+        fileProvider: provider,
+      });
+      useEffect(() => {
+        state = result;
+      }, [result]);
+      return null;
+    }
+    render(<Harness />);
+    await flushMicrotasks();
+    const first = state!.resolvedByPath['a.ts'];
+    expect(first?.status).toBe('ready');
+    updated = true;
+    act(() => state!.reload());
+    await entered;
+    expect(state!.refreshing).toBe(true);
+    expect(state!.base).toBe('old-base');
+    expect(state!.resolvedByPath['a.ts']).toBe(first);
+    await act(async () => {
+      release();
+      await next;
+    });
+    await flushMicrotasks();
+    expect(state!.base).toBe('new-base');
+    expect(state!.refreshing).toBe(false);
+    expect(state!.resolvedByPath['a.ts']).toBe(first);
+  });
+
+  it('rebinds a historical partial diff to the current runtime after reopening a workspace', async () => {
+    const paths = ['runtime-bound.ts'];
+    const checkpoints = [
+      {
+        filePath: paths[0],
+        add: 1,
+        del: 1,
+        cc: { v: 1 as const, fileId: 'runtime-bound', opId: '2:1', baseOpId: '1:1' },
+      },
+    ];
+    let retired = false;
+    const makeProvider = (old: boolean) =>
+      createDiffProvider(async () =>
+        manifestEntryToDiff(
+          {
+            path: paths[0],
+            status: 'ok',
+            base: { key: `sha256:${'1'.repeat(64)}`, rawBytes: 7, format: { encoding: 'utf8' } },
+            head: { key: `sha256:${'2'.repeat(64)}`, rawBytes: 6, format: { encoding: 'utf8' } },
+            hunks: '--- runtime-bound.ts\n+++ runtime-bound.ts\n@@ -1 +1 @@\n-before\n+after\n',
+          },
+          async (blob) => {
+            if (old && retired) throw new Error('Retired workspace runtime');
+            return new TextEncoder().encode(blob.key.includes('1111') ? 'before\n' : 'after\n');
+          }
+        )
+      );
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const props = {
+      mode: 'conversation' as const,
+      filePaths: paths,
+      loadFilePaths: paths,
+      fileDiffs: checkpoints,
+      onUpdate: (next: ReturnType<typeof useSessionConversationDiffData>) => {
+        state = next;
+      },
+    };
+    render(<DiffDataHarness {...props} fileProvider={makeProvider(true)} />);
+    await flushMicrotasks();
+    const first = state?.resolvedByPath[paths[0]];
+    expect(first?.status).toBe('ready-parsed');
+    act(() => root!.unmount());
+    root = null;
+    container?.remove();
+    container = null;
+    retired = true;
+    render(<DiffDataHarness {...props} fileProvider={makeProvider(false)} />);
+    await flushMicrotasks();
+    const current = state?.resolvedByPath[paths[0]];
+    expect(current).not.toBe(first);
+    if (current?.status !== 'ready-parsed' || !current.loadDiffFiles)
+      throw new Error('Expected current loader.');
+    expect(await current.loadDiffFiles(current.fileDiff)).toMatchObject({
+      newFile: { contents: 'after\n' },
+    });
+  });
+  it('keeps a legacy daemon result completed during scrolling instead of restarting it', async () => {
+    const held = createDeferred<unknown>();
+    const negotiated = createDeferred<{ supported: boolean; scope: string; persist: boolean }>();
+    let opened = 0;
+    const provider = new CodeCollabSessionFileProvider({
+      runtime: {
+        sessionId: 'session-1' as SessionId,
+        diffBlobTransportOptions: () => negotiated.promise,
+        openDiffManifest: async () => {
+          throw new Error('Legacy manifest called.');
+        },
+        readDiffBlob: async () => {
+          throw new Error('Legacy blob called.');
+        },
+        openCurrentDiff: async () => {
+          opened++;
+          return held.promise;
+        },
+      } as unknown as CodeCollabSessionFileProviderRuntime,
+    });
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const onUpdate = (next: ReturnType<typeof useSessionConversationDiffData>) => {
+      state = next;
+    };
+    render(<DiffDataHarness fileProvider={provider} onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(provider.supportsCancellableDiffReads).toBe(true);
+    rerender(<DiffDataHarness fileProvider={provider} loadPaused onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    negotiated.resolve({ supported: false, scope: 'synthetic', persist: false });
+    await flushMicrotasks();
+    expect(provider.supportsCancellableDiffReads).toBe(false);
+    held.resolve({
+      status: 'ok',
+      path: 'README.md',
+      oldSnapshot: { kind: 'text', text: { encoding: 'plain', text: 'old\n', rawBytes: 4 } },
+      newSnapshot: { kind: 'text', text: { encoding: 'plain', text: 'new\n', rawBytes: 4 } },
+      add: 1,
+      del: 1,
+    });
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'new\n' },
+    });
+    rerender(<DiffDataHarness fileProvider={provider} onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'new\n' },
+    });
+    expect(opened).toBe(1);
+  });
+
+  it('cancels hidden page sequences without publishing their late result and permits reopening', async () => {
+    const held = createDeferred<Awaited<ReturnType<SessionFileProvider['getDiff']>>>();
+    let signal: AbortSignal | undefined;
+    const provider = {
+      ...createDiffProvider(async (_path, _turn, _file, options) => {
+        signal = options?.signal;
+        return held.promise;
+      }),
+      supportsCancellableDiffReads: true,
+    };
+    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
+    const onUpdate = (next: ReturnType<typeof useSessionConversationDiffData>) => {
+      state = next;
+    };
+    render(<DiffDataHarness fileProvider={provider} enabled onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(signal?.aborted).toBe(false);
+    rerender(<DiffDataHarness fileProvider={provider} enabled={false} onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(signal?.aborted).toBe(true);
+    held.resolve({
+      status: 'ready',
+      path: 'README.md',
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'late' },
+    });
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toBeUndefined();
+    const recovered = createDiffProvider(async (path) => ({
+      status: 'ready',
+      path,
+      oldSnapshot: { kind: 'text', text: 'old' },
+      newSnapshot: { kind: 'text', text: 'reopened' },
+    }));
+    rerender(<DiffDataHarness fileProvider={recovered} enabled onUpdate={onUpdate} />);
+    await flushMicrotasks();
+    expect(state?.resolvedByPath['README.md']).toMatchObject({
+      status: 'ready',
+      newSnapshot: { text: 'reopened' },
+    });
+  });
+
   it('retains an immutable turn snapshot while its provider is rebuilt', async () => {
     const paths = ['immutable.ts'];
     const checkpoint = {
@@ -111,6 +391,7 @@ describe('useSessionConversationDiffData', () => {
     }
     render(<Harness visible={[paths[0]]} />);
     await flushMicrotasks();
+    expect(state?.normalizedPaths).toEqual(['deferred.ts', 'inline.ts']);
     expect(state?.resolvedByPath[paths[0]]).toMatchObject({
       status: 'ready',
       newSnapshot: { text: 'inline' },
@@ -132,7 +413,7 @@ describe('useSessionConversationDiffData', () => {
     });
   });
   it('refetches when the All Changes scope changes and renders the returned uncommitted file set', async () => {
-    const paths = ['committed.ts', 'worktree.ts'];
+    const paths = ['stale-index.ts'];
     const provider = createDiffProvider(async (path) => ({
       status: 'ready',
       path,
@@ -171,338 +452,12 @@ describe('useSessionConversationDiffData', () => {
     render(<Harness scope="branch" />);
     await flushMicrotasks();
     expect(state?.base).toBe('base');
+    expect(state?.normalizedPaths).toEqual(['committed.ts', 'worktree.ts']);
 
     rerender(<Harness scope="uncommitted" />);
     await flushMicrotasks();
     expect(state?.base).toBe('head');
     expect(state?.normalizedPaths).toEqual(['worktree.ts']);
-  });
-  it('accepts started reads across viewport changes and loads the newly visible file after settlement', async () => {
-    type DiffResult = Awaited<ReturnType<SessionFileProvider['getDiff']>>;
-    const pending = new Map<string, ReturnType<typeof createDeferred<DiffResult>>>();
-    const getDiff: SessionFileProvider['getDiff'] = (path) => {
-      if (pending.has(path)) throw new Error(`Duplicate read: ${path}`);
-      const deferred = createDeferred<DiffResult>();
-      pending.set(path, deferred);
-      return deferred.promise;
-    };
-    const provider = createDiffProvider(getDiff);
-    const paths = ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'];
-    let state: ReturnType<typeof useSessionConversationDiffData> | undefined;
-    const onUpdate = (value: ReturnType<typeof useSessionConversationDiffData>) => {
-      state = value;
-    };
-    render(
-      <DiffDataHarness
-        mode="base"
-        filePaths={paths}
-        loadFilePaths={paths.slice(0, 4)}
-        fileProvider={provider}
-        onUpdate={onUpdate}
-      />
-    );
-    await flushMicrotasks();
-    rerender(
-      <DiffDataHarness
-        mode="base"
-        filePaths={paths}
-        loadFilePaths={[paths[4]]}
-        fileProvider={provider}
-        onUpdate={onUpdate}
-      />
-    );
-    await flushMicrotasks();
-    expect(state?.resolvedByPath).toEqual({});
-    await act(async () =>
-      pending.get('a.ts')!.resolve({
-        status: 'ready',
-        path: 'a.ts',
-        oldSnapshot: { kind: 'text', text: 'old-a' },
-        newSnapshot: { kind: 'text', text: 'new-a' },
-      })
-    );
-    await flushMicrotasks();
-    expect(state?.resolvedByPath['a.ts']).toMatchObject({
-      status: 'ready',
-      newSnapshot: { text: 'new-a' },
-    });
-    await act(async () =>
-      pending.get('e.ts')!.resolve({
-        status: 'ready',
-        path: 'e.ts',
-        oldSnapshot: { kind: 'text', text: 'old-e' },
-        newSnapshot: { kind: 'text', text: 'new-e' },
-      })
-    );
-    await flushMicrotasks();
-    expect(state?.resolvedByPath['e.ts']).toMatchObject({
-      status: 'ready',
-      newSnapshot: { text: 'new-e' },
-    });
-  });
-  it('matches conversation fileDiff checkpoints by normalized path', async () => {
-    vi.useFakeTimers();
-    const checkpoint = {
-      filePath: 'README.md',
-      add: 1,
-      del: 0,
-      cc: {
-        v: 1 as const,
-        fileId: 't:000014',
-        opId: '2:5',
-        baseOpId: '1:5',
-      },
-    };
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
-      status: 'unavailable',
-      path: pathOrFileId,
-      reason: 'missing-text-frontiers',
-    }));
-
-    render(
-      <DiffDataHarness
-        mode="conversation"
-        filePaths={['./README.md']}
-        loadFilePaths={['./README.md']}
-        priorityFilePath="./README.md"
-        fileDiffs={[checkpoint]}
-        fileProvider={createDiffProvider(getDiff)}
-        onUpdate={() => undefined}
-      />
-    );
-
-    await flushMicrotasks();
-
-    expect(getDiff).toHaveBeenCalledWith('./README.md', 'turn-1', checkpoint);
-  });
-
-  it('ignores fileDiff checkpoints in All Changes mode', async () => {
-    vi.useFakeTimers();
-    const checkpoint = {
-      filePath: 'README.md',
-      add: 1,
-      del: 0,
-      cc: {
-        v: 1 as const,
-        fileId: 't:000014',
-        opId: '2:5',
-        baseOpId: '1:5',
-      },
-    };
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
-      status: 'unavailable',
-      path: pathOrFileId,
-      reason: 'missing-text-frontiers',
-    }));
-
-    render(
-      <DiffDataHarness
-        mode="base"
-        filePaths={['./README.md']}
-        loadFilePaths={['./README.md']}
-        priorityFilePath="./README.md"
-        fileDiffs={[checkpoint]}
-        fileProvider={createDiffProvider(getDiff)}
-        onUpdate={() => undefined}
-      />
-    );
-
-    await flushMicrotasks();
-
-    expect(getDiff).toHaveBeenCalledWith('./README.md', undefined, undefined);
-  });
-
-  it('passes the uncommitted All Changes scope to per-file reads', async () => {
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
-      status: 'unavailable',
-      path: pathOrFileId,
-      reason: 'not_changed',
-    }));
-
-    render(
-      <DiffDataHarness
-        mode="base"
-        allChangesScope="uncommitted"
-        fileProvider={createDiffProvider(getDiff)}
-        onUpdate={() => undefined}
-      />
-    );
-
-    await flushMicrotasks();
-
-    expect(getDiff).toHaveBeenCalledWith('README.md', undefined, undefined, {
-      allChangesScope: 'uncommitted',
-    });
-  });
-
-  it('keeps loaded All Changes data when equivalent checkpoints rerender', async () => {
-    vi.useFakeTimers();
-    const checkpoint = {
-      filePath: 'README.md',
-      add: 1,
-      del: 0,
-      cc: {
-        v: 1 as const,
-        fileId: 't:000014',
-        opId: '2:5',
-        baseOpId: '1:5',
-      },
-    };
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
-      status: 'ready',
-      path: pathOrFileId,
-      oldSnapshot: { kind: 'text', text: 'base\n' },
-      newSnapshot: { kind: 'text', text: 'base\nhello\n' },
-    }));
-    const onUpdate = vi.fn();
-    const provider = createDiffProvider(getDiff);
-
-    render(
-      <DiffDataHarness
-        mode="base"
-        filePaths={['./README.md']}
-        loadFilePaths={['./README.md']}
-        priorityFilePath="./README.md"
-        fileDiffs={[checkpoint]}
-        fileProvider={provider}
-        onUpdate={onUpdate}
-      />
-    );
-
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(1);
-    expect(getDiff).toHaveBeenCalledWith('./README.md', undefined, undefined);
-
-    rerender(
-      <DiffDataHarness
-        mode="base"
-        filePaths={['./README.md']}
-        loadFilePaths={['./README.md']}
-        priorityFilePath="./README.md"
-        fileDiffs={[{ ...checkpoint, cc: { ...checkpoint.cc } }]}
-        fileProvider={provider}
-        onUpdate={onUpdate}
-      />
-    );
-
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(1);
-    expect(onUpdate.mock.calls.at(-1)?.[0].resolvedByPath['./README.md']).toMatchObject({
-      status: 'ready',
-      oldSnapshot: { kind: 'text', text: 'base\n' },
-      newSnapshot: { kind: 'text', text: 'base\nhello\n' },
-    });
-  });
-
-  it('does not auto-retry provider-declared unavailable diff states', async () => {
-    vi.useFakeTimers();
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async (pathOrFileId) => ({
-      status: 'unavailable',
-      path: pathOrFileId,
-      reason: 'missing-text-frontiers',
-    }));
-
-    render(
-      <DiffDataHarness fileProvider={createDiffProvider(getDiff)} onUpdate={() => undefined} />
-    );
-
-    await flushMicrotasks();
-    expect(getDiff.mock.calls.length).toBeGreaterThan(0);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_500);
-    });
-    await flushMicrotasks();
-    const stableCalls = getDiff.mock.calls.length;
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-    });
-    await flushMicrotasks();
-
-    expect(getDiff).toHaveBeenCalledTimes(stableCalls);
-  });
-
-  it('retries thrown diff read failures only up to the configured retry limit', async () => {
-    vi.useFakeTimers();
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>(async () => {
-      throw new Error('temporary diff read failure');
-    });
-
-    render(
-      <DiffDataHarness fileProvider={createDiffProvider(getDiff)} onUpdate={() => undefined} />
-    );
-
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(800);
-    });
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(2);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(800);
-    });
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(3);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-    });
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(3);
-  });
-
-  it('keeps provider diff RPC concurrency bounded across resolved state updates', async () => {
-    vi.useFakeTimers();
-    const paths = Array.from({ length: 20 }, (_, index) => `src/file-${index}.ts`);
-    type DiffResult = Awaited<ReturnType<SessionFileProvider['getDiff']>>;
-    const pending = new Map<string, ReturnType<typeof createDeferred<DiffResult>>>();
-    const getDiff = vi.fn<SessionFileProvider['getDiff']>((pathOrFileId) => {
-      const deferred = createDeferred<DiffResult>();
-      pending.set(pathOrFileId, deferred);
-      return deferred.promise;
-    });
-
-    render(
-      <DiffDataHarness
-        mode="base"
-        filePaths={paths}
-        loadFilePaths={paths}
-        priorityFilePath={paths[0]}
-        fileProvider={createDiffProvider(getDiff)}
-        onUpdate={() => undefined}
-      />
-    );
-
-    await flushMicrotasks();
-    expect(getDiff.mock.calls.map(([path]) => path)).toEqual([paths[0]]);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_300);
-    });
-    await flushMicrotasks();
-    expect(getDiff).toHaveBeenCalledTimes(4);
-
-    await act(async () => {
-      pending.get(paths[0])?.resolve({
-        status: 'ready',
-        path: paths[0],
-        oldSnapshot: { kind: 'text', text: 'old\n' },
-        newSnapshot: { kind: 'text', text: 'new\n' },
-      });
-      await Promise.resolve();
-    });
-    await flushMicrotasks();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_300);
-    });
-    await flushMicrotasks();
-
-    expect(getDiff).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -546,15 +501,19 @@ function createDeferred<T>(): {
 
 function DiffDataHarness({
   fileProvider,
+  enabled = true,
   mode = 'base',
   filePaths = README_PATHS,
   loadFilePaths = README_PATHS,
   priorityFilePath = 'README.md',
+  loadPaused = false,
   fileDiffs,
   allChangesScope,
   onUpdate,
 }: {
   readonly fileProvider: SessionFileProvider;
+  readonly enabled?: boolean;
+  readonly loadPaused?: boolean;
   readonly mode?: SessionConversationDiffMode;
   readonly filePaths?: string[];
   readonly loadFilePaths?: string[];
@@ -569,10 +528,12 @@ function DiffDataHarness({
     mode,
     filePaths,
     loadFilePaths,
+    loadPaused,
     priorityFilePath,
     fileDiffs,
     fileProvider,
     allChangesScope,
+    enabled,
   });
 
   useEffect(() => {

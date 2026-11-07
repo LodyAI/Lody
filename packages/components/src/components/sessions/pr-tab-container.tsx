@@ -300,7 +300,7 @@ export function PrTabContainer({
       isDeletingBranch={isDeletingBranch}
       branchExists={branchExists}
       onSelectMergeMethod={handleSelectMergeMethod}
-      onMerge={canWrite ? handleMerge : undefined}
+      onMerge={canWrite && !pullRequest?.stack ? handleMerge : undefined}
       onSetState={canWrite ? handleSetState : undefined}
       onMarkReadyForReview={canWrite ? handleMarkReadyForReview : undefined}
       onDeleteBranch={canWrite ? handleDeleteBranch : undefined}

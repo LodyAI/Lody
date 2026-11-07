@@ -1,9 +1,20 @@
 import {
+  MachineAcpAuthenticateResponseSchema,
+  MachineAcpAuthenticationProgressMessageSchema,
+  MachineAcpBinaryProgressMessageSchema,
+  MachineAcpCapabilitiesRefreshResponseSchema,
+} from '@lody/shared';
+import { E2eeAcpInteractionParamsSchema } from '@lody/shared/local-machine-rpc';
+import { createAcpInteraction } from './acp-interaction-client';
+import { createAcpInteractionCrypto } from './acp-interaction-crypto';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 import {
   machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryInspection,
   machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistoryWatch,
 } from '@lody/shared';
@@ -31,6 +42,7 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
   getMachineRoomId,
@@ -46,6 +58,10 @@ import {
   type RepoWatchHandle,
 } from 'loro-repo';
 import { createWorkspaceRepoStorage } from './workspace-repo-storage';
+import {
+  reportWorkspaceCloseFailure,
+  type WorkspaceCloseStage,
+} from './workspace-close-diagnostics';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
@@ -111,6 +127,7 @@ import {
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
+import { clientLossEffects } from '@/lib/e2ee-client-loss-effects';
 import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
 import {
@@ -153,6 +170,7 @@ import {
 } from './background-sync-coordinator';
 import { WorkspacePresenceTransport } from './workspace-presence-transport';
 import { WorkspaceMachineMonitorTransport } from './workspace-machine-monitor-transport';
+import { WorkspacePromptSuggestions } from './workspace-prompt-suggestions';
 import { WorkspaceLocalMachineMonitorTransport } from './workspace-local-machine-monitor-transport';
 import { TargetRoutedMachineMonitor } from './target-routed-machine-monitor';
 import { createResilientRemoteCursorStore } from './resilient-remote-cursor-store';
@@ -201,13 +219,20 @@ export type WorkspaceRuntimeAnalyticsEvent = {
 
 export function resolveWorkspaceRuntimeCacheIdentity(
   workspaceId: WorkspaceId,
-  windowId: string
+  windowId: string,
+  identity?: E2eeLocalDataIdentity
 ): {
   namespace: string;
   repoDbName: string;
   remoteCursorDbName: string;
 } {
-  const namespace = windowId ? `${workspaceId}:${windowId}` : workspaceId;
+  if (identity && identity.workspaceId !== workspaceId)
+    throw new Error('e2ee_local_identity_mismatch');
+  const namespace = identity
+    ? encryptedLocalNamespace({ ...identity, windowId })
+    : windowId
+      ? `${workspaceId}:${windowId}`
+      : workspaceId;
   return {
     namespace,
     repoDbName: `lody-loro-repo-db-${namespace}`,
@@ -215,13 +240,47 @@ export function resolveWorkspaceRuntimeCacheIdentity(
   };
 }
 
+export type ProtectedCodeCollabRole = {
+  get(): 'read' | 'write';
+  subscribe(listener: () => void): () => void;
+};
+
 export type WorkspaceE2eeTransport = {
+  supportsDispatch?: boolean;
+  /** Whether the actual injected host implements the closed signed RPC ports. */
+  supportsRpc?: boolean;
+  /** Verified ledger file role; absent means read-only. Never an authorization. */
+  codeCollabRole?: ProtectedCodeCollabRole;
+  attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
+  createRpcTokenProvider(
+    signal: AbortSignal
+  ): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   bucketId(): string | null;
+  prepareFeatureRpc?: (
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptFeatureRpcResponse?: (
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
+  prepareDispatch?: (
+    machineId: string,
+    args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptDispatchResponse?: (
+    machineId: string,
+    args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frame: string
+  ) => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
 };
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
+  /** Provisional cloud runtimes may read/write locally, but cannot attach a
+   * transport or send a body until their immutable mode is authenticated. */
+  waitForContentAdmission?: (signal: AbortSignal) => Promise<void>;
   e2ee?: WorkspaceE2eeTransport;
+  e2eeLocalIdentity?: E2eeLocalDataIdentity;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -470,9 +529,43 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
   deps.signal?.throwIfAborted();
+  const egressAbort = new AbortController();
+  const waitForContentAdmission = async (signal?: AbortSignal) => {
+    const owned = signal ? AbortSignal.any([signal, egressAbort.signal]) : egressAbort.signal;
+    owned.throwIfAborted();
+    await deps.waitForContentAdmission?.(owned);
+    owned.throwIfAborted();
+  };
   const protectedContent = deps.content.mode === 'protected';
+  const protectedDispatchAvailable =
+    protectedContent &&
+    Boolean(
+      deps.e2ee?.supportsDispatch !== false &&
+      deps.e2ee?.prepareDispatch &&
+      deps.e2ee.acceptDispatchResponse &&
+      deps.e2ee.createRpcTokenProvider
+    );
+  const protectedRpcAvailable =
+    protectedDispatchAvailable &&
+    Boolean(
+      deps.e2ee?.supportsRpc !== false &&
+      deps.e2ee?.prepareFeatureRpc &&
+      deps.e2ee.acceptFeatureRpcResponse &&
+      deps.e2ee.prepareDispatch &&
+      deps.e2ee.acceptDispatchResponse &&
+      deps.e2ee.createRpcTokenProvider
+    );
   if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
-  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
+  if (
+    protectedContent &&
+    (!deps.e2eeLocalIdentity || deps.e2eeLocalIdentity.accountId !== deps.accountId)
+  )
+    throw new Error('e2ee_local_identity_required');
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(
+    deps.workspaceId,
+    desktopWindowId(),
+    protectedContent ? deps.e2eeLocalIdentity : undefined
+  );
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -503,6 +596,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
   });
+  // E2E-only protected transport evidence; absent outside a probe-enabled window.
+  const transportEffects = protectedContent ? clientLossEffects(deps.workspaceId) : null;
+  transportEffects?.ownerOpened();
+  let cloudStreamCounted = false;
+  const countCloudStream = () => {
+    if (!transportEffects || cloudStreamCounted) return;
+    cloudStreamCounted = true;
+    transportEffects.streamAttached();
+  };
+  // Removal stays best-effort for its callers; only a confirmed removal ends the count.
+  const removeCloudTransport = () =>
+    repo.removeTransport('cloud', { close: true }).then(
+      () => {
+        if (!cloudStreamCounted) return;
+        cloudStreamCounted = false;
+        transportEffects?.streamRemoved(true);
+      },
+      () => {
+        if (cloudStreamCounted) transportEffects?.streamRemoved(false);
+      }
+    );
   // Liveness invariant: opening a workspace must never wait forever on rebuildable
   // local cache. Loro Streams cursors are checkpoints, not source-of-truth data, so
   // a broken IndexedDB cursor store must fail open and let Streams bootstrap/catch up.
@@ -528,8 +642,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const transportReady = createDeferred<void>();
   // Runtime dispose intentionally rejects this deferred; swallow that expected rejection.
   void transportReady.promise.catch(() => {});
-  const syncMode: PlatformSyncMode =
-    protectedContent ? 'cloud' : deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud');
+  const syncMode: PlatformSyncMode = protectedContent
+    ? 'cloud'
+    : (deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud'));
   // Historical name: true whenever a local plane exists (dual OR local).
   const electronLocalDataPlane = syncMode !== 'cloud';
   // False only on the local-only platform: no Streams member, no token
@@ -548,6 +663,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   });
   resolveRoomTransportsImpl = (room) => targetRouter.resolveTransportRoute(room);
   let localTransportAttachPromise: Promise<void> | null = null;
+  let localStartupPromise: Promise<void> | null = null;
+  let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
@@ -656,6 +773,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
   const presenceTransport = new WorkspacePresenceTransport({
     workspaceId,
+    minimal: protectedContent,
     onSnapshot: (states) => {
       latestCloudPresenceStates = states;
       publishMergedPresence();
@@ -667,6 +785,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const machineMonitorTransport = new WorkspaceMachineMonitorTransport({
     workspaceId,
     onWarning: (message, context) => console.warn(message, context),
+  });
+  const promptSuggestions = new WorkspacePromptSuggestions({
+    workspaceId,
+    resolvePlane: (machineId) => targetRouter.getPlaneForMachine(machineId),
+    onWarning: (message) => console.warn(message),
   });
   const targetMachineMonitor = new TargetRoutedMachineMonitor(
     targetRouter,
@@ -683,6 +806,23 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Slow reconcile interval for the reconnect-loop backstop tick.
   const RECONNECT_BACKSTOP_INTERVAL_MS = 60_000;
   let disposePromise: Promise<void> | null = null;
+  let disposeAttempt: Promise<void> | null = null;
+  let uncertainRepoClose = false;
+  const closedSteps = new Set<WorkspaceCloseStage>();
+  const reportedCloseFailures = new Set<WorkspaceCloseStage>();
+  const closeStep = async (stage: WorkspaceCloseStage, close: () => void | Promise<void>) => {
+    if (closedSteps.has(stage)) return;
+    try {
+      await close();
+      closedSteps.add(stage);
+    } catch (error) {
+      if (!reportedCloseFailures.has(stage)) {
+        reportedCloseFailures.add(stage);
+        reportWorkspaceCloseFailure(stage, error);
+      }
+      throw error;
+    }
+  };
   const sessionReaderAbort = new AbortController();
   const sessionReaderWakeListeners = new Set<() => void>();
   let reconnectingStatusTimer: ReturnType<typeof setTimeout> | null = null;
@@ -899,7 +1039,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const cloudMetaSyncRoomId = `cloud-meta:${getLoroMetaStreamId(workspaceId)}`;
   const isCloudHealthRoom = (roomId: string): boolean => {
-    if (roomId.startsWith('presence:') || roomId.startsWith('machine-monitor:')) {
+    if (
+      roomId.startsWith('presence:') ||
+      roomId.startsWith('machine-monitor:') ||
+      roomId.startsWith('prompt-suggestions:')
+    ) {
       return true;
     }
     if (roomId === cloudMetaSyncRoomId) {
@@ -958,6 +1102,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   notifyTargetRouteChange = () => {
     void repo.refreshTransportRoutes().catch(() => undefined);
     targetMachineMonitor.refreshRoutes();
+    promptSuggestions.refreshRoutes();
     notifyConnectionStateInputsChanged();
   };
 
@@ -1708,19 +1853,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     if (!streamsTokenProvider) {
       const controller = new AbortController();
       streamsTokenAbort = controller;
-      streamsTokenProvider = deps.e2ee ? deps.e2ee.createTokenProvider(controller.signal) : createLoroStreamsTokenProviderLegacy({
-        endpoint: buildLoroStreamsTokenEndpoint(import.meta.env.VITE_CONVEX_SITE_URL),
-        workspaceId,
-        authToken: () => authToken,
-        fetchImpl: (input, init) =>
-          fetch(input, {
-            ...init,
-            signal: init?.signal
-              ? AbortSignal.any([controller.signal, init.signal])
-              : controller.signal,
-          }),
-        onEvent: logTokenProviderEvent,
-      });
+      streamsTokenProvider = deps.e2ee
+        ? deps.e2ee.createTokenProvider(controller.signal)
+        : createLoroStreamsTokenProviderLegacy({
+            endpoint: buildLoroStreamsTokenEndpoint(import.meta.env.VITE_CONVEX_SITE_URL),
+            workspaceId,
+            authToken: () => authToken,
+            fetchImpl: (input, init) =>
+              fetch(input, {
+                ...init,
+                signal: init?.signal
+                  ? AbortSignal.any([controller.signal, init.signal])
+                  : controller.signal,
+              }),
+            onEvent: logTokenProviderEvent,
+          });
       eagerSyncAuthCallback = streamsTokenProvider.createAuthCallback();
     }
     return streamsTokenProvider;
@@ -1730,6 +1877,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy;
     streamsBaseUrl: string;
   }> => {
+    await waitForContentAdmission();
     if (!cloudPlaneEnabled) {
       throw new Error('Streams RPC is disabled in local-only sync mode');
     }
@@ -1750,7 +1898,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy,
     streamsBaseUrl: string
   ): LoroStreamsJsonStreamClient => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     if (!jsonStreamClient) {
       jsonStreamClient = createLoroStreamsJsonStreamClient({
         bucketId: LORO_STREAMS_BUCKET_ID,
@@ -1814,10 +1962,84 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       `Streams RPC client not ready after ${MACHINE_RPC_TRANSPORT_READY_TIMEOUT_MS}ms`
     );
 
+  let encryptedDispatch:
+    | ReturnType<typeof import('./encrypted-dispatch-legacy').createEncryptedDispatchLegacy>
+    | undefined;
+  let encryptedRpcToken:
+    | ReturnType<NonNullable<typeof deps.e2ee>['createRpcTokenProvider']>
+    | undefined;
+  const ensureEncryptedRpc = async () => {
+    if (disposePromise) throw new Error('Runtime disposed');
+    if (!encryptedDispatch) {
+      const { createEncryptedDispatchLegacy } = await import('./encrypted-dispatch-legacy');
+      if (disposePromise) throw new Error('Runtime disposed');
+      const native = deps.e2ee;
+      if (!native?.prepareDispatch || !native.acceptDispatchResponse)
+        throw new Error('e2ee_rpc_unavailable');
+      encryptedDispatch ??= createEncryptedDispatchLegacy({
+        workspaceId,
+        prepare: native.prepareDispatch,
+        accept: native.acceptDispatchResponse,
+        prepareFeature: native.prepareFeatureRpc,
+        acceptFeature: native.acceptFeatureRpcResponse,
+        closeClient: async () => {
+          await encryptedRpcToken?.close();
+          encryptedRpcToken = undefined;
+        },
+        client: async (signal) => {
+          if (!native.createRpcTokenProvider) throw new Error('e2ee_rpc_unavailable');
+          const provider = (encryptedRpcToken ??= native.createRpcTokenProvider(signal));
+          await provider.getToken();
+          const streamsBaseUrl = getStreamsBaseUrlForProvider(provider);
+          const bucketId = native.bucketId();
+          if (!bucketId || bucketId === LORO_STREAMS_BUCKET_ID)
+            throw new Error('e2ee_content_configuration');
+          return createLoroStreamsJsonStreamClient({
+            bucketId,
+            baseUrl: streamsBaseUrl,
+            getBaseUrl: () => getStreamsBaseUrlForProvider(provider),
+            getToken: () => provider.getToken(),
+            fetchImpl: (url, init) =>
+              fetch(url, {
+                ...init,
+                signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+              }),
+          });
+        },
+      });
+    }
+    return encryptedDispatch;
+  };
+  const prepareEncryptedDispatch =
+    protectedDispatchAvailable && deps.e2ee?.prepareDispatch && deps.e2ee.acceptDispatchResponse
+      ? async (machineId: string, input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) =>
+          (await ensureEncryptedRpc()).prepare(machineId, input)
+      : undefined;
+
   const getMachineRpcClient = async (
     machineId: MachineId
   ): Promise<LoroStreamsMachineRpcClient> => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    await waitForContentAdmission();
+    if (protectedContent) {
+      if (
+        !protectedRpcAvailable ||
+        !deps.e2ee?.prepareFeatureRpc ||
+        !deps.e2ee.acceptFeatureRpcResponse ||
+        !deps.e2ee.createRpcTokenProvider
+      )
+        throw new Error('e2ee_rpc_unavailable');
+      const existing = machineRpcClients.get(machineId);
+      if (existing) return existing;
+      const next = new LoroStreamsMachineRpcClient({
+        workspaceId,
+        machineId,
+        encryptedQuery: async (method, params, timeoutMs) =>
+          (await ensureEncryptedRpc()).query(machineId, method, params, timeoutMs),
+      });
+      machineRpcClients.set(machineId, next);
+      return next;
+    }
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     const streamClient = await waitForMachineRpcTransportReady();
     const responseDispatcher = getMachineRpcResponseDispatcher(streamClient);
 
@@ -1868,6 +2090,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const {
+    requestSessionAutomationControl,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,
@@ -1883,6 +2106,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
     requestCodeCollabSaveText,
+    getDiffBlobTransportOptions,
+    requestCodeCollabOpenDiffManifest,
+    requestCodeCollabReadBlob,
     requestCodeCollabOpenCurrentDiff,
     requestCodeCollabOpenAllChangesDiff,
     requestCodeCollabOpenTurnDiff,
@@ -1895,20 +2121,40 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewRevoke,
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
+    requestAndroidEmulatorControl,
     requestLocalProjectGitState,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,
+    requestLocalMcpAuthentication,
+    requestLocalSorbetCredentials,
+    requestLocalSorbetProviders,
     requestMemoryProvider,
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
+    waitForContentAdmission,
     getSessionToken: () => authToken,
-    ...(protectedContent ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId } : {}),
+    ...(protectedContent
+      ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId }
+      : {}),
     getMachineProtocolCapabilities,
     workspaceId,
     targetRouter,
     getMachineRpcClient,
+    ...(protectedContent
+      ? {
+          protectedContent: true,
+          protectedCodeCollabRole: () => deps.e2ee?.codeCollabRole?.get() ?? 'read',
+        }
+      : {}),
+    ...(protectedRpcAvailable
+      ? {
+          requestEncryptedFeature: async (
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+          ) => (await ensureEncryptedRpc()).requestFeature(request),
+        }
+      : {}),
   });
 
   /**
@@ -2123,6 +2369,107 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return request;
   };
 
+  const encryptedAcpStarts = new Map<string, AbortController>();
+  const encryptedAcpActive = new Set<{ cancel: (signal?: AbortSignal) => Promise<void> }>();
+  let encryptedAcpCloseCancellation = false;
+  const encryptedAcpEarlyCancels = new Map<string, ReturnType<typeof setTimeout>>();
+  let encryptedAcpCancelOverflow: ReturnType<typeof setTimeout> | undefined;
+  const encryptedAcpOperations = new Map<
+    string,
+    { cancel: () => Promise<void>; submit: (id: string, input: unknown) => Promise<void> }
+  >();
+  const encryptedAcpKey = (machineId: string, requestId: string) =>
+    JSON.stringify([machineId, requestId]);
+  const startEncryptedAcp = async (args: {
+    machineId: MachineId;
+    requestId: string;
+    kind: 'probe' | 'authenticate';
+    configId: AgentConfigId;
+    force?: boolean;
+    methodId?: string;
+    signal?: AbortSignal;
+    onProgress: (progress: unknown) => void;
+  }) => {
+    await waitForContentAdmission(args.signal);
+    const capabilities = await getMachineProtocolCapabilities(args.machineId);
+    if ((capabilities as Record<string, unknown> | undefined)?.e2eeAcpInteraction !== 1)
+      throw new Error('Encrypted ACP interaction is not supported by this machine');
+    if (!protectedRpcAvailable || disposePromise || args.signal?.aborted)
+      throw new Error('e2ee_rpc_unavailable');
+    const crypto = await createAcpInteractionCrypto();
+    if (disposePromise || args.signal?.aborted) throw new Error('e2ee_rpc_unavailable');
+    let first = true;
+    const operation = createAcpInteraction(
+      {
+        ...crypto,
+        newRequestId: () => {
+          if (first) {
+            first = false;
+            return args.requestId.replaceAll('-', '');
+          }
+          return globalThis.crypto.randomUUID().replaceAll('-', '');
+        },
+        transport: async ({ requestId, expectedDevice, params, signal, onPrepared }) => {
+          // Retirement fences ordinary work immediately. Existing interactions alone
+          // may use their already-open channel to send the final best-effort cancel.
+          const closingCancel = params.action === 'cancel' && encryptedAcpCloseCancellation;
+          if (!closingCancel) await waitForContentAdmission(signal);
+          const dispatch = closingCancel ? encryptedDispatch : await ensureEncryptedRpc();
+          if (!dispatch) throw new Error('e2ee_rpc_unavailable');
+          let signer = '';
+          const response = await dispatch.requestFeature(
+            {
+              workspaceId,
+              machineId: args.machineId,
+              method: 'machine/acp-interaction',
+              params: E2eeAcpInteractionParamsSchema.parse(params),
+              timeoutMs: 10000,
+            },
+            {
+              requestId,
+              expectedDevice,
+              signal,
+              onPrepared: (device) => {
+                signer = device;
+                onPrepared?.(device);
+              },
+            }
+          );
+          if (!response.ok) throw new Error('Encrypted ACP interaction failed');
+          return { requesterDevice: signer, response: response.result };
+        },
+        parseProgress: (value) =>
+          args.kind === 'probe'
+            ? MachineAcpBinaryProgressMessageSchema.parse(value)
+            : MachineAcpAuthenticationProgressMessageSchema.parse(value),
+        parseResult: (kind, value) =>
+          kind === 'probe'
+            ? MachineAcpCapabilitiesRefreshResponseSchema.parse(value)
+            : MachineAcpAuthenticateResponseSchema.parse(value),
+      },
+      {
+        workspaceId,
+        machineId: args.machineId,
+        kind: args.kind,
+        configId: args.configId,
+        force: args.force,
+        methodId: args.methodId,
+        timeoutMs: args.kind === 'probe' ? ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS : 300000,
+        requestTimeoutMs: 10000,
+        pollIntervalMs: 500,
+        maxPolls: 2000,
+        signal: args.signal,
+        onProgress: args.onProgress,
+      }
+    );
+    encryptedAcpActive.add(operation);
+    void operation.result.then(
+      () => encryptedAcpActive.delete(operation),
+      () => encryptedAcpActive.delete(operation)
+    );
+    return operation;
+  };
+
   const performMachineAcpCapabilitiesRefreshViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
     options: {
@@ -2137,8 +2484,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         force: message.force,
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
-            handleMachineAcpBinaryProgress(progress);
-            options.onProgress?.(progress);
+            handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
+            options.onProgress?.({ ...progress, machineId: message.machineId });
           }
         },
         signal: options.signal,
@@ -2269,8 +2616,147 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         error: 'Cloud Machine RPC is disabled in local-only sync mode',
       };
     }
+    if (protectedContent) {
+      try {
+        const operation = await startEncryptedAcp({
+          machineId: message.machineId,
+          requestId: globalThis.crypto.randomUUID(),
+          kind: 'probe',
+          configId: message.configId,
+          force: negotiatedMessage.force,
+          signal,
+          onProgress: (value) => {
+            const progress = MachineAcpBinaryProgressMessageSchema.parse(value);
+            if (progress.machineId !== message.machineId)
+              throw new Error('ACP progress machine mismatch');
+            handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
+            options.onProgress?.({ ...progress, machineId: message.machineId });
+          },
+        });
+        const response = MachineAcpCapabilitiesRefreshResponseSchema.parse(await operation.result);
+        if (response.machineId !== message.machineId || response.configId !== message.configId)
+          throw new Error('ACP probe target mismatch');
+        if (response.capability?.models.some((model) => typeof model.name !== 'string'))
+          throw new Error('Invalid ACP capability models');
+        return {
+          ...response,
+          machineId: message.machineId,
+          configId: message.configId,
+        } as MachineAcpCapabilitiesRefreshResponse;
+      } catch (error) {
+        if (signal?.aborted) return null;
+        return {
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId: message.machineId,
+          configId: message.configId,
+          cliType: 'builtin',
+          agentType: 'unknown',
+          success: false,
+          error: error instanceof Error ? error.message : 'Encrypted ACP probe failed',
+        };
+      }
+    }
     const request = performMachineAcpCapabilitiesRefreshViaRpc(negotiatedMessage, options);
     return signal ? waitForPromiseOrAbort(request, signal) : request;
+  };
+
+  const dispatchEncryptedAcpAuthentication = async (
+    message: Extract<ClientToServer, { type: 'machine/acp-authenticate' }>,
+    routeSignal?: AbortSignal
+  ) => {
+    const key = encryptedAcpKey(
+      message.machineId,
+      message.action === 'start' ? message.requestId : message.authenticationRequestId
+    );
+    try {
+      if (message.action === 'start') {
+        const startController = new AbortController();
+        if (routeSignal?.aborted) throw new Error('ACP authentication cancelled');
+        routeSignal?.addEventListener('abort', () => startController.abort(), { once: true });
+        let pendingOperation: ReturnType<typeof startEncryptedAcp>;
+        const pending = {
+          cancel: async () => {
+            startController.abort();
+            const operation = await pendingOperation.catch(() => null);
+            if (operation) await operation.cancel();
+          },
+          submit: async (id: string, input: unknown) => {
+            const operation = await pendingOperation;
+            await operation.submit(id, input);
+          },
+        };
+        encryptedAcpOperations.set(key, pending);
+        pendingOperation = startEncryptedAcp({
+          machineId: message.machineId,
+          requestId: message.requestId,
+          kind: 'authenticate',
+          configId: message.configId,
+          methodId: message.methodId,
+          signal: startController.signal,
+          onProgress: (value) => {
+            const progress = MachineAcpAuthenticationProgressMessageSchema.parse(value);
+            if (
+              progress.machineId !== message.machineId ||
+              progress.requestId !== message.requestId.replaceAll('-', '')
+            )
+              throw new Error('ACP authentication progress target mismatch');
+            handleMachineAcpAuthenticationProgress({
+              ...progress,
+              machineId: message.machineId,
+              requestId: message.requestId,
+            });
+          },
+        });
+        try {
+          const operation = await pendingOperation;
+          const response = MachineAcpAuthenticateResponseSchema.parse(await operation.result);
+          if (
+            response.machineId !== message.machineId ||
+            response.requestId !== message.requestId.replaceAll('-', '')
+          )
+            throw new Error('ACP authentication target mismatch');
+          handleMachineAcpAuthenticateResponse({
+            ...response,
+            machineId: message.machineId,
+            requestId: message.requestId,
+          });
+        } finally {
+          if (encryptedAcpOperations.get(key) === pending) encryptedAcpOperations.delete(key);
+        }
+        return;
+      }
+      const operation = encryptedAcpOperations.get(key);
+      if (!operation) throw new Error('ACP authentication is not running');
+      if (message.action === 'cancel') await operation.cancel();
+      else if (message.action === 'submit-code')
+        await operation.submit('authorization-code', {
+          action: 'submit-code',
+          authorizationCode: message.authorizationCode,
+        });
+      else
+        await operation.submit(message.interactionId, {
+          action: 'submit-input',
+          authenticationInput: message.authenticationInput,
+        });
+      handleMachineAcpAuthenticateResponse({
+        type: 'machine/acp-authenticate_response',
+        machineId: message.machineId,
+        requestId: message.requestId,
+        agentType: 'unknown',
+        success: true,
+        disposition: message.action === 'cancel' ? 'cancelled' : 'input-accepted',
+      });
+    } catch (error) {
+      handleMachineAcpAuthenticateResponse({
+        type: 'machine/acp-authenticate_response',
+        machineId: message.machineId,
+        requestId: message.requestId,
+        agentType: 'unknown',
+        success: false,
+        disposition: 'error',
+        error: error instanceof Error ? error.message : 'Encrypted ACP authentication failed',
+      });
+    }
   };
 
   const dispatchMachineAcpAuthenticateViaRpc = async (
@@ -2290,6 +2776,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ...common,
               action: message.action,
               configId: message.configId,
+              ...(message.methodId ? { methodId: message.methodId } : {}),
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({
@@ -2438,6 +2925,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     try {
+      await waitForContentAdmission();
       const streamedProgressCounts = new Map<string, number>();
       const result = await sendLocalSessionControl(message, (payload) => {
         const validated = ServerToClientSchema.safeParse(payload);
@@ -2669,6 +3157,40 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     if (isMachineControlRequest(message)) {
+      let acpStart: AbortController | undefined;
+      let acpKey: string | undefined;
+      if (protectedContent && message.type === 'machine/acp-authenticate') {
+        acpKey = encryptedAcpKey(
+          message.machineId,
+          message.action === 'start' ? message.requestId : message.authenticationRequestId
+        );
+        if (message.action === 'start') {
+          acpStart = new AbortController();
+          encryptedAcpStarts.set(acpKey, acpStart);
+          if (encryptedAcpCancelOverflow) acpStart.abort();
+          const earlyCancel = encryptedAcpEarlyCancels.get(acpKey);
+          if (earlyCancel) {
+            clearTimeout(earlyCancel);
+            encryptedAcpEarlyCancels.delete(acpKey);
+            acpStart.abort();
+          }
+        } else if (message.action === 'cancel') {
+          const active = encryptedAcpStarts.get(acpKey);
+          if (active) active.abort();
+          else if (!encryptedAcpEarlyCancels.has(acpKey) && encryptedAcpEarlyCancels.size < 1024) {
+            const key = acpKey;
+            encryptedAcpEarlyCancels.set(
+              key,
+              setTimeout(() => encryptedAcpEarlyCancels.delete(key), 300000)
+            );
+          } else if (!encryptedAcpEarlyCancels.has(acpKey)) {
+            if (encryptedAcpCancelOverflow) clearTimeout(encryptedAcpCancelOverflow);
+            encryptedAcpCancelOverflow = setTimeout(() => {
+              encryptedAcpCancelOverflow = undefined;
+            }, 300000);
+          }
+        }
+      }
       void (async () => {
         await waitForMachineRouteIfNeeded(message.machineId);
         if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
@@ -2711,6 +3233,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           await dispatchMachineUpgradeViaRpc(message);
           return;
         }
+        if (message.type === 'machine/acp-authenticate' && protectedContent) {
+          try {
+            await dispatchEncryptedAcpAuthentication(message, acpStart?.signal);
+          } finally {
+            if (acpStart && acpKey && encryptedAcpStarts.get(acpKey) === acpStart)
+              encryptedAcpStarts.delete(acpKey);
+          }
+          return;
+        }
         if (message.type === 'machine/acp-authenticate') {
           await dispatchMachineAcpAuthenticateViaRpc(message);
           return;
@@ -2723,7 +3254,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           await dispatchMachineAcpBinaryInstallViaRpc(message);
           return;
         }
-      })();
+      })()
+        .catch(() => {
+          handleMachineControlTransportFailure(message, 'Machine control request failed');
+        })
+        .finally(() => {
+          if (acpStart && acpKey && encryptedAcpStarts.get(acpKey) === acpStart)
+            encryptedAcpStarts.delete(acpKey);
+        });
       return;
     }
 
@@ -2922,7 +3460,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     if (stopPresence) {
       await presenceTransport.stop();
-      await machineMonitorTransport.stop();
+      await Promise.all([machineMonitorTransport.stop(), promptSuggestions.stop()]);
     }
     if (stopRpcClients) {
       for (const client of machineRpcClients.values()) {
@@ -2979,10 +3517,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       if (transportAttached || localLoroTransport) {
         await repo.removeTransport('local', { close: true }).catch(() => undefined);
       }
-      await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+      await removeCloudTransport();
       transportAttached = false;
     }
     localLoroTransport = null;
+    promptSuggestions.detachLocal();
     localMachineMonitorTransport?.stop();
     localMachineMonitorTransport = null;
     cloudTransportAttached = false;
@@ -3016,7 +3555,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const startPresenceTransport = () => {
-    if (protectedContent) return;
     if (!streamsTokenProvider) {
       console.warn(
         'createWorkspaceRuntime: cannot start presence transport without token provider',
@@ -3039,7 +3577,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       durableBaseUrl,
       shardHostSuffix,
     });
+    const bucketId = protectedContent ? deps.e2ee?.bucketId() : undefined;
+    if (protectedContent && !bucketId) throw new Error('e2ee_content_configuration');
     presenceTransport.start({
+      ...(bucketId ? { bucketId } : {}),
+      baseUrl: durableBaseUrl,
+      auth: streamsTokenProvider.createAuthCallback(),
+      shardHostSuffix,
+    });
+    if (protectedContent) return;
+    promptSuggestions.start({
       baseUrl: durableBaseUrl,
       auth: streamsTokenProvider.createAuthCallback(),
       shardHostSuffix,
@@ -3052,6 +3599,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const attachLocalLoroDataPlaneTransport = async () => {
+    await waitForContentAdmission();
     if (transportAttached) {
       return;
     }
@@ -3085,6 +3633,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       connection: localConnection.connection,
     });
     targetMachineMonitor.setLocalTransport(localMachineMonitorTransport);
+    promptSuggestions.attachLocal(localConnection.connection);
     // Routing comes from resolveRoomTransports (wired to the router at repo
     // construction); per-room cloud bindings notify their own subscribers, so
     // the mux-era member-status side channel is gone by design.
@@ -3102,7 +3651,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (message.workspaceId !== workspaceId) return;
         presenceStore.apply(base64ToBytes(message.dataBase64));
         latestLocalOriginPresenceStates = parseLodyPresenceStates(
-          presenceStore.getAllStates() as Record<string, unknown>
+          presenceStore.getAllStates() as Record<string, unknown>,
+          { minimal: protectedContent }
         );
         publishMergedPresence();
       });
@@ -3114,6 +3664,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       workspaceId,
     });
     emitControlConnectionState();
+  };
+
+  const ensureLocalTransport = async () => {
+    // A failed classification has acquired no local transport. A later valid
+    // verdict may start it on this same Repo; actual I/O remains single-flight.
+    await waitForContentAdmission();
+    localTransportAttachPromise ??= (async () => {
+      await attachLocalLoroDataPlaneTransport();
+      await ensureMetaRoomSynced();
+    })();
+    await localTransportAttachPromise;
   };
 
   const createStreamsDurableTransport = (
@@ -3189,7 +3750,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         startPresenceTransport();
       }
 
-      if (!protectedContent) createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
+      if (!protectedContent)
+        createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
 
       if (isMetaRemoteCursorBypassActive()) {
         await dropSuspectMetaCheckpointBeforeAttach(streamsBaseUrl);
@@ -3205,6 +3767,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       webCloudAddsInFlight.add(options.generation);
       try {
         await repo.addTransport('cloud', transportAdapter, { ephemeral: true });
+        countCloudStream();
       } finally {
         webCloudAddsInFlight.delete(options.generation);
       }
@@ -3235,7 +3798,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
       if (shouldStartPresence) {
         await presenceTransport.stop();
-        await machineMonitorTransport.stop();
+        await Promise.all([machineMonitorTransport.stop(), promptSuggestions.stop()]);
       }
       throw error;
     }
@@ -3345,8 +3908,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         await repo.addTransport('cloud', createStreamsDurableTransport(provider, streamsBaseUrl), {
           ephemeral: true,
         });
+        countCloudStream();
         if (disposePromise || !authToken || !transportAttached) {
-          await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+          await removeCloudTransport();
           return;
         }
         attachCloudMetaHealthTracker();
@@ -3359,8 +3923,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       } catch (error) {
         cloudMetaTracker?.dispose();
         cloudMetaTracker = null;
-        await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
-        await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+        await Promise.all([
+          presenceTransport.stop(),
+          machineMonitorTransport.stop(),
+          promptSuggestions.stop(),
+        ]);
+        await removeCloudTransport();
         throw error;
       }
     })();
@@ -3384,11 +3952,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     cloudMetaTracker?.dispose();
     cloudMetaTracker = null;
     cloudAttachDroppedSuspectCheckpoint = false;
-    await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+    await Promise.all([
+      presenceTransport.stop(),
+      machineMonitorTransport.stop(),
+      promptSuggestions.stop(),
+    ]);
     latestCloudPresenceStates = {};
     publishMergedPresence();
     if (transportAttached) {
-      await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
+      await removeCloudTransport();
     }
     cloudTransportAttached = false;
     notifyConnectionStateInputsChanged();
@@ -3703,9 +4275,28 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     });
   };
 
+  let authAdmissionGeneration = 0;
+  let authAdmissionAbort: AbortController | null = null;
   const setAuthToken = async (token: string | null) => {
+    const generation = ++authAdmissionGeneration;
+    authAdmissionAbort?.abort(new DOMException('Authentication superseded', 'AbortError'));
+    authAdmissionAbort = null;
+    if (token && deps.waitForContentAdmission) {
+      const admission = new AbortController();
+      authAdmissionAbort = admission;
+      try {
+        await waitForContentAdmission(admission.signal);
+      } finally {
+        if (authAdmissionAbort === admission) authAdmissionAbort = null;
+      }
+    }
+    if (generation !== authAdmissionGeneration) return;
     if (disposePromise) {
       return;
+    }
+    if (token && deps.waitForContentAdmission && electronLocalDataPlane && !transportAttached) {
+      await ensureLocalTransport();
+      if (generation !== authAdmissionGeneration || disposePromise) return;
     }
     const nextAuthToken = token && token !== '' ? token : null;
     const previousAuthToken = authToken;
@@ -3848,6 +4439,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     needsReconnect: () => machineMonitorTransport.needsReconnect(),
   });
 
+  const promptSuggestionSyncRoomId = `prompt-suggestions:${workspaceId}`;
+  const untrackPromptSuggestionSync = roomSyncRegistry.track({
+    roomId: promptSuggestionSyncRoomId,
+    getSyncState: () => promptSuggestions.getSyncState(),
+    subscribeSyncState: (listener) => promptSuggestions.subscribeSyncState(listener),
+    needsReconnect: () => promptSuggestions.needsReconnect(),
+  });
+
   if (cloudPlaneEnabled && !electronLocalDataPlane) {
     webAttachReconnectLoop = createLocalReconnectLoop({
       canRun: () =>
@@ -3893,7 +4492,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       // or stuck in a non-synced state.
       const presenceProblem = !electronLocalDataPlane && presenceTransport.needsReconnect();
       const machineMonitorProblem =
-        !electronLocalDataPlane && machineMonitorTransport.needsReconnect();
+        !electronLocalDataPlane &&
+        (machineMonitorTransport.needsReconnect() || promptSuggestions.needsReconnect());
       const restartPresenceForWake =
         !electronLocalDataPlane &&
         force &&
@@ -3903,11 +4503,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         !electronLocalDataPlane &&
         force &&
         (triggerReason === 'visibility-wake' || triggerReason === 'network-online') &&
-        machineMonitorTransport.shouldRestartOnExternalWake();
+        (machineMonitorTransport.shouldRestartOnExternalWake() ||
+          promptSuggestions.shouldRestartOnExternalWake());
       const durableProblemRooms = roomSyncRegistry.listNeedsReconnect(
         (roomId) =>
           roomId !== presenceSyncRoomId &&
           roomId !== machineMonitorSyncRoomId &&
+          roomId !== promptSuggestionSyncRoomId &&
           (!electronLocalDataPlane || isLocalHealthRoom(roomId))
       );
       const durableProblem = durableProblemRooms.length > 0;
@@ -3978,7 +4580,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             machineMonitorSyncState: machineMonitorTransport.getSyncState(),
           }
         );
-        await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+        await Promise.all([
+          presenceTransport.stop({ retainSnapshot: true }),
+          machineMonitorTransport.stop(),
+          promptSuggestions.stop(),
+        ]);
         // Re-check: teardownTransport() may have run while stop() awaited.
         if (!disposePromise && transportAttached && streamsTokenProvider) {
           startPresenceTransport();
@@ -4021,6 +4627,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           (roomId) =>
             roomId !== presenceSyncRoomId &&
             roomId !== machineMonitorSyncRoomId &&
+            roomId !== promptSuggestionSyncRoomId &&
             isCloudHealthRoom(roomId)
         );
         // Registry-invisible failures on dual-homed rooms; the member rejoin
@@ -4034,9 +4641,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             presenceTransport.shouldRestartOnExternalWake());
         const restartMachineMonitor =
           machineMonitorTransport.needsReconnect() ||
+          promptSuggestions.needsReconnect() ||
           (force &&
             (triggerReason === 'visibility-wake' || triggerReason === 'network-online') &&
-            machineMonitorTransport.shouldRestartOnExternalWake());
+            (machineMonitorTransport.shouldRestartOnExternalWake() ||
+              promptSuggestions.shouldRestartOnExternalWake()));
 
         if (force || durableProblemRooms.length > 0 || cloudMemberProblemRooms.length > 0) {
           await repo.reconnect({ transportIds: ['cloud'], resetBackoff: true });
@@ -4078,7 +4687,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           cloudTransportAttached &&
           streamsTokenProvider
         ) {
-          await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+          await Promise.all([
+            presenceTransport.stop({ retainSnapshot: true }),
+            machineMonitorTransport.stop(),
+            promptSuggestions.stop(),
+          ]);
           if (!disposePromise && cloudTransportAttached && streamsTokenProvider) {
             startPresenceTransport();
           }
@@ -4173,42 +4786,45 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
    */
   const eagerSyncScope = workspaceId;
   const materializedSessionIds = new Set<SessionId>();
-  eagerSyncWorkerClient = protectedContent ? null : createEagerSyncWorkerClient({
-    content: { mode: deps.content.mode },
-    workspaceId,
-    scope: eagerSyncScope,
-    localConnection: createLocalLoroDataPlaneConnection,
-    resolveTransport: async (roomId) => {
-      await targetRouter.prepareDocTarget(roomId);
-      const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
-      if (plane === 'local') return { plane: 'local' };
-      if (!cloudPlaneEnabled || !streamsTokenProvider) {
-        throw new Error('Eager-sync cloud transport unavailable');
-      }
-      // Prime endpoint-derived routing before handing the transport to the worker.
-      await streamsTokenProvider.getToken();
-      // Match the mounted foreground transport. `transportStreamsBaseUrl`
-      // records the endpoint selected when that transport was attached.
-      const baseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
-      return {
-        plane: 'cloud',
-        streamId: getLoroStreamIdForDocId(workspaceId, roomId),
-        options: {
-          bucketId: LORO_STREAMS_BUCKET_ID,
-          metaStreamId: getLoroMetaStreamId(workspaceId),
-          baseUrl,
-          shardUrls: getLoroStreamsShardUrls(
-            baseUrl,
-            getStreamsShardHostSuffixForProvider(streamsTokenProvider)
-          ),
+  eagerSyncWorkerClient = protectedContent
+    ? null
+    : createEagerSyncWorkerClient({
+        content: { mode: deps.content.mode },
+        workspaceId,
+        scope: eagerSyncScope,
+        localConnection: createLocalLoroDataPlaneConnection,
+        resolveTransport: async (roomId) => {
+          await targetRouter.prepareDocTarget(roomId);
+          const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+          if (plane === 'local') return { plane: 'local' };
+          if (!cloudPlaneEnabled || !streamsTokenProvider) {
+            throw new Error('Eager-sync cloud transport unavailable');
+          }
+          // Prime endpoint-derived routing before handing the transport to the worker.
+          await streamsTokenProvider.getToken();
+          // Match the mounted foreground transport. `transportStreamsBaseUrl`
+          // records the endpoint selected when that transport was attached.
+          const baseUrl =
+            transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
+          return {
+            plane: 'cloud',
+            streamId: getLoroStreamIdForDocId(workspaceId, roomId),
+            options: {
+              bucketId: LORO_STREAMS_BUCKET_ID,
+              metaStreamId: getLoroMetaStreamId(workspaceId),
+              baseUrl,
+              shardUrls: getLoroStreamsShardUrls(
+                baseUrl,
+                getStreamsShardHostSuffixForProvider(streamsTokenProvider)
+              ),
+            },
+          };
         },
-      };
-    },
-    auth: async (context) => {
-      if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
-      return eagerSyncAuthCallback(context);
-    },
-  });
+        auth: async (context) => {
+          if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
+          return eagerSyncAuthCallback(context);
+        },
+      });
 
   const awaitSessionReaderMetadata = (
     roomId: string,
@@ -4409,6 +5025,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           readerWakes.clear();
         };
         rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+          coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
           watch: () => machineSupportsSessionHistoryWatch(ownerMachineMeta),
@@ -4425,6 +5042,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           workspaceId,
           machineId,
           resolvePlane: async (targetMachineId) => {
+            await waitForContentAdmission();
             const plane = await targetRouter.resolvePlaneForMachine(targetMachineId, {
               timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
             });
@@ -4732,7 +5350,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
-    if (protectedContent) throw new Error('e2ee_feature_unavailable');
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -4826,7 +5443,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
     create: async (id) => {
-      if (protectedContent) throw new Error('e2ee_feature_unavailable');
       const roomId = getScheduleRoomId(id);
       const handle = await repo.openPersistedDoc(roomId);
       const mirror = new Mirror({
@@ -5148,118 +5764,165 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const dispose = () => {
-    if (disposePromise) {
-      return disposePromise;
-    }
+    if (disposeAttempt) return disposeAttempt;
+    // loro-repo marks itself destroyed before closing its children. A failed
+    // terminal destroy has no retry/drain receipt; its later no-op is not proof.
+    if (uncertainRepoClose) return disposePromise!;
 
     // Publish retirement before any cancellation callback or asynchronous close runs.
-    disposePromise = Promise.resolve().then(async () => {
-      sessionReaderAbort.abort();
-      windowBootstrap?.close();
-      sharedWindowDocuments.clear();
-      streamsTokenAbort?.abort();
+    const attempt = Promise.resolve().then(async () => {
+      await closeStep('dispatch', async () => {
+        encryptedAcpCloseCancellation = true;
+        const cancellationController = new AbortController();
+        try {
+          const cancellations = Array.from(encryptedAcpActive, (operation) =>
+            operation.cancel(cancellationController.signal)
+          );
+          for (const start of encryptedAcpStarts.values()) start.abort();
+          cancellations.push(
+            ...Array.from(encryptedAcpOperations.values(), (operation) => operation.cancel())
+          );
+          if (cancellations.length) {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                Promise.allSettled(cancellations),
+                new Promise<void>((resolve) => {
+                  timer = setTimeout(resolve, 2000);
+                }),
+              ]);
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          }
+        } finally {
+          cancellationController.abort();
+          encryptedAcpCloseCancellation = false;
+        }
+        await encryptedDispatch?.close();
+      });
+      await closeStep('readers', () => {
+        sessionReaderAbort.abort();
+        windowBootstrap?.close();
+        sharedWindowDocuments.clear();
+        streamsTokenAbort?.abort();
+      });
       const reconnectsClosed = Promise.all([
         localReconnectLoop?.close(),
         cloudReconnectLoop?.close(),
         webAttachReconnectLoop?.close(),
       ]);
       // Held sends are in memory only: closing the workspace drops them.
-      await pendingSends.dispose();
+      void reconnectsClosed.catch(() => {});
+      await closeStep('pending-input', () => pendingSends.dispose());
       // Cancel and join send I/O while its cache, transport and repo still exist.
-      await sendResources.dispose();
-      cancelDelayedBackgroundSyncStart?.();
-      cancelDelayedBackgroundSyncStart = null;
-      cancelDelayedStartupAcpCapabilitiesRefresh?.();
-      cancelDelayedStartupAcpCapabilitiesRefresh = null;
-      startupAcpCapabilitiesRefreshAbortController?.abort();
-      startupAcpCapabilitiesRefreshAbortController = null;
-      backgroundSyncCoordinator?.stop();
-      backgroundSyncCoordinator = null;
-      backgroundSyncHighWaterStore?.close();
-      backgroundSyncHighWaterStore = null;
-      eagerSyncWorkerClient?.dispose();
-      eagerSyncWorkerClient = null;
-      localReconnectLoop?.stop();
-      cloudReconnectLoop?.stop();
-      webAttachReconnectLoop?.stop();
-      if (reconnectBackstopTimer) {
-        clearInterval(reconnectBackstopTimer);
-        reconnectBackstopTimer = null;
-      }
-      untrackPresenceSync();
-      unsubscribeStartupAcpCapabilitiesPresence();
-      unsubscribePresenceSyncState?.();
-      untrackMachineMonitorSync();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      transportReady.reject(new Error('Runtime disposed'));
-
-      for (const pending of pendingSessionCreateResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingSessionCreateResponses.clear();
-      sessionCreateResponseCache.clear();
-
-      for (const pending of pendingSessionCancelResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingSessionCancelResponses.clear();
-
-      for (const pending of pendingSessionChatResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingSessionChatResponses.clear();
-
-      for (const pending of pendingMachineStatusResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingMachineStatusResponses.clear();
-
-      for (const pending of pendingMachinePingResponses.values()) {
-        clearTimeout(pending.timeoutId);
-        pending.resolve(null);
-      }
-      pendingMachinePingResponses.clear();
-
-      machineAcpBinaryStatusRegistry.clearAll();
-      machineAcpBinaryInstallRegistry.clearAll();
-      machineAcpAuthenticateRegistry.clearAll();
-      machineAcpBinaryProgressListeners.clear();
-      machineAcpBinaryProgressSnapshots.clear();
-      machineAcpAuthenticationProgressListeners.clear();
-      for (const machineId of machineProtocolCapabilitiesReads.keys()) {
-        invalidateMachineProtocolCapabilities(machineId);
-      }
-      machineProtocolCapabilitiesCache.clear();
-      machineProtocolCapabilitiesReads.clear();
-
-      for (const handle of watchHandles) {
-        try {
-          handle.unsubscribe();
-        } catch {
-          // ignore
+      await closeStep('send-resources', () => sendResources.dispose());
+      await closeStep('listeners', () => {
+        cancelDelayedBackgroundSyncStart?.();
+        cancelDelayedBackgroundSyncStart = null;
+        cancelDelayedStartupAcpCapabilitiesRefresh?.();
+        cancelDelayedStartupAcpCapabilitiesRefresh = null;
+        startupAcpCapabilitiesRefreshAbortController?.abort();
+        startupAcpCapabilitiesRefreshAbortController = null;
+        backgroundSyncCoordinator?.stop();
+        backgroundSyncCoordinator = null;
+        backgroundSyncHighWaterStore?.close();
+        backgroundSyncHighWaterStore = null;
+        eagerSyncWorkerClient?.dispose();
+        eagerSyncWorkerClient = null;
+        localReconnectLoop?.stop();
+        cloudReconnectLoop?.stop();
+        webAttachReconnectLoop?.stop();
+        if (reconnectBackstopTimer) {
+          clearInterval(reconnectBackstopTimer);
+          reconnectBackstopTimer = null;
         }
-      }
-      watchHandles.length = 0;
+        untrackPresenceSync();
+        unsubscribeStartupAcpCapabilitiesPresence();
+        unsubscribePresenceSyncState?.();
+        untrackMachineMonitorSync();
+        untrackPromptSuggestionSync();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        transportReady.reject(new Error('Runtime disposed'));
 
-      await sessionStoreCache.disposeAll();
-      await previewVisualCommentStoreCache.disposeAll();
-      await scheduleStoreCache.disposeAll();
+        for (const pending of pendingSessionCreateResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingSessionCreateResponses.clear();
+        sessionCreateResponseCache.clear();
+
+        for (const pending of pendingSessionCancelResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingSessionCancelResponses.clear();
+
+        for (const pending of pendingSessionChatResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingSessionChatResponses.clear();
+
+        for (const pending of pendingMachineStatusResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingMachineStatusResponses.clear();
+
+        for (const pending of pendingMachinePingResponses.values()) {
+          clearTimeout(pending.timeoutId);
+          pending.resolve(null);
+        }
+        pendingMachinePingResponses.clear();
+
+        machineAcpBinaryStatusRegistry.clearAll();
+        machineAcpBinaryInstallRegistry.clearAll();
+        for (const start of encryptedAcpStarts.values()) start.abort();
+        encryptedAcpStarts.clear();
+        for (const timer of encryptedAcpEarlyCancels.values()) clearTimeout(timer);
+        encryptedAcpEarlyCancels.clear();
+        if (encryptedAcpCancelOverflow) clearTimeout(encryptedAcpCancelOverflow);
+        for (const operation of encryptedAcpOperations.values())
+          void operation.cancel().catch(() => {});
+        encryptedAcpOperations.clear();
+        machineAcpAuthenticateRegistry.clearAll();
+        machineAcpBinaryProgressListeners.clear();
+        machineAcpBinaryProgressSnapshots.clear();
+        machineAcpAuthenticationProgressListeners.clear();
+        for (const machineId of machineProtocolCapabilitiesReads.keys()) {
+          invalidateMachineProtocolCapabilities(machineId);
+        }
+        machineProtocolCapabilitiesCache.clear();
+        machineProtocolCapabilitiesReads.clear();
+
+        for (const handle of watchHandles) {
+          try {
+            handle.unsubscribe();
+          } catch {
+            // ignore
+          }
+        }
+        watchHandles.length = 0;
+      });
+
+      await closeStep('doc-stores', async () => {
+        await sessionStoreCache.disposeAll();
+        await previewVisualCommentStoreCache.disposeAll();
+        await scheduleStoreCache.disposeAll();
+      });
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
-        await codeCollabFileIndexCache.dispose();
+        await closeStep('file-index', () => codeCollabFileIndexCache.dispose());
       } catch (error) {
         codeCollabFileIndexCacheDisposeError = error;
       }
 
       let teardownTransportError: unknown = null;
       try {
-        await teardownTransport();
+        await closeStep('transport', () => teardownTransport());
       } catch (error) {
         if (!isDestroyedError(error)) {
           teardownTransportError = error;
@@ -5268,38 +5931,54 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       // Teardown first fences/removes live bindings; SDK work can then unwind.
       // Joining includes superseded generations, not just the latest attach.
-      await Promise.allSettled([
-        ...pendingWebAttaches,
-        metaRoomJoinPromise,
-        localTransportAttachPromise,
-      ]);
-      await reconnectsClosed;
-      // No reconnect sweep can add work after its loop has closed. Timed-out
-      // attempts may still be running, including attempts from earlier sweeps.
-      await Promise.allSettled(pendingCloudRejoins);
+      await closeStep('io-drain', async () => {
+        await Promise.allSettled([
+          ...pendingWebAttaches,
+          metaRoomJoinPromise,
+          localTransportAttachPromise,
+          localStartupPromise,
+          initialTokenAttachPromise,
+        ]);
+        await reconnectsClosed;
+        // No reconnect sweep can add work after its loop has closed. Timed-out
+        // attempts may still be running, including attempts from earlier sweeps.
+        await Promise.allSettled(pendingCloudRejoins);
+      });
       if (window.repo === repo) delete window.repo;
 
-      let destroyError: unknown = null;
-      try {
-        await repo.destroy();
-      } catch (error) {
-        if (!isDestroyedError(error)) {
-          destroyError = error;
-        }
-      }
-
-      if (destroyError) {
-        throw destroyError;
-      }
+      // Keep the Repo available to the retained cleanup owner until every
+      // transport/cache close succeeded. Never destroy it to mask a failure.
       if (teardownTransportError) {
         throw teardownTransportError;
       }
       if (codeCollabFileIndexCacheDisposeError) {
         throw codeCollabFileIndexCacheDisposeError;
       }
+      await closeStep('repo', async () => {
+        try {
+          await repo.destroy();
+        } catch (error) {
+          uncertainRepoClose = repo.destroyed;
+          throw error;
+        }
+      });
     });
+    // disposePromise remains a permanent admission fence between attempts.
+    disposePromise = disposeAttempt = attempt;
+    // Fence readers before a metadata-ready continuation can win against close.
+    egressAbort.abort(new Error('Runtime disposed'));
+    sessionReaderAbort.abort();
+    void attempt.catch(() => {
+      if (disposeAttempt === attempt) disposeAttempt = null;
+    });
+    // A rejected disposal keeps the owner live: it never reports a closed transport.
+    if (transportEffects)
+      void attempt.then(
+        () => transportEffects.ownerClosed(true),
+        () => transportEffects.ownerClosed(false)
+      );
 
-    return disposePromise;
+    return attempt;
   };
 
   // When the page becomes visible again (e.g. after mobile sleep/wake, tab switch),
@@ -5374,10 +6053,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
   window.repo = repo;
-  const codeCollabFileIndexCache = protectedContent ? {
-    acquire: async () => { throw new Error('e2ee_feature_unavailable'); },
-    dispose: async () => {},
-  } : createCodeCollabFileIndexCache(repo);
+  const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
   const sendResources = createSessionSendResources({
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
@@ -5391,6 +6067,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       ),
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
+    ...(protectedContent ? { localIdentity: deps.e2eeLocalIdentity } : {}),
     paused: !initialMetaSyncCompleted,
     runtime: {
       repo,
@@ -5399,6 +6076,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       requestSessionDispatchTurn,
       requestSessionSteer,
       contentMode: protectedContent ? 'e2ee' : 'plaintext',
+      attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+      ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
       isMachineRpcUnreachable,
     },
     token: () => authToken,
@@ -5427,6 +6106,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           requestSessionDispatchTurn,
           requestSessionSteer,
           contentMode: protectedContent ? 'e2ee' : 'plaintext',
+          attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
         },
       }).catch((error: unknown) => {
         console.warn('Legacy pending messages could not be migrated', error);
@@ -5442,11 +6122,25 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   try {
     deps.signal?.throwIfAborted();
     if (electronLocalDataPlane) {
-      localTransportAttachPromise = attachLocalLoroDataPlaneTransport();
-      await localTransportAttachPromise;
-      await ensureMetaRoomSynced();
+      localStartupPromise = ensureLocalTransport();
+      if (deps.waitForContentAdmission) {
+        // IndexedDB is usable before classification. This task remains owned by
+        // dispose, which cancels admission before joining a late attach.
+        void localStartupPromise.catch(() => {
+          if (!disposePromise) deps.onControlConnectionStateChange?.('error');
+        });
+      } else {
+        await localStartupPromise;
+      }
     } else if (deps.token != null && deps.token !== '') {
-      await setAuthToken(deps.token);
+      if (deps.waitForContentAdmission) {
+        initialTokenAttachPromise = setAuthToken(deps.token);
+        void initialTokenAttachPromise.catch(() => {
+          if (!disposePromise) deps.onControlConnectionStateChange?.('error');
+        });
+      } else {
+        await setAuthToken(deps.token);
+      }
     }
     deps.signal?.throwIfAborted();
   } catch (error) {
@@ -5466,6 +6160,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    waitForContentAdmission,
+    protectedRpcAvailable,
+    ...(protectedContent
+      ? {
+          protectedCodeCollabRole: deps.e2ee?.codeCollabRole ?? {
+            get: () => 'read' as const,
+            subscribe: () => () => undefined,
+          },
+        }
+      : {}),
+    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+    ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
     accountId: deps.accountId ?? null,
     pendingSends,
@@ -5492,11 +6198,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     setLocalMachineId,
     setEagerSyncVisibleSessionIds,
     setAuthToken,
+    subscribePromptSuggestion: (machineId, sessionId, listener) =>
+      promptSuggestions.subscribeSession(machineId, sessionId, listener),
     subscribeMachineMonitor: (machineId, listener) =>
       targetMachineMonitor.subscribeMachine(machineId, listener),
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
     publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) =>
-      protectedContent ? undefined : presenceTransport.publishSessionViewing(args),
+      presenceTransport.publishSessionViewing(args),
     ensureDocStream,
     // Every store access must be ref-counted so eviction cannot dispose+unload
     // a doc mid-use. releaseRef only starts the warm-release timer, so this
@@ -5530,11 +6238,25 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releasePreviewVisualCommentStore: previewVisualCommentStoreCache.release,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
     releasePreviewVisualCommentStoreRef: previewVisualCommentStoreCache.releaseRef,
-    withScheduleStore: <T>(
+    withScheduleStore: async <T>(
       id: string,
       fn: (store: ScheduleDocStore) => Promise<T> | T,
       options?: { create?: boolean }
-    ): Promise<T> => withScheduleWrite(scheduleStoreCache, id, fn, options),
+    ): Promise<T> => {
+      // A provisional ordinary Repo is for local input/read access, not for
+      // accepting a scheduled body into a namespace that E2EE may retire.
+      await waitForContentAdmission();
+      return withScheduleWrite(
+        scheduleStoreCache,
+        id,
+        (store) => {
+          // Store acquisition or first-sync can outlive this routed runtime.
+          egressAbort.signal.throwIfAborted();
+          return fn(store);
+        },
+        options
+      );
+    },
     acquireScheduleStore: scheduleStoreCache.acquire,
     releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
     sendControl,
@@ -5553,6 +6275,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     waitForMachineAcpBinaryInstallResponse,
     subscribeMachineAcpBinaryProgress,
     getMachineAcpBinaryProgress,
+    requestSessionAutomationControl,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,
@@ -5566,6 +6289,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
     requestCodeCollabSaveText,
+    getDiffBlobTransportOptions,
+    requestCodeCollabOpenDiffManifest,
+    requestCodeCollabReadBlob,
     requestCodeCollabOpenCurrentDiff,
     requestCodeCollabOpenAllChangesDiff,
     requestCodeCollabOpenTurnDiff,
@@ -5578,11 +6304,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewRevoke,
     requestSessionPreviewStatus,
     requestIosSimulatorControl,
+    requestAndroidEmulatorControl,
     requestLocalProjectGitState,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,
+    requestLocalMcpAuthentication,
+    requestLocalSorbetCredentials,
+    requestLocalSorbetProviders,
     requestMemoryProvider,
     requestMachinePiExtensions,
     dispose,

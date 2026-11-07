@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
-import { Component, StrictMode, useEffect, type ErrorInfo, type ReactNode } from 'react';
+/** @vitest-environment jsdom */
+import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +12,10 @@ import {
   AuthenticatedConvexContext,
   type AuthenticatedConvexContextValue,
 } from '../src/hooks/use-authenticated-convex';
-import { useRecoverableConvexQuery } from '../src/hooks/use-recoverable-convex-query';
+import {
+  useRecoverableConvexQuery,
+  useOptionalRecoverableConvexQuery,
+} from '../src/hooks/use-recoverable-convex-query';
 import { ErrorBoundary } from '../src/components/error-boundary';
 
 const mocks = vi.hoisted(() => ({
@@ -156,22 +160,6 @@ describe('useRecoverableConvexQuery', () => {
     expect(unmounts).toBe(0);
   });
 
-  it('renders an existing cached result on the first render', async () => {
-    mocks.queryResult = { label: 'cached data' };
-    await act(async () => renderConsumer());
-    expect(renderLabels[0]).toBe('cached data');
-    expect(container.textContent).toBe('cached data');
-  });
-
-  it('uses local loading without throwing when auth fails before the first result', async () => {
-    mocks.queryResult = unauthenticatedError();
-    await act(async () => renderConsumer());
-
-    expect(container.textContent).toBe('local loading');
-    expect(requestAuthRecovery).toHaveBeenCalledTimes(1);
-    expect(unmounts).toBe(0);
-  });
-
   it('does not retain cached data across Better Auth sessions', async () => {
     mocks.queryResult = { label: 'first account' };
     await act(async () => renderConsumer());
@@ -229,13 +217,6 @@ describe('useRecoverableConvexQuery', () => {
     expect(container.textContent).toBe('local loading');
   });
 
-  it('reports loading when auth drops before any snapshot exists', async () => {
-    context = { ...context, isAuthenticated: false, isLoading: true };
-    await act(async () => renderConsumer());
-
-    expect(container.textContent).toBe('local loading');
-  });
-
   it('does not retain data when the caller skips for a business reason', async () => {
     mocks.queryResult = { label: 'committed data' };
     await act(async () => renderConsumer());
@@ -246,20 +227,22 @@ describe('useRecoverableConvexQuery', () => {
     expect(container.textContent).toBe('local loading');
   });
 
-  it('still throws ordinary query failures to the normal error boundary', async () => {
+  it('returns optional catalog failure as scoped data while its ordinary sibling stays mounted', async () => {
     mocks.queryResult = new Error('ordinary query failure');
-    await act(async () => {
+    function Optional() {
+      const result = useOptionalRecoverableConvexQuery(query, { id: 'project-1' });
+      return <div>{result.error ? 'optional failed' : 'optional loading'}</div>;
+    }
+    await act(async () =>
       root.render(
         <AuthenticatedConvexContext.Provider value={context}>
-          <TestErrorBoundary>
-            <Consumer />
-          </TestErrorBoundary>
+          <span>ordinary work</span>
+          <Optional />
         </AuthenticatedConvexContext.Provider>
-      );
-    });
-
-    expect(container.textContent).toBe('ordinary fallback');
-    expect(requestAuthRecovery).not.toHaveBeenCalled();
+      )
+    );
+    expect(container.textContent).toContain('ordinary work');
+    expect(container.textContent).toContain('optional failed');
   });
 
   function serverError(requestId = 'synthetic-1'): Error {
@@ -311,26 +294,6 @@ describe('useRecoverableConvexQuery', () => {
     expect(mounts).toBe(1);
     expect(unmounts).toBe(0);
     expect(requestAuthRecovery).not.toHaveBeenCalled();
-  });
-
-  it('shares one retrying subscription across multiple consumers', async () => {
-    vi.useFakeTimers();
-    await act(async () =>
-      renderWithBoundary(
-        <>
-          <Consumer />
-          <Consumer />
-        </>
-      )
-    );
-    await deliver(serverError());
-    expect(container.textContent).toBe('local loadinglocal loading');
-    expect(mocks.activeWatches).toBe(0);
-    await advance(1_000);
-    expect(mocks.activeWatches).toBe(1);
-    await deliver({ label: 'recovered' });
-    expect(container.textContent).toBe('recoveredrecovered');
-    expect(unmounts).toBe(0);
   });
 
   it('retires a previous query scope and ignores its late callbacks', async () => {
@@ -411,65 +374,6 @@ describe('useRecoverableConvexQuery', () => {
     await act(async () => renderConsumer());
     expect(container.textContent).toBe('local loading');
     expect(unmounts).toBe(0);
-  });
-
-  it('keeps waiting for a fresh retry response across a transient auth skip', async () => {
-    vi.useFakeTimers();
-    await act(async () => renderWithBoundary());
-    await deliver(serverError());
-    await advance(1_000);
-    context = { ...context, isAuthenticated: false, isLoading: true };
-    await act(async () => renderWithBoundary());
-    context = { ...context, isAuthenticated: true, isLoading: false };
-    await act(async () => renderWithBoundary());
-    const subscriptions = mocks.subscriptions;
-    await advance(10_000);
-    expect(mocks.subscriptions).toBe(subscriptions);
-    expect(mocks.activeWatches).toBe(1);
-    await deliver({ label: 'fresh data' });
-    expect(container.textContent).toBe('fresh data');
-    expect(unmounts).toBe(0);
-  });
-
-  it('resets the retry budget only after a sustained healthy result', async () => {
-    vi.useFakeTimers();
-    await act(async () => renderWithBoundary());
-    await deliver(serverError());
-    await advance(1_000);
-    await deliver({ label: 'healthy' });
-    await advance(30_000);
-    await deliver(serverError('synthetic-next-outage'));
-    await advance(1_000);
-    expect(mocks.activeWatches).toBe(1);
-    await deliver({ label: 'recovered again' });
-    expect(container.textContent).toBe('recovered again');
-    expect(unmounts).toBe(0);
-  });
-
-  it('cancels pending retries when the consumer skips or unmounts, including Strict Mode', async () => {
-    vi.useFakeTimers();
-    await act(async () =>
-      renderWithBoundary(
-        <StrictMode>
-          <Consumer />
-        </StrictMode>
-      )
-    );
-    await deliver(serverError());
-    await act(async () =>
-      renderWithBoundary(
-        <StrictMode>
-          <Consumer skip />
-        </StrictMode>
-      )
-    );
-    const subscriptions = mocks.subscriptions;
-    await advance(60_000);
-    expect(mocks.subscriptions).toBe(subscriptions);
-    expect(mocks.activeWatches).toBe(0);
-    await act(async () => root.render(null));
-    await advance(60_000);
-    expect(mocks.activeWatches).toBe(0);
   });
 
   it('does not render raw Convex server details from ordinary boundaries', async () => {

@@ -20,7 +20,7 @@ export interface RecoveryIdentity extends DeviceSigner {
 export const generateRecoveryPackage = Effect.fnUntraced(function* (
   binding: Omit<
     RecoveryPrivatePackage,
-    'signingPublic' | 'encryptionPublic' | 'signingPrivate' | 'encryptionPrivate'
+    'formatVersion' | 'signingPublic' | 'encryptionPublic' | 'signingPrivate' | 'encryptionPrivate'
   >
 ) {
   return yield* native(async () => {
@@ -42,6 +42,7 @@ export const generateRecoveryPackage = Effect.fnUntraced(function* (
       throw vaultError('authentication');
     return {
       ...binding,
+      formatVersion: 1 as const,
       signingPublic: new Uint8Array(await crypto.subtle.exportKey('raw', signing.publicKey)),
       encryptionPublic: new Uint8Array(await crypto.subtle.exportKey('raw', encryption.publicKey)),
       signingPrivate: new Uint8Array(await crypto.subtle.exportKey('pkcs8', signing.privateKey)),

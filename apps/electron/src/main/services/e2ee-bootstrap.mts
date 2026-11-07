@@ -1,13 +1,17 @@
+import { rm } from 'node:fs/promises'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { makeDesktopPersonalJoins, type PersonalPairingOffer } from './e2ee-personal-pairing.mjs'
+import { makeDesktopMemberJoins } from './e2ee-member-join.mjs'
+import type { E2eeMemberOffer, E2eeWorkspaceHistoryPage } from '@lody/cloud-api'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, link, unlink, readdir } from 'node:fs/promises'
+import { lstat, mkdir, open } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Data, Effect, Layer, Result, Semaphore } from 'effect'
 import { InstalledEpochKeys, VerifiedLedger, verifyRetainedWorkspaceGenesis } from '@lody/e2ee-core'
 import {
+  accountUserId,
   Bytes,
   decodeRecord,
   hashRecordBytes,
@@ -53,35 +57,23 @@ export class DesktopE2eeBootstrapError extends Data.TaggedError('DesktopE2eeBoot
     | 'closed'
     | 'missing-binding'
     | 'credential-required'
-    | 'account-identity-required'
 }> {}
 
 const fail = (code: DesktopE2eeBootstrapError['code']) => new DesktopE2eeBootstrapError({ code })
-class IdentityReadFailure extends AggregateError {
-  constructor(
-    readonly primary: unknown,
-    cleanup: unknown
-  ) {
-    super([primary, cleanup], 'account identity read and cleanup failed')
-  }
-}
-
 const applicationId = 0x4c454243
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
-// Only quiesced identity-cache handles enter this process-owned cleanup set.
-// Retrying their close never grants authority or blocks unrelated workspace IO.
-const pendingIdentityFiles = new Map<Awaited<ReturnType<typeof open>>, string>()
-async function retryIdentityFileCloses(directory: string) {
-  for (const [file, owner] of pendingIdentityFiles) {
-    if (owner !== directory) continue
-    try {
-      await file.close()
-      pendingIdentityFiles.delete(file)
-    } catch (cause) {
-      if (file.fd === -1) pendingIdentityFiles.delete(file)
-      rememberDesktopE2eeFailure('account-identity-cleanup', cause)
-    }
-  }
+function storageFailure(cause: unknown) {
+  if (cause instanceof DesktopE2eeBootstrapError) return cause
+  const error = cause as { code?: string; errcode?: number } | null
+  const sqliteCode = typeof error?.errcode === 'number' ? error.errcode & 0xff : undefined
+  return fail(
+    sqliteCode === 11 ||
+      sqliteCode === 26 ||
+      error?.code === 'SQLITE_CORRUPT' ||
+      error?.code === 'SQLITE_NOTADB'
+      ? 'corrupt'
+      : 'storage'
+  )
 }
 
 function sql<A>(work: () => A) {
@@ -89,7 +81,7 @@ function sql<A>(work: () => A) {
     try: work,
     catch: (cause) => {
       rememberDesktopE2eeFailure('bootstrap-storage', cause)
-      return cause instanceof DesktopE2eeBootstrapError ? cause : fail('storage')
+      return storageFailure(cause)
     }
   })
 }
@@ -98,8 +90,7 @@ function io<A>(work: () => Promise<A>) {
     try: work,
     catch: (cause) => {
       rememberDesktopE2eeFailure('bootstrap-storage', cause)
-      const primary = cause instanceof IdentityReadFailure ? cause.primary : cause
-      return primary instanceof DesktopE2eeBootstrapError ? primary : fail('storage')
+      return storageFailure(cause)
     }
   })
 }
@@ -170,12 +161,6 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
   readonly directory: string
   readonly accountId: string
   readonly custody: DesktopE2eeCustody
-  /** Concrete publication boundary; tests inject only filesystem faults. */
-  readonly identityFiles?: {
-    readonly link: typeof link
-    readonly unlink: typeof unlink
-    readonly open?: typeof open
-  }
 }) {
   if (!isAbsolute(options.directory) || !options.accountId) return yield* fail('invalid-input')
   const { directory, accountId, custody } = options
@@ -200,9 +185,8 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
   const serial = yield* Semaphore.make(1)
   let closed = false
   yield* Effect.addFinalizer(() =>
-    Effect.promise(async () => {
+    Effect.sync(() => {
       closed = true
-      await retryIdentityFileCloses(directory)
     })
   )
 
@@ -245,7 +229,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         }
       } else if (version !== 1 || id !== applicationId) throw fail('corrupt')
       db.exec(
-        'CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
+        'CREATE TABLE IF NOT EXISTS removed_workspaces(workspace_id TEXT PRIMARY KEY,genesis TEXT NOT NULL,signing_key TEXT NOT NULL); CREATE TABLE IF NOT EXISTS revoked_devices(workspace_id TEXT PRIMARY KEY,genesis TEXT NOT NULL,signing_key TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
       )
       if (
         db.prepare('SELECT account_id FROM metadata').all().length !== 1 ||
@@ -255,167 +239,11 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     })
   )
 
-  // This unpublished cache is a current-only immutable public file, not SQLite.
-  // Never open/migrate the earlier experimental account-identity.sqlite candidate.
-  const identityPath = join(directory, 'account-identity.json')
-  const identityFiles = options.identityFiles ?? { link, unlink, open }
-  const encodeIdentity = (cryptoUserId: string) =>
-    Buffer.from(JSON.stringify({ version: 1, accountId, cryptoUserId }) + '\n')
-  async function readIdentityFile(path: string): Promise<string | null> {
-    await retryIdentityFileCloses(directory)
-    let file: Awaited<ReturnType<typeof open>>
-    let before: Awaited<ReturnType<typeof lstat>>
-    try {
-      before = await lstat(path)
-      if (!before.isFile() || before.isSymbolicLink()) throw fail('corrupt')
-      file = await (identityFiles.open ?? open)(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw cause
-    }
-    let primary: unknown
-    let result: string | undefined
-    try {
-      const info = await file.stat()
-      if (
-        !info.isFile() ||
-        info.dev !== before.dev ||
-        info.ino !== before.ino ||
-        info.size !== before.size ||
-        info.size < 1 ||
-        info.size > 4096 ||
-        (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
-      )
-        throw fail('corrupt')
-      const raw = Buffer.alloc(info.size + 1)
-      let bytesRead = 0
-      while (bytesRead < raw.length) {
-        const part = await file.read(raw, bytesRead, raw.length - bytesRead, bytesRead)
-        if (part.bytesRead === 0) break
-        bytesRead += part.bytesRead
-      }
-      const after = await file.stat()
-      const pathAfter = await lstat(path)
-      if (
-        bytesRead !== info.size ||
-        info.dev !== pathAfter.dev ||
-        info.ino !== pathAfter.ino ||
-        pathAfter.isSymbolicLink() ||
-        !pathAfter.isFile() ||
-        after.size !== info.size ||
-        after.mtimeMs !== info.mtimeMs ||
-        after.ctimeMs !== info.ctimeMs
-      )
-        throw fail('corrupt')
-      let value: unknown
-      try {
-        value = JSON.parse(raw.subarray(0, bytesRead).toString('utf8'))
-      } catch {
-        throw fail('corrupt')
-      }
-      if (
-        !value ||
-        typeof value !== 'object' ||
-        !('cryptoUserId' in value) ||
-        typeof value.cryptoUserId !== 'string' ||
-        !/^[0-9a-f]{64}$/.test(value.cryptoUserId) ||
-        !raw.subarray(0, bytesRead).equals(encodeIdentity(value.cryptoUserId))
-      )
-        throw fail('corrupt')
-      result = value.cryptoUserId
-    } catch (cause) {
-      primary = cause
-    }
-    try {
-      await file.close()
-    } catch (cause) {
-      if (file.fd !== -1) pendingIdentityFiles.set(file, directory)
-      if (primary !== undefined) throw new IdentityReadFailure(primary, cause)
-      rememberDesktopE2eeFailure('account-identity-cleanup', cause)
-    }
-    if (primary !== undefined) throw primary
-    if (result === undefined) throw fail('storage')
-    return result
-  }
-  const pendingName = /^account-identity\.json\.[0-9a-f]{32}\.pending$/
-  // A leftover path is the durable cleanup responsibility. Only a complete,
-  // account-bound copy of the published ID may be removed; unknown files stay.
-  async function cleanupIdentityCopies(cryptoUserId: string) {
-    let files: string[]
-    try {
-      files = await readdir(directory)
-    } catch (cause) {
-      rememberDesktopE2eeFailure('account-identity-cleanup', cause)
-      return
-    }
-    for (const name of files) {
-      if (!pendingName.test(name)) continue
-      const path = join(directory, name)
-      try {
-        const id = await readIdentityFile(path)
-        if (id === null) continue
-        if (id !== cryptoUserId) throw fail('conflict')
-        await identityFiles.unlink(path)
-      } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT')
-          rememberDesktopE2eeFailure('account-identity-cleanup', cause)
-      }
-    }
-  }
-  const cachedIdentity = io(async () => {
-    const id = await readIdentityFile(identityPath)
-    if (id !== null) await cleanupIdentityCopies(id)
-    return id
-  })
-  const retainIdentity = (value: { accountId: string; cryptoUserId: string }) =>
-    io(async () => {
-      if (value.accountId !== accountId || !/^[0-9a-f]{64}$/.test(value.cryptoUserId))
-        throw fail('invalid-input')
-      const previous = await readIdentityFile(identityPath)
-      if (previous !== null) {
-        if (previous !== value.cryptoUserId) throw fail('conflict')
-        await cleanupIdentityCopies(previous)
-        return
-      }
-      const temporary = `${identityPath}.${randomBytes(16).toString('hex')}.pending`
-      let file: Awaited<ReturnType<typeof open>> | undefined
-      try {
-        file = await (identityFiles.open ?? open)(temporary, 'wx', 0o600)
-        await file.writeFile(encodeIdentity(value.cryptoUserId))
-        await file.sync()
-        await file.close()
-        file = undefined
-        try {
-          await identityFiles.link(temporary, identityPath)
-        } catch (cause) {
-          // A lost link acknowledgment cannot undo a verified complete original.
-          // Preserve its raw cause in main while readback decides the result.
-          rememberDesktopE2eeFailure('account-identity-publish', cause)
-          const readback = await readIdentityFile(identityPath)
-          if (readback === null) throw cause
-          if (readback !== value.cryptoUserId) throw fail('conflict')
-        }
-        if ((await readIdentityFile(identityPath)) !== value.cryptoUserId) throw fail('conflict')
-      } finally {
-        // Closing/removing a known temporary is auxiliary; retain diagnostics and
-        // the path for a future cleanup pass without replacing the primary error.
-        try {
-          await file?.close()
-        } catch (cause) {
-          if (file && file.fd !== -1) pendingIdentityFiles.set(file, directory)
-          rememberDesktopE2eeFailure('account-identity-cleanup', cause)
-        }
-        try {
-          await identityFiles.unlink(temporary)
-        } catch (cause) {
-          if ((cause as NodeJS.ErrnoException).code !== 'ENOENT')
-            rememberDesktopE2eeFailure('account-identity-cleanup', cause)
-        }
-      }
-      await cleanupIdentityCopies(value.cryptoUserId)
-    })
-
+  const ledgerUserId = Effect.mapError(Effect.fromResult(accountUserId(accountId)), () =>
+    fail('invalid-input')
+  )
   const joins = yield* withLock(sql(() => makeDesktopPersonalJoins({ db, custody })))
+  const memberJoins = yield* withLock(sql(() => makeDesktopMemberJoins({ db, custody })))
 
   const load = (requestId: string) => {
     const value = db
@@ -581,8 +409,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
       return yield* fail('credential-required')
     let record = row!.record
     if (!record) {
-      const cryptoUserId = yield* cachedIdentity
-      if (!cryptoUserId) return yield* fail('account-identity-required')
+      const userId = yield* ledgerUserId
       yield* Effect.acquireUseRelease(
         custody.prepareDevice(),
         (prepared) =>
@@ -594,7 +421,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
               signer: prepared,
               encryptionPublicKey: prepared.enc,
               initialKey,
-              userId: Result.getOrThrow(Bytes.userId(Buffer.from(cryptoUserId, 'hex'))),
+              userId,
               membershipId: Result.getOrThrow(Bytes.membershipId(randomBytes(16)))
             })
             // Write-ahead identity: retries can locate every retained private original.
@@ -697,32 +524,191 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
             invitation: undefined
           }
         })
-        return creation ?? (yield* joins.origin(workspaceId))
+        return (
+          creation ??
+          ((yield* memberJoins.has(workspaceId))
+            ? yield* memberJoins.origin(workspaceId)
+            : yield* joins.origin(workspaceId))
+        )
+      })
+    )
+  const removedRow = (workspaceId: string) =>
+    db
+      .prepare('SELECT genesis,signing_key FROM removed_workspaces WHERE workspace_id=?')
+      .get(workspaceId) as { genesis: string; signing_key: string } | undefined
+  // Additive reason row for the same exact receipt; absent means whole-member removal.
+  const removedReason = (workspaceId: string): 'member_removed' | 'device_revoked' | null => {
+    const row = removedRow(workspaceId)
+    if (!row) return null
+    const revoked = db
+      .prepare('SELECT genesis,signing_key FROM revoked_devices WHERE workspace_id=?')
+      .get(workspaceId) as { genesis: string; signing_key: string } | undefined
+    return revoked?.genesis === row.genesis && revoked.signing_key === row.signing_key
+      ? 'device_revoked'
+      : 'member_removed'
+  }
+  const eraseRemoved = Effect.fnUntraced(function* (workspaceId: string) {
+    const row = yield* sql(() => removedRow(workspaceId))
+    if (!row) return false
+    const genesis = yield* Effect.fromResult(Bytes.genesisHash(Buffer.from(row.genesis, 'hex')))
+    const key = yield* Effect.fromResult(
+      Bytes.signingPublicKey(Buffer.from(row.signing_key, 'hex'))
+    )
+    if (!(yield* custody.forgetDevice(genesis, key, 'personal'))) return false
+    yield* Effect.tryPromise({
+      try: () => rm(join(directory, 'workspaces', workspaceId), { recursive: true, force: true }),
+      catch: () => fail('storage')
+    })
+    yield* sql(() => {
+      const binding = db
+        .prepare('SELECT request_id FROM workspace_bindings WHERE workspace_id=? AND genesis=?')
+        .get(workspaceId, row.genesis)
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        if (binding) {
+          db.prepare('DELETE FROM creation_credentials WHERE request_id=?').run(
+            binding.request_id as string
+          )
+          db.prepare('DELETE FROM creations WHERE request_id=?').run(binding.request_id as string)
+          db.prepare('DELETE FROM workspace_bindings WHERE workspace_id=? AND genesis=?').run(
+            workspaceId,
+            row.genesis
+          )
+        }
+        db.prepare('DELETE FROM personal_joins WHERE workspace_id=?').run(workspaceId)
+        db.prepare('DELETE FROM retired_personal_joins WHERE workspace_id=?').run(workspaceId)
+        db.prepare('DELETE FROM personal_join_histories WHERE workspace_id=?').run(workspaceId)
+        db.prepare('DELETE FROM member_joins WHERE workspace_id=?').run(workspaceId)
+        db.exec('COMMIT')
+      } catch (cause) {
+        db.exec('ROLLBACK')
+        throw cause
+      }
+    })
+    return true
+  })
+  const recordRemovedWorkspace = Effect.fnUntraced(function* (input: {
+    workspaceId: string
+    genesisHash: string
+    signingPublicKey: string
+    credential: string
+    /** Exact authenticated reason; device revocation is scoped to this device's identity. */
+    reason?: 'member_removed' | 'device_revoked'
+  }) {
+    // This is private host plumbing. Only the authenticated cloud removal result calls it.
+    const creation = yield* creationFor(input.workspaceId)
+    if (creation.genesisHash !== input.genesisHash) return false
+    return yield* withLock(
+      Effect.gen(function* () {
+        const genesis = yield* Effect.fromResult(
+          Bytes.genesisHash(Buffer.from(input.genesisHash, 'hex'))
+        )
+        const current = yield* custody.openDevice(genesis)
+        if (Buffer.from(current.publicKey.toBytes()).toString('hex') !== input.signingPublicKey)
+          return false
+        if ((yield* custody.deviceCredential(genesis, current.publicKey)) !== input.credential)
+          return false
+        yield* sql(() => {
+          const prior = removedRow(input.workspaceId)
+          if (
+            prior &&
+            (prior.genesis !== input.genesisHash || prior.signing_key !== input.signingPublicKey)
+          )
+            throw fail('conflict')
+          db.exec('BEGIN IMMEDIATE')
+          try {
+            db.prepare(
+              'INSERT OR IGNORE INTO removed_workspaces(workspace_id,genesis,signing_key) VALUES(?,?,?)'
+            ).run(input.workspaceId, input.genesisHash, input.signingPublicKey)
+            // The first authenticated reason for this exact device is retained.
+            if (!prior && input.reason === 'device_revoked')
+              db.prepare(
+                'INSERT OR REPLACE INTO revoked_devices(workspace_id,genesis,signing_key) VALUES(?,?,?)'
+              ).run(input.workspaceId, input.genesisHash, input.signingPublicKey)
+            db.exec('COMMIT')
+          } catch (cause) {
+            db.exec('ROLLBACK')
+            throw cause
+          }
+        })
+        return true
+      })
+    )
+  })
+  const forgetRemovedWorkspace = Effect.fnUntraced(function* (
+    input: Parameters<typeof recordRemovedWorkspace>[0]
+  ) {
+    const prior = yield* sql(() => removedRow(input.workspaceId))
+    if (!prior && !(yield* recordRemovedWorkspace(input))) return false
+    if (
+      prior &&
+      (prior.genesis !== input.genesisHash || prior.signing_key !== input.signingPublicKey)
+    )
+      return false
+    return yield* withLock(eraseRemoved(input.workspaceId))
+  })
+  const acceptJoin = (
+    workspaceId: string,
+    accept: Effect.Effect<void, unknown>,
+    installedOrigin: Effect.Effect<{ genesisHash: string }, unknown>
+  ) =>
+    withLock(
+      Effect.gen(function* () {
+        yield* accept
+        // The origin verifies the admission and binds it to the actual retained device.
+        const origin = yield* installedOrigin
+        const genesis = yield* Effect.fromResult(
+          Bytes.genesisHash(Buffer.from(origin.genesisHash, 'hex'))
+        )
+        const device = yield* custody.openDevice(genesis)
+        yield* sql(() => {
+          const previous = removedRow(workspaceId)
+          if (
+            previous?.genesis === origin.genesisHash &&
+            previous.signing_key !== hex(device.publicKey.toBytes())
+          ) {
+            db.prepare(
+              'DELETE FROM removed_workspaces WHERE workspace_id=? AND genesis=? AND signing_key=?'
+            ).run(workspaceId, previous.genesis, previous.signing_key)
+            db.prepare(
+              'DELETE FROM revoked_devices WHERE workspace_id=? AND genesis=? AND signing_key=?'
+            ).run(workspaceId, previous.genesis, previous.signing_key)
+          }
+        })
       })
     )
   return Object.freeze({
-    recordAccountIdentity: (value: { accountId: string; cryptoUserId: string }) =>
-      withLock(retainIdentity(value)),
-    creationNeedsAccountIdentity: (input: DesktopE2eeCreationIntent) =>
-      withLock(
-        Effect.gen(function* () {
-          const signed = yield* sql(() => {
-            validateDesktopE2eeCreationIntent(input)
-            if (input.accountId !== accountId) throw fail('invalid-input')
-            const row = load(input.requestId)
-            if (row && (row.name !== input.name || row.slug !== input.slug)) throw fail('conflict')
-            return Boolean(row?.record)
-          })
-          if (signed) return false
-          return (yield* cachedIdentity) === null
-        })
-      ),
+    recordRemovedWorkspace,
+    hasRemovedWorkspace: (workspaceId: string) => sql(() => Boolean(removedRow(workspaceId))),
+    removedReason: (workspaceId: string) => sql(() => removedReason(workspaceId)),
+    forgetRemovedWorkspace,
+    resumeRemovedWorkspace: (workspaceId: string) => withLock(eraseRemoved(workspaceId)),
     pendingPersonalJoin: (workspaceId: string) => withLock(joins.pending(workspaceId)),
+    pendingMemberJoin: (workspaceId: string) => withLock(memberJoins.pending(workspaceId)),
+    retireMemberJoin: (expected: Parameters<typeof memberJoins.retire>[0]) =>
+      withLock(memberJoins.retire(expected)),
+    prepareMemberJoin: (offer: E2eeMemberOffer) =>
+      withLock(Effect.flatMap(ledgerUserId, (userId) => memberJoins.prepare(offer, userId))),
+    acceptedMemberJoin: (workspaceId: string) => withLock(memberJoins.accepted(workspaceId)),
+    acceptMemberJoin: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>
+      acceptJoin(
+        workspaceId,
+        memberJoins.accept(workspaceId, pages),
+        memberJoins.origin(workspaceId)
+      ),
     retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
       withLock(joins.retire(workspaceId, pairingSessionId)),
     preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),
+    /** Account-wide pairing identity for one workspace; see `accountIdentity`. */
+    accountPairingIdentity: (pin: {
+      genesisHash: string
+      genesisRecordHex: string
+      membershipId: string
+    }) => withLock(joins.accountIdentity(pin)),
     acceptPersonalJoin: (workspaceId: string, invitationHex: string) =>
-      withLock(joins.accept(workspaceId, invitationHex)),
+      acceptJoin(workspaceId, joins.accept(workspaceId, invitationHex), joins.origin(workspaceId)),
+    acceptPersonalHistory: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>
+      acceptJoin(workspaceId, joins.acceptHistory(workspaceId, pages), joins.origin(workspaceId)),
     prepareCreation: (input: DesktopE2eeCreationIntent) => withLock(prepare(input)),
     recordCreated,
     creationFor,

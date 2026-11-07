@@ -27,7 +27,7 @@ import {
 } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
 import { conversationColumnStyles } from '@/lib/conversation-layout';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { conversation } from '../components/ai-gui/conversation.tokens.stylex';
@@ -37,6 +37,12 @@ import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SessionPinContext } from '@/components/sessions/session-pin-context';
 import { createConversationViewFromHistory, type ConversationView } from '@/lib/conversation-view';
 const alignmentSceneStyles = stylex.create({
+  viewport: {
+    position: 'relative',
+    height: 900,
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
   fill: { height: '100%' },
   guide: { position: 'relative', height: '100%' },
   outcome: (height: string) => ({
@@ -1249,7 +1255,7 @@ const planModeItems: ChatStreamItem[] = [
 const RailGuide = () => (
   <div aria-hidden {...stylex.props(storyLayout.overlay)}>
     <div
-      className={cn(
+      className={clsx(
         stylex.props(
           conversationColumnStyles.base,
           conversationColumnStyles.capped,
@@ -1682,11 +1688,15 @@ export const DeepSeekIndependentProse: Story = {
       await expect(answer).toBeDefined();
       const thoughtStyle = getComputedStyle(thought!);
       const answerStyle = getComputedStyle(answer!);
-      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height', 'color']) {
+      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height']) {
         await expect(thoughtStyle.getPropertyValue(property)).toBe(
           answerStyle.getPropertyValue(property)
         );
       }
+      await expect(thoughtStyle.color).not.toBe(answerStyle.color);
+      await expect(
+        Math.abs(thought!.getBoundingClientRect().left - answer!.getBoundingClientRect().left)
+      ).toBeLessThan(1);
       await expect(canvasElement.textContent).not.toContain('Synthetic command output');
       await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
     });
@@ -1702,4 +1712,75 @@ export const DeepSeekIndependentProse: Story = {
       <ConversationRhythmScene items={dshItems} />
     </Provider>
   ),
+};
+
+/** A streaming DSH turn with the same rail guide as the plan examples. */
+export const DeepSeekThinking: Story = {
+  args: { sessionId, items: dshItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => {
+    const message: SessionHistoryParsed = {
+      ...dshMessage,
+      id: 'dsh-thinking-preview',
+      finished: false,
+      items: [
+        {
+          type: 'thought',
+          text: [
+            'First, trace the message from the provider to the conversation view. The output can contain **structured Markdown**, not just plain paragraphs.',
+            '',
+            '| Content | Expected behavior | Check |',
+            '| --- | --- | --- |',
+            '| Paragraph | Align with the thought label | Inspect the left edge |',
+            '| Table | Keep columns readable | Scroll if the viewport is narrow |',
+            '| Code block | Preserve syntax highlighting | Compare both edges with the answer |',
+            '',
+            'Next, verify the rendering path:',
+            '',
+            '1. Find the `thought` item and preserve its original text.',
+            '2. Render Markdown while the response is streaming.',
+            '3. Check the finished state and search highlighting.',
+            '',
+            '```ts',
+            'const visibleItems = message.items.filter((item) =>',
+            "  item.type === 'thought' || item.type === 'text'",
+            ');',
+            '',
+            'for (const item of visibleItems) {',
+            '  renderMarkdown(item.text);',
+            '}',
+            '```',
+            '',
+            '> Keep the original order when a tool call arrives between thoughts.',
+          ].join('\n'),
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'preview-read',
+          title: 'Read conversation layout',
+          kind: 'read',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The layout uses a shared left edge for the conversation.' },
+        {
+          type: 'thought',
+          text: 'The tool returned successfully. Check the remaining cases:\n\n- A long line should wrap without moving the whole conversation.\n- Inline `code` and **emphasis** should remain readable.\n- A [link](https://example.com) should keep its usual treatment.',
+        },
+        { type: 'text', text: 'The updated display is ready for review.\n\n```sh\npnpm test\n```' },
+      ],
+    };
+    return (
+      <Provider store={dshStore}>
+        <div {...stylex.props(alignmentSceneStyles.viewport)}>
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={[{ type: 'message', sessionId, message, turnIndex: 0 }]}
+            lastAssistantMessageId={message.id}
+            renderMessageRow={renderMessageRow}
+          />
+          <RailGuide />
+        </div>
+      </Provider>
+    );
+  },
 };

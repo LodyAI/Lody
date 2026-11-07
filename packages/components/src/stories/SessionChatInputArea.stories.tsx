@@ -98,6 +98,7 @@ type StoryShellProps = {
   showFreeTurnLimitNotice?: boolean;
   onSendMessage?: SessionChatInputAreaProps['onSendMessage'];
   disableImageUpload?: boolean;
+  isArchived?: boolean;
   claimNavigationFocus?: () => boolean;
   isExternalHistoryRefreshing?: boolean;
 };
@@ -121,6 +122,7 @@ function StoryShell({
   claimNavigationFocus,
   disableImageUpload = true,
   isExternalHistoryRefreshing = false,
+  isArchived = false,
 }: StoryShellProps) {
   const store = useMemo(() => createStoryStore(), []);
   const session = useMemo<SessionMeta>(
@@ -135,6 +137,7 @@ function StoryShell({
       status: isAgentBusy ? { type: 'running' } : { type: 'idle' },
       cliType: 'builtin',
       agentType: 'codex',
+      isArchived,
       agentConfigId: STORY_AGENT_CONFIG_ID,
       repoFullName: 'loro-dev/lody',
       project: {
@@ -144,7 +147,7 @@ function StoryShell({
       },
       baseBranch: 'main',
     }),
-    [isAgentBusy]
+    [isAgentBusy, isArchived]
   );
 
   return (
@@ -180,6 +183,7 @@ function StoryShell({
               onModelChange={() => {}}
               onSendMessage={onSendMessage}
               onStop={() => {}}
+              onRestoreSession={() => {}}
               onRemoveQueueItem={async () => {}}
               initialInputText={initialInputText}
               disableImageUpload={disableImageUpload}
@@ -398,4 +402,8 @@ export const UploadingAttachmentsPendingAcceptance: Story = {
         );
       }),
   },
+};
+
+export const Archived: Story = {
+  args: { isArchived: true },
 };

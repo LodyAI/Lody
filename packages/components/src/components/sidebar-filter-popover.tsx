@@ -125,10 +125,7 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     cursor: 'pointer',
   },
-  triggerGlyph: {
-    width: themeSpace[4],
-    height: themeSpace[4],
-  },
+  triggerGlyph: { width: '14px', height: '14px' },
 });
 
 export type { SidebarOrganizeMode, SidebarChatScope };

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ACPSessionId, SessionId } from '@lody/shared';
-import type { AgentClient } from '@/agent/agent-client';
+import { AgentClient } from '@/agent/agent-client';
 import type { Logger } from '@/utils/logger';
 import { applyAcpSessionRunConfig, type AcpSessionRunConfig } from './acp-session-config-applier';
 
@@ -22,6 +22,44 @@ function createLogger(): Logger {
 }
 
 describe('applyAcpSessionRunConfig', () => {
+  it('captures the live command list without treating startup metadata as agent output', async () => {
+    const updates: unknown[] = [];
+    const agentClient = new AgentClient({
+      sessionId: 'session-commands' as SessionId,
+      logger: createLogger(),
+      terminalManager: {} as never,
+      onUpdateMessage: (notification) => updates.push(notification),
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+    });
+    Object.assign(agentClient, { connection: {} });
+    agentClient.adoptPreparedSession({
+      sessionId: 'acp-commands',
+      availableCommands: [{ name: 'review', description: 'Review' }],
+    } as Parameters<AgentClient['adoptPreparedSession']>[0]);
+    expect(updates).toEqual([]);
+    const apply = () =>
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-commands' as SessionId,
+          acpSessionId: 'acp-commands' as ACPSessionId,
+          agentClient,
+        },
+        config: {},
+        logger: createLogger(),
+      });
+    expect((await apply()).runtimeConfigPatch?.availableCommands).toEqual([
+      { name: 'review', description: 'Review' },
+    ]);
+    await agentClient.sessionUpdate({
+      sessionId: 'acp-commands',
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [],
+      },
+    });
+    expect((await apply()).runtimeConfigPatch?.availableCommands).toEqual([]);
+  });
+
   it.each<AcpSessionRunConfig>([
     { configOptionValues: { effort: 'max', model: 'provider/worker', mode: 'worker' } },
     { configOptionValues: { mode: 'worker', effort: 'max', model: 'provider/worker' } },
@@ -32,6 +70,7 @@ describe('applyAcpSessionRunConfig', () => {
     const state = { mode: 'default', model: 'provider/default', effort: 'low' };
     const agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [
         { id: 'mode', category: 'mode', type: 'select', currentValue: state.mode },
         { id: 'model', category: 'model', type: 'select', currentValue: state.model },
@@ -68,6 +107,7 @@ describe('applyAcpSessionRunConfig', () => {
       rejectedSelections: [],
       warningSelections: [],
       runtimeConfigPatch: {
+        availableCommands: [],
         acpSessionId: 'acp-worker',
         modeId: 'worker',
         modelId: 'provider/worker',
@@ -82,6 +122,7 @@ describe('applyAcpSessionRunConfig', () => {
     const state = { model: 'provider/default', effort: 'low' };
     const agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [],
       unstable_setSessionModel: async (_sessionId: string, value: string) => {
         state.model = value;
@@ -120,6 +161,7 @@ describe('applyAcpSessionRunConfig', () => {
     };
     const agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => options,
       setSessionMode: async (_sessionId: string, value: string) => select('permission-mode', value),
       unstable_setSessionModel: async (_sessionId: string, value: string) =>
@@ -150,6 +192,7 @@ describe('applyAcpSessionRunConfig', () => {
       rejectedSelections: [],
       warningSelections: [],
       runtimeConfigPatch: {
+        availableCommands: [],
         acpSessionId: 'acp-1',
         modeId: 'agent',
         modelId: 'model-a',
@@ -166,6 +209,7 @@ describe('applyAcpSessionRunConfig', () => {
     const logger = createLogger();
     const agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [],
       setSessionConfigOption: vi.fn(async () => {
         throw new Error('rejected');
@@ -189,7 +233,7 @@ describe('applyAcpSessionRunConfig', () => {
     ).resolves.toEqual({
       rejectedSelections: ['api_token=<redacted>'],
       warningSelections: ['api_token=<redacted>'],
-      runtimeConfigPatch: { acpSessionId: 'acp-2', configOptionValues: {} },
+      runtimeConfigPatch: { availableCommands: [], acpSessionId: 'acp-2', configOptionValues: {} },
     });
 
     expect(vi.mocked(logger.debug).mock.calls.flat().join('\n')).not.toContain('private-value');
@@ -203,6 +247,7 @@ describe('applyAcpSessionRunConfig', () => {
       });
       const agentClient = {
         isCreated: () => true,
+        getAvailableCommands: () => [],
         getConfigOptions: () => [
           { id: 'effort', category: 'thought_level' },
           { id: 'fast', category: 'fast-mode' },
@@ -245,7 +290,11 @@ describe('applyAcpSessionRunConfig', () => {
           'custom-option="enabled"',
         ],
         warningSelections: ['model="model-a"', 'custom-option="enabled"'],
-        runtimeConfigPatch: { acpSessionId: 'acp-3', configOptionValues: {} },
+        runtimeConfigPatch: {
+          availableCommands: [],
+          acpSessionId: 'acp-3',
+          configOptionValues: {},
+        },
       });
     }
   );
@@ -262,6 +311,7 @@ describe('applyAcpSessionRunConfig', () => {
       ];
       const agentClient = {
         isCreated: () => true,
+        getAvailableCommands: () => [],
         getConfigOptions: () => options,
         unstable_setSessionModel: async () => {
           throw new Error('Requested model is unavailable');
@@ -287,6 +337,7 @@ describe('applyAcpSessionRunConfig', () => {
         rejectedSelections: ['model="requested-model"'],
         warningSelections: ['model="requested-model"'],
         runtimeConfigPatch: {
+          availableCommands: [],
           acpSessionId: 'acp-model-rejection',
           modelId: 'active-model',
           configOptionValues: { engine: 'active-model' },
@@ -298,6 +349,7 @@ describe('applyAcpSessionRunConfig', () => {
   it('keeps known run-config rejection warnings for other agents', async () => {
     const agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [{ id: 'reasoning_effort', category: 'thought_level' }],
       unstable_setSessionModel: vi.fn(async () => {
         throw new Error('rejected');
@@ -325,13 +377,14 @@ describe('applyAcpSessionRunConfig', () => {
     ).resolves.toEqual({
       rejectedSelections: ['model="model-a"', 'reasoning_effort="high"'],
       warningSelections: ['model="model-a"', 'reasoning_effort="high"'],
-      runtimeConfigPatch: { acpSessionId: 'acp-4', configOptionValues: {} },
+      runtimeConfigPatch: { availableCommands: [], acpSessionId: 'acp-4', configOptionValues: {} },
     });
   });
 
   it('keeps non-plan mode rejection warnings for Codex and Claude', async () => {
     const agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [],
       setSessionMode: vi.fn(async () => {
         throw new Error('rejected');
@@ -355,7 +408,7 @@ describe('applyAcpSessionRunConfig', () => {
     ).resolves.toEqual({
       rejectedSelections: ['mode="agent-full-access"'],
       warningSelections: ['mode="agent-full-access"'],
-      runtimeConfigPatch: { acpSessionId: 'acp-5', configOptionValues: {} },
+      runtimeConfigPatch: { availableCommands: [], acpSessionId: 'acp-5', configOptionValues: {} },
     });
   });
 });

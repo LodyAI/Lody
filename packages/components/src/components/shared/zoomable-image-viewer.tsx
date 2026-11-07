@@ -6,7 +6,7 @@ import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { forcedThemeClassNames } from '@lody/ui/theme';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pencil, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PhotoSlider } from 'react-photo-view';
 import { toast } from '@/lib/toast';
@@ -25,7 +25,7 @@ import {
   runImagePreviewContextMenu,
   type ImagePreviewExportOutcome,
 } from '@/lib/image-preview-export';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import 'react-photo-view/dist/react-photo-view.css';
 import './zoomable-image-viewer.css';
 
@@ -121,6 +121,7 @@ export type ZoomableImageViewerProps = {
   readonly images: ZoomableImageViewerItem[];
   readonly index: number;
   readonly onIndexChange?: (index: number) => void;
+  readonly onAnnotate?: (item: ZoomableImageViewerItem) => void;
   /**
    * An element inside the surface that opened the viewer. Used only to find the
    * enclosing Vaul drawer; pass the scroll root or the preview container.
@@ -134,6 +135,7 @@ export function ZoomableImageViewer({
   images,
   index,
   onIndexChange,
+  onAnnotate,
   portalAnchorRef,
 }: ZoomableImageViewerProps) {
   const portalContainer = resolveImagePreviewPortalContainer(portalAnchorRef?.current);
@@ -147,6 +149,7 @@ export function ZoomableImageViewer({
       onClose={onClose}
       images={images}
       index={index}
+      {...(onAnnotate ? { onAnnotate } : {})}
       {...(onIndexChange ? { onIndexChange } : {})}
       {...(portalContainer ? { portalContainer } : {})}
     />
@@ -449,12 +452,14 @@ function OpenZoomableImageViewer({
   images,
   index,
   onIndexChange,
+  onAnnotate,
   portalContainer,
 }: {
   readonly onClose: () => void;
   readonly images: ZoomableImageViewerItem[];
   readonly index: number;
   readonly onIndexChange?: (index: number) => void;
+  readonly onAnnotate?: (item: ZoomableImageViewerItem) => void;
   readonly portalContainer?: HTMLElement;
 }) {
   const { t } = useTranslation();
@@ -481,7 +486,7 @@ function OpenZoomableImageViewer({
   // `--mac-controls`/`--win-controls` rules in the CSS). Both hide themselves
   // in native fullscreen.
   const reservesWindowControls = !isElectronFullscreen;
-  const sliderClassName = cn(
+  const sliderClassName = clsx(
     'lody-photo-slider',
     !isMobile && 'lody-photo-slider--desktop',
     // A single image has nothing to count; "1 / 1" is only noise.
@@ -558,18 +563,24 @@ function OpenZoomableImageViewer({
         )}
         {menu && <TouchImageMenu target={menu} close={closeMenu} finalFocus={closeRef} />}
         <div
-          className={cn(
+          className={clsx(
             sliderClassName,
             stylex.props(styles.controls).className,
             ...forcedThemeClassNames('dark')
           )}
         >
           <div
-            className={cn('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
+            className={clsx('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
           >
             <span className="PhotoView-Slider__Counter" aria-live="polite">
               {index + 1} / {images.length}
             </span>
+            {onAnnotate && images[index]?.src && (
+              <Button variant="ghost" onClick={() => onAnnotate(images[index]!)}>
+                <Pencil aria-hidden="true" />
+                {t('sessions.fileViewer.selection.markupImage', 'Mark up image')}
+              </Button>
+            )}
             <div {...stylex.props(styles.close)}>
               <Button
                 ref={closeRef}

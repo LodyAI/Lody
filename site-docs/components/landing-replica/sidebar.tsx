@@ -929,7 +929,16 @@ function SessionListRowView({
     ) : hasPr || showMergeablePill ? (
       <span {...stylex.props(sidebarStyles.row7)}>
         {showMergeablePill ? <MergeablePill label={mergeableLabel} /> : null}
-        {hasPr ? <ReplicaPrIcon status={prStatus} ciState={row.prCiState} /> : null}
+        {hasPr ? (
+          // Same 20px reserve as the app's compact `SessionPrIcon`: the end slot
+          // centers a lone mark, so the pill must not be what widens that box.
+          <span
+            data-session-pr-icon-anchor=""
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center"
+          >
+            <ReplicaPrIcon status={prStatus} ciState={row.prCiState} />
+          </span>
+        ) : null}
       </span>
     ) : undefined;
 

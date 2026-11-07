@@ -31,3 +31,6 @@
   Diagnostic health/Cause summaries must contain only finite categories, state/counts
   and auth status, never credentials, tokens, URLs, raw errors, Causes or owners.
   Timeout, interruption and release failure remain observable. [Contract](README.md).
+
+- Legacy invalidation after close begins is idempotent. Failed close/cleanup still
+  retains its owner and Cause; invalidation never confirms release or reopens admission.

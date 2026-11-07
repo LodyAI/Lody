@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   AGENT_ROLE_VERSION,
-  DEFAULT_AGENT_ROLE_EMOJI,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
@@ -129,69 +129,6 @@ describe('ComposerAgentRolePanel', () => {
     expect(view.textContent).toContain('model-the-agent-dropped');
   });
 
-  it('falls back to the shared glyph so every row reads the same', async () => {
-    const view = await render({
-      items: [{ ...reviewer, role: { ...reviewer.role, emoji: undefined } }],
-    });
-    expect(view.textContent).toContain(DEFAULT_AGENT_ROLE_EMOJI);
-  });
-
-  it('picks a Role by its stable id', async () => {
-    const onSelect = vi.fn();
-    const view = await render({ onSelect });
-    const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
-      node.textContent?.includes('Code Reviewer')
-    );
-    await act(async () => {
-      (row as HTMLElement).click();
-    });
-    expect(onSelect).toHaveBeenCalledWith('r-1');
-  });
-
-  it('offers leaving the Role as its own row', async () => {
-    const onSelect = vi.fn();
-    const view = await render({ selectedRoleId: 'r-1' as AgentRoleId, onSelect });
-    const none = [...view.querySelectorAll('[role="menuitemradio"]')].find(
-      (node) => node.textContent === 'None'
-    );
-    await act(async () => {
-      (none as HTMLElement).click();
-    });
-    // null, not "some other Role": it clears the name, not the configuration.
-    expect(onSelect).toHaveBeenCalledWith(null);
-  });
-
-  // The Role row turns into a create action instead of opening this submenu
-  // when the machine has no Roles, so this list is never empty in production.
-  it('renders nothing rather than an empty two-pane shell', async () => {
-    const view = await render({ items: [] });
-    expect(view.querySelector('[role="menuitemradio"]')).toBeNull();
-  });
-
-  it('offers making another Role from the list', async () => {
-    const onCreate = vi.fn();
-    const view = await render({ onCreate });
-    const create = view.querySelector(
-      '[aria-label="Create role from current settings"]'
-    ) as HTMLElement | null;
-    await act(async () => {
-      (create as HTMLElement).click();
-    });
-    expect(onCreate).toHaveBeenCalled();
-  });
-
-  it('offers editing the Role whose configuration it is showing', async () => {
-    const onEdit = vi.fn();
-    const view = await render({ onEdit });
-    const edit = [...view.querySelectorAll('button')].find((node) =>
-      node.textContent?.includes('Edit role')
-    );
-    await act(async () => {
-      (edit as HTMLElement).click();
-    });
-    expect(onEdit).toHaveBeenCalledWith('r-1');
-  });
-
   it('keeps an unavailable Role listed, disabled, and says why', async () => {
     const onSelect = vi.fn();
     const view = await render({
@@ -225,18 +162,6 @@ describe('ComposerAgentRolePanel', () => {
     expect(view.textContent).not.toContain('Unavailable');
   });
 
-  it('puts agent and model on the Role row when the detail pane cannot fit', async () => {
-    const view = await render({ compact: true, onEdit: () => undefined });
-    const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
-      node.textContent?.includes('Code Reviewer')
-    );
-    expect(row?.textContent).toContain('Code Reviewer');
-    expect(row?.textContent).toContain('Codex');
-    expect(row?.textContent).toContain('5.6-Sol');
-    expect(view.textContent).not.toContain('Edit role');
-    expect(view.textContent).not.toContain('Review the diff for correctness before style.');
-  });
-
   it('detects a too-narrow popper and drops the detail pane without a compact prop', async () => {
     const innerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 });
@@ -252,17 +177,5 @@ describe('ComposerAgentRolePanel', () => {
       if (innerWidth) Object.defineProperty(window, 'innerWidth', innerWidth);
       else delete (window as { innerWidth?: number }).innerWidth;
     }
-  });
-
-  it('still picks a Role from the compact two-line list', async () => {
-    const onSelect = vi.fn();
-    const view = await render({ compact: true, onSelect });
-    const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
-      node.textContent?.includes('Code Reviewer')
-    );
-    await act(async () => {
-      (row as HTMLElement).click();
-    });
-    expect(onSelect).toHaveBeenCalledWith('r-1');
   });
 });

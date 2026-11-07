@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as React from 'react';
-import { ClipboardList, MessagesSquare, UserRoundCog } from 'lucide-react';
+import { radius } from '@lody/ui/tokens/scales.stylex';
+import { ClipboardList, MessagesSquare, UserRoundCog, Quote } from 'lucide-react';
 
 import { MonochromeFileIcon, MonochromeFolderIcon } from '@/components/icons/file-icons';
 import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/index';
@@ -18,10 +19,9 @@ import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/ind
  * A mention may not change the advance width of the range it decorates. The
  * highlighter mirrors the textarea character for character; a decoration one
  * pixel wider than its raw text drags every following glyph out from under the
- * caret. So the classes below set colour and nothing else — no padding, no
- * border, no font change. That constraint is also why there is no background:
- * a fill would need padding to look like anything, and padding is the one thing
- * that cannot be spent here.
+ * caret. So the classes below never add padding, borders or font changes.
+ * Quotes use their real gutter characters to carry a filled surface; other
+ * mentions keep the surrounding surface and only change text colour.
  *
  * ## Which mentions get an icon
  *
@@ -49,6 +49,14 @@ import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/ind
 
 /** Pads the pasted-text label so its chip has an icon gutter and right padding. */
 const CHIP_PAD = '\u2007';
+const quoteStyles = stylex.create({
+  quote: {
+    backgroundColor: `color-mix(in srgb, ${colors.label} 8%, ${colors.elevatedBackground})`,
+    borderRadius: radius.mini,
+    color: colors.label,
+    boxDecorationBreak: 'clone',
+  },
+});
 export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${CHIP_PAD}`;
 
 /**
@@ -101,6 +109,7 @@ const CHIP_KINDS: ReadonlySet<string> = new Set([
   'pr',
   'mention',
   'pasted_text',
+  'message_quote',
 ]);
 
 /**
@@ -124,6 +133,7 @@ export function getMentionKindIcon(
   // nothing in it says the token is a Role rather than a path.
   if (kind === 'agent_role') return <UserRoundCog className={className} />;
   if (kind === 'pasted_text') return <ClipboardList className={className} aria-hidden="true" />;
+  if (kind === 'message_quote') return <Quote className={className} aria-hidden="true" />;
   return null;
 }
 
@@ -163,6 +173,12 @@ const getMentionPath = (mention: Mention, text: string): string =>
 export const getComposerMentionChip: MentionChipResolver = (mention: Mention, text: string) => {
   const kind = mention.kind ?? 'mention';
   if (kind === 'pasted_text') return pastedTextChip(text);
+  if (kind === 'message_quote')
+    return {
+      ...pastedTextChip(text),
+      icon: getMentionKindIcon(kind),
+      className: stylex.props(quoteStyles.quote).className,
+    };
   if (!CHIP_KINDS.has(kind)) return null;
 
   const icon = getMentionKindIcon(kind, { path: getMentionPath(mention, text) });

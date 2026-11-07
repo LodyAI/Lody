@@ -129,6 +129,7 @@ const styles = stylex.create({
     transitionDuration: '250ms',
     transitionTimingFunction: themeEasing.out,
   },
+  askQuestionAtRest: { marginBottom: themeSpace[2] },
   askQuestionViewport: {
     overscrollBehavior: 'contain',
     paddingBottom: 'max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px))',
@@ -650,6 +651,8 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
 // =============================================================================
 
 export interface FloatingPermissionRequestProps {
+  /** Mobile session drawers render outside the workspace keyboard padding. */
+  liftAboveKeyboard?: boolean;
   sessionId: SessionId;
   sessionStatus: SessionStatus | undefined;
   sessionHistory: SessionDoc['history'] | undefined;
@@ -671,6 +674,7 @@ type SendError = { requestId: string; message: string } | null;
  * them, and answering one brings up the next in the same place.
  */
 export function FloatingPermissionRequest({
+  liftAboveKeyboard = false,
   sessionId,
   sessionStatus,
   sessionHistory,
@@ -760,7 +764,10 @@ export function FloatingPermissionRequest({
     <>
       <ScrollArea
         hidden={!current.isAskUserQuestion}
-        className={stylex.props(styles.askQuestionScroll).className}
+        className={
+          stylex.props(styles.askQuestionScroll, !liftAboveKeyboard && styles.askQuestionAtRest)
+            .className
+        }
         viewportClassName={stylex.props(styles.askQuestionViewport).className}
         viewportRef={askQuestionScrollRef}
       >

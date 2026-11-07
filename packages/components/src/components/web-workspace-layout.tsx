@@ -24,15 +24,22 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
 import { clsx } from 'clsx';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
+import { useVerticalDivision } from './mobile/use-vertical-division';
 
 const DesktopSidebarContent = memo(function DesktopSidebarContent({
   pathname,
+  fitDivision,
 }: {
   pathname: string;
+  fitDivision: boolean;
 }) {
   return (
     <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-      <LoroAppSidebar pauseSidebarSourcesWhenHidden xstyle={styles.desktopSidebar} />
+      <LoroAppSidebar
+        pauseSidebarSourcesWhenHidden
+        overlay={fitDivision}
+        xstyle={[styles.desktopSidebar, fitDivision && styles.fitDivision]}
+      />
     </ErrorBoundary>
   );
 });
@@ -43,6 +50,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // whole workspace shell.
   const pathname = useLocation({ select: (l) => l.pathname });
   const compact = useIsCompactDesktop();
+  const division = useVerticalDivision();
   // Effective on-screen visibility: compact may auto-suppress the sidebar even
   // while the persisted preference says open — see atoms/layout-state.ts.
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
@@ -100,6 +108,15 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     MAX_DESKTOP_SIDEBAR_WIDTH
   );
   const rootProps = stylex.props(styles.root);
+  // Only use a division when each side can hold its own usable surface.
+  const fold =
+    !compact &&
+    division &&
+    division.left >= 240 &&
+    division.viewportWidth - division.left - division.width >= 240
+      ? division
+      : null;
+  const visibleSidebarWidth = fold?.left ?? sidebarSlideWidth;
   return (
     <div
       ref={setLayoutRoot}
@@ -125,8 +142,9 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           ref={sidebarRef}
           {...stylex.props(styles.sidebarColumn)}
           style={{
-            transform: `translateX(${sidebarVisible ? 0 : -sidebarSlideWidth}px)`,
-            marginRight: sidebarVisible ? 0 : -sidebarSlideWidth,
+            width: fold ? visibleSidebarWidth : undefined,
+            transform: `translateX(${sidebarVisible ? 0 : -visibleSidebarWidth}px)`,
+            marginRight: sidebarVisible ? (fold?.width ?? 0) : -visibleSidebarWidth,
             transitionProperty: 'transform, margin-right',
             transitionDuration: shouldReduceMotion ? '0ms' : '220ms',
             transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
@@ -134,7 +152,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           aria-hidden={!sidebarVisible}
           inert={!sidebarVisible}
         >
-          <DesktopSidebarContent pathname={pathname} />
+          <DesktopSidebarContent pathname={pathname} fitDivision={fold !== null} />
         </div>
       )}
       <FocusScope
@@ -145,6 +163,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           // Capture before inert can blur the opener during the open commit.
           returnFocusRef.current = event.target;
         }}
+        style={fold && !sidebarVisible ? { marginLeft: fold.left + fold.width } : undefined}
         className={stylex.props(styles.content).className}
       >
         <WindowDragStrip />
@@ -157,6 +176,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
 }
 
 const styles = stylex.create({
+  fitDivision: { width: '100%' },
   desktopSidebar: {
     height: '100%',
     transitionProperty: 'box-shadow',

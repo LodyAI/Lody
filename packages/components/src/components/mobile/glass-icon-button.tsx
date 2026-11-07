@@ -1,5 +1,7 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { ChevronLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import {
   themeDuration,
@@ -29,6 +31,8 @@ import {
 type GlassMode = 'light' | 'dark';
 
 const styles = stylex.create({
+  backOffset: { marginInlineStart: '-4px' },
+  backGlyph: { width: '20px', height: '20px' },
   button: {
     position: 'relative',
     display: 'inline-flex',
@@ -307,3 +311,23 @@ export const GlassIconButton = forwardRef<
     </button>
   );
 });
+
+/** The shared back control used by the mobile conversation header. */
+export function MobileSessionHeaderBackButton({
+  onBack,
+  label,
+}: {
+  onBack: () => void;
+  label?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <GlassIconButton
+      label={label ?? t('common.back', 'Back')}
+      onClick={onBack}
+      className={stylex.props(styles.backOffset).className}
+    >
+      <ChevronLeft {...stylex.props(styles.backGlyph)} strokeWidth={1.75} />
+    </GlassIconButton>
+  );
+}

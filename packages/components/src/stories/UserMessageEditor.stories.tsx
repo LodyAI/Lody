@@ -23,6 +23,14 @@ import type { UserMessageEditMentionContext } from '@/components/ai-gui/view';
 import { MessageRowView } from '@/components/ai-gui/view';
 import type { ConversationFontSize } from '@/atoms/settings';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
+
+const mergedStoryLayout = stylex.create({
+  fullWidth: {
+    containerType: 'inline-size',
+    width: '100%',
+  },
+});
+
 const storyLayout = stylex.create({
   row: {
     display: 'flex',
@@ -217,26 +225,28 @@ export const OwnedThemeScopes: Story = {
   ),
 };
 
-function FromMessageEditHarness() {
+function FromMessageEditHarness({ fullWidth = false }: { fullWidth?: boolean }) {
   const store = useMemo(() => createStoryStore(), []);
   return (
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
-        <MessageRowView
-          sessionId={STORY_SESSION_ID}
-          message={
-            {
-              id: 'editable-user-message',
-              role: 'user',
-              timestamp: '2026-09-12T10:00:00.000Z',
-              status: 'seen',
-              read: true,
-              items: [{ type: 'text', text: 'Clarify this instruction' }],
-            } satisfies SessionHistoryParsed
-          }
-          onEdit={async () => true}
-          editMentionContext={storyEditMentionContext}
-        />
+        <div {...stylex.props(fullWidth && mergedStoryLayout.fullWidth)}>
+          <MessageRowView
+            sessionId={STORY_SESSION_ID}
+            message={
+              {
+                id: 'editable-user-message',
+                role: 'user',
+                timestamp: '2026-09-12T10:00:00.000Z',
+                status: 'seen',
+                read: true,
+                items: [{ type: 'text', text: 'Clarify this instruction' }],
+              } satisfies SessionHistoryParsed
+            }
+            onEdit={async () => true}
+            editMentionContext={storyEditMentionContext}
+          />
+        </div>
       </Provider>
     </PlatformContext.Provider>
   );
@@ -244,6 +254,12 @@ function FromMessageEditHarness() {
 
 export const FromMessageEdit: Story = {
   render: () => <FromMessageEditHarness />,
+};
+
+/** Full-width user row: the 70% stack is wider than the editor's 800px cap. */
+export const FullWidthFromMessageEdit: Story = {
+  render: () => <FromMessageEditHarness fullWidth />,
+  parameters: { layout: 'fullscreen' },
 };
 
 /**

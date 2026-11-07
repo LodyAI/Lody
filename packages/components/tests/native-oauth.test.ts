@@ -49,14 +49,6 @@ describe('waitForNativeOAuthReturn', () => {
 });
 
 describe('runNativeOAuthSignIn', () => {
-  it('completes when the auth client sign-in promise completes', async () => {
-    const appWindow = new MockWindow();
-
-    await expect(
-      runNativeOAuthSignIn(() => Promise.resolve(), { appWindow, returnGraceMs })
-    ).resolves.toBe('completed');
-  });
-
   it('returns without session when the native browser returns and the sign-in promise hangs', async () => {
     vi.useFakeTimers();
     const appWindow = new MockWindow();

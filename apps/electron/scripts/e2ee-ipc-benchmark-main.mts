@@ -19,6 +19,7 @@ import {
 } from '@lody/e2ee-core/protocol'
 import { nativeDeviceSigner } from '@lody/e2ee-core/services'
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams'
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 async function main() {
   const directory = process.env.LODY_E2EE_BENCHMARK_DIRECTORY
@@ -37,6 +38,7 @@ async function main() {
       dependencies
     const sdkModule = fileURLToPath(dependencies.sdkModule)
     const loroAdapterModule = fileURLToPath(dependencies.loroAdapterModule)
+    const zstdModule = fileURLToPath(dependencies.zstdModule)
     stage = 'start-server'
     const server = await startDevServer({
       host: '127.0.0.1',
@@ -117,7 +119,16 @@ async function main() {
       open: (request: Parameters<typeof binding.open>[0]) =>
         Effect.runPromise(binding.open(request))
     }
+    const snapshotFirst = process.env.LODY_E2EE_BENCHMARK_SNAPSHOTS === '1'
+    const snapshotSizes: Record<string, number> = {}
+    const historyEdits = Number(process.env.LODY_E2EE_BENCHMARK_EDITS ?? 0)
+    if (!Number.isSafeInteger(historyEdits) || historyEdits < 0 || historyEdits > 1000)
+      throw new Error('benchmark_invalid_edits')
     stage = 'seed-streams'
+    const trace = process.env.LODY_E2EE_BENCHMARK_TRACE === '1'
+    ipcMain.on('e2ee-benchmark:trace', (_event, label) => {
+      if (trace) process.stderr.write(`benchmark_trace:${label}\n`)
+    })
     for (const kind of ['plain', 'protected']) {
       const writer = new LoroDoc()
       writer.setPeerId(1)
@@ -131,6 +142,7 @@ async function main() {
               e2ee: { provider: sdkProvider, readPolicy: 'encrypted-only', writePolicy: 'encrypt' }
             }
           : {}),
+        snapshotCodec: streamsSnapshotCodec,
         snapshotUpload: { enabled: false, canUpload: () => false }
       })
       try {
@@ -142,20 +154,41 @@ async function main() {
           throw new Error('benchmark_fixture_byte_mismatch')
         const uploaded = await sdk.appendWriteOnly()
         if (!uploaded.ok) throw new Error('benchmark_stream_upload')
+        for (let revision = 1; revision <= historyEdits; revision++) {
+          writer.getMap('data').set('revision', revision)
+          writer.commit({ timestamp: 0 })
+          const edited = await sdk.appendWriteOnly()
+          if (!edited.ok) throw new Error('benchmark_stream_upload')
+        }
+        if (snapshotFirst) {
+          const published = await sdk.uploadSnapshotForTesting()
+          if (!published.ok) throw new Error('benchmark_snapshot_upload')
+          snapshotSizes[kind] = published.value.snapshotByteLength
+          // A real suffix is read after the snapshot in each fresh replica.
+          writer.getText('text').insert(text.length, 'tail')
+          writer.commit({ timestamp: 0 })
+          const suffix = await sdk.appendWriteOnly()
+          if (!suffix.ok) throw new Error('benchmark_stream_upload')
+        }
       } finally {
         await sdk.close()
         writer.free()
       }
     }
     ipcMain.on('e2ee-benchmark:loro-module', (event) => {
-      event.returnValue = { loroModule, sdkModule, loroAdapterModule }
+      event.returnValue = { loroModule, sdkModule, loroAdapterModule, zstdModule }
     })
     ipcMain.handle('e2ee-benchmark:fixture', () => ({
       small: new Uint8Array(16_384).fill(42),
       largePlain,
       fixtureSha256: createHash('sha256').update(largePlain).digest('hex'),
       largeSealed,
-      textLength: text.length,
+      textLength: text.length + (snapshotFirst ? 4 : 0),
+      updateTextLength: text.length,
+      snapshotFirst,
+      snapshotSizes,
+      historyEdits,
+      trace,
       streamBaseUrl: `${server.baseUrl}/ds/benchmark`
     }))
     ipcMain.handle('e2ee-benchmark:seal', (_event, plaintext) => seal(plaintext))
@@ -231,10 +264,12 @@ async function main() {
         disposeContentKey(leaf)
       }
     })
+    if (trace) process.stderr.write('benchmark_trace:seeded\n')
     stage = 'create-window'
     window = new BrowserWindow({
       show: false,
       webPreferences: {
+        backgroundThrottling: false,
         sandbox: false,
         contextIsolation: true,
         nodeIntegration: false,

@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 
 /**
  * Colors are theme-measured, not eyeballed — see the surface-ladder comment in
@@ -106,7 +106,7 @@ export function TabPillStrip<Key extends string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn(stylex.props(styles.strip).className, className)}
+      className={clsx(stylex.props(styles.strip).className, className)}
     >
       {items.map(({ key, label, icon: Icon }) => {
         const active = key === activeKey;
@@ -117,7 +117,7 @@ export function TabPillStrip<Key extends string>({
             role="tab"
             aria-selected={active}
             onClick={() => onSelect(key)}
-            className={cn(
+            className={clsx(
               stylex.props(styles.pill, active ? tabPillStyles.active : tabPillStyles.inactive)
                 .className,
               itemClassName

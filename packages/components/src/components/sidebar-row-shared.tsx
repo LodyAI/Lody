@@ -64,6 +64,14 @@ const GROUP_HOVER = ':is(:where(.group):hover *)';
 const GROUP_OPEN = ':is(:where(.group)[data-menu-open] *)';
 
 const rowParts = stylex.create({
+  prAnchor: {
+    display: 'inline-flex',
+    width: '20px',
+    height: '20px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   unsentTitle: { color: 'hsl(var(--sidebar-foreground-muted) / 1)' },
   groupLabelInk: {
     color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
@@ -710,8 +718,8 @@ export function SessionPrIcon({
           ? CircleDot
           : null;
 
-  if (verdict && (VerdictIcon || verdict === 'pending')) {
-    return (
+  const mark =
+    verdict && (VerdictIcon || verdict === 'pending') ? (
       <MaskedPrCiIcon
         BaseIcon={BaseIcon}
         VerdictIcon={VerdictIcon}
@@ -724,19 +732,29 @@ export function SessionPrIcon({
           className
         )}
       />
+    ) : (
+      <BaseIcon
+        className={clsx(
+          stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
+          compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
+          toneClassName,
+          className
+        )}
+        strokeWidth={2.25}
+        aria-hidden="true"
+      />
     );
-  }
+
+  // Sidebar rows park this mark in `SidebarRowEndSlot`, which centers anything
+  // narrower than its 20px reserve (`min-w-5`, the archive target). A Mergeable
+  // pill widens that cluster past 20px, the centering inset disappears, and the
+  // mark slides to the trailing edge. Hold the compact mark in a box the same
+  // size as the reserve so the pill grows to the left and the mark stays put.
+  if (!compact) return mark;
   return (
-    <BaseIcon
-      className={clsx(
-        stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
-        compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
-        toneClassName,
-        className
-      )}
-      strokeWidth={2.25}
-      aria-hidden="true"
-    />
+    <span data-session-pr-icon-anchor="" {...stylex.props(rowParts.prAnchor)}>
+      {mark}
+    </span>
   );
 }
 

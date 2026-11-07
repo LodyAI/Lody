@@ -102,7 +102,10 @@ export interface ReplayPromptResult {
 export interface BuildReplayPromptOptions {
   /** Session history entries (sorted by timestamp ascending) */
   history: SessionHistoryInput[];
-  /** History ID to exclude (typically the current user message) */
+  /**
+   * User-turn ID to exclude. Its deterministic assistant entry
+   * (`assistant:<id>`) is excluded with it.
+   */
   excludeTurnId?: string;
   /** Maximum characters for the prompt (default: 100,000) */
   maxChars?: number;
@@ -160,6 +163,21 @@ function tail(text: string, maxChars: number): string {
     return text;
   }
   return '...' + text.slice(-maxChars);
+}
+
+/**
+ * A replay excludes the current user turn and the assistant output it owns.
+ * Otherwise a re-dispatched turn can replay its own prior partial answer, and
+ * an empty assistant entry can make a history wait believe prior context has
+ * arrived.
+ */
+export function isReplayEntryExcluded(
+  entry: { readonly id?: unknown },
+  excludeTurnId?: string
+): boolean {
+  return (
+    !!excludeTurnId && (entry.id === excludeTurnId || entry.id === `assistant:${excludeTurnId}`)
+  );
 }
 
 /**
@@ -311,7 +329,7 @@ function generatePrompt(
 
   for (const entry of history) {
     // Skip the current message if specified
-    if (excludeTurnId && entry.id === excludeTurnId) {
+    if (isReplayEntryExcluded(entry, excludeTurnId)) {
       continue;
     }
 
@@ -546,6 +564,108 @@ export function buildReplayPromptFromHistory(
       ...(truncated ? { truncated: true } : {}),
       ...(terminalOmitted ? { terminalOmitted: true } : {}),
       ...(thinkingOmitted ? { thinkingOmitted: true } : {}),
+    },
+  };
+}
+
+/** Accumulate budget-sized A/B/C/D candidates and ordered unique file paths. */
+export function createReplayPromptBuilder(options: Omit<BuildReplayPromptOptions, 'history'> = {}) {
+  const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
+  const terminalTailChars = options.terminalTailChars ?? DEFAULT_TERMINAL_TAIL_CHARS;
+  const capacity = Number.isFinite(maxChars) ? Math.max(0, Math.ceil(maxChars)) : Infinity;
+  const candidates = [
+    { includeTerminal: true, includeThinking: true, terminalTailChars },
+    { includeTerminal: false, includeThinking: true, terminalTailChars },
+    { includeTerminal: false, includeThinking: false, terminalTailChars },
+  ].map((pass) => ({ pass, length: 0, head: '', tail: '', messages: 0 }));
+  type Candidate = (typeof candidates)[number];
+  const append = (candidate: Candidate, text: string) => {
+    candidate.length += text.length;
+    if (candidate.length <= capacity) candidate.head += text;
+    else candidate.head = '';
+    if (candidate === candidates[2])
+      candidate.tail =
+        capacity === Infinity
+          ? candidate.tail + text
+          : text.length >= capacity
+            ? text.slice(-capacity || text.length)
+            : (candidate.tail + text).slice(-capacity || text.length);
+  };
+  for (const candidate of candidates)
+    append(candidate, '=== Previous Conversation Context ===\n\n');
+  const paths = new Map<string, 'read' | 'edit' | 'other'>();
+  return {
+    add(entry: SessionHistoryInput): void {
+      if (isReplayEntryExcluded(entry, options.excludeTurnId) || entry.role === 'system') return;
+      for (const item of entry.items ?? [])
+        if (item.type === 'tool_call')
+          for (const path of collectPathsFromToolCall(item)) {
+            const prior = paths.get(path.path);
+            if (!prior || path.kind === 'edit' || (path.kind === 'read' && prior === 'other'))
+              paths.set(path.path, path.kind);
+          }
+      for (const candidate of candidates) {
+        let parts = 0;
+        for (const item of entry.items ?? []) {
+          const text = extractTextFromItem(item as MessageContent, candidate.pass);
+          if (!text) continue;
+          append(candidate, parts ? '\n\n' : entry.role === 'user' ? '[User]\n' : '[Assistant]\n');
+          append(candidate, text);
+          parts++;
+        }
+        if (parts) {
+          append(candidate, '\n\n');
+          candidate.messages++;
+        }
+      }
+    },
+    finish(): ReplayPromptResult {
+      let footer = '';
+      if (paths.size) {
+        footer = '=== Files Referenced ===\n';
+        for (const [kind, label] of [
+          ['read', 'Read'],
+          ['edit', 'Edit'],
+          ['other', 'Other'],
+        ] as const) {
+          const values = [...paths].filter(([, value]) => value === kind).map(([path]) => path);
+          if (values.length) footer += `${label}: ${values.join(', ')}\n`;
+        }
+        footer += '\n';
+      }
+      const end = '=== End of Previous Context ===\n';
+      for (const candidate of candidates) append(candidate, footer);
+      const index = candidates.findIndex((candidate) => candidate.length + end.length <= maxChars);
+      const chosen = candidates[index < 0 ? 2 : index]!;
+      let text = chosen.head + end,
+        truncated = false;
+      if (index < 0) {
+        truncated = true;
+        const budget = maxChars - end.length - 50;
+        text =
+          budget <= 0
+            ? '... [Context truncated due to length] ...\n\n' + end
+            : '... [Earlier context truncated] ...\n\n' + chosen.tail.slice(-budget) + end;
+      }
+      const terminalOmitted = index !== 0,
+        thinkingOmitted = index < 0 || index === 2;
+      return {
+        promptText: text,
+        stats: {
+          usedChars: text.length,
+          truncated,
+          terminalOmitted,
+          terminalTailApplied: !terminalOmitted,
+          thinkingOmitted,
+          pathsCount: paths.size,
+          messagesIncluded: chosen.messages,
+        },
+        noticeMeta: {
+          ...(truncated ? { truncated: true } : {}),
+          ...(terminalOmitted ? { terminalOmitted: true } : {}),
+          ...(thinkingOmitted ? { thinkingOmitted: true } : {}),
+        },
+      };
     },
   };
 }

@@ -99,6 +99,8 @@ export type SupervisorOptions = {
   fatalFailureThreshold?: number;
   fatalOomWindowMs?: number;
   fatalOomThreshold?: number;
+  /** Pause after repeated V8 OOMs before one automatic recovery start (default 10 minutes). */
+  fatalOomCooldownMs?: number;
   healthyRunMs?: number;
 };
 

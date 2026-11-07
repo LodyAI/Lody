@@ -17,11 +17,13 @@ import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/e
 import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/staging';
 import { openEpochKeyHpke } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
-import { canonical, parseCanonical, attempt, random, hex, vaultError } from './crypto';
+import { canonical, fromHex, parseCanonical, attempt, random, hex, vaultError } from './crypto';
+import { deriveRecoveryAccessCredential } from './credential';
 import { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 import {
   wipeRecoveryPackage,
   type RecoveryEntryReference,
+  type RecoveryPrivatePackage,
   type RecoveryVault,
   type RecoveryVaultLocalStore,
 } from './vault';
@@ -31,6 +33,8 @@ export type RecoverySubmitResult = {
   readonly outcome: 'Committed' | 'Conflict' | 'Pending';
   readonly record: Uint8Array;
 };
+/** SHA-256 of R's derived service access credential, registered with R's admission append. */
+export type RecoveryCredentialRegistration = { readonly recoveryCredentialHash: Uint8Array };
 /** The current epoch-key envelope addressed to a recovery device, as fetched during restore. */
 export type RecoveryEnvelope =
   | { readonly sender: Bytes.SigningPublicKey; readonly frame: Uint8Array }
@@ -43,7 +47,13 @@ export interface WorkspaceRecoveryInput {
   readonly membershipId: Bytes.MembershipId;
   readonly personalSigner: DeviceSigner;
   readonly ledger: () => Effect.Effect<LedgerView, unknown>;
-  readonly submitOriginal: (record: Uint8Array) => Effect.Effect<RecoverySubmitResult, unknown>;
+  /** Submit the exact original record. R's own admission carries the hash of R's
+   * derived access credential so the service can register it with that append;
+   * every other record (for example a revocation) passes null. */
+  readonly submitOriginal: (
+    record: Uint8Array,
+    registration: RecoveryCredentialRegistration | null
+  ) => Effect.Effect<RecoverySubmitResult, unknown>;
   readonly fetchCurrentEnvelope: (
     recipient: Bytes.SigningPublicKey,
     epoch: number,
@@ -174,7 +184,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
   };
   const useIdentity = <A, E, R>(
     ref: RecoveryEntryReference,
-    work: (identity: RecoveryIdentity) => Effect.Effect<A, E, R>
+    work: (identity: RecoveryIdentity, bundle: RecoveryPrivatePackage) => Effect.Effect<A, E, R>
   ) =>
     Effect.acquireUseRelease(
       vault.readEntry(ref),
@@ -187,7 +197,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           )
             return yield* vaultError('authentication');
           const identity = yield* importRecoveryIdentity(bundle);
-          return yield* work(identity);
+          return yield* work(identity, bundle);
         }),
       (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
     );
@@ -392,14 +402,19 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       progress = state.value!;
     }
     const reference = progress.reference!;
-    return yield* useIdentity(reference, (identity) =>
+    return yield* useIdentity(reference, (identity, bundle) =>
       Effect.gen(function* () {
+        const registration = yield* attempt(() => {
+          const derived = deriveRecoveryAccessCredential(bundle);
+          derived.credential.fill(0);
+          return { recoveryCredentialHash: derived.credentialHash };
+        });
         let view = yield* current();
         // The record may have committed before this process died, while its P09
         // result still awaits acknowledgement. Reconcile that original before
         // advancing local stage even when the registered R is already visible.
         if (progress.record && progress.stage === 'registration' && active(view, identity)) {
-          const resumed = yield* submit(new Uint8Array(progress.record));
+          const resumed = yield* submit(new Uint8Array(progress.record), registration);
           if (!bytesEqual(resumed.record, progress.record))
             return yield* vaultError('authentication');
           if (resumed.outcome !== 'Committed')
@@ -438,7 +453,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             });
             progress = state.value!;
           }
-          const result = yield* submit(new Uint8Array(progress.record!));
+          const result = yield* submit(new Uint8Array(progress.record!), registration);
           if (!bytesEqual(result.record, progress.record!))
             return yield* vaultError('authentication');
           if (result.outcome !== 'Committed')
@@ -476,10 +491,17 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           ref.membershipId === hex(membership.toBytes())
       );
     if (!reference) return yield* vaultError('missing');
-    return yield* useIdentity(reference, (identity) =>
+    return yield* useIdentity(reference, (identity, bundle) =>
       Effect.gen(function* () {
         const view = yield* current();
         if (!active(view, identity)) return yield* vaultError('unauthorized');
+        // The genesis anchors the replay; the package's checkpoint stops a fork from it.
+        const checkpoint = yield* attempt(() => ({
+          head: Result.getOrThrow(Bytes.recordHash(fromHex(bundle.trust.head))),
+          length: bundle.trust.length,
+        }));
+        if (!(yield* Effect.fromResult(hasVerifiedCheckpoint(view, checkpoint))))
+          return yield* vaultError('authentication');
         const epoch = yield* openCurrent(identity),
           personal = request.personal;
         if (
@@ -548,6 +570,97 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       })
     );
   });
+  const RevokeIntentSchema = Schema.Struct({
+    target: Schema.String,
+    record: Schema.Uint8Array,
+    position: Schema.Number,
+  });
+  /** Whole-vault replacement: with this vault's R proven, revoke every other active
+   * recovery device of this membership. It needs no V from any older vault, because
+   * the verified ledger names them. Each original is journaled and never re-signed. */
+  const revokeOtherRecoveryDevices = Effect.fnUntraced(function* () {
+    const status = yield* checkedStatus();
+    if (!status.recoverable) return yield* vaultError('pending');
+    const prefix = `${key}/revoke-other/`,
+      reference = (yield* load()).value?.reference;
+    if (!reference) return yield* vaultError('missing');
+    return yield* useIdentity(reference, (identity) =>
+      Effect.gen(function* () {
+        const self = hex(identity.publicKey.toBytes()),
+          view = yield* current(),
+          others = [...view.inspectState().devices]
+            .filter(
+              ([id, device]) =>
+                id !== self && device.kind === 'recovery' && device.membershipId.equals(membership)
+            )
+            .map(([id]) => id),
+          journaled = (yield* local.list(prefix)).map((row) => row.key.slice(prefix.length));
+        const signRevocation = Effect.fnUntraced(function* (target: string) {
+          const latest = yield* current(),
+            targetKey = yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(target))),
+            proposal = yield* Effect.fromResult(
+              prepareLedgerCommand(latest, personalSigner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: targetKey,
+              })
+            );
+          return {
+            target,
+            record: yield* signLedgerRecord(proposal, personalSigner),
+            position: latest.length + 1,
+          };
+        });
+        for (const target of new Set([...journaled, ...others])) {
+          const journalKey = `${prefix}${target}`;
+          let raw = yield* local.read(journalKey);
+          let intent: typeof RevokeIntentSchema.Type;
+          if (raw) {
+            const stored = raw;
+            intent = yield* attempt(() =>
+              Result.getOrThrow(
+                Schema.decodeUnknownResult(RevokeIntentSchema)(parseCanonical(stored))
+              )
+            );
+          } else {
+            intent = yield* signRevocation(target);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(journalKey, null, next)) !== 'Committed')
+              return yield* vaultError('conflict');
+            raw = next;
+          }
+          for (let attempts = 0; ; attempts++) {
+            const outcome = yield* submit(new Uint8Array(intent.record), null);
+            if (!bytesEqual(outcome.record, intent.record))
+              return yield* vaultError('authentication');
+            if (outcome.outcome === 'Pending') return { outcome: outcome.outcome };
+            const after = yield* current(),
+              landed = yield* Effect.fromResult(
+                hasVerifiedCheckpoint(after, {
+                  head: hashRecordBytes(intent.record),
+                  length: intent.position,
+                })
+              );
+            if (outcome.outcome === 'Committed') {
+              if (after.inspectState().devices.has(target) || !landed)
+                return yield* vaultError('authentication');
+              break;
+            }
+            // Only the ledger proves this original can never commit: a different record
+            // holds its position. Until then it is resent unchanged, never re-signed.
+            if (landed || !after.inspectState().devices.has(target)) break;
+            if (after.length < intent.position || attempts >= 3)
+              return { outcome: outcome.outcome };
+            intent = yield* signRevocation(target);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(journalKey, raw, next)) !== 'Committed')
+              return yield* vaultError('conflict');
+            raw = next;
+          }
+        }
+        return { outcome: 'Committed' as const };
+      })
+    );
+  });
   const replacementSchema = Schema.Struct({
     old: RefSchema,
     candidateId: Schema.String,
@@ -607,7 +720,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           const view = yield* current();
           if (!active(view, oldIdentity)) {
             if (intent.revoke) {
-              const reconciled = yield* submit(new Uint8Array(intent.revoke));
+              const reconciled = yield* submit(new Uint8Array(intent.revoke), null);
               if (!bytesEqual(reconciled.record, intent.revoke))
                 return yield* vaultError('authentication');
               return reconciled.outcome;
@@ -628,7 +741,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             };
             yield* persistIntent();
           }
-          const outcome = yield* submit(new Uint8Array(intent.revoke!));
+          const outcome = yield* submit(new Uint8Array(intent.revoke!), null);
           if (!bytesEqual(outcome.record, intent.revoke!))
             return yield* vaultError('authentication');
           if (outcome.outcome !== 'Committed') return outcome.outcome;
@@ -668,10 +781,15 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         );
       intent = { ...intent, selected: reference };
       yield* persistIntent();
-      const state = yield* load();
-      yield* save(state.raw, {
-        entryId: reference.entryId,
-        reference,
+    }
+    // The journal and progress are separate writes: a resumed request re-points
+    // progress here, or setup would run on the old reference.
+    const candidate = intent.selected!,
+      progress = yield* load();
+    if (progress.value?.reference?.entryId !== candidate.entryId)
+      yield* save(progress.raw, {
+        entryId: candidate.entryId,
+        reference: candidate,
         record: null,
         recordPosition: null,
         stage: 'indexed',
@@ -680,7 +798,6 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         envelopeEpoch: null,
         skipped: false,
       });
-    }
     const tested = yield* setup();
     if (tested.outcome !== 'Committed' || !tested.status.recoverable)
       return yield* vaultError('pending');
@@ -691,9 +808,9 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           ref.genesis === hex(genesis.toBytes()) &&
           ref.membershipId === hex(membership.toBytes())
       );
-    if (selected?.entryId !== intent.selected!.entryId) {
+    if (selected?.entryId !== candidate.entryId) {
       if (selected?.entryId !== intent.old.entryId) return yield* vaultError('conflict');
-      const changed = yield* vault.replace(intent.selected!);
+      const changed = yield* vault.replace(candidate);
       if (changed.outcome !== 'Committed') return yield* vaultError('conflict');
     }
     if (!request.compromised && (yield* revokeOld()) !== 'Committed')
@@ -704,6 +821,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
   });
   return Object.freeze({
     replace: (request: Parameters<typeof replace>[0]) => own(replace(request)),
+    revokeOtherRecoveryDevices: () => own(revokeOtherRecoveryDevices()),
     setup: () => own(setup()),
     test: () => own(runTest()),
     status: () => own(checkedStatus()),

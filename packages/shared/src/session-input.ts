@@ -298,6 +298,7 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
     sizeBytes: block.sizeBytes,
@@ -325,6 +326,7 @@ const toFilePayload = (
   return {
     type: 'file',
     fileId: block.fileId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     fileName: block.fileName,
     mimeType: block.mimeType,
     sizeBytes: block.sizeBytes,
@@ -703,6 +705,40 @@ export const buildSessionTurnInputConfig = (args: {
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,
   };
+};
+
+const sortedJson = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(sortedJson)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.entries(value)
+            .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+            .map(([key, item]) => [key, sortedJson(item)])
+        )
+      : value;
+
+/**
+ * Canonical bytes of what a queued input's author chose, comparable across the
+ * composer's config and the promoted history row. Promotion replaces `resume`
+ * from Session metadata; absent and empty MCP selections mean the same input.
+ */
+export const queuedInputEvidence = (config: unknown): string | undefined => {
+  const input = normalizeSessionTurnInputConfig(config);
+  const cliType = input?.cliType;
+  const agentType = input?.agentType;
+  if (!input || !cliType || !agentType) return undefined;
+  const inputBlocks = normalizeSessionInputBlocks(input.inputBlocks, input.prompt ?? '');
+  if (inputBlocks.length === 0) return undefined;
+  const { resume: _resume, ...chosen } = buildSessionTurnInputConfig({
+    ...input,
+    cliType,
+    agentType,
+    inputBlocks,
+    mcpServerIds: input.mcpServerIds?.length ? input.mcpServerIds : undefined,
+  });
+  const evidence = { ...chosen, _lodyAutomation: input._lodyAutomation };
+  return JSON.stringify(sortedJson(JSON.parse(JSON.stringify(evidence))));
 };
 
 export const buildInitialSessionTurnInputConfig = (args: {

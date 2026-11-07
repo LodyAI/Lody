@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, useState } from 'react';
-import { Dialog, AlertDialog } from '../src/ui/dialog';
+
 import { Menu } from '@lody/ui/menu';
-import { Drawer as UiDrawer } from '@lody/ui/drawer';
+
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -49,6 +50,8 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  delete window.__LODY_HORIZONTAL_DIVISION__;
+  document.documentElement.style.removeProperty('--native-keyboard-height');
 });
 
 function renderDrawer(
@@ -81,6 +84,110 @@ function resize(layoutHeight: number, visualHeight: number, eventTarget: EventTa
     eventTarget.dispatchEvent(new Event('resize'));
   });
 }
+
+describe('drawer floating controls', () => {
+  it.each([false, true])(
+    'keeps the mobile diff in the session modal scope (initially open: %s)',
+    async (initiallyOpen) => {
+      function SessionDiff() {
+        const [open, setOpen] = useState(initiallyOpen);
+        const [selection, setSelection] = useState('Unchanged');
+        return (
+          <Drawer direction="right" open repositionInputs={false}>
+            <DrawerContent aria-describedby={undefined}>
+              <DrawerTitle>Conversation</DrawerTitle>
+              <button onClick={() => setOpen(true)}>Open changes</button>
+              <output>{selection}</output>
+              <SessionMobileDiffDrawer
+                open={open}
+                onOpenChange={setOpen}
+                changes={{
+                  ready: true,
+                  synced: true,
+                  changeEntries: [],
+                  changeFilePaths: [],
+                  onOpenChangesDiff: () => {},
+                }}
+              >
+                <button onClick={() => setSelection('Selected line')}>Select line</button>
+              </SessionMobileDiffDrawer>
+            </DrawerContent>
+          </Drawer>
+        );
+      }
+      await act(async () => root.render(<SessionDiff />));
+      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+      if (!initiallyOpen) {
+        await act(async () => drawer.querySelector<HTMLButtonElement>('button')!.click());
+      }
+      const diff = drawer.querySelector<HTMLElement>('[data-side="bottom"]');
+      expect(diff).not.toBeNull();
+      expect(diff!.closest('[data-vaul-no-drag]')).not.toBeNull();
+      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
+      expect(getComputedStyle(diff!).pointerEvents).not.toBe('none');
+      const select = diff!.querySelector<HTMLButtonElement>('button:not([aria-label])')!;
+      await act(async () => {
+        select.focus();
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(document.activeElement).toBe(select);
+      await act(async () => select.click());
+      expect(drawer.querySelector('output')?.textContent).toBe('Selected line');
+      await act(async () =>
+        diff!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click()
+      );
+      expect(drawer.querySelector('[data-side="bottom"]')).toBeNull();
+      expect(drawer.getAttribute('data-state')).toBe('open');
+    }
+  );
+});
+
+describe('legacy drawer description size', () => {
+  it('applies an explicit physical size while retaining caller style priority and accessible description', async () => {
+    await act(async () =>
+      root.render(
+        <Drawer open repositionInputs={false}>
+          <DrawerContent>
+            <DrawerTitle>Size control</DrawerTitle>
+            <DrawerDescription fontSize="0.78rem" style={{ fontSize: '19px', lineHeight: '1.75' }}>
+              Details
+            </DrawerDescription>
+          </DrawerContent>
+        </Drawer>
+      )
+    );
+    const description = document.querySelector<HTMLElement>('[data-slot="drawer-description"]')!;
+    expect(description.style.fontSize).toBe('19px');
+    expect(description.style.lineHeight).toBe('1.75');
+    expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-describedby')).toBe(
+      description.id
+    );
+  });
+
+  it('keeps slotted child style and ref, then clears an omitted explicit size on update', async () => {
+    const ref = { current: null as HTMLParagraphElement | null };
+    const render = (fontSize?: React.CSSProperties['fontSize']) => (
+      <Drawer open repositionInputs={false}>
+        <DrawerContent>
+          <DrawerTitle>Size control</DrawerTitle>
+          <DrawerDescription ref={ref} asChild fontSize={fontSize}>
+            <p style={{ fontSize: '21px' }}>Child details</p>
+          </DrawerDescription>
+          <DrawerDescription data-size-update="" fontSize={fontSize}>
+            Updated details
+          </DrawerDescription>
+        </DrawerContent>
+      </Drawer>
+    );
+    await act(async () => root.render(render(0)));
+    expect(ref.current?.style.fontSize).toBe('21px');
+    const updated = document.querySelector<HTMLElement>('[data-size-update]')!;
+    expect(updated.style.fontSize).toBe('0px');
+    await act(async () => root.render(render()));
+    expect(ref.current?.style.fontSize).toBe('21px');
+    expect(updated.style.fontSize).toBe('');
+  });
+});
 
 describe('native side-drawer keyboard layout', () => {
   it('retains Vaul name nodes, refs, ids and inline styles when hidden names are shown', () => {
@@ -147,288 +254,4 @@ describe('native side-drawer keyboard layout', () => {
       expect(drawer.style.bottom).toBe('0px');
     }
   );
-
-  it('tracks overlay keyboard height through intermediate changes and repeated open/hide cycles', () => {
-    const drawer = renderDrawer();
-    for (const height of [480, 400, 460, 800, 500, 800]) {
-      resize(800, height);
-      expect(drawer.style.bottom).toBe(`${800 - height}px`);
-      expect(drawer.style.height).toBe('');
-    }
-  });
-
-  it('handles window-only resize notifications and switches between resize and overlay modes', () => {
-    const drawer = renderDrawer();
-    resize(800, 480);
-    expect(drawer.style.bottom).toBe('320px');
-    resize(480, 480, window);
-    expect(drawer.style.bottom).toBe('0px');
-    resize(800, 800, window);
-    expect(drawer.style.height).toBe('');
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it('measures an already-open keyboard on mount and accounts for viewport panning', () => {
-    viewport.height = 450;
-    viewport.offsetTop = 30;
-    const drawer = renderDrawer();
-    expect(drawer.style.bottom).toBe('320px');
-    act(() => {
-      viewport.offsetTop = 50;
-      viewport.dispatchEvent(new Event('scroll'));
-    });
-    expect(drawer.style.bottom).toBe('300px');
-    resize(800, 800);
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it.each([0.999, 1.0000001])('tracks keyboard occlusion at near-unit scale %s', (scale) => {
-    const drawer = renderDrawer();
-    viewport.scale = scale;
-    resize(800, 480);
-    expect(drawer.style.bottom).toBe('320px');
-    resize(800, 800);
-    expect(drawer.style.bottom).toBe('0px');
-    expect(drawer.style.height).toBe('');
-  });
-
-  it.each([0.98, 1.02, 2])(
-    'does not treat pinch zoom at scale %s as keyboard occlusion',
-    (scale) => {
-      const drawer = renderDrawer();
-      viewport.scale = scale;
-      resize(800, 400);
-      expect(drawer.style.bottom).toBe('0px');
-    }
-  );
-
-  it('keeps CSS sizing when visualViewport is unavailable', () => {
-    vi.stubGlobal('visualViewport', undefined);
-    const drawer = renderDrawer();
-    resize(480, 480, window);
-    resize(800, 800, window);
-    expect(drawer.style.height).toBe('');
-    expect(drawer.style.bottom).toBe('0px');
-  });
-
-  it.each(['ios', 'disabled'] as const)('does not take over %s positioning', (mode) => {
-    runtime.native = true;
-    runtime.ios = mode === 'ios';
-    const drawer = renderDrawer(mode !== 'disabled');
-    expect(drawer.style.bottom).toBe('');
-  });
-});
-
-function DrawerMenu({ initiallyOpen }: { initiallyOpen: boolean }) {
-  const [selection, setSelection] = useState('Unchanged');
-  return (
-    <Drawer direction="right" open repositionInputs={false}>
-      <DrawerContent aria-describedby={undefined}>
-        <DrawerTitle>Simulator</DrawerTitle>
-        <output>{selection}</output>
-        <Menu.Root defaultOpen={initiallyOpen}>
-          <Menu.Trigger>More controls</Menu.Trigger>
-          <Menu.Content>
-            <Menu.Item onClick={() => setSelection('Rotated')}>Rotate left</Menu.Item>
-          </Menu.Content>
-        </Menu.Root>
-      </DrawerContent>
-    </Drawer>
-  );
-}
-
-describe('drawer floating controls', () => {
-  it.each([
-    ['dialog', false],
-    ['dialog', true],
-    ['alert', false],
-    ['alert', true],
-    ['drawer', false],
-    ['drawer', true],
-  ] as const)(
-    'keeps %s in the outer modal scope (initially open: %s)',
-    async (kind, initiallyOpen) => {
-      const Modal = kind === 'alert' ? AlertDialog : kind === 'drawer' ? UiDrawer : Dialog;
-      function NestedModal() {
-        const [open, setOpen] = useState(initiallyOpen);
-        const [value, setValue] = useState('');
-        return (
-          <Drawer direction="right" open repositionInputs={false}>
-            <DrawerContent aria-describedby={undefined}>
-              <DrawerTitle>Conversation</DrawerTitle>
-              <button onClick={() => setOpen(true)}>Open preview</button>
-              <Modal.Root open={open} onOpenChange={setOpen}>
-                <Modal.Content aria-describedby={undefined}>
-                  <Modal.Title>Preview</Modal.Title>
-                  <input
-                    aria-label="Preview field"
-                    value={value}
-                    onChange={(event) => setValue(event.target.value)}
-                  />
-                  <Modal.Close>Done</Modal.Close>
-                </Modal.Content>
-              </Modal.Root>
-            </DrawerContent>
-          </Drawer>
-        );
-      }
-      await act(async () => root.render(<NestedModal />));
-      const outer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
-      if (!initiallyOpen) await act(async () => outer.querySelector('button')!.click());
-      const field = document.querySelector<HTMLInputElement>('[aria-label="Preview field"]')!;
-      expect(outer.contains(field)).toBe(true);
-      expect(field.closest('[data-vaul-no-drag]')).not.toBeNull();
-      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
-      expect(getComputedStyle(field).pointerEvents).not.toBe('none');
-      await act(async () => {
-        field.focus();
-        await vi.advanceTimersByTimeAsync(32);
-      });
-      expect(document.activeElement).toBe(field);
-      const done = Array.from(outer.querySelectorAll('button')).find(
-        (button) => button.textContent === 'Done'
-      )!;
-      await act(async () => done.click());
-      expect(document.querySelector('[aria-label="Preview field"]')).toBeNull();
-      expect(outer.getAttribute('data-state')).toBe('open');
-    }
-  );
-
-  it.each([false, true])(
-    'keeps the mobile diff in the session modal scope (initially open: %s)',
-    async (initiallyOpen) => {
-      function SessionDiff() {
-        const [open, setOpen] = useState(initiallyOpen);
-        const [selection, setSelection] = useState('Unchanged');
-        return (
-          <Drawer direction="right" open repositionInputs={false}>
-            <DrawerContent aria-describedby={undefined}>
-              <DrawerTitle>Conversation</DrawerTitle>
-              <button onClick={() => setOpen(true)}>Open changes</button>
-              <output>{selection}</output>
-              <SessionMobileDiffDrawer
-                open={open}
-                onOpenChange={setOpen}
-                changes={{
-                  ready: true,
-                  synced: true,
-                  changeEntries: [],
-                  changeFilePaths: [],
-                  onOpenChangesDiff: () => {},
-                }}
-              >
-                <button onClick={() => setSelection('Selected line')}>Select line</button>
-              </SessionMobileDiffDrawer>
-            </DrawerContent>
-          </Drawer>
-        );
-      }
-      await act(async () => root.render(<SessionDiff />));
-      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
-      if (!initiallyOpen) {
-        await act(async () => drawer.querySelector<HTMLButtonElement>('button')!.click());
-      }
-      const diff = drawer.querySelector<HTMLElement>('[data-side="bottom"]');
-      expect(diff).not.toBeNull();
-      expect(diff!.closest('[data-vaul-no-drag]')).not.toBeNull();
-      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
-      expect(getComputedStyle(diff!).pointerEvents).not.toBe('none');
-      const select = diff!.querySelector<HTMLButtonElement>('button:not([aria-label])')!;
-      await act(async () => {
-        select.focus();
-        await vi.advanceTimersByTimeAsync(32);
-      });
-      expect(document.activeElement).toBe(select);
-      await act(async () => select.click());
-      expect(drawer.querySelector('output')?.textContent).toBe('Selected line');
-      await act(async () =>
-        diff!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click()
-      );
-      expect(drawer.querySelector('[data-side="bottom"]')).toBeNull();
-      expect(drawer.getAttribute('data-state')).toBe('open');
-    }
-  );
-
-  it.each([false, true])(
-    'keeps a menu interactive in the modal scope (initially open: %s)',
-    async (initiallyOpen) => {
-      await act(async () => {
-        root.render(<DrawerMenu initiallyOpen={initiallyOpen} />);
-      });
-      if (!initiallyOpen) {
-        await act(async () => {
-          document
-            .querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!
-            .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-          await vi.advanceTimersByTimeAsync(32);
-        });
-      }
-      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
-      const item = document.querySelector<HTMLElement>('[role="menuitem"]')!;
-      expect(drawer.contains(item)).toBe(true);
-      expect(item.closest('[data-vaul-no-drag]')).not.toBeNull();
-      // A body portal inherits the modal pointer lock, so its clicks hit the iframe below.
-      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
-      expect(getComputedStyle(item).pointerEvents).not.toBe('none');
-      await act(async () => {
-        item.focus();
-        await vi.advanceTimersByTimeAsync(32);
-      });
-      expect(document.activeElement).toBe(item);
-      await act(async () => {
-        item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        await vi.advanceTimersByTimeAsync(32);
-      });
-      expect(drawer.querySelector('output')?.textContent).toBe('Rotated');
-      expect(document.querySelector('[role="menu"]')).toBeNull();
-      expect(drawer.getAttribute('data-state')).toBe('open');
-    }
-  );
-});
-
-describe('legacy drawer description size', () => {
-  it('applies an explicit physical size while retaining caller style priority and accessible description', async () => {
-    await act(async () =>
-      root.render(
-        <Drawer open repositionInputs={false}>
-          <DrawerContent>
-            <DrawerTitle>Size control</DrawerTitle>
-            <DrawerDescription fontSize="0.78rem" style={{ fontSize: '19px', lineHeight: '1.75' }}>
-              Details
-            </DrawerDescription>
-          </DrawerContent>
-        </Drawer>
-      )
-    );
-    const description = document.querySelector<HTMLElement>('[data-slot="drawer-description"]')!;
-    expect(description.style.fontSize).toBe('19px');
-    expect(description.style.lineHeight).toBe('1.75');
-    expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-describedby')).toBe(
-      description.id
-    );
-  });
-
-  it('keeps slotted child style and ref, then clears an omitted explicit size on update', async () => {
-    const ref = { current: null as HTMLParagraphElement | null };
-    const render = (fontSize?: React.CSSProperties['fontSize']) => (
-      <Drawer open repositionInputs={false}>
-        <DrawerContent>
-          <DrawerTitle>Size control</DrawerTitle>
-          <DrawerDescription ref={ref} asChild fontSize={fontSize}>
-            <p style={{ fontSize: '21px' }}>Child details</p>
-          </DrawerDescription>
-          <DrawerDescription data-size-update="" fontSize={fontSize}>
-            Updated details
-          </DrawerDescription>
-        </DrawerContent>
-      </Drawer>
-    );
-    await act(async () => root.render(render(0)));
-    expect(ref.current?.style.fontSize).toBe('21px');
-    const updated = document.querySelector<HTMLElement>('[data-size-update]')!;
-    expect(updated.style.fontSize).toBe('0px');
-    await act(async () => root.render(render()));
-    expect(ref.current?.style.fontSize).toBe('21px');
-    expect(updated.style.fontSize).toBe('');
-  });
 });

@@ -1,11 +1,15 @@
+import { Flock } from '@loro-dev/flock-wasm';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CodeCollabFileIndexWritableFlock } from '@lody/shared';
 import {
-  CodeCollabFileIndexChangedPublishError,
-  publishCodeCollabFileIndexFlock,
-  publishCodeCollabFileIndexSignalFlock,
-} from './code-collab-flock-publish';
+  CODE_COLLAB_FILE_INDEX_LIMITS,
+  buildCodeCollabFileIndexState,
+  readCodeCollabFileIndexFromFlock,
+  readCodeCollabFileGenerations,
+  type CodeCollabFileIndexWritableFlock,
+  type CodeCollabV2FileTreeState,
+} from '@lody/shared';
+import { publishCodeCollabFileIndexFlock } from './code-collab-flock-publish';
 
 function makeFlock(
   initial: Record<string, unknown>,
@@ -16,14 +20,28 @@ function makeFlock(
   readonly snapshot: () => Record<string, unknown>;
 } {
   const values = new Map(Object.entries(initial));
+  const generations = new Map<string, unknown>();
   return {
     flock: {
-      scan: () => [...values].map(([key, value]) => ({ key: [key], value })),
-      set: ([key], value) => {
+      scan: () => [
+        ...[...values].map(([key, value]) => ({ key: [key], value })),
+        ...[...generations].map(([key, value]) => ({ key: [key, 'v'], value })),
+      ],
+      set: (keys, value) => {
+        const key = keys[0];
+        if (keys.length === 2) {
+          generations.set(key, value);
+          return;
+        }
         events.push(`set:${key}`);
         values.set(key, value);
       },
-      delete: ([key]) => {
+      delete: (keys) => {
+        const key = keys[0];
+        if (keys.length === 2) {
+          generations.delete(key);
+          return;
+        }
         events.push(`delete:${key}`);
         values.delete(key);
       },
@@ -41,49 +59,49 @@ function makeFlock(
   };
 }
 
-function makeTransportRepo(
-  events: string[],
-  initial: {
-    readonly local?: Record<string, unknown>;
-    readonly remote?: Record<string, unknown>;
-  } = {}
-) {
-  const local = makeFlock(initial.local ?? {}, events);
-  let remote = { ...(initial.remote ?? {}) };
-  let flushed = false;
-  return {
-    repo: {
-      openFlockDoc: vi.fn(async () => {
-        let syncCount = 0;
-        flushed = false;
-        events.push('open');
-        return {
-          flock: local.flock,
-          syncOnce: async () => {
-            syncCount += 1;
-            events.push(`sync:${syncCount}`);
-            if (flushed) {
-              remote = local.snapshot();
-            } else {
-              local.replace(remote);
-            }
-          },
-        };
-      }),
-      flush: vi.fn(async () => {
-        events.push('flush');
-        flushed = true;
-      }),
-    },
-    resetRemote: (next: Record<string, unknown>) => {
-      remote = { ...next };
-    },
-    localSnapshot: local.snapshot,
-    remoteSnapshot: () => remote,
-  };
-}
-
 describe('Code Collab Flock publication', () => {
+  it('bumps only changed paths and invalidates unchanged rows when the comparison base changes', async () => {
+    const local = makeFlock({}, []);
+    const repo = {
+      openFlockDoc: async () => ({ flock: local.flock, syncOnce: async () => undefined }),
+      flush: async () => undefined,
+    };
+    const files = {
+      'a.ts': { kind: 'text' as const, change: { diff: [1, 0] as [number, number] } },
+      'b.ts': { kind: 'text' as const, change: { diff: [2, 0] as [number, number] } },
+    };
+    const publish = (
+      fileIndex: typeof files,
+      resetDiffGenerations = false,
+      bumpDiffPaths?: readonly string[]
+    ) =>
+      publishCodeCollabFileIndexFlock({
+        repo,
+        flockDocId: 'workspace:fi:owner',
+        fileIndex,
+        updatedAtMs: 1,
+        reconcileRemote: false,
+        resetDiffGenerations,
+        bumpDiffPaths,
+      });
+    await publish(files);
+    const first = readCodeCollabFileGenerations(local.flock);
+    await publish({ ...files, 'a.ts': { ...files['a.ts'], change: { diff: [3, 0] } } });
+    const second = readCodeCollabFileGenerations(local.flock);
+    expect(second['a.ts']).not.toBe(first['a.ts']);
+    expect(second['b.ts']).toBe(first['b.ts']);
+    const current = readCodeCollabFileIndexFromFlock(local.flock);
+    await publish(current as typeof files, false, ['a.ts']);
+    const sameStats = readCodeCollabFileGenerations(local.flock);
+    expect(sameStats['a.ts']).not.toBe(second['a.ts']);
+    expect(sameStats['b.ts']).toBe(second['b.ts']);
+    await publish(current as typeof files, true);
+    const third = readCodeCollabFileGenerations(local.flock);
+    expect(third['a.ts']).not.toBe(second['a.ts']);
+    expect(third['b.ts']).not.toBe(second['b.ts']);
+    expect(readCodeCollabFileIndexFromFlock(local.flock)).toEqual(current);
+  });
+
   it('does not apply a stale file index when cancellation wins a pending pre-sync', async () => {
     const events: string[] = [];
     const local = makeFlock({ 'old.ts': true }, events);
@@ -124,96 +142,94 @@ describe('Code Collab Flock publication', () => {
     expect(local.snapshot()).toEqual({ 'old.ts': true });
   });
 
-  it('pre-syncs reconnect repair and skips write, flush, and post-sync when unchanged', async () => {
-    const events: string[] = [];
-    const { repo, remoteSnapshot } = makeTransportRepo(events);
-    await publishCodeCollabFileIndexFlock({
-      repo,
+  it('cleans an oversized legacy index in bounded commits and converges to the bounded state', async () => {
+    const flock = new Flock();
+    const legacy: CodeCollabV2FileTreeState = {};
+    // Synthetic store-like paths: long, multi-byte and JSON-escaped segments.
+    for (let index = 0; index < 4_000; index += 1) {
+      legacy[`.pnpm-store/v10/index/${String(index).padStart(6, '0')}-缓存-"q"\\name@1.0.0.json`] =
+        true;
+    }
+    for (const [key, value] of Object.entries(legacy)) {
+      flock.set([key], value);
+      flock.set([key, 'v'], { g: 'legacy' });
+    }
+    flock.commit();
+
+    const tree: CodeCollabV2FileTreeState = { src: { kind: 'lazy' } };
+    for (let index = 0; index < 1_200; index += 1) tree[`src/file-${index}.ts`] = true;
+    const target = buildCodeCollabFileIndexState(tree, {
+      'src/file-1.ts': { diff: [2, 1] },
+      'src/removed.ts': { diff: [0, 4], del: true },
+    });
+
+    let exportedFrom = flock.version();
+    const exportedBundleBytes: number[] = [];
+    const recordExport = async () => {
+      const bundle = flock.exportJson(exportedFrom);
+      exportedFrom = flock.version();
+      exportedBundleBytes.push(new TextEncoder().encode(JSON.stringify(bundle)).byteLength);
+    };
+    const result = await publishCodeCollabFileIndexFlock({
+      repo: {
+        openFlockDoc: async () => ({ flock, syncOnce: recordExport }),
+        flush: async () => undefined,
+      },
       flockDocId: 'workspace:fi:owner',
-      fileIndex: { 'src/a.ts': true },
-      updatedAtMs: 1,
+      fileIndex: target,
+      updatedAtMs: 1_800_000_000_000,
       reconcileRemote: false,
     });
-    expect(remoteSnapshot()).toEqual({ 'src/a.ts': true });
-    events.length = 0;
 
-    const result = await publishCodeCollabFileIndexFlock({
-      repo,
-      flockDocId: 'workspace:fi:owner',
-      fileIndex: { 'src/a.ts': true },
-      updatedAtMs: 1,
-      reconcileRemote: true,
+    expect(result.changed).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(target);
+    const generations = readCodeCollabFileGenerations(flock);
+    expect(Object.keys(generations).sort()).toEqual(['src/file-1.ts', 'src/removed.ts']);
+    expect(target['src/removed.ts']).toEqual({
+      kind: 'deleted',
+      change: { diff: [0, 4], del: true },
     });
-
-    expect(result).toEqual({ changed: false });
-    expect(events).toEqual(['open', 'sync:1']);
-  });
-
-  it('repairs missing remote state in pre-sync, write, flush, post-sync order', async () => {
-    const events: string[] = [];
-    const { repo, localSnapshot, remoteSnapshot, resetRemote } = makeTransportRepo(events);
-    await publishCodeCollabFileIndexFlock({
-      repo,
+    expect(exportedBundleBytes.length).toBeGreaterThan(1);
+    for (const bytes of exportedBundleBytes) {
+      expect(bytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
+    }
+    // The complete published state also fits one bundle.
+    const full = new TextEncoder().encode(JSON.stringify(flock.exportJson())).byteLength;
+    expect(full - countTombstoneBytes(flock)).toBeLessThanOrEqual(
+      CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes
+    );
+    // A generation-only reset still commits and syncs, without rewriting file rows.
+    const lastExport = exportedBundleBytes.length;
+    const reset = await publishCodeCollabFileIndexFlock({
+      repo: {
+        openFlockDoc: async () => ({ flock, syncOnce: recordExport }),
+        flush: async () => undefined,
+      },
       flockDocId: 'workspace:fi:owner',
-      fileIndex: { 'src/a.ts': true },
-      updatedAtMs: 1,
+      fileIndex: target,
+      updatedAtMs: 1_800_000_000_001,
       reconcileRemote: false,
+      resetDiffGenerations: true,
     });
-    expect(localSnapshot()).toEqual({ 'src/a.ts': true });
-    expect(remoteSnapshot()).toEqual({ 'src/a.ts': true });
-    resetRemote({});
-    events.length = 0;
-
-    const result = await publishCodeCollabFileIndexFlock({
-      repo,
-      flockDocId: 'workspace:fi:owner',
-      fileIndex: { 'src/a.ts': true },
-      updatedAtMs: 1,
-      reconcileRemote: true,
-    });
-
-    expect(result).toEqual({ changed: true });
-    expect(events).toEqual(['open', 'sync:1', 'set:src/a.ts', 'commit', 'flush', 'sync:2']);
-    expect(localSnapshot()).toEqual({ 'src/a.ts': true });
-    expect(remoteSnapshot()).toEqual({ 'src/a.ts': true });
-  });
-
-  it('advances the synced signal revision before flush and post-sync', async () => {
-    const events: string[] = [];
-    const { repo } = makeTransportRepo(events, {
-      local: { s: { v: 1, r: 7 } },
-      remote: { s: { v: 1, r: 7 } },
-    });
-
-    const result = await publishCodeCollabFileIndexSignalFlock({
-      repo,
-      flockDocId: 'workspace:fis:owner',
-      updatedAtMs: 1,
-    });
-
-    expect(result).toEqual({ changed: true, revision: 8 });
-    expect(events).toEqual(['open', 'sync:1', 'set:s', 'commit', 'flush', 'sync:2']);
-  });
-
-  it('does not post-sync after a flush failure', async () => {
-    const events: string[] = [];
-    const { repo } = makeTransportRepo(events);
-    repo.flush.mockImplementationOnce(async () => {
-      events.push('flush');
-      throw new Error('flush failed');
-    });
-
-    const publication = publishCodeCollabFileIndexFlock({
-      repo,
-      flockDocId: 'workspace:fi:owner',
-      fileIndex: { 'src/a.ts': true },
-      updatedAtMs: 1,
-      reconcileRemote: true,
-    });
-    await expect(publication).rejects.toBeInstanceOf(CodeCollabFileIndexChangedPublishError);
-    await expect(publication).rejects.toMatchObject({
-      cause: expect.objectContaining({ message: 'flush failed' }),
-    });
-    expect(events).toEqual(['open', 'sync:1', 'set:src/a.ts', 'commit', 'flush']);
+    expect(reset.changed).toBe(true);
+    expect(readCodeCollabFileIndexFromFlock(flock)).toEqual(target);
+    for (const path of Object.keys(generations))
+      expect(readCodeCollabFileGenerations(flock)[path]).not.toBe(generations[path]);
+    expect(exportedBundleBytes.slice(lastExport).length).toBeGreaterThan(0);
+    for (const bytes of exportedBundleBytes.slice(lastExport))
+      expect(bytes).toBeLessThanOrEqual(CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes);
   });
 });
+
+function countTombstoneBytes(flock: Flock): number {
+  const bundle = flock.exportJson() as { entries: Record<string, { d?: unknown }> };
+  let bytes = 0;
+  for (const [key, record] of Object.entries(bundle.entries)) {
+    if (record.d === undefined) {
+      bytes += new TextEncoder().encode(
+        `${JSON.stringify(key)}:${JSON.stringify(record)},`
+      ).byteLength;
+    }
+  }
+  return bytes;
+}

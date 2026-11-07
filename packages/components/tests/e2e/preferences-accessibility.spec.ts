@@ -35,13 +35,14 @@ const client = {
     }),
   },
 };
-export const initOneSignal = async () => client;
-export const loadOneSignalSdk = initOneSignal;
-export const isOneSignalSupported = () => true;
-export const getOneSignalPermissionState = async () => 'granted';
-export const getOneSignalPushSubscriptionOptedIn = async () => optedIn;
-export const withOneSignal = async callback => callback(client);
-export const scheduleOneSignalTask = callback => { void withOneSignal(callback); };
+export const initPush = async () => client;
+export const installPushPort = () => () => {};
+export const logoutPush = async () => {};
+export const isPushSupported = () => true;
+export const getPushPermissionState = async () => 'granted';
+export const getPushSubscriptionOptedIn = async () => optedIn;
+export const withPush = async callback => callback(client);
+export const schedulePushTask = callback => { void withPush(callback); };
 `;
 
 for (const { locale, names, codeHelper } of cases) {
@@ -92,7 +93,7 @@ for (const { locale, names, codeHelper } of cases) {
     page,
   }) => {
     await page.route('https://**/*', (route) => route.abort());
-    await page.route('**/src/lib/onesignal.ts*', (route) =>
+    await page.route('**/src/lib/push-notifications.ts*', (route) =>
       route.fulfill({ contentType: 'text/javascript', body: notificationService })
     );
     await page.addInitScript(() => {

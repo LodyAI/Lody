@@ -14,7 +14,7 @@ PR: [#1729](https://github.com/LodyAI/Lody/pull/1729)
 
 复现的六处 `doc.ts` 错误涉及不存在的 `runLegacy`、`acquireScopeLegacy`、`.native`，以及未导入的 `Scope`。#1692 的 native Repo 测试没有验证产品使用的 Promise 边界。本文更正[此前 Daemon 决策](../architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.zh.md)中目录实现与证据，保留其授权、active Turn 和借用 Daemon 副本的约定。本实现替代 main 上 `de8debe03` 的临时 Promise helper；原有 facade 超时、detach 和 acquisition 行为覆盖保留并适配到 scoped owner。
 
-workspace 启动时在后台建立元数据和 workspace reader。请求只为已授权 Machine Flock 接纳 reader。同 key 请求共享 acquisition、有限退避和 baseline。SDK 适配器调用 `acquireFlockDoc` 与 `joinFlockDocRoom`；元数据调用 `joinMetaRoom`。显式副本 lease 阻止 unload 在读取期间替换对象，room 提供后续更新。不创建第二个 Repo、存储 owner 或 native wrapper。
+workspace 启动时在后台建立元数据和 workspace reader。请求只为已授权 Machine Flock 接纳 reader。同 key 请求共享 acquisition、有限退避和 baseline。除元数据和 workspace Flock 外，reader 在闲置窗口后释放并停止重试（[room 生命周期](2026-11-02-cross-machine-read-room-lifetime.zh.md)）。SDK 适配器调用 `acquireFlockDoc` 与 `joinFlockDocRoom`；元数据调用 `joinMetaRoom`。显式副本 lease 阻止 unload 在读取期间替换对象，room 提供后续更新。不创建第二个 Repo、存储 owner 或 native wrapper。
 
 `WorkspaceCatalogSyncLegacy` 是唯一 Promise 执行入口，消费者为 `LoroDocumentManager`；manager 迁移到原生所有权后删除该入口。Effect 管理 reader 重试、Clock 等待和 Scope 关闭。这是适配外部 SDK I/O 的小生命周期单元，不迁移尚未完成的 workspace/Session 消费链。
 

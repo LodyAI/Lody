@@ -8,10 +8,18 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
+import { ACP_INPUT_OUTCOME_UNKNOWN } from '../providers/acp-interaction-client';
+
+export class AcpInputOutcomeUnknownError extends Error {}
 
 export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
+  /**
+   * Sign-in method the reader picked from the agent's advertised list. Sent only
+   * to Machines that understand it; elsewhere the daemon shows its own picker.
+   */
+  methodId?: string;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
 };
 
@@ -106,6 +114,7 @@ export function useMachineAcpAuthentication(
             requestId,
             action: 'start',
             configId: args.configId,
+            ...(args.methodId ? { methodId: args.methodId } : {}),
           });
           const response = await responsePromise;
           if (!response) {
@@ -170,7 +179,19 @@ export function useMachineAcpAuthentication(
         authorizationCode: args.authorizationCode,
       });
       const response = await responsePromise;
-      if (!response || !response.success || response.disposition !== 'input-accepted') {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
+        throw new AcpInputOutcomeUnknownError(
+          t(
+            'agents.authentication.inputOutcomeUnknown',
+            'The response may have been received. Wait for sign-in to finish or cancel and start again.'
+          )
+        );
+      }
+      if (!response.success || response.disposition !== 'input-accepted') {
         throw new Error(
           response?.error ??
             t(
@@ -205,7 +226,19 @@ export function useMachineAcpAuthentication(
         authenticationInput: JSON.stringify(args.input),
       });
       const response = await responsePromise;
-      if (!response || !response.success || response.disposition !== 'input-accepted') {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
+        throw new AcpInputOutcomeUnknownError(
+          t(
+            'agents.authentication.inputOutcomeUnknown',
+            'The response may have been received. Wait for sign-in to finish or cancel and start again.'
+          )
+        );
+      }
+      if (!response.success || response.disposition !== 'input-accepted') {
         throw new Error(
           response?.error ??
             t(

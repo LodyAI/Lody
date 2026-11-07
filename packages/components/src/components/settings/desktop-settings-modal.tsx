@@ -1,3 +1,4 @@
+import { WorkspaceSettings } from './e2ee/workspace-security';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { MemorySetting } from './memory-setting';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
@@ -39,6 +40,7 @@ import { BillingSettingsComponent } from './billing-setting';
 import { StatsSettingsComponent } from './stats-setting';
 import { ProjectSettingsComponent } from './project-settings';
 import { MachineAgentSettings } from './machine-agent-settings';
+import { LodyAgentSetting } from './lody-agent-setting';
 import { IntegrationsSettingsComponent } from './integrations-setting';
 import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
 import { AboutSettingsComponent } from './about-setting';
@@ -255,7 +257,10 @@ function SettingsModalBody() {
   const resolvedTheme = useResolvedTheme();
   const shortcutsAllowed = useWorkspaceFeature('shortcuts');
   const sharingAllowed = useWorkspaceFeature('sharing');
-  const platformTabs = useVisibleSettingsTabs().filter(tab => (tab.id !== 'prompt-shortcuts' || shortcutsAllowed) && (tab.id !== 'shares' || sharingAllowed));
+  const platformTabs = useVisibleSettingsTabs().filter(
+    (tab) =>
+      (tab.id !== 'prompt-shortcuts' || shortcutsAllowed) && (tab.id !== 'shares' || sharingAllowed)
+  );
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;
@@ -558,7 +563,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
     case 'account':
       return <AccountSettingsComponent surface="account" />;
     case 'workspace':
-      return <AccountSettingsComponent surface="workspace" />;
+      return <WorkspaceSettings />;
     case 'people':
       return <AccountSettingsComponent surface="workspace" />;
     case 'billing':
@@ -575,6 +580,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
           onSelectedMachineChange={setSelectedMachineId}
         />
       );
+    case 'lody-agent':
+      return <LodyAgentSetting />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':

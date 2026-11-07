@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import 'monaco-editor/min/vs/editor/editor.main.css';
+import './session-monaco-text-viewer.css';
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
@@ -260,7 +261,7 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div className={clsx(stylex.props(styles.root).className, className)}>
+    <div className={clsx(stylex.props(styles.root).className, 'lody-session-monaco', className)}>
       <div ref={containerRef} {...stylex.props(styles.editorContainer)} />
     </div>
   );

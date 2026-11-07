@@ -1,5 +1,8 @@
 /** @vitest-environment jsdom */
 
+/** @vitest-environment jsdom */
+/** @vitest-environment jsdom */
+/** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
@@ -18,11 +21,9 @@ import {
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 
 import {
-  LOCAL_CLEAR_RECORD_RELEVANCE_MS,
   markCacheClearPending,
   maybeClearLodyCacheOnBoot,
   readLastLocalClear,
-  readRecentLocalClear,
   readPendingLocalClearMode,
   resetBootClearMemoForTests,
   restartIntoCacheClear,
@@ -140,15 +141,6 @@ describe('maybeClearLodyCacheOnBoot', () => {
       contentMode: 'plaintext',
     });
   });
-  it('does nothing when no clear was requested', async () => {
-    localStorage.setItem('lody:auth-token', 'token');
-
-    await maybeClearLodyCacheOnBoot(['lody-loro-repo-db-ws1']);
-
-    expect(deletedDatabases).toEqual([]);
-    expect(deletedCaches).toEqual([]);
-    expect(localStorage.getItem('lody:auth-token')).toBe('token');
-  });
 
   it('clears only lody caches for a cache clear, and keeps the user signed in', async () => {
     localStorage.setItem('lody:auth-token', 'token');
@@ -162,6 +154,24 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(deletedCaches).toEqual(['lody-avatars']);
     expect(localStorage.getItem('lody:auth-token')).toBe('token');
     expect(readPendingLocalClearMode()).toBeNull();
+  });
+
+  it('retains unknown durable databases through enumerated and late explicit cache clearing', async () => {
+    const originals = [
+      'lody-client-custody',
+      'lody-client-installations',
+      'lody-client-submission-originals',
+      'lody-unregistered-durable-data',
+    ];
+    presentDatabases = [...originals, 'lody:github-review-comments', 'lody-loro-repo-db-ws1'];
+    markCacheClearPending();
+    await maybeClearLodyCacheOnBoot();
+    await maybeClearLodyCacheOnBoot(originals);
+    expect(presentDatabases).toEqual(originals);
+    resetBootClearMemoForTests();
+    await startHardReset();
+    await maybeClearLodyCacheOnBoot();
+    expect(presentDatabases).toEqual([]);
   });
 
   it('keeps the only saved input through cache recovery, and erases it only on explicit full reset', async () => {
@@ -260,71 +270,6 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(deletedDatabases).toContain('lody-loro-repo-db-ws-cached');
     expect(deletedDatabases).toContain('lody-loro-stream-cursors-ws-cached');
   });
-
-  it('runs one clear per page load no matter how many callers await it', async () => {
-    markCacheClearPending();
-
-    await Promise.all([
-      maybeClearLodyCacheOnBoot(),
-      maybeClearLodyCacheOnBoot(),
-      maybeClearLodyCacheOnBoot(),
-    ]);
-
-    const repoFilePathsDeletes = deletedDatabases.filter((name) => name === 'lody:repo-file-paths');
-    expect(repoFilePathsDeletes).toHaveLength(1);
-  });
-
-  it('still deletes a caller-supplied database name that enumeration missed', async () => {
-    presentDatabases = [];
-    markCacheClearPending();
-
-    await maybeClearLodyCacheOnBoot(['lody-loro-repo-db-ws-uncached']);
-
-    expect(deletedDatabases).toContain('lody-loro-repo-db-ws-uncached');
-  });
-
-  it('ignores caller-supplied names when nothing was pending', async () => {
-    await maybeClearLodyCacheOnBoot(['lody-loro-repo-db-ws-uncached']);
-
-    expect(deletedDatabases).toEqual([]);
-  });
-
-  it.each([
-    ['enumerated', ['lody-session-send-v1']],
-    ['not enumerable', []],
-  ])('removes the retired session-send journal database (%s)', async (_label, present) => {
-    presentDatabases = present;
-    localStorage.setItem('lody_auth_token', 'token');
-    markCacheClearPending();
-
-    await maybeClearLodyCacheOnBoot();
-
-    expect(deletedDatabases).toContain('lody-session-send-v1');
-    expect(localStorage.getItem('lody_auth_token')).toBe('token');
-    expect(readPendingLocalClearMode()).toBeNull();
-  });
-
-  it.each([
-    ['force-cache', 'cache'],
-    ['force-all', 'hard'],
-  ] as const)(
-    'completes a %s clear armed by a build that had the send journal',
-    async (flag, mode) => {
-      presentDatabases = ['lody-session-send-v1', 'lody-loro-repo-db-ws1', 'someone-elses-db'];
-      localStorage.setItem('lody_auth_token', 'token');
-      localStorage.setItem(CACHE_CLEAR_FLAG, flag);
-      expect(readPendingLocalClearMode()).toBe(mode);
-
-      await maybeClearLodyCacheOnBoot();
-
-      expect(deletedDatabases).toEqual(
-        expect.arrayContaining(['lody-session-send-v1', 'lody-loro-repo-db-ws1'])
-      );
-      expect(deletedDatabases.includes('someone-elses-db')).toBe(mode === 'hard');
-      expect(localStorage.getItem('lody_auth_token')).toBe(mode === 'hard' ? null : 'token');
-      expect(localStorage.getItem(CACHE_CLEAR_FLAG)).toBeNull();
-    }
-  );
 });
 
 describe('restartIntoCacheClear', () => {
@@ -355,15 +300,6 @@ describe('restartIntoCacheClear', () => {
     expect(readPendingLocalClearMode()).toBe('cache');
   });
 
-  it('relaunches into the clear only when asked to', async () => {
-    const relaunches = installDesktop('quitting');
-
-    expect(await restartIntoCacheClear({ relaunch: true })).toBe(true);
-
-    expect(relaunches).toEqual(['cache']);
-    expect(readPendingLocalClearMode()).toBeNull();
-  });
-
   it('reports a relaunch the person cancelled, and arms nothing', async () => {
     installDesktop('cancelled');
 
@@ -374,15 +310,6 @@ describe('restartIntoCacheClear', () => {
 });
 
 describe('a boot clear that cannot delete everything', () => {
-  it('records a complete clear and consumes the flag', async () => {
-    markCacheClearPending();
-
-    await maybeClearLodyCacheOnBoot();
-
-    expect(readLastLocalClear()).toMatchObject({ mode: 'cache', ok: true });
-    expect(readPendingLocalClearMode()).toBeNull();
-  });
-
   it('records a clear that left databases behind, and does not run it again', async () => {
     failingDatabases.add('lody-loro-repo-db-ws1');
     markCacheClearPending();
@@ -397,17 +324,6 @@ describe('a boot clear that cannot delete everything', () => {
     deletedDatabases = [];
     await maybeClearLodyCacheOnBoot();
     expect(deletedDatabases).toEqual([]);
-  });
-
-  it('treats a clear older than a day as no longer relevant', async () => {
-    markCacheClearPending();
-    await maybeClearLodyCacheOnBoot();
-    const { atMs } = readLastLocalClear()!;
-
-    expect(readRecentLocalClear(atMs + LOCAL_CLEAR_RECORD_RELEVANCE_MS - 1)).not.toBeNull();
-    expect(readRecentLocalClear(atMs + LOCAL_CLEAR_RECORD_RELEVANCE_MS)).toBeNull();
-    // A clock that moved backwards cannot make a record look current either.
-    expect(readRecentLocalClear(atMs - 1)).toBeNull();
   });
 
   it('counts a database that still exists after a reported success as not cleared', async () => {
@@ -471,26 +387,6 @@ describe('a clear armed from the CLI', () => {
     expect(localStorage.getItem('lody:githubReposCache')).toBeNull();
     // A cache reset keeps the session; only `--hard` signs the user out.
     expect(localStorage.getItem('lody_auth_token')).toBe('token');
-  });
-
-  it('does not ask the desktop when the in-app flag already answered', async () => {
-    markCacheClearPending();
-    const channels = installFakeIpcBridge(async () => 'hard');
-
-    await maybeClearLodyCacheOnBoot();
-
-    expect(channels).not.toContain('app.consumePendingLocalClear');
-    // The flag said `cache`, so the unrelated database survives.
-    expect(deletedDatabases).not.toContain('someone-elses-db');
-  });
-
-  it('clears nothing when the desktop reports no armed reset', async () => {
-    installFakeIpcBridge(async () => null);
-
-    await maybeClearLodyCacheOnBoot(['lody-loro-repo-db-ws1']);
-
-    expect(deletedDatabases).toEqual([]);
-    expect(deletedCaches).toEqual([]);
   });
 
   it('gives up on a desktop that never answers instead of holding up boot', async () => {

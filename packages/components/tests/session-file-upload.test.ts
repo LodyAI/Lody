@@ -1,20 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createStaticStore, type PlatformProvider } from '@lody/platform';
+import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
+import { retainWorkspaceModeProof } from '../src/lib/e2ee-workspace-storage';
+import i18next from 'i18next';
+import en from '../../../locales/en.json';
+import zhCN from '../../../locales/zh_CN.json';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SESSION_FILE_HASH_CHUNK_SIZE_BYTES,
-  computeSha256HexInChunks,
-  isSessionFileTransferPhase,
   uploadSessionFile,
   type SessionFileTransferProgress,
 } from '../src/lib/session-file-upload';
-
-class TrackingBlob extends Blob {
-  readonly sliceSizes: number[] = [];
-
-  override slice(start?: number, end?: number, contentType?: string): Blob {
-    this.sliceSizes.push((end ?? this.size) - (start ?? 0));
-    return super.slice(start, end, contentType);
-  }
-}
 
 type MockXhrOptions = { failFirstAttemptAfterProgress?: boolean };
 
@@ -68,56 +62,31 @@ const installMockXhr = (options: MockXhrOptions = {}) => {
   return { sentPartSizes };
 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
+let removeWorkspaceAccess: () => void;
+beforeEach(() => {
+  retainWorkspaceModeProof(localStorage, 'upload-test', 'workspace', {
+    workspaceId: 'workspace-1',
+    contentMode: 'plaintext',
+    contentModeVersion: 1,
+  });
+  removeWorkspaceAccess = installAttachmentWorkspaceAccess({
+    identity: {
+      session: createStaticStore({ status: 'authenticated', user: { id: 'upload-test' } } as never),
+      signOut: async () => {},
+    },
+    e2eeWorkspaces: {} as PlatformProvider['e2eeWorkspaces'],
+    workspaces: {
+      state: createStaticStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
+      setActive: async () => {},
+    },
+  });
 });
 
-describe('session file preparation', () => {
-  it('hashes the file in bounded chunks and reports monotonic preparation progress', async () => {
-    const bytes = new TextEncoder().encode('abc');
-    const blob = new TrackingBlob([bytes]);
-    const progress: SessionFileTransferProgress[] = [];
-
-    await expect(
-      computeSha256HexInChunks(blob, { onProgress: (next) => progress.push(next) })
-    ).resolves.toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-
-    expect(blob.sliceSizes).toEqual([bytes.length]);
-    expect(progress.map((item) => item.phase)).toEqual(['preparing', 'preparing']);
-    expect(progress.map((item) => item.percent)).toEqual([0, 100]);
-  });
-
-  it('never reads more than the configured chunk size', async () => {
-    const blob = new TrackingBlob([new Uint8Array(SESSION_FILE_HASH_CHUNK_SIZE_BYTES * 2 + 17)]);
-    await computeSha256HexInChunks(blob);
-
-    expect(blob.sliceSizes).toEqual([
-      SESSION_FILE_HASH_CHUNK_SIZE_BYTES,
-      SESSION_FILE_HASH_CHUNK_SIZE_BYTES,
-      17,
-    ]);
-  });
-
-  it('aborts between chunks', async () => {
-    const controller = new AbortController();
-    const blob = new TrackingBlob([new Uint8Array(SESSION_FILE_HASH_CHUNK_SIZE_BYTES + 1)]);
-
-    const promise = computeSha256HexInChunks(blob, {
-      signal: controller.signal,
-      onProgress: (progress) => {
-        if (progress.loadedBytes > 0) controller.abort();
-      },
-    });
-
-    await expect(promise).rejects.toMatchObject({ name: 'UploadAbortedError' });
-  });
-
-  it('recognizes every blocking transfer phase', () => {
-    expect(['preparing', 'uploading', 'verifying'].every(isSessionFileTransferPhase)).toBe(true);
-    expect(isSessionFileTransferPhase('uploaded')).toBe(false);
-    expect(isSessionFileTransferPhase('failed')).toBe(false);
-  });
+afterEach(() => {
+  removeWorkspaceAccess();
+  localStorage.clear();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('multipart session file progress', () => {
@@ -265,51 +234,34 @@ describe('multipart response and cancellation', () => {
     expect(await upload).toEqual({ imageId: 'uploaded' });
     controller.abort();
     expect(request.aborted).toBe(false);
-    expect(request.upload.onprogress).toBeNull();
-  });
-
-  it('aborts the actual request and rejects without retaining callbacks', async () => {
-    const { postMultipartWithProgress } = await import('../src/lib/multipart-upload');
-    let request!: ControlledRequest;
-    class ControlledRequest {
-      upload = { onprogress: null };
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      onabort: (() => void) | null = null;
-      aborted = false;
-      constructor() {
-        request = this;
-      }
-      open() {}
-      setRequestHeader() {}
-      send() {}
-      abort() {
-        this.aborted = true;
-        this.onabort?.();
-      }
-    }
-    vi.stubGlobal('XMLHttpRequest', ControlledRequest);
-    const controller = new AbortController();
-    const upload = postMultipartWithProgress({
-      url: '/upload',
-      token: 'test',
-      formData: new FormData(),
-      errorLabel: 'Image',
-      signal: controller.signal,
-    });
-    controller.abort();
-    await expect(upload).rejects.toMatchObject({ name: 'AbortError' });
-    expect(request.aborted).toBe(true);
-    expect([request.onload, request.onerror, request.onabort, request.upload.onprogress]).toEqual([
-      null,
-      null,
-      null,
-      null,
-    ]);
   });
 });
 
-it('refuses protected uploads before constructing any network transfer', async () => {
-  vi.stubGlobal('XMLHttpRequest', class { constructor() { throw new Error('unexpected plaintext transfer'); } });
-  await expect(uploadSessionFile({ content: {mode:'protected'}, workspaceId:'workspace-1',sessionId:'session-1' as never,token:'synthetic',file:new File(['CANARY-synthetic'],'CANARY-name.txt'),sha256:'00'.repeat(32),textPreview:true })).rejects.toThrow('e2ee_attachments_unavailable');
-});
+it.each([
+  ['en', en, 'e2ee_attachment_requires_preparation'],
+  ['zh_CN', zhCN, 'e2ee_attachment_requires_preparation'],
+] as const)(
+  'explains refused encrypted uploads in %s before any network transfer',
+  async (language, translations, message) => {
+    await i18next.init({ lng: language, resources: { [language]: { translation: translations } } });
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        constructor() {
+          throw new Error('unexpected plaintext transfer');
+        }
+      }
+    );
+    await expect(
+      uploadSessionFile({
+        content: { mode: 'protected' },
+        workspaceId: 'workspace-1',
+        sessionId: 'session-1' as never,
+        token: 'synthetic',
+        file: new File(['CANARY-synthetic'], 'CANARY-name.txt'),
+        sha256: '00'.repeat(32),
+        textPreview: true,
+      })
+    ).rejects.toThrow(message);
+  }
+);

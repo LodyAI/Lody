@@ -23,6 +23,33 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+
+const offlineScope = stylex.create({
+  frame: {
+    display: 'flex',
+    minHeight: '100dvh',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 2)' },
+  context: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-normal)',
+    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 80%, transparent)',
+  },
+});
+
 const sceneStyles = stylex.create({
   footer: {
     containerType: 'inline-size',
@@ -360,6 +387,26 @@ function MachineScopeShell() {
   );
 }
 
+function OfflineMachineScopeShell() {
+  return (
+    <div {...stylex.props(offlineScope.frame)}>
+      {['build-machine', 'ubuntu-gpu-workstation-shanghai-02'].map((name) => (
+        <div key={name} {...stylex.props(offlineScope.row)}>
+          <DesktopMachineMenu
+            value={'machine-remote' as MachineId}
+            selectedLabel={name}
+            offline
+            options={[{ value: machineId, label: 'zx-macbook' }]}
+            onChange={fn()}
+            onAddMachine={fn()}
+          />
+          <div {...stylex.props(offlineScope.context)}>lody</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GrokConfigShell() {
   const store = useMemo(() => {
     const next = createStore();
@@ -549,6 +596,14 @@ export const DeepSeekModels: Story = {
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },
   render: () => <MachineScopeShell />,
+};
+export const MachineScopeOffline: Story = {
+  args: { isEmptyConversation: true },
+  render: () => <OfflineMachineScopeShell />,
+};
+export const MachineScopeOfflineLight: Story = {
+  ...MachineScopeOffline,
+  globals: { theme: 'light' },
 };
 export const MachineScopeEmpty: Story = {
   args: { isEmptyConversation: true },

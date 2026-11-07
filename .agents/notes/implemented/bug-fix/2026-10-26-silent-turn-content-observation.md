@@ -76,7 +76,7 @@ before reading, while the turn still owns its state. This is the same drain alre
 used by finalization, moved ahead of the verdict rather than a second recovery
 mechanism. Both execution paths await it through their existing Effect Promise
 boundary. Stop interrupts the waiter; finalization still retains the upload owner
-until it drains, then releases execution and presence. Failed/refused uploads
+within the shared turn deadline; timeout/shutdown releases execution while owned uploads may finish later against their exact turn. Failed/refused uploads
 retain the existing caught-error behavior and add no success fact. Events arriving
 after all current uploads drain keep their captured target but do not retroactively
 change an already-settled outcome.
@@ -95,8 +95,8 @@ would expand this issue. No native boundary or unit-ledger fact changes.
 
 ## Verification and simplification
 
-All 454 cases pass in four owning suites covering ACP batching, execution, image
-upload and AgentClient routing using synthetic provider/upload/Git inputs, real local history and native
+The ACP batching, execution, image-upload and AgentClient routing suites use
+synthetic provider/upload/Git inputs, real local history and native
 presence. Explicit gates cover upload tails, failure/refusal, begin-only and failed
 status, Stop during the upload, late end callbacks and delayed writes across
 different IDs or the same ID with a new epoch. Assertions inspect history, terminal

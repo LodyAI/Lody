@@ -162,6 +162,159 @@ describe('MessageProcessor permission responses', () => {
   });
 });
 
+const deferred = () => {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
+describe('MessageProcessor local control lanes', () => {
+  const target = { machineId: 'm-1' as MachineId, workspaceId: 'ws-1' as WorkspaceId };
+  const refresh = (configId: string): LocalSessionControlRequestValidated => ({
+    ...target,
+    type: 'machine/acp-capabilities-refresh',
+    configId,
+  });
+  const lifecycle = (
+    type: 'machine/restart' | 'machine/upgrade'
+  ): LocalSessionControlRequestValidated => ({
+    ...target,
+    type,
+    requesterUserId: 'u-1',
+    requestToken: 'token-1',
+    requestId: 'req-1',
+  });
+  const cancel: LocalSessionControlRequestValidated = {
+    ...target,
+    type: 'session/cancel',
+    sessionId: 's-1' as SessionId,
+    turnId: 'turn-1',
+  };
+  const independentMessages: LocalSessionControlRequestValidated[] = [
+    { ...target, type: 'machine/status' },
+    { ...target, type: 'machine/ping', requestId: 'ping-1' },
+    cancel,
+    refresh('cfg-2'),
+    { ...target, type: 'machine/provider-rate-limits-refresh', configId: 'cfg-1' },
+    { ...target, type: 'machine/acp-binary-status', agentType: 'codex' },
+    { ...target, type: 'machine/acp-binary-install', agentType: 'codex' },
+    lifecycle('machine/restart'),
+    lifecycle('machine/upgrade'),
+  ];
+
+  it.each(independentMessages)(
+    'completes $type while a capability refresh is blocked',
+    async (message) => {
+      const processor = new MessageProcessor(createSilentLogger(), 2);
+      const started = deferred();
+      const release = deferred();
+      const completed = deferred();
+      const events: string[] = [];
+      try {
+        processor.enqueue(refresh('cfg-1'), async () => {
+          started.resolve();
+          await release.promise;
+          events.push('refresh:end');
+        });
+        await started.promise;
+        processor.enqueue(message, async () => {
+          events.push('control:end');
+          completed.resolve();
+        });
+        await withTimeout(completed.promise, 1000);
+        expect(events).toEqual(['control:end']);
+      } finally {
+        release.resolve();
+        processor.stop();
+        await processor.drain();
+      }
+    }
+  );
+
+  it('cancels a session while its chat is blocked on the main lane', async () => {
+    const processor = new MessageProcessor(createSilentLogger(), 2);
+    const started = deferred();
+    const release = deferred();
+    const completed = deferred();
+    const events: string[] = [];
+    try {
+      processor.enqueue(
+        {
+          ...target,
+          type: 'session/chat',
+          sessionId: 's-1' as SessionId,
+          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+          userTurnId: 'turn-1',
+          userId: 'u-1',
+          userName: 'User',
+          userEmail: 'user@example.com',
+        },
+        async () => {
+          started.resolve();
+          await release.promise;
+          events.push('chat:end');
+        }
+      );
+      await started.promise;
+      processor.enqueue(cancel, async () => {
+        events.push('cancel:end');
+        completed.resolve();
+      });
+      await withTimeout(completed.promise, 1000);
+      expect(events).toEqual(['cancel:end']);
+    } finally {
+      release.resolve();
+      processor.stop();
+      await processor.drain();
+    }
+  });
+
+  it.each([
+    { name: 'same config refreshes', first: refresh('cfg-1'), second: refresh('cfg-1') },
+    {
+      name: 'restart then upgrade',
+      first: lifecycle('machine/restart'),
+      second: lifecycle('machine/upgrade'),
+    },
+    {
+      name: 'upgrade then restart',
+      first: lifecycle('machine/upgrade'),
+      second: lifecycle('machine/restart'),
+    },
+  ])('serializes $name', async ({ first, second }) => {
+    const processor = new MessageProcessor(createSilentLogger(), 2);
+    const started = deferred();
+    const release = deferred();
+    const marker = deferred();
+    const events: string[] = [];
+    try {
+      processor.enqueue(first, async () => {
+        started.resolve();
+        await release.promise;
+        events.push('first:end');
+      });
+      await started.promise;
+      processor.enqueue(second, async () => {
+        events.push('second:end');
+      });
+      processor.enqueue({ ...target, type: 'machine/ping', requestId: 'marker' }, async () => {
+        marker.resolve();
+      });
+      await withTimeout(marker.promise, 1000);
+      expect(events).toEqual([]);
+      release.resolve();
+      await processor.drain();
+      expect(events).toEqual(['first:end', 'second:end']);
+    } finally {
+      release.resolve();
+      processor.stop();
+      await processor.drain();
+    }
+  });
+});
+
 describe('MessageProcessor machine/acp-authenticate lanes', () => {
   const machineId = 'm-1';
   const workspaceId = 'ws-1';

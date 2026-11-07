@@ -233,7 +233,7 @@ and the original Roost head. They are pre-existing warning behavior, not a Roost
 regression. The operator success tests now use deterministic process-command
 fixtures and retain assertions that uncertain snapshots refuse recovery without
 replay. The 63-case owning suite passes. Evidence and the unchanged production
-boundary are recorded in the [Inbox note](../architecture/2026-10-12-operation-inbox.md#deterministic-operator-recovery-verification-2026-10-17).
+boundary are recorded in the [Inbox note](../architecture/2026-10-12-operation-inbox.md#superseded-operator-recovery).
 The full root check passes with those fixtures.
 
 Documentation checks now pass after checking out Kimi `743c6641` and Pi `64482a51`
@@ -258,4 +258,4 @@ remains draft; implementation does not approve it.
 Related decisions: [incremental recovery](2026-10-16-roost-incremental-history.md),
 [write amplification](2026-10-16-roost-storage-write-amplification.md),
 [native runtime](../../proposed/architecture/2026-10-09-roost-native-runtime.md),
-[creation feature gate](../../proposed/feature/2026-10-08-roost-history-feature-gate.md).
+[creation feature gate](../feature/2026-10-08-roost-history-feature-gate.md).

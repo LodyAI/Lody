@@ -1,5 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { SessionMeta } from '@lody/shared';
+import { Button } from '@lody/ui';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
+import { SessionFileContentView } from '@/components/sessions/session-file-content-view';
+import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
 import * as stylex from '@stylexjs/stylex';
 import { fn } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
@@ -115,6 +120,74 @@ export const PdfDocument: Story = {
   args: { path: '/tmp/annual-report.pdf', bytes: createSamplePdf() },
 };
 
+function PdfFilePanelStory({ preload = false }: { preload?: boolean }) {
+  const [mounted, setMounted] = useState(preload);
+  const [open, setOpen] = useState(false);
+  const provider = useMemo(
+    () =>
+      createFakeSessionFileProvider({
+        sourceState: 'live-readonly',
+        files: [
+          { fileId: 'pdf', path: 'report.pdf', kind: 'binary', sourceState: 'live-readonly' },
+        ],
+        snapshots: { 'report.pdf': { kind: 'binary', bytes: createSamplePdf() } },
+      }),
+    []
+  );
+  const session = {
+    id: 'storybook-pdf-panel',
+    machineId: 'storybook-machine',
+    userId: 'storybook-user',
+    createdAt: '2026-10-19T00:00:00Z',
+    cliType: 'codex',
+    agentType: 'codex',
+  } as unknown as SessionMeta;
+  return (
+    <DesktopSessionDetailLayout
+      defaultSizes={{ main: 50, sidebar: 50 }}
+      topBar={null}
+      chatSurfaces={
+        <Button
+          onClick={() => {
+            setMounted(true);
+            setOpen(true);
+          }}
+        >
+          Open PDF
+        </Button>
+      }
+      terminalDock={null}
+      secondaryPanel={
+        mounted ? (
+          <SessionFileContentView
+            sessionId={session.id}
+            session={session}
+            filePath="report.pdf"
+            fileId="pdf"
+            fileProvider={provider}
+            fileProviderRole="read"
+            active={open}
+            onAddSelectionToChat={() => true}
+          />
+        ) : null
+      }
+      sidebarOpen={open}
+      onSidebarCollapse={() => setOpen(false)}
+      deleteConfirmDialog={null}
+    />
+  );
+}
+
+export const PdfFilePanel: Story = {
+  args: { path: 'report.pdf' },
+  render: () => <PdfFilePanelStory />,
+};
+
+export const PdfCollapsedFilePanel: Story = {
+  args: { path: 'report.pdf' },
+  render: () => <PdfFilePanelStory preload />,
+};
+
 export const DocxDocument: Story = {
   args: { path: '/tmp/quarterly-report.docx', bytes: sampleDocx() },
 };
@@ -165,6 +238,8 @@ export const AttachedImageMarkup: Story = {
       const context = canvas.getContext('2d')!;
       context.fillStyle = '#fff';
       context.fillRect(0, 0, 800, 400);
+      // Exercise transparent source images when the marked-up result is flattened.
+      context.clearRect(0, 0, 16, 16);
       context.fillStyle = '#2563eb';
       context.fillRect(40, 40, 720, 100);
       context.fillStyle = '#111';
@@ -174,6 +249,52 @@ export const AttachedImageMarkup: Story = {
         canvas.toBlob((value) => resolve(value!), 'image/png')
       );
       return { file: new File([blob], 'screenshot.png', { type: 'image/png' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
+};
+
+export const AnimatedAttachedImageMarkup: Story = {
+  args: { path: 'animated.gif' },
+  loaders: [
+    async () => {
+      // Two synthetic frames: red followed by blue.
+      const data = atob(
+        'R0lGODlhCAAIAPAAAP8AAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAACAAIAAACB4SPqcvtXQAAIfkEAGQAAAAsAAAAAAgACACAAAD/AAAAAgeEj6nL7V0AADs='
+      );
+      const bytes = Uint8Array.from(data, (character) => character.charCodeAt(0));
+      return { file: new File([bytes], 'animated.gif', { type: 'image/gif' }) };
+    },
+  ],
+  render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,
+};
+
+export const LargeAttachedImageMarkup: Story = {
+  args: { path: 'large.jpg' },
+  loaders: [
+    async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 2048;
+      const context = canvas.getContext('2d')!;
+      const pixels = context.createImageData(canvas.width, canvas.height);
+      let random = 0x6d2b79f5;
+      for (let index = 0; index < pixels.data.length; index += 4) {
+        for (let channel = 0; channel < 3; channel++) {
+          random ^= random << 13;
+          random ^= random >>> 17;
+          random ^= random << 5;
+          pixels.data[index + channel] = random & 255;
+        }
+        pixels.data[index + 3] = 255;
+      }
+      context.putImageData(pixels, 0, 0);
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((value) => resolve(value!), 'image/jpeg', 0.7)
+      );
+      const file = new File([blob], 'large.jpg', { type: 'image/jpeg' });
+      (window as Window & { markupSourceFile?: File }).markupSourceFile = file;
+      return { file };
     },
   ],
   render: (_args, { loaded }) => <AttachedImageMarkupStory file={loaded.file} />,

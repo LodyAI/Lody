@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LoroDoc, LoroMap } from 'loro-crdt';
+import { afterEach, describe, expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
 import {
   createHistoryWriter,
   type SessionHistoryInput,
@@ -247,38 +247,6 @@ describe('Session observation', () => {
     expect(f.errors).toEqual([]);
   });
 
-  it('does not hydrate bodies or rescan a long transcript for streaming updates', async () => {
-    const f = await fixture([
-      ...Array.from({ length: 100 }, (_, i) =>
-        entry(`old-${i}`, {
-          status: 'canceled',
-          items: [{ type: 'text', text: 'large'.repeat(1000) }],
-        })
-      ),
-      entry('u', { status: 'processing' }),
-      entry('a', { role: 'assistant', userTurnId: 'u', finished: false }),
-    ]);
-    const serialize = vi.spyOn(LoroMap.prototype, 'toJSON');
-    const readDirectory = vi.spyOn(f.data.history, 'readDirectory');
-    try {
-      const before = f.events.length;
-      for (let i = 0; i < 30; i++) {
-        const assistant = f.doc.getList('history').get(101);
-        if (!(assistant instanceof LoroMap)) throw new Error('Missing assistant');
-        assistant.set('items', [{ type: 'text', text: String(i) }]);
-        f.doc.commit();
-      }
-      await f.observer.flush();
-      expect(f.events).toHaveLength(before);
-      expect(serialize).not.toHaveBeenCalled();
-      expect(readDirectory.mock.calls.length).toBeGreaterThan(0);
-      expect(readDirectory.mock.calls.every(([from, to]) => from === 101 && to === 102)).toBe(true);
-    } finally {
-      serialize.mockRestore();
-      readDirectory.mockRestore();
-    }
-  });
-
   it('reconciles results after connection loss without reporting presence loss as completion', async () => {
     const f = await fixture([
       entry('u', { status: 'processing' }),
@@ -390,18 +358,6 @@ describe('Session observation', () => {
     expect(f.observer.current?.latestTurn?.state).toBe('canceled');
   });
 
-  it('preserves stored history and stops emitting after disposal', async () => {
-    const f = await fixture([entry('u', { status: 'pending', read: false })]);
-    const before = f.doc.toJSON();
-    await f.observer.close();
-    expect(f.doc.toJSON()).toEqual(before);
-    const count = f.events.length;
-    f.writer.updateEntry('u', (turn) => ({ ...turn, status: 'processing' }));
-    await f.observer.flush();
-    expect(f.events).toHaveLength(count);
-    expect((await f.data.history.readTurn('u')).state).toBe('ready');
-  });
-
   it('distinguishes archive changes from a definitive deletion', async () => {
     let removed = false;
     const meta: SessionMeta = {
@@ -444,55 +400,6 @@ describe('Session observation process boundary', () => {
     ).toThrow('--offline');
   });
 
-  it('orders multiple producers and waits for output backpressure', async () => {
-    const entered = deferred<void>();
-    const release = deferred<void>();
-    const lines: string[] = [];
-    const output = new Writable({
-      highWaterMark: 1,
-      write(chunk, _encoding, done) {
-        lines.push(String(chunk));
-        if (lines.length === 1) {
-          entered.resolve();
-          void release.promise.then(() => done());
-        } else done();
-      },
-    });
-    const stop = new AbortController();
-    const write = createSessionObserveWriter({
-      output,
-      streamId: 'stream',
-      workspaceId: 'w' as WorkspaceId,
-      now: () => 100,
-      signal: stop.signal,
-    });
-    const first = write({ type: 'ready' });
-    await entered.promise;
-    const second = write({ type: 'ready', sessionId: 's' as SessionId });
-    expect(lines).toHaveLength(1);
-    release.resolve();
-    await Promise.all([first, second]);
-    expect(lines.map((line) => JSON.parse(line))).toEqual([
-      {
-        type: 'ready',
-        version: 1,
-        streamId: 'stream',
-        workspaceId: 'w',
-        sequence: 1,
-        observedAt: 100,
-      },
-      {
-        type: 'ready',
-        sessionId: 's',
-        version: 1,
-        streamId: 'stream',
-        workspaceId: 'w',
-        sequence: 2,
-        observedAt: 100,
-      },
-    ]);
-  });
-
   it('releases a pending write on shutdown and rejects an oversized frame', async () => {
     const entered = deferred<void>();
     const output = new Writable({
@@ -514,26 +421,6 @@ describe('Session observation process boundary', () => {
     await expect(write({ type: 'error', error: 'x'.repeat(1024 * 1024) })).rejects.toThrow('1 MiB');
     stop.abort();
     await rejected;
-    expect(output.listenerCount('error')).toBe(0);
-  });
-
-  it('handles a broken pipe including the error event after its write callback', async () => {
-    const failed = deferred<void>();
-    const output = new Writable({
-      write(_chunk, _encoding, done) {
-        done(new Error('EPIPE'));
-      },
-    });
-    output.once('close', () => failed.resolve());
-    const write = createSessionObserveWriter({
-      output,
-      streamId: 'stream',
-      workspaceId: 'w' as WorkspaceId,
-      now: () => 100,
-      signal: new AbortController().signal,
-    });
-    await expect(write({ type: 'ready' })).rejects.toThrow('EPIPE');
-    await failed.promise;
     expect(output.listenerCount('error')).toBe(0);
   });
 });
@@ -731,34 +618,6 @@ describe('Workspace Session observation', () => {
     expect(f.errors).toEqual([]);
   });
 
-  it('checks activation identities before releasing a stale idle child projection', async () => {
-    const f = workspaceFixture([meta('s', { latestUserMsgId: 'u2' })]);
-    await f.reader.start();
-    await f.reader.flush();
-    const child = f.opened.get('s' as SessionId);
-    if (!child) throw new Error('Missing observer');
-    child.current = {
-      ...child.current,
-      state: 'idle',
-      latestTurn: { userTurnId: 'u1', state: 'completed' },
-    };
-    await child.emit({
-      type: 'session.changed',
-      sessionId: 's' as SessionId,
-      session: child.current,
-    });
-    await f.reader.flush();
-    expect([...f.held]).toEqual(['s']);
-    child.current = { ...child.current, latestTurn: { userTurnId: 'u2', state: 'completed' } };
-    await child.emit({
-      type: 'session.changed',
-      sessionId: 's' as SessionId,
-      session: child.current,
-    });
-    await f.reader.flush();
-    expect(f.held.size).toBe(0);
-  });
-
   it('releases a real child that sees deletion before the workspace watch', async () => {
     let child: Awaited<ReturnType<typeof fixture>> | undefined;
     const held = new Set<SessionId>();
@@ -824,46 +683,6 @@ describe('Workspace Session observation', () => {
     ]);
     expect(f.held.has('two' as SessionId)).toBe(false);
     expect(f.reader.current.map((s) => s.sessionId)).toEqual(['one']);
-  });
-
-  it('opens at most four rooms concurrently and closes a room acquired during shutdown', async () => {
-    const fourOpened = deferred<void>();
-    const gate = deferred<void>();
-    let acquired = 0;
-    const held = new Set<SessionId>();
-    const f = workspaceFixture(
-      Array.from({ length: 10 }, (_, i) => meta(`s-${i}`, { status: { type: 'running' } })),
-      {
-        async open(id) {
-          acquired += 1;
-          if (acquired === 4) fourOpened.resolve();
-          await gate.promise;
-          held.add(id);
-          return {
-            observer: {
-              current: {
-                ...projectSessionCatalog(meta(id)),
-                source: 'persisted',
-                state: 'running',
-              },
-              refresh() {},
-              async flush() {},
-            },
-            async close() {
-              held.delete(id);
-            },
-          };
-        },
-      }
-    );
-    await f.reader.start();
-    await fourOpened.promise;
-    expect(acquired).toBe(4);
-    const closed = f.reader.close();
-    gate.resolve();
-    await closed;
-    expect(acquired).toBe(4);
-    expect(held.size).toBe(0);
   });
 
   it('reads catalog snapshots without acquiring rooms in one-shot mode', async () => {

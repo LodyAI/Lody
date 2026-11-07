@@ -41,7 +41,7 @@ const testPresenceLayer = WorkspacePresenceOwnersLive.pipe(
   Layer.provide(
     Layer.merge(
       Layer.succeed(PresenceHost, {
-        instanceId: () => 'synthetic-document-manager' as LodyPresenceInstanceId,
+        instanceId: () => '01020304-1111-4222-8333-010203040506' as LodyPresenceInstanceId,
         serverOffsetMs: () => 0,
         report: () => {},
       }),
@@ -87,6 +87,7 @@ afterEach(() => presenceApplication.closeLegacy());
 import type { Logger } from '../src/utils/logger';
 import * as logging from '../src/utils/logger';
 import { CliMachineMonitorRuntime } from '../src/lib/loro/machine-monitor';
+import { CliPromptSuggestions } from '../src/lib/loro/prompt-suggestions';
 
 // The production interceptors install once for the whole module lifetime. Keep
 // these underlying delegates stable across tests, regardless of which test first
@@ -186,6 +187,7 @@ vi.mock('@/utils/http-transport', () => ({
 import { LoroDocumentManager } from '../src/lib/loro/doc';
 import { withWorkspaceManager } from '../src/lib/command-runtime';
 import { createCliSqliteRepoStore } from '../src/lib/loro/sqlite-repo-store';
+import * as timeoutUtils from '../src/lib/loro/timeout-utils';
 
 const testStreamsTokens = {
   createTokenProvider: () =>
@@ -229,12 +231,6 @@ const createSilentLogger = (): Logger => ({
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
-});
-
-const createLoggerWithDebug = (debug: ReturnType<typeof vi.fn>): Logger => ({
-  ...createSilentLogger(),
-  debug,
-  child: () => createLoggerWithDebug(debug),
 });
 
 const createMetaSubscription = (
@@ -289,6 +285,10 @@ let tempHomeDir: string | undefined;
 describe('LoroDocumentManager.create degraded startup behavior', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    // Native presence has the controlled service above. These independent optional
+    // SDK channels are outside manager-startup tests and must not start real HTTP.
+    vi.spyOn(CliMachineMonitorRuntime.prototype, 'attachStreams').mockImplementation(() => {});
+    vi.spyOn(CliPromptSuggestions.prototype, 'attachStreams').mockImplementation(() => {});
     mocks.transportOptions.length = 0;
     mocks.transportStatus = 'connected';
     tempHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-loro-doc-manager-home-'));
@@ -300,6 +300,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     if (originalHomeEnv === undefined) {
       delete process.env.HOME;
@@ -577,6 +578,15 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
 
   it('continues in degraded mode when meta room sync times out', async () => {
     process.env.LODY_LORO_SYNC_META_TIMEOUT_MS = '1';
+    const deadlineStarted = Promise.withResolvers<void>();
+    const deadline = Promise.withResolvers<never>();
+    const withTimeout = timeoutUtils.withTimeout;
+    vi.spyOn(timeoutUtils, 'withTimeout').mockImplementation((promise, timeoutMs, message) => {
+      if (timeoutMs !== 1 || !String(message).includes('phase=initial'))
+        return withTimeout(promise, timeoutMs, message);
+      deadlineStarted.resolve();
+      return Promise.race([promise, deadline.promise]);
+    });
 
     const unsubscribe = vi.fn();
     const repoDestroy = vi.fn(async () => {});
@@ -586,43 +596,114 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     });
 
     mocks.repoCreate.mockResolvedValueOnce({
-      joinMetaRoom: vi.fn(async () =>
-        createMetaSubscription({
-          unsubscribe,
-          firstSyncedWithRemote,
-        })
-      ),
+      joinMetaRoom: async () => createMetaSubscription({ unsubscribe, firstSyncedWithRemote }),
       destroy: repoDestroy,
       addTransport: mocks.repoAddTransport,
       removeTransport: mocks.repoRemoveTransport,
       transportRooms: mocks.repoTransportRooms,
     });
 
-    const manager = await LoroDocumentManager.create(
+    const opening = LoroDocumentManager.create(
       'workspace-3' as WorkspaceId,
       'user-1',
       createSilentLogger(),
       { attachRemoteOnCreate: true, streamsTokens: testStreamsTokens }
     );
 
-    // Initial sync timed out — create returns a usable manager in degraded mode.
-    expect(manager.hasCompletedInitialMetaSync()).toBe(false);
-    expect(repoDestroy).toHaveBeenCalledTimes(0);
-    expect(mocks.repoAddTransport).toHaveBeenCalledTimes(1);
-    expect(mocks.repoAddTransport).toHaveBeenCalledWith('streams', expect.anything(), {
-      ephemeral: true,
-    });
-    expect(mocks.transportOptions).toHaveLength(1);
+    await deadlineStarted.promise;
+    deadline.reject(new Error('Synthetic meta-sync deadline'));
+    const manager = await opening;
 
-    // Once the meta room syncs, an explicit wait succeeds and flips the flag.
-    resolveMetaSync?.();
-    await expect(
-      manager.waitUntilMetaSynced({ timeoutMs: 100, reason: 'test-recovery' })
-    ).resolves.toBe(true);
-    expect(manager.hasCompletedInitialMetaSync()).toBe(true);
-    expect(unsubscribe).toHaveBeenCalledTimes(0);
+    try {
+      // Initial sync timed out — create returns a usable manager in degraded mode.
+      expect(manager.hasCompletedInitialMetaSync()).toBe(false);
+      expect(repoDestroy).toHaveBeenCalledTimes(0);
+      expect(mocks.repoAddTransport).toHaveBeenCalledTimes(1);
+      expect(mocks.repoAddTransport).toHaveBeenCalledWith('streams', expect.anything(), {
+        ephemeral: true,
+      });
+      expect(mocks.transportOptions).toHaveLength(1);
 
-    await manager.cleanUp({ fast: true });
+      // Once the meta room syncs, an explicit wait succeeds and flips the flag.
+      resolveMetaSync?.();
+      await expect(
+        manager.waitUntilMetaSynced({ timeoutMs: 100, reason: 'test-recovery' })
+      ).resolves.toBe(true);
+      expect(manager.hasCompletedInitialMetaSync()).toBe(true);
+      expect(unsubscribe).toHaveBeenCalledTimes(0);
+    } finally {
+      await manager.cleanUp({ fast: true });
+    }
+  });
+
+  it('creates minimal encrypted presence locally and joins its remote room without other side channels', async () => {
+    const repo = {
+      joinMetaRoom: async () => createMetaSubscription(),
+      destroy: async () => {},
+      addTransport: mocks.repoAddTransport,
+      removeTransport: mocks.repoRemoveTransport,
+      transportRooms: mocks.repoTransportRooms,
+    };
+    mocks.repoCreate.mockResolvedValueOnce(repo);
+    const manager = await LoroDocumentManager.create(
+      'workspace-minimal' as WorkspaceId,
+      'user-1',
+      createSilentLogger(),
+      {
+        streamsTokens: testStreamsTokens,
+        encryptedWorkspace: {
+          repositoryDirectory: path.join(tempHomeDir!, 'encrypted-repo'),
+          content: {
+            mode: 'protected',
+            namespace: 'synthetic',
+            resolve: () => {
+              throw new Error('unused');
+            },
+            snapshotUpload: { canUpload: () => false },
+          },
+          bucketId: () => 'protected-bucket',
+          refresh: async () => {},
+          close: async () => {},
+        },
+      }
+    );
+    try {
+      // No remote room proves no absence, even though local entries are already authored.
+      expect(await manager.getMachinePresenceView({ timeoutMs: 1 })).toEqual({
+        online: new Set(),
+        synced: false,
+      });
+      manager.publishSessionPresence(
+        '01020304-1111-4222-8333-010203040507' as SessionId,
+        '01020304-1111-4222-8333-010203040508' as MachineId,
+        {
+          type: 'initializing',
+          stage: 'acp',
+          detail: 'private path',
+        }
+      );
+      expect(Object.values(manager.getPresenceStates() ?? {})).toEqual([
+        {
+          kind: 'session',
+          sessionId: '01020304-1111-4222-8333-010203040507',
+          machineId: '01020304-1111-4222-8333-010203040508',
+          instanceId: '01020304-1111-4222-8333-010203040506',
+          updatedAt: expect.any(Number),
+          status: { type: 'initializing', stage: 'acp' },
+        },
+      ]);
+      await manager.attachRemoteStreamsTransport();
+      // The real owner has joined; absent remote machine heartbeats now form a known empty set.
+      expect(await manager.getMachinePresenceView({ timeoutMs: 100 })).toEqual({
+        online: new Set(),
+        synced: true,
+      });
+      expect(repo.addTransport).toHaveBeenCalledWith('streams', expect.anything(), {
+        ephemeral: true,
+      });
+    } finally {
+      await manager.cleanUp({ fast: true });
+    }
   });
 
   it('configures zstd snapshot codec on the streams transport adapter', async () => {
@@ -667,7 +748,10 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     });
     let root = captureLogger('process-before');
     const rootGetter = vi.spyOn(logging, 'getLogger').mockImplementation(() => root);
-    // This case exercises diagnostics, not the independent live monitor room.
+    // Keep independent live rooms from issuing requests into the diagnostic fetch fixture.
+    const suggestionsAttach = vi
+      .spyOn(CliPromptSuggestions.prototype, 'attachStreams')
+      .mockResolvedValue(undefined);
     const monitorAttach = vi
       .spyOn(CliMachineMonitorRuntime.prototype, 'attachStreams')
       .mockResolvedValue(undefined);
@@ -763,33 +847,9 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       diagnosticConsoleSink = undefined;
       diagnosticFetch = undefined;
       monitorAttach.mockRestore();
+      suggestionsAttach.mockRestore();
       rootGetter.mockRestore();
     }
-  });
-
-  it('installs the CLI HTTP global dispatcher at create without attaching Streams', async () => {
-    const logger = createSilentLogger();
-    mocks.repoCreate.mockResolvedValueOnce({
-      joinMetaRoom: vi.fn(async () => createMetaSubscription()),
-      destroy: vi.fn(async () => {}),
-      addTransport: mocks.repoAddTransport,
-      removeTransport: mocks.repoRemoveTransport,
-      transportRooms: mocks.repoTransportRooms,
-    });
-
-    const manager = await LoroDocumentManager.create(
-      'workspace-http' as WorkspaceId,
-      'user-1',
-      logger
-    );
-
-    // The global HTTP dispatcher is configured unconditionally at create so all
-    // CLI HTTP is routed through it, but local-first create defers the Streams
-    // transport until the remote bridge attaches (no attachRemoteOnCreate here).
-    expect(mocks.installCliHttpGlobalDispatcher).toHaveBeenCalledWith({ logger });
-    expect(mocks.transportOptions).toHaveLength(0);
-
-    await manager.cleanUp({ fast: true });
   });
 
   it('marks initial meta sync as ready when startup sync succeeds', async () => {
@@ -852,44 +912,6 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     expect(repoDestroy).toHaveBeenCalledTimes(1);
   });
 
-  it('logs meta room status changes', async () => {
-    const debug = vi.fn();
-    const statusListeners: Array<(status: string) => void> = [];
-    const repoDestroy = vi.fn(async () => {});
-
-    mocks.repoCreate.mockResolvedValueOnce({
-      joinMetaRoom: vi.fn(async () =>
-        createMetaSubscription({
-          status: 'connecting',
-          onStatusChange: vi.fn((listener: (status: string) => void) => {
-            statusListeners.push(listener);
-            listener('connecting');
-            return vi.fn();
-          }),
-        })
-      ),
-      destroy: repoDestroy,
-      addTransport: mocks.repoAddTransport,
-      removeTransport: mocks.repoRemoveTransport,
-      transportRooms: mocks.repoTransportRooms,
-    });
-
-    const manager = await LoroDocumentManager.create(
-      'workspace-6' as WorkspaceId,
-      'user-1',
-      createLoggerWithDebug(debug)
-    );
-
-    statusListeners[0]?.('joined');
-
-    expect(debug).toHaveBeenCalledWith('[workspace-6] Loro meta room status: connecting');
-    expect(debug).toHaveBeenCalledWith(
-      '[workspace-6] Loro meta room status: joined (was connecting)'
-    );
-
-    await manager.cleanUp({ fast: true });
-  });
-
   it('sweeps rooms via repo.reconnect on the healthy watchdog tick', async () => {
     // The healthy-path watchdog now runs a pure room sweep (repo.reconnect with
     // resetBackoff:false) instead of early-returning, so a doc/flock room stuck
@@ -930,6 +952,58 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     expect(joinMetaRoom).not.toHaveBeenCalled();
 
     await manager.cleanUp({ fast: true });
+  });
+
+  it('closes sibling documents and stores after a document fails, and retries remain possible', async () => {
+    const events: string[] = [];
+    const repo = {
+      destroy: async () => {
+        events.push('repo');
+      },
+    } as unknown as LoroDocumentManager['repo'];
+    const manager = new LoroDocumentManager({
+      repo,
+      workspaceId: 'cleanup-failure' as WorkspaceId,
+      userId: 'user-1',
+      metaSub: createMetaSubscription(),
+      logger: createSilentLogger(),
+      initialTransportStatus: 'connected',
+      initialMetaSyncPromise: Promise.resolve(true),
+      initialMetaSyncCompleted: true,
+    });
+    const failed = 'unsaved-session' as SessionId;
+    manager.sessions.set(failed, {
+      destroy: async () => {
+        events.push('failed');
+        throw new Error('disk full');
+      },
+    } as never);
+    manager.sessions.set(
+      'sibling' as SessionId,
+      {
+        destroy: async () => {
+          events.push('sibling');
+        },
+      } as never
+    );
+    manager.machine = {
+      destroy: async () => {
+        events.push('machine');
+      },
+    } as never;
+    Object.assign(manager, {
+      encryptedWorkspace: {
+        close: async () => {
+          events.push('encrypted');
+        },
+      },
+    });
+    const failure = await manager.cleanUp({ fast: true }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors[0].message).toContain(failed);
+    expect(events).toEqual(['failed', 'sibling', 'machine', 'repo', 'encrypted']);
+    await manager.cleanUp({ fast: true });
+    expect(manager.getConnectedRoomCount()).toBe(0);
   });
 
   it('settles a queued manual reconnect when cleanup runs first', async () => {

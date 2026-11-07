@@ -5,6 +5,7 @@ import { fn } from 'storybook/test';
 import { FOCUS_TUNING, tuneFocusMotion } from '@/components/chat/home/focus-motion';
 import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { WebChatLandingScreen } from '@/components/chat/web-chat-landing-screen';
+import { getWebWorkspaceLayoutRootClassName } from '@/components/workspace-layout-utils';
 import {
   HOME_WEEK_NOW,
   HOME_WEEK_USAGE_SOURCES,
@@ -57,14 +58,22 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** What the agents are doing: what needs you, the plan usage, what runs, what finished, what to pick back up. */
+/**
+ * What the agents are doing: what needs you, the plan usage, what runs, what finished, what to
+ * pick back up. The usage tile draws the plan's two segments side by side — the 5-hour one and the
+ * week — each with its own percent used and its own reset; the week's used to be dropped.
+ */
 export const Now: Story = {};
 
 export const NoAgentsRunning: Story = {
   args: { now: homeNowFixture('idle') },
 };
 
-/** The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. */
+/**
+ * The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. In
+ * the half tile two meters no longer fit, so the week's reset reads as a countdown ("Weekly in
+ * 20h") in the head.
+ */
 export const NowNearReset: Story = {
   args: {
     usage: homeWeekUsageFixture('nearReset'),
@@ -115,6 +124,16 @@ function landingAt(height: string, storyArgs: Story['args'] = { defaultBoard: 'n
 
 /** The real landing stage: switching boards keeps the line in place; folding re-centres it. */
 export const Landing: Story = landingAt('100vh', {});
+
+/** The wide native shell applies the keyboard offset once at the workspace root. */
+export const LandingNativeKeyboard: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => (
+    <div className={getWebWorkspaceLayoutRootClassName()}>
+      <WebChatLandingScreen title="New chat" composer={<textarea aria-label="Draft" />} />
+    </div>
+  ),
+};
 
 /** The landing with nothing going on: one quiet card sits beside the usage. */
 export const LandingQuiet: Story = landingAt('100vh', {

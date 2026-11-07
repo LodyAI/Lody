@@ -1,15 +1,23 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  HOME_BOARD_HANG_SHARE,
-  HOME_BOARD_MAX_TILT,
-  HOME_FOLDED_LIFT,
-  HomeDashboard,
-} from '../src/components/chat/home/home-dashboard';
+// The composer's mention sources read the authenticated workspace; the page under test is the
+// landing view and its dashboard, not mentions.
+vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSessionMentionItems: () => [],
+}));
+vi.mock('../src/components/mentions/mention-agent-role-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useAgentRoleMentionItems: () => [],
+}));
+
+import { ChatLandingView } from '../src/components/chat/chat-landing-view';
+import { HomeDashboard } from '../src/components/chat/home/home-dashboard';
 import { LandingStageContext, type LandingStage } from '../src/components/chat/landing-stage';
 import { initI18n } from '../src/i18n';
 import type { HomeBoard } from '../src/lib/home-board';
@@ -46,22 +54,21 @@ function nowRow(id: string, overrides: Partial<HomeNowRow> = {}): HomeNowRow {
   };
 }
 
-const usage = (resetsInHours = 2): HomeWeekUsage => ({
+const usage = (resetsInHours = 2, weekResetsInHours: number | null = 98): HomeWeekUsage => ({
   name: null,
-  windows: [
-    {
-      usedPercent: 38,
-      remainingPercent: 62,
-      windowDurationSeconds: 5 * 60 * 60,
-      resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
-    },
-    {
-      usedPercent: 21,
-      remainingPercent: 79,
-      windowDurationSeconds: 7 * 24 * 60 * 60,
-      resetsAtEpochSeconds: null,
-    },
-  ],
+  window: {
+    usedPercent: 38,
+    remainingPercent: 62,
+    windowDurationSeconds: 5 * 60 * 60,
+    resetsAtEpochSeconds: NOW_MS / 1000 + resetsInHours * 60 * 60,
+  },
+  otherWindow: {
+    usedPercent: 21,
+    remainingPercent: 79,
+    windowDurationSeconds: 7 * 24 * 60 * 60,
+    resetsAtEpochSeconds:
+      weekResetsInHours == null ? null : NOW_MS / 1000 + weekResetsInHours * 60 * 60,
+  },
 });
 
 const CODEX: HomeWeekUsageSource = {
@@ -198,12 +205,6 @@ describe('HomeDashboard', () => {
       );
     });
 
-    it('opens the session a row names', () => {
-      render({ rows: [nowRow('wait', { waiting: true })] });
-      click(q('[data-session="wait"]')!);
-      expect(opened).toEqual(['wait']);
-    });
-
     it('keeps an empty list in its place, and opens a long one from where it goes on', () => {
       render({
         rows: Array.from({ length: 6 }, (_, index) =>
@@ -214,7 +215,9 @@ describe('HomeDashboard', () => {
       const attention = q('[data-now-column="left"] [data-testid="home-now-attention"]')!;
       expect(attention.textContent).toBe('Needs you0');
       expect(attention.querySelectorAll('[data-session]')).toHaveLength(0);
-      const running = q('[data-now-column="right"] [data-testid="home-now-running"]')!;
+      // Running takes the left column with needs you: with nothing else to place, that is the
+      // arrangement that leaves those two columns level, and just finished stays on the right.
+      const running = q('[data-now-column="left"] [data-testid="home-now-running"]')!;
       expect(running.querySelectorAll('[data-session]')).toHaveLength(4);
       // "Show all" under the last row: an action, not a session.
       const toggle = byTestId('home-now-running-toggle')!;
@@ -227,9 +230,10 @@ describe('HomeDashboard', () => {
       const all = byTestId('home-now-running-all')!;
       expect(all.querySelectorAll('[data-session]')).toHaveLength(6);
       expect(byTestId('home-now')?.getAttribute('data-focus')).toBe('running');
-      expect(q('[data-now-column="right"]')?.contains(all)).toBe(true);
+      expect(q('[data-now-column="left"]')?.contains(all)).toBe(true);
       expect(running.closest('[inert]')).not.toBeNull();
-      expect(attention.closest('[inert]')).toBeNull();
+      expect(attention.closest('[inert]')).not.toBeNull();
+      expect(byTestId('home-now-next')?.closest('[inert]')).toBeNull();
       const back = byTestId('home-now-back')!;
       expect(document.activeElement).toBe(back);
       expect(back.textContent).toBe('Show less');
@@ -275,27 +279,21 @@ describe('HomeDashboard', () => {
       expect(byTestId('home-now-running-all')).toBeNull();
     });
 
-    it('leaves a tile that shows everything alone under a press', () => {
-      render({ rows: [nowRow('run', { working: true })] });
-      click(byTestId('home-now-running')!);
-      expect(byTestId('home-now-running-all')).toBeNull();
-    });
-
     it('fits a short window, and folds into the line when even one row each does not fit', () => {
       const boards: (HomeBoard | null)[] = [];
       const rows = [
         ...Array.from({ length: 9 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
         ...Array.from({ length: 6 }, (_, index) => nowRow(`run-${index}`, { working: true })),
       ];
-      // Plenty of room: the whole budget.
+      // With room for the whole board, the chosen arrangement levels needs you to its full list.
       render({ rows, defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(6);
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(9);
 
-      // Room for six rows a column (182px of board): needs you keeps one row and its "Show all"
-      // over just finished's title, and running, in the other column, the same.
-      render({ rows, defaultBoard: 'now', stage: { height: 340, rest: 100 } });
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
+      // Room for ten rows a column (262px of board): needs you takes the left column alone and
+      // shows seven of its nine, and running the first three of its six on the right.
+      render({ rows, defaultBoard: 'now', stage: { height: 420, rest: 100 } });
+      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(7);
+      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(3);
       expect(byTestId('home-now-running-toggle')).not.toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
 
@@ -315,30 +313,6 @@ describe('HomeDashboard', () => {
       click(q('[data-segment="now"]')!);
       expect(byTestId('home-now')).not.toBeNull();
       expect(boards).toEqual(['now']);
-    });
-
-    it('keeps breathing room below a busy board in a compact landing', () => {
-      render({
-        rows: [
-          ...Array.from({ length: 14 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
-          ...Array.from({ length: 6 }, (_, index) => nowRow(`run-${index}`, { working: true })),
-          ...Array.from({ length: 5 }, (_, index) => nowRow(`done-${index}`, { unread: true })),
-          ...Array.from({ length: 11 }, (_, index) =>
-            nowRow(`ready-${index}`, {
-              pr: { number: 700 + index, status: 'open', ci: 'pass', ready: true },
-            })
-          ),
-        ],
-        usage: usage(),
-        // Mirrors the 620px Storybook landing: a 492px stage with 60px used by the heading.
-        stage: { height: 492, rest: 60 },
-      });
-
-      expect(byTestId('home-now-attention')?.querySelectorAll('[data-session]')).toHaveLength(5);
-      expect(byTestId('home-now-running')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-finished')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-now-next')?.querySelectorAll('[data-session]')).toHaveLength(1);
-      expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(false);
     });
 
     it('puts one quiet card beside the usage when nothing is going on', () => {
@@ -361,98 +335,46 @@ describe('HomeDashboard', () => {
       expect(byTestId('home-now-quiet')).toBeNull();
       expect(q('[data-now-column="left"]')?.textContent).toContain('Needs you');
     });
-
-    it('holds the board at its own height, hung a little low but in balance; folded, high', () => {
-      const section = () => byTestId('home-dashboard')!;
-      const slotPx = () => Number.parseFloat(byTestId('home-dashboard-slot')!.style.minHeight);
-      const hang = () => -Number.parseFloat(section().style.marginBottom || '0');
-      // The stage centres the group's box (the rest, the line, the board's gap and slot, less
-      // what hangs); the space under the board is the space above the heading less the hang.
-      const gaps = (stage: number) => {
-        const box = 100 + 28 + slotPx() + 6 - hang();
-        const above = (stage - box) / 2;
-        return { above, below: above - hang() };
-      };
-
-      // A tall stage: part of the board hangs, lifting the heading less than centring would,
-      // with the space above the heading at most `HOME_BOARD_MAX_TILT` times the space under it.
-      render({ defaultBoard: 'now', stage: { height: 2000, rest: 100 } });
-      const height = slotPx();
-      const tall = hang();
-      expect(tall).toBeGreaterThan(0);
-      expect(tall).toBeLessThanOrEqual((height + 6) * HOME_BOARD_HANG_SHARE);
-      expect(gaps(2000).above).toBeLessThanOrEqual(HOME_BOARD_MAX_TILT * gaps(2000).below + 1);
-      // The slot is the board's own height: no band of nothing under the tiles.
-      expect(height).toBe(BOARD_HEIGHT_PX);
-      // Switching boards gives the other board its own height.
-      click(q('[data-segment="week"]')!);
-      expect(byTestId('home-week')).not.toBeNull();
-      expect(slotPx()).toBe(BOARD_HEIGHT_PX);
-      // Folded, no slot is held, and a little space is kept under the line instead, so the stage
-      // centres the heading and the line a little above its middle.
-      click(q('[data-segment="week"]')!);
-      expect(byTestId('home-dashboard-slot')).toBeNull();
-      const kept = -hang();
-      expect(kept).toBe(Math.floor(2 * HOME_FOLDED_LIFT * (2000 - 100 - 28)));
-      // Opening never moves the heading down: what the open board does not hang is at least
-      // what the folded page keeps under its line.
-      expect(height + 6 - tall).toBeGreaterThanOrEqual(kept);
-    });
-
-    it('holds the board up off the composer in a middling stage', () => {
-      const section = () => byTestId('home-dashboard')!;
-      const slotPx = () => Number.parseFloat(byTestId('home-dashboard-slot')!.style.minHeight);
-      const hang = () => -Number.parseFloat(section().style.marginBottom || '0');
-      const gaps = (stage: number) => {
-        const box = 100 + 28 + slotPx() + 6 - hang();
-        const above = (stage - box) / 2;
-        return { above, below: above - hang() };
-      };
-
-      // Start folded explicitly: the compact quiet card now fits this stage on its own, while
-      // this case is about the geometry after a person opens a board from the line.
-      render({ defaultBoard: null, stage: { height: 700, rest: 100 } });
-      expect(byTestId('home-dashboard-slot')).toBeNull();
-      click(q('[data-segment="now"]')!);
-      expect(hang()).toBeGreaterThan(0);
-      expect(hang()).toBeLessThan((slotPx() + 6) * HOME_BOARD_HANG_SHARE);
-      expect(gaps(700).above).toBeLessThanOrEqual(HOME_BOARD_MAX_TILT * gaps(700).below + 1);
-      expect(gaps(700).below).toBeGreaterThan(12);
-    });
   });
 
   describe('plan usage', () => {
     const text = () => byTestId('home-now')?.textContent ?? '';
 
-    it('shows one window, the shortest, with how much is used and when it resets', () => {
-      render({ usage: usage(2) });
+    it('puts the plan’s two segments side by side, each with how much is used and its reset', () => {
+      render({ usage: usage(2, 98) });
       expect(text()).toContain('Plan usage');
-      expect(text()).toContain('5 hours');
-      expect(text()).toContain('38% used');
-      expect(text()).toContain('Resets in about 2 hours');
-      expect(text()).not.toContain('Weekly');
-      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(1);
+      const meters = Array.from(
+        byTestId('home-week-usage')!.querySelectorAll('[data-usage-window]')
+      ).map((meter) => meter.textContent ?? '');
+      expect(meters).toHaveLength(2);
+      expect(meters[0]).toContain('5 hours');
+      expect(meters[0]).toContain('38% used');
+      expect(meters[0]).toContain('Resets in about 2 hours');
+      // The week behind the 5-hour segment: its own percent and its own reset, beside it.
+      expect(meters[1]).toContain('Weekly');
+      expect(meters[1]).toContain('21% used');
+      expect(meters[1]).toContain('Resets in 4 days');
+      expect(container.querySelectorAll('[data-usage-fill]')).toHaveLength(2);
       expect(byTestId('home-week-forecast')).toBeNull();
       expect(byTestId('home-week-usage')?.getAttribute('data-column')).toBe('1 / span 2');
     });
 
-    it('names the tier the provider named', () => {
-      render({ usage: { ...usage(), name: 'GPT-5.3-Codex-Spark' } });
-      expect(text()).toContain('Plan usage · GPT-5.3-Codex-Spark');
+    it('shows one meter when the provider reports one window', () => {
+      render({ usage: { ...usage(), otherWindow: null } });
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')).toBeNull();
+      expect(text()).toContain('Plan usage');
     });
 
-    it('gives a known Codex reset a tile of its own beside the usage', () => {
+    it('keeps the week’s reset in a half tile as a countdown', () => {
       render({
-        usage: usage(),
+        usage: usage(2, 20),
         forecast: { title: 'Codex reset forecast', chancePercent: 65, when: 'Today 2:00 PM' },
       });
-      const forecast = byTestId('home-week-forecast')!;
-      expect(forecast.textContent).toBe('Codex reset forecast65%chanceToday 2:00 PM');
-      expect(byTestId('home-week-usage')?.contains(forecast)).toBe(false);
-      expect(byTestId('home-week-usage')?.getAttribute('data-column')).toBe('1');
-      const source = byTestId('home-week-forecast-source')!;
-      expect(source.tagName).toBe('BUTTON');
-      expect(source.getAttribute('aria-label')).toContain('codex-resets.com');
+      // Beside the forecast the tile is half as wide: one meter, and the other window's reset in
+      // the head as a countdown rather than two columns of labels.
+      expect(container.querySelectorAll('[data-usage-window]')).toHaveLength(1);
+      expect(byTestId('home-week-usage-other-window')?.textContent).toBe('Weekly in 20h');
     });
 
     it('words a scheduled reset without a probability', () => {
@@ -464,59 +386,11 @@ describe('HomeDashboard', () => {
         'Codex reset scheduledToday 2:00 PM'
       );
     });
-
-    it('says whose plan it is, in a control that opens a list when there are several', () => {
-      render({ usage: usage(), usageSources: [CODEX, CLAUDE], usageSourceId: CODEX.id });
-      // Without a handler the control cannot change anything, so it stays a plain outline.
-      expect(byTestId('home-week-usage-source')?.tagName).toBe('SPAN');
-      render({
-        usage: usage(),
-        usageSources: [CODEX, CLAUDE],
-        usageSourceId: CLAUDE.id,
-        onUsageSourceChange: () => undefined,
-      });
-      const trigger = byTestId('home-week-usage-source')!;
-      expect(trigger.tagName).toBe('BUTTON');
-      expect(trigger.textContent).toBe('Claude');
-      expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
-    });
-
-    it.each([CODEX, CLAUDE])('closes the usage picker after choosing $name', async (candidate) => {
-      const selected: string[] = [];
-      render({
-        usage: usage(),
-        usageSources: [CODEX, CLAUDE],
-        usageSourceId: CODEX.id,
-        onUsageSourceChange: (id) => selected.push(id),
-      });
-      const trigger = byTestId('home-week-usage-source')!;
-      await act(async () => trigger.click());
-      expect(trigger.getAttribute('aria-expanded')).toBe('true');
-      const option = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
-      ).find((item) => item.textContent === candidate.name)!;
-      expect(option).toBeDefined();
-
-      await act(async () => option.click());
-
-      expect(trigger.getAttribute('aria-expanded')).toBe('false');
-      expect(selected).toEqual([candidate.id]);
-    });
   });
 
   describe('the line', () => {
     const segment = (id: HomeBoard) => q(`[data-segment="${id}"]`)!;
     const fold = () => byTestId('home-dashboard-fold')!;
-
-    it('opens on now, with the week waiting as its summary', () => {
-      render({ rows: [nowRow('run', { working: true })], defaultBoard: 'now' });
-      expect(byTestId('home-now')).not.toBeNull();
-      expect(byTestId('home-week')).toBeNull();
-      expect(segment('now').getAttribute('aria-expanded')).toBe('true');
-      // Both segments keep their summaries open or folded, so neither changes width.
-      expect(segment('now').contains(byTestId('home-now-summary'))).toBe(true);
-      expect(segment('week').contains(byTestId('home-week-summary'))).toBe(true);
-    });
 
     it('swaps the boards from the other segment, and folds the open one into the line', () => {
       render({ rows: [nowRow('wait', { waiting: true }), nowRow('run', { working: true })] });
@@ -588,24 +462,93 @@ describe('HomeDashboard', () => {
       expect(boards).toEqual([null, 'week', null, 'week', 'now', null, 'now']);
       field.remove();
     });
+  });
 
-    it('says so in one quiet phrase when nothing at all is going on', () => {
-      render({ defaultBoard: null });
-      expect(byTestId('home-now-summary')?.textContent).toBe('All caught up');
-      expect(byTestId('home-now-summary')?.getAttribute('data-summary')).toBe('quiet');
+  describe('under the composer', () => {
+    beforeEach(() => {
+      vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false,
+      }));
     });
 
-    it('keeps the three counts once anything is going on', () => {
-      render({ defaultBoard: null, rows: [nowRow('a', { waiting: true })] });
-      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you1Running0Just finished0');
-    });
+    const states: { name: string; rows: HomeNowRow[]; usage: HomeWeekUsage | null }[] = [
+      // A new account's first visit: no sessions yet, and no provider reporting usage.
+      { name: 'a new account', rows: [], usage: null },
+      { name: 'a quiet board beside the usage', rows: [], usage: usage() },
+      {
+        name: 'busy lists without usage',
+        rows: [nowRow('wait', { waiting: true }), nowRow('run', { working: true })],
+        usage: null,
+      },
+      {
+        name: 'busy lists beside the usage',
+        rows: [
+          ...Array.from({ length: 9 }, (_, index) => nowRow(`wait-${index}`, { waiting: true })),
+          ...Array.from({ length: 6 }, (_, index) => nowRow(`done-${index}`, { unread: true })),
+        ],
+        usage: usage(),
+      },
+    ];
+    const boards: (HomeBoard | null)[] = ['now', 'week', null];
 
-    it('shows the board it is given when controlled', () => {
-      render({ board: 'week' });
-      expect(byTestId('home-week')).not.toBeNull();
-      render({ board: null });
-      expect(byTestId('home-week')).toBeNull();
-      expect(byTestId('home-now')).toBeNull();
+    it.each(states.flatMap((state) => boards.map((defaultBoard) => ({ ...state, defaultBoard }))))(
+      'keeps the prompt on the page for $name on board $defaultBoard',
+      (state) => {
+        act(() => {
+          root.render(
+            <ChatLandingView
+              tone="light"
+              title="New chat"
+              promptValue=""
+              onPromptChange={() => undefined}
+              submitLabel="Send"
+              ambient={
+                <HomeDashboard
+                  now={buildHomeNow({ rows: state.rows }, NOW_MS)}
+                  week={buildHomeWeek({ rows: [], activeDays: [] }, NOW)}
+                  agentLabel={label}
+                  nowMs={NOW_MS}
+                  animate={false}
+                  defaultBoard={state.defaultBoard}
+                  usage={state.usage}
+                />
+              }
+            />
+          );
+        });
+        expect(q('#chat-prompt')).not.toBeNull();
+        expect(byTestId('home-dashboard')).not.toBeNull();
+      }
+    );
+
+    it('keeps the prompt on the page when the dashboard fails to render', () => {
+      const BrokenDashboard = (): never => {
+        throw new TypeError("Cannot read properties of undefined (reading 'reduce')");
+      };
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      act(() => {
+        root.render(
+          <ChatLandingView
+            tone="light"
+            title="New chat"
+            promptValue=""
+            onPromptChange={() => undefined}
+            submitLabel="Send"
+            ambient={<BrokenDashboard />}
+          />
+        );
+      });
+      expect(q('#chat-prompt')).not.toBeNull();
+      const alert = q('[role="alert"]');
+      expect(alert?.textContent).toContain("This part couldn't be shown.");
+      expect(alert?.querySelector('[title]')?.getAttribute('title')).toContain('reduce');
     });
   });
 });

@@ -20,10 +20,12 @@ highlighting an action, while keyboard opening and arrow navigation focus rows.
 Both the row and the switch toggle the preference without dismissing the menu.
 
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,
-including independent optional notes and secret masking. Its dedicated
+including distinct short headers, independent optional notes and secret masking. Its dedicated
 `AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
 replacement answers. The [answer notes Spec](../../../../../specs/ask-question-answer-notes.md)
-describes the shared parsing and persistence boundary.
+describes the shared parsing and persistence boundary. Question text renders as
+Markdown without loading images; this also renders the plan-review detail carried
+in a DSH form. See the [DSH question decision](../../../../../.agents/notes/implemented/feature/2026-09-20-dsh-user-questions.md).
 
 | File                                         | Responsibility                                                              |
 | -------------------------------------------- | --------------------------------------------------------------------------- |
@@ -50,21 +52,21 @@ menus prefer opening above the bottom-of-chat controls. Full provider labels
 wrap left-aligned within the popup, including paths without spaces. The [presentation decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-15-permission-option-wrapping.md)
 records the label budget, interaction trade-off, and verification limits.
 
-| File                                                            | Responsibility                                                                                                                                      |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session-chat-interface.tsx`                                    | Conversation surface: stream, header variants, read receipts, launchers                                                                             |
-| [`chat-share-image-dialog.tsx`](chat-share-image-dialog.tsx)    | Selected-message card styling, historical metadata, PNG export, and local image copying; [draft contract](../../../../../specs/chat-share-image.md) |
-| `draft-session-chat-interface.tsx`                              | Draft variant of the conversation surface                                                                                                           |
-| `session-chat-input-area.tsx`                                   | Composer: attachments, run-config footer, [upload waiting](../../../../../specs/composer-send-during-upload.md), submit                             |
-| `message-queue/`                                                | Queued turns and edit-operation ownership ([scope AGENTS.md](message-queue/AGENTS.md))                                                              |
-| `session-message-submit-route.ts`                               | Capability-gated send, regular queue, and native steer routing                                                                                      |
-| `desktop-run-config-menu.tsx`                                   | Desktop run-config dropdown + permission-mode button                                                                                                |
-| `recent-run-config-menu-group.tsx`                              | "Recently used" run-config entries                                                                                                                  |
-| `composer-agent-role-panel.tsx`, `agent-role-detail-pane.tsx`   | Agent Role selection and the single Role detail pane                                                                                                |
-| `floating-permission-request.tsx`, `ask-user-question-card.tsx` | Permission/question queue, draft continuity, and answer recovery                                                                                    |
-| `notification-permission-prompt.tsx`                            | Notification permission ask                                                                                                                         |
-| `session-fork-destination-menu.tsx`                             | Fork target choice (shared workspace tab vs. new worktree)                                                                                          |
-| `rename-session-dialog.tsx`                                     | Session rename dialog                                                                                                                               |
+| File                                                            | Responsibility                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session-chat-interface.tsx`                                    | Conversation surface: stream, header variants, read receipts, launchers                                                                                                                                                                                 |
+| [`chat-share-image-dialog.tsx`](chat-share-image-dialog.tsx)    | Selected-message card styling, historical metadata, PNG export, and local image copying; [draft contract](../../../../../specs/chat-share-image.md)                                                                                                     |
+| `draft-session-chat-interface.tsx`                              | Draft variant of the conversation surface                                                                                                                                                                                                               |
+| `session-chat-input-area.tsx`                                   | Composer: attachments, run-config footer, [upload waiting](../../../../../specs/composer-send-during-upload.md), submit, [archived workspace restore](../../../../../.agents/notes/implemented/feature/2026-11-03-archived-session-composer-restore.md) |
+| `message-queue/`                                                | Queued turns and edit-operation ownership ([scope AGENTS.md](message-queue/AGENTS.md))                                                                                                                                                                  |
+| `session-message-submit-route.ts`                               | Capability-gated send, regular queue, and native steer routing                                                                                                                                                                                          |
+| `desktop-run-config-menu.tsx`                                   | Desktop run-config dropdown + permission-mode button                                                                                                                                                                                                    |
+| `recent-run-config-menu-group.tsx`                              | "Recently used" run-config entries                                                                                                                                                                                                                      |
+| `composer-agent-role-panel.tsx`, `agent-role-detail-pane.tsx`   | Agent Role selection and the single Role detail pane                                                                                                                                                                                                    |
+| `floating-permission-request.tsx`, `ask-user-question-card.tsx` | Permission/question queue, draft continuity, and answer recovery                                                                                                                                                                                        |
+| `notification-permission-prompt.tsx`                            | Notification permission ask                                                                                                                                                                                                                             |
+| `session-fork-destination-menu.tsx`                             | Fork target choice (shared workspace tab vs. new worktree)                                                                                                                                                                                              |
+| `rename-session-dialog.tsx`                                     | Session rename dialog                                                                                                                                                                                                                                   |
 
 ## Info bar, status, and session actions
 
@@ -73,8 +75,8 @@ or a compact icon button on mobile. Tap/click (also hover on desktop) opens its
 owner, device and connection details. A machine-only info bar has no raised
 background. The
 [draft Spec](../../../../../specs/composer-machine-owner.md) and
-[proposal](../../../../../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.md)
-record the presentation decision awaiting visual review.
+[decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-composer-machine-info-card.md)
+record the presentation, which still awaits visual review.
 In narrow mobile bars the private-access badge keeps its lock and sharing action,
 with the full access description in its accessible name/title.
 
@@ -143,15 +145,22 @@ text selection opens feedback beside the source and preserves its highlight.
 Empty feedback dismisses outside; typed feedback stays anchored through scrolling.
 Cmd/Ctrl+I focuses its comment, Cmd/Ctrl+Enter stages it, and Escape cancels.
 PDF rotation is in More and PDF/CSV search opens beneath the toolbar.
-`document-selection-editor.tsx` owns screenshot previews and comments. Only the
-existing-image attachment dialog opts into drawing tools, with names and a drawing
-hint. Crops preserve display pixel density within the 4 MP output budget; their CSS
+`document-selection-editor.tsx` owns screenshot previews and comments. The
+existing-image attachment lightbox centers the image over the session, with a floating
+toolbar for drawing tools and colors;
+rectangle and text marks can carry notes, which are rendered into the image and
+included in the attachment's chat context. Undo removes the last mark. Crops preserve display pixel density within the 4 MP output budget; their CSS
 preview size and markup stroke size remain independent of that density. PDF pages
 are captured in page coordinates to preserve centering and crop edges, and cross-page regions compose those page patches.
 Source context is staged as an expandable text reference and screenshots as
 ordinary image attachments, awaiting the user's send. The session composer also
 offers markup on existing image drafts, replacing their pixels only after acceptance.
-See the [decision and verification limits](../../../../../.agents/notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md).
+Accepted image markup is encoded as JPEG on a white background, reducing quality
+when necessary to fit the 5 MiB image limit. Attachments sent without accepting
+markup keep their original format; document selection captures continue to use PNG.
+See the [document-selection decision](../../../../../.agents/notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
+and [markup workspace update](../../../../../.agents/notes/implemented/feature/2026-10-31-image-markup-workspace.md),
+and the [JPEG markup decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
 
 `session-file-binary-preview.tsx` renders supported images, videos, PDFs, DOCX, XLSX, and
 PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local

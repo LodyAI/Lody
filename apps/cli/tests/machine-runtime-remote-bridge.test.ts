@@ -24,7 +24,7 @@ const deferred = <T>(): Deferred<T> => {
   return { promise, resolve };
 };
 
-const createHarness = () => {
+const createHarness = (encrypted = false) => {
   // Stateful shared-resource model: attach/detach flip the same booleans the
   // real LoroDocumentManager transport + MessageHandler backfill gate flip.
   const state = { transportAttached: false, backfillEnabled: false };
@@ -52,7 +52,13 @@ const createHarness = () => {
       throw new Error('not used');
     },
     workspaceDocument: workspaceDocument as never,
-    handlerConfig: { token: 'token' } as never,
+    handlerConfig: {
+      token: 'token',
+      encryptedWorkspace: encrypted,
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      userId: 'owner',
+    } as never,
     logger: createSilentLogger(),
   } satisfies MachineRuntimeOptions);
   (runtime as unknown as { handler: unknown }).handler = handler;
@@ -129,4 +135,126 @@ describe('MachineRuntime remote bridge transitions', () => {
     expect(state.transportAttached).toBe(true);
     expect(state.backfillEnabled).toBe(true);
   });
+});
+
+it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+  'rejects %s at encrypted remote ingress before dispatch',
+  async (method) => {
+    const { runtime, handler } = createHarness(true);
+    const dispatched: unknown[] = [];
+    Object.assign(handler, {
+      handleLocalMachineRpc: async (request: unknown) => {
+        dispatched.push(request);
+        return { ok: true };
+      },
+    });
+    const request =
+      method === 'sorbet/credentials-list'
+        ? { method, workspaceId: 'workspace', machineId: 'machine', params: { configId: 'config' } }
+        : {
+            method,
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            params: { configId: 'config', providerId: '提供商 / 账户' },
+          };
+    await expect(runtime.handleEncryptedFeatureRpc(request)).rejects.toThrow(
+      'e2ee_feature_unavailable'
+    );
+    expect(dispatched).toEqual([]);
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    Object.assign(handler, {
+      handleLocalMachineRpc: async (_request: unknown, signal?: AbortSignal) => {
+        receivedSignal = signal;
+        return { ok: true };
+      },
+    });
+    await expect(
+      runtime.handleEncryptedFeatureRpc(request, {
+        requestId: 'request',
+        expiresAt: 1,
+        signal: controller.signal,
+      })
+    ).resolves.toEqual({ ok: true });
+    controller.abort();
+    expect(receivedSignal?.aborted).toBe(true);
+  }
+);
+
+it('admits encrypted file and preview features through machine dispatch while rejecting foreign routing and requester identity', async () => {
+  const { runtime, handler } = createHarness(true);
+  const files = new Map<string, string>();
+  Object.assign(handler, {
+    handleLocalMachineRpc: async (
+      request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+    ) => {
+      if (request.method === 'code-collab/save-text' && request.params.text.encoding === 'plain')
+        files.set(request.params.path, request.params.text.text);
+      return { ok: true, result: { status: 'ok' } };
+    },
+  });
+  const request = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'code-collab/save-text' as const,
+    params: {
+      sessionId: 'session',
+      requestedByUserId: 'owner',
+      path: 'private.ts',
+      baseDigest: 'sha256:' + '11'.repeat(32),
+      text: { encoding: 'plain' as const, text: 'private contents', rawBytes: 16 },
+    },
+  };
+  await runtime.handleEncryptedFeatureRpc(request);
+  expect(files.get('private.ts')).toBe('private contents');
+  await expect(
+    runtime.handleEncryptedFeatureRpc({ ...request, workspaceId: 'other' })
+  ).rejects.toThrow('e2ee_feature_scope');
+  await expect(
+    runtime.handleEncryptedFeatureRpc({
+      ...request,
+      params: { ...request.params, requestedByUserId: 'other', path: 'foreign.ts' },
+    })
+  ).rejects.toThrow('e2ee_feature_requester');
+  expect([...files.keys()]).toEqual(['private.ts']);
+});
+
+it('requires live verified authority for encrypted ACP interaction routing', async () => {
+  const { runtime, handler } = createHarness(true);
+  const request = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    method: 'machine/acp-interaction' as const,
+    params: { action: 'poll' as const, interactionRequestId: 'a'.repeat(32) },
+  };
+  const controller = new AbortController();
+  const context = {
+    requestId: 'b'.repeat(32),
+    requesterDevice: 'c'.repeat(64),
+    expiresAt: Date.now() + 60_000,
+    signal: new AbortController().signal,
+  };
+  const received: unknown[] = [];
+  Object.assign(handler, {
+    handleEncryptedAcpInteraction: async (input: unknown, verified: unknown) => {
+      received.push({ input, verified });
+      return { ok: true };
+    },
+  });
+  await expect(runtime.handleEncryptedFeatureRpc(request, context)).rejects.toThrow(
+    'e2ee_feature_unavailable'
+  );
+  await expect(
+    runtime.handleEncryptedFeatureRpc(request, {
+      ...context,
+      authority: { signal: controller.signal, isCurrent: () => false },
+    })
+  ).rejects.toThrow('e2ee_feature_unavailable');
+  const verified = { ...context, authority: { signal: controller.signal, isCurrent: () => true } };
+  await expect(runtime.handleEncryptedFeatureRpc(request, verified)).resolves.toEqual({ ok: true });
+  expect(received).toEqual([{ input: request, verified }]);
+  controller.abort();
+  await expect(runtime.handleEncryptedFeatureRpc(request, verified)).rejects.toThrow(
+    'e2ee_feature_unavailable'
+  );
 });

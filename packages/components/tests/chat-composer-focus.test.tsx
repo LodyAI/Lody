@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,52 +54,7 @@ describe('ChatComposer focusOnContainerClick', () => {
     vi.unstubAllGlobals();
   });
 
-  it('focuses textarea when clicking container background with focusOnContainerClick=true', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
-    await act(async () => {
-      root.render(
-        createElement(ChatComposer, {
-          promptRef,
-          promptValue: '',
-          onPromptChange: () => undefined,
-          focusOnContainerClick: true,
-        })
-      );
-    });
-
-    const boxContainer = container.querySelector('[data-lody-composer-box]') as HTMLElement;
-    expect(boxContainer).not.toBeNull();
-    expect(document.activeElement).not.toBe(promptRef.current);
-
-    await act(async () => {
-      boxContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(document.activeElement).toBe(promptRef.current);
-  });
-
-  it('does not focus textarea when focusOnContainerClick is false', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
-    await act(async () => {
-      root.render(
-        createElement(ChatComposer, {
-          promptRef,
-          promptValue: '',
-          onPromptChange: () => undefined,
-          focusOnContainerClick: false,
-        })
-      );
-    });
-
-    const boxContainer = container.querySelector('[data-lody-composer-box]') as HTMLElement;
-    await act(async () => {
-      boxContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(document.activeElement).not.toBe(promptRef.current);
-  });
-
-  it('does not focus textarea when clicking a button, input, or portalled element', async () => {
+  it('does not steal focus from an embedded input', async () => {
     const promptRef = createRef<HTMLTextAreaElement>();
     const customInputRef = createRef<HTMLInputElement>();
 

@@ -736,6 +736,7 @@ export interface LoroSidebarProps {
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
+  settingsIcon?: ReactNode;
   onDocsClicked?: () => void;
   onGithubClicked?: () => void;
   onJoinCommunityClicked?: () => void;
@@ -1342,6 +1343,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onArchiveClicked,
   onSchedulesClicked,
   onSettingsClicked,
+  settingsIcon,
   onDocsClicked,
   onGithubClicked,
   onJoinCommunityClicked,
@@ -1355,7 +1357,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const schedulesAllowed = useWorkspaceFeature('schedules');
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ includeDesktopWeb: true });
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
   const store = useStore();
@@ -1645,6 +1647,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1658,6 +1661,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -2269,7 +2273,9 @@ export const LoroSidebar = memo(function LoroSidebar({
             )}
 
             <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
-              <Settings {...stylex.props(shellStyles.glyphFull)} strokeWidth={1.5} />
+              {settingsIcon ?? (
+                <Settings {...stylex.props(shellStyles.glyphFull)} strokeWidth={1.5} />
+              )}
             </IconButton>
           </div>
 

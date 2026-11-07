@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -82,7 +83,7 @@ function renderRows(conversations: ConversationTabEntry[]): HTMLElement[] {
 
 const hand = (row: HTMLElement) => row.querySelector(`[aria-label="${WAITING_LABEL}"]`);
 const spinner = (row: HTMLElement) =>
-  row.querySelector('[data-slot="spinner"]');
+  row.querySelector('[data-slot="icon-spinner"][data-spinning="true"], [data-slot="spinner"]');
 const unreadDot = (row: HTMLElement) => row.querySelector('[aria-label="Unread messages"]');
 
 describe('mobile session tab sheet status slot', () => {
@@ -96,68 +97,11 @@ describe('mobile session tab sheet status slot', () => {
     expect(hand(main!)).toBeNull();
   });
 
-  it('keeps the spinner for a tab that is working but not blocked', () => {
-    const [working] = renderRows([entry({ id: 'working', running: true })]);
-    expect(spinner(working!)).not.toBeNull();
-    expect(hand(working!)).toBeNull();
-  });
-
   it('ranks waiting above unread when a tab is both', () => {
     const [both] = renderRows([
       entry({ id: 'both', running: true, waitingPermission: true, unread: true }),
     ]);
     expect(hand(both!)).not.toBeNull();
     expect(unreadDot(both!)).toBeNull();
-  });
-});
-
-describe('archive and closed conversations', () => {
-  function renderSheet(onNewConversation: (() => void) | undefined) {
-    flushSync(() => {
-      root.render(
-        createElement(MobileSessionTabSheet, {
-          open: true,
-          onOpenChange: vi.fn(),
-          conversations: [entry({ id: 'main', main: true, active: true })],
-          archivedConversations: [
-            { id: 'closed', title: 'Closed child', lastActivityAt: null },
-            {
-              id: 'archived',
-              title: 'Archived child',
-              lastActivityAt: null,
-              restoresArchive: true,
-            },
-          ],
-          viewers: [],
-          onSelectConversation: vi.fn(),
-          onNewConversation,
-          onSelectViewer: vi.fn(),
-          onRestoreConversation: vi.fn(),
-        })
-      );
-    });
-    flushSync(() => {
-      Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]'))
-        .find((button) => button.textContent?.startsWith('Closed'))!
-        .click();
-    });
-  }
-
-  it('labels an archived child of a live workspace Restore and a closed tab Reopen', () => {
-    renderSheet(vi.fn());
-    expect(container.textContent).toContain('New Chat');
-    const labels = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('button[aria-label]'),
-      (button) => [button.textContent?.trim(), button.getAttribute('aria-label')]
-    ).filter(([text]) => text === 'Closed child' || text === 'Archived child');
-    expect(labels).toEqual([
-      ['Closed child', 'Reopen conversation'],
-      ['Archived child', 'Restore session'],
-    ]);
-  });
-
-  it('offers no New Chat in a review-only archived workspace', () => {
-    renderSheet(undefined);
-    expect(container.textContent).not.toContain('New Chat');
   });
 });

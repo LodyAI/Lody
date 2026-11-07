@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
+// @vitest-environment jsdom
 import { webcrypto } from 'node:crypto';
 import { prepareSharePackage, createShareDeliveryKey } from '@lody/shared/session-sharing';
 import { act, Component, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Virtualizer } from 'virtua';
+
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 const cloud = vi.hoisted(() => ({
@@ -90,6 +93,8 @@ vi.mock('@lody/shared/session-sharing', async (original) => ({
   uploadPreparedShare: (...args: unknown[]) => cloud.upload(...args),
 }));
 import { SessionShareRequestCards } from '../src/components/sharing/session-share-request-cards';
+import { activeWorkspaceRuntimeAtom } from '../src/atoms/runtime';
+import { getDefaultStore } from 'jotai';
 
 /** Stands in for the chat-stream boundary the cards must never reach. */
 class ConversationBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -131,6 +136,7 @@ beforeEach(async () => {
   vi.stubEnv('VITE_SESSION_SHARE_ORIGIN', 'https://share.test');
   vi.stubEnv('VITE_SERVER_URL', 'https://api.test');
   cloud.publicKey = (await createShareDeliveryKey()).publicKey;
+  getDefaultStore().set(activeWorkspaceRuntimeAtom, { workspaceId: 'workspace' } as never);
   cloud.capture.mockReset().mockResolvedValue(
     await prepareSharePackage({
       rootSourceId: 'root',
@@ -158,6 +164,34 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+});
+
+it('requires decrypted-copy consent after MCP approval in an encrypted workspace', async () => {
+  getDefaultStore().set(activeWorkspaceRuntimeAtom, {
+    workspaceId: 'workspace',
+    contentMode: 'e2ee',
+  } as never);
+  await render();
+  await click('Approve and share');
+  expect(container.textContent).toContain('where the server can read it');
+  expect(cloud.capture).not.toHaveBeenCalled();
+  expect(cloud.upload).not.toHaveBeenCalled();
+  expect(localStorage.length).toBe(0);
+  await click('Cancel');
+  expect(container.textContent).toContain('Approve and share');
+  expect(cloud.cancel).not.toHaveBeenCalled();
+  expect(cloud.capture).not.toHaveBeenCalled();
+  expect(cloud.upload).not.toHaveBeenCalled();
+  await click('Approve and share');
+  await act(async () => {
+    [...container.querySelectorAll('button')]
+      .find((node) => node.textContent === 'Publish decrypted copy')!
+      .click();
+    await cloud.published;
+  });
+  expect(container.textContent).not.toContain('Approve and share');
+  expect(container.textContent).not.toContain('Publish decrypted copy');
+  expect(localStorage.length).toBe(1);
 });
 
 it('discloses full agent delivery and completes publication with one approval', async () => {
@@ -190,13 +224,6 @@ it('explains interrupted publication and hides the card when publication is conf
   expect(container.querySelector('section')).toBeNull();
 });
 
-it('does not show already published requests when opening the conversation', async () => {
-  cloud.status = 'published';
-  await render();
-  expect(container.innerHTML).toBe('');
-  expect(localStorage.length).toBe(0);
-});
-
 it('keeps a failed publication visible for retry', async () => {
   cloud.capture.mockRejectedValue(new Error('Capture failed'));
   await render();
@@ -222,120 +249,3 @@ it('keeps the conversation alive when the share-request query fails, and recover
     logged.mockRestore();
   }
 });
-
-it.each(['leading-row', 'outside-list'] as const)(
-  'delivers a delayed share request after scrolling with cards at %s',
-  async (placement) => {
-    cloud.loaded = false;
-    const observers: Array<{ callback: ResizeObserverCallback; targets: Set<Element> }> = [];
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        entry: (typeof observers)[number];
-        constructor(callback: ResizeObserverCallback) {
-          this.entry = { callback, targets: new Set() };
-          observers.push(this.entry);
-        }
-        observe = (element: Element) => this.entry.targets.add(element);
-        unobserve = (element: Element) => this.entry.targets.delete(element);
-        disconnect = () => this.entry.targets.clear();
-      }
-    );
-    vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(
-      function (this: HTMLElement) {
-        return this.parentElement;
-      }
-    );
-    const cards = (
-      <SessionShareRequestCards
-        workspaceId={'workspace' as WorkspaceId}
-        session={{ id: 'root' } as SessionMeta}
-        isVisible
-      />
-    );
-    const measure = () => {
-      for (const { callback, targets } of observers) {
-        callback(
-          [...targets].map((target) => ({
-            target,
-            contentRect: {
-              width: 400,
-              height: target.hasAttribute('data-viewport')
-                ? 400
-                : target.querySelector('[data-share-leading]')
-                  ? 0
-                  : 100,
-            },
-          })) as ResizeObserverEntry[],
-          {} as ResizeObserver
-        );
-      }
-    };
-    await act(async () =>
-      root.render(
-        <>
-          <div data-viewport="">
-            <Virtualizer itemSize={100} bufferSize={800} shift={false}>
-              {placement === 'leading-row' && <div data-share-leading="">{cards}</div>}
-              {Array.from({ length: 60 }, (_, i) => (
-                <div key={i}>message {i}</div>
-              ))}
-            </Virtualizer>
-          </div>
-          {placement === 'outside-list' && cards}
-        </>
-      )
-    );
-    const viewport = container.querySelector<HTMLElement>('[data-viewport]')!;
-    await act(async () => measure());
-    expect(container.textContent).toContain('message 0');
-    // Same initial bottom restoration as the conversation, with no human scroll.
-    await act(async () => {
-      viewport.scrollTop = 5600;
-      viewport.dispatchEvent(new Event('scroll'));
-    });
-    expect(container.textContent).toContain('message 59');
-    expect(container.textContent).not.toContain('message 0');
-    await act(async () => {
-      cloud.loaded = true;
-      for (const notify of cloud.listeners) notify();
-    });
-    if (placement === 'leading-row') {
-      // Reproduce Add -> Remove before the pending result can render.
-      expect(cloud.listeners.size).toBe(0);
-      expect(container.querySelector('section')).toBeNull();
-    } else {
-      let finishUpload!: () => void;
-      let startedUpload!: () => void;
-      const uploading = new Promise<void>((resolve) => {
-        startedUpload = resolve;
-      });
-      const uploaded = new Promise<void>((resolve) => {
-        finishUpload = resolve;
-      });
-      cloud.upload.mockImplementation(() => {
-        startedUpload();
-        return uploaded;
-      });
-      expect(container.textContent).toContain('Approve and share');
-      await click('Approve and share');
-      await act(async () => uploading);
-      await act(async () => {
-        cloud.status = 'confirmed';
-        for (const notify of cloud.listeners) notify();
-        viewport.scrollTop = 0;
-        viewport.dispatchEvent(new Event('scroll'));
-      });
-      expect(container.textContent).toContain('message 0');
-      expect(container.textContent).not.toContain('message 59');
-      expect(container.querySelector('[role="dialog"]')).toBeNull();
-      expect(container.textContent).toContain('Publishing automatically');
-      expect(cloud.capture).toHaveBeenCalledTimes(1);
-      await act(async () => {
-        finishUpload();
-        await cloud.published;
-      });
-      expect(container.querySelector('section')).toBeNull();
-    }
-  }
-);

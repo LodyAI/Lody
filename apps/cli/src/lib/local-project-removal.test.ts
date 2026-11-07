@@ -5,10 +5,7 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
-import {
-  cleanupLocalProjectWorktrees,
-  preflightLocalProjectWorktreeRemoval,
-} from './local-project-removal';
+import { cleanupLocalProjectWorktrees } from './local-project-removal';
 
 const inspectWorktree = vi.fn();
 const removeWorktree = vi.fn();
@@ -50,18 +47,6 @@ describe('local project worktree removal', () => {
   beforeEach(() => {
     inspectWorktree.mockReset();
     removeWorktree.mockReset();
-  });
-
-  it('lists dirty worktrees during preflight', async () => {
-    inspectWorktree
-      .mockResolvedValueOnce({ state: 'clean', path: '/worktrees/clean' })
-      .mockResolvedValueOnce({ state: 'dirty', path: '/worktrees/dirty' });
-
-    await expect(preflightLocalProjectWorktreeRemoval(target)).resolves.toEqual({
-      clean: [{ sessionId: cleanSessionId, title: 'Clean session', path: '/worktrees/clean' }],
-      dirty: [{ sessionId: dirtySessionId, title: 'Dirty session', path: '/worktrees/dirty' }],
-      failed: [],
-    });
   });
 
   it('deletes only clean worktrees without force or backup commits', async () => {

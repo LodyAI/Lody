@@ -12,33 +12,42 @@
     "./adapters/node-sqlite": "./src/adapters/node-sqlite/index.ts",
     "./adapters/loro-streams": "./src/adapters/loro-streams/index.ts",
     "./cloudflare": "./src/cloudflare/index.ts",
-    "./internal": "./src/internal/index.ts"
+    "./internal": "./src/internal/index.ts",
+    "./adapters/browser-crypto": "./src/adapters/browser-crypto/index.ts",
+    "./adapters/indexeddb": "./src/adapters/indexeddb/index.ts",
+    "./adapters/browser-custody": "./src/adapters/browser-custody/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test": "vitest run --no-file-parallelism",
     "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.ts'",
-    "check:docs": "tsx scripts/check-public-docs.ts"
+    "check:docs": "tsx scripts/check-public-docs.ts",
+    "test:browser-crypto": "vitest run --config vitest.browser.config.ts",
+    "test:browser-idb": "vitest run --config vitest.idb.config.ts",
+    "test:browser-custody": "vitest run --config vitest.custody.config.ts"
   },
   "dependencies": {
     "@hpke/chacha20poly1305": "1.8.0",
     "@hpke/core": "1.9.0",
+    "@hpke/dhkem-x25519": "1.7.0",
     "@ipld/dag-cbor": "10.0.2",
     "@noble/ciphers": "2.1.1",
     "@noble/ed25519": "3.2.0",
     "@noble/hashes": "2.2.0",
-    "effect": "catalog:",
-    "better-sqlite3": "catalog:"
+    "better-sqlite3": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "3.2.4",
-    "oxfmt": "^0.65.0",
-    "@types/better-sqlite3": "catalog:",
-    "tsx": "4.23.7",
     "@loro-dev/streams-client": "catalog:",
-    "@loro-dev/streams-crdt": "catalog:"
+    "@loro-dev/streams-crdt": "catalog:",
+    "@playwright/test": "1.58.2",
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "esbuild": "0.28.2",
+    "oxfmt": "^0.65.0",
+    "tsx": "4.23.7",
+    "typescript": "catalog:",
+    "vitest": "3.2.4"
   }
 }

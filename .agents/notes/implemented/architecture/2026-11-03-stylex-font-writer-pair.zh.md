@@ -9,6 +9,8 @@ PR: [#1875](https://github.com/LodyAI/Lody/pull/1875) (draft)
 
 ## 摘要
 
+历史实现：声明桥接及其私有字体 writer 已移除。下文证据记录旧适配器；当前样式所有权见[直接 StyleX 与框架退役](2026-10-22-tailwind-to-stylex-migration.zh.md)。
+
 只迁字重而省略私有 writer 会改变受支持的 CSS 合同。声明桥现支持一个封闭的 `font-medium` 对，把两条原生 StyleX 声明放回原规则，保留 class 身份、顺序与注册。一个真实 ACP 选择器 label 通过 24 对浏览器状态与六条构建路径。该声明对仍依赖 Tailwind alias 与排序；组合 Root 资格及全部历史视觉差异与这项隔离验收分列。
 
 ## 边界

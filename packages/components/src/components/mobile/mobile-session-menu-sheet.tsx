@@ -15,6 +15,7 @@ import {
 } from '../../style/theme-scale.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { sheetSurface } from './sheet-surface';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 /**
  * Bottom sheet that replaces the mobile session header "…" dropdown. A dropdown
@@ -300,6 +301,7 @@ export function MobileSessionMenuSheet({
   owner,
 }: MobileSessionMenuSheetProps) {
   const { t } = useTranslation();
+  const maxHeight = useFoldAwareSheetHeight();
   const heading = title ?? t('sessions.moreActions', 'More actions');
   const [ownerListOpen, setOwnerListOpen] = useState(false);
   // Reopening the sheet should start from the collapsed row again.
@@ -316,7 +318,7 @@ export function MobileSessionMenuSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent xstyle={styles.sheet}>
+      <DrawerContent style={{ maxHeight }} xstyle={styles.sheet}>
         <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{heading}</DrawerTitle>
         <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>{heading}</DrawerDescription>
         <div {...stylex.props(sheetSurface.body)}>

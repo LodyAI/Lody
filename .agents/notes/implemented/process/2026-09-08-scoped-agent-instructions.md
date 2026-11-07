@@ -25,7 +25,7 @@ to product intent. It extends the routing described in the
 [maintenance proposal](../../proposed/process/2026-09-05-human-reviewed-spec-maintenance.md)
 without approving that whole proposal or any Spec. It preserves the directly
 visible Spec/Note obligations established by
-[explicit note triggers](2026-09-07-explicit-agent-note-triggers.md).
+[explicit note triggers](../../archived/process/2026-09-07-explicit-agent-note-triggers.md).
 
 Binding rules still live in `AGENTS.md`, with explanations in `.agents/docs/`.
 For contracts spanning directories, the common ancestor names the behavior that
@@ -55,6 +55,10 @@ measurement. Related CLI and component explanations point to the new owners.
 Byte counts use Git-managed baseline `AGENTS.md` files and current non-ignored
 files, counting each once without its `CLAUDE.md` alias. An ancestor-chain count
 sums the root and each ancestor `AGENTS.md` of the named source directory.
+
+Correction (2026-10-28): the byte gate and 7,000-byte warning cited here were
+replaced by word ceilings; see [note memory hygiene](2026-10-28-agent-note-memory-hygiene.md).
+The byte figures above remain the measurements of this change.
 
 | Scope | Before | After |
 | --- | ---: | ---: |

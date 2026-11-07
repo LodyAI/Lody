@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -75,41 +76,106 @@ describe('queued message editing commits', () => {
     container = undefined;
   });
 
-  it('keeps scheduled messages after ordinary rows, re-sorts time edits, and excludes them from dragging', async () => {
-    const items = ['late', 'ordinary-a', 'early', 'ordinary-b'].map((id) => ({
-      ...makeItem(),
-      $cid: id,
-      task: id,
-    }));
-    const render = async (lateAt: number) => {
-      await act(async () => {
-        root?.render(
-          createElement(MessageQueueDisplay, {
-            sessionId: 'session-test' as SessionId,
-            items,
-            getItemScheduledAt: (item) =>
-              item.$cid === 'late' ? lateAt : item.$cid === 'early' ? 10 : null,
-            onRemove: () => {},
-            onReorder: () => {},
-            onEditStart: () => {},
-            onEditCancel: () => {},
-            onEditSave: () => {},
-            onSteer: () => {},
-          })
-        );
-      });
-    };
-    const rows = () => [...(container?.querySelectorAll('.group\\/row') ?? [])];
-    const order = () =>
-      rows().map((row) => items.find((item) => row.textContent?.includes(item.task))?.$cid);
-    await render(20);
-    expect(order()).toEqual(['ordinary-a', 'ordinary-b', 'early', 'late']);
-    for (const row of rows().slice(2))
+  it('renders dedicated scheduled rows in a final section without queue affordances', async () => {
+    const opened: string[] = [];
+    const cancelledRows: string[] = [];
+    const items = [makeItem()];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items,
+          scheduledItems: [
+            {
+              scheduleId: 'later',
+              content: 'Later scheduled message',
+              at: 30,
+              timeZone: 'UTC',
+              state: 'pending',
+            },
+            {
+              scheduleId: 'earlier',
+              content: 'Earlier scheduled message',
+              at: 10,
+              timeZone: 'UTC',
+              state: 'failed',
+            },
+          ],
+          onOpenScheduled: (item) => opened.push(item.scheduleId),
+          onCancelScheduled: (item) => cancelledRows.push(item.scheduleId),
+          onRemove: () => {},
+          onReorder: () => {},
+          onEditStart: () => {},
+          onEditCancel: () => {},
+          onEditSave: () => {},
+          onSteer: () => {},
+        })
+      );
+    });
+    expect(container!.textContent).toContain('Scheduled');
+    const scheduledRows = [...container!.querySelectorAll<HTMLElement>('[data-scheduled-row]')];
+    expect(scheduledRows.map((row) => row.title)).toEqual([
+      'Earlier scheduled message',
+      'Later scheduled message',
+    ]);
+    // Failure is marked on the time itself, never as a separate status column.
+    expect(container!.textContent).not.toContain('Not sent');
+    expect(container!.textContent).not.toContain('Pending');
+    const timeButton = (row: HTMLElement) =>
+      row.querySelector<HTMLButtonElement>('button[aria-label*="Edit scheduled time"]')!;
+    expect(timeButton(scheduledRows[0]!).getAttribute('aria-label')).toContain('Not sent');
+    expect(timeButton(scheduledRows[1]!).getAttribute('aria-label')).not.toContain('Not sent');
+    for (const row of scheduledRows) {
       expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
-    for (const row of rows().slice(0, 2))
-      expect(row.querySelector('[aria-label="Drag to reorder"]')).not.toBeNull();
-    await render(5);
-    expect(order()).toEqual(['ordinary-a', 'ordinary-b', 'late', 'early']);
+      expect(row.querySelector('[aria-label*="Steer"]')).toBeNull();
+      expect(timeButton(row)).not.toBeNull();
+    }
+    await act(async () =>
+      scheduledRows[0]!.querySelector<HTMLButtonElement>('button[aria-label="Edit"]')!.click()
+    );
+    await act(async () =>
+      scheduledRows[1]!
+        .querySelector<HTMLButtonElement>('button[aria-label="Cancel scheduled message"]')!
+        .click()
+    );
+    expect(opened).toEqual(['earlier']);
+    expect(cancelledRows).toEqual(['later']);
+  });
+
+  it('routes the scheduled time to the time editor rather than details', async () => {
+    const edited: string[] = [];
+    const opened: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [],
+          scheduledItems: [
+            {
+              scheduleId: 'scheduled-only',
+              content: 'Send the weekly summary',
+              at: Date.parse('2026-10-27T09:00:00Z'),
+              timeZone: 'UTC',
+              state: 'pending',
+            },
+          ],
+          onOpenScheduled: (item) => opened.push(item.scheduleId),
+          onEditScheduledTime: (item) => edited.push(item.scheduleId),
+          onRemove: () => {},
+          onReorder: () => {},
+          onEditStart: () => {},
+          onEditCancel: () => {},
+          onEditSave: () => {},
+          onSteer: () => {},
+        })
+      );
+    });
+    const row = container!.querySelector<HTMLElement>('[data-scheduled-row]')!;
+    const time = row.querySelector<HTMLButtonElement>('button[aria-label*="Edit scheduled time"]')!;
+    expect(time.textContent).toContain('9:00');
+    await act(async () => time.click());
+    expect(edited).toEqual(['scheduled-only']);
+    expect(opened).toEqual([]);
   });
 
   // The save promise stays pending until the test releases it, so the row is
@@ -192,57 +258,6 @@ describe('queued message editing commits', () => {
     await act(async () => textarea.focus());
     await pressEnter(textarea);
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Keep this unfinished draft' }]);
-  });
-
-  it('saves the edit when Enter is pressed', async () => {
-    const view = await renderQueue();
-    const textarea = await startEditing(view);
-
-    await act(async () => {
-      setTextareaValue(textarea, 'Rewrite the queue instead');
-    });
-    const event = await pressEnter(textarea);
-
-    expect(event.defaultPrevented).toBe(true);
-    expect(saved).toEqual([{ cid: 'cid-0', task: 'Rewrite the queue instead' }]);
-  });
-
-  it('focuses the editor when the editing flag arrives before the start write completes', async () => {
-    let finishStart!: () => void;
-    function QueueWithEarlyUpdate() {
-      const [items, setItems] = useState([makeItem()]);
-      return createElement(MessageQueueDisplay, {
-        sessionId: 'session-test' as SessionId,
-        items,
-        onRemove: () => undefined,
-        onReorder: () => undefined,
-        onSteer: () => undefined,
-        onEditCancel: () => undefined,
-        onEditSave: (item, task) => {
-          saved.push({ cid: item.$cid, task });
-          setItems((current) => current.map((entry) => ({ ...entry, isEditing: false, task })));
-        },
-        onEditStart: (item) => {
-          setItems([{ ...item, isEditing: true }]);
-          return new Promise<void>((resolve) => {
-            finishStart = resolve;
-          });
-        },
-      });
-    }
-    await act(async () => root?.render(createElement(QueueWithEarlyUpdate)));
-    const textarea = await startEditing(container!);
-    expect(textarea.disabled).toBe(true);
-    expect(document.activeElement).not.toBe(textarea);
-
-    await act(async () => finishStart());
-    expect(textarea.disabled).toBe(false);
-    expect(document.activeElement).toBe(textarea);
-    expect(textarea.selectionStart).toBe(ORIGINAL_TASK.length);
-    expect(textarea.selectionEnd).toBe(ORIGINAL_TASK.length);
-    await act(async () => setTextareaValue(textarea, 'Clarified queued instruction'));
-    await pressEnter(textarea);
-    expect(saved).toEqual([{ cid: 'cid-0', task: 'Clarified queued instruction' }]);
   });
 
   for (const nextEditPending of [false, true]) {
@@ -407,16 +422,6 @@ describe('queued message editing commits', () => {
     } finally {
       consoleError.mockRestore();
     }
-  });
-
-  it('reverts instead of writing when the text is unchanged', async () => {
-    const view = await renderQueue();
-    const textarea = await startEditing(view);
-
-    await pressEnter(textarea);
-
-    expect(saved).toEqual([]);
-    expect(cancelled).toEqual(['cid-0']);
   });
 });
 

@@ -15,10 +15,11 @@ retains exact opaque response frames before either transport may publish them.
 It opens no product channel and supplies no authorization or approved wire format.
 Product integration must also fence the existing durable dispatch path; storage
 tests alone do not establish safe agent execution. Only the current journal format
-is accepted. The owner accepts the persistent clock floor, including potentially long-lived
-cross-workspace rejection after an erroneous forward observation; no recalibration
-mechanism is introduced. SQLite-native recovery is permitted; application schema
-migrations remain forbidden.
+is accepted. The 2026-10-27 owner decision withdraws the earlier permanent global
+clock-floor limitation. The [MVP recovery decision](../bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md)
+adds workspace clocks, trusted-time checks, evidence-preserving reset and empty-store
+recovery. SQLite-native recovery remains permitted; application schema migrations
+remain forbidden.
 
 ## Existing evidence and reuse
 
@@ -52,22 +53,24 @@ mid-body and hold no network wait. Each operation opens the existing database,
 uses zero busy timeout and closes its handle. Explicit first provisioning creates
 the file exclusively. Short transactions use the
 [upstream synchronous transaction contract](https://github.com/WiseLibs/better-sqlite3/blob/v13.0.3/docs/api.md#transactionfunction---function),
-without catching mutation failures inside a transaction. Reopen accepts schema 2
-only: versions 1 and unknown, empty, corrupt or incomplete stores are refused,
-without schema upgrades, legacy decoding, replacement or application repair.
-Existing files open through SQLite's normal read/write recovery path. The application
-validates the version and required columns before mutation settings, permission
-normalization or application SQL writes. Provisioning interrupted before schema
-commit remains unavailable; reopen does not silently initialize it. This follows
-the [current-only rule](../../../../specs/e2ee-foundations.md#format-compatibility);
-the earlier draft's v1-to-v2 upgrade was a specification violation and is removed.
+without catching mutation failures inside a transaction. Reopen accepts schema 3
+only. After native recovery, version zero with no schema objects may complete first
+initialization; other unsupported/incomplete schemas are renamed and reported,
+without decoding or upgrading old formats. Current-format request keys must be
+retired before archival even if other tables are incomplete; unreadable current
+keys refuse reset and preserve the original for repair. Replacement requires explicit local reset.
+The stable adjacent control database coordinates shared opens against exclusive reset and retains retired
+current-format request IDs and interrupted-reset intent. See the
+[recovery decision](../bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md) for its
+ownership, crash boundaries and limits. Corruption still refuses dependent work.
 
 The preservation boundary is committed logical evidence and application format,
 not physical SQLite file identity. The owner approved SQLite-native transaction
 rollback and WAL checkpoint, including before an unsupported application version
 can be identified and rejected. Recovery can modify main/WAL/journal/SHM files;
 it does not authorize application migration, evidence deletion, database replacement
-or format repair. Closed rollback-mode stores needing no native recovery retain
+or format repair. The recovery exception permits renaming evidence and explicit fresh
+provisioning, without importing old rows. Closed rollback-mode stores needing no native recovery retain
 byte/mode checks; WAL and interrupted-transaction cases instead verify committed
 schema, version and evidence. SQLite owns its locks and recovery; the application
 does not copy, delete or bypass journals to inspect an uncommitted header. Real
@@ -94,7 +97,9 @@ connections. A successful claim returns one module-owned permit to its winning
 owner. There is no lease expiry, replacement permit or ownership adoption.
 Read/reopen maps started state to uncertain; only the original live owner may
 settle it. A crash after a side effect therefore cannot authorize automatic replay.
-Uncertainty must be reconciled through existing execution evidence, not cleared.
+The interface also reports `outcomeStatus: unknown`. Independent request IDs in
+the same workspace remain runnable. Uncertainty needs existing execution evidence;
+it grants no replacement permit.
 
 The first `finish` attempt retains a copy of its outcome in the permit owner before
 I/O. Failed persistence leaves started evidence; `retryFinish` retries only those
@@ -104,7 +109,7 @@ restart and expiry. Repeated identical settlement is safe; replacement is refuse
 Handle-close failures cannot replace a result or original operation error: the owner
 retains the handle and first unconsumed diagnostic cause, and retries cleanup
 separately. Repeated cleanup failure admits no new handle, and retains at most one
-failed handle and one pending diagnostic; successful cleanup permits the next call.
+main handle plus its control lock and one pending diagnostic; successful cleanup permits the next call.
 Corrupt or locked storage fails closed; restoration allows the next call to reopen.
 
 Response positions are local storage indexes, not an approved wire sequence or
@@ -128,7 +133,7 @@ no sender request outbox, acknowledgement policy or expiry-based response cleanu
 
 ## Interrupted current-store recovery
 
-A current schema-2 database may require rollback writes before SQLite can inspect
+A current schema-3 database may require rollback writes before SQLite can inspect
 its committed schema. Read-only preflight prevented that normal recovery with
 `SQLITE_READONLY_ROLLBACK`; it is removed under the narrow native-recovery decision.
 A controlled subprocess exit after an uncommitted spilled outcome update exercises
@@ -141,27 +146,21 @@ SQLite consolidates WAL or removes a recovered rollback journal. Busy or failed
 native recovery reports the original storage cause; after the lock or fault is
 removed, the next call can retry ordinary recovery without replacing the database.
 
-## Clock floor: accepted availability limitation
+## Clock floor and explicit recovery
 
-The owner chose to retain the maximum locally observed timestamp without a
-correction mechanism. The single clock row spans every request/workspace in that
-file. An erroneous observation of `1_000_000_000`, followed by correction to `100`,
-keeps even a new workspace's new request with deadline `1000` expired after reopen.
-This may last until real time catches up. Completed outcomes and response originals
-remain readable; local history and offline editing must not depend on a new claim.
-The dormant adapter has no product caller, so this is not evidence of a currently
-stopped product agent.
+The earlier owner decision accepted one file-global maximum timestamp and persistent
+rejection after a bad forward jump. The owner withdrew that availability trade-off
+on 2026-10-27. Its rationale remains useful: local wall time alone cannot distinguish
+clock correction from genuine elapsed time followed by rollback, and old deadlines
+must never be silently extended.
 
-`now(): number` cannot distinguish a corrected erroneous forward jump from real
-elapsed time followed by rollback. Keep the floor and original deadlines. Do not
-clear it, add a recovery generation/time source/handshake, automatically retry with
-new request IDs, or adopt started/uncertain work. An old received-but-unclaimed
-request must not become eligible again after rollback. Retrying storage cannot
-claim to repair this accepted limitation or renew any authorization deadline.
-
-Tests retain the cross-workspace/restart limitation while proving that completed
-outcomes and response originals remain readable. This is a limitation regression,
-not a successful recovery or a 15-minute product acceptance result.
+Current floors are keyed by genesis/workspace. A caller-supplied current authenticated
+reference rejects local time more than ten minutes ahead before any floor write;
+accepted calls advance from reference time, not the ahead local value. Without a
+reference, keep the conservative workspace maximum. The operator can archive/reset
+the machine journal rather than wait for real time to catch up. Known old request
+IDs remain fenced, so resetting a floor does not revive them or adopt uncertain work.
+Details and CLI usage are in the [recovery decision](../bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
 
 No evidence is reclaimed at `expiresAt`; no GC or retired-ID policy is implemented.
 Retained storage can grow without bound; exhaustion refuses dependent new work
@@ -185,11 +184,11 @@ Opaque response retention alone enables no product reply or query endpoint.
 `realtime-journal.test.ts` uses real disk SQLite, independent opens and competing
 worker-thread connections. It covers exact bytes/identity, retained outcomes,
 crash uncertainty, expired evidence, observed-clock rollback, owner-only settlement,
-lock contention, missing/corrupt/empty originals, rollback on injected SQLite
+lock contention, missing/corrupt originals, interrupted empty-store initialization, rollback on injected SQLite
 receive/start/result failures, and committed results with failed handle cleanup.
 Response tests also cover immutable ordered originals, independent reopen,
 pending-write recovery, completed-outcome preservation and rejection of non-current
-or incomplete stores without application migration or committed-evidence rewriting.
+or incomplete stores through archival without application migration or committed-evidence rewriting.
 Signals coordinate concurrent workers; no sleep or network is used.
 Database snapshots compare each BLOB by its SHA-256 digest and byte length, while
 retaining schema, version, journal mode and every other column value. This avoids
@@ -204,6 +203,6 @@ held reader separately proves COMMIT failure rolls back and the next call recove
 
 These are storage-boundary tests. They do not verify the full encrypted dispatch
 chain, platform packaging, power-loss behavior, malicious local storage replacement,
-real gateway behavior, native iroh, UI recovery or latency. Full repository checks
-and independent adversarial review remain PR submission requirements. The proposal
+real gateway behavior, native iroh, UI recovery or latency. Affected local checks and their limits are recorded in the recovery decision; full
+repository checks and independent adversarial review remain unverified in that change. The proposal
 does not approve a Spec or claim M2/M5 product acceptance.

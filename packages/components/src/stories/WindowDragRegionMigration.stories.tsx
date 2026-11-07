@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import {
   WindowDragStrip,
   WINDOW_DRAG_REGION_HEIGHT_CLASS,
@@ -49,7 +49,7 @@ function Rows({ toggle }: { toggle: () => void }) {
       <p>Synthetic Electron IPC data; browser geometry only.</p>
       <div
         data-drag-header
-        className={cn(header, WINDOW_DRAG_REGION_HEIGHT_CLASS, right, windows, mac)}
+        className={clsx(header, WINDOW_DRAG_REGION_HEIGHT_CLASS, right, windows, mac)}
         style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid currentColor' }}
       >
         Header{' '}
@@ -66,7 +66,7 @@ function Rows({ toggle }: { toggle: () => void }) {
         <div
           key={i}
           data-pad-row={i}
-          className={cn(WINDOW_DRAG_REGION_HEIGHT_CLASS, value)}
+          className={clsx(WINDOW_DRAG_REGION_HEIGHT_CLASS, value)}
           style={{
             display: 'flex',
             alignItems: 'center',

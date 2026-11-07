@@ -817,7 +817,8 @@ nothing re-declares what it is made of.
 
 Flat, with a light above it. Nothing here is a picture of a material: no grain,
 no noise, no gloss, no reflection, no deep groove. What is physical is the logic
-of the light, and it takes four rules.
+of the light, and it takes four rules. The owner's rulings behind them are in the
+[UI flat material note](../../../../.agents/notes/implemented/feature/2026-09-23-ui-flat-material.md).
 
 - **Raised catches the light.** A thing you can press is at least as light as
   what it rests on, never a mid-gray on a gray: in Lody Light `raisedBackground`

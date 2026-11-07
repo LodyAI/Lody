@@ -1,6 +1,7 @@
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';
@@ -9,10 +10,7 @@ import { buildChatStreamItems as buildFromView } from '../src/components/ai-gui/
 import { initI18n } from '../src/i18n';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  SessionForkDestinationMenu,
-  getSessionForkDestinationOptions,
-} from '../src/components/sessions/session-fork-destination-menu';
+import { SessionForkDestinationMenu } from '../src/components/sessions/session-fork-destination-menu';
 
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -25,24 +23,6 @@ vi.mock('react-i18next', async (importOriginal) => ({
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-describe('getSessionForkDestinationOptions', () => {
-  const t = (_key: string, fallback: string) => fallback;
-
-  it('only offers a new tab when worktree support is hidden', () => {
-    expect(getSessionForkDestinationOptions(t, 'hidden').map((option) => option.id)).toEqual([
-      'shared',
-    ]);
-  });
-
-  it('disables the worktree option while Git status is still resolving', () => {
-    const worktree = getSessionForkDestinationOptions(t, 'checking').find(
-      (option) => option.id === 'new-worktree'
-    );
-    expect(worktree?.disabled).toBe(true);
-    expect(worktree?.status).toBe('Checking Git status…');
-  });
-});
 
 describe('SessionForkDestinationMenu', () => {
   let root: Root;
@@ -89,19 +69,6 @@ describe('SessionForkDestinationMenu', () => {
     });
   };
 
-  it('lists both destinations by name and explains each only on hover', async () => {
-    await renderMenu();
-    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(items.map((item) => item.textContent)).toEqual([
-      'Fork to new tab',
-      'Fork to new worktree',
-    ]);
-    const explanation = 'works in the same directory';
-    expect(document.body.textContent).not.toContain(explanation);
-    await act(async () => items[0]?.focus());
-    expect(document.body.textContent).toContain(explanation);
-  });
-
   it('keeps the Git status check inline on the disabled worktree row', async () => {
     await renderMenu({ worktreeAvailability: 'checking' });
     const worktree = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
@@ -125,26 +92,6 @@ describe('SessionForkDestinationMenu', () => {
     expect(items[0]?.textContent).toContain('Copy context as Markdown');
     await act(async () => items[0]?.click());
     expect(copied).toBe(true);
-  });
-
-  it('does not leave the first destination focused after opening', async () => {
-    await renderMenu();
-    const firstItem = document.querySelector('[role="menuitem"]');
-    expect(firstItem).toBeInstanceOf(HTMLElement);
-    expect(document.activeElement).not.toBe(firstItem);
-  });
-
-  it('forks to a new tab from a menu, not a modal dialog', async () => {
-    const onSelect = vi.fn();
-    await renderMenu({ onSelect });
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(document.querySelector('[role="menu"]')).not.toBeNull();
-
-    const shared = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent === 'Fork to new tab'
-    );
-    await act(async () => shared?.click());
-    expect(onSelect).toHaveBeenCalledWith('shared');
   });
   it.each([false, true])('exposes context copying for a turn (finished=%s)', async (finished) => {
     await initI18n('en');

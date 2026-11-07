@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { PanInfo } from 'framer-motion';
@@ -15,6 +15,9 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 import { sheetSurface } from './sheet-surface';
+import { isNativeIOSAppShell } from '@/lib/native-platform';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import type { MultiSelectPill } from './mobile-filter-pill-bar';
 
 /**
@@ -429,6 +432,9 @@ export function MobileFilterDrawer({
   description,
 }: MobileFilterDrawerProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet();
+  const maxHeight = useFoldAwareSheetHeight(88, true);
+  const nativeIOS = isNativeIOSAppShell();
   const resolvedTitle = title ?? t('mobile.filterDrawer.title', 'Filters');
   const [activeId, setActiveId] = useState<string | null>(null);
   const activePill = activeId ? (pills.find((p) => p.id === activeId) ?? null) : null;
@@ -441,8 +447,18 @@ export function MobileFilterDrawer({
   }, [open]);
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="mobile-filter-drawer" xstyle={styles.sheet}>
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      repositionInputs={nativeIOS ? false : undefined}
+    >
+      <DrawerContent
+        className="mobile-filter-drawer"
+        xstyle={[styles.sheet, nativeIOS && keyboard.contentXstyle]}
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
+      >
         <div {...stylex.props(sheetSurface.column)}>
           <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
             {activePill ? (
@@ -478,6 +494,7 @@ export function MobileFilterDrawer({
                 <DimensionPage
                   key={`dim-${activePill.id}`}
                   pill={activePill}
+                  scrollRef={keyboard.scrollRef}
                   onBack={() => setActiveId(null)}
                 />
               ) : (
@@ -625,7 +642,15 @@ function SummaryPage({
   );
 }
 
-function DimensionPage({ pill, onBack }: { pill: MultiSelectPill; onBack: () => void }) {
+function DimensionPage({
+  pill,
+  onBack,
+  scrollRef,
+}: {
+  pill: MultiSelectPill;
+  onBack: () => void;
+  scrollRef: RefObject<HTMLDivElement | null>;
+}) {
   const { t } = useTranslation();
   /* Fuzzy search kicks in for longer option lists (repo / project
      filters can run into 20+ entries in big workspaces). Threshold
@@ -666,6 +691,7 @@ function DimensionPage({ pill, onBack }: { pill: MultiSelectPill; onBack: () => 
 
   return (
     <motion.div
+      ref={scrollRef}
       {...stylex.props(styles.view, styles.viewCanvas)}
       /* Drag-right to dismiss back to summary. `dragDirectionLock` lets
          vertical scroll through unimpeded — motion only captures the

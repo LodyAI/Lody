@@ -33,6 +33,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     color: colors.label,
     fontSize: text.bodySize,
+    fontWeight: 400,
   },
   /** Identity group: agent logo + model name, the flex item that shrinks. */
   identity: {
@@ -42,14 +43,14 @@ const styles = stylex.create({
     minWidth: 0,
     overflow: 'hidden',
   },
-  /** Truncates keeping the tail, so `provider/model-name` loses the prefix. */
+  /** Keep the beginning of a long model name visible. */
   model: {
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     textAlign: 'start',
-    direction: 'rtl',
+    direction: 'ltr',
   },
   fixed: { flexShrink: 0, whiteSpace: 'nowrap' },
   dot: { flexShrink: 0, userSelect: 'none', color: colors.tertiaryLabel },
@@ -68,8 +69,7 @@ const styles = stylex.create({
  * Layout contract (always one row):
  * - The button is `min-w-0 max-w-full` and never wraps; status glyphs stay
  *   `shrink-0`, and only the model label absorbs remaining width via flex.
- * - Model truncates keeping the *tail* (rtl trick) so long
- *   "provider/model-name" labels lose the prefix, not the model suffix.
+ * - Long model names keep their beginning visible.
  * - agent icon: ACP brand icon, passed in by the caller.
  * - reasoning / mode / Plan / Fast: fixed-width status; never force a second
  *   line when the model name is long.

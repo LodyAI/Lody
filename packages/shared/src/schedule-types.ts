@@ -16,6 +16,12 @@ export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
 export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';
 export const SCHEDULE_DISPATCH_MAX_ATTEMPTS = 5;
 export const SCHEDULE_DISPATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * Completed one-time messages keep their definition and Registry row for a
+ * quiet period, then the owner purges the document. The tombstone remains to
+ * reject stale offline writes.
+ */
+export const SCHEDULED_MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const SCHEDULE_MISFIRE_GRACE_MS = 2 * 60 * 1000;
 export const SCHEDULE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000] as const;
 

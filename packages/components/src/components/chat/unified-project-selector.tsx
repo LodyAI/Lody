@@ -1,3 +1,4 @@
+import { compareUnifiedProjectOptions } from './chat-landing-derived';
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
@@ -16,11 +17,13 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
+import { composerSurface } from '@/components/shared/composer-surface';
 import { getSessionSharingDescription, ProjectShareDialog } from '@/components/session-sharing';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import {
@@ -33,6 +36,7 @@ import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index
 import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Button } from '@lody/ui/button';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
@@ -40,6 +44,25 @@ const DARK_SCOPE =
   ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
+  ownerFrame: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: space[4],
+    height: space[4],
+    flexShrink: 0,
+  },
+  ownerAvatarOverlay: { position: 'absolute', inset: 0 },
+  ownerAvatarPending: { opacity: 0 },
+  editAction: {
+    opacity: {
+      default: 0,
+      ':focus-visible': 1,
+      ':where([data-project-option][data-highlighted] *)': 1,
+      '@media (hover: hover)': { default: null, ':where([data-project-option]:hover *)': 1 },
+    },
+  },
   content: { width: 'min(20rem, calc(100vw - 2rem))' },
   search: {
     marginBottom: 'calc(var(--spacing) * 1)',
@@ -95,13 +118,12 @@ const styles = stylex.create({
     borderBottomRightRadius: themeRadius.md,
     paddingInline: themeSpace[2],
     fontSize: '0.8em',
-    fontWeight: themeFontWeight.medium,
     transitionProperty:
       'color, background-color, border-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
-  accessStatusOption: { fontSize: '0.8em', fontWeight: themeFontWeight.medium },
+  accessStatusOption: { fontSize: '0.8em' },
   accessStatusAction: {
     cursor: 'pointer',
     color: { default: 'hsl(var(--foreground) / 0.75)', ':hover': themeColors.foreground },
@@ -206,8 +228,6 @@ const styles = stylex.create({
     gap: themeSpace[1.5],
     borderRadius: themeRadius.md,
     paddingInline: themeSpace[2],
-    fontSize: '0.9em',
-    fontWeight: themeFontWeight.normal,
     color: { default: 'hsl(var(--foreground) / 0.8)', ':hover': themeColors.foreground },
     transitionProperty:
       'color, background-color, border-color, text-decoration-color, fill, stroke',
@@ -281,7 +301,7 @@ const styles = stylex.create({
   },
 });
 
-function GitHubOwnerAvatarIcon({
+export function GitHubOwnerAvatarIcon({
   repoFullName,
   glyphStyle,
 }: {
@@ -289,20 +309,30 @@ function GitHubOwnerAvatarIcon({
   glyphStyle?: stylex.StyleXStyles;
 }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
-  const [failed, setFailed] = useState(false);
+  const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
+  const [failedOwner, setFailedOwner] = useState<string | null>(null);
 
-  if (!ownerHandle || failed) {
+  if (!ownerHandle || failedOwner === ownerHandle) {
     return <Github {...stylex.props(styles.ownerGlyph, glyphStyle)} />;
   }
 
   return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(ownerHandle)}
-      alt=""
-      aria-hidden="true"
-      className={stylex.props(styles.ownerAvatar).className}
-      onError={() => setFailed(true)}
-    />
+    <span {...stylex.props(styles.ownerFrame)}>
+      {loadedOwner !== ownerHandle && <Github {...stylex.props(styles.ownerGlyph, glyphStyle)} />}
+      <CachedAvatarImg
+        key={ownerHandle}
+        src={getGitHubOwnerAvatarUrl(ownerHandle)}
+        alt=""
+        aria-hidden="true"
+        {...stylex.props(
+          styles.ownerAvatar,
+          styles.ownerAvatarOverlay,
+          loadedOwner !== ownerHandle && styles.ownerAvatarPending
+        )}
+        onLoad={() => setLoadedOwner(ownerHandle)}
+        onError={() => setFailedOwner(ownerHandle)}
+      />
+    </span>
   );
 }
 
@@ -353,20 +383,7 @@ export type UnifiedLocalProjectOption = {
   sharing?: SessionSharingState;
 };
 
-export function compareUnifiedProjectOptions(
-  left: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>,
-  right: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>
-): number {
-  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
-    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
-  } else if (left.lastUsedAt !== undefined) {
-    return -1;
-  } else if (right.lastUsedAt !== undefined) {
-    return 1;
-  }
-  const labelComparison = left.label.localeCompare(right.label);
-  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
-}
+export { compareUnifiedProjectOptions } from './chat-landing-derived';
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
@@ -524,6 +541,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
   renderLimit?: number;
   /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
   onCreateProject?: () => void;
+  /** Opens a project group in the editor; the group rows offer it on hover. */
+  onEditProjectGroup?: (projectId: string) => void;
 }
 
 function ProjectAccessStatus({
@@ -678,6 +697,7 @@ export function UnifiedProjectSelectorView({
   folderIconXstyle,
   renderLimit,
   onCreateProject,
+  onEditProjectGroup,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -826,6 +846,7 @@ export function UnifiedProjectSelectorView({
               className={[
                 stylex.props(
                   !isPropertyRow && contextPill.surface,
+                  !isPropertyRow && composerSurface.contextLabel,
                   !isPropertyRow && contextPill.interactive,
                   !isPropertyRow && open && contextPill.open,
                   isPropertyRow && styles.triggerPropertyRow,
@@ -856,6 +877,7 @@ export function UnifiedProjectSelectorView({
             className={[
               stylex.props(
                 !isPropertyRow && contextPill.surface,
+                !isPropertyRow && composerSurface.contextLabel,
                 !isPropertyRow && contextPill.interactive,
                 !isPropertyRow && open && contextPill.open,
                 isPropertyRow && styles.triggerPropertyRow,
@@ -921,6 +943,10 @@ export function UnifiedProjectSelectorView({
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
                     option.selection.kind === 'group' ? option.description : undefined;
+                  const editProjectId =
+                    option.selection.kind === 'group' && onEditProjectGroup
+                      ? option.selection.projectId
+                      : undefined;
                   const labelNode = (
                     <span
                       {...stylex.props(
@@ -938,19 +964,35 @@ export function UnifiedProjectSelectorView({
                       disabled={option.disabledReason !== undefined}
                       indicator="check"
                       indicatorSide="end"
-                      xstyle={[
-                        styles.option,
-                        inlineDescription ? styles.optionStart : styles.optionCenter,
-                      ]}
+                      data-project-option=""
+                      xstyle={[styles.option, styles.optionCenter]}
+                      endContent={
+                        editProjectId !== undefined ? (
+                          <Button
+                            variant="ghost"
+                            size="mini"
+                            tabIndex={-1}
+                            aria-label={t('chat.projectPicker.editGroup', 'Edit {{name}}', {
+                              name: option.label,
+                            })}
+                            xstyle={styles.editAction}
+                            // The row selects on press; the button only edits.
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onMouseUp={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setOpen(false);
+                              onEditProjectGroup?.(editProjectId);
+                            }}
+                          >
+                            {t('common.edit', 'Edit')}
+                          </Button>
+                        ) : null
+                      }
                     >
-                      <span
-                        {...stylex.props(
-                          styles.optionIcon,
-                          Boolean(inlineDescription) && styles.optionIconWithDescription
-                        )}
-                      >
-                        {option.icon}
-                      </span>
+                      <span {...stylex.props(styles.optionIcon)}>{option.icon}</span>
                       <span {...stylex.props(styles.optionBody)}>
                         {localPath ? (
                           <Tooltip.Root>

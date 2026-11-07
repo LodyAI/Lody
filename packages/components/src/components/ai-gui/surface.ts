@@ -112,6 +112,7 @@ export const conversationSurface = stylex.create({
     paddingBlock: conversation.activityPadding,
     paddingInline: conversation.railInset,
   },
+  thoughtStep: { paddingInline: 0 },
   userRow: { display: 'flex', width: '100%', flexDirection: 'row-reverse', columnGap: space[2] },
   mobileUserRow: { paddingLeft: '28px' },
   author: {
@@ -135,6 +136,9 @@ export const conversationSurface = stylex.create({
     },
   },
   mobileUserStack: { maxWidth: 'min(100%, 28rem)' },
+  // Editing turns the fitting bubble into a full-width column. Keep its capped
+  // content on the stack's inline-end, aligned with the metadata and avatar.
+  userEditContent: { marginInlineStart: 'auto' },
   metadata: {
     display: 'flex',
     minHeight: conversation.metadataPitch,

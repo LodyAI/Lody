@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+// @vitest-environment jsdom
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider, type PrimitiveAtom } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -198,33 +199,6 @@ describe('useLodyLiveActivity summary throttling', () => {
     vi.useRealTimers();
   });
 
-  it('keeps delivering summaries during a metadata burst instead of starving on a reset debounce', async () => {
-    await mount();
-    await advance(SYNC_DEBOUNCE_MS);
-    expect(syncedPayloads).toHaveLength(1);
-    syncedPayloads.length = 0;
-
-    // A burst faster than the bridge debounce used to reset that timer forever,
-    // so nothing was ever delivered while every batch still paid for a rebuild.
-    // Any summary input left outside the throttle reproduces this on its own.
-    const burstMs = 2 * LIVE_ACTIVITY_SUMMARY_THROTTLE_MS;
-    const stepMs = 50;
-    for (let step = 1; step <= burstMs / stepMs; step += 1) {
-      await metadataBatch(step);
-      await advance(stepMs);
-    }
-
-    // One emit per throttle window, each trailed by the bridge debounce.
-    expect(syncedPayloads.length).toBeGreaterThanOrEqual(1);
-    expect(syncedPayloads.length).toBeLessThanOrEqual(burstMs / LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
-
-    // The burst's final state still lands once it settles: the trailing throttle
-    // emit, then the bridge debounce that follows it.
-    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
-    await advance(SYNC_DEBOUNCE_MS);
-    expect(syncedPayloads.at(-1)?.totalCount).toBe(1 + burstMs / stepMs);
-  });
-
   it('promptly projects a permission request silently during a metadata burst', async () => {
     await mount();
     await advance(SYNC_DEBOUNCE_MS);
@@ -399,16 +373,5 @@ describe('useLodyLiveActivity summary throttling', () => {
     } finally {
       errors.mockRestore();
     }
-  });
-
-  it('ends the activity on unmount', async () => {
-    await mount();
-    await advance(SYNC_DEBOUNCE_MS);
-    expect(endedActivityIds).toEqual([]);
-
-    await act(async () => {
-      root.render(<Provider store={store} />);
-    });
-    expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
   });
 });

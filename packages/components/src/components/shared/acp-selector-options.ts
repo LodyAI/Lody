@@ -194,6 +194,8 @@ export type AcpSelectorOptions = {
   defaultModelId: string | null;
   /** Dynamic config option selectors for agents with configOptions (e.g. thought_level). */
   configOptionSelectors: AcpConfigOptionSelector[];
+  /** Probed controls before per-model filtering; lets generic model validation restore hidden controls. */
+  unnormalizedConfigOptionSelectors?: AcpConfigOptionSelector[];
   /** Per-model reasoning-effort ladders when the capability source publishes them. */
   modelReasoningEfforts: Record<string, string[]> | undefined;
   /** Per-model effort and Fast support the adapter declared, when stored. */
@@ -296,10 +298,10 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
   );
   return staticCapabilities
     ? {
-      authority: 'provisional',
-      configOptions: staticCapabilities.configOptions,
-      modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
-    }
+        authority: 'provisional',
+        configOptions: staticCapabilities.configOptions,
+        modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
+      }
     : { authority: 'unavailable', modelReasoningEfforts: undefined };
 };
 
@@ -350,8 +352,8 @@ const buildConfigOptionSelectors = (
     const selectedValue = target?.configOptionValues?.[opt.id];
     const optionValues =
       authority !== 'authoritative' &&
-        typeof selectedValue === 'string' &&
-        !opt.options.some((option) => option.value === selectedValue)
+      typeof selectedValue === 'string' &&
+      !opt.options.some((option) => option.value === selectedValue)
         ? [...opt.options, { value: selectedValue, name: selectedValue }]
         : opt.options;
 
@@ -380,10 +382,13 @@ const resolveSelectedModelId = (
   configOptions: AcpConfigOptionSummary[] | undefined,
   target?: AcpSelectorTarget
 ): string | undefined => {
-  if (target?.selectedModelId) return target.selectedModelId;
+  const isAcpProbed = target?.cliType === 'registry' || target?.cliType === 'custom';
+  if (!isAcpProbed && target?.selectedModelId) return target.selectedModelId;
   const modelOption = configOptions?.find(
     (option) => option.category === 'model' && option.type === 'select'
   );
+  const selectedValue = isAcpProbed && modelOption && target?.configOptionValues?.[modelOption.id];
+  if (typeof selectedValue === 'string') return selectedValue;
   return typeof modelOption?.currentValue === 'string' ? modelOption.currentValue : undefined;
 };
 
@@ -482,16 +487,16 @@ export const normalizeReasoningEffortSelectors = (
       hasEffort || !binding
         ? selectors
         : [
-          ...selectors,
-          {
-            configId: binding.effortConfigId,
-            label: binding.effortLabel,
-            category: ACP_THOUGHT_LEVEL_CATEGORY,
-            type: 'select',
-            options: [],
-            currentValue: declared.fallbackValue,
-          },
-        ];
+            ...selectors,
+            {
+              configId: binding.effortConfigId,
+              label: binding.effortLabel,
+              category: ACP_THOUGHT_LEVEL_CATEGORY,
+              type: 'select',
+              options: [],
+              currentValue: declared.fallbackValue,
+            },
+          ];
     return applyEffortLadder(withEffort, declared.values, declared.fallbackValue);
   }
   if (options.cliType === 'builtin' && options.agentType?.toLowerCase() === 'codex') {
@@ -725,6 +730,15 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     defaultModelId:
       typeof modelConfigOption?.currentValue === 'string' ? modelConfigOption.currentValue : null,
     configOptionSelectors,
+    ...(isAcpProbed
+      ? {
+          unnormalizedConfigOptionSelectors: buildConfigOptionSelectors(
+            configOptions,
+            target,
+            capabilityAuthority
+          ),
+        }
+      : {}),
     modelReasoningEfforts,
     declaredModelControls,
   };

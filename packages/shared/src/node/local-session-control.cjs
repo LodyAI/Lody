@@ -443,7 +443,8 @@ function isACPSessionConfig(value) {
     agentType === 'kimi' ||
     agentType === 'deepseek' ||
     agentType === 'bub' ||
-    agentType === 'dimcode';
+    agentType === 'dimcode' ||
+    agentType === 'sorbet';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||
@@ -504,6 +505,13 @@ function isLocalSessionControlRequest(value) {
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.turnId === 'string'
+    );
+  }
+
+  if (value.type === 'machine/dsh-providers') {
+    return (
+      typeof value.machineId === 'string' &&
+      Object.keys(value).every((key) => ['type', 'machineId'].includes(key))
     );
   }
 
@@ -810,6 +818,16 @@ function isLocalSessionControlResponse(value) {
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
       isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'machine/dsh-providers_response') {
+    return (
+      Array.isArray(value.providers) &&
+      value.providers.every(
+        (item) =>
+          isObjectRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+      )
     );
   }
 

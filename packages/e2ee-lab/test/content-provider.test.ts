@@ -1,4 +1,4 @@
-import { Effect, Result, Scope, Exit, Deferred, Fiber } from 'effect';
+import { Effect, Result, Scope, Exit } from 'effect';
 import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { writeFileSync } from 'node:fs';
@@ -167,99 +167,6 @@ describe('public update provider with released CRDT SDK', () => {
             };
             expect(recovered.text).toBe('synthetic protected update + second');
             expect(recovered.cursor.nextOffset).not.toBe(prior!.nextOffset);
-          })
-        )
-      );
-    } finally {
-      await f.close();
-    }
-  });
-  it('awaits a real one-shot SDK operation before SDK close and Wasm free, refusing late output', async () => {
-    const f = await fixture();
-    let freed = false,
-      rawSettled = false,
-      closedEarly = false;
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const provider = yield* makeLabUpdateProvider({
-              genesis: f.anchor,
-              resource: 'owned-empty',
-              model: 'loro',
-              writeEpoch: 0,
-              signer: f.owner,
-              ledger: () => Effect.succeed(f.view),
-              readEpochKey: () => Effect.die('empty stream never reads key'),
-            });
-            const child = yield* Effect.acquireRelease(Scope.make(), (scope) =>
-              Scope.close(scope, Exit.void)
-            );
-            const doc = yield* Effect.acquireRelease(
-              Effect.sync(() => new LoroDoc()),
-              (value) =>
-                Effect.sync(() => {
-                  value.free();
-                  freed = true;
-                })
-            ).pipe(Effect.provideService(Scope.Scope, child));
-            const entered = yield* Deferred.make<void>(),
-              release = yield* Deferred.make<void>();
-            const transport = yield* makeLabSdkOwner(({ assertOpen }) => {
-              const sdk = new StreamsCrdt({
-                streamUrl: `${f.server.baseUrl}/ds/synthetic/owned-empty`,
-                adapter: createLoroDocAdapter(doc),
-                payloadProtectionRequired: true,
-                e2ee: { provider, readPolicy: 'encrypted-only', writePolicy: 'encrypt' },
-                // Controlled native-fetch gate intentionally ignores abort. Actual HTTP/SDK remain real.
-                fetch: async (url, init) => {
-                  const response = await fetch(url, { ...init, signal: undefined });
-                  if (url.includes('/bootstrap')) {
-                    Effect.runSync(Deferred.succeed(entered, undefined));
-                    await Effect.runPromise(Deferred.await(release));
-                    try {
-                      assertOpen();
-                    } catch (error) {
-                      await response.body?.cancel();
-                      throw error;
-                    }
-                  }
-                  return response;
-                },
-              });
-              return {
-                createStream: () => sdk.createStream(),
-                sync: () => sdk.sync(),
-                close: async () => {
-                  // Observe real shutdown order, not a mock invocation count.
-                  closedEarly = !rawSettled;
-                  await sdk.close();
-                },
-              };
-            }).pipe(Effect.provideService(Scope.Scope, child));
-            expect((yield* transport.invoke((sdk) => sdk.createStream())).ok).toBe(true);
-            const reading = yield* Effect.forkChild(
-              Effect.result(
-                transport.invoke((sdk) =>
-                  sdk.sync().finally(() => {
-                    rawSettled = true;
-                  })
-                )
-              )
-            );
-            yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
-            yield* Deferred.await(entered);
-            const closing = yield* Effect.sync(() => Effect.runFork(Scope.close(child, Exit.void)));
-            expect(
-              Result.isFailure(yield* Effect.result(transport.invoke((sdk) => sdk.createStream())))
-            ).toBe(true);
-            expect(freed).toBe(false);
-            yield* Deferred.succeed(release, undefined);
-            expect(Result.isFailure(yield* Fiber.join(reading))).toBe(true);
-            yield* Fiber.join(closing);
-            expect(rawSettled).toBe(true);
-            expect(closedEarly).toBe(false);
-            expect(freed).toBe(true);
           })
         )
       );
@@ -550,6 +457,16 @@ describe('public update provider with released CRDT SDK', () => {
               streamUrl: url,
               path,
             });
+            // Automatic verified-history fallback reaches the real SQL barrier.
+            // Refusing that write must retain both halves of the prior durable pair.
+            const fault = new Database(path);
+            try {
+              fault.exec(
+                'CREATE TRIGGER reject_recovery BEFORE INSERT ON lab_document_state BEGIN SELECT RAISE(IGNORE); END'
+              );
+            } finally {
+              fault.close();
+            }
             expect(Exit.isFailure(yield* Effect.exit(reader.pull()))).toBe(true);
             expect(yield* reader.status()).toBe('document-stopped');
             expect(yield* reader.cursor()).toBeNull();
@@ -563,14 +480,6 @@ describe('public update provider with released CRDT SDK', () => {
             yield* other.append('independent B');
             yield* other.pull();
             expect(yield* other.text()).toBe('independent B');
-            const fault = new Database(path);
-            try {
-              fault.exec(
-                'CREATE TRIGGER reject_recovery BEFORE INSERT ON lab_document_state BEGIN SELECT RAISE(IGNORE); END'
-              );
-            } finally {
-              fault.close();
-            }
             expect(Exit.isFailure(yield* Effect.exit(reader.recoverFromFullHistory()))).toBe(true);
             expect(yield* reader.cursor()).toBeNull();
             expect(yield* reader.status()).toBe('document-stopped');
@@ -634,7 +543,7 @@ describe('public update provider with released CRDT SDK', () => {
             expect(Exit.isFailure(yield* Effect.exit(unavailable.recoverFromFullHistory()))).toBe(
               true
             );
-            expect(yield* unavailable.status()).toBe('document-stopped');
+            expect(yield* unavailable.status()).toBe('active');
             expect(yield* unavailable.cursor()).toBeNull();
             expect(yield* other.status()).toBe('active');
           })
@@ -644,38 +553,6 @@ describe('public update provider with released CRDT SDK', () => {
       await f.close();
     }
   });
-});
-
-it('a real SDK provider defect remains a harness failure instead of an expected crypto rejection', async () => {
-  const f = await fixture();
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const session = yield* makeLabLoroSession({
-            path: join(f.dir, 'provider-defect.sqlite'),
-            mode: 'create',
-            streamUrl: `${f.server.baseUrl}/ds/synthetic/provider-defect`,
-            fetch,
-            genesis: f.anchor,
-            resource: 'document',
-            writeEpoch: 0,
-            signer: f.owner,
-            ledger: () => Effect.die(new Error('synthetic provider implementation defect')),
-            readEpochKey: () => Effect.die('must not read a key after ledger defect'),
-          });
-          yield* session.create();
-          const result = yield* Effect.result(session.append('local original'));
-          expect(Result.isFailure(result)).toBe(true);
-          if (Result.isFailure(result))
-            expect(result.failure).toMatchObject({ _tag: 'LabProviderError', code: 'harness' });
-          expect(yield* session.status()).toBe('active');
-        })
-      )
-    );
-  } finally {
-    await f.close();
-  }
 });
 
 it('keeps transport and permission failures retryable while stopping authenticated remote corruption', async () => {

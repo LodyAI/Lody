@@ -1,3 +1,5 @@
+import { useCloudMutation } from '@lody/platform/react';
+import { cloudOperations } from '@/lib/cloud-api-operations';
 import { createFileRoute } from '@tanstack/react-router';
 import { AuthenticatedWorkspaceContent } from '@/components/authenticated-workspace-content';
 import { BootNavigate } from '@/components/boot-navigate';
@@ -22,7 +24,7 @@ import {
   identifyPostHogWorkspace,
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
-import { scheduleOneSignalTask } from '@/lib/onesignal';
+import { installPushPort, schedulePushTask } from '@/lib/push-notifications';
 import { PreloadedMainLayout } from '@/components/preloaded-main-layout';
 import { RouteMessage } from '@/components/route-message';
 import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
@@ -38,9 +40,9 @@ import {
   useRecordWorkspaceDataReady,
   WorkspaceDataWait,
 } from '@/components/workspace-data-wait';
-import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
+import { BillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
-const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
+const AUTH_ROUTE_PUSH_LOGIN_IDLE_TIMEOUT_MS = 10_000;
 
 function normalizeConvexSiteUrl(rawUrl: string | undefined): string | null {
   const trimmed = rawUrl?.trim();
@@ -101,7 +103,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   const [sessionSettled, setSessionSettled] = useState(!isPending);
   const postHog = usePostHog();
   const authRouteStartMsRef = useRef(getPerformanceNowMs());
-  const fireAccountReadyOnce = useFireOncePerKey();
   const fireAuthReadyOnce = useFireOncePerKey();
   const fireCliReadyOnce = useFireOncePerKey();
   const onlineMachineCount = useMemo(() => {
@@ -150,19 +151,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     identifyPostHogUser(postHog, currentUser);
     identifyPostHogWorkspace(postHog, currentWorkspaceId);
   }, [currentUser, currentWorkspaceId, postHog]);
-
-  useEffect(() => {
-    if (!currentUser || !analyticsUserWorkspaceKey) {
-      return;
-    }
-    if (!fireAccountReadyOnce(analyticsUserWorkspaceKey)) {
-      return;
-    }
-    capturePostHogEvent(postHog, 'onboarding/account_ready', {
-      user_id: currentUser.id,
-      workspace_id: currentWorkspaceId ?? null,
-    });
-  }, [analyticsUserWorkspaceKey, currentUser, currentWorkspaceId, fireAccountReadyOnce, postHog]);
 
   useEffect(() => {
     if (!currentUser || !analyticsUserWorkspaceKey) {
@@ -219,6 +207,13 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     postHog,
   ]);
 
+  const registerPush = useCloudMutation(cloudOperations.pushSubscriptions.register);
+  const unregisterPush = useCloudMutation(cloudOperations.pushSubscriptions.unregister);
+  useEffect(
+    () => installPushPort({ register: registerPush, unregister: unregisterPush }),
+    [registerPush, unregisterPush]
+  );
+
   useEffect(() => {
     const token = session?.session?.token;
     if (!currentUser || !token) {
@@ -228,16 +223,15 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
       return undefined;
     }
 
-    return scheduleOneSignalTask(async (oneSignal, signal) => {
+    return schedulePushTask(async (pushClient, signal) => {
       try {
-        await oneSignal.login(currentUser.id, token);
-        if (signal.aborted) {
-          await oneSignal.logout?.();
-        }
+        await pushClient.login(currentUser.id, token);
+        // A subsequent login owns the new generation; an old effect must not log it out.
+        if (signal.aborted) return;
       } catch (loginError) {
-        console.error('OneSignal login failed', loginError);
+        console.error('Push login failed', loginError);
       }
-    }, AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS);
+    }, AUTH_ROUTE_PUSH_LOGIN_IDLE_TIMEOUT_MS);
   }, [currentUser, session?.session?.token]);
 
   useEffect(() => {
@@ -326,6 +320,13 @@ function LodyLiveActivityHost({ workspaceName }: { workspaceName: string }) {
   return null;
 }
 
+/** Billing preload is latency-only; its leaf contains a rejected query. */
+function BillingOverviewPreloadHost() {
+  const user = useAtomValue(userAtom);
+  const { workspaceId } = useResolvedWorkspaceScope();
+  return <BillingOverviewPreload workspaceId={user ? workspaceId : null} />;
+}
+
 function AuthedLayoutContent({
   hasLocalToken,
   workspaceName,
@@ -337,6 +338,7 @@ function AuthedLayoutContent({
     <>
       <LodyLiveActivityHost workspaceName={workspaceName} />
       <WorkspaceSyncStuckReporter />
+      <BillingOverviewPreloadHost />
       <AuthedLayoutRoutes hasLocalToken={hasLocalToken} workspaceName={workspaceName} />
     </>
   );
@@ -359,7 +361,6 @@ function AuthedLayoutRoutes({
   } = useOrganization({ targetSlug: workspaceName });
   const user = useAtomValue(userAtom);
   const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
-  useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
   useRecordWorkspaceDataReady(currentWorkspaceId ? workspaceName : null, user?.id ?? null);

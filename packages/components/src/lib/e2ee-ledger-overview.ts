@@ -36,6 +36,7 @@ export type LedgerEventSummary =
       member: LedgerMemberLabel;
       epoch: number;
     }
+  | { type: 'removeMember'; actor: LedgerMemberLabel | null; member: LedgerMemberLabel }
   | { type: 'declareCapabilities'; actor: LedgerMemberLabel | null; capabilities: string };
 
 export interface LedgerOverview {
@@ -129,6 +130,12 @@ export function ledgerOverview(history: VerifiedLedgerHistory): LedgerOverview {
         };
       case 'publishEpoch':
         return { type: 'publishEpoch', actor, epoch: op.epoch };
+      case 'removeMember':
+        return {
+          type: 'removeMember',
+          actor,
+          member: label(bytesToHex(op.membershipId.toBytes())),
+        };
       case 'removeMemberAndPublishEpoch':
         return {
           type: 'removeMemberAndPublishEpoch',

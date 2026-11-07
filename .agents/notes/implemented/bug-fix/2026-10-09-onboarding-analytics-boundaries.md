@@ -32,9 +32,11 @@ them and document which one is the durable funnel numerator in the
 [Spec](../../../../specs/onboarding-analytics.md). Attempts are numbered per route
 mount, not globally. A reload can reuse the flow id while restarting the counter.
 
-Audit also found legacy `account_ready` and `cli_ready` in the workspace auth route;
-those belong to the separate auth/app workstream and are intentionally unchanged.
-The [blueprint proposal](../../proposed/feature/2026-09-26-blueprint-onboarding.md)
+Workspace auth readiness is owned by the separate
+[auth/app contract](../../../../specs/auth-session-analytics.md): `app/active`
+replaces the duplicate `account_ready`, while `cli_ready` retains its later
+machine-readiness transition.
+The [blueprint proposal](../../rejected/feature/2026-09-26-blueprint-onboarding.md)
 is not the production flow and does not supersede this contract.
 
 ## Validation and limits

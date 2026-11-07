@@ -147,7 +147,10 @@ SQLite stores share the current-format connection helper. Opening validates the
 file identity and bindings; local hostile-process mutation audits are outside the
 threat model. Signed history is still verified on reopen and transaction/target-row
 readback semantics remain in place.
-Explicit recovery rebuilds the native owner and uses the released SDK's available
+Rejected native snapshots first replay verified retained history; if that prefix is
+trimmed, repair-enabled sessions retry the next authentic snapshot. The validated
+410 recovery cause stays retryable, including when a prior provider check failed.
+Explicit recovery rebuilds the native owner and uses the patched SDK's available
 history or authenticated content snapshot plus suffix. An ordinary read from the
 beginning can return HTTP 410 after native snapshot retention while bootstrap still
 succeeds; this does not restore the pruned prefix. Insufficient recovery material
@@ -217,8 +220,10 @@ the offset byte count. The gateway checks an actual record boundary no later tha
 head, without interpreting opaque caller offsets. Readers compare the exact
 continuation after decryption; native document state and cursor commit together.
 The [three-role plan](test/plan-snapshot.test.ts) bootstraps Loro/Flock snapshot plus
-tail, rejects a moved response offset without durable advancement, and recovers
-through a fresh actual bootstrap. It preserves native retention and ordinary HTTP 410.
+tail, rejects a moved response offset, observes the real trimmed-history 410, and
+automatically retries an authentic native bootstrap before reopening its durable
+result. The SQL failure case still proves that neither half of the durable pair
+advances when replay persistence is refused. It preserves native retention and ordinary HTTP 410.
 
 `removeMemberAndRotate(member)` shares the existing candidate publisher/P09 and
 writes one removal+epoch record. A real admitted R now exercises personal-device

@@ -1,4 +1,5 @@
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +7,7 @@ import * as stylex from '@stylexjs/stylex';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { button } from '@lody/ui/button/button.tokens.stylex';
+import { Tooltip } from '@lody/ui/tooltip';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -27,6 +29,7 @@ export interface AttachmentAddMenuProps {
   isMobile: boolean;
   /** Smaller trigger for the landing composer variant. */
   isLanding?: boolean;
+  isSheet?: boolean;
   /** Disables the whole trigger (e.g. the prompt is disabled). */
   disabled?: boolean;
   /** Omit the callback to hide the attachment item entirely. The picker is
@@ -57,6 +60,7 @@ const styles = stylex.create({
   trigger: {
     [button.ghostHover]: 'hsl(var(--hover) / 1)',
   },
+  sheetTrigger: { borderRadius: 'calc(infinity * 1px)' },
   item: { cursor: 'pointer' },
   itemMobile: {
     gap: 'calc(var(--spacing) * 2.5)',
@@ -149,17 +153,16 @@ const styles = stylex.create({
 export function AttachmentAddMenu({
   isMobile,
   isLanding,
+  isSheet,
   disabled,
-  onAddAttachment: requestedAddAttachment,
+  onAddAttachment,
   attachmentDisabled,
-  onScheduleSend: requestedScheduleSend,
+  onScheduleSend,
   scheduleDisabledReason,
   mcp,
 }: AttachmentAddMenuProps) {
-  const schedulesAllowed = useWorkspaceFeature('schedules');
-  const onScheduleSend = schedulesAllowed ? requestedScheduleSend : undefined;
-  const attachmentAllowed = useWorkspaceFeature('attachments');
-  const onAddAttachment = attachmentAllowed ? requestedAddAttachment : undefined;
+  const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
+  const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
@@ -183,6 +186,38 @@ export function AttachmentAddMenu({
       ? t('session.mcp.loadCount', { count: selectedCount })
       : t('session.mcp.loadNone');
 
+  const scheduleDisabled = Boolean(scheduleFeatureReason || scheduleDisabledReason);
+  const scheduleItem = onScheduleSend ? (
+    <Menu.Item
+      icon={Clock}
+      onClick={onScheduleSend}
+      disabled={scheduleDisabled}
+      xstyle={[styles.item, isMobile && styles.itemMobile]}
+    >
+      {scheduleFeatureReason ? (
+        <WorkspaceFeatureReasonText reason={scheduleFeatureReason} />
+      ) : (
+        t('scheduledMessage.menu')
+      )}
+    </Menu.Item>
+  ) : null;
+
+  // A disabled menu row does not receive pointer events, so a `title` on it can
+  // never show. Keep the row disabled and put the hover target on a wrapper that
+  // owns the same box; the tooltip then explains the state without making the
+  // command clickable.
+  const scheduleEntry =
+    scheduleItem && scheduleDisabled && !scheduleFeatureReason ? (
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={0} render={<div />}>
+          {scheduleItem}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="right">{scheduleDisabledReason}</Tooltip.Content>
+      </Tooltip.Root>
+    ) : (
+      scheduleItem
+    );
+
   return (
     <Menu.Root
       open={open}
@@ -197,13 +232,13 @@ export function AttachmentAddMenu({
         render={
           <Button
             type="button"
-            variant="ghost"
+            variant={isSheet ? 'secondary' : 'ghost'}
             icon
             width={triggerSize}
             height={triggerSize}
             disabled={disabled}
             aria-label={triggerLabel}
-            className={stylex.props(styles.trigger).className}
+            xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
           >
             <Plus strokeWidth={1.5} className={plusClassName} />
           </Button>
@@ -211,13 +246,13 @@ export function AttachmentAddMenu({
       >
         <Button
           type="button"
-          variant="ghost"
+          variant={isSheet ? 'secondary' : 'ghost'}
           icon
           width={triggerSize}
           height={triggerSize}
           disabled={disabled}
           aria-label={triggerLabel}
-          className={stylex.props(styles.trigger).className}
+          xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
         >
           <Plus strokeWidth={1.5} className={plusClassName} />
         </Button>
@@ -252,24 +287,19 @@ export function AttachmentAddMenu({
             {onAddAttachment ? (
               <Menu.Item
                 onClick={onAddAttachment}
-                disabled={attachmentDisabled}
+                disabled={attachmentDisabled || !!attachmentFeatureReason}
+                title={attachmentFeatureReason}
                 xstyle={[styles.item, isMobile && styles.itemMobile]}
                 icon={Paperclip}
               >
-                {triggerLabel}
+                {attachmentFeatureReason ? (
+                  <WorkspaceFeatureReasonText reason={attachmentFeatureReason} />
+                ) : (
+                  triggerLabel
+                )}
               </Menu.Item>
             ) : null}
-            {onScheduleSend ? (
-              <Menu.Item
-                icon={Clock}
-                onClick={onScheduleSend}
-                disabled={!!scheduleDisabledReason}
-                title={scheduleDisabledReason}
-                xstyle={[styles.item, isMobile && styles.itemMobile]}
-              >
-                {t('scheduledMessage.menu')}
-              </Menu.Item>
-            ) : null}
+            {scheduleEntry}
             {hasMcp && mcp ? (
               <>
                 {onAddAttachment ? <Menu.Separator /> : null}

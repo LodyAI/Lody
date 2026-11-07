@@ -76,11 +76,10 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-// loro-repo >= 0.16.11 resolves create()/initOffline()/destroy() on the real clock
-// (native libuv async), NOT via the timers vitest fakes. Awaiting them while fake
-// timers are installed leaves the resolution to real wall time, which on a loaded CI
-// runner can be starved past the 30s test timeout. So run repo setup/teardown on real
-// timers and only keep the fake clock for the batch-window assertions.
+// Repo setup/teardown crosses native async work, so run it on real timers.
+// Restoring real timers cannot settle yields already queued on a fake clock:
+// persistence can await setTimeout(0). Tests without batch-window assertions
+// should keep real timers for the whole repo lifetime.
 const destroyRepoOnRealTimers = async (repo: LoroRepo) => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers();
@@ -237,6 +236,7 @@ const createRecoveryHarness = async (
     store: SessionTransientStore;
     sessionActivePresence: SessionActivePresenceControllerLegacy;
     machineFlockCommandWatcher: { stop(): void };
+    clearScheduledACPFlush(id: SessionId): void;
     flushACPUpdatesNow(id: SessionId): Promise<void>;
   };
   host.machineFlockCommandWatcher.stop();
@@ -296,6 +296,7 @@ const createRecoveryHarness = async (
     let promptPending = false;
     session.agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [],
       currentModel: undefined,
       get pendingPromptCompletion() {
@@ -586,6 +587,9 @@ describe('MessageHandler ACP batching', () => {
   ])(
     'image epoch acceptance: late output cannot mark a successor (sameId=$sameId, endAfterSwitch=$endAfterSwitch)',
     async ({ sameId, endAfterSwitch }) => {
+      // This tests epoch ownership, not time. Persistence may yield through
+      // setTimeout(0); switching clocks at teardown can discard that queued yield.
+      vi.useRealTimers();
       const h = await createRecoveryHarness();
       const uploadStarted = Promise.withResolvers<void>();
       const allowUpload = Promise.withResolvers<void>();
@@ -794,6 +798,7 @@ describe('MessageHandler ACP batching', () => {
         expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
         expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
         expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
+        expect(h.doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([]);
       } finally {
         await h.close();
       }
@@ -934,26 +939,66 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it.each<AcpSessionNotification['update']>([
+  const disconnectedPromptUpdates: AcpSessionNotification['update'][] = [
     { sessionUpdate: 'current_mode_update', currentModeId: 'auto' },
     { sessionUpdate: 'plan', entries: [] },
     { sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' },
-  ])('never replays a disconnected prompt after $sessionUpdate', async (update) => {
-    const h = await createRecoveryHarness({ updates: [update] });
-    h.finishRetry.resolve();
-    try {
-      await h.service.continueSession(h.message);
-      await h.service.drainInboxExecutions();
-      expect(h.submissions).toEqual(['old']);
-      expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
-        { kind: 'unknown', code: 'agent_disconnected' },
-      ]);
-      expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
-      expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
-    } finally {
-      await h.close();
+  ];
+  it.each(
+    disconnectedPromptUpdates.flatMap((update) =>
+      [false, true].map((flushBeforeDisconnect) => ({
+        update,
+        sessionUpdate: update.sessionUpdate,
+        flushBeforeDisconnect,
+      }))
+    )
+  )(
+    'never replays a disconnected prompt after $sessionUpdate (flushed=$flushBeforeDisconnect)',
+    async ({ update, flushBeforeDisconnect }) => {
+      // This tests event ownership, not time. A repo persistence yield must
+      // remain runnable through close instead of being discarded with fake timers.
+      vi.useRealTimers();
+      const promptStarted = Promise.withResolvers<void>();
+      const disconnect = Promise.withResolvers<void>();
+      const h = await createRecoveryHarness({
+        updates: [update],
+        onPrompt: async () => {
+          // Own the flush boundary so neither branch races the batch timer.
+          h.host.clearScheduledACPFlush(h.sessionId);
+          promptStarted.resolve();
+          await disconnect.promise;
+        },
+      });
+      h.finishRetry.resolve();
+      const running = h.service.continueSession(h.message);
+      try {
+        await Promise.race([
+          promptStarted.promise,
+          running.then(() => {
+            throw new Error('Turn ended before the ACP update');
+          }),
+        ]);
+        expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toHaveLength(1);
+        if (flushBeforeDisconnect) {
+          await h.host.flushACPUpdatesNow(h.sessionId);
+          expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
+        }
+        disconnect.resolve();
+        await running;
+        await h.service.drainInboxExecutions();
+        expect(h.submissions).toEqual(['old']);
+        expect(h.outcomes.map((fact) => fact.outcome)).toEqual([
+          { kind: 'unknown', code: 'agent_disconnected' },
+        ]);
+        expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
+        expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
+      } finally {
+        disconnect.resolve();
+        await running;
+        await h.close();
+      }
     }
-  });
+  );
 
   it.each(['snapshot', 'progress', 'text', 'rich', 'tool'] as const)(
     'subagent content observation distinguishes $0 from lifecycle status',
@@ -1530,6 +1575,65 @@ describe('MessageHandler ACP batching', () => {
       }
     }
   );
+
+  it('routes custom ACP usage with its accounting identity and user attribution', async () => {
+    vi.useRealTimers();
+    const sessionId = 'custom-usage' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing session doc');
+    const recorded: unknown[] = [];
+    Object.assign(handler, {
+      usageTrackingService: {
+        recordSessionUsageUpdate: (input: unknown) => recorded.push(input),
+        flushSessionUsage: async () => {},
+      },
+    });
+    const host = handler as unknown as {
+      handleUsageUpdate(
+        sessionId: SessionId,
+        accountingId: string,
+        update: SessionUsageUpdate
+      ): Promise<void>;
+    };
+    const usage = { inputTokens: 12, outputTokens: 3, cacheReadInputTokens: 0, costUSD: 0.42 };
+    const update = { sessionId: 'native', usage, modelUsage: { model: usage } };
+    try {
+      await repo.upsertDocMeta(getSessionRoomId(sessionId), {
+        id: sessionId,
+        machineId: 'm-1',
+        userId: 'u-1',
+        cliType: 'custom',
+        agentType: 'custom-123e4567-e89b-12d3-a456-426614174000',
+      });
+      await doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'user-turn',
+          role: 'user',
+          userId: 'author',
+          status: 'handled',
+          read: true,
+          timestamp: '2026-10-17T00:00:00.000Z',
+          items: [],
+        } as SessionHistoryInput,
+      });
+      await host.handleUsageUpdate(sessionId, 'native:scope:one', update);
+      expect(recorded).toEqual([
+        {
+          workspaceId: 'ws-1',
+          sessionId,
+          acpSessionId: 'native:scope:one',
+          userId: 'author',
+          machineId: 'm-1',
+          cliType: 'custom',
+          update,
+        },
+      ]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
 
   it('records each turn its own token usage deltas, including late reports', async () => {
     vi.useRealTimers();

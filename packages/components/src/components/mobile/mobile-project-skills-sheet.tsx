@@ -41,6 +41,7 @@ import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scal
 import { withClassName } from '@/lib/stylex';
 import { sheetSurface } from './sheet-surface';
 import { mobileSurface } from './surface';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 type SelectedSkill = { skill: ProjectSkill; scope: ProjectSkillScope };
 
@@ -397,6 +398,7 @@ export function MobileProjectSkillsSheet({
      rows doesn't kick off a scan/fetch per project until the user asks. */
   const activeSource = open ? source : null;
   const { status, groups, error, stale, fetchedAt, refresh } = useProjectSkills(activeSource);
+  const maxHeight = useFoldAwareSheetHeight(88);
   const title = t('workspace.projects.skills.sheetTitle', 'Skills');
   /* The skill detail drills in as an in-sheet slide-over (not a stacked drawer)
      so the sheet's own close chip stays the single dismiss affordance; the
@@ -412,7 +414,7 @@ export function MobileProjectSkillsSheet({
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange}>
-      <DrawerContent xstyle={styles.sheet}>
+      <DrawerContent style={{ maxHeight }} xstyle={styles.sheet}>
         <div {...stylex.props(sheetSurface.columnAuto)}>
           <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
             {detail ? (

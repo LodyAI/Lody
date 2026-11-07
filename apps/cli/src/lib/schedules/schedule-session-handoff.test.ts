@@ -15,7 +15,6 @@ import {
   type SessionHistoryInput,
 } from '@lody/shared';
 import type { LoroDocumentManager } from '../loro/doc';
-import { AgentExecutionSlots } from '../agent-execution-slots';
 import {
   commitPreparedSessionDispatch,
   materializePreparedSessionInput,
@@ -126,7 +125,6 @@ describe('Schedule to ordinary Session handoff', () => {
         machineId: 'machine',
         userId: 'owner',
         store,
-        slots: new AgentExecutionSlots(),
         now: () => now,
         ready: () => connected,
         disabled: () => false,
@@ -180,7 +178,6 @@ describe('Schedule to ordinary Session handoff', () => {
         connected = true;
         now = 90_000;
         engine = new ScheduleEngine(ports());
-        engine.restoreOccupancy();
         await engine.evaluate();
         await engine.evaluate();
         expect(prepare).toHaveBeenCalledOnce();

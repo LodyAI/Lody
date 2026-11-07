@@ -501,6 +501,7 @@ const styles = stylex.create({
 
   /* CI run tones. */
   ciSuccess: { color: themeColors.statusSuccess },
+  ciUnknown: { color: 'hsl(var(--muted-foreground))' },
   ciFailure: { color: themeColors.destructive },
   ciRunning: { color: themeColors.statusWarning },
   ciQueued: { color: themeColors.mutedForeground },
@@ -1045,7 +1046,8 @@ export function ContextChip({
   diffStat?: { add: number; del: number } | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
-  /** Compact CI state from the session row; live runs override it when present. */
+  /** CI verdict from session metadata, the same value the sidebar shows. Live
+   *  runs only list the checks; they never change this summary. */
   prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
@@ -1073,17 +1075,8 @@ export function ContextChip({
   // cluster stays uniform-width (the "#1234" label lived only here and caused
   // the layout jump on hand-off).
   const StatusIcon = statusMeta?.icon ?? LocationIcon;
-  const liveCiOverall = prCiRuns?.length ? summarizePrCiRuns(prCiRuns) : null;
-  const compactCiState: SessionPullRequestCiState | null | undefined =
-    liveCiOverall === 'failing'
-      ? 'f'
-      : liveCiOverall === 'running'
-        ? 'p'
-        : liveCiOverall === 'passing'
-          ? 's'
-          : prCiState;
   const prNumber = pr
-    ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
+    ? (parseGitHubPrNumber(pr.url) ?? getSessionPullRequestLegacyFields(pr).number)
     : null;
   const value = pr ? (prNumber ? `#${prNumber}` : 'PR') : undefined;
   const label = pr
@@ -1113,12 +1106,12 @@ export function ContextChip({
         title={t('sessions.pr.openTab', 'Open pull request')}
         className={clsx(stylex.props(styles.prButton).className, INFO_BAR_TEXT_CLASS)}
       >
-        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
         {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
       </button>
     ) : (
       <span {...stylex.props(styles.prStatic)}>
-        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
         {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
       </span>
     )
@@ -1186,7 +1179,7 @@ export function ContextChip({
             {/* CI pill stays adjacent to the PR number; the location control
                 trails it, sitting right before the repo/branch summary. */}
             <span {...stylex.props(styles.ciSlot)}>
-              <PrCiPill runs={prCiRuns} onOpenRun={onOpenPrCiRun} />
+              <PrCiPill runs={prCiRuns} state={prCiState} onOpenRun={onOpenPrCiRun} />
             </span>
             {locationControl}
           </>
@@ -1263,22 +1256,41 @@ export const PR_CI_RUN_ICON: Record<
   cancelled: { Icon: CircleSlash, className: stylex.props(styles.ciSkipped).className ?? '' },
 };
 
-export function usePrCiPresentation(runs: readonly PrCiRun[]) {
+/** Session metadata CI code as a pill verdict; null when metadata has none. */
+function getPrCiOverallFromState(
+  state: SessionPullRequestCiState | null | undefined
+): PrCiOverall | null {
+  if (state === 's') return 'passing';
+  if (state === 'f' || state === 'e') return 'failing';
+  if (state === 'p' || state === 'x') return 'running';
+  return null;
+}
+
+/** The verdict is the metadata CI code, the same one the sidebar and the Fix CI
+ *  gate read; without one the pill only lists the runs. */
+export function usePrCiPresentation(
+  runs: readonly PrCiRun[],
+  state?: SessionPullRequestCiState | null
+) {
   const { t } = useTranslation();
-  const overall = summarizePrCiRuns(runs);
+  const overall = getPrCiOverallFromState(state);
   const settled = runs.filter((run) => run.status !== 'running' && run.status !== 'queued').length;
   const overallLabel =
     overall === 'passing'
       ? t('sessions.prCi.passing', 'CI passed')
       : overall === 'failing'
         ? t('sessions.prCi.failing', 'CI failed')
-        : t('sessions.prCi.running', 'CI running');
+        : overall === 'running'
+          ? t('sessions.prCi.running', 'CI running')
+          : null;
   const toneClassName =
     overall === 'passing'
       ? stylex.props(styles.ciSuccess).className
       : overall === 'failing'
         ? stylex.props(styles.ciFailure).className
-        : stylex.props(styles.ciRunning).className;
+        : overall === 'running'
+          ? stylex.props(styles.ciRunning).className
+          : stylex.props(styles.ciUnknown).className;
   const VerdictIcon =
     overall === 'passing' ? CircleCheck : overall === 'failing' ? CircleX : CircleDot;
   return { overall, settled, overallLabel, toneClassName, VerdictIcon };
@@ -1286,14 +1298,16 @@ export function usePrCiPresentation(runs: readonly PrCiRun[]) {
 
 function PrCiPopoverBody({
   runs,
+  state,
   onOpenRun,
 }: {
   runs: readonly PrCiRun[];
+  state?: SessionPullRequestCiState | null;
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
   const durationUnitLabels = getDurationUnitLabels(t);
-  const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs);
+  const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs, state);
   const ciOverallProps = stylex.props(styles.ciOverall);
   const ciListProps = stylex.props(styles.ciList);
   const ciRunGlyphProps = stylex.props(styles.ciRunGlyph);
@@ -1301,7 +1315,7 @@ function PrCiPopoverBody({
     <div {...stylex.props(styles.ciPanel)}>
       <div className={clsx(stylex.props(styles.ciHeaderRow).className, INFO_BAR_TEXT_CLASS)}>
         <span {...ciOverallProps} className={clsx(ciOverallProps.className, toneClassName)}>
-          {overallLabel}
+          {overallLabel ?? t('sessions.prCi.label', 'CI checks')}
         </span>
         <span {...stylex.props(styles.ciCount)}>
           · {settled}/{runs.length}
@@ -1358,20 +1372,25 @@ function PrCiPopoverBody({
  */
 export function PrCiPill({
   runs,
+  state,
   onOpenRun,
 }: {
   runs: readonly PrCiRun[] | undefined;
+  /** Session metadata CI code; it decides the verdict when present. */
+  state?: SessionPullRequestCiState | null;
   /** Open a check run (e.g. its GitHub Actions page). */
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const hasRuns = !!runs && runs.length > 0;
-  const presentation = usePrCiPresentation(hasRuns ? runs! : []);
+  const presentation = usePrCiPresentation(hasRuns ? runs! : [], state);
   if (!hasRuns) return null;
 
   const { overall, settled, overallLabel, toneClassName, VerdictIcon } = presentation;
-  const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
+  const label = overallLabel
+    ? `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`
+    : t('sessions.prCi.label', 'CI checks');
   const pillProps = stylex.props(styles.ciPillButton, open && styles.ciPillOpen);
   const ciRunGlyphProps = stylex.props(styles.ciRunGlyph);
 
@@ -1408,7 +1427,7 @@ export function PrCiPill({
         maxWidth="min(24rem, 90vw)"
         xstyle={styles.ciPopover}
       >
-        <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
+        <PrCiPopoverBody runs={runs!} state={state} onOpenRun={onOpenRun} />
       </Popover.Content>
     </Popover.Root>
   );

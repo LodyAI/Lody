@@ -1,4 +1,7 @@
 import posthog from 'posthog-js';
+import { isElectronRenderer } from './electron';
+import { isNativeAppShell } from './native-platform';
+import { postHogPrivacy } from './posthog-privacy';
 
 type PostHogClient = typeof posthog;
 type PostHogOptions = NonNullable<Parameters<PostHogClient['init']>[1]>;
@@ -216,6 +219,7 @@ export function createDeferredPostHogController(
       try {
         options.onBeforeInitialize?.();
         realClient.init(apiKey, initOptions);
+        if (realClient === posthog) postHogPrivacy.sync(true);
         initialized = true;
         initializationFailed = false;
       } catch {
@@ -272,6 +276,9 @@ export function createDeferredPostHogController(
   };
 
   const enqueueOrInvoke = (method: DeferredMethod, args: unknown[]): unknown => {
+    if (method === 'captureException' && realClient === posthog) {
+      args = postHogPrivacy.prepareException(args);
+    }
     if ((initialized || realClient.__loaded) && !queueDraining) {
       initialized = true;
       return invoke(method, args);
@@ -374,6 +381,9 @@ export function createDeferredPostHogController(
       timestamp = new Date(),
       { force = false }: { force?: boolean } = {}
     ) {
+      // Native navigation already has product events; pageviews add recurring
+      // traffic for every session switch without useful page-level analysis.
+      if (isElectronRenderer() || isNativeAppShell()) return;
       const normalizedKey = normalizePageViewKey(navigationKey);
       if (disabled || (!force && pageViewActive && activePageViewKey === normalizedKey)) return;
       activePageViewKey = normalizedKey;
@@ -415,7 +425,10 @@ function stopDeferredPageLifecycleListeners(): void {
 }
 
 const deferredPostHogController = createDeferredPostHogController(posthog, defaultScheduler, {
-  onBeforeInitialize: stopDeferredStartupErrorListeners,
+  onBeforeInitialize: () => {
+    stopDeferredStartupErrorListeners();
+    postHogPrivacy.attach(posthog);
+  },
   onDisabled: (reason) => {
     stopDeferredStartupErrorListeners();
     if (reason === 'missing-api-key') {
