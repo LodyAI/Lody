@@ -15,7 +15,6 @@ const dependencyFields = [
 ];
 const forbiddenPathPrefixes = [
   'backend/',
-  'apps/mobile/',
   'apps/web/',
   'context/',
   'docs/',
@@ -43,6 +42,11 @@ const hostedPresetPattern =
 const publicRuntimeArtifactHostPattern = /api\.lody\.ai/u;
 const publicRuntimeArtifactHostAllowlist = new Set([
   'README.md',
+  // Native mobile clients use this host for public cloud APIs, not runtime downloads.
+  'apps/mobile/android/AGENTS.md',
+  'apps/mobile/ios/apps/ios/verification/kit/attachments/README.md',
+  'apps/mobile/ios/packages/cloud-runtime/src/runtime/sharing/runtime.ts',
+  'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/sharing/runtime.ts',
   'apps/cli/src/ios-simulator/baguette-manifest.json',
   'packages/platform/src/runtime-artifacts.ts',
 ]);
@@ -147,7 +151,7 @@ async function main() {
     if (documentationBoundaryAllowlist.has(file)) continue;
     const content = await readFile(path.join(repoRoot, file), 'utf8');
     if (
-      /@lody\/convex|backend\/(?:convex|server|do)|apps\/(?:mobile|web)|site\/docs/u.test(content)
+      /@lody\/convex|backend\/(?:convex|server|do)|apps\/web|site\/docs/u.test(content)
     ) {
       violations.push(`${file}: documentation references a closed implementation path`);
     }

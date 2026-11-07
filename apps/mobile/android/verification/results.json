@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-28",
+  "device": "Pixel_8 emulator, Android 14 / API 34, arm64-v8a",
+  "webview": "com.google.android.webview 149.0.7827.91",
+  "javascriptTests": {
+    "passed": 10,
+    "failed": 0
+  },
+  "junit": [
+    {
+      "report": "verification/reports/phase-1/TEST-app.lody.android.runtime.ChunkAssemblerTest.xml",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "report": "verification/reports/phase-1/TEST-app.lody.android.runtime.RuntimeHealthTest.xml",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "report": "verification/reports/phase-1/TEST-app.lody.android.runtime.RuntimeOwnerTest.xml",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "report": "verification/reports/phase-1/TEST-app.lody.android.runtime.RuntimeProtocolTest.xml",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "report": "verification/reports/phase-1/device-full.xml",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0
+    }
+  ],
+  "releaseDiagnosticAssetAbsent": true,
+  "licensesBundled": [
+    {
+      "name": "@loro-dev/flock-wasm",
+      "version": "0.4.3",
+      "licenseSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+    },
+    {
+      "name": "@loro-dev/streams-client",
+      "version": "0.7.0",
+      "licenseSha256": "a00b226761f61635dfddc6f1a36762c1cc7b68c8e65c8741ea3a7be38b7ff26d"
+    },
+    {
+      "name": "@loro-dev/streams-crdt",
+      "version": "0.16.1",
+      "licenseSha256": "a00b226761f61635dfddc6f1a36762c1cc7b68c8e65c8741ea3a7be38b7ff26d"
+    },
+    {
+      "name": "@loro-dev/streams-client",
+      "version": "0.8.0",
+      "licenseSha256": "a00b226761f61635dfddc6f1a36762c1cc7b68c8e65c8741ea3a7be38b7ff26d"
+    },
+    {
+      "name": "fzstd",
+      "version": "0.1.1",
+      "licenseSha256": "62249119bb7df6e54300f37a37145c26a6d4420410aac8881a119c5b427cf751"
+    },
+    {
+      "name": "loro-crdt",
+      "version": "1.15.1",
+      "licenseSha256": "a9ec532f4f11817f427e4f3ca0432b176138721e0866f152864b17ebdeac6bbf"
+    },
+    {
+      "name": "zod",
+      "version": "3.25.76",
+      "licenseSha256": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8"
+    }
+  ],
+  "lintFindings": [
+    "OldTargetApi",
+    "AndroidGradlePluginVersion",
+    "NewerVersionAvailable",
+    "DataExtractionRules",
+    "MissingApplicationIcon"
+  ],
+  "phase": "1 — scoped offline runtime host",
+  "catalogWireRegression": "verification/reports/phase-1/catalog-device.xml",
+  "releaseDiagnosticClassesAbsent": true,
+  "snapshotFilesVerified": 64,
+  "review": "4 important findings fixed with RED→GREEN regression tests",
+  "builds": [
+    "assembleDebug",
+    "assembleRelease",
+    "lintDebug"
+  ],
+  "remainingScope": [
+    "cloud auth/grants/CORS",
+    "durable account and catalog restore",
+    "real cloud synchronization and writes",
+    "physical-device and broader WebView version matrix"
+  ],
+  "processAcceptance": {
+    "initialPid": "17319",
+    "restartedPid": "18160",
+    "background": "9 seconds via Home; same PID and generation",
+    "navigation": "details and back",
+    "workspaceSwitch": "workspace-a → workspace-b",
+    "processRestart": "fresh workspace-a fixture; no persisted commands",
+    "offlineChecks": "7/7",
+    "video": "navigation-process.mp4"
+  },
+  "uiEvidence": "verification/evidence/phase-1",
+  "uiVerdict": "pending user visual review",
+  "videoDurationSeconds": 40.2088,
+  "artifactCheck": {
+    "warnings": [],
+    "pending": []
+  }
+}

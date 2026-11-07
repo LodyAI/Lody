@@ -1,3 +1,10 @@
+import { collectFileDownload } from '@/lib/file-download';
+import { downloadBytesAsFile } from '@/lib/download-file';
+import { shareFileBytesNatively } from '@/lib/session-file-native-save';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { getIpcServices } from '@/lib/electron-ipc-client';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import type { SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
@@ -259,7 +266,7 @@ import {
   getSessionImageDataUrl,
   peekSessionImageUrl,
 } from '@/lib/session-image-cache';
-import { SessionFileCard, SessionFileCardList } from './session-file-card';
+import { SessionFileCard, SessionFileCardList, SessionFileCardLayout } from './session-file-card';
 import {
   SessionFilePreviewDialog,
   type SessionFilePreviewStatus,
@@ -643,7 +650,7 @@ export interface SessionChatStreamViewProps {
   sendMessage?: (message: ClientToServer) => void;
   renderMessageRow: (args: { message: SessionHistoryParsed; sessionId: SessionId }) => ReactNode;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
-  onFilePathClick?: (filePath: string) => void;
+  onFilePathClick?: (filePath: string, options?: { pathKind: 'canonical' }) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
   onAnnotateImage?: (selection: DocumentSelection) => boolean;
@@ -685,6 +692,7 @@ export interface SessionChatStreamViewProps {
 export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  openLocalFile?: (path: string, options?: { pathKind: 'canonical' }) => void;
   copyContext?: (messageId: string) => void;
 }>({});
 const SessionImagePreviewContext = createContext<{
@@ -2459,10 +2467,11 @@ export const SessionChatStreamView = forwardRef<
     const chatActionContextValue = useMemo(
       () => ({
         copyContext: onCopyContext,
+        openLocalFile: onFilePathClick,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
       }),
-      [onCopyContext, onOpenHtmlFile, sendMessage]
+      [onCopyContext, onOpenHtmlFile, onFilePathClick, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -6352,6 +6361,8 @@ const renderAssistantContent = (
           align="start"
         />
       );
+    case 'local_attachment':
+      return <LocalAttachmentCard attachment={content} sessionId={sessionId} />;
     case 'file':
       return <SessionFileGroup files={[content]} sessionId={sessionId} align="start" />;
     case 'thought':
@@ -6950,6 +6961,118 @@ export const ImageGroupBubble = ({
  * one list (decision #3) at the call site; this component handles however many
  * it is handed.
  */
+export const LocalAttachmentCard = ({
+  attachment,
+  sessionId,
+}: {
+  attachment: SessionLocalAttachment;
+  sessionId: SessionId;
+}) => {
+  const { t } = useTranslation();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const machineId = useAtomValue(localMachineIdAtom);
+  const runtime = useAtomValue(runtimeAtom);
+  const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  const readonly = useContext(SessionReadonlyContext);
+  const { openLocalFile } = useContext(SessionChatActionContext);
+  const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const binding = `${workspaceId}:${sessionId}:${attachment.referenceId}:${machineId}`;
+  const currentBinding = useRef<string | null>(binding);
+  currentBinding.current = binding;
+  useEffect(
+    () => () => {
+      currentBinding.current = null;
+    },
+    []
+  );
+  const remote = machineId !== attachment.machineId;
+  const available =
+    !readonly &&
+    sessionId === attachment.sessionId &&
+    !!workspaceId &&
+    (remote ? !!runtime : !!openLocalFile);
+  return (
+    <SessionFileCardLayout
+      fileName={attachment.fileName}
+      mimeType={attachment.mimeType}
+      subtitle={
+        error ??
+        (opening && remote
+          ? t('sessions.localAttachmentDownloading', 'Downloading from original computer…')
+          : remote
+            ? t('sessions.localAttachmentDownload', 'Download from original computer')
+            : t('sessions.localAttachmentOnly', 'Available only on the original computer'))
+      }
+      actionIcon={
+        remote ? (
+          opening ? (
+            <Spinner className="h-4 w-4" />
+          ) : (
+            <ArrowDown className="h-4 w-4" />
+          )
+        ) : null
+      }
+      failed={!!error}
+      isInteractive={available && !opening}
+      onClick={() => {
+        if (!available || !workspaceId) return;
+        setOpening(true);
+        setError(null);
+        if (remote && runtime) {
+          void collectFileDownload((range) =>
+            runtime.requestFileDownloadChunk(
+              attachment.machineId as MachineId,
+              {
+                sessionId,
+                path: attachment.fileName,
+                attachment: { ...attachment, sessionId },
+                ...range,
+              },
+              session?.parentSessionId ?? sessionId
+            )
+          )
+            .then(async (bytes) => {
+              if (currentBinding.current !== binding) return;
+              if (!bytes) throw new Error('Attachment download unavailable');
+              if (isNativeAppShell()) await shareFileBytesNatively(attachment.fileName, bytes);
+              else downloadBytesAsFile(attachment.fileName, bytes);
+            })
+            .catch(() => {
+              if (currentBinding.current === binding)
+                setError(
+                  t(
+                    'sessions.localAttachmentDownloadFailed',
+                    'Cannot download. Check that the original computer is online and the file still exists.'
+                  )
+                );
+            })
+            .finally(() => {
+              if (currentBinding.current === binding) setOpening(false);
+            });
+          return;
+        }
+        const ipc = getIpcServices();
+        if (!ipc) {
+          setOpening(false);
+          setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'));
+          return;
+        }
+        void ipc.localProjects
+          .resolveLocalAttachment({ workspaceId, sessionId, attachment })
+          .then((filePath) => {
+            if (currentBinding.current === binding)
+              openLocalFile?.(filePath, { pathKind: 'canonical' });
+          })
+          .catch(() =>
+            setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'))
+          )
+          .finally(() => setOpening(false));
+      }}
+    />
+  );
+};
+
 export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
   const readonly = useContext(SessionReadonlyContext);
   return readonly ? (
@@ -7183,6 +7306,8 @@ const renderUserContent = (
           thumbnailSize={options.thumbnailSize}
         />
       );
+    case 'local_attachment':
+      return <LocalAttachmentCard attachment={content} sessionId={sessionId} />;
     case 'file':
       return <SessionFileGroup files={[content]} sessionId={sessionId} align="end" />;
     case 'thought':

@@ -1,0 +1,17 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "code-block",
+        "version": 1,
+        "code": "type User = {\n  id: string\n  name: string\n  role: 'admin' | 'editor' | 'viewer'\n}\n\ntype ApiResult<T> = {\n  data: T\n  status: number\n}\n\nfunction assertOk<T>(result: ApiResult<T>): T {\n  if (result.status >= 400) {\n    throw new Error(`Request failed: ${result.status}`)\n  }\n  return result.data\n}\n\nasync function fetchUsers(): Promise<User[]> {\n  const response = await fetch('/api/users')\n  const result = (await response.json()) as ApiResult<User[]>\n  return assertOk(result)\n}\n\nasync function bootstrap() {\n  const users = await fetchUsers()\n  const visible = users.filter((user) => user.role !== 'viewer')\n  console.table(visible)\n}\n\nvoid bootstrap()",
+        "language": "typescript"
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

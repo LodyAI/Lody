@@ -1,0 +1,495 @@
+{
+  "root": {
+    "type": "root",
+    "version": 1,
+    "children": [
+      {
+        "type": "heading",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "Title",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "tag": "h1"
+      },
+      {
+        "type": "heading",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "Sub",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "tag": "h3"
+      },
+      {
+        "type": "paragraph",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "plain ",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "bold",
+            "format": 1,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "italic",
+            "format": 2,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "strike",
+            "format": 4,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "under",
+            "format": 8,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "code",
+            "format": 16,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "sub",
+            "format": 32,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "sup",
+            "format": 64,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "mark",
+            "format": 128,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "lower",
+            "format": 256,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "UPPER",
+            "format": 512,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "cap",
+            "format": 1024,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "styled",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": "color: red;"
+          }
+        ],
+        "direction": "ltr",
+        "format": "center",
+        "indent": 0,
+        "textFormat": 1,
+        "textStyle": "font-size: 15px;"
+      },
+      {
+        "type": "paragraph",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "tab",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "tab",
+            "version": 1,
+            "text": "\t",
+            "format": 0,
+            "detail": 2,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "after",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "linebreak",
+            "version": 1
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "next line",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "$": {
+          "blockId": "blk-1",
+          "ts": 1759132800123,
+          "ratio": 0.1,
+          "nested": {
+            "flag": true,
+            "list": [
+              1,
+              2.5,
+              "x",
+              null
+            ]
+          }
+        }
+      },
+      {
+        "type": "paragraph",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "see ",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "autolink",
+            "version": 1,
+            "children": [
+              {
+                "type": "text",
+                "version": 1,
+                "text": "https://innei.in",
+                "format": 0,
+                "detail": 0,
+                "mode": "normal",
+                "style": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "url": "https://innei.in",
+            "rel": null,
+            "target": null,
+            "title": null,
+            "isUnlinked": false
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": " and ",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "link",
+            "version": 1,
+            "children": [
+              {
+                "type": "text",
+                "version": 1,
+                "text": "docs",
+                "format": 0,
+                "detail": 0,
+                "mode": "normal",
+                "style": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "url": "https://lexical.dev",
+            "rel": "noopener",
+            "target": "_blank",
+            "title": "Lexical"
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0
+      },
+      {
+        "type": "quote",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "quoted",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0
+      },
+      {
+        "type": "list",
+        "version": 1,
+        "children": [
+          {
+            "type": "listitem",
+            "version": 1,
+            "children": [
+              {
+                "type": "text",
+                "version": 1,
+                "text": "done",
+                "format": 0,
+                "detail": 0,
+                "mode": "normal",
+                "style": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "value": 1,
+            "checked": true
+          },
+          {
+            "type": "listitem",
+            "version": 1,
+            "children": [
+              {
+                "type": "text",
+                "version": 1,
+                "text": "todo",
+                "format": 0,
+                "detail": 0,
+                "mode": "normal",
+                "style": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "value": 2,
+            "checked": false
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "listType": "check",
+        "start": 1,
+        "tag": "ul"
+      },
+      {
+        "type": "list",
+        "version": 1,
+        "children": [
+          {
+            "type": "listitem",
+            "version": 1,
+            "children": [
+              {
+                "type": "text",
+                "version": 1,
+                "text": "one",
+                "format": 0,
+                "detail": 0,
+                "mode": "normal",
+                "style": ""
+              }
+            ],
+            "direction": "ltr",
+            "format": "",
+            "indent": 0,
+            "value": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "listType": "number",
+        "start": 3,
+        "tag": "ol"
+      },
+      {
+        "type": "horizontalrule",
+        "version": 1
+      },
+      {
+        "type": "paragraph",
+        "version": 1,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "rtl",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ],
+        "direction": "rtl",
+        "format": "right",
+        "indent": 1
+      },
+      {
+        "type": "code",
+        "version": 1,
+        "language": "swift",
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "children": [
+          {
+            "type": "code-highlight",
+            "version": 1,
+            "text": "let",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": "",
+            "highlightType": "keyword"
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": " x = 1",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          },
+          {
+            "type": "linebreak",
+            "version": 1
+          },
+          {
+            "type": "text",
+            "version": 1,
+            "text": "print(x)",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "version": 1,
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "children": [
+          {
+            "type": "text",
+            "version": 1,
+            "text": "plain",
+            "format": 0,
+            "detail": 0,
+            "mode": "normal",
+            "style": ""
+          }
+        ]
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0
+  }
+}

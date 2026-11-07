@@ -1,0 +1,142 @@
+[
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Doc title",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "heading",
+    "version": 1,
+    "tag": "h1"
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 1,
+        "mode": "normal",
+        "style": "",
+        "text": "Bold run",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " then ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 2,
+        "mode": "normal",
+        "style": "",
+        "text": "italic",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " and ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 4,
+        "mode": "normal",
+        "style": "",
+        "text": "struck",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 64,
+        "mode": "normal",
+        "style": "",
+        "text": "sup",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 1,
+    "textStyle": ""
+  },
+  {
+    "type": "linebreak",
+    "version": 1
+  },
+  {
+    "children": [
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "Done item",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "type": "listitem",
+        "version": 1,
+        "checked": true,
+        "value": 1
+      },
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "Open item",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "type": "listitem",
+        "version": 1,
+        "checked": false,
+        "value": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "list",
+    "version": 1,
+    "listType": "check",
+    "start": 1,
+    "tag": "ul"
+  }
+]

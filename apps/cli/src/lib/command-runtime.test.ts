@@ -13,6 +13,8 @@ import {
   listWorkspaceCandidates,
   resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
+  checkEncryptedCommandAccess,
+  describeEncryptedCommandFailure,
 } from './command-runtime';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 import { Effect } from 'effect';
@@ -404,5 +406,60 @@ describe('command runtime helpers', () => {
         meta: { id: 'real', latestUserMsgId: 'turn-1' },
       },
     ]);
+  });
+});
+
+describe('encrypted one-shot commands', () => {
+  const manager = (allowed: boolean) => {
+    const asked: unknown[][] = [];
+    return {
+      asked,
+      value: {
+        authorizeEncryptedMachine: async (...args: unknown[]) => {
+          asked.push(args);
+          return allowed;
+        },
+      } as never,
+    };
+  };
+
+  it('decides machine access from the local replica', async () => {
+    const allowed = manager(true);
+    await expect(
+      checkEncryptedCommandAccess(allowed.value, 'account', {
+        machineId: 'machine',
+        requesterUserId: 'account',
+        localProjectId: 'project',
+      })
+    ).resolves.toEqual({ allowed: true });
+    expect(allowed.asked).toEqual([['machine', 'project']]);
+    await expect(
+      checkEncryptedCommandAccess(manager(false).value, 'account', {
+        machineId: 'machine',
+        requesterUserId: 'account',
+        localProjectId: 'project',
+      })
+    ).resolves.toEqual({ allowed: false, reason: 'project_not_shared' });
+  });
+
+  it('refuses another requester without reading the ledger', async () => {
+    const other = manager(true);
+    await expect(
+      checkEncryptedCommandAccess(other.value, 'account', {
+        machineId: 'machine',
+        requesterUserId: 'someone-else',
+      })
+    ).resolves.toEqual({ allowed: false, reason: 'requester_not_member' });
+    expect(other.asked).toEqual([]);
+  });
+
+  it('explains a machine with no local ledger for the workspace', () => {
+    const failure = describeEncryptedCommandFailure(
+      'workspace',
+      new Error('e2ee_pairing_required')
+    );
+    expect(failure.message).toContain('Pair this machine');
+    const other = new Error('e2ee_binding_conflict');
+    expect(describeEncryptedCommandFailure('workspace', other)).toBe(other);
   });
 });

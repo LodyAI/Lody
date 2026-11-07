@@ -85,6 +85,13 @@ Emacs bindings such as Control+A/E and Control+P/N move by line, so this
 character-movement rule leaves them with the browser. See the
 [caret navigation decision](../notes/implemented/bug-fix/2026-10-27-mention-emacs-caret-navigation.md).
 
+The decorated input has one visible text painter: a character-aligned mirror
+renders prose, references, and selection together. The native textarea stays
+above it with transparent text and native spelling decorations disabled; it
+owns editing, clipboard semantics, accessibility, and the caret. Moving to a
+reference boundary never changes that stacking order. Placeholder text remains
+native. A primitive without a chip resolver retains native text and highlights.
+
 ## Ranking
 
 File menus use `useMentionFileSearch`: a Worker owns the file/directory index,

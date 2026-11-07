@@ -1,0 +1,80 @@
+[
+  {
+    "name": "replace-one-line",
+    "path": "docs/superpowers/.diff-check.md",
+    "old": "a\nb\nc\n",
+    "new": "a\nhello\nc\n"
+  },
+  {
+    "name": "new-file",
+    "path": "src/new.ts",
+    "old": "",
+    "new": "export const n = 1;\nexport const m = 2;\n"
+  },
+  {
+    "name": "deleted-file",
+    "path": "src/old.ts",
+    "old": "one\ntwo\n",
+    "new": ""
+  },
+  {
+    "name": "identical",
+    "path": "README.md",
+    "old": "same\n",
+    "new": "same\n"
+  },
+  {
+    "name": "new-side-missing-newline",
+    "path": "a.txt",
+    "old": "x\ny\n",
+    "new": "x\ny"
+  },
+  {
+    "name": "both-missing-newline",
+    "path": "a.txt",
+    "old": "x\ny",
+    "new": "x\nz"
+  },
+  {
+    "name": "two-hunks",
+    "path": "src/long.ts",
+    "old": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n",
+    "new": "line 1\nline two\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline eighteen\nline 19\nline 20\n"
+  },
+  {
+    "name": "merged-by-eight-context",
+    "path": "src/long.ts",
+    "old": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n",
+    "new": "line 1\nline 2\nthird\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\ntwelfth\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n"
+  },
+  {
+    "name": "split-by-nine-context",
+    "path": "src/long.ts",
+    "old": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n",
+    "new": "line 1\nline 2\nthird\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nthirteenth\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n"
+  },
+  {
+    "name": "insert-middle",
+    "path": "src/long.ts",
+    "old": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n",
+    "new": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\ninserted\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\n"
+  },
+  {
+    "name": "crlf",
+    "path": "win.txt",
+    "old": "a\r\nb\r\n",
+    "new": "a\r\nc\r\n"
+  },
+  {
+    "name": "non-ascii-path",
+    "path": "docs/文档 \"q\".md",
+    "old": "旧\n",
+    "new": "新\n"
+  },
+  {
+    "name": "tab-path",
+    "path": "odd\tname.txt",
+    "old": "1\n",
+    "new": "2\n"
+  }
+]

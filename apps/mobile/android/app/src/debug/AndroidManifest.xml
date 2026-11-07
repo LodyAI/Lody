@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:name="app.lody.android.diagnostics.DebugLodyApplication" tools:replace="android:name" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name="app.lody.android.diagnostics.ComposerMotionProbeActivity" android:exported="true" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="app.lody.android.diagnostics.CreateSessionProbeActivity" android:exported="true" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="app.lody.android.diagnostics.StickyGroupsProbeActivity" android:exported="true" />
+        <activity android:name="app.lody.android.diagnostics.CloudProbeActivity" android:exported="true" />
+        <activity android:name="app.lody.android.diagnostics.RuntimeDetailsActivity" android:exported="false" />
+        <activity android:name="app.lody.android.diagnostics.ChatStreamProbeActivity" android:exported="true" android:label="Chat stream probe" android:windowSoftInputMode="adjustResize">
+        </activity>
+        <activity android:name="app.lody.android.diagnostics.RuntimeProbeActivity" android:exported="true">
+        </activity>
+    </application>
+</manifest>

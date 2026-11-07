@@ -102,7 +102,10 @@ export interface ReplayPromptResult {
 export interface BuildReplayPromptOptions {
   /** Session history entries (sorted by timestamp ascending) */
   history: SessionHistoryInput[];
-  /** History ID to exclude (typically the current user message) */
+  /**
+   * User-turn ID to exclude. Its deterministic assistant entry
+   * (`assistant:<id>`) is excluded with it.
+   */
   excludeTurnId?: string;
   /** Maximum characters for the prompt (default: 100,000) */
   maxChars?: number;
@@ -160,6 +163,21 @@ function tail(text: string, maxChars: number): string {
     return text;
   }
   return '...' + text.slice(-maxChars);
+}
+
+/**
+ * A replay excludes the current user turn and the assistant output it owns.
+ * Otherwise a re-dispatched turn can replay its own prior partial answer, and
+ * an empty assistant entry can make a history wait believe prior context has
+ * arrived.
+ */
+export function isReplayEntryExcluded(
+  entry: { readonly id?: unknown },
+  excludeTurnId?: string
+): boolean {
+  return (
+    !!excludeTurnId && (entry.id === excludeTurnId || entry.id === `assistant:${excludeTurnId}`)
+  );
 }
 
 /**
@@ -311,7 +329,7 @@ function generatePrompt(
 
   for (const entry of history) {
     // Skip the current message if specified
-    if (excludeTurnId && entry.id === excludeTurnId) {
+    if (isReplayEntryExcluded(entry, excludeTurnId)) {
       continue;
     }
 
@@ -578,8 +596,7 @@ export function createReplayPromptBuilder(options: Omit<BuildReplayPromptOptions
   const paths = new Map<string, 'read' | 'edit' | 'other'>();
   return {
     add(entry: SessionHistoryInput): void {
-      if ((options.excludeTurnId && entry.id === options.excludeTurnId) || entry.role === 'system')
-        return;
+      if (isReplayEntryExcluded(entry, options.excludeTurnId) || entry.role === 'system') return;
       for (const item of entry.items ?? [])
         if (item.type === 'tool_call')
           for (const path of collectPathsFromToolCall(item)) {

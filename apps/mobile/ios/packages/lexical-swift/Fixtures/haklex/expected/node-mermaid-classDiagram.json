@@ -1,0 +1,16 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "mermaid",
+        "version": 1,
+        "diagram": "classDiagram\n    class Node {\n      +String type\n      +getType() String\n      +clone() Node\n    }\n    class DecoratorNode {\n      +decorate() ReactElement\n    }\n    class MermaidNode {\n      -String diagram\n      +getDiagram() String\n    }\n    Node <|-- DecoratorNode\n    DecoratorNode <|-- MermaidNode"
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

@@ -1,0 +1,192 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm bundle
+
+  native:
+    name: Native behavior
+    runs-on: xcode-27
+    # Cold Lexical builds and the remaining Swift checks exceed 20 minutes on Xcode 27.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Install Metal Toolchain
+        run: /bin/bash .github/scripts/ensure-metal-toolchain.sh iphonesimulator
+      - name: Ensure cmake
+        run: command -v cmake >/dev/null || brew install cmake
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Create clean Simulator
+        run: |
+          udid="$(xcrun simctl create 'Lody Offline UI' com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
+          echo "UI_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+      - name: Core routing and protocol policies
+        run: swift test --package-path packages/lody-core
+      - name: Native behavior checks
+        run: pnpm verify:native --udid "$UI_UDID"
+      - name: Capture failed Simulator screen
+        if: failure() && env.UI_UDID != ''
+        run: |
+          mkdir -p .artifacts/ui-failure
+          xcrun simctl io "$UI_UDID" screenshot .artifacts/ui-failure/native-device.png || true
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-failure-native-${{ github.sha }}
+          path: .artifacts/ui-failure
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Remove owned Simulator
+        if: always() && env.UI_UDID != ''
+        run: |
+          xcrun simctl shutdown "$UI_UDID" || true
+          xcrun simctl delete "$UI_UDID"
+
+  build:
+    name: Build iOS Simulator
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Install Metal Toolchain
+        run: /bin/bash .github/scripts/ensure-metal-toolchain.sh iphonesimulator
+      - name: Ensure cmake
+        run: command -v cmake >/dev/null || brew install cmake
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Generate native project
+        working-directory: apps/ios
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          pnpm prebuild
+      - name: Verify native dependencies
+        run: /bin/bash .github/scripts/verify-ios-build-mode.sh apps/ios
+      - name: Build signed Simulator app
+        run: |
+          APP=$(pnpm --silent verify:build --configuration Release --derived-data "$RUNNER_TEMP/lody-build")
+          /bin/bash .github/scripts/verify-apple-bundle-linkage.sh "$APP"
+          codesign --verify --deep --strict "$APP"
+          tar -czf "$RUNNER_TEMP/lody-simulator.tar.gz" -C "$(dirname "$APP")" Lody.app
+      - name: Upload Simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: lody-simulator-${{ github.sha }}
+          path: ${{ runner.temp }}/lody-simulator.tar.gz
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-build-${{ github.sha }}
+          path: .artifacts/ui-build
+          retention-days: 14
+
+  ui:
+    name: Offline iOS UI (${{ matrix.suite }})
+    needs: build
+    runs-on: xcode-27
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core-home, core-send]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install pinned AXe
+        run: |
+          mkdir -p "$RUNNER_TEMP/axe"
+          curl -fL --retry 3 https://github.com/cameroncooke/AXe/releases/download/v1.8.0/AXe-macOS-v1.8.0-universal.tar.gz -o "$RUNNER_TEMP/axe.tar.gz"
+          echo "7b76340b72e90d0f211bc7c4636f15009076eff07acef2f2b632b175debd8834  $RUNNER_TEMP/axe.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/axe.tar.gz" -C "$RUNNER_TEMP/axe"
+          echo "$RUNNER_TEMP/axe" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: lody-simulator-${{ github.sha }}
+          path: ${{ runner.temp }}/lody-app
+      - name: Extract Simulator app
+        run: tar -xzf "$RUNNER_TEMP/lody-app/lody-simulator.tar.gz" -C "$RUNNER_TEMP/lody-app"
+      - name: Create clean Simulator
+        run: |
+          udid="$(xcrun simctl create 'Lody Offline UI' com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
+          echo "UI_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+      - name: Core offline UI regression
+        run: python3 apps/ios/verification/ui/run.py --udid "$UI_UDID" --app "$RUNNER_TEMP/lody-app/Lody.app" --suite "${{ matrix.suite }}" --embedded
+      - name: Capture failed Simulator screen
+        if: failure() && env.UI_UDID != ''
+        run: |
+          mkdir -p .artifacts/ui-failure
+          xcrun simctl io "$UI_UDID" screenshot ".artifacts/ui-failure/${{ matrix.suite }}-device.png" || true
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-failure-${{ matrix.suite }}-${{ github.sha }}
+          path: |
+            .artifacts/ui-failure
+            .artifacts/ui/failures
+            .artifacts/ui/**/failure.png
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-ui-${{ matrix.suite }}-${{ github.sha }}
+          path: .artifacts/ui
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Remove owned Simulator
+        if: always() && env.UI_UDID != ''
+        run: |
+          xcrun simctl shutdown "$UI_UDID" || true
+          xcrun simctl delete "$UI_UDID"

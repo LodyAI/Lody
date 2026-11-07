@@ -1,3 +1,7 @@
+import {
+  runWithDaemonWorkspace,
+  runWithEncryptedCommandAccess,
+} from '../lib/session-command-environment';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
 import * as commandRuntime from '@/lib/command-runtime';
@@ -63,6 +67,7 @@ import {
   resolveSessionCreateOwnerUserId,
   selectDefaultAgentConfigForCreate,
   readDelegatedMachineAccess,
+  readSessionMachineAccess,
   resolveSessionRequester,
   sendSessionChatResult,
   ensureTargetMachineNotOffline,
@@ -2457,6 +2462,73 @@ describe('session command output boundary', () => {
       flush.mockRestore();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('encrypted one-shot machine access', () => {
+  it('answers from the command replica', async () => {
+    const asked: unknown[] = [];
+    const result = await runWithEncryptedCommandAccess(
+      async (target) => {
+        asked.push(target);
+        return { allowed: false, reason: 'not_visible' };
+      },
+      () =>
+        readSessionMachineAccess({
+          // A service call with this token would reject before any answer.
+          auth: { token: '', userId: 'machine-account', machineId: 'machine' } as never,
+          workspaceId: 'workspace' as never,
+          machineId: 'other-machine' as never,
+        })
+    );
+    expect(result).toEqual({ allowed: false, reason: 'not_visible' });
+    expect(asked).toEqual([{ machineId: 'other-machine', requesterUserId: 'machine-account' }]);
+  });
+});
+
+describe('encrypted daemon machine access', () => {
+  const access = (delegated: boolean) => {
+    const asked: unknown[] = [];
+    const daemon = {
+      workspaceId: 'workspace',
+      userId: 'machine-account',
+      machineId: 'machine',
+      manager: {},
+      readInvocation: () => ({ active: false }),
+      checkEncryptedMachineAccess: async (target: unknown) => {
+        asked.push(target);
+        return { allowed: true as const };
+      },
+    } as never;
+    const result = runWithDaemonWorkspace(daemon, () =>
+      readSessionMachineAccess({
+        // A service call with this token would reject before any answer.
+        auth: { token: '', userId: 'machine-account', machineId: 'machine' } as never,
+        workspaceId: 'workspace' as never,
+        machineId: 'other-machine' as never,
+        ...(delegated
+          ? {
+              delegatedRequester: {
+                userId: 'e2ee-member:verified',
+                author: { sessionId: 'session', turnId: 'turn' },
+              } as never,
+            }
+          : {}),
+        localProjectId: 'project' as never,
+      })
+    );
+    return { asked, result };
+  };
+
+  it.each([
+    ['a command', false, 'machine-account'],
+    ['a delegated command', true, 'e2ee-member:verified'],
+  ] as const)('answers %s from the daemon', async (_name, delegated, requesterUserId) => {
+    const { asked, result } = access(delegated);
+    await expect(result).resolves.toEqual({ allowed: true });
+    expect(asked).toEqual([
+      { machineId: 'other-machine', requesterUserId, localProjectId: 'project' },
+    ]);
   });
 });
 

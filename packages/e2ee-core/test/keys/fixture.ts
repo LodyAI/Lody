@@ -19,7 +19,11 @@ export async function recipientPair(): Promise<CryptoKeyPair> {
     publicKey: await kem.deserializePublicKey(bytes(v.pkR)),
   };
 }
-export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
+export function envelopeFixture(
+  kind: 0 | 1 | 2 = 0,
+  org = 100,
+  ownerUser: Uint8Array = new Uint8Array(32).fill(10)
+) {
   const ed = (n: number) => {
     const privateKey = createPrivateKey({
       key: Buffer.concat([
@@ -51,14 +55,7 @@ export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
     ok(encodeCbor([body, signer.signBytes(tag('sig/v1', ok(encodeCbor(body))))]));
   const member = new Uint8Array(16).fill(10);
   const records = [
-    signed([
-      1,
-      owner.raw,
-      new Uint8Array(32).fill(10),
-      member,
-      new Uint8Array(32).fill(org),
-      commitment.toBytes(),
-    ]),
+    signed([1, owner.raw, ownerUser, member, new Uint8Array(32).fill(org), commitment.toBytes()]),
   ];
   const genesis = ok(Public.Bytes.genesisHash(Ledger.hashRecordBytes(records[0]!).toBytes()));
   const view = () =>
