@@ -645,30 +645,36 @@ describe('Automation control authority', () => {
     expect(host.ledger.wait(ready.id)?.state).toBe('cancelled');
     expect(host.ledger.wait(wait.id)?.consecutiveErrors).toBe(0);
   });
-  it('keeps each Session’s waits private and rejects cross-session registration', async () => {
-    const host = await workspaceFixture();
-    const foreign = host.ledger.registerWait(
-      { program: '() => false', intervalMs: 30000 },
-      'session-b',
-      'user',
-      1
+  it('manages an owned Session’s automations from another active Session', async () => {
+    const host = await workspaceFixture({
+      id: 'session-b',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const wait = (await host.command(
+      { type: 'register', sessionId: 'session-b', program: '() => false', intervalMs: 30000 },
+      'session-a'
+    )) as { id: string; sessionId: string };
+    expect(wait.sessionId).toBe('session-b');
+    expect(await host.command({ type: 'list', sessionId: 'session-b' }, 'session-a')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: wait.id })])
     );
-    await expect(host.command({ type: 'show', id: foreign.id }, 'session-a')).rejects.toThrow(
-      'AUTOMATION_NOT_FOUND'
-    );
-    await expect(host.command({ type: 'cancel', id: foreign.id }, 'session-a')).rejects.toThrow(
-      'AUTOMATION_NOT_FOUND'
-    );
-    await expect(
-      host.command(
-        { type: 'register', sessionId: 'session-b', program: '() => false', intervalMs: 30000 },
-        'session-a'
-      )
-    ).rejects.toThrow('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
-    expect(await host.command({ type: 'show', id: foreign.id })).toMatchObject({
+    expect(await host.command({ type: 'show', id: wait.id }, 'session-a')).toMatchObject({
       sessionId: 'session-b',
     });
-    expect(await host.command({ type: 'list' }, 'session-a')).toEqual([]);
+    await host.command(
+      { type: 'configure', sessionId: 'session-b', settings: { archiveAfterMerge: true } },
+      'session-a'
+    );
+    expect(
+      await host.command({ type: 'settings', sessionId: 'session-b' }, 'session-a')
+    ).toMatchObject({ archiveAfterMerge: true });
+    expect(
+      await host.command({ type: 'activities', sessionId: 'session-b' }, 'session-a')
+    ).toMatchObject({ items: expect.any(Array) });
+    await host.command({ type: 'cancel', id: wait.id }, 'session-a');
+    expect(host.ledger.wait(wait.id)?.state).toBe('cancelled');
     await expect(host.command({ type: 'list' }, 'inactive-session')).rejects.toThrow(
       'AUTOMATION_ACTIVE_AUTHOR_REQUIRED'
     );
