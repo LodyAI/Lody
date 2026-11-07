@@ -196,7 +196,12 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     if (target.hasIdentity() && !isOpen(progress)) continue;
     const attempt = Effect.scoped(
       Effect.gen(function* () {
-        if (!progress) yield* input.local.compareAndSwap(key, null, RESTORE_OPEN);
+        // A finished marker from an earlier vault must not hide this attempt's failure.
+        if (!isOpen(progress)) {
+          const opened = yield* input.local.compareAndSwap(key, progress, RESTORE_OPEN);
+          if (opened !== 'Committed')
+            return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
+        }
         let connected: Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>> | undefined;
         const plan = yield* prepareVaultRestore({
           vault: input.vault,

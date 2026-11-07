@@ -248,6 +248,7 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       : submit(record);
   return {
     f,
+    oldVault,
     fetchEnvelope,
     submitOnce,
     local: storage.local,
@@ -1495,6 +1496,120 @@ describe('encrypted recovery vault and genuine workflow', () => {
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             expect(yield* run()).toEqual([]);
             expect(adoptions).toBe(2);
+          })
+        )
+      );
+    }));
+  it('keeps a new vault restore retryable after an old vault restore finished', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            const second = yield* generateDevice();
+            let device = r.f.personal;
+            let hasIdentity = false;
+            let failInstall = false;
+            let adoptions = 0;
+            const target = () => {
+              const keys = memoryRecoveryEpochKeys();
+              return {
+                id: 'workspace',
+                name: 'Workspace',
+                genesisHash: hex(r.f.initial.genesis.toBytes()),
+                hasIdentity: () => hasIdentity,
+                connect: () =>
+                  Effect.succeed({
+                    personalSigner: device,
+                    personal: { ...device, encryptionPublicKey: device.enc },
+                    ledger: () => Effect.sync(r.f.view),
+                    installed: keys,
+                    fetchCurrentEnvelope: r.fetchEnvelope,
+                    submitOriginalAsRecovery: (record: Uint8Array) => r.submitOnce(record),
+                    acquirePersonal: () => Effect.fail(new Error('unused')),
+                    recovered: keys.entries,
+                    adopt: () =>
+                      Effect.scoped(
+                        Effect.gen(function* () {
+                          adoptions += 1;
+                          hasIdentity = true;
+                          const installed = yield* makeSqliteProtectedEpochKeys({
+                            path: join(dir, `restored-${adoptions}.sqlite`),
+                            mode: 'create',
+                            genesis: r.f.initial.genesis,
+                            recipient: device.publicKey,
+                            ledger: () => Effect.sync(r.f.view),
+                            protector: labSyntheticProtector,
+                          });
+                          if (failInstall)
+                            return yield* Effect.fail(new Error('synthetic install'));
+                          for (const [epoch, key] of keys.entries())
+                            yield* installed.saveAndReload(epoch, key);
+                        })
+                      ),
+                  }),
+              };
+            };
+            const run = (vault: RecoveryVault) =>
+              restoreVaultWorkspaces({ vault, local: r.local, targets: [target()] });
+            // The old vault restores and finishes.
+            expect(yield* run(r.oldVault.vault)).toEqual([
+              { name: 'Workspace', outcome: 'Committed' },
+            ]);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            // Finished work is not repeated.
+            expect(yield* run(r.oldVault.vault)).toEqual([]);
+            // A new R passes and the old one is revoked; the local identity is rebuilt.
+            yield* r.newOwner.setup();
+            yield* r.newOwner.revokeOtherRecoveryDevices();
+            hasIdentity = false;
+            device = second;
+            failInstall = true;
+            expect(yield* run(r.newVault.vault)).toEqual([
+              { name: 'Workspace', outcome: 'Failed' },
+            ]);
+            expect(hasIdentity).toBe(true);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
+            failInstall = false;
+            expect(yield* run(r.newVault.vault)).toEqual([
+              { name: 'Workspace', outcome: 'Committed' },
+            ]);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            expect(yield* run(r.newVault.vault)).toEqual([]);
+          })
+        )
+      );
+    }));
+  it('stops a restore when its progress cannot be reopened', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            let connected = 0;
+            const target = {
+              id: 'workspace',
+              name: 'Workspace',
+              genesisHash: hex(r.f.initial.genesis.toBytes()),
+              hasIdentity: () => false,
+              connect: () =>
+                Effect.suspend(() => {
+                  connected += 1;
+                  return Effect.fail(new Error('unused'));
+                }),
+            };
+            const refusing = {
+              ...r.local,
+              compareAndSwap: () => Effect.succeed('Conflict' as const),
+            };
+            expect(
+              yield* restoreVaultWorkspaces({
+                vault: r.oldVault.vault,
+                local: refusing,
+                targets: [target],
+              })
+            ).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
+            expect(connected).toBe(0);
           })
         )
       );
