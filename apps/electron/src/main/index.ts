@@ -56,6 +56,8 @@ app.once('will-quit', () => {
   ownsSingleInstanceLock = false
 })
 
+let startupCore: import('./services/core-updater-service').CoreUpdaterService | null = null
+
 async function start(): Promise<void> {
   // Same-app launches deliver their URL to the primary; they must not be
   // mistaken for a conflict with the other distribution.
@@ -134,6 +136,7 @@ async function start(): Promise<void> {
           }
         )
       : null
+  startupCore = core
   if (core) setCoreUpdater(core)
   const application = core
     ? await core.loadApplication(() => import('./application'))
@@ -146,6 +149,7 @@ async function start(): Promise<void> {
 void start().catch(async (error: unknown) => {
   launchAdmission.markRejected()
   console.error('[Electron] Desktop startup failed', error)
+  if (await startupCore?.recoverInitialFailure()) return
   await app.whenReady()
   dialog.showErrorBox(
     desktopInstallationProfile.desktopProductName,

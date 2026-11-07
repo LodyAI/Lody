@@ -6,12 +6,15 @@ import { app } from 'electron'
 
 export type RelaunchQuitOutcome = 'quitting' | 'cancelled'
 
+let coreRecovery = false
+
 let pending: ((outcome: RelaunchQuitOutcome) => void) | null = null
 
 /** Quit and relaunch; settles `cancelled` when the app stays running. */
-export function quitAndRelaunch(): Promise<RelaunchQuitOutcome> {
+export function quitAndRelaunch(reason?: 'core-recovery'): Promise<RelaunchQuitOutcome> {
   if (pending) return Promise.resolve('cancelled')
   return new Promise((resolve) => {
+    coreRecovery = reason === 'core-recovery'
     pending = resolve
     app.quit()
   })
@@ -26,7 +29,8 @@ export function relaunchIfRequested(): void {
 }
 
 /** The quit barrier kept the app running. */
-export function cancelRequestedRelaunch(): void {
+export function cancelRequestedRelaunch(options?: { preserveCoreRecovery: boolean }): void {
+  if (options?.preserveCoreRecovery && coreRecovery) return
   pending?.('cancelled')
   pending = null
 }

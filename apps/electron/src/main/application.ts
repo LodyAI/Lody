@@ -379,6 +379,16 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       hideWindowOnAutoLaunch
     })
     setWindowsTrayAvailable(windowsTrayService.start())
+    getCoreUpdater()?.setInitialFailureCleanup(async () => {
+      const results = await Promise.allSettled([
+        cliService.shutdownForQuit(),
+        applicationRuntime.closeLegacy()
+      ])
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : []
+      )
+      if (failures.length) throw new AggregateError(failures, 'Startup owners remain unreleased')
+    })
     cliService.autoStart(getMainWindow()?.webContents ?? undefined)
     appUpdaterService.start()
 
@@ -436,7 +446,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         }
         // Only main-owned work may end at process termination. The CLI and shell
         // process owners above must first confirm release; never orphan them.
-        cancelRequestedRelaunch()
+        cancelRequestedRelaunch({ preserveCoreRecovery: true })
         // A second menu/dock Quit while marker I/O is pending must not replace
         // the nonzero terminal exit.
         app.on('before-quit', (event) => event.preventDefault())
@@ -446,7 +456,10 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         // No shutdown UI, including update installation and OS shutdown/logout.
         void finishUnconfirmedDesktopQuit({
           record: () => recordUnconfirmedDesktopQuit(app.getPath('userData')),
-          exit: (code) => app.exit(code)
+          exit: (code) => {
+            relaunchIfRequested()
+            app.exit(code)
+          }
         })
       },
       recover: async () => {
@@ -504,7 +517,8 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     app.on('before-quit', (event) => {
       void beforeQuit(event)
     })
-    getCoreUpdater()?.setHealthRescue(() => quitAndRelaunch())
+    getCoreUpdater()?.setInitialFailureCleanup()
+    getCoreUpdater()?.setHealthRescue(() => quitAndRelaunch('core-recovery'))
     await getCoreUpdater()?.markMainReady()
 
     process.on('exit', () => {
@@ -520,6 +534,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
   void appReady.catch(async (error: unknown) => {
     recordE2EBootDiagnostic('failed', error)
     console.error('[Electron] Fatal error while creating the main window', error)
+    if (await getCoreUpdater()?.recoverInitialFailure()) return
     try {
       await applicationRuntime.closeLegacy()
     } catch (cleanupError) {

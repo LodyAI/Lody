@@ -219,3 +219,80 @@ void test('a Sparkle error during a quit already owned by the barrier keeps wind
 
   assert.equal(quitting, true)
 })
+
+test('only Core rescue survives unconfirmed persistence, after owners and marker finish', async () => {
+  const { createDesktopQuitBarrier, finishUnconfirmedDesktopQuit } =
+    await import('./desktop-shutdown.ts')
+  for (const reason of [undefined, 'core-recovery']) {
+    const events = []
+    let beforeQuit
+    let quitting
+    const owners = Promise.withResolvers()
+    const marker = Promise.withResolvers()
+    const app = {
+      quit() {
+        quitting = beforeQuit({ preventDefault() {} })
+      },
+      relaunch() {
+        events.push('relaunch')
+      }
+    }
+    const intent = await load('../relaunch-intent.ts', { electron: { app } })
+    let terminal
+    beforeQuit = createDesktopQuitBarrier({
+      prepare: async () => true,
+      stop: async () => {
+        await owners.promise
+        events.push('owners-released')
+      },
+      quit() {
+        intent.cancelRequestedRelaunch({ preserveCoreRecovery: true })
+        terminal = finishUnconfirmedDesktopQuit({
+          record: async () => {
+            await marker.promise
+            events.push('marker')
+          },
+          exit(code) {
+            intent.relaunchIfRequested()
+            events.push(`exit-${code}`)
+          }
+        })
+      },
+      reportFailure(error) {
+        throw error
+      }
+    })
+    const outcome = intent.quitAndRelaunch(reason)
+    assert.deepEqual(events, [])
+    owners.resolve()
+    await quitting
+    assert.deepEqual(events, ['owners-released'])
+    marker.resolve()
+    await terminal
+    assert.deepEqual(
+      events,
+      reason
+        ? ['owners-released', 'marker', 'relaunch', 'exit-1']
+        : ['owners-released', 'marker', 'exit-1']
+    )
+    assert.equal(await outcome, reason ? 'quitting' : 'cancelled')
+    intent.relaunchIfRequested()
+    assert.equal(events.filter((event) => event === 'relaunch').length, reason ? 1 : 0)
+  }
+})
+
+test('a cancelled Core rescue cannot relaunch a later ordinary quit', async () => {
+  const events = []
+  const app = {
+    quit() {},
+    relaunch() {
+      events.push('relaunch')
+    }
+  }
+  const intent = await load('../relaunch-intent.ts', { electron: { app } })
+  const outcome = intent.quitAndRelaunch('core-recovery')
+  intent.cancelRequestedRelaunch()
+  assert.equal(await outcome, 'cancelled')
+  intent.relaunchIfRequested()
+  assert.deepEqual(events, [])
+})

@@ -22,6 +22,7 @@ export class CoreUpdaterService {
   private healthTimer?: ReturnType<typeof setTimeout>
   private recovering = false
   private rescue?: () => unknown
+  private initialFailureCleanup?: () => Promise<void>
   private mainReady = false
   private rendererReady = false
   private selection: any
@@ -103,16 +104,36 @@ export class CoreUpdaterService {
     this.rescue = rescue
   }
 
+  setInitialFailureCleanup(cleanup?: () => Promise<void>) {
+    this.initialFailureCleanup = cleanup
+  }
+
+  async recoverInitialFailure(): Promise<boolean> {
+    if (!this.selection || this.selection.builtin || this.healthy) return false
+    if (this.healthDecision === 'ack') await this.healthWrite.catch(() => {})
+    if (this.healthy) return false
+    if (this.shuttingDown || this.recovering) return true
+    try {
+      await this.failInitialHealth()
+    } catch (error) {
+      console.error('[Core OTA] Initial recovery remains owned by quit', error)
+    }
+    return true
+  }
+
   private async failInitialHealth() {
     if (this.healthy || this.recovering || this.shuttingDown || this.healthDecision) return
     this.healthDecision = 'fail'
     this.recovering = true
     if (this.healthTimer) clearTimeout(this.healthTimer)
+    const cleanup = this.initialFailureCleanup?.()
+    void cleanup?.catch(() => {})
     try {
       await this.activation.fail(this.selection)
     } catch (error) {
       console.warn('[Core OTA] Could not persist failed health attempt', error)
     }
+    await cleanup
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([

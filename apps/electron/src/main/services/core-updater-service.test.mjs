@@ -456,3 +456,199 @@ test('oversized manifest cancels the response and releases its reader without st
   assert.equal(states.at(-1).phase, 'error')
   assert.equal(service.ready, false)
 })
+
+test('startup failure shares recovery admission with timeout and late ACK', async () => {
+  let release
+  const pending = new Promise((resolve) => {
+    release = resolve
+  })
+  let rescued = 0
+  let rejected = false
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async fail() {
+        await pending
+        rejected = true
+      },
+      async acknowledge() {
+        throw new Error('late ACK admitted')
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  service.setHealthRescue(() => {
+    rescued++
+  })
+  const first = service.recoverInitialFailure()
+  assert.equal(await service.recoverInitialFailure(), true)
+  await service.failInitialHealth()
+  await service.acknowledgeHealthy()
+  release()
+  assert.equal(await first, true)
+  assert.equal(rejected, true)
+  assert.equal(rescued, 1)
+})
+
+test('builtin and confirmed healthy startup failures retain the ordinary failure path', async () => {
+  const service = new CoreUpdaterService({}, { async acknowledge() {} })
+  service.selection = { builtin: true }
+  assert.equal(await service.recoverInitialFailure(), false)
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  await service.markMainReady()
+  await service.acknowledgeHealthy()
+  assert.equal(await service.recoverInitialFailure(), false)
+})
+
+test('loaded external startup exceptions persist rollback before rescue', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'core-startup-recovery-'))
+  const installed = {
+    product: 'lody',
+    channel: 'test',
+    platform: process.platform,
+    arch: process.arch,
+    hostAbi: 'test'
+  }
+  const options = { root, installed, lease: { assertHeld() {} } }
+  try {
+    const initial = await openActivation(options)
+    const pointer = join(initial.directory, 'pointer.json')
+    for (const asynchronous of [false, true]) {
+      await writeFile(
+        pointer,
+        JSON.stringify({
+          current: 'candidate',
+          previous: 'good',
+          staged: null,
+          attempt: { releaseId: 'candidate', attemptId: '00000000-0000-0000-0000-000000000001' },
+          rejected: [],
+          seq: 1
+        })
+      )
+      const entry = join(root, asynchronous ? 'async.mjs' : 'sync.mjs')
+      await writeFile(
+        entry,
+        asynchronous
+          ? 'export function startApplication() { return Promise.reject(new Error("appReady failed")) }'
+          : 'export function startApplication() { throw new Error("startApplication failed") }'
+      )
+      const service = new CoreUpdaterService({}, await openActivation(options))
+      service.entry = entry
+      service.selection = {
+        builtin: false,
+        releaseId: 'candidate',
+        attemptId: '00000000-0000-0000-0000-000000000001'
+      }
+      let recovered
+      service.setHealthRescue(async () => {
+        recovered = JSON.parse(await readFile(pointer, 'utf8'))
+      })
+      const application = await service.loadApplication(() => {
+        throw new Error('unsafe builtin evaluation')
+      })
+      await assert.rejects(
+        async () => application.startApplication(),
+        asynchronous ? /appReady failed/ : /startApplication failed/
+      )
+      assert.equal(await service.recoverInitialFailure(), true)
+      assert.equal(recovered.current, 'good')
+      assert.equal(recovered.attempt, null)
+      assert.deepEqual(recovered.rejected, ['candidate'])
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('startup failure joins an admitted ACK and cannot replace graceful shutdown', async () => {
+  let release
+  const pending = new Promise((resolve) => {
+    release = resolve
+  })
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async acknowledge() {
+        await pending
+      },
+      async fail() {
+        throw new Error('must not replace ACK')
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  await service.markMainReady()
+  const ack = service.acknowledgeHealthy()
+  const failure = service.recoverInitialFailure()
+  release()
+  await ack
+  assert.equal(await failure, false)
+  const quitting = new CoreUpdaterService(
+    {},
+    {
+      async abandon() {},
+      async fail() {
+        throw new Error('must not replace shutdown')
+      }
+    }
+  )
+  quitting.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  await quitting.abandonHealthAttempt()
+  assert.equal(await quitting.recoverInitialFailure(), true)
+})
+
+test('early startup failure stops launch admission before activation I/O and joins both owners', async () => {
+  const write = Promise.withResolvers()
+  const launch = Promise.withResolvers()
+  const cliClosed = Promise.withResolvers()
+  const shellClosed = Promise.withResolvers()
+  const events = []
+  let admitted = true
+  const launching = launch.promise.then(() => {
+    if (admitted) events.push('launched')
+  })
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async fail() {
+        events.push('write')
+        await write.promise
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  service.setInitialFailureCleanup(async () => {
+    admitted = false
+    events.push('stop-admission')
+    await Promise.all([cliClosed.promise, shellClosed.promise])
+    events.push('owners-released')
+  })
+  service.setHealthRescue(() => {
+    events.push('relaunch-exit')
+  })
+  const recovery = service.recoverInitialFailure()
+  assert.deepEqual(events, ['stop-admission', 'write'])
+  launch.resolve()
+  await launching
+  write.resolve()
+  cliClosed.resolve()
+  await cliClosed.promise
+  assert.equal(events.includes('relaunch-exit'), false)
+  shellClosed.resolve()
+  await recovery
+  assert.deepEqual(events, ['stop-admission', 'write', 'owners-released', 'relaunch-exit'])
+})
+
+test('unconfirmed early startup owner never hands recovery to Host exit', async () => {
+  const service = new CoreUpdaterService({}, { async fail() {} })
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  let exited = false
+  service.setInitialFailureCleanup(async () => {
+    throw new Error('CLI still owned')
+  })
+  service.setHealthRescue(() => {
+    exited = true
+  })
+  assert.equal(await service.recoverInitialFailure(), true)
+  assert.equal(exited, false)
+})
