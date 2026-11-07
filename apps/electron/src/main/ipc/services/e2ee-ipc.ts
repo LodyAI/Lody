@@ -48,13 +48,15 @@ import {
   MAX_RECOVERY_FILE_BYTES,
   abandonAccountVaultReplacement,
   beginAccountVaultReplacement,
+  continueAccountVaultReplacement,
   createAccountRecoveryVault,
   inspectRecoveryFile,
   recoveryReplacementPlan,
   recoveryVaultEnabled,
   recoveryVaultFailure,
   saveRecoveryFile,
-  type RecoveryVaultReplacement
+  type RecoveryVaultReplacement,
+  type RecoveryWorkspaceTarget
 } from '../../services/e2ee-recovery-vault.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
@@ -3215,6 +3217,7 @@ export class E2eeIpc extends IpcService {
       accountId: string
       store: RecoveryVaultStore['Service']
       journalPath: string
+      client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client']
       exists: Effect.Effect<boolean, unknown>
       replacement: RecoveryVaultReplacement
       accountWorkspaces: Effect.Effect<
@@ -3231,6 +3234,7 @@ export class E2eeIpc extends IpcService {
           accountId,
           store: client.recoveryVault(),
           journalPath: desktopE2eeRecoveryJournalPath(accountId),
+          client,
           exists: client.hasRecoveryVault(),
           replacement: client.recoveryVaultReplacement(),
           accountWorkspaces: client.recoveryVaultAccountWorkspaces()
@@ -3320,19 +3324,115 @@ export class E2eeIpc extends IpcService {
     )
     return { outcome: 'begun' as const, vaultId: begun.vaultId }
   }
-  /** Default-off: per-workspace recovery setup is not wired on desktop, so no R can be
-   * admitted or revoked here yet. */
+  /** Read a chosen recovery file, bounded before any parsing. */
+  private async readRecoveryFile(path: string) {
+    const handle = await openFile(path, 'r')
+    try {
+      const buffer = new Uint8Array(MAX_RECOVERY_FILE_BYTES + 1)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+      if (bytesRead > MAX_RECOVERY_FILE_BYTES) {
+        buffer.fill(0)
+        throw new Error('e2ee_recovery_invalid-input')
+      }
+      return buffer.subarray(0, bytesRead)
+    } finally {
+      await handle.close()
+    }
+  }
+  /** This device's recovery targets: the workspaces it holds an identity for. */
+  private async recoveryTargets(
+    accountId: string,
+    client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client'],
+    workspaces: readonly { readonly id: string; readonly name: string }[]
+  ) {
+    const targets: RecoveryWorkspaceTarget[] = []
+    for (const { id, name } of workspaces) {
+      if (!desktopE2eeHasWorkspaceIdentity(accountId, id)) continue
+      const { host, credential } = await withDesktopE2eeAccount(
+        (owner) =>
+          Effect.map(owner.bootstrap.deviceCredential(id), (credential) => ({
+            host: owner.host,
+            credential
+          })),
+        id,
+        false
+      )
+      targets.push({
+        id,
+        name,
+        append: (request) => client.appendRecord(request),
+        refresh: () => host.refreshWorkspaceLedger(id, (request) => client.history(request)),
+        mailbox: (recovery) => client.mailbox({ workspaceId: id, credential: recovery }),
+        deliver: () =>
+          Effect.asVoid(
+            host.keyRound(
+              id,
+              (signal) => client.mailbox({ workspaceId: id, credential }, signal),
+              (signal) => client.staging({ workspaceId: id, credential }, signal),
+              (signal) => (request) => client.history(request, signal)
+            )
+          ),
+        owner: (ports) => host.workspaceRecovery(id, ports),
+        abandonOwner: (ports) => host.workspaceRecoveryAbandon(id, ports)
+      })
+    }
+    return targets
+  }
+  /** Default-off: from the new file, prove every workspace, revoke old Rs and retire the
+   * old vault. A suspected leak revokes first. The file never reaches the renderer. */
   @IpcMethod()
-  async continueRecoveryReplacement() {
+  async continueRecoveryReplacement(input: { compromised: boolean }) {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
-    throw new Error('e2ee_recovery_setup-unavailable')
+    const compromised = input?.compromised === true
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      properties: ['openFile' as const],
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const chosen = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = chosen.filePaths[0]
+    if (chosen.canceled || !path) return { outcome: 'cancelled' as const }
+    const file = await this.readRecoveryFile(path)
+    try {
+      return await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+              (workspaces) =>
+                continueAccountVaultReplacement({
+                  store,
+                  journalPath,
+                  replacement,
+                  workspaces,
+                  file,
+                  compromised
+                })
+            )
+          )
+      )
+    } finally {
+      file.fill(0)
+    }
   }
-  /** Default-off: retire the unfinished vault. No new R exists on desktop yet to revoke. */
+  /** Default-off: give up an unfinished replacement. Needs no file: this device's journal
+   * names each new R. */
   @IpcMethod()
   async abandonRecoveryReplacement() {
     sender()
-    return this.recoveryOperation(({ replacement }) => abandonAccountVaultReplacement(replacement))
+    return this.recoveryOperation(
+      ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+        Effect.flatMap(accountWorkspaces, (rows) =>
+          Effect.flatMap(
+            Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+            (workspaces) =>
+              abandonAccountVaultReplacement({ store, journalPath, replacement, workspaces })
+          )
+        )
+    )
   }
   /** Default-off: open a vault from a chosen recovery file and authenticate its
    * index. This checks the file; it neither restores a workspace nor admits a device. */
@@ -3350,20 +3450,7 @@ export class E2eeIpc extends IpcService {
       : await dialog.showOpenDialog(options)
     const path = chosen.filePaths[0]
     if (chosen.canceled || !path) return { outcome: 'cancelled' as const }
-    const file = await (async () => {
-      const handle = await openFile(path, 'r')
-      try {
-        const buffer = new Uint8Array(MAX_RECOVERY_FILE_BYTES + 1)
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-        if (bytesRead > MAX_RECOVERY_FILE_BYTES) {
-          buffer.fill(0)
-          throw new Error('e2ee_recovery_invalid-input')
-        }
-        return buffer.subarray(0, bytesRead)
-      } finally {
-        await handle.close()
-      }
-    })()
+    const file = await this.readRecoveryFile(path)
     try {
       const inspected = await this.recoveryOperation(({ store, journalPath }) =>
         inspectRecoveryFile({ store, journalPath, file })

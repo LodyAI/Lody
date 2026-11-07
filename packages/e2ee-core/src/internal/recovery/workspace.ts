@@ -11,6 +11,7 @@ import {
   type LedgerView,
 } from '../ledger';
 import { prepareDeviceAdmission, prepareLedgerCommand } from '../ledger/admission';
+import { decodeRecord } from '../ledger/records';
 import { signLedgerRecord } from '../ledger/signing';
 import type { DeviceSigner } from '../foundation/signing';
 import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/envelope';
@@ -57,7 +58,9 @@ export interface WorkspaceRecoveryInput {
   readonly fetchCurrentEnvelope: (
     recipient: Bytes.SigningPublicKey,
     epoch: number,
-    identity: RecoveryIdentity
+    identity: RecoveryIdentity,
+    /** R's derived service credential, for the mailbox read. Owned by the callee. */
+    credential: Uint8Array
   ) => Effect.Effect<RecoveryEnvelope, unknown>;
   readonly installed: {
     readonly saveAndReload: (epoch: number, key: Bytes.EpochKey) => Effect.Effect<unknown, unknown>;
@@ -182,6 +185,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       state.members.has(hex(membership.toBytes()))
     );
   };
+  const credentials = new WeakMap<RecoveryIdentity, Uint8Array>();
   const useIdentity = <A, E, R>(
     ref: RecoveryEntryReference,
     work: (identity: RecoveryIdentity, bundle: RecoveryPrivatePackage) => Effect.Effect<A, E, R>
@@ -197,7 +201,11 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           )
             return yield* vaultError('authentication');
           const identity = yield* importRecoveryIdentity(bundle);
-          return yield* work(identity, bundle);
+          const derived = yield* attempt(() => deriveRecoveryAccessCredential(bundle));
+          credentials.set(identity, derived.credential);
+          return yield* work(identity, bundle).pipe(
+            Effect.ensuring(Effect.sync(() => derived.credential.fill(0)))
+          );
         }),
       (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
     );
@@ -208,7 +216,12 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     const before = yield* current();
     if (!active(before, identity)) return yield* vaultError('unauthorized');
     const epoch = before.inspectState().epoch.number,
-      remote = yield* fetch(identity.publicKey, epoch, identity);
+      remote = yield* fetch(
+        identity.publicKey,
+        epoch,
+        identity,
+        new Uint8Array(credentials.get(identity)!)
+      );
     let keyValue: Bytes.EpochKey;
     if ('staged' in remote) {
       const qualified = yield* Effect.fromResult(
@@ -595,13 +608,16 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     return yield* revokeRecoveryDevices(() => true, 'revoke-other');
   });
   /** Abandon a replacement: revoke this vault's own R, known only to the device that
-   * admitted it. The older R is untouched. */
+   * admitted it. Its journaled admission names the R, so this needs no V. The older R
+   * is untouched. */
   const revokeOwnRecoveryDevice = Effect.fnUntraced(function* () {
-    const reference = (yield* load()).value?.reference;
-    if (!reference) return { outcome: 'Committed' as const };
-    return yield* useIdentity(reference, (identity) =>
-      revokeRecoveryDevices((id) => id === hex(identity.publicKey.toBytes()), 'revoke-own')
-    );
+    const record = (yield* load()).value?.record;
+    if (!record) return { outcome: 'Committed' as const };
+    const body = (yield* Effect.fromResult(decodeRecord(record))).body;
+    if (body.type !== 'ordinary' || body.operation.type !== 'admitDevice')
+      return yield* vaultError('authentication');
+    const target = hex(body.operation.signingPublicKey.toBytes());
+    return yield* revokeRecoveryDevices((id) => id === target, 'revoke-own');
   });
   const revokeRecoveryDevices = (select: (id: string) => boolean, purpose: string) =>
     Effect.gen(function* () {
@@ -876,4 +892,31 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         })
       ),
   });
+});
+
+/** Revoke the R a device admitted for a vault it can no longer open: the new file was
+ * lost mid-replacement. Only the device's journal is read, so no V is needed. */
+export const abandonWorkspaceRecovery = Effect.fnUntraced(function* (
+  input: Pick<
+    WorkspaceRecoveryInput,
+    'local' | 'genesis' | 'membershipId' | 'personalSigner' | 'ledger' | 'submitOriginal'
+  > & { readonly vaultId: string; readonly genesisRecord: Uint8Array }
+) {
+  const owner = yield* makeWorkspaceRecovery({
+    ...input,
+    // Unreachable here: this path reads the journal and the ledger only.
+    vault: { vaultId: input.vaultId } as RecoveryVault,
+    installed: {
+      saveAndReload: () => Effect.fail(vaultError('closed')),
+      read: () => Effect.fail(vaultError('closed')),
+    },
+    trust: {
+      source: 'abandoned replacement',
+      genesisRecord: input.genesisRecord,
+      head: hex(input.genesis.toBytes()),
+      length: 1,
+    },
+    fetchCurrentEnvelope: () => Effect.fail(vaultError('closed')),
+  });
+  return { revokeOwnRecoveryDevice: owner.revokeOwnRecoveryDevice };
 });

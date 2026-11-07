@@ -27,6 +27,7 @@ export { deriveRecoveryAccessCredential, type RecoveryAccessCredential } from '.
 export { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 export {
   makeWorkspaceRecovery,
+  abandonWorkspaceRecovery,
   type WorkspaceRecoveryInput,
   type RecoveryCredentialRegistration,
   type RecoverySubmitResult,

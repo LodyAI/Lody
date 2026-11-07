@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { Bytes } from '@lody/e2ee-core';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import {
+  abandonWorkspaceRecovery,
   makeWorkspaceRecovery,
   type RecoveryVault,
   type RecoverySubmitResult,
@@ -14,6 +15,8 @@ import {
 import {
   abandonVaultReplacement,
   planVaultReplacement,
+  recoveryFetchEnvelope,
+  recoverySubmitOriginal,
   replaceAccountVault,
 } from '@lody/e2ee-client/vault-replacement';
 import { type RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
@@ -149,6 +152,7 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       return result;
     });
   let envelopeFails = false;
+  const credentials: Uint8Array[] = [];
   const owner = (vault: RecoveryVault) =>
     makeWorkspaceRecovery({
       vault,
@@ -165,8 +169,9 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
         head: hex(f.view().head.toBytes()),
         length: f.records.length,
       },
-      fetchCurrentEnvelope: (recipient, epoch) =>
+      fetchCurrentEnvelope: (recipient, epoch, _identity, credential) =>
         Effect.gen(function* () {
+          credentials.push(new Uint8Array(credential));
           if (envelopeFails) return yield* Effect.fail(new Error('synthetic no envelope'));
           return {
             sender: f.owner.publicKey,
@@ -216,6 +221,8 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
     });
   return {
     f,
+    local: storage.local,
+    seenCredentials: () => credentials,
     owner,
     oldR,
     newVault,
@@ -1129,6 +1136,100 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('abandons with the new file lost: the journal alone names the new R', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const abandon = yield* abandonWorkspaceRecovery({
+              vaultId: r.newVault.vault.vaultId,
+              local: r.local,
+              genesis: r.f.initial.genesis,
+              membershipId: r.f.membership,
+              personalSigner: r.f.owner,
+              ledger: () => Effect.sync(r.f.view),
+              submitOriginal: r.submit,
+              genesisRecord: r.f.initial.record,
+            });
+            expect(yield* abandon.revokeOwnRecoveryDevice()).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toEqual([r.oldR]);
+          })
+        )
+      );
+    }));
+  it('hands the envelope fetch the credential registered with this R', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const index = yield* r.newVault.vault.readIndex();
+            const bundle = yield* r.newVault.vault.readEntry(index.value.entries[0]!);
+            const derived = deriveRecoveryAccessCredential(bundle);
+            wipeRecoveryPackage(bundle);
+            expect(r.seenCredentials().map(hex)).toContain(hex(derived.credential));
+          })
+        )
+      );
+    }));
+  it('maps service replies and asks for delivery once before giving up', async () => {
+    const appended: unknown[] = [];
+    let refreshed = 0;
+    const submit = recoverySubmitOriginal({
+      append: (request) =>
+        Effect.sync(() => {
+          appended.push(request);
+          return { status: appended.length === 1 ? 'committed' : 'conflict' } as const;
+        }),
+      refresh: () =>
+        Effect.sync(() => {
+          refreshed += 1;
+        }),
+    });
+    const f = await Effect.runPromise(fixture());
+    const record = f.initial.record;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const hash = new Uint8Array(32).fill(9);
+        expect((yield* submit(record, { recoveryCredentialHash: hash })).outcome).toBe('Committed');
+        expect((yield* submit(record, null)).outcome).toBe('Conflict');
+      })
+    );
+    expect(refreshed).toBe(2);
+    expect(appended).toEqual([
+      {
+        requestId: hex(hashRecordBytes(record).toBytes()),
+        recordHex: hex(record),
+        credentialHash: hex(new Uint8Array(32).fill(9)),
+      },
+      { requestId: hex(hashRecordBytes(record).toBytes()), recordHex: hex(record) },
+    ]);
+    const sender = hex(f.owner.publicKey.toBytes());
+    let items: { sender: string; frame: Uint8Array }[] = [];
+    let delivered = 0;
+    const seen: string[] = [];
+    const fetch = recoveryFetchEnvelope({
+      mailbox: (credential) => {
+        seen.push(credential);
+        return { fetch: () => Effect.sync(() => ({ items, next: null })) };
+      },
+      deliver: () =>
+        Effect.sync(() => {
+          delivered += 1;
+          items = [{ sender, frame: new Uint8Array([7]) }];
+        }),
+    });
+    const recipient = f.personal.publicKey;
+    const found = await Effect.runPromise(
+      fetch(recipient, 0, undefined as never, new Uint8Array(32).fill(8))
+    );
+    expect(delivered).toBe(1);
+    expect(seen[0]).toBe(hex(new Uint8Array(32).fill(8)));
+    expect('frame' in found && found.frame).toEqual(new Uint8Array([7]));
+  });
   it('names the workspaces a device cannot act on', () => {
     expect(
       planVaultReplacement(

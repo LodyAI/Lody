@@ -80,6 +80,7 @@ export type { EpochStagedGroup } from './internal/keys/staging';
 export { RecoveryVaults } from './internal/recovery/vaults';
 export {
   makeWorkspaceRecovery,
+  abandonWorkspaceRecovery,
   RecoveryVaultError,
   type RecoveryVault,
   type RecoveryEntryReference,

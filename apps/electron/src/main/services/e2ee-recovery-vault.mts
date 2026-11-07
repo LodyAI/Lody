@@ -1,12 +1,19 @@
-import { RecoveryVaults } from '@lody/e2ee-core'
+import { RecoveryVaults, type RecoveryVault, type WorkspaceRecoveryInput } from '@lody/e2ee-core'
 import { parseRecoveryFile } from '@lody/e2ee-core/protocol'
-import { planVaultReplacement } from '@lody/e2ee-client/vault-replacement'
+import {
+  abandonVaultReplacement,
+  planVaultReplacement,
+  recoveryFetchEnvelope,
+  recoverySubmitOriginal,
+  replaceAccountVault,
+  type VaultReplacementWorkspace
+} from '@lody/e2ee-client/vault-replacement'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { randomUUID } from 'node:crypto'
 import { open, rename, rm, type FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, type Scope } from 'effect'
 
 /** Default-off gate for the post-MVP recovery vault. Proposal: specs/e2ee/recovery-vault.md. */
 export const RECOVERY_VAULT_ENV = 'LODY_E2EE_RECOVERY_VAULT'
@@ -73,7 +80,7 @@ interface RecoveryVaultIo {
 }
 const vaults = (io: RecoveryVaultIo) =>
   RecoveryVaults.layer.pipe(
-    Layer.provide(
+    Layer.provideMerge(
       Layer.mergeAll(
         Layer.succeed(RecoveryVaultStore, io.store),
         Layer.effect(
@@ -147,6 +154,7 @@ export interface RecoveryVaultReplacement {
     unknown
   >
   readonly reserve: (vaultId: string) => Effect.Effect<void, unknown>
+  readonly finish: (oldVaultId: string, newVaultId: string) => Effect.Effect<void, unknown>
   readonly abandon: (vaultId: string) => Effect.Effect<void, unknown>
 }
 
@@ -204,14 +212,116 @@ export const recoveryReplacementPlan = (io: {
     }
   })
 
-/** Retire an unfinished replacement. The current vault is untouched. */
-export const abandonAccountVaultReplacement = (replacement: RecoveryVaultReplacement) =>
-  Effect.gen(function* () {
-    const { replacing } = yield* replacement.state()
-    if (!replacing) return { abandoned: false }
-    yield* replacement.abandon(replacing)
-    return { abandoned: true }
+/** One workspace this device acts on: its service ports and the host's recovery owner. */
+export interface RecoveryWorkspaceTarget {
+  readonly id: string
+  readonly name: string
+  readonly append: (request: {
+    readonly workspaceId: string
+    readonly requestId: string
+    readonly recordHex: string
+    readonly credentialHash?: string
+  }) => Effect.Effect<{ readonly status: 'committed' | 'conflict' }, unknown>
+  readonly refresh: () => Effect.Effect<void, unknown>
+  readonly mailbox: Parameters<typeof recoveryFetchEnvelope>[0]['mailbox']
+  readonly deliver: () => Effect.Effect<void, unknown>
+  readonly owner: (ports: {
+    readonly vault: RecoveryVault
+    readonly local: RecoveryVaultLocalStore['Service']
+    readonly submitOriginal: WorkspaceRecoveryInput['submitOriginal']
+    readonly fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope']
+  }) => Effect.Effect<Omit<VaultReplacementWorkspace, 'name'>, unknown, Scope.Scope>
+  readonly abandonOwner: (ports: {
+    readonly vaultId: string
+    readonly local: RecoveryVaultLocalStore['Service']
+    readonly submitOriginal: WorkspaceRecoveryInput['submitOriginal']
+  }) => Effect.Effect<
+    {
+      readonly revokeOwnRecoveryDevice: () => Effect.Effect<{ readonly outcome: string }, unknown>
+    },
+    unknown,
+    Scope.Scope
+  >
+}
+
+const submitFor = (target: RecoveryWorkspaceTarget) =>
+  recoverySubmitOriginal({
+    append: (request) => target.append({ workspaceId: target.id, ...request }),
+    refresh: target.refresh
   })
+
+/**
+ * Finish a replacement from its new file: each workspace passes a real envelope test,
+ * then old Rs are revoked, then the new vault becomes current. Rerunning resumes.
+ */
+export const continueAccountVaultReplacement = (
+  io: RecoveryVaultIo & {
+    readonly file: Uint8Array
+    readonly compromised: boolean
+    readonly replacement: RecoveryVaultReplacement
+    readonly workspaces: readonly RecoveryWorkspaceTarget[]
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { current, replacing } = yield* io.replacement.state()
+      if (!current || !replacing) return yield* Effect.fail({ code: 'missing' })
+      const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: new Uint8Array(io.file) })
+      if (vault.vaultId !== replacing) return yield* Effect.fail({ code: 'authentication' })
+      const local = yield* RecoveryVaultLocalStore
+      const workspaces: VaultReplacementWorkspace[] = []
+      for (const target of io.workspaces)
+        workspaces.push({
+          name: target.name,
+          ...(yield* target.owner({
+            vault,
+            local,
+            submitOriginal: submitFor(target),
+            fetchCurrentEnvelope: recoveryFetchEnvelope(target)
+          }))
+        })
+      return yield* replaceAccountVault({
+        workspaces,
+        compromised: io.compromised,
+        finish: () => io.replacement.finish(current, replacing)
+      })
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
+/**
+ * Give up an unfinished replacement. This works without the new file: each workspace's
+ * journal names the new R, which is revoked before the vault retires.
+ */
+export const abandonAccountVaultReplacement = (
+  io: RecoveryVaultIo & {
+    readonly replacement: RecoveryVaultReplacement
+    readonly workspaces: readonly RecoveryWorkspaceTarget[]
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { replacing } = yield* io.replacement.state()
+      if (!replacing) return { outcome: 'None' as const }
+      const local = yield* RecoveryVaultLocalStore
+      const workspaces: {
+        readonly name: string
+        readonly revokeOwnRecoveryDevice: () => Effect.Effect<{ readonly outcome: string }, unknown>
+      }[] = []
+      for (const target of io.workspaces)
+        workspaces.push({
+          name: target.name,
+          ...(yield* target.abandonOwner({
+            vaultId: replacing,
+            local,
+            submitOriginal: submitFor(target)
+          }))
+        })
+      return yield* abandonVaultReplacement({
+        workspaces,
+        abandon: () => io.replacement.abandon(replacing)
+      })
+    }).pipe(Effect.provide(vaults(io)))
+  )
 
 /**
  * Open a vault from a user-supplied recovery file and authenticate its index.

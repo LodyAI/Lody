@@ -29,7 +29,14 @@ type Plan = {
   uncovered: readonly { id: string; name: string }[];
 };
 type Result =
-  | { kind: 'notice'; key: 'e2ee.recovery.replaceBegun' | 'e2ee.recovery.replaceAbandoned' }
+  | {
+      kind: 'notice';
+      key:
+        | 'e2ee.recovery.replaceBegun'
+        | 'e2ee.recovery.replaceAbandoned'
+        | 'e2ee.recovery.replaceFinished'
+        | 'e2ee.recovery.replacePending';
+    }
   | { kind: 'created'; vaultId: string }
   | { kind: 'opened'; vaultId: string; count: number }
   | { kind: 'error'; code: string };
@@ -72,6 +79,14 @@ export function RecoveryVaultSection() {
     } finally {
       setBusy(false);
     }
+  };
+  const finishReplacement = async (compromised: boolean): Promise<Result | undefined> => {
+    const finished = await e2ee.continueRecoveryReplacement({ compromised });
+    if (finished.outcome === 'Committed')
+      return { kind: 'notice', key: 'e2ee.recovery.replaceFinished' };
+    return finished.outcome === 'Pending'
+      ? { kind: 'notice', key: 'e2ee.recovery.replacePending' }
+      : undefined;
   };
   const short = (vaultId: string) => vaultId.slice(0, 12);
   return (
@@ -124,8 +139,14 @@ export function RecoveryVaultSection() {
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    await e2ee.abandonRecoveryReplacement();
-                    return { kind: 'notice', key: 'e2ee.recovery.replaceAbandoned' };
+                    const abandoned = await e2ee.abandonRecoveryReplacement();
+                    return {
+                      kind: 'notice',
+                      key:
+                        abandoned.outcome === 'Pending'
+                          ? 'e2ee.recovery.replacePending'
+                          : 'e2ee.recovery.replaceAbandoned',
+                    };
                   })
                 }
               >
@@ -149,15 +170,13 @@ export function RecoveryVaultSection() {
               {t(
                 result.code.includes('e2ee_recovery_disabled')
                   ? 'e2ee.recovery.disabled'
-                  : result.code.includes('e2ee_recovery_setup-unavailable')
-                    ? 'e2ee.recovery.setupUnavailable'
-                    : result.code.includes('e2ee_recovery_replacing')
-                      ? 'e2ee.recovery.replacingElsewhere'
-                      : result.code.includes('e2ee_recovery_exists')
-                        ? 'e2ee.recovery.exists'
-                        : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                          ? 'e2ee.recovery.wrongFile'
-                          : 'e2ee.recovery.failed'
+                  : result.code.includes('e2ee_recovery_replacing')
+                    ? 'e2ee.recovery.replacingElsewhere'
+                    : result.code.includes('e2ee_recovery_exists')
+                      ? 'e2ee.recovery.exists'
+                      : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                        ? 'e2ee.recovery.wrongFile'
+                        : 'e2ee.recovery.failed'
               )}
             </Alert.Description>
           </Alert.Root>
@@ -201,10 +220,7 @@ export function RecoveryVaultSection() {
                 disabled={busy}
                 onClick={() => {
                   setDialog(undefined);
-                  void run(async () => {
-                    await e2ee.continueRecoveryReplacement();
-                    return undefined;
-                  });
+                  void run(() => finishReplacement(true));
                 }}
               >
                 {t('e2ee.recovery.replaceRevokeFirst')}
@@ -217,10 +233,7 @@ export function RecoveryVaultSection() {
                 const step = dialog;
                 setDialog(undefined);
                 void run(async () => {
-                  if (step === 'continue') {
-                    await e2ee.continueRecoveryReplacement();
-                    return undefined;
-                  }
+                  if (step === 'continue') return finishReplacement(false);
                   const begun = await e2ee.beginRecoveryReplacement();
                   return begun.outcome === 'begun'
                     ? { kind: 'notice', key: 'e2ee.recovery.replaceBegun' }

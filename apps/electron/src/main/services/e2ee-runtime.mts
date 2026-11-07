@@ -30,7 +30,10 @@ import {
   InstalledEpochKeys,
   InstalledKeyError,
   LedgerFeed,
-  VerifiedLedger
+  VerifiedLedger,
+  abandonWorkspaceRecovery,
+  makeWorkspaceRecovery,
+  type WorkspaceRecoveryInput
 } from '@lody/e2ee-core'
 import {
   Bytes,
@@ -220,6 +223,12 @@ type HistoryRow = { position: number; record: Uint8Array; locator: string | null
 /** One account's lazy workspace runtimes. The caller Scope owns custody/bootstrap;
  * close this host first. Every admitted native operation settles before stores close.
  */
+/** The platform ports of one workspace's recovery; the host adds identity and ledger. */
+export type DesktopWorkspaceRecoveryPorts = Pick<
+  WorkspaceRecoveryInput,
+  'vault' | 'local' | 'submitOriginal' | 'fetchCurrentEnvelope'
+>
+
 export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open')(
   function* (options: {
     readonly directory: string
@@ -232,6 +241,22 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     const entries = new Map<
       string,
       {
+        recoveryOwner: (
+          ports: DesktopWorkspaceRecoveryPorts
+        ) => Effect.Effect<
+          Effect.Success<ReturnType<typeof makeWorkspaceRecovery>>,
+          unknown,
+          Scope.Scope
+        >
+        abandonRecovery: (
+          ports: Pick<DesktopWorkspaceRecoveryPorts, 'local' | 'submitOriginal'> & {
+            readonly vaultId: string
+          }
+        ) => Effect.Effect<
+          Effect.Success<ReturnType<typeof abandonWorkspaceRecovery>>,
+          unknown,
+          Scope.Scope
+        >
         manage: (
           command: DesktopE2eeManagementCommand,
           ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
@@ -1532,7 +1557,47 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
           return yield* result
         })
+        /** Bind recovery to this workspace's verified ledger, signer and installed keys.
+         * The trust checkpoint comes from the ledger this device has verified. */
+        const recoveryOwner = Effect.fnUntraced(function* (ports: DesktopWorkspaceRecoveryPorts) {
+          const view = (yield* feed.current()).view
+          const self = view.inspectState().devices.get(hex(device.publicKey.toBytes()))
+          if (!self) return yield* fail('device_revoked')
+          return yield* makeWorkspaceRecovery({
+            ...ports,
+            genesis,
+            membershipId: self.membershipId,
+            personalSigner: device,
+            ledger: () => feed.current().pipe(Effect.map((current) => current.view)),
+            installed: keys,
+            trust: {
+              source: 'desktop verified ledger',
+              genesisRecord: creation.record,
+              head: hex(view.head.toBytes()),
+              length: view.length
+            }
+          })
+        })
+        const abandonRecovery = Effect.fnUntraced(function* (
+          ports: Pick<DesktopWorkspaceRecoveryPorts, 'local' | 'submitOriginal'> & {
+            readonly vaultId: string
+          }
+        ) {
+          const view = (yield* feed.current()).view
+          const self = view.inspectState().devices.get(hex(device.publicKey.toBytes()))
+          if (!self) return yield* fail('device_revoked')
+          return yield* abandonWorkspaceRecovery({
+            ...ports,
+            genesis,
+            membershipId: self.membershipId,
+            personalSigner: device,
+            ledger: () => feed.current().pipe(Effect.map((current) => current.view)),
+            genesisRecord: creation.record
+          })
+        })
         return {
+          recoveryOwner,
+          abandonRecovery,
           manage,
           managementState,
           scope,
@@ -2073,6 +2138,25 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                     ),
                     Effect.catch(() => Effect.succeed('e2ee_key_status_unavailable'))
                   )
+        ),
+      /** Default-off: a recovery owner for one workspace, in the caller's Scope. */
+      workspaceRecovery: (workspaceId: string, ports: DesktopWorkspaceRecoveryPorts) =>
+        run(openWorkspace(workspaceId)).pipe(Effect.flatMap((entry) => entry.recoveryOwner(ports))),
+      workspaceRecoveryAbandon: (
+        workspaceId: string,
+        ports: Pick<DesktopWorkspaceRecoveryPorts, 'local' | 'submitOriginal'> & {
+          readonly vaultId: string
+        }
+      ) =>
+        run(openWorkspace(workspaceId)).pipe(
+          Effect.flatMap((entry) => entry.abandonRecovery(ports))
+        ),
+      refreshWorkspaceLedger: (
+        workspaceId: string,
+        history: DesktopE2eeManagementRemote['history']
+      ) =>
+        run(openWorkspace(workspaceId)).pipe(
+          Effect.flatMap((entry) => entry.refreshSharingLedger(history))
         ),
       ingestLedgerRecords: (workspaceId: string, page: E2eeWorkspaceHistoryPage) =>
         run(
