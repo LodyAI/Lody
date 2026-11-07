@@ -89,6 +89,8 @@ export function mainArtifactBoundary({ hostDependencies = [] } = {}) {
 export function mainEntryFileName(chunk) {
   if (chunk.facadeModuleId?.endsWith('/src/main/index.ts')) return 'index.js'
   if (chunk.facadeModuleId?.endsWith('/src/main/application.ts')) return 'application.js'
+  // Window resource paths are relative to the selected Core's main directory.
+  if (chunk.facadeModuleId?.endsWith('/src/main/window.ts')) return 'window.js'
   if (chunk.facadeModuleId?.endsWith('/src/main/native-storage-smoke.mts'))
     return 'native-storage-smoke.js'
   return 'modules/[name].js'

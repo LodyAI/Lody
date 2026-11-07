@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
@@ -210,9 +210,12 @@ test('desktop publisher retains nested Core closure under out and excludes Host-
   await writeFile(join(out, 'main', 'application.js'), "import './deps/shared.js'")
   await writeFile(join(out, 'main', 'deps', 'shared.js'), 'export const shared = 1')
   await writeFile(join(out, 'main', 'host.js'), 'host only')
+  await writeFile(join(out, 'main', 'window.js'), 'export {}')
+  for (const name of ['devbar', 'pr-image', 'recovery'])
+    await writeFile(join(out, 'renderer', `${name}.html`), '<html></html>')
   await writeFile(
     join(out, 'main', 'core-artifacts.json'),
-    JSON.stringify({ version: 1, main: ['application.js', 'deps/shared.js'] })
+    JSON.stringify({ version: 1, main: ['application.js', 'deps/shared.js', 'window.js'] })
   )
   await writeFile(join(out, 'preload', 'index.js'), 'preload')
   await writeFile(join(out, 'renderer', 'index.html'), '<html></html>')
@@ -222,14 +225,30 @@ test('desktop publisher retains nested Core closure under out and excludes Host-
     output: join(f.root, 'published'),
     buildOutput: out
   })
+  // Missing resources must fail before any signed release is published.
+  for (const resource of ['main/window.js', 'renderer/recovery.html']) {
+    const file = join(out, resource)
+    const bytes = await readFile(file)
+    await rm(file)
+    const output = join(f.root, `missing-${resource.replaceAll('/', '-')}`)
+    await assert.rejects(buildDesktopRelease({ ...options, output, buildOutput: out }), {
+      code: 'ENOENT'
+    })
+    await assert.rejects(stat(output), { code: 'ENOENT' })
+    await writeFile(file, bytes)
+  }
   verifyManifest(result.manifest, publicKey)
   assert.deepEqual(
     result.manifest.tree.map((entry) => entry.path),
     [
       'out/main/application.js',
       'out/main/deps/shared.js',
+      'out/main/window.js',
       'out/preload/index.js',
-      'out/renderer/index.html'
+      'out/renderer/devbar.html',
+      'out/renderer/index.html',
+      'out/renderer/pr-image.html',
+      'out/renderer/recovery.html'
     ]
   )
   for (const entry of result.manifest.tree) {
