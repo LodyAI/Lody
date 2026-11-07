@@ -854,9 +854,12 @@ export class E2eeIpc extends IpcService {
     }
     return id
   }
-  private memberScope(workspaceId: string) {
+  /** `identity` lets one operation bind a later owner to the sign-in it started under. */
+  private memberScope(
+    workspaceId: string,
+    identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+  ) {
     const auth = getIpcServiceDeps().authService
-    const identity = auth.getCachedSessionIdentity()
     let original: Owner | undefined
     return <A>(work: (owner: Owner) => Effect.Effect<A, unknown>, create = false) =>
       withDesktopE2eeAccount(
@@ -978,11 +981,43 @@ export class E2eeIpc extends IpcService {
       throw error
     })
   }
+  /** A new invitation can reach a removed member before any refresh or token request has
+   * told this device. Its accepted earlier join would refuse the offer as a conflict, so
+   * this device's credential confirms the removal first; local removal erases that join.
+   * A membership that is still current keeps the conflict. Returns whether it was removed. */
+  private async endRemovedMemberJoin(
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
+  ) {
+    const access = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? Effect.gen(function* () {
+            if (!(yield* owner.bootstrap.acceptedMemberJoin(workspaceId))) return null
+            return {
+              accountId: owner.accountId,
+              workspaceId,
+              credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+              status: yield* owner.host.status(workspaceId)
+            }
+          })
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (!access) return false
+    try {
+      await this.endOnAccessLoss(access, cloud, undefined, true)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_member_removed') return true
+      throw error
+    }
+    return false
+  }
   @IpcMethod()
   async prepareMemberJoin(source: E2eeMemberOffer) {
     sender()
     const offer = MemberOfferSchema.parse(source)
-    const scope = this.memberScope(offer.workspaceId)
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const scope = this.memberScope(offer.workspaceId, identity)
     const cloud = await desktopE2eeCloudClient()
     const pending = await scope(
       (owner) =>
@@ -1007,7 +1042,12 @@ export class E2eeIpc extends IpcService {
           : Effect.fail(new Error('e2ee_account_mismatch'))
       )
     }
-    const original = await scope((owner) =>
+    // Removal cleanup replaces the account owner. The new join binds to the current owner,
+    // still under the sign-in generation this operation started with.
+    const joining = (await this.endRemovedMemberJoin(offer.workspaceId, scope, cloud))
+      ? this.memberScope(offer.workspaceId, identity)
+      : scope
+    const original = await joining((owner) =>
       owner.accountId === cloud.accountId
         ? owner.bootstrap.prepareMemberJoin(offer)
         : Effect.fail(new Error('e2ee_account_mismatch'))

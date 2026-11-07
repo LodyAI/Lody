@@ -4818,7 +4818,10 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
       // Credential-bound: the typed result that authorizes local cleanup.
       contentStreamsToken: () =>
         relay.memberRemoved
-          ? Effect.fail(new E2eeMemberRemovedError())
+          ? Effect.suspend(() => {
+              relay.onRemovalConfirmed?.()
+              return Effect.fail(new E2eeMemberRemovedError())
+            })
           : relayed('member', 'contentStreamsToken', () => ({ token: 't' })),
       mailbox: () => mailboxPort(),
       staging
@@ -4864,6 +4867,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     joiner,
     ownerApi: owner.api,
     memberApi: member.api,
+    memberIdentity: member.identity,
     relay,
     logs,
     async submit() {
@@ -5349,5 +5353,87 @@ void test(
     )
     // The removal receipt fences this identity: reopening reports the removal.
     await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
+  }
+)
+void test(
+  'a removed member that has not yet observed its removal can submit a new invitation',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    // An administrator removes the member and invites it again. The member opens the new
+    // invitation before any refresh or token request has told this device of the removal.
+    f.relay.memberRemoved = true
+    const again = await f.ownerApi.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'link', 9_000_000_000_000),
+      'team',
+      false
+    )
+    assert.notEqual(JSON.stringify(again), JSON.stringify(f.offer))
+    const second = await f.joiner.prepareMemberJoin(again)
+    assert.notEqual(second.requestId, first.requestId)
+    assert.notEqual(second.signingPublicKey, first.signingPublicKey)
+    await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
+    // The new request is the retained pending join; the removed one no longer refuses it.
+    assert.equal(
+      JSON.stringify(await f.joiner.pendingMemberJoin('team')),
+      JSON.stringify({ offer: again, requestId: second.requestId })
+    )
+  }
+)
+void test(
+  'a sign-in change while a removed join is cleaned up refuses the new invitation',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    f.relay.memberRemoved = true
+    // The same account signs in again while the confirmed removal is being cleaned up.
+    f.relay.onRemovalConfirmed = () => {
+      f.memberIdentity.generation = (f.memberIdentity.generation ?? 0) + 1
+    }
+    const again = await f.ownerApi.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'link', 9_000_000_000_000),
+      'team',
+      false
+    )
+    await assert.rejects(f.joiner.prepareMemberJoin(again), /^Error: e2ee_host_operation_failed$/)
+    f.relay.onRemovalConfirmed = undefined
+    // The removal still ends the old workspace, but no request was made for the new sign-in.
+    await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
+    assert.equal(await f.joiner.pendingMemberJoin('team'), null)
+  }
+)
+void test(
+  'a current member refuses another invitation and keeps its workspace',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    const again = await f.ownerApi.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'link', 9_000_000_000_000),
+      'team',
+      false
+    )
+    await assert.rejects(f.joiner.prepareMemberJoin(again), /^Error: e2ee_conflict$/)
+    assert.equal((await f.joiner.open('team')).hasCurrentKey, true)
   }
 )
