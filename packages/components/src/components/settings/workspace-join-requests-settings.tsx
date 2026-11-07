@@ -1,3 +1,4 @@
+import { seatBillingErrorKey } from './billing-errors';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
@@ -16,7 +17,12 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
-import { SeatCostNotice } from './invite-member-dialog';
+import {
+  SeatCostNotice,
+  SeatAdmissionActions,
+  isSeatAdmissionReady,
+  type SeatInvitePreview,
+} from './invite-member-dialog';
 import { Select } from '@lody/ui/select';
 import { CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
@@ -97,7 +103,13 @@ const styles = stylex.create({
   glyph: { width: '100%', height: '100%' },
 });
 
-export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
+export function WorkspaceJoinRequestsSettings({
+  workspaceId,
+  onOpenBilling,
+}: {
+  workspaceId: string;
+  onOpenBilling?: () => void;
+}) {
   const { t } = useTranslation();
   const state = useLegacyWorkspaceQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
     workspaceId,
@@ -127,7 +139,12 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
       await action();
     } catch (error) {
       console.error('Workspace join request action failed:', error);
-      toast.error(t('joinRequest.admin.actionFailed', 'Could not update join requests.'));
+      toast.error(
+        t(
+          seatBillingErrorKey(error) ?? 'joinRequest.admin.actionFailed',
+          'Could not update join requests.'
+        )
+      );
     } finally {
       setBusyAction(null);
     }
@@ -291,7 +308,6 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
               disabled={busyAction !== null}
               onClick={() =>
                 void run(`approve:${request.id}`, async () => {
-                  await refreshSeatTerms({ workspaceId });
                   setApprovalId(request.id);
                 })
               }
@@ -320,45 +336,24 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
 
   return (
     <>
-      <Dialog.Root
+      <SeatApprovalDialog
         open={approvalId !== null}
         onOpenChange={(open) => {
-          if (!open && busyAction === null) setApprovalId(null);
+          if (!open) setApprovalId(null);
         }}
-      >
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>{t('joinRequest.admin.approve')}</Dialog.Title>
-            <Dialog.Description>{t('billing.seatApprovalConfirm')}</Dialog.Description>
-          </Dialog.Header>
-          <SeatCostNotice preview={seatPreview} />
-          <Dialog.Footer>
-            <Button
-              variant="secondary"
-              disabled={busyAction !== null}
-              onClick={() => setApprovalId(null)}
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              disabled={
-                busyAction !== null ||
-                seatPreview === undefined ||
-                (seatPreview?.status === 'billed' && seatPreview.proratedAmount === null)
-              }
-              onClick={() => {
-                if (!approvalId) return;
-                void run(`approve:${approvalId}`, async () => {
-                  await reviewRequest({ requestId: approvalId, decision: 'approved' });
-                  setApprovalId(null);
-                });
-              }}
-            >
-              {t('joinRequest.admin.approve')}
-            </Button>
-          </Dialog.Footer>
-        </Dialog.Content>
-      </Dialog.Root>
+        preview={seatPreview}
+        pending={busyAction !== null}
+        onOpenBilling={onOpenBilling}
+        onRefresh={() => void run('refresh-billing', () => refreshSeatTerms({ workspaceId }))}
+        onApprove={() => {
+          if (!approvalId || !isSeatAdmissionReady(seatPreview)) return;
+          void run(`approve:${approvalId}`, async () => {
+            await refreshSeatTerms({ workspaceId });
+            await reviewRequest({ requestId: approvalId, decision: 'approved' });
+            setApprovalId(null);
+          });
+        }}
+      />
       <CompactSection
         title={t('joinRequest.admin.title', 'Open join link')}
         description={t(
@@ -369,5 +364,61 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
         {lines}
       </CompactSection>
     </>
+  );
+}
+
+/** Shared presentational boundary: cloud work and retry sequencing stay in the controller. */
+export function SeatApprovalDialog({
+  open,
+  onOpenChange,
+  preview,
+  pending,
+  onOpenBilling,
+  onRefresh,
+  onApprove,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  preview?: SeatInvitePreview | null;
+  pending: boolean;
+  onOpenBilling?: () => void;
+  onRefresh: () => void;
+  onApprove: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(value) => {
+        if (!pending) onOpenChange(value);
+      }}
+    >
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>{t('joinRequest.admin.approve')}</Dialog.Title>
+          <Dialog.Description>{t('billing.seatApprovalConfirm')}</Dialog.Description>
+        </Dialog.Header>
+        <SeatCostNotice preview={preview} />
+        <Dialog.Footer>
+          <Button variant="ghost" disabled={pending} onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={pending || !isSeatAdmissionReady(preview)}
+            onClick={() => {
+              if (!pending && isSeatAdmissionReady(preview)) onApprove();
+            }}
+          >
+            {t('joinRequest.admin.approve')}
+          </Button>
+          <SeatAdmissionActions
+            preview={preview}
+            pending={pending}
+            onOpenBilling={onOpenBilling}
+            onRefresh={onRefresh}
+          />
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

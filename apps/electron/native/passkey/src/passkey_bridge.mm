@@ -1,5 +1,5 @@
 // AuthenticationServices passkey ceremonies with PRF, for the recovery vault only.
-// This file has never been compiled or run; see ../README.md.
+// This file compiles but has never run; see ../README.md.
 #import <AppKit/AppKit.h>
 #import <AuthenticationServices/AuthenticationServices.h>
 #import <Security/SecRandom.h>

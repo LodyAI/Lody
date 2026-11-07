@@ -3296,13 +3296,16 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async recoveryReplacementPlan() {
     sender()
-    return this.recoveryOperation(({ accountId, replacement, accountWorkspaces }) =>
-      recoveryReplacementPlan({
-        replacement,
-        accountWorkspaces,
-        hasIdentity: (workspaceId) =>
-          Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId))
-      })
+    return this.recoveryOperation(
+      ({ accountId, store, journalPath, replacement, accountWorkspaces }) =>
+        recoveryReplacementPlan({
+          store,
+          journalPath,
+          replacement,
+          accountWorkspaces,
+          hasIdentity: (workspaceId) =>
+            Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId))
+        })
     )
   }
   /** Default-off: save a new file and reserve its vault. The current vault keeps working. */
@@ -3520,10 +3523,10 @@ export class E2eeIpc extends IpcService {
         ({ accountId, client, store, journalPath, accountWorkspaces }) =>
           Effect.flatMap(
             Effect.flatMap(accountWorkspaces, (rows) =>
-              Effect.filter(rows, (row) =>
+              Effect.forEach(rows, (row) =>
                 Effect.map(
                   Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
-                  (has) => !has
+                  (has) => ({ ...row, has })
                 )
               )
             ),
@@ -3533,11 +3536,11 @@ export class E2eeIpc extends IpcService {
                 journalPath,
                 unlock,
                 workspaces: rows.map((row) =>
-                  recoveryRestoreTarget({
+                  recoveryRestoreTarget<E2eeWorkspaceHistoryPage>({
                     ...row,
+                    hasIdentity: () => row.has,
                     append: (request) => client.appendRecord(request),
-                    history: (cursor) =>
-                      client.history({ workspaceId: row.id, ...(cursor ? { cursor } : {}) }),
+                    history: (next) => client.history({ workspaceId: row.id, ...next }),
                     mailbox: (credential) => client.mailbox({ workspaceId: row.id, credential }),
                     stagedGroup: (credential, key) =>
                       client.staging({ workspaceId: row.id, credential }).readGroup(key),

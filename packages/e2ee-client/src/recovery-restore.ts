@@ -1,8 +1,9 @@
 /** Restore from an unlocked vault with nothing known about the workspace. No
  * product flow calls this yet, so it changes no create, join or pairing path. */
-import { Effect, Result, type Scope } from 'effect';
+import { Effect, Exit, Result, type Scope } from 'effect';
 import {
   Bytes,
+  makeWorkspaceRecovery,
   RecoveryVaultError,
   type LedgerView,
   type RecoveryEntryReference,
@@ -96,7 +97,25 @@ export interface RecoveryHistoryPage {
   readonly startIndex: number;
   readonly recordsHex: readonly string[];
   readonly nextCursor: string | null;
+  readonly checkpoint: unknown;
 }
+
+/** Read a complete history. Every continuation carries the first page's checkpoint, so
+ * one read describes one fixed ledger. */
+export const readRecoveryHistory = Effect.fnUntraced(function* <P extends RecoveryHistoryPage, E>(
+  read: (next?: {
+    readonly cursor: string;
+    readonly checkpoint: P['checkpoint'];
+  }) => Effect.Effect<P, E>
+) {
+  const first = yield* read();
+  const pages = [first];
+  for (let cursor = first.nextCursor; cursor; cursor = pages.at(-1)!.nextCursor) {
+    if (pages.length >= 256) return yield* Effect.fail(new RecoveryVaultError({ code: 'storage' }));
+    pages.push(yield* read({ cursor, checkpoint: first.checkpoint }));
+  }
+  return pages;
+});
 
 /** Replay the complete served history from the package's genesis. Each call rereads it,
  * because a restore must see its own admission. */
@@ -119,3 +138,96 @@ export const recoveryLedger =
         })
       );
     }) as Effect.Effect<LedgerView, unknown>;
+
+const restoreProgressKey = (workspaceId: string) => `restore-progress/${workspaceId}`;
+const RESTORE_OPEN = new TextEncoder().encode('open');
+const RESTORE_DONE = new TextEncoder().encode('done');
+const isOpen = (value: Uint8Array | null) =>
+  value !== null && new TextDecoder().decode(value) === 'open';
+
+/** True while a restore has begun but its keys are not installed. Such a workspace has an
+ * identity yet cannot decrypt, so it stays restorable and does not count as set up. */
+export const recoveryRestoreIncomplete = (
+  local: WorkspaceRecoveryInput['local'],
+  workspaceId: string
+) => Effect.map(local.read(restoreProgressKey(workspaceId)), isOpen);
+
+/** One workspace a vault can restore onto this device. */
+export interface RecoveryRestoreTarget {
+  readonly id: string;
+  readonly name: string;
+  readonly genesisHash: string;
+  /** Whether this device already holds an identity for the workspace. */
+  readonly hasIdentity: () => boolean;
+  /** Connect only once the authenticated package names the workspace. */
+  readonly connect: (anchor: VaultRestoreAnchor) => Effect.Effect<
+    VaultRestorePorts & {
+      readonly personal: VaultRestorePorts['personalSigner'] & {
+        readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
+      };
+      readonly recovered: () => readonly (readonly [number, Bytes.EpochKey])[];
+      /** Adopt the identity and install the keys. Must be safe to repeat. */
+      readonly adopt: (
+        recovered: readonly (readonly [number, Bytes.EpochKey])[]
+      ) => Effect.Effect<void, unknown>;
+    },
+    unknown,
+    Scope.Scope
+  >;
+}
+
+/**
+ * Restore every workspace a vault covers and this account can name. The genesis comes
+ * only from the authenticated package; ledger, checkpoint and key commitment are core's
+ * checks. Durable progress keeps a workspace retryable until its keys are installed, and
+ * one workspace's failure never stops the others.
+ */
+export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
+  readonly vault: RecoveryVault;
+  readonly local: WorkspaceRecoveryInput['local'];
+  readonly targets: readonly RecoveryRestoreTarget[];
+}) {
+  const results: { readonly name: string; readonly outcome: string }[] = [];
+  for (const reference of yield* listVaultWorkspaces(input.vault)) {
+    const target = input.targets.find((row) => row.genesisHash === reference.genesis);
+    if (!target) continue;
+    const key = restoreProgressKey(target.id);
+    const progress = yield* input.local.read(key);
+    if (target.hasIdentity() && !isOpen(progress)) continue;
+    const attempt = Effect.scoped(
+      Effect.gen(function* () {
+        // A finished marker from an earlier vault must not hide this attempt's failure.
+        if (!isOpen(progress)) {
+          const opened = yield* input.local.compareAndSwap(key, progress, RESTORE_OPEN);
+          if (opened !== 'Committed')
+            return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
+        }
+        let connected: Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>> | undefined;
+        const plan = yield* prepareVaultRestore({
+          vault: input.vault,
+          local: input.local,
+          reference,
+          ports: (anchor) =>
+            Effect.tap(target.connect(anchor), (ports) =>
+              Effect.sync(() => {
+                connected = ports;
+              })
+            ),
+        });
+        const workflow = yield* makeWorkspaceRecovery(plan.workflow);
+        const result = yield* workflow.restoreFromRecovery({
+          personal: connected!.personal,
+          submitOriginalAsRecovery: plan.submitOriginalAsRecovery,
+        });
+        if (result.outcome === 'Committed') {
+          yield* connected!.adopt(connected!.recovered());
+          yield* input.local.compareAndSwap(key, RESTORE_OPEN, RESTORE_DONE);
+        }
+        return result.outcome as string;
+      })
+    );
+    const exit = yield* Effect.exit(attempt);
+    results.push({ name: target.name, outcome: Exit.isSuccess(exit) ? exit.value : 'Failed' });
+  }
+  return results;
+});

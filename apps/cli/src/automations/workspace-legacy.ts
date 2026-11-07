@@ -421,12 +421,8 @@ export async function createAutomationWorkspaceLegacy(options: {
         );
       }
     );
-    const assertReadable = (wait: AutomationWait, requesterSessionId?: string) => {
-      if (
-        wait.ownerUserId !== auth.userId ||
-        wait.ownerMachineId !== auth.machineId ||
-        (requesterSessionId && wait.sessionId !== requesterSessionId)
-      )
+    const assertReadable = (wait: AutomationWait) => {
+      if (wait.ownerUserId !== auth.userId || wait.ownerMachineId !== auth.machineId)
         throw new Error('AUTOMATION_NOT_FOUND');
     };
     const publicWait = (wait: AutomationWait) => {
@@ -510,14 +506,8 @@ export async function createAutomationWorkspaceLegacy(options: {
           const now = await runtime.runPromise(Clock.currentTimeMillis);
           switch (command.type) {
             case 'register': {
-              const sessionId = requesterSessionId ?? command.sessionId;
+              const sessionId = command.sessionId ?? requesterSessionId;
               if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               const context = await sessionContext(sessionId);
               if (command.expiresAt !== undefined && command.expiresAt <= now)
                 throw new Error('AUTOMATION_ALREADY_EXPIRED');
@@ -537,14 +527,8 @@ export async function createAutomationWorkspaceLegacy(options: {
             }
             case 'settings':
             case 'configure': {
-              const sessionId = requesterSessionId ?? command.sessionId;
+              const sessionId = command.sessionId ?? requesterSessionId;
               if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               await sessionContext(sessionId);
               if (command.type === 'configure') {
                 const record =
@@ -575,32 +559,20 @@ export async function createAutomationWorkspaceLegacy(options: {
               return sessionPolicySettings(ledger, sessionId);
             }
             case 'list': {
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               return ledger
-                .waits(auth.userId, requesterSessionId ?? command.sessionId)
+                .waits(auth.userId, command.sessionId ?? requesterSessionId)
                 .map(publicWait);
             }
             case 'show': {
               const wait = ledger.wait(command.id);
               if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-              assertReadable(wait, requesterSessionId);
+              assertReadable(wait);
               return publicWait(wait);
             }
             case 'activities': {
-              if (
-                requesterSessionId &&
-                command.sessionId &&
-                command.sessionId !== requesterSessionId
-              )
-                throw new Error('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
               const page = ledger.activityPage(
                 auth.userId,
-                requesterSessionId ?? command.sessionId,
+                command.sessionId ?? requesterSessionId,
                 command.limit,
                 command.before
               );
@@ -609,7 +581,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             case 'cancel': {
               const wait = ledger.wait(command.id);
               if (wait) {
-                assertReadable(wait, requesterSessionId);
+                assertReadable(wait);
                 await runtime.runPromise(service.cancel(wait.id));
                 const current = ledger.wait(wait.id);
                 return current && publicWait(current);
@@ -617,11 +589,7 @@ export async function createAutomationWorkspaceLegacy(options: {
               const receipt = ledger.receipt(command.id);
               if (!receipt) {
                 const work = ledger.work(command.id);
-                if (
-                  !work ||
-                  work.ownerUserId !== auth.userId ||
-                  (requesterSessionId && work.sessionId !== requesterSessionId)
-                )
+                if (!work || work.ownerUserId !== auth.userId)
                   throw new Error('AUTOMATION_NOT_FOUND');
                 ledger.putWork({ ...work, state: 'cancelled', updatedAt: now });
                 if (work.invocationId) await runtime.runPromise(service.cancel(work.invocationId));
@@ -629,11 +597,7 @@ export async function createAutomationWorkspaceLegacy(options: {
                 const current = ledger.work(command.id);
                 return current ? workActivity(current) : undefined;
               }
-              if (
-                receipt.rule.ownerUserId !== auth.userId ||
-                (requesterSessionId && receipt.rule.scope.sessionId !== requesterSessionId)
-              )
-                throw new Error('AUTOMATION_NOT_FOUND');
+              if (receipt.rule.ownerUserId !== auth.userId) throw new Error('AUTOMATION_NOT_FOUND');
               await runtime.runPromise(service.cancel(command.id));
               const current = ledger.receipt(command.id);
               return current ? actionActivity(current) : undefined;
@@ -702,7 +666,8 @@ export async function createAutomationWorkspaceLegacy(options: {
           if (operation.type === 'cancel') {
             const wait = ledger.wait(operation.id);
             if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-            assertReadable(wait, input.sessionId);
+            assertReadable(wait);
+            if (wait.sessionId !== input.sessionId) throw new Error('AUTOMATION_NOT_FOUND');
             await handle.command({ type: 'cancel', id: operation.id });
             return { type: 'cancel' as const };
           }
