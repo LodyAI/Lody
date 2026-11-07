@@ -2300,6 +2300,8 @@ export interface SessionChatInterfaceProps {
   onOpenSearch?: () => void | Promise<void>;
   /** External callback for copying conversation history (used when header and message area are split) */
   onCopyConversationHistory?: () => void | Promise<void>;
+  /** External copy-link callback for split header/message layouts; the toolbar owner knows the active tab. */
+  onCopyUrl?: () => void | Promise<void>;
   /** External rename request for split header/message layouts. */
   onRequestRename?: () => void | Promise<void>;
   /** External latest-assistant fork callback for split header/message layouts. */
@@ -2366,6 +2368,7 @@ export type SessionChatToolbar = {
     | 'onDeleteSession'
     | 'onOpenSearch'
     | 'onCopyConversationHistory'
+    | 'onCopyUrl'
     | 'onRequestRename'
     | 'onForkSession'
     | 'forkWorktreeAvailability'
@@ -2505,6 +2508,7 @@ export const SessionChatInterface = memo(
       onDeleteSession,
       onOpenSearch: onOpenSearchExternal,
       onCopyConversationHistory: onCopyConversationHistoryExternal,
+      onCopyUrl: onCopyUrlExternal,
       onRequestRename,
       onForkSession: onForkSessionExternal,
       sharing,
@@ -7132,6 +7136,11 @@ export const SessionChatInterface = memo(
       : hideMessageArea && onCopyConversationHistoryExternal
         ? onCopyConversationHistoryExternal
         : handleCopyConversationHistory;
+    // The desktop toolbar is rendered by the root conversation, so its own
+    // `session.id` is the root even while a child tab is active. The toolbar
+    // owner resolves the active tab and supplies the link to copy.
+    const headerCopyUrl =
+      (toolbarActions ? toolbarActions.onCopyUrl : onCopyUrlExternal) ?? handleCopySessionLink;
     const headerMenuNode = (
       <SessionHeaderMenu
         key={`${workspaceId}:${session.id}`}
@@ -7178,7 +7187,7 @@ export const SessionChatInterface = memo(
         machineName={sessionMachine?.name}
         onCopyConversationHistory={headerCopyConversation}
         onCopyUrl={() => {
-          void handleCopySessionLink();
+          void headerCopyUrl();
         }}
         onCopyDeepLink={() => handleCopySessionLink('deeplink')}
         sharing={headerSharing}
