@@ -1,3 +1,7 @@
+import {
+  type SessionUsage,
+  projectSessionUsage,
+} from '../protocol/session-usage.ts';
 import { presentMessageText } from '../protocol/message-references.ts';
 import {
   readTurnMetadata,
@@ -107,6 +111,7 @@ export type Envelope = {
   reason?: string;
   revision: number;
   billableTurnCount: number;
+  usage?: SessionUsage;
   awaitingUserSince?: number;
   preview?: { label: string; active: boolean };
   composer?: {
@@ -599,6 +604,7 @@ export function projectSession(
     status,
     reason,
     revision,
+    usage: projectSessionUsage(session, raw),
     billableTurnCount: billableTurnCount({ history: raw, mq: queued }),
     awaitingUserSince:
       typeof session?.awaitingUserSince === 'number'

@@ -66,7 +66,7 @@ enum MarkdownMermaid {
   static func theme(_ traits: UITraitCollection) -> DiagramTheme {
     // The renderer mixes raw CGColor channels; UIKit gray colors have only two.
     var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 1
-    UIColor.systemBackground.resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+    UIColor.lodyBackground.resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
     return DiagramTheme(
       background: UIColor(red: red, green: green, blue: blue, alpha: alpha),
       foreground: UIColor.label.resolvedColor(with: traits),

@@ -79,3 +79,16 @@ No desktop credentials, real turns or private user data belong in fixtures.
 For visual/interaction requirement alignment only, export a finished run with
 `acceptance-round.py` and ingest its claims through the acceptance tool. Ordinary
 regression runs remain programmatic gates and are not ingested.
+
+### Conversation usage
+
+`session-preview-usage` renders the production conversation with a synthetic 42%
+context ring beside Send. `session-preview-usage-popup` opens its native usage
+popover (84K / 200K, weekly and five-hour meters). The fixture clock is fixed;
+reset-time arrows independently toggle relative and concrete dates. These Debug
+scenes are reachable with `lody:///debug?verifyCase=<scene>` under `--ui-verify`.
+When AXe is unavailable, launch with `--ui-verify --ui-review-usage` or
+`--ui-verify --ui-review-usage-popup` using `simctl launch`; these bypass the
+Simulator's external-URL confirmation, not product navigation. Native `message-details` checks
+context normalization/window ordering/reset mode; `remote-settings` checks exact
+account, model and capability quota selection. Neither scene performs cloud I/O.

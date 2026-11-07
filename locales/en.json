@@ -2303,6 +2303,8 @@
   "sessions.fileViewer.save": "Save",
   "sessions.fileViewer.save.conflict": "Resolve the save conflict first",
   "sessions.fileViewer.save.withShortcut": "Save (⌘S / Ctrl+S)",
+  "sessions.fileViewer.edit": "Edit file",
+  "sessions.fileViewer.readOnly": "Switch to read-only",
   "sessions.fileViewer.search": "Search",
   "sessions.fileViewer.wordWrap": "Wrap lines",
   "sessions.fileViewer.wordWrapEnable": "Wrap long lines",

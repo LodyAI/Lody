@@ -102,7 +102,7 @@ final class ChatMentionPanel: UIView {
     accessibilityIdentifier = "mention-panel"
     isHidden = true
     alpha = 0
-    backgroundColor = .systemBackground
+    backgroundColor = .lodyBackground
     layer.cornerRadius = 20
     layer.cornerCurve = .continuous
     layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
@@ -394,7 +394,7 @@ final class ChatMentionLevelController: UIViewController, UICollectionViewDelega
   override func viewDidLoad() {
     super.viewDidLoad()
     // Opaque, so the level being covered never shows through during the push.
-    view.backgroundColor = .systemBackground
+    view.backgroundColor = .lodyBackground
     edgesForExtendedLayout = []
     var config = UICollectionLayoutListConfiguration(appearance: .plain)
     config.backgroundColor = .clear

@@ -6062,6 +6062,7 @@ const SessionDetail = ({
         copyMarkdownRequestSeq={viewerTabSaveStates[tab.id]?.copyMarkdownRequestSeq ?? 0}
         sessionLinksEnabled={!!handleNavigateSession}
         defaultHtmlPreview={isMobile}
+        defaultReadOnly={isMobile}
         preferNativeMarkdownSelection={isMobile}
         onAddSelectionToChat={
           activeSession.isArchived

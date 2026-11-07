@@ -17,7 +17,8 @@
 
 - Apple HIG is the primary UI requirement. Chat references inform behavior only; preserve native conventions.
 - Native text uses system fonts, with system monospaced fonts for code. Keep semantic sizes, weights and Dynamic Type in `LodyTextStyle`; do not bundle or select custom font families for native UI. Chat inline code uses body size and secondary-label ink, retaining link colours. Preserve fenced-code themes; with the current per-block renderer, containers holding fences retain their original code colours.
-- Use fixed Ink for the configurable app accent; do not expose an accent picker or read legacy accent preferences. Preserve conversation activity/status colors from the design system. Diff additions use systemGreen, paired with systemRed deletions. Use UIKit semantic colors for native content, Ink for actions, and neutral system backgrounds. Preserve automatic dark mode and accessibility contrast adaptation.
+- Use fixed Ink for the configurable app accent; do not expose an accent picker or read legacy accent preferences. Preserve conversation activity/status colors from the design system. Diff additions use systemGreen, paired with systemRed deletions. Use UIKit semantic colors for native content, Ink for actions, and neutral backgrounds. Preserve automatic dark mode and accessibility contrast adaptation.
+- App-owned dark canvases use fixed soft `#111113`, never pure black; ignore legacy `darkBackground` preferences and do not expose a picker. Preserve light semantics. Camera and simulator media backdrops stay soft dark in either theme; masks, translucent scrims, shadows, artwork and foreground ink are not canvas fills.
 - Preserve native navigation, safe areas, VoiceOver labels, and at least 44 pt touch targets. MVP acceptance uses the default text size; keep system text behavior but do not add special layouts or remount logic for oversized accessibility text.
 - Reference Yohaku iOS for native UI boundaries. System grouped rows use `LodyGroupedList` / `UICollectionViewListCell` in LodyKit; navigation uses UIKit automatic scroll edges through the existing native stack. Register native collection views with UIKit directly; do not simulate native effects with decorative overlays.
 - `LodyGroupedList` system-row pages default to flat rail rows; CreateSession and its pickers opt back into inset-grouped rows with `setGrouped(true)`.
@@ -33,7 +34,7 @@
 
 ## Pages and native APIs
 
-- `LodyShell` owns the root navigation controller and sheet navigation controllers. `LodyPageController` hosts native content, carries results and clears callbacks on close. Reuse `pushNative`, `presentNative`, `finish` and `close`; do not add a second presentation manager.
+- `LodyShell` owns the root navigation controller and sheet navigation controllers. `LodyPageController` hosts native content, carries results and clears callbacks on close. Reuse `pushNative`, `presentNative`, `finish` and `close`; do not add a second presentation manager. Conversation file routes retain per-path ownership until the preview closes (including interactive dismissal), not merely until presentation returns; different file paths remain independent.
 - Deep links are parsed by `LodyCore.AppLink` and routed by `LodyApplication`. Notification navigation validates account, workspace and session catalog before opening a session.
 - `HomeController` owns the adaptive UIKit split and list, session and inspector navigation controllers. Preserve system back and interactive pop. `SessionNavigation` handles session actions; tool pages use `LodyShell.presentDetail`. Keep sheets for transient flows and Debug demos.
 - Register page factories in `Shell/LodyNativePages.swift`. Controllers read Swift-owned state and observe NotificationCenter changes. Inject service closures for I/O; offline preview subclasses use scripted services. Use `String(localized:bundle:)` with `.lody` and edit `packages/LodyKit/Sources/LodyKit/Resources/Localizable.xcstrings` directly. Use Foundation format arguments and catalog plural variations; `InfoPlist.xcstrings` owns permission prompts.
@@ -79,12 +80,14 @@
 
 - Native OneSignal SDK ownership stays in LodyKit `Notifications/PushNotifications.swift`;
   `PushLifecycle` initializes at app launch, retains SDK listeners and caches
-  clicks until `LodyApplication` resolves and acknowledges them.
+  clicks until `LodyApplication` resolves and acknowledges them. `PushRegistration` serializes
+  session-bound APNs writes; only the exact `configuration.selfHostedEnabled` Boolean
+  selects direct APNs. OneSignal uses `lody-push-v2:<userId>`; native ownership stays raw.
 - `project.yml` and `App` persist the NSE, App Group,
   SDK pin and entitlements across prebuild. Never fix only generated `ios/` files.
 - Notification navigation accepts only the legacy workspace/session route and resolves
   against the signed-in user's catalog. `recipientUserId` fences clicks after an
-  account switch; old payloads use the SDK's current external ID as a compatibility fallback.
+  account switch; payloads without a raw recipient are rejected (SDK external IDs are namespaced).
 - Debug's offline notification fixture never initializes OneSignal or requests real
   permission. See `apps/ios/PUSH_NOTIFICATIONS.md` for setup and verification limits.
 
@@ -162,3 +165,5 @@
 - Definite send failures must leave the composer available for a fresh turn. Keep the failed pending turn retryable until an explicit replacement; never reuse its attachments for the new turn or relax the fence for unconfirmed delivery.
 
 - Conversation-list Mark Read availability respects the local viewed-message watermark, just like unread emphasis. Swipe actions require an explicit button tap, never a full-swipe commit. When a chat row’s swipe commands change, replace its cell to discard the previous swipe presentation.
+
+- Conversation usage beside Send is display-only: context occupancy comes from the session usage projection, never turn billing totals. Resolve subscription windows against the exact machine, agent config and selected model, requiring eligibility and the rate-limits capability. Keep unknown context hidden, compacting distinct, neutral used-percent meters and an independent relative/concrete reset-time toggle for each window.

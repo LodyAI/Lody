@@ -13,6 +13,7 @@ struct SessionEnvelope: Sendable {
   var entriesJSON = "[]"
   var billableTurnCount: Int?
   var composerJSON: String?
+  var usageJSON: String?
   var preview: SessionBrowserPreview?
   var transcript = SessionTranscriptFacts()
 
@@ -24,6 +25,9 @@ struct SessionEnvelope: Sendable {
     )
     if let preview = object["preview"] as? [String: Any], let label = preview["label"] as? String {
       envelope.preview = SessionBrowserPreview(label: label, active: preview["active"] as? Bool == true)
+    }
+    if let usage = object["usage"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: usage) {
+      envelope.usageJSON = String(decoding: data, as: UTF8.self)
     }
     envelope.billableTurnCount = (object["billableTurnCount"] as? NSNumber)?.intValue
     if let composer = object["composer"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: composer) {

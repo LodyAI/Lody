@@ -31,7 +31,7 @@ class SessionController: UIViewController {
   weak var tasksPage: TasksController?
   var permissionPage: PermissionController?
   var permissionScope: (userId: String, workspaceId: String)?
-  var openingFile = false
+  var openingFiles: Set<String> = []
   var mentions: MentionCatalogStore?
   var mentionSequence = 0
   var editable = ""
