@@ -295,7 +295,7 @@ final class InboxController: UIViewController {
     guard let workspace = source.state.workspace else { return }
     var params: [String: Any] = [
       "workspaceId": workspace.id, "name": workspace.name,
-      "color": LodyAccentChoice.hex(UIColor.lodyAccent.resolvedColor(with: traitCollection)),
+      "color": LodyAccent.hex(UIColor.lodyAccent.resolvedColor(with: traitCollection)),
     ]
     params["image"] = workspace.image
     LodyShell.shared.presentNative(WorkspaceEditorController(params: params),

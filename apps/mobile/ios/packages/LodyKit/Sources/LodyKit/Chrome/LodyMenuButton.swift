@@ -171,7 +171,7 @@ final class LodyMenuButton: UIView {
       avatar: LodyMenuButtonStyle.avatarImage(
         text: avatar.text,
         fill: tint ?? .lodyAccent,
-        foreground: tint == nil ? LodyAccentChoice.current.foregroundColor : .white,
+        foreground: tint == nil ? LodyAccent.foregroundColor : .white,
         photo: photo
       ),
       showsLabel: !labelHidden, to: button

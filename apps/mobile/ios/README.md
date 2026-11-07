@@ -70,6 +70,16 @@ What that week actually looked like:
 - **Smooth Character Fade-In**: Balanced batch scheduling paired with low-level `CTRunDraw` character alpha transitions delivers gentle, flicker-free streaming output during AI generation.
 - **Native Input (`ChatComposerView`)**: Pixel-perfect keyboard avoidance matching system input methods, local draft persistence with automatic restoration, and real-time model thinking effort controls.
 
+The iOS app uses fixed Ink accents in both light and dark appearances, including
+Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
+without an accent-color picker. Process status labels use the same regular type
+as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
+thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+Chat inline code matches the body size in a monospaced face. Prose blocks use
+secondary-label grey (links retain link blue); fenced code retains its own sizing
+and colours. With MarkdownView's shared code colour, a list or quote containing a
+fence keeps its original code colours throughout that block.
+
 ### Code Diffs & Workspace File Browsing
 
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.

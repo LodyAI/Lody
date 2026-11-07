@@ -33,6 +33,19 @@ enum NativeDebug {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
       return
     }
+    if scenario == "inline-code" {
+      let page = UIViewController()
+      page.view.backgroundColor = .systemBackground
+      let store = ChatMarkdownStore(traits: page.traitCollection)
+      let markdown = store.view(id: "inline-preview",
+        text: "Body with `inline code` and **`bold code`**.\n\n```\nfenced code keeps its ink\n```",
+        secondary: false, streaming: false, width: 330)
+      markdown.frame = CGRect(x: 24, y: 120, width: 330, height: markdown.measuredHeight)
+      page.view.addSubview(markdown)
+      LodyShell.shared.pushRootNative(page, title: "Inline code")
+      ChatContextViewProbe.checkInlineCode()
+      return
+    }
     if scenario == "home-native-alert" {
       let alert = UIAlertController(title: "Layout verification", message: nil, preferredStyle: .alert)
       alert.addAction(UIAlertAction(title: "OK", style: .default))
