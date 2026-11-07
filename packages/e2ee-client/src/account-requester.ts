@@ -331,6 +331,8 @@ export interface AccountPairingKeyDeliveryEvent {
   readonly code?: string;
 }
 /** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
+/** One ledger catch-up. Timing out cancels it and the round still runs. */
+export const ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS = 30_000;
 const KEY_DELIVERY_RETRY_DELAYS = [
   10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
 ] as const;
@@ -457,10 +459,15 @@ export function makePortableAccountPairingApprover(input: {
               releaseQuietly(current, 'account-pairing-key-delivery-release');
             // The mailbox refuses a sender behind the ledger, so a retry catches up first.
             // The round then resends the saved original or supersedes it from the new ledger;
-            // a failed catch-up does not skip the round.
+            // a failed or timed-out catch-up does not skip the round.
             const attempt = (current: AccountPairingApproverSession, retry: number) =>
               Effect.gen(function* () {
-                if (retry > 0) yield* Effect.result(current.refresh());
+                if (retry > 0)
+                  yield* Effect.result(
+                    current
+                      .refresh()
+                      .pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
+                  );
                 const round = yield* Effect.result(current.keyRound());
                 const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
                 if (Result.isSuccess(evidence) && evidence.success === 'delivered')
