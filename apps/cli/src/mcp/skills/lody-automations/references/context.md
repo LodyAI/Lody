@@ -10,6 +10,13 @@ ctx.read(resource: string, parameters?: object): Promise<{
   value: unknown
   observedAt: number // Epoch milliseconds for the observation.
 }>
+ctx.exec(options: { command: string, args?: string[], cwd?: string }): Promise<{
+  exitCode: number | null, signal: string | null, stdout: string, stderr: string
+}>
+ctx.fetch(url: string, options?: { method?: 'GET' | 'HEAD', headers?: Record<string, string> }): Promise<{
+  ok: boolean, status: number, url: string, headers: Record<string, string>,
+  text(): Promise<string>, json(): Promise<unknown>
+}>
 ```
 
 Workspace is the storage/runtime scope; Session is the fixed continuation target.
@@ -31,11 +38,21 @@ schemas, read `skill://lody-automations/references/context.schema.json`.
 
 Reads return data; the condition uses CodeMode’s supported JavaScript subset. Unknown/incomplete observations
 must not be treated as success. Payloads must be JSON; return concise results rather
-than all observations. Each check permits up to 32 reads and each observation is
+than all observations. Each check permits up to 32 read, fetch or exec calls and each observation is
 bounded to 128 KiB; the result is bounded to 64 KiB. Five consecutive check errors
 fail the wait; a successful check resets that counter.
 
-No Node, filesystem, shell, arbitrary network, MCP tool call, import, or credential
-access is exposed inside the program. If the required data has no listed source,
-report that missing capability instead of inventing `ctx` methods. The registration
-tool runs outside this sandbox; its presence does not make it callable inside JS.
+`ctx.fetch` reads HTTP or HTTPS endpoints accessible from the Host, including local services. It rejects redirects, URL credentials and request headers other than `accept` and `accept-language`. Responses are buffered up to 64 KiB; HTTP errors return their status, while transport failures fail the check. Checks may repeat, so use observational endpoints and never embed secrets in the program. `ctx.fetch` shares the call and concurrency limits with `ctx.read`.
+
+`ctx.exec` runs an executable in the Session workdir; `cwd`, when supplied, is relative to it. Arguments are passed directly, without shell interpolation. For shell syntax, invoke a shell explicitly. Nonzero exit codes are returned as data. Commands have the local OS user's authority, receive a limited environment, and may run again after interruption or restart; use checks that are safe to repeat.
+
+```js
+async ({ ctx }) => {
+  const result = await ctx.exec({ command: 'git', args: ['status', '--short'] });
+  return result.exitCode === 0 && result.stdout.trim() === ''
+    ? { resumeText: 'The working tree is clean. Continue.' }
+    : false;
+}
+```
+
+The program has no direct Node, filesystem, shell, MCP tool call, import, or credential access. `ctx.exec` can run a shell and access files or the network through the invoked command. The registration tool runs outside the interpreter; its presence does not make it callable inside JS.
