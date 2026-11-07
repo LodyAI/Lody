@@ -49,7 +49,7 @@ Translation: current
 
 ## 现有 Spec
 
-下列段落仍写着 15 分钟的行为。实现时在同一改动里按本批准更新：
+下列段落保留常规运行的 15 分钟行为，并链接到这里：
 
 - [基础边界](../e2ee-foundations.zh.md)及英文版：
   - "严格小于 15 分钟的内存缓存"一段；
@@ -62,10 +62,11 @@ Translation: current
 
 ## 相关上限
 
-`apps/cli/src/lib/lody-fleet.ts` 的 `FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS` 让加密 remote bridge 在没有账本确认时最多保持连接 15 分钟。实现时要随上面的窗口一起改，否则执行放宽了，它依赖的 bridge 却已经断开。
+`apps/cli/src/lib/lody-fleet.ts` 的 `FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS` 让加密 remote bridge 在没有账本确认时最多保持连接 24 小时，即上面最长的窗口。它要随窗口一起改，否则请求放行了，它依赖的 bridge 却已经断开。
 
 ## 证据
 
-- 当前行为：`apps/cli/src/lib/e2ee/execution-authorization.ts`，`refresh` 把所有读取失败都映射成拒绝 `unavailable`。
-- "不确定的挂起/恢复会结束窗口"需要新增检测，比较墙钟和单调时钟的变化量。今天长时间挂起总会超过 15 分钟授权，所以能被发现；窗口变长后不再成立。
-- 已执行的验证：无。这里是已批准的意图，实现尚未完成。
+- 实现：`apps/cli/src/lib/e2ee/execution-authorization.ts`，故障规则在 `apps/cli/src/lib/cloud-e2ee-errors.ts` 的 `ledgerReadFailure`。
+- "不确定的挂起/恢复会结束窗口"靠比较墙钟和单调时钟的变化量，因为长时间挂起不再必然超过授权时长。
+- 提示是 `lody daemon status` 显示的运行时问题，其他客户端界面还没有显示。
+- 已执行的验证：`apps/cli/tests/e2ee-runtime.test.ts`（"backend outage windows"）和 `apps/cli/tests/lody-fleet-local-catalog.test.ts`，使用合成账本和注入时钟。没有运行真实的后端故障。

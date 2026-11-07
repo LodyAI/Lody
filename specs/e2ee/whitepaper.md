@@ -3,7 +3,7 @@
 Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
 Translation: current
 
-Approved revision: 2026-11-06 recovery whole-vault replacement; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement). Previous: 2026-11-06 ledger user ID ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ledger-user-id-is-the-account-id)), 2026-11-06 recovery passkey unlock and trust anchor ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)), 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
+Approved revision: 2026-11-07 execution freshness during a backend outage ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)); 2026-11-06 recovery whole-vault replacement; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement). Previous: 2026-11-06 ledger user ID ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ledger-user-id-is-the-account-id)), 2026-11-06 recovery passkey unlock and trust anchor ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)), 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
@@ -198,7 +198,7 @@ Version one keeps existing machine sharing: once the machine owner shares it, wo
 
 Execution requests include starting an Agent turn, saving a remote file and terminal operations; they do not mean redesigning every local CLI command. Their signatures bind the device, Org, target machine, operation and arguments, stable request ID, and expiry. The machine checks the device-to-user authorization, current execution permission, and request integrity, and durably records execution state to prevent duplicate retries. Unknown results MUST be queried before any rerun. If the result remains unknown, the operation MUST NOT be automatically rerun; surface the uncertainty for explicit user action. Arbitrary shell effects are not promised exactly once. Explicitly new user intent gets a new ID. Successful decryption, new CRDT content, or possession of a login token does not replace execution authorization.
 
-Org execution permissions obey the same worst-case 15-minute revocation bound. Caches cannot outlive the original freshness proof, and forwarding, receipt, or restart does not start a new timer. Known revocation invalidates them immediately; failure to refresh by expiry blocks new execution. This bound depends on the server honestly supplying current control state: a local timer cannot prevent a malicious server from continually concealing revocation. Cancelling an already started command is a separate process; revocation does not automatically undo its effects.
+Org execution permissions obey the same worst-case 15-minute revocation bound. Caches cannot outlive the original freshness proof, and forwarding, receipt, or restart does not start a new timer. Known revocation invalidates them immediately; failure to refresh by expiry blocks new execution, except that a read which gets no answer leaves the same member's requests inside the longer windows of [execution freshness during a backend outage](execution-freshness-outage.md). This bound depends on the server honestly supplying current control state: a local timer cannot prevent a malicious server from continually concealing revocation. Cancelling an already started command is a separate process; revocation does not automatically undo its effects.
 
 The [M5 realtime review draft](../e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
 sets the concrete bytes and MVP route order: encrypted Streams RPC, then encrypted
@@ -210,7 +210,9 @@ binds machineId in admission and possession; old developer ledgers are recreated
 current-only, without a compatibility path. `rotationRequired` only advises key
 rotation and alone blocks neither sealing, sending nor execution. Machine-obtained
 execution freshness is memory-only, at most 15 minutes from before its own
-authenticated latest read, and requires online revalidation after restart; the
+authenticated latest read (longer for the machine's own member during a
+[backend outage](execution-freshness-outage.md)), and requires online revalidation
+after restart; the
 journal's persistent workspace expiry floor is not that grant. Execution evidence
 is not automatically collected. The send-to-actual-start target is ≤1 second,
 with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizing

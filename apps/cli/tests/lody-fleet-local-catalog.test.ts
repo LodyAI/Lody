@@ -653,6 +653,7 @@ describe('LodyFleet remote authentication boundary', () => {
       };
     };
     const MINUTE = 60_000;
+    const LIMIT = 24 * 60 * MINUTE;
 
     it('keeps an encrypted workspace attached through a transient error', async () => {
       try {
@@ -669,13 +670,13 @@ describe('LodyFleet remote authentication boundary', () => {
       try {
         const { detached, attached, revoked, fail } = await offlineHarness();
         fail(new Error('[Server Error] e2ee_projection_corrupt'));
-        await vi.advanceTimersByTimeAsync(15 * MINUTE - 1);
+        await vi.advanceTimersByTimeAsync(LIMIT - 1);
         expect(detached).toEqual(['plain']);
         await vi.advanceTimersByTimeAsync(1);
         expect(detached).toEqual(['plain', 'encrypted']);
         // A suspension is not a revocation: nothing is cleaned up.
         expect(revoked).toEqual([]);
-        await vi.advanceTimersByTimeAsync(24 * 60 * MINUTE);
+        await vi.advanceTimersByTimeAsync(LIMIT);
         expect(detached).toEqual(['plain', 'encrypted']);
         expect(attached).toEqual([]);
       } finally {
@@ -689,7 +690,7 @@ describe('LodyFleet remote authentication boundary', () => {
         fail(new Error('[Server Error] e2ee_projection_corrupt'));
         await vi.advanceTimersByTimeAsync(10 * MINUTE);
         confirm();
-        await vi.advanceTimersByTimeAsync(15 * MINUTE - 1);
+        await vi.advanceTimersByTimeAsync(LIMIT - 1);
         expect(detached).toEqual(['plain']);
         await vi.advanceTimersByTimeAsync(1);
         expect(detached).toEqual(['plain', 'encrypted']);
@@ -702,7 +703,7 @@ describe('LodyFleet remote authentication boundary', () => {
       try {
         const { detached, fail, clocks } = await offlineHarness();
         fail(new Error('[Server Error] e2ee_projection_corrupt'));
-        for (let round = 0; round < 3; round += 1) {
+        for (let round = 0; round < 288; round += 1) {
           await vi.advanceTimersByTimeAsync(5 * MINUTE);
           clocks.wallOffset -= 5 * MINUTE;
         }
@@ -716,13 +717,13 @@ describe('LodyFleet remote authentication boundary', () => {
       try {
         const { detached, attached, revoked, fail, confirm } = await offlineHarness();
         fail(new Error('[Server Error] e2ee_projection_corrupt'));
-        await vi.advanceTimersByTimeAsync(16 * MINUTE);
+        await vi.advanceTimersByTimeAsync(LIMIT + MINUTE);
         confirm();
         await vi.advanceTimersByTimeAsync(0);
         expect(attached).toEqual(['encrypted']);
         expect(revoked).toEqual([]);
         // The limit keeps applying while the list stays down.
-        await vi.advanceTimersByTimeAsync(15 * MINUTE);
+        await vi.advanceTimersByTimeAsync(LIMIT);
         expect(detached).toEqual(['plain', 'encrypted', 'encrypted']);
       } finally {
         vi.useRealTimers();
@@ -735,7 +736,7 @@ describe('LodyFleet remote authentication boundary', () => {
         fail(new Error('[Server Error] e2ee_projection_corrupt'));
         await vi.advanceTimersByTimeAsync(5 * MINUTE);
         listRecovered();
-        await vi.advanceTimersByTimeAsync(60 * MINUTE);
+        await vi.advanceTimersByTimeAsync(2 * LIMIT);
         expect(detached).toEqual(['plain']);
       } finally {
         vi.useRealTimers();

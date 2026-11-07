@@ -451,6 +451,7 @@ type CliE2eeWorkspaceOptions = {
   onUnavailable: () => void;
   /** A latest ledger read verified in full. `startedAt` was taken before its network I/O. */
   onAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
+  onWindowNotice?: (active: boolean) => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
@@ -1202,6 +1203,7 @@ async function openWorkspaceOwned(
       while (pending && !isClosed()) {
         pending = false;
         const startedAt = authorityStamp();
+        const confirmRead = opened.executionAuthorization.beginLatestRead();
         let status = await run(opened.runtime.status());
         const trusted = status;
         let movedBack = false;
@@ -1234,8 +1236,10 @@ async function openWorkspaceOwned(
           if (
             page.checkpoint.length !== checkpoint.length ||
             page.checkpoint.headHash !== checkpoint.headHash
-          )
+          ) {
+            opened.executionAuthorization.endOutageWindow();
             throw new Error('e2ee_ledger_checkpoint_changed');
+          }
           // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
           movedBack ||=
             page.checkpoint.length < trusted.length ||
@@ -1253,7 +1257,11 @@ async function openWorkspaceOwned(
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
         // Later key work has its own failures; they do not undo this confirmation.
-        if (!cursor && !closed && !movedBack) options.onAuthorityConfirmed?.(startedAt);
+        if (movedBack) opened.executionAuthorization.endOutageWindow();
+        else if (!cursor && !closed) {
+          confirmRead();
+          options.onAuthorityConfirmed?.(startedAt);
+        }
         if (!closed) {
           if (pairing) {
             await confirmPairing(pairing);

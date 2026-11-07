@@ -51,7 +51,7 @@ import {
   createCliSqliteRepoStore,
   type CliSqliteRepoStore,
 } from '../src/lib/loro/sqlite-repo-store';
-import { CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
+import { CloudE2eeLedgerOutage, CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
 import { randomUUID } from 'node:crypto';
 import { resetCliE2eeIdentity } from '../src/lib/e2ee/reset-identity';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
@@ -1127,6 +1127,36 @@ describe('machine E2EE local runtime', () => {
         await vi.advanceTimersByTimeAsync(250);
         await host.refresh();
         expect(authorityConfirmations.length).toBeGreaterThan(beforeChangedCheckpoint);
+        // A background read that moves back ends an outage window, and a later read reopens one.
+        const answer = cloud.getHistory;
+        const outageRead = async (): Promise<never> => {
+          throw new CloudE2eeLedgerOutage();
+        };
+        const authorize = () =>
+          Effect.runPromise(host!.authorizeExecution('workspace', fixture.sender));
+        cloud.getHistory = outageRead;
+        const held = await authorize();
+        if (held._tag !== 'Authorized') throw new Error('expected an outage authorization');
+        expect(held.isCurrent?.()).toBe(true);
+        cloud.getHistory = async () => page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(held.isCurrent?.()).toBe(false);
+        cloud.getHistory = outageRead;
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Denied' });
+        cloud.getHistory = async () => page(fixture.records);
+        await host.refresh();
+        cloud.getHistory = outageRead;
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Authorized' });
+        // An ordinary 15-minute grant does not depend on the window.
+        cloud.getHistory = async () => page(fixture.records);
+        await host.refresh();
+        const fresh = await authorize();
+        if (fresh._tag !== 'Authorized') throw new Error('expected a fresh authorization');
+        cloud.getHistory = async () => page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(fresh.isCurrent?.()).toBe(true);
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Authorized' });
+        cloud.getHistory = answer;
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
@@ -5548,9 +5578,13 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
     monotonicTimeNanos: Effect.sync(() => BigInt(io.monotonic) * 1_000_000n),
     sleep: (duration) => baseClock.sleep(duration),
   };
-  const makeGate = (sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing']) =>
+  const makeGate = (
+    sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing'],
+    onWindowNotice?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['onWindowNotice']
+  ) =>
     makeCliE2eeExecutionAuthorization({
       sharing,
+      onWindowNotice,
       workspaceId: 'workspace',
       credential: fixture.credential,
       runtime,
@@ -5632,7 +5666,7 @@ const automationOrigin = {
 
 /** Real ledger, signed dispatch originals, watcher promotion and start claim. */
 const queuedInputHarness = Effect.fnUntraced(function* (directory: string, shared: boolean) {
-  const { fixture, runtime, makeGate, device } = yield* executionFixture(directory);
+  const { fixture, runtime, makeGate, device, io } = yield* executionFixture(directory);
   const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'member'), wrapper });
   const member = yield* custody.prepareDevice();
   const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(71)));
@@ -6027,6 +6061,9 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     rewriteRow,
     writeMemberRow,
     execution,
+    fixture,
+    gate,
+    io,
     machineKey,
     member,
     memberRpc,
@@ -7514,6 +7551,304 @@ describe('machine execution authorization freshness', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  describe('backend outage windows', () => {
+    const FIFTEEN_MINUTES = 900_000;
+    const HOUR = 3_600_000;
+    const withOutage = (
+      body: (
+        input: Effect.Success<ReturnType<typeof executionFixture>>
+      ) => Effect.Effect<void, unknown>
+    ) =>
+      (async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'execution-outage-'));
+        try {
+          await execute(
+            Effect.gen(function* () {
+              const fixture = yield* executionFixture(directory);
+              const { gate, io } = fixture;
+              expect(
+                yield* gate.authorizeExecution('workspace', fixture.fixture.sender)
+              ).toMatchObject({ _tag: 'Authorized' });
+              io.respond = async () => {
+                throw new CloudE2eeLedgerOutage();
+              };
+              yield* body(fixture);
+            })
+          );
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      })();
+    const at = (io: { wall: number; monotonic: number }, ms: number) => {
+      io.wall = io.monotonic = ms;
+    };
+
+    it('keeps the same member executing for 4 hours from the last successful read', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+            principal: 'owner',
+          });
+          at(io, 4 * HOUR - 1);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          at(io, 4 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
+    it('keeps the same member reading for 24 hours from the last successful read', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 24 * HOUR - 1);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+          at(io, 24 * HOUR);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
+    it('ends a window on any other read failure until a read succeeds', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          io.respond = async () => {
+            throw new Error('e2ee_device_unauthorized');
+          };
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          at(io, FIFTEEN_MINUTES + 120_000);
+          io.respond = async () => {
+            throw new CloudE2eeLedgerOutage();
+          };
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('does not relax when no read has succeeded', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'execution-outage-cold-'));
+      try {
+        await execute(
+          Effect.gen(function* () {
+            const { fixture, gate, io } = yield* executionFixture(directory);
+            io.respond = async () => {
+              throw new CloudE2eeLedgerOutage();
+            };
+            expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it('ends a window when the clocks disagree about elapsed time', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          io.monotonic = FIFTEEN_MINUTES;
+          io.wall = 2 * HOUR;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
+    it('does not wait on the backend for every request during an outage', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          yield* gate.authorizeExecution('workspace', fixture.sender);
+          const reads = io.reads;
+          at(io, FIFTEEN_MINUTES + 1_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(io.reads).toBe(reads);
+          at(io, FIFTEEN_MINUTES + 61_000);
+          yield* gate.authorizeExecution('workspace', fixture.sender);
+          yield* Effect.yieldNow;
+          expect(io.reads).toBe(reads + 1);
+        })
+      ));
+
+    it('counts a background ledger read as the last successful read', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 3 * HOUR);
+          gate.beginLatestRead()();
+          at(io, 6 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('reports the window while it is in use', () =>
+      withOutage(({ fixture, io, makeGate }) =>
+        Effect.gen(function* () {
+          const notices: boolean[] = [];
+          const noticed = yield* makeGate(undefined, (notice) => notices.push(notice));
+          io.respond = async () => page(fixture.records);
+          yield* noticed.authorizeExecution('workspace', fixture.sender);
+          io.respond = async () => {
+            throw new CloudE2eeLedgerOutage();
+          };
+          at(io, FIFTEEN_MINUTES);
+          yield* noticed.authorizeExecution('workspace', fixture.sender);
+          expect(notices).toEqual([true]);
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 120_000);
+          yield* noticed.authorizeExecution('workspace', fixture.sender);
+          expect(notices).toEqual([true, false]);
+        })
+      ));
+
+    it('invalidates an outage authorization when the window ends', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          expect(granted.isCurrent?.()).toBe(true);
+          io.respond = async () => {
+            throw new Error('e2ee_device_unauthorized');
+          };
+          at(io, FIFTEEN_MINUTES + 120_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(granted.isCurrent?.()).toBe(false);
+        })
+      ));
+
+    it('needs a successful read after the clocks disagree', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          at(io, FIFTEEN_MINUTES + 120_000);
+          io.wall += 2 * HOUR;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 360_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('ends the window when a held authorization sees the clocks disagree', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          io.wall += 2 * HOUR;
+          expect(granted.isCurrent?.()).toBe(false);
+          at(io, FIFTEEN_MINUTES + 120_000);
+          expect(granted.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps the read window after a held execution authorization expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          at(io, 5 * HOUR);
+          expect(granted.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps the longer read window after execution expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 5 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps another member at 15 minutes', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'execution-outage-member-'));
+      try {
+        await execute(
+          Effect.gen(function* () {
+            const { gate, io, member } = yield* queuedInputHarness(directory, true);
+            const memberDevice = hex(member.publicKey.toBytes());
+            expect(yield* gate.authorizeExecution('workspace', memberDevice)).toMatchObject({
+              _tag: 'Authorized',
+              principal: 'member',
+            });
+            io.respond = async () => {
+              throw new CloudE2eeLedgerOutage();
+            };
+            at(io, FIFTEEN_MINUTES);
+            expect(yield* gate.authorizeExecution('workspace', memberDevice)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+            expect(yield* gate.authorizeRead('workspace', memberDevice)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
   });
 
   it('shares concurrent refreshes, preserves siblings after cancellation, and retries a failed read', async () => {

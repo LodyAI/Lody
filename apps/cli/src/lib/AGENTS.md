@@ -59,7 +59,7 @@
   `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
   Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
   the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- A failing workspace list detaches encrypted runtimes only on explicit refusal or revocation, or after 15 unconfirmed minutes until reconfirmed.
+- A failing workspace list detaches encrypted runtimes only on explicit refusal or revocation, or after 24 unconfirmed hours until reconfirmed.
 - Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
   reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
   errors stay errors. Retain originals, failure receipts and usable ordinary rows.
