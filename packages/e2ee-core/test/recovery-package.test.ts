@@ -36,8 +36,17 @@ import {
 } from '../src/internal/recovery/crypto';
 import { deriveRecoveryAccessCredential } from '../src/internal/recovery/credential';
 import { generateRecoveryPackage } from '../src/internal/recovery/identity';
+import vaultVector from './recovery-vault-vector.json';
+import {
+  useCanonicalSecret,
+  vaultPrfInput,
+  verifiedPasskeyPrf,
+} from '../src/internal/recovery/crypto';
 import {
   createRecoveryVault,
+  openRecoveryVault,
+  openRecoveryVaultWithPasskey,
+  ownRecoveryPackage,
   parseRecoveryFile,
   wipeRecoveryPackage,
   type RecoveryPrivatePackage,
@@ -316,4 +325,139 @@ describe('recovery access credential lifetime', () => {
       expect(holds(buffer, credential)).toBe(false);
     }
   });
+});
+
+describe('independently encoded recovery vault', () => {
+  const bytes = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
+  const hexOf = (value: Uint8Array) => Buffer.from(value).toString('hex');
+  const entry = (value: { entryId: string; revision: number; body: string }): VaultCiphertext => ({
+    entryId: value.entryId,
+    revision: value.revision,
+    body: bytes(value.body),
+  });
+  const v = vaultVector;
+  const expectedPackage = {
+    ...v.package,
+    signingPublic: bytes(v.package.signingPublic),
+    encryptionPublic: bytes(v.package.encryptionPublic),
+    signingPrivate: bytes(v.package.signingPrivate),
+    encryptionPrivate: bytes(v.package.encryptionPrivate),
+    trust: { ...v.package.trust, genesisRecord: bytes(v.package.trust.genesisRecord) },
+  };
+  const populated = (index: VaultCiphertext) =>
+    Effect.gen(function* () {
+      const stores = memoryStores();
+      for (const wrap of [v.fileWrap, v.prfWrap, v.workspaceEntry])
+        yield* stores.store.putImmutable(v.vaultId, entry(wrap));
+      yield* stores.store.compareAndSwapIndex(v.vaultId, null, index, []);
+      return stores;
+    });
+  const failureCode = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.flip,
+      Effect.map((error) => (error as { code?: string }).code)
+    );
+
+  it('keeps the recovery file, every wrap and the package bytes', () => {
+    // Created outside this codebase; a failure means existing vaults stop opening.
+    const file = bytes(v.recoveryFile);
+    expect(parseRecoveryFile(file)).toEqual({
+      vaultId: v.vaultId,
+      locator: v.locator,
+      unlock: bytes(v.unlock),
+    });
+    expect(hexOf(canonical(['vault-v1', 1, v.vaultId, v.locator, bytes(v.unlock)]))).toBe(
+      v.recoveryFile
+    );
+    expect(vaultPrfInput()).toEqual(bytes(v.prfInput));
+    for (const [wrap, secret, purpose] of [
+      [v.fileWrap, v.unlock, 'file-wrap'],
+      [v.prfWrap, v.prfOutput, 'prf-wrap'],
+    ] as const) {
+      expect(ciphertextDigest(entry(wrap))).toBe(wrap.digest);
+      expect(decryptVault(bytes(secret), v.vaultId, entry(wrap), purpose)).toEqual(bytes(v.master));
+    }
+    const plain = decryptVault(
+      bytes(v.master),
+      v.vaultId,
+      entry(v.workspaceEntry),
+      'workspace-entry'
+    );
+    expect(plain).toEqual(bytes(v.workspaceEntry.plaintext));
+    const owned = useCanonicalSecret(plain, (value) =>
+      ownRecoveryPackage(value as RecoveryPrivatePackage)
+    );
+    expect(owned).toEqual(expectedPackage);
+    expect(hexOf(canonical(owned))).toBe(v.workspaceEntry.plaintext);
+    for (const index of [v.indexFirst, v.index]) {
+      expect(ciphertextDigest(entry(index))).toBe(index.digest);
+      expect(decryptVault(bytes(v.master), v.vaultId, entry(index), 'index')).toEqual(
+        bytes(index.plaintext)
+      );
+    }
+  });
+
+  it('opens with the recovery file and with the passkey, and reads the index and package', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const byFile = yield* openRecoveryVault({
+            ...(yield* populated(entry(v.index))),
+            recoveryFile: bytes(v.recoveryFile),
+          });
+          const index = yield* byFile.readIndex();
+          expect(index.value).toEqual(v.expectedIndex);
+          expect(yield* byFile.readEntry(v.expectedIndex.entries[0]!)).toEqual(expectedPackage);
+          const prf = yield* verifiedPasskeyPrf({
+            credentialId: v.credentialId,
+            userVerified: true,
+            extension: { results: { first: bytes(v.prfOutput).slice().buffer } },
+          });
+          const byPasskey = yield* openRecoveryVaultWithPasskey({
+            ...(yield* populated(entry(v.index))),
+            vaultId: v.vaultId,
+            locator: v.locator,
+            credential: prf,
+          });
+          expect((yield* byPasskey.readIndex()).value).toEqual(v.expectedIndex);
+        })
+      )
+    ));
+
+  it.each(v.negative.recoveryFiles)('refuses a recovery file with $name', (vector) => {
+    expect(() => parseRecoveryFile(bytes(vector.hex))).toThrow();
+  });
+
+  it.each(v.negative.ciphertexts)('refuses a ciphertext with $name', (vector) => {
+    expect(() =>
+      decryptVault(
+        bytes(vector.secret),
+        vector.vaultId,
+        entry(vector.entry),
+        vector.purpose as 'file-wrap' | 'prf-wrap'
+      )
+    ).toThrow(expect.objectContaining({ code: 'authentication' }));
+  });
+
+  it.each(v.negative.packages)('refuses a package with $name', (vector) => {
+    expect(() =>
+      useCanonicalSecret(bytes(vector.hex), (value) =>
+        ownRecoveryPackage(value as RecoveryPrivatePackage)
+      )
+    ).toThrow();
+  });
+
+  it.each(v.negative.indexes)('refuses an index with $name', (vector) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const vault = yield* openRecoveryVault({
+            ...(yield* populated(entry(vector.entry))),
+            recoveryFile: bytes(v.recoveryFile),
+          });
+          expect(yield* failureCode(vault.readIndex())).toBe(vector.code);
+        })
+      )
+    )
+  );
 });

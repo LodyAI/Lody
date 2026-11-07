@@ -73,7 +73,7 @@ This note predates the ledger user ID revision (#2365) and covers neither the fo
 | Comparison code | `snapshot-digest/v4` in [`snapshot-codec.ts`](../../../../packages/e2ee-core/src/internal/ledger/snapshot-codec.ts); QR `lody-ledger:1:<version>:<head>:<digest>` | None for the state digest or snapshot v4 bytes |
 | HPKE and epoch key envelopes | [`hpke.ts`](../../../../packages/e2ee-core/src/internal/crypto/hpke.ts), [`envelope.ts`](../../../../packages/e2ee-core/src/internal/keys/envelope.ts) | HPKE and epoch history vectors; none for a complete signed envelope |
 | Short-code pairing | [`pairing`](../../../../packages/e2ee-core/src/internal/pairing/index.ts) | `pairing-vector.json` |
-| Recovery vault, outside the MVP | [`vault.ts`](../../../../packages/e2ee-core/src/internal/recovery/vault.ts) | Recovery credential only; the vault file needs vectors before it ships |
+| Recovery vault, outside the MVP | [`vault.ts`](../../../../packages/e2ee-core/src/internal/recovery/vault.ts) | Recovery credential vector, and `recovery-vault-vector.json` for the recovery file, the file-wrap, prf-wrap, workspace-entry and index ciphertexts, the `formatVersion: 1` package and the passkey index, with negative inputs |
 
 ## Vector and domain review
 

@@ -471,6 +471,13 @@ Intended behavior is the text above. Inspected on 2026-11-05 and not executed:
 - No package outside core and the Lab consumes the vault. [#2125](https://github.com/LodyAI/Lody/pull/2125)
   is an unmerged draft with conflicts.
 
+Executed: [`recovery-vault-vector.json`](../../packages/e2ee-core/test/recovery-vault-vector.json),
+written by an independent generator, fixes the recovery file, the file-wrap, prf-wrap,
+workspace-entry and index ciphertexts, the `formatVersion: 1` package and the passkey
+index, with inputs that must be rejected. `recovery-package.test.ts` opens it through
+the recovery file and through a passkey PRF. Its nonces are fixed only for
+reproducibility.
+
 External sources: [WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) for `enabled`,
 optional registration results, the user-verified PRF, `user.id` overwrite and RP scope;
 [Apple](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct)
