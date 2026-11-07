@@ -40,6 +40,8 @@ const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
+  onEncryptedAuthorityConfirmed?: (startedAt: number) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -133,6 +135,7 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
+        onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
         onRemoved: async (reason, recorded) => {
           const owner = await removalOwner;
           if (!owner) return;

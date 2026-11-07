@@ -601,17 +601,24 @@ describe('LodyFleet remote authentication boundary', () => {
         runtimes: Map<string, unknown>;
         refreshRuntimeState: () => void;
         remoteBridge: unknown;
+        confirmEncryptedAuthority: (workspaceId: string, startedAt: number) => void;
       };
       fleet.applyRemoteWorkspaceList = async () => {};
       const detached: string[] = [];
+      const attached: string[] = [];
+      const revoked: string[] = [];
       const runtime = (id: string, contentMode: string) => ({
         workspace: { id, contentMode },
         lody: {
           detachRemoteBridge: async () => {
             detached.push(id);
           },
-          attachRemoteBridge: async () => {},
-          handleRemoteAccessRevoked: async () => {},
+          attachRemoteBridge: async () => {
+            attached.push(id);
+          },
+          handleRemoteAccessRevoked: async () => {
+            revoked.push(id);
+          },
         },
       });
       fleet.refreshRuntimeState = () => {};
@@ -623,18 +630,89 @@ describe('LodyFleet remote authentication boundary', () => {
         userId: 'user-1',
         machineId: 'machine-1' as MachineId,
         machineName: 'host',
-        getRuntime: (id) => fleet.runtimes.get(id) as never,
+        getRuntime: (id) => (fleet.runtimes.get(id) as { lody: never } | undefined)?.lody,
       });
       await fleet.startWorkspaceSubscription({ waitForInitial: false });
       push({ status: 'authorized', userId: 'user-1', workspaces: [] });
-      return { detached, fail };
+      return {
+        detached,
+        attached,
+        revoked,
+        fail,
+        confirm: () => fleet.confirmEncryptedAuthority('encrypted', Date.now()),
+        listRecovered: () => push({ status: 'authorized', userId: 'user-1', workspaces: [] }),
+      };
     };
+    const MINUTE = 60_000;
 
     it('keeps an encrypted workspace attached through a transient error', async () => {
       try {
         const { detached, fail } = await offlineHarness();
         fail(new Error('[Server Error] e2ee_projection_corrupt'));
         await vi.advanceTimersByTimeAsync(20_000);
+        expect(detached).toEqual(['plain']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps an encrypted workspace attached until its authority confirmation is too old', async () => {
+      try {
+        const { detached, attached, revoked, fail } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        await vi.advanceTimersByTimeAsync(15 * MINUTE - 1);
+        expect(detached).toEqual(['plain']);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(detached).toEqual(['plain', 'encrypted']);
+        // A suspension is not a revocation: nothing is cleaned up.
+        expect(revoked).toEqual([]);
+        await vi.advanceTimersByTimeAsync(24 * 60 * MINUTE);
+        expect(detached).toEqual(['plain', 'encrypted']);
+        expect(attached).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('counts the limit from the last confirmation, not the first list error', async () => {
+      try {
+        const { detached, fail, confirm } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        await vi.advanceTimersByTimeAsync(10 * MINUTE);
+        confirm();
+        await vi.advanceTimersByTimeAsync(15 * MINUTE - 1);
+        expect(detached).toEqual(['plain']);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(detached).toEqual(['plain', 'encrypted']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('resumes a suspended workspace once its authority is confirmed', async () => {
+      try {
+        const { detached, attached, revoked, fail, confirm } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        await vi.advanceTimersByTimeAsync(16 * MINUTE);
+        confirm();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(attached).toEqual(['encrypted']);
+        expect(revoked).toEqual([]);
+        // The limit keeps applying while the list stays down.
+        await vi.advanceTimersByTimeAsync(15 * MINUTE);
+        expect(detached).toEqual(['plain', 'encrypted', 'encrypted']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops the limit when the workspace list recovers', async () => {
+      try {
+        const { detached, fail, listRecovered } = await offlineHarness();
+        fail(new Error('[Server Error] e2ee_projection_corrupt'));
+        await vi.advanceTimersByTimeAsync(5 * MINUTE);
+        listRecovered();
+        await vi.advanceTimersByTimeAsync(60 * MINUTE);
         expect(detached).toEqual(['plain']);
       } finally {
         vi.useRealTimers();

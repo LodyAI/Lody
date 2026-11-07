@@ -165,11 +165,19 @@ export class RemoteBridge {
     entries: Iterable<{ workspaceId: string; runtime: RemoteBridgeRuntime; encrypted: boolean }>
   ): Promise<void> {
     for (const { workspaceId, runtime, encrypted } of entries) {
-      if (encrypted) continue;
-      this.allowedWorkspaceIds.delete(workspaceId);
-      this.clearAttachRetry(workspaceId);
-      await this.detach(runtime);
+      if (!encrypted) await this.markWorkspaceOffline(workspaceId, runtime);
     }
+  }
+
+  async markWorkspaceOffline(workspaceId: string, runtime: RemoteBridgeRuntime): Promise<void> {
+    this.allowedWorkspaceIds.delete(workspaceId);
+    this.clearAttachRetry(workspaceId);
+    await this.detach(runtime);
+  }
+
+  async resumeWorkspace(workspaceId: string): Promise<void> {
+    this.allowedWorkspaceIds.add(workspaceId);
+    await this.attachRuntimeIfAllowed(workspaceId);
   }
 
   shutdown(): void {

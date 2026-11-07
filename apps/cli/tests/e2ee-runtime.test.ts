@@ -996,6 +996,7 @@ describe('machine E2EE local runtime', () => {
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      const authorityConfirmations: number[] = [];
       try {
         const accountId = 'ledger-retry-account';
         const root = join(
@@ -1064,8 +1065,10 @@ describe('machine E2EE local runtime', () => {
           onUnavailable: () => {
             queueMicrotask(() => retryFailed());
           },
+          onAuthorityConfirmed: (startedAt) => authorityConfirmations.push(startedAt),
         });
         await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(0);
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
@@ -1092,6 +1095,7 @@ describe('machine E2EE local runtime', () => {
           };
         };
         history = rejectedHistory();
+        const confirmedBefore = authorityConfirmations.length;
         await host.refresh();
         const before = reads;
         for (const [index, delay] of [250, 1_000, 4_000].entries()) {
@@ -1108,7 +1112,9 @@ describe('machine E2EE local runtime', () => {
         history = page(fixture.records);
         await vi.advanceTimersByTimeAsync(100_000);
         expect(reads - before).toBe(3);
+        expect(authorityConfirmations).toHaveLength(confirmedBefore);
         await host.refresh(); // Explicit retry resets the bounded episode.
+        expect(authorityConfirmations.length).toBeGreaterThan(confirmedBefore);
         await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
         history = rejectedHistory();
         await host.refresh();
