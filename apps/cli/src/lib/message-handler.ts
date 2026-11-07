@@ -1,9 +1,4 @@
-import {
-  registerLocalAttachment,
-  downloadLocalAttachmentChunk,
-  resolveLocalAttachment,
-  rebindLocalAttachment,
-} from './session-local-attachments';
+import { LocalAttachmentStore } from './session-local-attachments';
 import type {
   SorbetCustomProvider,
   SorbetCustomProviderInput,
@@ -873,6 +868,7 @@ export class MessageHandler {
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
+  private localAttachments: LocalAttachmentStore;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
   private turnPostProcessingService: TurnPostProcessingService;
@@ -2548,15 +2544,8 @@ export class MessageHandler {
     for (const block of args.inputBlocks) {
       if (block.type === 'local_attachment') {
         if (!args.userTurnId) throw new Error('Local attachment requires its original turn');
-        const resolved = await resolveLocalAttachment(
-          path.join(
-            getLodyDataDir(),
-            'local-attachments',
-            crypto.createHash('sha256').update(this.userId).digest('hex')
-          ),
+        const resolved = await this.localAttachments.resolve(
           {
-            workspaceId: args.workspaceId,
-            machineId: this.machineId,
             sessionId: args.sessionId,
             turnId: args.userTurnId,
           },
@@ -3145,6 +3134,11 @@ export class MessageHandler {
     this.machineName = config.machineName;
     this.cliVersion = config.cliVersion;
     this.machineId = config.machineId as MachineId;
+    this.localAttachments = new LocalAttachmentStore({
+      accountId: this.userId,
+      workspaceId: this.workspaceId,
+      machineId: this.machineId,
+    });
     this.sessionActivePresence = new SessionActivePresenceControllerLegacy(
       this.workspaceDocument,
       this.machineId,
@@ -4046,22 +4040,7 @@ export class MessageHandler {
       turnId: string
     ) => {
       if (this.encryptedAttachments) throw new Error('Protected local attachments are unavailable');
-      const scope = {
-        workspaceId: this.workspaceId,
-        machineId: this.machineId,
-        sessionId: attachment.sessionId,
-        turnId: attachment.turnId,
-      };
-      return await rebindLocalAttachment(
-        path.join(
-          getLodyDataDir(),
-          'local-attachments',
-          crypto.createHash('sha256').update(this.userId).digest('hex')
-        ),
-        scope,
-        { ...scope, sessionId, turnId },
-        attachment
-      );
+      return this.localAttachments.inherit(attachment, { sessionId, turnId });
     };
     this.sessionForkService = new SessionForkService({
       rebindLocalAttachment: inheritLocalAttachment,
@@ -7533,15 +7512,7 @@ export class MessageHandler {
     request: import('@lody/shared').FileDownloadRequest
   ): Promise<import('@lody/shared').FileDownloadResponse> {
     if (this.encryptedAttachments) return { status: 'error', code: 'unsupported_protocol' };
-    return downloadLocalAttachmentChunk(
-      path.join(
-        getLodyDataDir(),
-        'local-attachments',
-        crypto.createHash('sha256').update(this.userId).digest('hex')
-      ),
-      { workspaceId: this.workspaceId, machineId: this.machineId, sessionId: request.sessionId },
-      request
-    );
+    return this.localAttachments.download(request);
   }
 
   async handleLocalMachineRpc(
@@ -8125,15 +8096,8 @@ export class MessageHandler {
             this.encryptedAttachments
           )
             throw new Error('Local attachment is unavailable on this machine');
-          const resolved = await resolveLocalAttachment(
-            path.join(
-              getLodyDataDir(),
-              'local-attachments',
-              crypto.createHash('sha256').update(this.userId).digest('hex')
-            ),
+          const resolved = await this.localAttachments.resolve(
             {
-              workspaceId: this.workspaceId,
-              machineId: this.machineId,
               sessionId: message.sessionId,
               turnId: message.attachment.turnId,
             },
@@ -8164,14 +8128,7 @@ export class MessageHandler {
             this.encryptedAttachments
           )
             throw new Error('Local attachment registration is unavailable for this target');
-          const attachment = await registerLocalAttachment(
-            path.join(
-              getLodyDataDir(),
-              'local-attachments',
-              crypto.createHash('sha256').update(this.userId).digest('hex')
-            ),
-            message
-          );
+          const attachment = await this.localAttachments.register(message);
           context.send({
             type: 'session/attachment-register_response',
             sessionId: message.sessionId,

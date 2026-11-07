@@ -2,11 +2,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import {
-  registerLocalAttachment,
-  rebindLocalAttachment,
-  resolveLocalAttachment,
-} from '../lib/session-local-attachments';
+import { LocalAttachmentStore } from '../lib/session-local-attachments';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -1278,7 +1274,8 @@ it('inherits local files into a same-machine fork without losing the original bi
       sessionId: sourceSessionId,
       turnId: 'user-1',
     };
-    const attachment = await registerLocalAttachment(root, {
+    const store = new LocalAttachmentStore({ ...scope, accountId: 'test' }, root);
+    const attachment = await store.register({
       ...scope,
       referenceId: randomUUID(),
       path: source,
@@ -1293,7 +1290,7 @@ it('inherits local files into a same-machine fork without losing the original bi
     const harness = createForkHarness(undefined, {
       sourceHistory: history,
       rebindLocalAttachment: (item, sessionId, turnId) =>
-        rebindLocalAttachment(root, scope, { ...scope, sessionId, turnId }, item),
+        store.inherit(item, { sessionId, turnId }),
     });
     harness.targetDoc.sessionData.snapshots.copyFrom = target.snapshots.copyFrom;
     expect((await harness.service.fork(forkSpec)).success).toBe(true);
@@ -1302,12 +1299,11 @@ it('inherits local files into a same-machine fork without losing the original bi
       { type: 'local_attachment', sessionId: targetSessionId },
     ]);
     expect(inherited.inputConfig?.inputBlocks).toEqual(inherited.items);
-    const resolved = await resolveLocalAttachment(
-      root,
+    const resolved = await store.resolve(
       { ...scope, sessionId: targetSessionId },
       inherited.items[0] as typeof attachment
     );
-    expect(resolved).toEqual(await resolveLocalAttachment(root, scope, attachment));
+    expect(resolved).toEqual(await store.resolve(scope, attachment));
   } finally {
     target.dispose();
     await rm(root, { recursive: true, force: true });

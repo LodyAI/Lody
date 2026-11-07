@@ -2,11 +2,7 @@ import { mkdtemp, writeFile, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import {
-  registerLocalAttachment,
-  rebindLocalAttachment,
-  resolveLocalAttachment,
-} from '../lib/session-local-attachments';
+import { LocalAttachmentStore } from '../lib/session-local-attachments';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -666,7 +662,8 @@ it.each([false, true])(
       const source = path.join(root, 'input.txt');
       await writeFile(source, 'synthetic');
       const scope = { workspaceId: 'workspace-1', machineId, sessionId, turnId: 'user-2' };
-      const attachment = await registerLocalAttachment(root, {
+      const store = new LocalAttachmentStore({ ...scope, accountId: 'test' }, root);
+      const attachment = await store.register({
         ...scope,
         referenceId: randomUUID(),
         path: source,
@@ -680,7 +677,7 @@ it.each([false, true])(
       const harness = createHarness({
         history,
         rebindLocalAttachment: (item, targetSession, turnId) =>
-          rebindLocalAttachment(root, scope, { ...scope, sessionId: targetSession, turnId }, item),
+          store.inherit(item, { sessionId: targetSession, turnId }),
       });
       if (missing) await unlink(source);
       const result = await harness.service.editAndResend({
@@ -702,11 +699,7 @@ it.each([false, true])(
         )!;
         expect(replacement.items).toMatchObject([{ type: 'local_attachment', turnId: 'user-3' }]);
         await expect(
-          resolveLocalAttachment(
-            root,
-            { ...scope, turnId: 'user-3' },
-            replacement.items[0] as typeof attachment
-          )
+          store.resolve({ ...scope, turnId: 'user-3' }, replacement.items[0] as typeof attachment)
         ).resolves.toMatchObject({ sizeBytes: 9 });
       }
     } finally {

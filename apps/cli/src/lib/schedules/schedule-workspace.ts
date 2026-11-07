@@ -1,7 +1,4 @@
-import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { rebindLocalAttachment } from '../session-local-attachments';
+import { LocalAttachmentStore } from '../session-local-attachments';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -90,6 +87,11 @@ export async function createScheduleWorkspace(args: {
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
+  const localAttachments = new LocalAttachmentStore({
+    accountId: auth.userId,
+    workspaceId,
+    machineId: auth.machineId,
+  });
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
   const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
@@ -235,22 +237,11 @@ export async function createScheduleWorkspace(args: {
               block.turnId !== 'schedule:' + run.scheduleId
             )
               throw new Error('Local attachment belongs to another scheduled message');
-            const source = {
-              workspaceId,
-              machineId: auth.machineId,
+
+            return localAttachments.inherit(block, {
               sessionId: run.sessionId,
-              turnId: block.turnId,
-            };
-            return rebindLocalAttachment(
-              path.join(
-                getLodyDataDir(),
-                'local-attachments',
-                createHash('sha256').update(auth.userId).digest('hex')
-              ),
-              source,
-              { ...source, turnId: run.userTurnId },
-              block
-            );
+              turnId: run.userTurnId,
+            });
           })
         );
         prepared = withScheduledMessageInput(
