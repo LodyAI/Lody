@@ -71,7 +71,7 @@ final class NativeAuthProviders: NSObject, ASAuthorizationControllerDelegate, AS
           GIDSignIn.sharedInstance.signOut()
           if let token, !token.isEmpty { reply.resume(returning: token) }
           else if let error = error as NSError?, error.domain == kGIDSignInErrorDomain,
-                  error.code == GIDSignInErrorCode.canceled.rawValue { reply.resume(throwing: CancellationError()) }
+                  error.code == GIDSignInError.canceled.rawValue { reply.resume(throwing: CancellationError()) }
           else { reply.resume(throwing: AuthFailure(message: String(localized: "auth.native.failed", bundle: .lody))) }
         }
       }
