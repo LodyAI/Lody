@@ -1,0 +1,15 @@
+{
+  "replace-one-line": "===================================================================\n--- a/docs/superpowers/.diff-check.md\n+++ b/docs/superpowers/.diff-check.md\n@@ -1,3 +1,3 @@\n a\n-b\n+hello\n c\n",
+  "new-file": "===================================================================\n--- a/src/new.ts\n+++ b/src/new.ts\n@@ -0,0 +1,2 @@\n+export const n = 1;\n+export const m = 2;\n",
+  "deleted-file": "===================================================================\n--- a/src/old.ts\n+++ b/src/old.ts\n@@ -1,2 +0,0 @@\n-one\n-two\n",
+  "identical": "===================================================================\n--- a/README.md\n+++ b/README.md\n",
+  "new-side-missing-newline": "===================================================================\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n x\n-y\n+y\n\\ No newline at end of file\n",
+  "both-missing-newline": "===================================================================\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n x\n-y\n\\ No newline at end of file\n+z\n\\ No newline at end of file\n",
+  "two-hunks": "===================================================================\n--- a/src/long.ts\n+++ b/src/long.ts\n@@ -1,6 +1,6 @@\n line 1\n-line 2\n+line two\n line 3\n line 4\n line 5\n line 6\n@@ -14,7 +14,7 @@\n line 14\n line 15\n line 16\n line 17\n-line 18\n+line eighteen\n line 19\n line 20\n",
+  "merged-by-eight-context": "===================================================================\n--- a/src/long.ts\n+++ b/src/long.ts\n@@ -1,16 +1,16 @@\n line 1\n line 2\n-line 3\n+third\n line 4\n line 5\n line 6\n line 7\n line 8\n line 9\n line 10\n line 11\n-line 12\n+twelfth\n line 13\n line 14\n line 15\n line 16\n",
+  "split-by-nine-context": "===================================================================\n--- a/src/long.ts\n+++ b/src/long.ts\n@@ -1,7 +1,7 @@\n line 1\n line 2\n-line 3\n+third\n line 4\n line 5\n line 6\n line 7\n@@ -9,9 +9,9 @@\n line 9\n line 10\n line 11\n line 12\n-line 13\n+thirteenth\n line 14\n line 15\n line 16\n line 17\n",
+  "insert-middle": "===================================================================\n--- a/src/long.ts\n+++ b/src/long.ts\n@@ -7,8 +7,9 @@\n line 7\n line 8\n line 9\n line 10\n+inserted\n line 11\n line 12\n line 13\n line 14\n",
+  "crlf": "===================================================================\n--- a/win.txt\n+++ b/win.txt\n@@ -1,2 +1,2 @@\n a\r\n-b\r\n+c\r\n",
+  "non-ascii-path": "===================================================================\n--- \"a/docs/\\346\\226\\207\\346\\241\\243 \\\"q\\\".md\"\n+++ \"b/docs/\\346\\226\\207\\346\\241\\243 \\\"q\\\".md\"\n@@ -1,1 +1,1 @@\n-旧\n+新\n",
+  "tab-path": "===================================================================\n--- \"a/odd\\tname.txt\"\n+++ \"b/odd\\tname.txt\"\n@@ -1,1 +1,1 @@\n-1\n+2\n"
+}

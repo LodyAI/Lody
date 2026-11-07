@@ -1,0 +1,20 @@
+name: SidebarPOC
+options:
+  bundleIdPrefix: ai.lody.mobile
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: '26.0'
+    DEVELOPMENT_TEAM: YTRMX32C99
+    SWIFT_VERSION: '5.0'
+targets:
+  SidebarPOC:
+    type: application
+    platform: iOS
+    sources: [Main.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.lody.mobile.sidebar-poc
+        TARGETED_DEVICE_FAMILY: '2'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'

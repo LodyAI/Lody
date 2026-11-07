@@ -1,0 +1,455 @@
+<title>Lody Throw Tuner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F4F4F8;--panel:#FFFFFF;--ink:#1B1B24;--muted:#6E6E7C;--line:#E1E1EA;--soft:#EEEEF4;
+  --accent:#3B4FD9;--bubble:#EBEDFB;--composer:#F2F2F7;--ai:#E9E9EE;--phone:#FFFFFF;--phone-edge:#D8D8E0;
+  --track:#D9D9E3;--graph-grid:#E8E8F0;--scale-line:#C2410C;--size-line:#7C7C8C;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0C0C11;--panel:#16161D;--ink:#ECECF2;--muted:#8E8E9C;--line:#26262F;--soft:#1E1E27;
+    --accent:#7B8AFF;--bubble:#111324;--composer:#1C1C1E;--ai:#2C2C2E;--phone:#000000;--phone-edge:#2A2A33;
+    --track:#33333E;--graph-grid:#20202A;--scale-line:#FB923C;--size-line:#8A8A9A;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0C0C11;--panel:#16161D;--ink:#ECECF2;--muted:#8E8E9C;--line:#26262F;--soft:#1E1E27;
+  --accent:#7B8AFF;--bubble:#111324;--composer:#1C1C1E;--ai:#2C2C2E;--phone:#000000;--phone-edge:#2A2A33;
+  --track:#33333E;--graph-grid:#20202A;--scale-line:#FB923C;--size-line:#8A8A9A;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;align-items:baseline;gap:16px;padding:20px 24px 0;max-width:1320px;margin:0 auto}
+header h1{font-size:20px;margin:0;font-weight:600;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted)}
+.app{display:grid;grid-template-columns:420px minmax(0,1fr);gap:24px;padding:16px 24px 40px;max-width:1320px;margin:0 auto}
+@media (max-width:960px){.app{grid-template-columns:1fr}}
+.stage{position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;gap:12px}
+@media (max-width:960px){.stage{position:static}}
+.phone{position:relative;width:390px;height:560px;background:var(--phone);border:1px solid var(--phone-edge);border-radius:36px;overflow:hidden;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
+.nav{position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;font-weight:600;font-size:15px}
+.msg{position:absolute;padding:10px 13px;font-size:17px;line-height:25px;border-radius:19px;max-width:280px;white-space:pre-wrap}
+.msg.ai{left:16px;background:var(--ai)}
+.composerBar{position:absolute;left:0;right:0;bottom:0;height:0}
+.field{position:absolute;left:12px;background:var(--composer);border-radius:19px;padding:10px 13px;font-size:17px;line-height:25px;color:transparent;white-space:pre-wrap}
+.field::after{content:attr(data-placeholder);position:absolute;left:13px;top:10px;color:var(--muted);opacity:0;transition:opacity .2s}
+.field.empty::after{opacity:1}
+.sendBtn{position:absolute;right:14px;width:36px;height:36px;border-radius:18px;background:var(--accent)}
+.sendBtn::after{content:"";position:absolute;left:12px;top:14px;width:12px;height:12px;border-left:2.5px solid #fff;border-top:2.5px solid #fff;transform:translateY(2px) rotate(45deg)}
+.fly{position:absolute;left:0;top:0;border-radius:19px;padding:10px 13px;font-size:17px;line-height:25px;overflow:hidden;white-space:pre-wrap;will-change:transform,width,height;transform-origin:center}
+.pathSvg{position:absolute;inset:0;pointer-events:none}
+.measure{position:absolute;visibility:hidden;left:-9999px;top:0;font-size:17px;line-height:25px;white-space:pre-wrap;padding:0}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{background:var(--soft)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:#fff;border-color:transparent}
+select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.scrub{display:flex;align-items:center;gap:10px}
+.scrub input[type=range]{flex:1}
+.readout{color:var(--muted);font-size:12px;display:flex;gap:14px;flex-wrap:wrap}
+.readout b{color:var(--ink);font-weight:500}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-content:start}
+.group{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.group h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;font-weight:600}
+.row{display:grid;grid-template-columns:96px 1fr 64px 28px;gap:8px;align-items:center;padding:4px 0}
+.row label{font-size:13px}
+.row input[type=range]{width:100%;margin:0;accent-color:var(--accent)}
+.row input[type=number]{width:100%;font:12px "IBM Plex Mono",ui-monospace,monospace;color:var(--ink);background:var(--soft);border:1px solid transparent;border-radius:6px;padding:4px 6px;text-align:right}
+.row .unit{font-size:11px;color:var(--muted)}
+.row.hidden{display:none}
+textarea{width:100%;font:inherit;color:var(--ink);background:var(--soft);border:1px solid transparent;border-radius:8px;padding:8px;resize:vertical;min-height:56px}
+.wide{grid-column:1/-1}
+.bottom{grid-column:1/-1;display:grid;grid-template-columns:240px minmax(0,1fr) minmax(280px,.8fr);gap:16px}
+@media (max-width:1100px){.bottom{grid-template-columns:1fr}}
+canvas{display:block;max-width:100%}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
+pre{margin:0;font:12px/1.5 "IBM Plex Mono",ui-monospace,monospace;background:var(--soft);border-radius:8px;padding:12px;overflow:auto;white-space:pre;max-height:340px}
+.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.presets button{padding:4px 10px;font-size:12px}
+.note{font-size:12px;color:var(--muted);margin:6px 0 0}
+</style>
+
+<header>
+  <h1>Lody Throw Tuner</h1>
+  <p>用户消息从输入框飞到列表的动画曲线。所有单位与 Core Animation 一致，pt 与秒。</p>
+</header>
+
+<div class="app">
+  <section class="stage">
+    <div class="phone" id="phone">
+      <div class="nav">Lody</div>
+      <div class="msg ai" id="ai1" style="top:64px">好的，我先看一下 ChatSendHandoff.swift 里的四条动画轨道。</div>
+      <div class="msg ai" id="ai2" style="top:150px">position 用的是对称 ease-in-out，起步偏慢。</div>
+      <div class="composerBar" id="bar"><div class="field" id="field" data-placeholder="Message"></div><div class="sendBtn" id="sendBtn"></div></div>
+      <svg class="pathSvg" id="pathSvg" width="390" height="560" viewBox="0 0 390 560" aria-hidden="true"></svg>
+      <div class="fly" id="fly"></div>
+      <div class="measure" id="measure"></div>
+    </div>
+    <div class="transport">
+      <button class="primary" id="play">播放</button>
+      <select id="speed" aria-label="播放速度"><option value="1">1×</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option><option value="0.1">0.1×</option></select>
+      <label><input type="checkbox" id="loop"> 循环</label>
+      <label><input type="checkbox" id="showPath" checked> 显示路径</label>
+    </div>
+    <div class="scrub"><input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="时间轴"><span class="mono" id="time">0 ms</span></div>
+    <div class="readout" id="readout"></div>
+  </section>
+
+  <section class="panels" id="panels">
+    <div class="group wide">
+      <h2>预设</h2>
+      <div class="presets" id="presets"></div>
+      <textarea id="text" aria-label="示例文本"></textarea>
+    </div>
+  </section>
+
+  <section class="bottom">
+    <div class="group">
+      <h2>position 时间曲线</h2>
+      <canvas id="editor" width="208" height="208"></canvas>
+      <p class="note">拖动两个控制点。横轴时间，纵轴路径进度。</p>
+    </div>
+    <div class="group">
+      <h2>轨道随时间</h2>
+      <canvas id="graph" width="640" height="220"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>路径进度（>1 为过冲）</span><span><i style="background:var(--scale-line)"></i>scale</span><span><i style="background:var(--size-line)"></i>尺寸进度</span></div>
+    </div>
+    <div class="group">
+      <h2>导出到 Swift</h2>
+      <pre id="export"></pre>
+      <div class="transport" style="margin-top:8px"><button id="copy">复制</button><button id="reset">重置为当前 App 值</button></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const PHONE_W = 390, PHONE_H = 560, HOME = 34;
+const DEFAULT_TEXT = '把 position 曲线改成 ease-out，再加一点落地 spring。';
+
+const PRESETS = {
+  current: { label: '当前 App（ChatThrowCurve）', p: { mode: 'settle', duration: 300, bez: [0.49, 0.09, 0.41, 0.91], arc: 56, apex: 0.44, response: 0.32, damping: 0.62, carry: 0.55, kick: 90, springV0: 0, squash: 0.86, squashT: 0.43, over: 1.005, overT: 0.71, boundsSpeed: 2, offset: 140 } },
+  straight: { label: '旧版直线', p: { mode: 'settle', duration: 350, bez: [0.49, 0.088, 0.405, 0.905], arc: 0, apex: 0.5, response: 0.3, damping: 0.7, carry: 0, kick: 0, springV0: 0, squash: 0.88, squashT: 0.35, over: 1, overT: 0.75, boundsSpeed: 2, offset: 0 } },
+  kick: { label: 'ease-out + 强 spring', p: { mode: 'settle', duration: 320, bez: [0.3, 0.1, 0.25, 1], arc: 36, apex: 0.45, response: 0.32, damping: 0.68, carry: 1, kick: 320, springV0: 0, squash: 0.88, squashT: 0.35, over: 1.02, overT: 0.72, boundsSpeed: 2, offset: 0 } },
+  spring: { label: '全程 spring', p: { mode: 'spring', duration: 320, bez: [0.3, 0.1, 0.25, 1], arc: 30, apex: 0.45, response: 0.42, damping: 0.78, carry: 0, kick: 0, springV0: 1.5, squash: 0.88, squashT: 0.35, over: 1.02, overT: 0.72, boundsSpeed: 2, offset: 0 } },
+};
+
+const FIELDS = [
+  { group: '飞行', key: 'mode', label: '模式', type: 'select', options: [['settle', '贝塞尔 + 落地 spring'], ['spring', '全程 spring']] },
+  { group: '飞行', key: 'duration', label: '时长', min: 150, max: 700, step: 5, unit: 'ms' },
+  { group: '飞行', key: 'bez.0', label: 'x1', min: 0, max: 1, step: 0.01 },
+  { group: '飞行', key: 'bez.1', label: 'y1', min: -0.5, max: 1.5, step: 0.01 },
+  { group: '飞行', key: 'bez.2', label: 'x2', min: 0, max: 1, step: 0.01 },
+  { group: '飞行', key: 'bez.3', label: 'y2', min: -0.5, max: 1.5, step: 0.01 },
+  { group: '路径', key: 'arc', label: '弧高', min: -120, max: 120, step: 1, unit: 'pt' },
+  { group: '路径', key: 'apex', label: '顶点位置', min: 0.1, max: 0.9, step: 0.01 },
+  { group: '路径', key: 'offset', label: '落点抬高', min: 0, max: 140, step: 1, unit: 'pt' },
+  { group: 'Spring', key: 'response', label: 'response', min: 0.1, max: 0.8, step: 0.01, unit: 's' },
+  { group: 'Spring', key: 'damping', label: 'dampingRatio', min: 0.2, max: 1, step: 0.01 },
+  { group: 'Spring', key: 'carry', label: '到达速度保留', min: 0, max: 3, step: 0.05, unit: '×', only: 'settle' },
+  { group: 'Spring', key: 'kick', label: '附加初速度', min: 0, max: 1500, step: 10, unit: 'pt/s', only: 'settle' },
+  { group: 'Spring', key: 'springV0', label: '初速度', min: 0, max: 6, step: 0.1, unit: '距离/s', only: 'spring' },
+  { group: '压缩 scale', key: 'squash', label: '最小 scale', min: 0.7, max: 1, step: 0.01 },
+  { group: '压缩 scale', key: 'squashT', label: '最深时刻', min: 0.1, max: 0.7, step: 0.01, unit: '×时长' },
+  { group: '压缩 scale', key: 'over', label: '落地 scale', min: 1, max: 1.12, step: 0.005 },
+  { group: '压缩 scale', key: 'overT', label: '落地时刻', min: 0.5, max: 0.95, step: 0.01, unit: '×时长' },
+  { group: '尺寸', key: 'boundsSpeed', label: '尺寸速度', min: 1, max: 4, step: 0.1, unit: '×' },
+];
+
+let P = structuredClone(PRESETS.current.p);
+let text = DEFAULT_TEXT;
+try {
+  const saved = JSON.parse(localStorage.getItem('lody-throw-tuner') || 'null');
+  if (saved && saved.p) { P = Object.assign(structuredClone(PRESETS.current.p), saved.p); text = saved.text || text; }
+} catch (e) {}
+
+const $ = (id) => document.getElementById(id);
+const getKey = (k) => k.startsWith('bez.') ? P.bez[+k.slice(4)] : P[k];
+const setKey = (k, v) => { if (k.startsWith('bez.')) P.bez[+k.slice(4)] = v; else P[k] = v; };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+
+function bezierY(b, x) {
+  if (x <= 0) return 0; if (x >= 1) return 1;
+  const [x1, y1, x2, y2] = b;
+  const cx = (t) => 3 * x1 * (1 - t) * (1 - t) * t + 3 * x2 * (1 - t) * t * t + t * t * t;
+  const cy = (t) => 3 * y1 * (1 - t) * (1 - t) * t + 3 * y2 * (1 - t) * t * t + t * t * t;
+  let lo = 0, hi = 1, t = x;
+  for (let i = 0; i < 24; i++) { const v = cx(t); if (Math.abs(v - x) < 1e-5) break; if (v < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+  return cy(t);
+}
+const bezierEndSlope = (b) => (1 - b[3]) / Math.max(1 - b[2], 0.02);
+
+function springSettle(v0, tau, response, zeta) {
+  const w = 2 * Math.PI / response;
+  if (zeta >= 0.999) return v0 * tau * Math.exp(-w * tau);
+  const wd = w * Math.sqrt(1 - zeta * zeta);
+  return (v0 / wd) * Math.exp(-zeta * w * tau) * Math.sin(wd * tau);
+}
+function spring01(t, response, zeta, v0) {
+  const w = 2 * Math.PI / response;
+  if (zeta >= 0.999) return 1 - Math.exp(-w * t) * (1 + (w - v0) * t);
+  const wd = w * Math.sqrt(1 - zeta * zeta);
+  return 1 - Math.exp(-zeta * w * t) * (Math.cos(wd * t) + ((zeta * w - v0) / wd) * Math.sin(wd * t));
+}
+function settleTail(amplitude, response, zeta) {
+  if (amplitude < 0.3) return 0;
+  return clamp(Math.log(amplitude / 0.3) / (zeta * 2 * Math.PI / response), 0, 1.2);
+}
+
+let G = null;
+function measure(str, maxInner) {
+  const m = $('measure');
+  m.style.maxWidth = maxInner + 'px';
+  m.style.display = 'inline-block';
+  m.textContent = str || ' ';
+  const r = m.getBoundingClientRect();
+  return { w: Math.ceil(r.width) + 26, h: Math.ceil(r.height) + 20 };
+}
+function cssColor(name) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseInt(v.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function layout() {
+  const src = measure(text, PHONE_W - 24 - 44 - 8 - 26);
+  src.w = PHONE_W - 24 - 44 - 8;
+  src.x = 12; src.y = PHONE_H - HOME - src.h - 8;
+  const dst = measure(text, 280 - 26);
+  dst.x = PHONE_W - 16 - dst.w; dst.y = src.y - 12 - dst.h - P.offset;
+  const S = { x: src.x + src.w / 2, y: src.y + src.h / 2 };
+  const E = { x: dst.x + dst.w / 2, y: dst.y + dst.h / 2 };
+  const dx = E.x - S.x, dy = E.y - S.y, L = Math.hypot(dx, dy) || 1;
+  const n = { x: dy / L, y: -dx / L };
+  const C = { x: lerp(S.x, E.x, P.apex) + n.x * P.arc, y: lerp(S.y, E.y, P.apex) + n.y * P.arc };
+  const tx = E.x - C.x, ty = E.y - C.y, tl = Math.hypot(tx, ty) || 1;
+  const T = { x: tx / tl, y: ty / tl };
+  const Lend = 2 * tl;
+  const D = P.duration / 1000;
+  let tail, arrival = 0, v0 = 0;
+  if (P.mode === 'settle') {
+    arrival = bezierEndSlope(P.bez) * Lend / D;
+    v0 = arrival * P.carry + P.kick;
+    const wd = (2 * Math.PI / P.response) * Math.sqrt(1 - Math.min(P.damping, 0.999) ** 2);
+    tail = settleTail(Math.abs(v0) / wd, P.response, P.damping);
+  } else {
+    tail = 0;
+  }
+  const springEnd = P.mode === 'spring' ? settleTail(Lend * Math.sqrt(1 + ((P.damping * 2 * Math.PI / P.response - P.springV0) / ((2 * Math.PI / P.response) * Math.sqrt(1 - Math.min(P.damping, 0.999) ** 2))) ** 2), P.response, P.damping) : 0;
+  const end = P.mode === 'settle' ? D + tail : Math.max(D, springEnd);
+  G = { src, dst, S, E, C, T, Lend, D, end, arrival, v0, composer: cssColor('--composer'), bubble: cssColor('--bubble') };
+
+  const field = $('field');
+  field.style.top = src.y + 'px'; field.style.width = src.w + 'px'; field.textContent = text;
+  $('sendBtn').style.top = (src.y + src.h - 40) + 'px';
+  $('fly').textContent = text;
+  drawPath();
+  $('scrub').max = Math.round(end * 1000);
+}
+
+function sample(t) {
+  const { S, E, C, T, Lend, D, src, dst } = G;
+  let progress, pos;
+  const Q = (p) => ({ x: (1 - p) ** 2 * S.x + 2 * (1 - p) * p * C.x + p * p * E.x, y: (1 - p) ** 2 * S.y + 2 * (1 - p) * p * C.y + p * p * E.y });
+  if (P.mode === 'settle') {
+    const pb = bezierY(P.bez, t / D);
+    pos = Q(pb);
+    progress = pb;
+    if (t > D) { const d = springSettle(G.v0, t - D, P.response, P.damping); pos = { x: E.x + T.x * d, y: E.y + T.y * d }; progress = 1 + d / Lend; }
+  } else {
+    const ps = spring01(t, P.response, P.damping, P.springV0);
+    progress = ps;
+    if (ps <= 1) pos = Q(Math.max(ps, 0)); else pos = { x: E.x + T.x * (ps - 1) * Lend, y: E.y + T.y * (ps - 1) * Lend };
+  }
+  const u = clamp(t / D, 0, 1);
+  const sizeP = bezierY([0.54, 0, 0.58, 1], clamp(t * P.boundsSpeed / D, 0, 1));
+  let scale;
+  if (u <= P.squashT) scale = lerp(1, P.squash, bezierY([0.66, 0, 1, 1], u / P.squashT));
+  else if (u <= P.overT) scale = lerp(P.squash, P.over, bezierY([0, 0, 0.62, 0.93], (u - P.squashT) / (P.overT - P.squashT)));
+  else scale = lerp(P.over, 1, bezierY([0.45, 0, 0.55, 1], (u - P.overT) / (1 - P.overT)));
+  const colorP = bezierY(P.bez, u);
+  return { pos, progress, scale, sizeP, w: lerp(src.w, dst.w, sizeP), h: lerp(src.h, dst.h, sizeP), colorP };
+}
+
+function render(t) {
+  const s = sample(t);
+  const fly = $('fly');
+  fly.style.width = s.w + 'px'; fly.style.height = s.h + 'px';
+  fly.style.transform = `translate(${s.pos.x - s.w / 2}px, ${s.pos.y - s.h / 2}px) scale(${s.scale})`;
+  const c = G.composer.map((v, i) => Math.round(lerp(v, G.bubble[i], s.colorP)));
+  fly.style.background = `rgb(${c.join(',')})`;
+  $('field').classList.toggle('empty', t > 0.001);
+  $('time').textContent = Math.round(t * 1000) + ' ms';
+  $('scrub').value = Math.round(t * 1000);
+  drawGraph(t);
+  drawEditor();
+  $('readout').innerHTML = `<span>路径长 <b class="mono">${Math.round(Math.hypot(G.E.x - G.S.x, G.E.y - G.S.y))} pt</b></span>` +
+    `<span>到达速度 <b class="mono">${Math.round(G.arrival)} pt/s</b></span>` +
+    (P.mode === 'settle' ? `<span>spring 初速度 <b class="mono">${Math.round(G.v0)} pt/s</b></span>` : '') +
+    `<span>总时长 <b class="mono">${Math.round(G.end * 1000)} ms</b></span>`;
+}
+
+function drawPath() {
+  const svg = $('pathSvg');
+  if (!$('showPath').checked) { svg.innerHTML = ''; return; }
+  const { S, E, C } = G;
+  svg.innerHTML = `<path d="M${S.x},${S.y} Q${C.x},${C.y} ${E.x},${E.y}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 5" opacity=".7"/>` +
+    `<line x1="${S.x}" y1="${S.y}" x2="${C.x}" y2="${C.y}" stroke="var(--muted)" stroke-width="1" opacity=".35"/>` +
+    `<line x1="${C.x}" y1="${C.y}" x2="${E.x}" y2="${E.y}" stroke="var(--muted)" stroke-width="1" opacity=".35"/>` +
+    `<circle cx="${C.x}" cy="${C.y}" r="3.5" fill="var(--accent)"/>` +
+    `<rect x="${G.dst.x}" y="${G.dst.y}" width="${G.dst.w}" height="${G.dst.h}" rx="19" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 4" opacity=".5"/>`;
+}
+
+function drawGraph(now) {
+  const cv = $('graph'), ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, padL = 34, padR = 10, padT = 12, padB = 24;
+  const cs = getComputedStyle(document.documentElement);
+  ctx.clearRect(0, 0, W, H);
+  const tx = (t) => padL + (t / G.end) * (W - padL - padR);
+  const ty = (v) => padT + (1.15 - v) / 1.3 * (H - padT - padB);
+  ctx.strokeStyle = cs.getPropertyValue('--graph-grid'); ctx.lineWidth = 1;
+  ctx.fillStyle = cs.getPropertyValue('--muted'); ctx.font = '11px IBM Plex Mono, monospace';
+  for (const v of [0, 0.5, 1]) { ctx.beginPath(); ctx.moveTo(padL, ty(v)); ctx.lineTo(W - padR, ty(v)); ctx.stroke(); ctx.fillText(v.toFixed(1), 4, ty(v) + 4); }
+  for (let ms = 0; ms <= G.end * 1000; ms += 100) { ctx.fillText(ms, tx(ms / 1000) - 8, H - 8); }
+  ctx.strokeStyle = cs.getPropertyValue('--line'); ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(tx(G.D), padT); ctx.lineTo(tx(G.D), H - padB); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillText('D', tx(G.D) + 3, padT + 9);
+  const plot = (color, fn) => {
+    ctx.strokeStyle = cs.getPropertyValue(color); ctx.lineWidth = 2; ctx.beginPath();
+    for (let i = 0; i <= 240; i++) { const t = G.end * i / 240; const v = fn(sample(t)); if (i === 0) ctx.moveTo(tx(t), ty(v)); else ctx.lineTo(tx(t), ty(v)); }
+    ctx.stroke();
+  };
+  plot('--size-line', (s) => s.sizeP);
+  plot('--scale-line', (s) => s.scale);
+  plot('--accent', (s) => s.progress);
+  ctx.strokeStyle = cs.getPropertyValue('--ink'); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(tx(now), padT); ctx.lineTo(tx(now), H - padB); ctx.stroke();
+}
+
+const editor = { drag: null };
+function editorMap() { const cv = $('editor'); const pad = 24; const sz = cv.width - pad * 2; return { pad, sz, x: (v) => pad + v * sz, y: (v) => cv.height - pad - v * sz, ix: (px) => (px - pad) / sz, iy: (py) => (cv.height - pad - py) / sz }; }
+function drawEditor() {
+  const cv = $('editor'), ctx = cv.getContext('2d'), m = editorMap();
+  const cs = getComputedStyle(document.documentElement);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = cs.getPropertyValue('--graph-grid'); ctx.lineWidth = 1;
+  ctx.strokeRect(m.x(0), m.y(1), m.sz, m.sz);
+  const [x1, y1, x2, y2] = P.bez;
+  ctx.strokeStyle = cs.getPropertyValue('--muted'); ctx.globalAlpha = .5;
+  ctx.beginPath(); ctx.moveTo(m.x(0), m.y(0)); ctx.lineTo(m.x(x1), m.y(y1)); ctx.moveTo(m.x(1), m.y(1)); ctx.lineTo(m.x(x2), m.y(y2)); ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = cs.getPropertyValue('--accent'); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(m.x(0), m.y(0)); ctx.bezierCurveTo(m.x(x1), m.y(y1), m.x(x2), m.y(y2), m.x(1), m.y(1)); ctx.stroke();
+  ctx.fillStyle = cs.getPropertyValue('--accent');
+  for (const [px, py] of [[x1, y1], [x2, y2]]) { ctx.beginPath(); ctx.arc(m.x(px), m.y(py), 6, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = cs.getPropertyValue('--muted'); ctx.font = '11px IBM Plex Mono, monospace';
+  ctx.fillText(P.bez.map((v) => v.toFixed(2)).join(', '), m.pad, cv.height - 6);
+}
+(function bindEditor() {
+  const cv = $('editor');
+  const pt = (e) => { const r = cv.getBoundingClientRect(); const m = editorMap(); return { x: m.ix((e.clientX - r.left) * cv.width / r.width), y: m.iy((e.clientY - r.top) * cv.height / r.height) }; };
+  cv.addEventListener('pointerdown', (e) => {
+    const p = pt(e); const d1 = Math.hypot(p.x - P.bez[0], p.y - P.bez[1]), d2 = Math.hypot(p.x - P.bez[2], p.y - P.bez[3]);
+    editor.drag = d1 < d2 ? 0 : 2; cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (editor.drag === null) return; const p = pt(e);
+    P.bez[editor.drag] = Math.round(clamp(p.x, 0, 1) * 100) / 100; P.bez[editor.drag + 1] = Math.round(clamp(p.y, -0.5, 1.5) * 100) / 100;
+    syncInputs(); onChange();
+  });
+  cv.addEventListener('pointerup', () => { editor.drag = null; });
+})();
+
+function buildControls() {
+  const panels = $('panels');
+  const groups = {};
+  for (const f of FIELDS) {
+    if (!groups[f.group]) { const g = document.createElement('div'); g.className = 'group'; g.innerHTML = `<h2>${f.group}</h2>`; panels.appendChild(g); groups[f.group] = g; }
+    const row = document.createElement('div'); row.className = 'row'; row.dataset.key = f.key; if (f.only) row.dataset.only = f.only;
+    if (f.type === 'select') {
+      row.innerHTML = `<label>${f.label}</label><select data-k="${f.key}" style="grid-column:2/-1">${f.options.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
+      row.querySelector('select').addEventListener('change', (e) => { setKey(f.key, e.target.value); syncInputs(); onChange(); });
+    } else {
+      row.innerHTML = `<label>${f.label}</label><input type="range" data-k="${f.key}" min="${f.min}" max="${f.max}" step="${f.step}"><input type="number" data-k="${f.key}" min="${f.min}" max="${f.max}" step="${f.step}"><span class="unit">${f.unit || ''}</span>`;
+      for (const inp of row.querySelectorAll('input')) inp.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; setKey(f.key, v); syncInputs(); onChange(); });
+    }
+    groups[f.group].appendChild(row);
+  }
+  const notes = { Spring: '落地 spring 从到达速度出发回到终点，过冲方向沿路径末端切线。', '路径': '弧高为正时路径向外凸；0 为直线。', '尺寸': '当前 App 里 bounds 以 2 倍速完成，reflow 藏在压缩最深处。' };
+  for (const [g, n] of Object.entries(notes)) { const p = document.createElement('p'); p.className = 'note'; p.textContent = n; groups[g].appendChild(p); }
+  const presets = $('presets');
+  for (const [id, pr] of Object.entries(PRESETS)) { const b = document.createElement('button'); b.textContent = pr.label; b.addEventListener('click', () => { P = structuredClone(pr.p); syncInputs(); onChange(); }); presets.appendChild(b); }
+  $('text').value = text;
+  $('text').addEventListener('input', (e) => { text = e.target.value; onChange(); });
+}
+function syncInputs() {
+  for (const el of document.querySelectorAll('[data-k]')) { const v = getKey(el.dataset.k); if (el.tagName === 'SELECT') el.value = v; else el.value = typeof v === 'number' ? +v.toFixed(3) : v; }
+  for (const row of document.querySelectorAll('.row[data-only]')) row.classList.toggle('hidden', row.dataset.only !== P.mode);
+}
+
+function exportSwift() {
+  const b = P.bez.map((v) => v.toFixed(2)).join(', ');
+  const lines = [
+    'enum ChatThrowCurve {',
+    `  static let mode = "${P.mode}"`,
+    `  static let duration: CFTimeInterval = ${(P.duration / 1000).toFixed(3)}`,
+    `  static let positionTiming = CAMediaTimingFunction(controlPoints: ${b})`,
+    `  static let arcRatio: CGFloat = ${(P.arc / Math.hypot(G.E.x - G.S.x, G.E.y - G.S.y)).toFixed(2)}  // ${P.arc} pt on this ${Math.round(Math.hypot(G.E.x - G.S.x, G.E.y - G.S.y))} pt throw`,
+    `  static let arcApex: CGFloat = ${P.apex}`,
+    `  static let springResponse: CFTimeInterval = ${P.response.toFixed(2)}`,
+    `  static let springDampingRatio: CGFloat = ${P.damping.toFixed(2)}`,
+    P.mode === 'settle' ? `  static let settleVelocityCarry: CGFloat = ${P.carry.toFixed(2)}` : `  static let springInitialVelocity: CGFloat = ${P.springV0.toFixed(2)}`,
+    P.mode === 'settle' ? `  static let settleKick: CGFloat = ${P.kick}` : null,
+    `  static let squash: (scale: CGFloat, at: Float) = (${P.squash.toFixed(2)}, ${P.squashT.toFixed(2)})`,
+    `  static let landing: (scale: CGFloat, at: Float) = (${P.over.toFixed(3)}, ${P.overT.toFixed(2)})`,
+    `  static let boundsSpeed: Float = ${P.boundsSpeed.toFixed(1)}`,
+    '}',
+    '',
+    '// JSON',
+    JSON.stringify(P),
+  ].filter((l) => l !== null);
+  $('export').textContent = lines.join('\n');
+}
+
+let playing = false, startAt = 0, current = 0, raf = 0;
+function frame(now) {
+  if (!playing) return;
+  const speed = parseFloat($('speed').value);
+  current = (now - startAt) / 1000 * speed;
+  if (current >= G.end) {
+    if ($('loop').checked) { startAt = now + 400; current = 0; render(G.end); raf = requestAnimationFrame(frame); return; }
+    playing = false; current = G.end; render(current); $('play').textContent = '重播'; return;
+  }
+  render(Math.max(current, 0));
+  raf = requestAnimationFrame(frame);
+}
+function play() { cancelAnimationFrame(raf); playing = true; startAt = performance.now(); $('play').textContent = '暂停'; raf = requestAnimationFrame(frame); }
+function pause() { playing = false; cancelAnimationFrame(raf); $('play').textContent = '播放'; }
+$('play').addEventListener('click', () => { if (playing) pause(); else play(); });
+$('scrub').addEventListener('input', (e) => { pause(); current = e.target.value / 1000; render(current); });
+$('showPath').addEventListener('change', drawPath);
+$('copy').addEventListener('click', async () => { const t = $('export').textContent; try { await navigator.clipboard.writeText(t); $('copy').textContent = '已复制'; } catch (e) { const r = document.createRange(); r.selectNodeContents($('export')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); $('copy').textContent = '已选中，Cmd+C'; } setTimeout(() => { $('copy').textContent = '复制'; }, 1500); });
+$('reset').addEventListener('click', () => { P = structuredClone(PRESETS.current.p); text = DEFAULT_TEXT; $('text').value = text; syncInputs(); onChange(); });
+
+let changeTimer = 0;
+function onChange() {
+  layout(); exportSwift();
+  try { localStorage.setItem('lody-throw-tuner', JSON.stringify({ p: P, text })); } catch (e) {}
+  clearTimeout(changeTimer);
+  changeTimer = setTimeout(() => { if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play(); else render(0); }, 120);
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { layout(); render(current); });
+
+buildControls();
+syncInputs();
+layout();
+exportSwift();
+render(0);
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setTimeout(play, 500);
+</script>

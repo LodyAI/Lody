@@ -1,0 +1,26 @@
+name: Ship (TestFlight)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Optional notification notes'
+        required: false
+        type: string
+
+concurrency:
+  group: ship
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: TestFlight
+    uses: ./.github/workflows/release.yml
+    with:
+      notes: ${{ inputs.notes }}
+    secrets: inherit
