@@ -1,4 +1,5 @@
 declare module 'acp-extension-codex';
+declare module 'acp-extension-codex/dist/lody.js';
 
 declare module 'acp-extension-codex/baseline-config' {
   import type { SessionConfigOption } from '@agentclientprotocol/sdk';
