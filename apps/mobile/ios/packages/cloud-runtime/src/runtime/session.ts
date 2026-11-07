@@ -87,6 +87,12 @@ const reserved = new Set<string>();
 export const retainedSessionIds = () => [...sessions.keys()];
 export const reservedSessionIds = () => [...reserved];
 export const sessionDoc = (id: string) => sessions.get(id)?.doc;
+/** Full persisted history of a synchronized session, for whole-conversation exports. */
+export function readyHistory(id: string): Record<string, any>[] {
+  const state = sessions.get(id);
+  if (!state?.ready) throw new Error('session_not_ready');
+  return state.doc.getList('history').toJSON() as Record<string, any>[];
+}
 function traceCode(value: unknown) {
   const pattern = /^[a-z][a-z0-9_]{0,47}$/;
   if (typeof value === 'string') return pattern.test(value) ? value : undefined;

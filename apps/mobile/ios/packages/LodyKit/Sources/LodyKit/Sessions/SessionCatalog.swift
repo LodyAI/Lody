@@ -31,6 +31,8 @@ struct SessionItem: Equatable, Sendable {
   var lastReadAt: Double?
   var awaitingUserSince: Double?
   var branchName: String?
+  /// Web `session.baseBranch || project.branch`; the Copy menu offers it beside a different current branch.
+  var baseBranch: String?
   var modelName: String?
   var modelNeverRan = false
   var diff: [String: Int] = [:]
@@ -57,7 +59,7 @@ struct SessionItem: Equatable, Sendable {
 extension SessionItem: Decodable {
   private enum CodingKeys: String, CodingKey {
     case id, title, status, isTabClosed, archived, pinned, projectId, createdAt, openedBySessionId, openedByRootSessionId
-    case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, lastModel, diff, machineId
+    case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
     case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, userId, agentConfigId
     case workspaceDirty, workspaceUnpushed
   }
@@ -94,6 +96,7 @@ extension SessionItem: Decodable {
     lastReadAt = value(.lastReadAt)
     awaitingUserSince = value(.awaitingUserSince)
     branchName = present(value(.branchName))
+    baseBranch = present(value(.baseBranch))
     machineId = value(.machineId) ?? ""
     cliType = value(.cliType) ?? ""
     agentType = value(.agentType) ?? ""

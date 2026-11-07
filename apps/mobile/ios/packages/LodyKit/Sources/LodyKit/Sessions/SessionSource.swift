@@ -20,6 +20,8 @@ enum SessionWrite: Sendable {
   case pin(Bool)
   case read(Double)
   case rename(String)
+  /// The owner `SessionMeta.userId` (web Change owner); sharing stays a separate action.
+  case owner(String)
   case delete([String])
 }
 

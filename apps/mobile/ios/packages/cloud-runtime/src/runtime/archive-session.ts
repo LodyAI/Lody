@@ -155,6 +155,23 @@ export async function renameSession(
   await appendJson(meta.client, meta.flock.exportJson(version));
 }
 
+/** Web `transferSessionOwner`: rewrites only the owner `userId`, never sharing or visibility. */
+export async function setSessionOwner(
+  args: { sessionId: string; userId: string },
+  meta: { flock: Flock; client: StreamsClient },
+) {
+  if (typeof args.sessionId !== 'string' || typeof args.userId !== 'string')
+    throw new Error('invalid_session');
+  const userId = args.userId.trim();
+  if (!userId) throw new Error('invalid_session');
+  const room = `session-${args.sessionId}`;
+  if (!sessionPresent(meta.flock, room)) throw new Error('session_not_found');
+  const version = meta.flock.version();
+  meta.flock.set(['m', room, 'userId'], userId);
+  meta.flock.commit();
+  await appendJson(meta.client, meta.flock.exportJson(version));
+}
+
 export async function pinSession(
   args: { sessionId: string; pinned: boolean },
   meta: { flock: Flock; client: StreamsClient },
