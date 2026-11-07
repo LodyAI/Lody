@@ -62,6 +62,11 @@ final class DiagnosticsStore: @unchecked Sendable {
     return allowed.contains(code) ? code : nil
   }
 
+  static func attachmentMediaType(_ value: String) -> String {
+    let allowed = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif"]
+    return allowed.contains(value) ? value : "other"
+  }
+
   func navigation(id: String, source: String, outcome: String, reason: String) {
     var fields = ["source": source, "reason": reason]
     if source == "notification", UUID(uuidString: id) != nil { fields["message"] = id }
@@ -242,12 +247,21 @@ final class DiagnosticsStore: @unchecked Sendable {
   private static func metadata(_ fields: [String: String]) -> [String: String] {
     fields.filter { key, value in
       switch key {
-      case "activity", "native", "session":
+      case "activity", "native", "session", "serverErrorFingerprint":
         return value.count == 16 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
-      case "message", "attempt", "oneSignalApp": return UUID(uuidString: value) != nil
+      case "message", "attempt", "oneSignalApp", "requestId": return UUID(uuidString: value) != nil
       case "stage":
         return ["image_upload", "file_upload", "multipart_create", "multipart_part", "multipart_complete", "multipart_abort"].contains(value)
       case "httpStatus": return Int(value).map { (100...599).contains($0) } ?? false
+      case "cfRay":
+        return value.utf8.count <= 36 && value.range(of: "^[0-9a-f]{16,32}-[A-Z]{3}$", options: .regularExpression) != nil
+      case "requestBytes", "responseBytes", "sourceBytes", "imageBytes", "elapsedMs":
+        return value.utf8.count <= 16 && !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) }
+      case "sourceType", "uploadType": return Self.attachmentMediaType(value) == value
+      case "converted": return ["true", "false"].contains(value)
+      case "responseType": return ["json", "html", "text", "other", "missing"].contains(value)
+      case "responseBody": return ["empty", "too_large", "json_object", "json_other", "invalid_json"].contains(value)
+      case "serverCodeState": return ["recognized", "unrecognized", "missing"].contains(value)
       case "networkCode": return Int(value) != nil
       case "serverCode": return Self.attachmentServerCode(value) == value
       case "hasToken", "enabled", "identified", "authorized", "current", "configured", "registered", "accepted",

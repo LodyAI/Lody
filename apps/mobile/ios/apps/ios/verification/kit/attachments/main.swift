@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import UIKit
 
 enum AuthKeychain { static func read() throws -> String? { "synthetic-test-token" } }
@@ -52,6 +53,16 @@ final class UploadProtocol: URLProtocol {
       switch request.url!.lastPathComponent {
       case "bad-request":
         status = 400; body = #"{"error":"private-server-message"}"#
+      case "nested-code":
+        status = 400; body = #"{"code":"private-token","error":{"code":"BAD_REQUEST","message":"private-server-message"}}"#
+      case "message-code":
+        status = 400; body = #"{"error":{"message":"Bad request"}}"#
+      case "empty":
+        status = 400; body = ""
+      case "oversized":
+        status = 400; body = String(repeating: "x", count: 65537)
+      case "array":
+        status = 400; body = "[]"
       case "too-large":
         status = 413; body = "{}"
       case "format":
@@ -77,7 +88,9 @@ final class UploadProtocol: URLProtocol {
         return
       default: fatalError("Unknown diagnostic fixture")
       }
-      client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+        headerFields: ["Content-Type": request.url!.lastPathComponent == "html" ? "text/html; charset=utf-8" : "application/json",
+          "CF-Ray": "0123456789abcdef-SJC", "X-Request-ID": "12345678-1234-1234-1234-123456789abc"])!, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: Data(body.utf8))
       client?.urlProtocolDidFinishLoading(self)
       return
@@ -151,6 +164,7 @@ final class UploadProtocol: URLProtocol {
     assert(thumb.query == "width=768&fit=scale-down&quality=85")
     assert(thumb != original, "Lightbox preview must not reuse the thumbnail URL")
     URLProtocol.registerClass(UploadProtocol.self)
+    try DiagnosticsStore.shared.clear()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -190,6 +204,11 @@ final class UploadProtocol: URLProtocol {
     assert(imageProgress.progress.contains { $0.1 == "uploading" && $0.2 == 0 })
     assert(imageProgress.progress.last?.0 == "photo.png" && imageProgress.progress.last?.1 == "complete")
     assert(images[0]["imageId"] as? String == "image1")
+    let tiff = root.appendingPathComponent("converted.tiff")
+    let destination = CGImageDestinationCreateWithURL(tiff as CFURL, "public.tiff" as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, UIImage(contentsOfFile: image.path)!.cgImage!, nil)
+    assert(CGImageDestinationFinalize(destination))
+    _ = try await SessionAttachments.upload([attachment(tiff, "image")], workspace: "w1", session: "s1")
     let video = root.appendingPathComponent("IMG_3933.mov")
     try Data("hi!".utf8).write(to: video)
     UploadProtocol.requests = []
@@ -235,7 +254,7 @@ final class UploadProtocol: URLProtocol {
       return $0["event"] as? String == "request_succeeded" && fields?["stage"] == "multipart_abort" && fields?["attempt"] == failedPartFields["attempt"]
     }, "Cleanup must not hide the failed part, and must share its attempt identifier")
     let httpFailures: [(String, Int, String?)] = [("bad-request", 400, nil), ("unauthorized", 401, "unauthorized"), ("quota", 403, "storage_quota_exceeded"),
-                                               ("too-large", 413, nil), ("format", 415, nil), ("unknown", 409, nil), ("rate", 429, "rate_limited"), ("private", 403, nil), ("html", 502, nil), ("malformed", 200, nil)]
+                                               ("nested-code", 400, "bad_request"), ("message-code", 400, "bad_request"), ("empty", 400, nil), ("oversized", 400, nil), ("array", 400, nil), ("too-large", 413, nil), ("format", 415, nil), ("unknown", 409, nil), ("rate", 429, "rate_limited"), ("private", 403, nil), ("html", 502, nil), ("malformed", 200, nil)]
     for (fixture, status, serverCode) in httpFailures {
       let attempt = UUID()
       do {
@@ -263,6 +282,25 @@ final class UploadProtocol: URLProtocol {
       let fields = events.last!["fields"] as! [String: String]
       assert(fields["stage"] == "image_upload" && fields["httpStatus"] == String(status))
       assert(fields["serverCode"] == serverCode && fields["networkCode"] == nil)
+      assert(fields["requestBytes"] == "0" && fields["responseBytes"].flatMap(Int.init) != nil)
+      assert(fields["elapsedMs"].flatMap(Int.init).map { $0 >= 0 } == true)
+      assert(fields["responseType"] == (fixture == "html" ? "html" : "json"))
+      assert(fields["cfRay"] == "0123456789abcdef-SJC")
+      assert(fields["requestId"] == "12345678-1234-1234-1234-123456789abc")
+      if fixture != "malformed" {
+        let bodyStates = ["empty": "empty", "oversized": "too_large", "array": "json_other", "html": "invalid_json"]
+        assert(fields["responseBody"] == (bodyStates[fixture] ?? "json_object"))
+        let unknownCode = ["bad-request", "unknown", "private"].contains(fixture)
+        var codeState = "missing"
+        if unknownCode { codeState = "unrecognized" }
+        if serverCode != nil { codeState = "recognized" }
+        assert(fields["serverCodeState"] == codeState)
+        if unknownCode {
+          assert(fields["serverErrorFingerprint"]?.count == 16, "Unknown errors remain correlatable without exporting their text")
+        }
+        if ["bad-request", "unknown"].contains(fixture) { assert(fields["serverErrorFingerprint"] == "127616598055cd1f") }
+        if ["empty", "oversized"].contains(fixture) { assert(fields["serverErrorFingerprint"] == nil) }
+      }
     }
     for (fixture, code) in [("timeout", NSURLErrorTimedOut), ("cancelled", NSURLErrorCancelled)] {
       let attempt = UUID()
@@ -282,7 +320,18 @@ final class UploadProtocol: URLProtocol {
       assert(event["event"] as? String == "transport_failed" && fields["networkCode"] == String(code))
       assert(fields["stage"] == "file_upload" && fields["httpStatus"] == nil)
     }
-    let (diagnosticText, _) = try diagnostics()
+    let (diagnosticText, finalRecords) = try diagnostics()
+    let prepared = finalRecords.first { $0["event"] as? String == "image_prepared" }?["fields"] as? [String: String]
+    assert(prepared?["sourceType"] == "image/png" && prepared?["uploadType"] == "image/png")
+    assert(prepared?["converted"] == "false")
+    let imageBytes = try Data(contentsOf: image).count
+    assert(prepared?["sourceBytes"] == String(imageBytes) && prepared?["imageBytes"] == String(imageBytes))
+    assert(prepared?["session"]?.count == 16 && prepared?["attempt"] != nil)
+    let converted = finalRecords.last { $0["event"] as? String == "image_prepared" }?["fields"] as? [String: String]
+    assert(converted?["converted"] == "true" && converted?["sourceType"] == "other" && converted?["uploadType"] == "image/jpeg")
+    let convertedBytes = Int(converted?["imageBytes"] ?? "") ?? 0
+    assert(convertedBytes > 0 && convertedBytes <= 5 * 1024 * 1024)
+    assert(converted?["attempt"] != prepared?["attempt"])
     for secret in ["synthetic-test-token", "private-token", "private-server-message", "private-filename", "private-url", "private-network-description", "private-file-contents", "api.lody.ai", "upload1", "test.txt"] {
       assert(!diagnosticText.contains(secret), "Export must exclude credentials, raw errors, URLs, upload IDs, filenames and attachment contents")
     }

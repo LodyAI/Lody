@@ -24,11 +24,26 @@ History displays image thumbnails above their text bubbles; files retain their n
 
 Settings → Diagnostics → Export diagnostic file includes upload request start,
 success and failure events for images, files and multipart create/part/complete/abort.
-A random per-attachment attempt ID joins multipart requests without recording any
-workspace, session, filename, URL, attachment content or credentials. Failures
+A random per-attachment attempt ID joins multipart requests without recording raw
+workspace/session IDs, filenames, URLs, attachment content or credentials. Failures
 include HTTP status, allowlisted server error categories (including authorization
 and storage quota), or native URL loading error codes. Unknown server error text
-and codes are omitted. Alerts classify invalid requests, authentication/access,
+and codes are omitted. Upload events retain request/response byte counts and
+monotonic elapsed milliseconds. `image_prepared` records allowlisted source/upload
+MIME types (`other` for unlisted types), original/encoded byte counts, conversion
+status, and a hashed session ID joined to the request by its attempt ID.
+HTTP responses record a coarse content type and validated trace headers (`CF-Ray`
+in hex-datacenter form, `X-Request-ID` only when it is a UUID). Failure diagnostics
+classify empty, oversized (over 64 KiB), invalid JSON, JSON object and other JSON
+bodies; `serverCodeState` distinguishes recognized, unrecognized and absent error
+categories. Known categories are checked across top-level and nested error codes
+and messages, so an unknown top-level code cannot mask a known nested category.
+Nonempty error bodies up to 64 KiB get a SHA-256 prefix fingerprint for comparing
+failures; the fingerprint cannot explain an unknown error by itself. Use the
+validated trace ID and timestamp for server-side investigation. No response body,
+arbitrary header, filename or credential is exported.
+
+Alerts classify invalid requests, authentication/access,
 storage quota, attachment size/format, rate limits, server availability and network
 failures, retaining HTTP status for support. Only allowlisted server categories
 override status-based explanations; response bodies never become alert text. Invalid
