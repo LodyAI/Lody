@@ -51,8 +51,8 @@ lody automation cancel AUTOMATION_ID
 Managed sessions supply `LODY_SESSION_ID` and `LODY_WORKSPACE_ID`. Outside a Session,
 pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` accepts
 `{command: {type: "register", program: "async ({ctx}) => ..."}}` and binds the
-current Session automatically. Its caller cannot redirect the result to another
-Session. CLI and MCP share the same local control endpoint. The Electron Session
+current Session by default. Pass `sessionId` to target another owned Session on the
+same machine; continuations return to the target Session. CLI and MCP share the same local control endpoint. The Electron Session
 UI uses that endpoint for local-machine waits and settings, and the remote machine
 control bridge for eligible remote Sessions. Encrypted workspaces and Web remain unsupported.
 The [general availability decision](../../../../.agents/notes/implemented/feature/2026-10-30-session-continuation-general-availability.md) explains the UI gate removal; the [UI design](../../../../.agents/notes/proposed/feature/2026-10-27-session-continuation-note-ui.md) records its presentation trade-offs.
