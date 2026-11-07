@@ -3,7 +3,6 @@
 import { Effect } from 'effect';
 import {
   Bytes,
-  RecoveryVaultError,
   type RecoveryCredentialRegistration,
   type RecoverySubmitResult,
   type WorkspaceRecoveryInput,
@@ -119,7 +118,8 @@ export const recoverySubmitOriginal =
     });
 
 /** Read R's envelope from its mailbox as R. After a new admission nothing may be there
- * yet, so ask this device to deliver once before reporting it missing. */
+ * yet, so ask this device to deliver once. A delivery still on its way is Pending, not a
+ * failure. */
 export const recoveryFetchEnvelope =
   (input: {
     readonly mailbox: (credential: string) => {
@@ -145,7 +145,7 @@ export const recoveryFetchEnvelope =
         page = yield* mailbox.fetch(epoch, null, 100);
       }
       const row = page.items[0];
-      if (!row) return yield* Effect.fail(new RecoveryVaultError({ code: 'missing' }));
+      if (!row) return { pending: true } as const;
       return {
         sender: yield* Effect.fromResult(Bytes.signingPublicKey(fromHex(row.sender))),
         frame: row.frame,

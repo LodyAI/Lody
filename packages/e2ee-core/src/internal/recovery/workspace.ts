@@ -18,7 +18,16 @@ import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/e
 import { authenticateEpochStagedGroup, type EpochStagedGroup } from '../keys/staging';
 import { openEpochKeyHpke } from '../crypto/hpke';
 import { commitEpochKey, recoverLedgerHistory } from '../keys/history';
-import { canonical, fromHex, parseCanonical, attempt, random, hex, vaultError } from './crypto';
+import {
+  canonical,
+  fromHex,
+  parseCanonical,
+  attempt,
+  random,
+  hex,
+  RecoveryVaultError,
+  vaultError,
+} from './crypto';
 import { deriveRecoveryAccessCredential } from './credential';
 import { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 import {
@@ -39,7 +48,9 @@ export type RecoveryCredentialRegistration = { readonly recoveryCredentialHash: 
 /** The current epoch-key envelope addressed to a recovery device, as fetched during restore. */
 export type RecoveryEnvelope =
   | { readonly sender: Bytes.SigningPublicKey; readonly frame: Uint8Array }
-  | { readonly staged: EpochStagedGroup };
+  | { readonly staged: EpochStagedGroup }
+  /** Not delivered yet. Nothing failed: the caller reports Pending and retries. */
+  | { readonly pending: true };
 /** Everything the recovery workflow of one workspace needs: the vault session, local journal, identity, ledger, submission and envelope fetch. */
 export interface WorkspaceRecoveryInput {
   readonly vault: RecoveryVault;
@@ -105,6 +116,8 @@ const RestoreSchema = Schema.Struct({
   record: Schema.Uint8Array,
   position: Schema.Number,
 });
+const isPending = (error: unknown) =>
+  error instanceof RecoveryVaultError && error.code === 'pending';
 /** A resumable four-step owner. Only encrypted vault entries, original signed
  * records and non-secret progress reach local storage. Genuine ledger facts and
  * actual HPKE/commitment checks establish paired/enveloped/recoverable separately. */
@@ -222,6 +235,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         identity,
         new Uint8Array(credentials.get(identity)!)
       );
+    if ('pending' in remote) return yield* vaultError('pending');
     let keyValue: Bytes.EpochKey;
     if ('staged' in remote) {
       const qualified = yield* Effect.fromResult(
@@ -484,7 +498,12 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             return yield* vaultError('authentication');
         }
         state = yield* save(state.raw, { ...progress, stage: 'registered' });
-        return { outcome: 'Committed' as const, status: yield* runTest() };
+        return yield* runTest().pipe(
+          Effect.map((status) => ({ outcome: 'Committed' as const, status })),
+          Effect.catchIf(isPending, () =>
+            Effect.map(checkedStatus(), (status) => ({ outcome: 'Pending' as const, status }))
+          )
+        );
       })
     );
   });
@@ -492,7 +511,9 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     readonly personal: DeviceSigner & { readonly encryptionPublicKey: Bytes.EncryptionPublicKey };
     readonly submitOriginalAsRecovery: (
       record: Uint8Array,
-      identity: RecoveryIdentity
+      identity: RecoveryIdentity,
+      /** R's derived service credential, for the admission append. Owned by the callee. */
+      credential: Uint8Array
     ) => Effect.Effect<RecoverySubmitResult, unknown>;
   }) {
     yield* current();
@@ -515,8 +536,13 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         }));
         if (!(yield* Effect.fromResult(hasVerifiedCheckpoint(view, checkpoint))))
           return yield* vaultError('authentication');
-        const epoch = yield* openCurrent(identity),
-          personal = request.personal;
+        const personal = request.personal;
+        const opened = yield* openCurrent(identity).pipe(
+          Effect.catchIf(isPending, () => Effect.succeed(null))
+        );
+        if (opened === null)
+          return { outcome: 'Pending' as const, epoch: view.inspectState().epoch.number };
+        const epoch = opened;
         if (
           personal.publicKey.equals(identity.publicKey) ||
           personal.encryptionPublicKey.equals(identity.encryptionPublicKey)
@@ -555,7 +581,8 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         }
         const result = yield* request.submitOriginalAsRecovery(
           new Uint8Array(intent.record),
-          identity
+          identity,
+          new Uint8Array(credentials.get(identity)!)
         );
         if (!bytesEqual(result.record, intent.record)) return yield* vaultError('authentication');
         if (result.outcome !== 'Committed') return { outcome: result.outcome, epoch };

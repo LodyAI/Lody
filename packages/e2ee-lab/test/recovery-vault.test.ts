@@ -152,6 +152,7 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
       return result;
     });
   let envelopeFails = false;
+  let envelopeHeld = false;
   const credentials: Uint8Array[] = [];
   const owner = (vault: RecoveryVault) =>
     makeWorkspaceRecovery({
@@ -173,6 +174,7 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
         Effect.gen(function* () {
           credentials.push(new Uint8Array(credential));
           if (envelopeFails) return yield* Effect.fail(new Error('synthetic no envelope'));
+          if (envelopeHeld) return { pending: true as const };
           return {
             sender: f.owner.publicKey,
             frame: yield* prepareEpochEnvelope({
@@ -231,6 +233,9 @@ const replacementFixture = Effect.fnUntraced(function* (dir: string) {
     submit,
     recoveryDevices,
     replace,
+    holdEnvelope: (held: boolean) => {
+      envelopeHeld = held;
+    },
     failEnvelope: (fails: boolean) => {
       envelopeFails = fails;
     },
@@ -1229,7 +1234,86 @@ describe('encrypted recovery vault and genuine workflow', () => {
     expect(delivered).toBe(1);
     expect(seen[0]).toBe(hex(new Uint8Array(32).fill(8)));
     expect('frame' in found && found.frame).toEqual(new Uint8Array([7]));
+    items = [];
+    const silent = recoveryFetchEnvelope({
+      mailbox: () => ({ fetch: () => Effect.succeed({ items: [] }) }),
+      deliver: () => Effect.void,
+    });
+    expect(
+      await Effect.runPromise(silent(recipient, 0, undefined as never, new Uint8Array(32)))
+    ).toEqual({ pending: true });
   });
+  it('waits for a slow delivery instead of failing, then finishes without a second R', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            let finished = 0;
+            const finish = () =>
+              Effect.sync(() => {
+                finished += 1;
+              });
+            r.holdEnvelope(true);
+            expect(yield* r.replace(r.newOwner, finish)).toEqual({
+              outcome: 'Pending',
+              step: 'setup',
+              workspace: 'synthetic workspace',
+            });
+            expect(r.recoveryDevices()).toContain(r.oldR);
+            expect(r.recoveryDevices()).toHaveLength(2);
+            expect(finished).toBe(0);
+            r.holdEnvelope(false);
+            expect(yield* r.replace(r.newOwner, finish)).toEqual({ outcome: 'Committed' });
+            expect(r.recoveryDevices()).toHaveLength(1);
+          })
+        )
+      );
+    }));
+  it('reports a restore as pending while the envelope is on its way', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            r.holdEnvelope(true);
+            const before = r.f.records.length;
+            const result = yield* r.newOwner.restoreFromRecovery({
+              personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+              submitOriginalAsRecovery: (record) => r.submit(record),
+            });
+            expect(result.outcome).toBe('Pending');
+            expect(r.f.records).toHaveLength(before);
+          })
+        )
+      );
+    }));
+  it('hands the recovery submission the credential of the R admitting the device', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            const index = yield* r.newVault.vault.readIndex();
+            const bundle = yield* r.newVault.vault.readEntry(index.value.entries[0]!);
+            const derived = deriveRecoveryAccessCredential(bundle);
+            wipeRecoveryPackage(bundle);
+            const seen: string[] = [];
+            const result = yield* r.newOwner.restoreFromRecovery({
+              personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+              submitOriginalAsRecovery: (record, _identity, credential) => {
+                seen.push(hex(credential));
+                return r.submit(record);
+              },
+            });
+            expect(result.outcome).toBe('Committed');
+            expect(seen).toEqual([hex(derived.credential)]);
+          })
+        )
+      );
+    }));
   it('names the workspaces a device cannot act on', () => {
     expect(
       planVaultReplacement(
