@@ -131,6 +131,9 @@ describe development signing only.
 
 What the repository shows:
 
+- The cloud desktop is `ai.lody.desktop` in the private `apps/electron-cloud/electron-builder.yml`.
+  `dev.loro.lody.oss` is the local-only public build, which has no vault, so the checks below
+  apply to the cloud build. iOS is `ai.lody.mobile`.
 - `apps/electron/electron-builder.yml` uses the hardened runtime and notarization, with
   `entitlements` for the app and `entitlementsInherit` for nested binaries.
 - `build/entitlements.mac.plist` has no `com.apple.developer.associated-domains`,
@@ -159,6 +162,22 @@ Run these in order on a Mac. Stop at the first failure.
 
 If step 1 or 2 fails, Developer ID cannot carry this path. The fallback is the recovery file on
 macOS, with passkeys only on iPhone and the Web surface, which needs an owner decision.
+
+## Web unlock surface: minimal plan
+
+Not started. It follows macOS and iPhone, once those pass on real devices. The approved shape is
+in the [Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock). The smallest build:
+
+1. A separate static app on `vault.lody.ai`, served by the Worker that already serves AASA, with
+   no third-party scripts or telemetry, a strict CSP, and its own deployment credentials.
+2. A browser `E2eePasskeyPort` over `navigator.credentials`, reusing `@lody/e2ee-client`. If the
+   browser returns no PRF, the page offers the recovery file on the same surface.
+3. One flow only: sign in, unlock, restore into a browser device C on this origin, then show a
+   pairing code so the regular Web app or another device joins through C.
+4. V is never stored, and V, R and the PRF result never reach the regular Web app.
+
+Open before starting: how sign-in works on this origin without sharing the regular app's session.
+A hostile operator controlling this host can still attempt a ceremony; the Spec accepts this.
 
 ## Consequences and limits
 
