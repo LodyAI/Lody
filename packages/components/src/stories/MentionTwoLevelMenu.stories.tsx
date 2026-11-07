@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Mention, MentionInput } from '@/ui/mention';
+import { getComposerMentionChip } from '@/components/mentions/mention-chips';
 import { mentionSurface } from '@/ui/mention/mention-surface';
 import type { Mention as MentionRange } from '@/ui/mention/mention-root';
 import type { AgentRoleMentionItem } from '@/components/mentions/mention-agent-role-source';
@@ -243,6 +244,14 @@ const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
       availability: { kind: 'unavailable', reason: 'machine_unknown' },
     }),
     'Unavailable: its machine is not available to you'
+  ),
+  toAgentRoleCandidate(
+    roleItem({
+      slug: 'Retired-Model-Reviewer',
+      role: agentRole({ id: 'retired-model-role' as AgentRoleId, name: 'Retired Model Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'model_unavailable' },
+    }),
+    'Unavailable: its agent no longer offers the saved model. Edit this Role to pick another'
   ),
 ];
 
@@ -540,6 +549,46 @@ type Story = StoryObj<typeof meta>;
 export const Categories: Story = {
   args: { search: '' },
 };
+
+/** Real composer decorations with a synthetic mixed-language session reference. */
+export const SessionMentionRendering: Story = {
+  args: { search: '' },
+  render: () => <SessionMentionRenderingHarness />,
+};
+
+function SessionMentionRenderingHarness() {
+  const token = '@讨论-Sample-Agent-Renderer-输入框颜色与光标';
+  const prefix = 'review 这里的改动 ';
+  const [value, setValue] = React.useState(`${prefix}${token} 后续文字`);
+  const [mentions, setMentions] = React.useState<MentionRange[]>([
+    {
+      start: prefix.length,
+      end: prefix.length + token.length,
+      value: 'sample-session',
+      kind: 'session',
+    },
+  ]);
+  return (
+    <div className="bg-input text-foreground p-4" data-testid="session-mention-rendering">
+      <Mention
+        inputValue={value}
+        onInputValueChange={setValue}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        getMentionChip={getComposerMentionChip}
+      >
+        <MentionInput
+          value={value}
+          onChange={() => {}}
+          aria-label="Message"
+          placeholder="Message"
+          rows={5}
+          className="w-full resize-none p-2 text-base leading-6"
+        />
+      </Mention>
+    </div>
+  );
+}
 
 /** `@mention` — one query answered across every category, Files first. */
 export const AggregateSearch: Story = {

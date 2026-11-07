@@ -1,8 +1,13 @@
 export {
   RecoveryVaultError,
   verifiedPasskeyPrf,
+  verifiedPasskeyRegistration,
+  vaultPrfInput,
+  passkeyUserHandle,
+  vaultIdFromPasskeyUserHandle,
   disposePrf,
   type VerifiedPasskeyPrf,
+  type VerifiedPasskeyRegistration,
   type VaultCiphertext,
 } from './crypto';
 export {
@@ -16,11 +21,14 @@ export {
   type RecoveryVaultLocalStore,
   type RecoveryPrivatePackage,
   type RecoveryEntryReference,
+  type RecoveryPasskeyReference,
 } from './vault';
 export { deriveRecoveryAccessCredential, type RecoveryAccessCredential } from './credential';
 export { generateRecoveryPackage, importRecoveryIdentity, type RecoveryIdentity } from './identity';
 export {
   makeWorkspaceRecovery,
+  abandonWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
   type WorkspaceRecoveryInput,
   type RecoveryCredentialRegistration,
   type RecoverySubmitResult,

@@ -209,24 +209,71 @@ export function decryptVault(
   }
   return value.plaintext;
 }
-/** An opaque verified passkey PRF output used to unlock a vault; dispose it with `disposePrf`. */
-export type VerifiedPasskeyPrf = { readonly credentialId: string };
-const prfCapabilities = new WeakMap<VerifiedPasskeyPrf, Uint8Array>();
-/** Actual WebAuthn PRF extension result, not ordinary passkey login. The caller
- * authenticates the ceremony and credential; absent enabled/result never unlocks. */
-export function verifiedPasskeyPrf(input: {
+/** The one PRF input every vault ceremony evaluates. It is constant because a new
+ * device does not know vaultId before the ceremony; HKDF salted by vaultId separates
+ * vaults. */
+export const vaultPrfInput = () => new TextEncoder().encode('lody-e2ee/vault-v1/prf-input\0');
+/** The WebAuthn `user.id` of a vault passkey: the vaultId's 32 bytes. */
+export const passkeyUserHandle = (vaultId: string) => fromHex(vaultId);
+/** The vaultId named by a ceremony's user handle. This is only a hint: decryption, which
+ * binds vaultId through the HKDF salt and AAD, decides whether the vault opens. */
+export const vaultIdFromPasskeyUserHandle = (userHandle: Uint8Array) =>
+  attempt(() => {
+    if (!(userHandle instanceof Uint8Array) || userHandle.length !== 32)
+      throw vaultError('prf-unavailable');
+    return hex(userHandle);
+  });
+// Unpadded base64url of at most the 1023 raw bytes WebAuthn allows, so every platform
+// computes the same entryId for one credential.
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const validCredentialId = (value: string) => {
+  if (typeof value !== 'string' || value.length > 1364 || !/^[A-Za-z0-9_-]+$/.test(value))
+    return false;
+  // A partial final group carries zero padding bits, so one credential has one spelling.
+  const remainder = value.length % 4,
+    last = BASE64URL.indexOf(value.at(-1)!);
+  return remainder === 0 || (remainder === 2 && !(last & 15)) || (remainder === 3 && !(last & 3));
+};
+/** A passkey whose registration reported PRF support; required to enroll it. */
+export type VerifiedPasskeyRegistration = { readonly credentialId: string };
+const registrations = new WeakSet<VerifiedPasskeyRegistration>();
+/** Accept a registration ceremony. WebAuthn reports `enabled` only here; any PRF result
+ * returned at registration is optional and is not used. */
+export function verifiedPasskeyRegistration(input: {
   readonly credentialId: string;
   readonly extension: unknown;
 }) {
   return attempt(() => {
+    const schema = Schema.Struct({ enabled: Schema.Literal(true) });
+    Result.getOrThrow(Schema.decodeUnknownResult(schema)(input.extension));
+    if (!validCredentialId(input.credentialId)) throw vaultError('prf-unavailable');
+    const capability = Object.freeze({ credentialId: input.credentialId });
+    registrations.add(capability);
+    return capability;
+  }).pipe(Effect.mapError(() => vaultError('prf-unavailable')));
+}
+export const isVerifiedPasskeyRegistration = (value: VerifiedPasskeyRegistration) =>
+  registrations.has(value);
+/** An opaque verified passkey PRF output used to unlock a vault; dispose it with `disposePrf`. */
+export type VerifiedPasskeyPrf = { readonly credentialId: string };
+const prfCapabilities = new WeakMap<VerifiedPasskeyPrf, Uint8Array>();
+/** Actual WebAuthn PRF result of an authentication ceremony, not ordinary passkey login.
+ * WebAuthn never reports `enabled` at authentication, so only a user-verified 32-byte
+ * `results.first` counts. The caller authenticates the ceremony and credential. */
+export function verifiedPasskeyPrf(input: {
+  readonly credentialId: string;
+  readonly userVerified: boolean;
+  readonly extension: unknown;
+}) {
+  return attempt(() => {
     const schema = Schema.Struct({
-      enabled: Schema.Literal(true),
+      enabled: Schema.optional(Schema.Literal(true)),
       results: Schema.Struct({ first: Schema.instanceOf(ArrayBuffer) }),
     });
     const value = Result.getOrThrow(Schema.decodeUnknownResult(schema)(input.extension));
     if (
-      !input.credentialId ||
-      input.credentialId.length > 1024 ||
+      input.userVerified !== true ||
+      !validCredentialId(input.credentialId) ||
       value.results.first.byteLength !== 32
     )
       throw vaultError('prf-unavailable');

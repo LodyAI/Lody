@@ -43,7 +43,7 @@ import {
   extendLedger,
   verifyLedger
 } from '@lody/e2ee-core/protocol'
-import { inspectContentFrame } from '@lody/e2ee-core/protocol'
+import { accountUserId, inspectContentFrame } from '@lody/e2ee-core/protocol'
 import { desktopE2eePorts, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
@@ -73,7 +73,7 @@ const safeStorage = {
   }
 }
 const intent = Object.freeze({
-  accountId: 'synthetic-account',
+  accountId: '2w8hg7s65mt3pgj9a1bnwsbcedx48wr',
   requestId: 'request-0123456789',
   name: 'Encrypted example',
   slug: 'encrypted-example'
@@ -96,12 +96,7 @@ const openOwner = (directory, override = (custody) => custody, registerIdentity 
       accountId: intent.accountId,
       custody: override(custody)
     })
-    if (registerIdentity)
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-    return { custody, bootstrap }
+    if (registerIdentity) return { custody, bootstrap }
   })
 
 const workspaceId = 'synthetic-workspace'
@@ -341,12 +336,8 @@ const memberWithHost = Effect.fnUntraced(function* (folder) {
   })
   const bootstrap = yield* makeDesktopE2eeBootstrap({
     directory: folder,
-    accountId: 'other-account',
+    accountId: 'acc2',
     custody
-  })
-  yield* bootstrap.recordAccountIdentity({
-    accountId: 'other-account',
-    cryptoUserId: 'bb'.repeat(32)
   })
   const host = yield* makeDesktopE2eeRuntimeHost({ directory: folder, custody, bootstrap })
   return { custody, bootstrap, host }
@@ -376,7 +367,7 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
       assert.deepEqual(yield* member.bootstrap.prepareMemberJoin(offer), original)
       assert.equal(
         hex(decodeMemberKeyPackage(original.keyPackageHex).request.userId.toBytes()),
-        'bb'.repeat(32)
+        hex(Result.getOrThrow(accountUserId('acc2')).toBytes())
       )
       assert.ok(Result.isFailure(yield* Effect.result(member.host.open(workspaceId))))
       yield* owner.host.inspectMemberAdmission(workspaceId, original.keyPackageHex)
@@ -703,6 +694,11 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
         const nextOffer = yield* owner.host.memberOffer(workspaceId, 'email', 9_000_000_000_001)
         assert.notEqual(nextOffer.token, firstOffer.token)
         const nextRequest = yield* next.bootstrap.prepareMemberJoin(nextOffer)
+        // The rejoining account is recognizably the same person under a new membership.
+        assert.equal(
+          hex(decodeMemberKeyPackage(nextRequest.keyPackageHex).request.userId.toBytes()),
+          hex(decodeMemberKeyPackage(firstRequest.keyPackageHex).request.userId.toBytes())
+        )
         const proof = decodeMemberKeyPackage(nextRequest.keyPackageHex)
         assert.notEqual(hex(proof.request.signingPublicKey.toBytes()), original.signingPublicKey)
         assert.notEqual(
@@ -2451,34 +2447,6 @@ void test('terminal cancellation can archive a signed pre-reservation intent, wh
       assert.equal((yield* first.host.status(workspaceId)).length, 2)
     })
   )
-})
-
-void test('D03 unknown identity companion blocks only new signatures; existing workspace and signed originals reopen offline', async (t) => {
-  const directory = await fixture(t)
-  let original
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      original = yield* bind(owner)
-      yield* owner.host.open(workspaceId)
-    })
-  )
-  const protectedBytes = Buffer.from('{"version":99,"opaque":"future account identity"}')
-  await writeFile(join(directory, 'account-identity.json'), protectedBytes)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* openOwner(directory, (value) => value, false)
-      const host = yield* makeDesktopE2eeRuntimeHost({ directory, ...owner })
-      assert.equal((yield* host.open(workspaceId)).hasCurrentKey, true)
-      assert.equal(yield* owner.bootstrap.creationNeedsAccountIdentity(intent), false)
-      assert.deepEqual(yield* owner.bootstrap.prepareCreation(intent), original)
-      const next = { ...intent, requestId: 'another-request-01234567' }
-      const rejected = yield* Effect.result(owner.bootstrap.creationNeedsAccountIdentity(next))
-      assert.equal(rejected.failure.code, 'corrupt')
-      assert.equal((yield* host.status(workspaceId)).hasCurrentKey, true)
-    })
-  )
-  assert.deepEqual(await readFile(join(directory, 'account-identity.json')), protectedBytes)
 })
 
 for (const source of ['staging', 'temporary-io'])

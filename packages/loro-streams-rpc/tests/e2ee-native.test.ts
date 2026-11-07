@@ -386,21 +386,29 @@ describe('trusted-host encrypted dispatch originals', () => {
     }
   );
 
-  it("separates a verified sharing denial from an unverifiable policy before signing another member's dispatch", async () => {
+  it("withholds another member's dispatch only on a verified sharing denial", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);
-    const prepare = (authorize: (machineId: string) => Effect.Effect<boolean, unknown>) =>
+    const prepare = (authorize?: (machineId: string) => Effect.Effect<boolean, unknown>) =>
       Effect.runPromise(
         f.native('teammate', 'teammate', authorize).prepareDispatch(f.machineId, f.input)
       );
     await expect(prepare(() => Effect.succeed(false))).rejects.toThrow(/^e2ee_machine_not_shared$/);
-    await expect(prepare(() => Effect.fail(new Error('offline')))).rejects.toThrow(
-      /^e2ee_machine_sharing_unavailable$/
-    );
-    // Neither refusal retained an original, so a permitted retry signs the first one.
-    const original = await prepare(() => Effect.succeed(true));
+    // Refusal retained no original, so an unverifiable policy signs the first one;
+    // the receiving machine still decides.
+    const original = await prepare(() => Effect.fail(new Error('offline')));
     const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.requesterDevice).not.toBe(Buffer.from(f.ledger.owner.raw).toString('hex'));
+    expect(opened.args).toEqual(f.input);
+  });
+
+  it("signs another member's dispatch on a host with no sharing policy reader", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const original = await Effect.runPromise(
+      f.native('teammate', 'teammate').prepareDispatch(f.machineId, f.input)
+    );
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.args).toEqual(f.input);
   });
 

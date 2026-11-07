@@ -106,6 +106,7 @@ function mergeNormalizedDocMetaPatch(
 const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'id',
   'title',
+  'groupTitle',
   'repoFullName',
   'branchName',
   'status',

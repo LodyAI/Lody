@@ -256,6 +256,7 @@ export function ComposerAgentRolePanel({
           role={previewItem.role}
           agentConfig={previewItem.agentConfig}
           machine={machine}
+          availability={previewItem.availability}
           onEdit={onEdit}
           className="h-auto min-h-0 max-h-[14rem]"
         />

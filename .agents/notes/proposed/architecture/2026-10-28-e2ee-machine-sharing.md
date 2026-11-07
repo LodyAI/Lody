@@ -40,7 +40,7 @@ Identity strings are strict UTF-8, 1..256 bytes, with no normalization/BOM strip
 
 Existing content-v0 document-update crypto fixes resource `machine-access:<unpadded-base64url(machineIdUtf8)>:<ownerMembershipIdHex>:<generationHex>`, docEpoch zero and signature/AAD binding `lody-e2ee/machine-sharing/v2\0`. Hash the complete original encrypted frame with SHA-256, not decoded state; the frame maximum remains 262287 bytes. Retain originals for uncertain retries, never re-encrypt or automatically rebase them. No v1 policy reader, fallback or silent conversion exists.
 
-The backend uses credential-derived identity, current ledger-qualified generation and `admitMachineSharingFrame`. In the same atomic mutation it rechecks current personal/member/machine eligibility and generation, compares full scope/status/revision/digest, deduplicates request intent and inserts original plus head. An old-generation pending request conflicts even if its revision/digest equals a fresh resource's values. Exact committed retries return their receipt, or removed after purge; changed intent under a requestId fails. Minimal request intent receipts and removal cutoff survive cleanup. Cleanup is bound to the old generation and cannot delete new-generation commits. Purged version reads may return null; readHead retains the old removed high water, never promoting it to a trusted pin. Account-only `latestForMember` returns ciphertext/untrusted metadata to current workspace members, without execution freshness.
+The backend uses credential-derived identity, current ledger-qualified generation and `admitMachineSharingFrame`. In the same atomic mutation it rechecks current personal/member/machine eligibility and generation, compares full scope/status/revision/digest, deduplicates request intent and inserts original plus head. An old-generation pending request conflicts even if its revision/digest equals a fresh resource's values. Exact committed retries return their receipt, or removed after purge; changed intent under a requestId fails. Minimal request intent receipts and removal cutoff survive cleanup. Cleanup is bound to the old generation and cannot delete new-generation commits. Purged version reads may return null; readHead retains the old removed high water, never promoting it to a trusted pin.
 
 `readMachineSharingHistoryStep` returns authenticated same-generation full state from a historically admitted owner-personal device, including after signer revocation. It creates no execution credential and proves neither publication time nor then-current permission. Only fresh explicit owner intent may preserve that state at n+1 within the same generation through the currently valid personal signer. Machine/recovery signatures fail as recovery input. `openMachineSharingPolicy` and `authorizeMachineExecution` still require current owner-personal authority; Guest/recovery never execute and all-team includes future qualified members. History readers do not skip missing history within a live generation.
 
@@ -145,17 +145,11 @@ refresh contract. Purely local sidebar drag ordering never writes session metada
 
 ## Sender withdrawal gate
 
-A machine discovers encrypted input in two ways: the signed RPC fast path and pending
-turns in synced session history. History origins are authenticated by their writer, so
-a pending user turn is executable once it syncs. An honest sender that has already
-verified a withdrawal therefore must not write that input. Before any metadata,
-receipt or history write, an encrypted send prepares its dispatch. If the host returns
-the verified denial `e2ee_machine_not_shared`, the send fails as not sent and the
-composer keeps the draft. `prepareDispatch` reports an unverifiable policy separately
-as `e2ee_machine_sharing_unavailable`. That outcome, like timeouts and transport
-failures, stays unknown: the input is written as before and the receiving machine
-decides. Writing first and repairing the turn afterwards was rejected because upload
-and a machine's history discovery race the repair.
+Before any metadata, receipt or history write, an encrypted send prepares its dispatch. A
+verified denial, `e2ee_machine_not_shared`, fails the send as not sent, and the composer keeps
+the draft. An unverifiable policy, a host with no policy reader, a timeout or a transport
+failure stays unknown: the input is written as usual and the receiving machine decides. The
+check runs before the write, not as a repair afterwards.
 
 A verified withdrawal must stay known. The host derives it from the resource's
 accepted pin, which is bound to workspace, genesis, machine, owner and generation, and

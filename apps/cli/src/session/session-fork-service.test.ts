@@ -1,3 +1,8 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { LocalAttachmentStore } from '../lib/session-local-attachments';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -60,6 +65,9 @@ const sourceHistory: SessionHistoryInput[] = [
 function createForkHarness(
   failPersistReason?: string,
   options: {
+    rebindLocalAttachment?: ConstructorParameters<
+      typeof SessionForkService
+    >[0]['rebindLocalAttachment'];
     sourceBusy?: boolean;
     sourceMeta?: Partial<SessionMeta>;
     sourceRuntimeConfig?: SessionAcpRuntimeConfigSnapshot;
@@ -240,6 +248,7 @@ function createForkHarness(
     workspaceId: 'workspace-1',
     machineId,
     forkOperationStore,
+    rebindLocalAttachment: options.rebindLocalAttachment,
     isSourceBusy: () => options.sourceBusy === true,
     inspectGitWorkdir: options.worktree
       ? vi.fn(async () => ({
@@ -1251,4 +1260,52 @@ describe('SessionForkService fork operation recovery', () => {
     );
     await vi.waitFor(() => expect(harness.markers).toEqual([]));
   });
+});
+
+it('inherits local files into a same-machine fork without losing the original binding', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fork-local-'));
+  const target = createLoroSessionData({ sessionId: targetSessionId, doc: new LoroDoc() });
+  try {
+    const source = path.join(root, 'input.txt');
+    await writeFile(source, 'synthetic');
+    const scope = {
+      workspaceId: 'workspace-1',
+      machineId,
+      sessionId: sourceSessionId,
+      turnId: 'user-1',
+    };
+    const store = new LocalAttachmentStore({ ...scope, accountId: 'test' }, root);
+    const attachment = await store.register({
+      ...scope,
+      referenceId: randomUUID(),
+      path: source,
+      managed: false,
+      kind: 'file',
+      fileName: 'input.txt',
+      mimeType: 'text/plain',
+    });
+    const history = structuredClone(sourceHistory);
+    history[0]!.items = [attachment];
+    history[0]!.inputConfig = { inputBlocks: [attachment] };
+    const harness = createForkHarness(undefined, {
+      sourceHistory: history,
+      rebindLocalAttachment: (item, sessionId, turnId) =>
+        store.inherit(item, { sessionId, turnId }),
+    });
+    harness.targetDoc.sessionData.snapshots.copyFrom = target.snapshots.copyFrom;
+    expect((await harness.service.fork(forkSpec)).success).toBe(true);
+    const inherited = (await target.history.readAll()).find((entry) => entry.id === 'user-1')!;
+    expect(inherited.items).toMatchObject([
+      { type: 'local_attachment', sessionId: targetSessionId },
+    ]);
+    expect(inherited.inputConfig?.inputBlocks).toEqual(inherited.items);
+    const resolved = await store.resolve(
+      { ...scope, sessionId: targetSessionId },
+      inherited.items[0] as typeof attachment
+    );
+    expect(resolved).toEqual(await store.resolve(scope, attachment));
+  } finally {
+    target.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,0 +1,20 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "link-card",
+        "version": 1,
+        "url": "https://github.com/Innei/Shiroi",
+        "title": "Shiroi - Modern Blog System",
+        "description": "A beautiful Next.js-based blog platform with rich features",
+        "favicon": "https://github.githubassets.com/favicons/favicon.svg",
+        "image": "https://opengraph.githubassets.com/1/Innei/Shiroi"
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

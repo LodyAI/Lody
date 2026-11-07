@@ -1,0 +1,369 @@
+{
+  "workspaces": [
+    {
+      "id": "ui-home",
+      "name": "我的超长工作区名称不能折行",
+      "slug": null,
+      "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAL0lEQVR42u3OIQEAAAgDMNJQk6J0gRg3E/Or7bmkEhAQEBAQEBAQEBAQEBAQSAceRa0Al+0rSMYAAAAASUVORK5CYII="
+    },
+    {
+      "id": "ui-other",
+      "name": "另一个工作区",
+      "slug": "other"
+    },
+    {
+      "id": "ui-states",
+      "name": "Design states",
+      "slug": "design-states"
+    }
+  ],
+  "catalog": {
+    "projects": [
+      {
+        "id": "ui:local:lody",
+        "name": "Lody iOS",
+        "machineId": "ui",
+        "rootPath": "/tmp/lody-ios"
+      },
+      {
+        "id": "ui:empty",
+        "name": "空盒子",
+        "machineId": "ui",
+        "rootPath": "/tmp/empty-box"
+      }
+    ],
+    "sessions": [
+      {
+        "id": "ui-design",
+        "branchName": "feature/session-model-with-a-very-long-branch-name",
+        "lastModel": {
+          "modelId": "gpt-6",
+          "name": "GPT-6"
+        },
+        "title": "首页交互设计",
+        "projectId": "ui:local:lody",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-09-07T10:00:00Z",
+        "archived": false,
+        "pinned": false
+      },
+      {
+        "id": "ui-pinned",
+        "branchName": "main",
+        "lastModel": {
+          "modelId": "gpt-6",
+          "name": "GPT-6"
+        },
+        "title": "置顶的首页会话",
+        "projectId": "ui:local:lody",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-09-07T09:00:00Z",
+        "lastMessageAt": 1788773400000,
+        "lastReadAt": 1788774000000,
+        "archived": false,
+        "pinned": true
+      },
+      {
+        "id": "ui-search",
+        "title": "搜索历史会话 Search",
+        "projectId": "ui:local:lody",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-09-07T10:00:00Z",
+        "archived": true,
+        "pinned": false
+      },
+      {
+        "id": "ui-chat",
+        "lastModel": null,
+        "title": "纯对话草稿",
+        "projectId": "ui:unassigned",
+        "machineId": "ui",
+        "status": "idle",
+        "createdAt": "2026-09-07T11:00:00Z",
+        "archived": false,
+        "pinned": false
+      }
+    ],
+    "machineIds": ["ui", "mini", "studio"],
+    "machineNames": {
+      "ui": "Fixture Mac",
+      "mini": "Mac mini",
+      "studio": "Studio"
+    }
+  },
+  "previewCache": "{\"v\":1,\"status\":\"live\",\"revision\":1,\"entries\":[{\"id\":\"u1\",\"role\":\"user\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"t\",\"type\":\"text\",\"text\":\"设计首页\"}]},{\"id\":\"a1\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"think\",\"type\":\"thought\",\"text\":\"先看列表\"},{\"itemId\":\"read\",\"type\":\"tool_call\",\"kind\":\"read\",\"status\":\"completed\",\"title\":\"读取\"},{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"用项目分组。\"}]}]}",
+  "searchPreviewCache": "{\"v\":1,\"status\":\"live\",\"revision\":1,\"entries\":[{\"id\":\"search-user\",\"role\":\"user\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"text\",\"type\":\"text\",\"text\":\"needle from user\"}]},{\"id\":\"search-answer\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"thought\",\"type\":\"thought\",\"text\":\"hidden-only thought\"},{\"itemId\":\"tool\",\"type\":\"tool_call\",\"title\":\"tool-only\",\"status\":\"completed\"},{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"![image](https://needle.invalid)\\n\\nA **needle** beside a [needle link](https://private-marker.invalid).\\n\\ncross**format**body 跨**格式**正文。\\n\\n`needle code` and [source.ts](/tmp/secret-needle.ts)\\n\\n```swift\\nlet needle = 1\\n```\\n\\n| Key | Value |\\n| --- | --- |\\n| result | needle |\"}]}]}",
+  "olderSearchCache": "{\"v\":1,\"status\":\"live\",\"revision\":1,\"entries\":[{\"id\":\"search-history-0\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"ancient-signal\"}]},{\"id\":\"search-history-1\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 1\"}]},{\"id\":\"search-history-2\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 2\"}]},{\"id\":\"search-history-3\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 3\"}]},{\"id\":\"search-history-4\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 4\"}]},{\"id\":\"search-history-5\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 5\"}]},{\"id\":\"search-history-6\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 6\"}]},{\"id\":\"search-history-7\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 7\"}]},{\"id\":\"search-history-8\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 8\"}]},{\"id\":\"search-history-9\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 9\"}]},{\"id\":\"search-history-10\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 10\"}]},{\"id\":\"search-history-11\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 11\"}]},{\"id\":\"search-history-12\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 12\"}]},{\"id\":\"search-history-13\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 13\"}]},{\"id\":\"search-history-14\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 14\"}]},{\"id\":\"search-history-15\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 15\"}]},{\"id\":\"search-history-16\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 16\"}]},{\"id\":\"search-history-17\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 17\"}]},{\"id\":\"search-history-18\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 18\"}]},{\"id\":\"search-history-19\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 19\"}]},{\"id\":\"search-history-20\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 20\"}]},{\"id\":\"search-history-21\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 21\"}]},{\"id\":\"search-history-22\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 22\"}]},{\"id\":\"search-history-23\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 23\"}]},{\"id\":\"search-history-24\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 24\"}]},{\"id\":\"search-history-25\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 25\"}]},{\"id\":\"search-history-26\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 26\"}]},{\"id\":\"search-history-27\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 27\"}]},{\"id\":\"search-history-28\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 28\"}]},{\"id\":\"search-history-29\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 29\"}]},{\"id\":\"search-history-30\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 30\"}]},{\"id\":\"search-history-31\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 31\"}]},{\"id\":\"search-history-32\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 32\"}]},{\"id\":\"search-history-33\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 33\"}]},{\"id\":\"search-history-34\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 34\"}]},{\"id\":\"search-history-35\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 35\"}]},{\"id\":\"search-history-36\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 36\"}]},{\"id\":\"search-history-37\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 37\"}]},{\"id\":\"search-history-38\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 38\"}]},{\"id\":\"search-history-39\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 39\"}]},{\"id\":\"search-history-40\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 40\"}]},{\"id\":\"search-history-41\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 41\"}]},{\"id\":\"search-history-42\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 42\"}]},{\"id\":\"search-history-43\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 43\"}]},{\"id\":\"search-history-44\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 44\"}]},{\"id\":\"search-history-45\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 45\"}]},{\"id\":\"search-history-46\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 46\"}]},{\"id\":\"search-history-47\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 47\"}]},{\"id\":\"search-history-48\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 48\"}]},{\"id\":\"search-history-49\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 49\"}]},{\"id\":\"search-history-50\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 50\"}]},{\"id\":\"search-history-51\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 51\"}]},{\"id\":\"search-history-52\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 52\"}]},{\"id\":\"search-history-53\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 53\"}]},{\"id\":\"search-history-54\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 54\"}]},{\"id\":\"search-history-55\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 55\"}]},{\"id\":\"search-history-56\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 56\"}]},{\"id\":\"search-history-57\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 57\"}]},{\"id\":\"search-history-58\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 58\"}]},{\"id\":\"search-history-59\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 59\"}]},{\"id\":\"search-history-60\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 60\"}]},{\"id\":\"search-history-61\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Result 61\"}]}]}",
+  "statesCatalog": {
+    "projects": [
+      {
+        "id": "states:lody-ios",
+        "name": "lody-ios",
+        "machineId": "ui",
+        "rootPath": "/Users/me/git/lody-ios",
+        "repoFullName": "lody-fixture/lody-ios"
+      },
+      {
+        "id": "states:lody-cloud",
+        "name": "lody-cloud",
+        "machineId": "mini",
+        "rootPath": "/Users/me/git/lody-cloud"
+      }
+    ],
+    "machineIds": ["ui", "mini"],
+    "machineNames": {
+      "ui": "Fixture Mac",
+      "mini": "Mac mini"
+    },
+    "sessions": [
+      {
+        "id": "st-checklist",
+        "title": "Release checklist",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": true,
+        "branchName": "main",
+        "lastModel": {
+          "modelId": "gpt-6",
+          "name": "GPT-6"
+        },
+        "ago": 172800,
+        "readAgo": 172770
+      },
+      {
+        "id": "st-review",
+        "title": "Migrate auth middleware",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "waiting",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "feature/auth",
+        "lastModel": {
+          "modelId": "claude",
+          "name": "Claude"
+        },
+        "ago": 120,
+        "readAgo": 90,
+        "awaitingAgo": 120
+      },
+      {
+        "id": "st-ship",
+        "title": "Ship 0.42 release",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "running",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "release/0.42",
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 360,
+        "readAgo": 330
+      },
+      {
+        "id": "st-ship-mac",
+        "title": "Test on macOS",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "running",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "release/0.42",
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 180,
+        "readAgo": 150,
+        "openedBySessionId": "st-ship"
+      },
+      {
+        "id": "st-ship-fix",
+        "title": "Land upstream fix",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "waiting",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "release/0.42",
+        "lastModel": {
+          "modelId": "claude",
+          "name": "Claude"
+        },
+        "ago": 300,
+        "readAgo": 270,
+        "openedBySessionId": "st-ship",
+        "awaitingAgo": 300
+      },
+      {
+        "id": "st-unread",
+        "title": "Retain opaque canvases",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "main",
+        "lastModel": {
+          "modelId": "gpt-6",
+          "name": "GPT-6"
+        },
+        "ago": 1080,
+        "diff": {
+          "add": 128,
+          "del": 41
+        }
+      },
+      {
+        "id": "st-sync",
+        "title": "Refactor catalog sync",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "feature/sync",
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 3600,
+        "readAgo": 3570
+      },
+      {
+        "id": "st-sync-a",
+        "title": "Map catalog cursors",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 3700,
+        "readAgo": 3670,
+        "openedBySessionId": "st-sync"
+      },
+      {
+        "id": "st-sync-b",
+        "title": "Rewrite replica restore",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "lastModel": {
+          "modelId": "claude",
+          "name": "Claude"
+        },
+        "ago": 3800,
+        "readAgo": 3770,
+        "openedBySessionId": "st-sync"
+      },
+      {
+        "id": "st-sync-c",
+        "title": "Benchmark 8 MiB ceiling",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "lastModel": {
+          "modelId": "gpt-6",
+          "name": "GPT-6"
+        },
+        "ago": 3900,
+        "readAgo": 3870,
+        "openedBySessionId": "st-sync"
+      },
+      {
+        "id": "st-flaky",
+        "title": "Flaky watchdog check",
+        "projectId": "states:lody-ios",
+        "machineId": "ui",
+        "status": "error",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "ci/watchdog",
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 7200,
+        "readAgo": 7170
+      },
+      {
+        "id": "st-bump",
+        "title": "Bump Loro, rebuild WASM",
+        "projectId": "states:lody-cloud",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "main",
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 10800,
+        "readAgo": 10770
+      },
+      {
+        "id": "st-streams",
+        "title": "Fix Streams cursor reset",
+        "projectId": "states:lody-cloud",
+        "machineId": "ui",
+        "status": "running",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "branchName": "fix/streams",
+        "lastModel": {
+          "modelId": "codex",
+          "name": "Codex"
+        },
+        "ago": 240,
+        "readAgo": 210
+      },
+      {
+        "id": "st-notes",
+        "title": "Draft release notes",
+        "projectId": "states:unassigned",
+        "machineId": "ui",
+        "status": "completed",
+        "createdAt": "2026-10-29T08:00:00Z",
+        "archived": false,
+        "pinned": false,
+        "lastModel": null,
+        "ago": 86400,
+        "readAgo": 86370
+      }
+    ]
+  },
+  "statesProseCache": "{\"v\":1,\"status\":\"live\",\"revision\":1,\"entries\":[{\"id\":\"states-sync-0\",\"role\":\"user\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"prompt\",\"type\":\"text\",\"text\":\"Make catalog sync resumable after a dropped connection.\"}]},{\"id\":\"states-sync-1\",\"role\":\"assistant\",\"status\":\"completed\",\"finished\":true,\"items\":[{\"itemId\":\"answer\",\"type\":\"text\",\"text\":\"Sync now resumes from the last durable cursor watermark instead of replaying every replica from the server bootstrap.\"}]}]}",
+  "photoCache": {
+    "https://avatars.githubusercontent.com/lody-fixture?size=96": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAIAAABt+uBvAAAAr0lEQVR42u3YwQ0AEAxAUXOZzcoSI9iAOAjq/ThL+45NTcMSAkCAAAECBAjQpJLrVQ8QIECAAAECBAgQIECAAAECBAjQGtDugV75HxAgQIAAAQIECBAgQIAAAQIECNCZg9apeQABAgQIECBAgAABAgQIECBAgAA5mAECBAgQIECAAAECBAgQIECAAEUEirrwaoAAAQIECBAgQIAAAQIECBAgQID+ChAgQIAAAQIUtg6pLqHeGqsF1QAAAABJRU5ErkJggg=="
+  }
+}

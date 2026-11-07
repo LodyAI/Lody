@@ -378,10 +378,25 @@ const SessionVisualAnnotationReferenceInputBlockSchema =
     type: z.literal('visual_annotation_reference'),
   }).strict();
 
+export const SessionLocalAttachmentSchema = z
+  .object({
+    type: z.literal('local_attachment'),
+    referenceId: z.string().uuid(),
+    machineId: MachineIdSchema,
+    sessionId: SessionIdSchema,
+    turnId: SharedTrimmedNonEmptyStringSchema,
+    kind: z.enum(['file', 'image']),
+    fileName: SharedTrimmedNonEmptyStringSchema,
+    mimeType: SharedTrimmedNonEmptyStringSchema,
+    sizeBytes: z.number().int().nonnegative(),
+  })
+  .strict();
+
 export const SessionInputBlockSchema = z.discriminatedUnion('type', [
   SessionTextInputBlockSchema,
   SessionImageInputBlockSchema,
   SessionFileBlockObjectSchema,
+  SessionLocalAttachmentSchema,
   SessionCommentReferenceInputBlockSchema,
   SessionVisualAnnotationReferenceInputBlockSchema,
 ]);
@@ -392,9 +407,10 @@ export const SessionInputBlocksSchema = z
     let imageCount = 0;
     let fileCount = 0;
     blocks.forEach((block, index) => {
-      if (block.type === 'image') {
+      if (block.type === 'image' || (block.type === 'local_attachment' && block.kind === 'image')) {
         imageCount += 1;
       }
+      if (block.type === 'local_attachment' && block.kind === 'file') fileCount += 1;
       if (block.type === 'file') {
         fileCount += 1;
         refineSessionFileBlock(block, ctx, [index]);
@@ -497,6 +513,12 @@ export const normalizeSessionTurnInputConfig = (
   }
 
   const inputBlocks = maybeParseField(SessionInputBlocksSchema, record.inputBlocks);
+  if (
+    !inputBlocks &&
+    Array.isArray(record.inputBlocks) &&
+    record.inputBlocks.some((block) => block?.type === 'local_attachment')
+  )
+    throw new Error('Invalid local attachment input');
   if (inputBlocks) {
     normalized.inputBlocks = inputBlocks;
   }
@@ -1861,6 +1883,49 @@ export const SessionFileUploadResponseSchema = z
   })
   .strict();
 
+export const SessionAttachmentResolveRequestSchema = z
+  .object({
+    type: z.literal('session/attachment-resolve'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    attachment: SessionLocalAttachmentSchema,
+  })
+  .strict();
+export const SessionAttachmentResolveResponseSchema = z
+  .object({
+    type: z.literal('session/attachment-resolve_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    path: z.string().optional(),
+    error: z.string().optional(),
+  })
+  .strict();
+export const SessionAttachmentRegisterRequestSchema = z
+  .object({
+    type: z.literal('session/attachment-register'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    turnId: SharedTrimmedNonEmptyStringSchema,
+    referenceId: z.string().uuid(),
+    path: SharedTrimmedNonEmptyStringSchema,
+    managed: z.boolean(),
+    kind: z.enum(['file', 'image']),
+    fileName: SharedTrimmedNonEmptyStringSchema,
+    mimeType: SharedTrimmedNonEmptyStringSchema,
+  })
+  .strict();
+export const SessionAttachmentRegisterResponseSchema = z
+  .object({
+    type: z.literal('session/attachment-register_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    error: z.string().optional(),
+    attachment: SessionLocalAttachmentSchema.optional(),
+  })
+  .strict();
+
 export const SessionFileSendLocalRequestSchema = z
   .object({
     type: z.literal('session/file-send-local'),
@@ -2429,6 +2494,8 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageUploadRequestSchema,
   SessionFileUploadRequestSchema,
   SessionFileSendLocalRequestSchema,
+  SessionAttachmentRegisterRequestSchema,
+  SessionAttachmentResolveRequestSchema,
   SessionHistoryReadRequestSchema,
   SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
@@ -2466,6 +2533,8 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageUploadResponseSchema,
   SessionFileUploadResponseSchema,
   SessionFileSendLocalResponseSchema,
+  SessionAttachmentRegisterResponseSchema,
+  SessionAttachmentResolveResponseSchema,
   SessionHistoryReadResponseSchema,
   SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,
@@ -3826,6 +3895,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
   SessionImageInputBlockSchema,
   SessionImageGroupContentSchema,
   SessionFileBlockObjectSchema,
+  SessionLocalAttachmentSchema,
   z.object({
     type: z.literal('thought'),
     text: SharedStringSchema,

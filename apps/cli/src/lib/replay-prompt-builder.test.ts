@@ -30,6 +30,47 @@ describe('buildReplayPromptFromHistory', () => {
     expect(result.stats.messagesIncluded).toBe(1);
   });
 
+  it('should exclude the assistant entry owned by the specified user turn', () => {
+    const history: SessionHistoryInput[] = [
+      {
+        id: '1',
+        role: 'user',
+        timestamp: '2024-01-01T00:00:00Z',
+        fileDiff: [],
+        items: [{ type: 'text', text: 'Earlier request' }],
+      },
+      {
+        id: 'assistant:1',
+        role: 'assistant',
+        timestamp: '2024-01-01T00:00:01Z',
+        fileDiff: [],
+        items: [{ type: 'text', text: 'Earlier answer' }],
+      },
+      {
+        id: '2',
+        role: 'user',
+        timestamp: '2024-01-01T00:01:00Z',
+        fileDiff: [],
+        items: [{ type: 'text', text: 'Current request' }],
+      },
+      {
+        id: 'assistant:2',
+        role: 'assistant',
+        timestamp: '2024-01-01T00:01:01Z',
+        fileDiff: [],
+        items: [{ type: 'text', text: 'Stale current answer' }],
+      },
+    ];
+
+    const result = buildReplayPromptFromHistory({ history, excludeTurnId: '2' });
+
+    expect(result.promptText).toContain('Earlier request');
+    expect(result.promptText).toContain('Earlier answer');
+    expect(result.promptText).not.toContain('Current request');
+    expect(result.promptText).not.toContain('Stale current answer');
+    expect(result.stats.messagesIncluded).toBe(2);
+  });
+
   it('should preserve tool content text when terminal is omitted (Pass B)', () => {
     // Create history that exceeds budget to trigger Pass B
     const largeOutput = 'output '.repeat(10000);

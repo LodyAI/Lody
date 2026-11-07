@@ -2,6 +2,8 @@ import { Cause, Clock, Effect, Fiber, Result } from 'effect';
 import { z } from 'zod';
 import { Bytes, contentPermissions } from '@lody/e2ee-core/protocol';
 import type { CloudE2eePort } from '@lody/platform';
+import { CloudE2eeLedgerOutage } from '../cloud-e2ee-errors';
+import { authorityClocksAgree, withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
 import type { makeCliE2eeRuntime } from './runtime';
 
 export type ExecutionAuthorization =
@@ -27,7 +29,12 @@ const denied = (reason: Extract<ExecutionAuthorization, { _tag: 'Denied' }>['rea
   ({ _tag: 'Denied', reason }) as const;
 const requesterSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const ttl = 15 * 60_000;
-type Stamp = { wall: number; monotonic: bigint };
+/** Windows of specs/e2ee/execution-freshness-outage.md, from the last successful latest read. */
+const OUTAGE_EXECUTION_WINDOW_MS = 4 * 60 * 60_000;
+const OUTAGE_READ_WINDOW_MS = 24 * 60 * 60_000;
+/** A failed read is not repeated for this long, so an outage does not delay every request. */
+const OUTAGE_RETRY_MS = 60_000;
+type Stamp = AuthorityStamp;
 
 /** One workspace/device-identity lifetime. This gate grants admission only for the
  * immediate new execution; callers must authenticate the frame and claim its journal
@@ -42,6 +49,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       localProjectId?: string
     ) => Effect.Effect<{ allowed: boolean; isCurrent?: () => boolean }, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
+    /** True while a window is in use, false once access is confirmed or refused again. */
+    onWindowNotice?: (active: boolean) => void;
     runtime: Pick<
       Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
       'status' | 'ingest' | 'executionLedger' | 'executionGeneration'
@@ -59,6 +68,26 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       now.monotonic >= start.monotonic &&
       now.monotonic - start.monotonic < BigInt(ttl) * 1_000_000n;
     const grants = new Map<string, Stamp>();
+    let lastRead: Stamp | undefined;
+    let outage: { at: Stamp } | undefined;
+    let windowGeneration = 0;
+    let noticed = false;
+    const clearNotice = () => {
+      if (!noticed) return;
+      noticed = false;
+      options.onWindowNotice?.(false);
+    };
+    const confirmRead = (started: Stamp) => {
+      if (!lastRead || started.monotonic > lastRead.monotonic) lastRead = started;
+      outage = undefined;
+      clearNotice();
+    };
+    const endWindow = () => {
+      windowGeneration += 1;
+      lastRead = undefined;
+      outage = undefined;
+      clearNotice();
+    };
     let flight: Fiber.Fiber<Stamp | undefined> | undefined;
     let closed = false;
     const authorityController = new AbortController();
@@ -91,7 +120,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
             }),
           catch: (cause) => {
             options.onCredentialFailure?.(cause);
-            return 'unavailable' as const;
+            return cause;
           },
         });
         // One authenticated endpoint for all pages, never a requester-supplied proof.
@@ -99,23 +128,38 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (
           checkpoint.length < initial.length ||
           (checkpoint.length === initial.length && checkpoint.headHash !== initial.headHash)
-        )
+        ) {
+          endWindow();
           return undefined;
+        }
         if (
           checkpoint.length !== page.checkpoint.length ||
           checkpoint.headHash !== page.checkpoint.headHash
-        )
+        ) {
+          endWindow();
           return undefined;
+        }
         status = yield* options.runtime.ingest(page);
-        if (!fresh(started, yield* stamp)) return undefined;
+        if (!fresh(started, yield* stamp)) {
+          endWindow();
+          return undefined;
+        }
         cursor = page.nextCursor ?? undefined;
       } while (cursor);
+      confirmRead(started);
       return started;
     }).pipe(
       Effect.timeout(30_000),
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(undefined)
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterrupts(cause)) return Effect.interrupt;
+        return Effect.gen(function* () {
+          const failure = Cause.squash(cause);
+          if (failure instanceof CloudE2eeLedgerOutage || Cause.isTimeoutError(failure))
+            outage = { at: yield* stamp };
+          else endWindow();
+          return undefined;
+        });
+      }),
       Effect.ensuring(
         Effect.sync(() => {
           flight = undefined;
@@ -150,9 +194,24 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         const now = yield* stamp;
         if (closed) return denied('closed');
         for (const [device, start] of grants) if (!fresh(start, now)) grants.delete(device);
-        const start = grants.get(requesterDevice) ?? (yield* refreshOnce);
+        let start = grants.get(requesterDevice);
+        let relaxed = false;
+        if (!start) {
+          relaxed =
+            !!outage &&
+            !!lastRead &&
+            withinAuthorityLimit(outage.at, now, OUTAGE_RETRY_MS) &&
+            withinAuthorityLimit(lastRead, now, OUTAGE_READ_WINDOW_MS);
+          if (!relaxed) {
+            start = yield* refreshOnce;
+            relaxed = !start && !!outage;
+          }
+          if (relaxed) start = lastRead;
+        }
         if (closed) return denied('closed');
-        if (!start || !fresh(start, yield* stamp)) return denied('unavailable');
+        if (!start || (!relaxed && !fresh(start, yield* stamp))) return denied('unavailable');
+        const grantedFrom = start;
+        const grantedInWindow = windowGeneration;
         // Offline state supplies immediate known revocations, never freshness.
         let generation = options.runtime.executionGeneration();
         let policyCurrent: (() => boolean) | undefined;
@@ -179,6 +238,23 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           )
             ? ('owner' as const)
             : ('member' as const);
+        const windowMs =
+          principal === 'member'
+            ? 0
+            : access === 'read'
+              ? OUTAGE_READ_WINDOW_MS
+              : OUTAGE_EXECUTION_WINDOW_MS;
+        const current = (at: Stamp) => {
+          if (!relaxed) return fresh(grantedFrom, at);
+          if (windowGeneration !== grantedInWindow) return false;
+          if (!authorityClocksAgree(grantedFrom, at)) {
+            // Only a successful read reopens this: realigned clocks prove nothing.
+            endWindow();
+            return false;
+          }
+          return withinAuthorityLimit(grantedFrom, at, windowMs);
+        };
+        if (relaxed && !current(yield* stamp)) return denied('unavailable');
         if (principal === 'member') {
           grants.delete(requesterDevice);
           if (access !== 'execute') return denied('e2ee_machine_not_owned');
@@ -209,13 +285,18 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           )
             return denied('not-authorized');
         }
-        if (!fresh(start, yield* stamp)) return denied('unavailable');
+        if (!current(yield* stamp)) return denied('unavailable');
         // Revocation may arrive while a native check yields. Nothing may publish
         // an old grant after the synchronous host fence, including cached reads.
         if (closed) return denied('closed');
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
-        grants.set(requesterDevice, start);
+        if (relaxed) {
+          if (!noticed) {
+            noticed = true;
+            options.onWindowNotice?.(true);
+          }
+        } else grants.set(requesterDevice, grantedFrom);
         if (access === 'read') return { _tag: 'Authorized' };
         return {
           _tag: 'Authorized',
@@ -223,7 +304,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           isCurrent: () =>
             !closed &&
             options.runtime.executionGeneration() === generation &&
-            fresh(start, {
+            current({
               wall: clock.currentTimeMillisUnsafe(),
               monotonic: clock.monotonicTimeNanosUnsafe(),
             }) &&
@@ -244,6 +325,19 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       ),
       authorizeRead: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'read'),
+      /** A reply moved the ledger back. Ordinary grants are unaffected; a later read reopens it. */
+      endOutageWindow: endWindow,
+      /** A background ledger read counts as a successful read once its callback runs. */
+      beginLatestRead: () => {
+        const started = {
+          wall: clock.currentTimeMillisUnsafe(),
+          monotonic: clock.monotonicTimeNanosUnsafe(),
+        };
+        const generation = windowGeneration;
+        return () => {
+          if (!closed && generation === windowGeneration) confirmRead(started);
+        };
+      },
       authoritySignal: authorityController.signal,
       invalidate,
     };

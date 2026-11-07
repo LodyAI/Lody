@@ -1,0 +1,50 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "chat",
+        "version": 1,
+        "variant": "user-user",
+        "participants": [
+          {
+            "id": "p_alice_demo",
+            "kind": "user",
+            "name": "Alice"
+          },
+          {
+            "id": "p_bob_demo",
+            "kind": "user",
+            "name": "Bob"
+          }
+        ],
+        "messages": [
+          {
+            "id": "m_uu_1",
+            "participantId": "p_alice_demo",
+            "content": "Are we still doing the static/edit split for the new chat node?"
+          },
+          {
+            "id": "m_uu_2",
+            "participantId": "p_bob_demo",
+            "content": "Yes — same pattern as code-snippet."
+          },
+          {
+            "id": "m_uu_3",
+            "participantId": "p_alice_demo",
+            "content": "Perfect. Should I open a draft PR?"
+          },
+          {
+            "id": "m_uu_4",
+            "participantId": "p_bob_demo",
+            "content": "Hold on — let's get the spec approved first."
+          }
+        ]
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

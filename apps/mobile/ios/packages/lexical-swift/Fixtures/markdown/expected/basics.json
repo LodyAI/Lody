@@ -1,0 +1,366 @@
+[
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Title",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "heading",
+    "version": 1,
+    "tag": "h1"
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Second level",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "heading",
+    "version": 1,
+    "tag": "h2"
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Plain ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 1,
+        "mode": "normal",
+        "style": "",
+        "text": "bold",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 2,
+        "mode": "normal",
+        "style": "",
+        "text": "italic",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 3,
+        "mode": "normal",
+        "style": "",
+        "text": "both",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 4,
+        "mode": "normal",
+        "style": "",
+        "text": "gone",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 16,
+        "mode": "normal",
+        "style": "",
+        "text": "code",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 128,
+        "mode": "normal",
+        "style": "",
+        "text": "mark",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " and ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 1,
+        "mode": "normal",
+        "style": "",
+        "text": "under",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 2,
+        "mode": "normal",
+        "style": "",
+        "text": "it",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": ".",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Escaped *not italic* and a literal 2 * 3 * 4.",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "A ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "link",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": null,
+        "format": "",
+        "indent": 0,
+        "type": "link",
+        "version": 1,
+        "rel": null,
+        "target": null,
+        "title": "Lexical \"docs\"",
+        "url": "https://lexical.dev"
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": " and ",
+        "type": "text",
+        "version": 1
+      },
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "plain",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": null,
+        "format": "",
+        "indent": 0,
+        "type": "link",
+        "version": 1,
+        "rel": null,
+        "target": null,
+        "title": null,
+        "url": "https://innei.in"
+      },
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": ".",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  },
+  {
+    "children": [
+      {
+        "detail": 0,
+        "format": 0,
+        "mode": "normal",
+        "style": "",
+        "text": "Last line",
+        "type": "text",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "paragraph",
+    "version": 1,
+    "textFormat": 0,
+    "textStyle": ""
+  }
+]

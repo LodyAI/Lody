@@ -35,6 +35,49 @@ record synthetic coverage and unverified host/provider behavior.
 Binding rules remain in [AGENTS.md](AGENTS.md). This document explains interoperability
 and lifecycle decisions behind them; it does not introduce additional requirements.
 
+## Command help
+
+`lody_help({command: "lody_session_create"})` returns that command's complete
+description and input JSON Schema. `lody_help({})` lists command names and summaries.
+Help serves only bundled registrations; a command argument never selects files,
+URLs, machine state or another conversation. It executes no target command and
+changes no permissions.
+
+[Tool help registration](tool-help.ts) preserves the original validators and
+callbacks. Tool discovery retains concise purpose, the input schema and a help
+pointer; full descriptions are kept once per registration and returned on demand.
+Each registration supplies an explicit purpose summary, independent of its display
+title. Agents see these summaries in the tool list before reading help, and
+`lody_help({})` uses the same summaries. The short purpose distinguishes commands
+such as creating versus continuing a conversation, inspecting status versus reading
+results, and cancelling a current turn versus cancelling an Operation.
+The same path covers Session/catalog, Schedule, automation, preview and upload
+tools. Skills keep their existing resource-loading path.
+
+Each tool summary, server instructions and the Lody prompt require reading successful
+command-specific help before execution. The index alone does not satisfy this rule,
+and the agent must not run help and the command in parallel. Already-read full help
+may be reused while it remains in context; after compaction or loss, read it again.
+This is an agent instruction,
+not a persisted read-receipt or execution gate: stateless HTTP requests do not
+share read state, and help does not block an otherwise valid operation. Tests verify
+the MCP documentation/validation boundary; they do not prove model adherence.
+
+Invalid command arguments retain their original validation issues and include
+the exact `lody_help({command: "..."})` call to read before correction or retry.
+The SDK input adapter keeps the original JSON Schema and validator; the daemon
+registration applies the same reminder to direct-call validation failures.
+Explicit error results also retain their content and structured error/retry
+fields, with a separate help reminder appended. These hints neither retry a
+command nor turn a non-retryable failure into permission to retry.
+
+Command help also explains how to interpret replies: cancellation acknowledgement
+does not prove execution has exited, idle/finished is not a task-success verdict,
+and durable completion precedes its delivery into the requesting conversation.
+Session status, history and Operation help document observation quality, partial
+failures, truncation and pagination so agents can retrieve evidence without
+restarting work. These details stay in help rather than the discovery summaries.
+
 ## Skills over MCP
 
 The built-in `lody` server publishes the
@@ -147,13 +190,46 @@ records the measurements and why subprocess/request isolation remains necessary.
 
 ## Session placement guidance
 
-Single and batch create descriptions tell agents to explicitly set
+Single and batch create help tells agents to explicitly set
 `useCurrentSessionAsParent=false` for sidebar sub-conversations; batch calls can
 set it in `defaults`. Use `true` only for an explicitly requested Tab within the
 current conversation. This is caller guidance: runtime defaults remain unchanged,
 including same-machine Local Project Role creation choosing a Tab when the field
-and `workContext` are omitted. An independent conversation can use `workContext`
-to select its project. See [session relations](../../../../specs/session-relations.md).
+and `workContext` are omitted. Both creation tools serve the same execution
+guide through help, with field descriptions on single-create inputs, batch defaults and batch
+items. The guide explains target/configuration precedence, omitted-context
+behavior, code bases, file visibility and context transfer before dispatch.
+
+| Selection                                                   | Directory and code effect                                                                                                                                                  |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useCurrentSessionAsParent=true`                            | A same-machine Tab shares the current workspace, including its existing worktree and uncommitted files. No `workContext` or nested Tab is allowed.                         |
+| `false`, `workContext.kind=local`, `worktree` omitted/false | Uses the registered project's original directory on the target machine. It does not select a session-owned worktree; an explicit branch can switch the original directory. |
+| `false`, `workContext.kind=local`, `worktree=true`          | Creates a separate worktree from the selected committed base; it does not copy uncommitted files.                                                                          |
+| `false`, `workContext.kind=github`                          | Creates a separate repository worktree on the target machine. Its preferred base is not the caller's current session branch; unavailable GitHub bases can fall back.       |
+| `false`, `workContext.kind=chat`                            | Uses a separate chat directory without a project.                                                                                                                          |
+
+Omitting `workContext` starts a plain chat for non-Role independent creation.
+Role creation has project-dependent defaults described by the tools: in particular,
+explicit `false` suppresses the same-machine Local Project shared-Tab inference.
+Choosing the same project is not equivalent to sharing the current worktree.
+
+For a caller already working in the original local project directory, an independent
+conversation on the same machine with the same `projectId` and `worktree:false`
+(or omitted) does share that directory, including its uncommitted files. Leave
+`branch` unset to keep the directory's current checkout; a Tab is not required.
+
+Agents can query `lody_session_create_options` to inspect `current.workContext`.
+For local projects, `worktree:true` reports the project/session worktree flag;
+absence means neither metadata field marks a worktree. GitHub contexts use a
+repository worktree; chat contexts have no project. The local `rootPath` is the
+registered original directory, not a session worktree path. This discovery result
+is not automatically injected into agent prompts.
+
+No creation mode copies the caller's transcript. Agent-origin input identifies
+its source Session, and `lody_session_history` can supply additional authorized
+context. The caller should provide a self-contained task; single-create attachments
+transfer selected files rather than mounting or synchronizing the caller workspace.
+See [session relations](../../../../specs/session-relations.md).
 
 ## Operation acceptance
 

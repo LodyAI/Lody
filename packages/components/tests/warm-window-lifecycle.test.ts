@@ -434,7 +434,7 @@ describe('renderer unload confirmation', () => {
     expect(main.contents.listenerCount('render-process-gone')).toBe(0);
   });
 
-  it('keeps the quit deadline live while an invitation page veto awaits an unanswered sheet', async () => {
+  it('cancels an unanswered quit confirmation within its budget and keeps the document available', async () => {
     vi.useFakeTimers();
     const first = productWindow({ main: true });
     await expect(closeProductWindowsForQuit()).resolves.toBe(true);
@@ -454,9 +454,10 @@ describe('renderer unload confirmation', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(outcome).toBeUndefined();
       await vi.advanceTimersByTimeAsync(15_000);
-      expect(outcome).toBe(true);
-      expect(unconfirmed).toBe(true);
-      expect(reopened.destroyed).toBe(true);
+      expect(outcome).toBe(false);
+      expect(unconfirmed).toBe(false);
+      expect(reopened.destroyed).toBe(false);
+      expect(isAppQuitting()).toBe(false);
       const replacement = productWindow({ main: true, veto: true });
       decision.resolve({ response: 1 });
       await vi.advanceTimersByTimeAsync(0);
@@ -466,6 +467,34 @@ describe('renderer unload confirmation', () => {
       reopened.destroy();
       await quit;
     }
+  });
+
+  it('allows another quit after a confirmation expires and bounds a hung Leave retry', async () => {
+    vi.useFakeTimers();
+    const main = productWindow({ main: true, veto: true });
+    const oldDecision = Promise.withResolvers<{ response: number }>();
+    nativeState.unloadDecision = oldDecision.promise;
+    const first = closeProductWindowsForQuit();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(first).resolves.toBe(false);
+    const nextDecision = Promise.withResolvers<{ response: number }>();
+    nativeState.unloadDecision = nextDecision.promise;
+    let unconfirmed = false;
+    const next = closeProductWindowsForQuit(() => {
+      unconfirmed = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    oldDecision.resolve({ response: 1 });
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(main.destroyed).toBe(false);
+    main.hung = true;
+    nextDecision.resolve({ response: 1 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(main.destroyed).toBe(false);
+    await vi.advanceTimersByTimeAsync(14_000);
+    await expect(next).resolves.toBe(true);
+    expect(unconfirmed).toBe(true);
+    expect(main.destroyed).toBe(true);
   });
 
   it('does not apply a late Leave answer to a different document', async () => {

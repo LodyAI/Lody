@@ -161,7 +161,8 @@ this page is the full text of the rules summarised there.
   existing dialog snapshots its target; saving does not re-read the active tab.
 - Tab titles and the sidebar title are independent. Tab and current-session rename
   write that Session's `title`; sidebar rename writes the root's `groupTitle`, and
-  sidebar rows and the window title read `getSessionGroupTitle`. See the
+  sidebar rows and the window title read `getSessionGroupTitle`. Active and archived
+  list equality includes `groupTitle` so a group-only rename refreshes its row. See the
   [group title decision](../notes/implemented/architecture/2026-11-05-session-group-titles.md).
 - **The `?tab` search value is the single source of truth for the active
   conversation tab.** `session-detail.tsx` DERIVES the active tab from the
