@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises'
 import { constants } from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { sha256 } from './protocol.mjs'
 
@@ -80,5 +81,33 @@ export async function collectObjects(directory, protectedHashes, budget) {
       if (error.code !== 'ENOENT') throw error
     })
     total -= entry.size
+  }
+}
+
+export async function verifyObject(file, hash, size) {
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const before = await handle.stat()
+    if (
+      !before.isFile() ||
+      before.size > 256 * 2 ** 20 ||
+      (size !== undefined && before.size !== size)
+    )
+      throw Object.assign(new Error('Invalid cached object size'), { code: 'INVALID_OBJECT' })
+    const digest = createHash('sha256')
+    let length = 0
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
+      length += chunk.length
+      if (length > before.size)
+        throw Object.assign(new Error('Object changed'), { code: 'INVALID_OBJECT' })
+      digest.update(chunk)
+    }
+    const after = await handle.stat()
+    if (length !== before.size || before.mtimeMs !== after.mtimeMs || digest.digest('hex') !== hash)
+      throw Object.assign(new Error('Cached object hash mismatch'), { code: 'INVALID_OBJECT' })
+    const used = new Date()
+    await handle.utimes(used, used)
+  } finally {
+    await handle.close()
   }
 }

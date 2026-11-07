@@ -1,10 +1,55 @@
+import { createReadStream, createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
+import { Transform } from 'node:stream'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { assembleCoreSnapshot } from '../assemble-core-snapshot.mjs'
-import { readFile, readdir, lstat, mkdir, writeFile, realpath, mkdtemp, rm } from 'node:fs/promises'
+import { verifyCoreResources } from '../verify-core-resources.mjs'
+import {
+  readFile,
+  readdir,
+  lstat,
+  mkdir,
+  writeFile,
+  realpath,
+  mkdtemp,
+  rm,
+  open
+} from 'node:fs/promises'
 import { resolve, join, relative, dirname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
+import { createZstdCompress, createZstdDecompress } from 'node:zlib'
 import { sha256, signManifest, canonicalJson } from './protocol.mjs'
+async function digestFile(file) {
+  const digest = createHash('sha256')
+  for await (const chunk of createReadStream(file)) digest.update(chunk)
+  return digest.digest('hex')
+}
+async function compress(file, output, expected, dictionary) {
+  const digest = createHash('sha256')
+  const compressed = createHash('sha256')
+  let length = 0
+  await pipeline(
+    createReadStream(file),
+    new Transform({
+      transform(chunk, encoding, done) {
+        digest.update(chunk)
+        done(null, chunk)
+      }
+    }),
+    createZstdCompress(dictionary ? { dictionary } : {}),
+    new Transform({
+      transform(chunk, encoding, done) {
+        length += chunk.length
+        compressed.update(chunk)
+        done(null, chunk)
+      }
+    }),
+    createWriteStream(output, { flags: 'wx' })
+  )
+  if (digest.digest('hex') !== expected) throw new Error('Input changed during build')
+  return { file: output, length, hash: compressed.digest('hex') }
+}
 async function immutableWrite(path, bytes) {
   try {
     await writeFile(path, bytes, { flag: 'wx' })
@@ -40,36 +85,51 @@ export async function buildRelease(o) {
         if (totalSize > 32 * 2 ** 30) throw new Error('Core tree exceeds limit')
         if (stat.size > 256 * 2 ** 20 || tree.length >= 100000)
           throw new Error('Core input exceeds limits')
-        const bytes = await readFile(full)
-        const h = sha256(bytes)
-        tree.push({ path, sha256: h, size: bytes.length })
+        const h = await digestFile(full)
+        tree.push({ path, sha256: h, size: stat.size })
         contents.set(h, full)
       } else throw new Error('Unsupported Core file type')
     }
   }
   await walk(input)
-  const frames = [],
-    objects = {},
+  const objects = {},
     patches = []
   const packs = []
+  await mkdir(output, { recursive: true })
+  const spool = await mkdtemp(join(output, '.pack-'))
+  let packFile = join(spool, 'pending')
+  let packHandle = await open(packFile, 'wx')
+  let packDigest = createHash('sha256')
   let pending = []
   let offset = 0
   await mkdir(join(output, 'packs'), { recursive: true })
   async function flush() {
-    if (!frames.length) return
+    if (!pending.length) return
     if (packs.length >= 64) throw new Error('Too many packs')
-    const bytes = Buffer.concat(frames)
-    const hash = sha256(bytes)
+    await packHandle.sync()
+    await packHandle.close()
+    const hash = packDigest.digest('hex')
+    const bytes = o.returnPackBytes === false ? undefined : await readFile(packFile)
     const path = `packs/${hash}.pack`
-    await immutableWrite(join(output, path), bytes)
+    try {
+      await (await import('node:fs/promises')).link(packFile, join(output, path))
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      const digest = createHash('sha256')
+      for await (const chunk of (await import('node:fs')).createReadStream(join(output, path)))
+        digest.update(chunk)
+      if (digest.digest('hex') !== hash) throw new Error('Existing output differs')
+    }
+    await rm(packFile)
+    packHandle = await open(packFile, 'wx')
+    packDigest = createHash('sha256')
     for (const frame of pending) frame.packSha256 = hash
     packs.push({
       sha256: hash,
       path,
-      size: bytes.length,
+      size: offset,
       ...(o.returnPackBytes === false ? {} : { bytes })
     })
-    frames.length = 0
     pending = []
     offset = 0
   }
@@ -78,54 +138,74 @@ export async function buildRelease(o) {
     if (offset + bytes.length > maxPackBytes) await flush()
     descriptor.offset = offset
     pending.push(descriptor)
-    frames.push(bytes)
+    for await (const chunk of createReadStream(bytes.file)) {
+      await packHandle.writeFile(chunk)
+      packDigest.update(chunk)
+    }
+    await rm(bytes.file)
     offset += bytes.length
   }
-  for (const h of [...contents.keys()].sort()) {
-    const target = await readFile(contents.get(h))
-    if (sha256(target) !== h) throw new Error('Input changed during build')
-    const frame = zstdCompressSync(target)
-    objects[h] = { packSha256: '', offset, length: frame.length, compressedSha256: sha256(frame) }
-    await append(frame, objects[h])
-    if (previous) {
-      const candidate = tree.find((f) => f.sha256 === h).path
-      const oldPath = join(previous, candidate)
-      let base
-      try {
-        const resolved = await realpath(oldPath)
-        const relation = relative(previous, resolved)
-        if (relation.startsWith('..') || relation.startsWith('/'))
-          throw new Error('Previous input escapes root')
-        const stat = await lstat(oldPath)
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 2 ** 20)
-          throw new Error('Invalid previous input')
-        base = await readFile(oldPath)
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error
-      }
-      if (base && sha256(base) !== h) {
-        const patch = zstdCompressSync(target, { dictionary: base })
-        if (patch.length + 256 < frame.length) {
-          const replay = zstdDecompressSync(patch, {
-            dictionary: base,
-            maxOutputLength: Math.max(1, target.length)
-          })
-          if (!replay.equals(target)) throw new Error('Dictionary patch replay failed')
-          const descriptor = {
-            fromSha256: sha256(base),
-            toSha256: h,
-            packSha256: '',
-            offset,
-            length: patch.length,
-            compressedSha256: sha256(patch)
-          }
-          patches.push(descriptor)
-          await append(patch, descriptor)
+  try {
+    for (const h of [...contents.keys()].sort()) {
+      const target = contents.get(h)
+      const frame = await compress(target, join(spool, 'frame'), h)
+      objects[h] = { packSha256: '', offset, length: frame.length, compressedSha256: frame.hash }
+      await append(frame, objects[h])
+      if (previous) {
+        const candidate = tree.find((f) => f.sha256 === h).path
+        const oldPath = join(previous, candidate)
+        let base
+        try {
+          const resolved = await realpath(oldPath)
+          const relation = relative(previous, resolved)
+          if (relation.startsWith('..') || relation.startsWith('/'))
+            throw new Error('Previous input escapes root')
+          const stat = await lstat(oldPath)
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 2 ** 20)
+            throw new Error('Invalid previous input')
+          base = await readFile(oldPath)
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error
+        }
+        if (base && sha256(base) !== h) {
+          const patch = await compress(target, join(spool, 'patch'), h, base)
+          if (patch.length + 256 < frame.length) {
+            const replay = createHash('sha256')
+            let replaySize = 0
+            await pipeline(
+              createReadStream(patch.file),
+              createZstdDecompress({ dictionary: base }),
+              new Transform({
+                transform(chunk, encoding, done) {
+                  replaySize += chunk.length
+                  if (replaySize > tree.find((f) => f.sha256 === h).size)
+                    return done(new Error('Oversized patch replay'))
+                  replay.update(chunk)
+                  done()
+                }
+              })
+            )
+            if (replay.digest('hex') !== h) throw new Error('Dictionary patch replay failed')
+            const descriptor = {
+              fromSha256: sha256(base),
+              toSha256: h,
+              packSha256: '',
+              offset,
+              length: patch.length,
+              compressedSha256: patch.hash
+            }
+            patches.push(descriptor)
+            await append(patch, descriptor)
+          } else await rm(patch.file)
         }
       }
     }
+    await flush()
+    await packHandle.close()
+  } finally {
+    await packHandle.close().catch(() => {})
+    await rm(spool, { recursive: true, force: true })
   }
-  await flush()
   const manifest = signManifest(
     {
       schemaVersion: 1,
@@ -150,6 +230,7 @@ export async function buildDesktopRelease({ buildOutput, ...options }) {
   const snapshot = await mkdtemp(join(tmpdir(), 'core-publish-'))
   try {
     await assembleCoreSnapshot(buildOutput, join(snapshot, 'out'))
+    await verifyCoreResources(join(snapshot, 'out'))
     return await buildRelease({ ...options, input: snapshot })
   } finally {
     await rm(snapshot, { recursive: true, force: true })

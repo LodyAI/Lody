@@ -376,3 +376,338 @@ test('cache GC evicts least recently verified objects and protects active refere
   await collectObjects(root, new Set(), 0)
   assert.deepEqual(await fs.readdir(root), [])
 })
+
+test('stream spool budgets and corrupt HTTP frames leave no partial files', async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-stream-')))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const input = path.join(root, 'input')
+  await fs.mkdir(input)
+  await fs.writeFile(path.join(input, 'large'), randomBytes(512 * 1024))
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const output = path.join(root, 'output')
+  const { manifest } = await buildRelease({
+    ...applicability,
+    input,
+    output,
+    release: 'r',
+    seq: 1,
+    privateKey,
+    returnPackBytes: false
+  })
+  assert.deepEqual((await fs.readdir(output)).sort(), ['manifest.json', 'packs'])
+  let corrupt = false
+  const server = createServer(async (req, res) => {
+    const pack = await fs.readFile(path.join(output, manifest.packs[0].path))
+    if (corrupt) pack[0] ^= 255
+    res.writeHead(200, { 'Content-Length': pack.length }).end(pack)
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const baseUrl = `http://127.0.0.1:${server.address().port}/`
+  let clock = 0
+  const options = { ...applicability, manifest, publicKey, baseUrl, now: () => ++clock }
+  const storeRoot = path.join(root, 'store')
+  await assert.rejects(stageRelease({ ...options, storeRoot, maxSpoolBytes: 1 }), /disk budget/)
+  await assertOnlyVerifiedCache(storeRoot, manifest)
+  corrupt = true
+  await assert.rejects(stageRelease({ ...options, storeRoot }), /hash mismatch/)
+  await assertOnlyVerifiedCache(storeRoot, manifest)
+  corrupt = false
+  const result = await stageRelease({ ...options, storeRoot })
+  assert.equal(result.stats.usefulBytes + result.stats.wasteBytes, result.stats.downloadedBytes)
+  assert.equal(result.stats.peakSpoolBytes, manifest.packs[0].size)
+  assert.ok(result.stats.elapsedMs > 0)
+  assert.deepEqual(
+    await fs.readFile(path.join(result.directory, 'large')),
+    await fs.readFile(path.join(input, 'large'))
+  )
+})
+
+test('measured latency replans the next missing pack with a synthetic clock', async (t) => {
+  const { zstdCompressSync } = await import('node:zlib')
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-plan-')))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const data = [randomBytes(1024), randomBytes(1024), randomBytes(1024)]
+  const frames = data.map((b) => zstdCompressSync(b))
+  const gap = Buffer.alloc(1024 * 1024)
+  const bytes = [frames[0], Buffer.concat([frames[1], gap, frames[2]])]
+  const packs = bytes.map((b, i) => ({
+    sha256: sha256(b),
+    size: b.length,
+    path: `packs/${i}.pack`
+  }))
+  const tree = data.map((b, i) => ({ path: String(i), sha256: sha256(b), size: b.length }))
+  const objects = Object.fromEntries(
+    tree.map((f, i) => [
+      f.sha256,
+      {
+        packSha256: packs[i ? 1 : 0].sha256,
+        offset: i === 2 ? frames[1].length + gap.length : 0,
+        length: frames[i].length,
+        compressedSha256: sha256(frames[i])
+      }
+    ])
+  )
+  const manifest = signManifest(
+    {
+      ...applicability,
+      schemaVersion: 1,
+      releaseId: 'r',
+      seq: 1,
+      tree,
+      objects,
+      packs,
+      patches: []
+    },
+    privateKey
+  )
+  const requests = []
+  let clock = 0
+  const fetchImpl = async (url, options) => {
+    const i = Number(new URL(url).pathname.match(/(\d).pack/)[1])
+    requests.push(options.headers.Range ?? 'full')
+    clock += 100000
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes[i])
+          controller.close()
+        }
+      }),
+      { headers: { 'Content-Length': String(bytes[i].length) } }
+    )
+  }
+  const result = await stageRelease({
+    ...applicability,
+    manifest,
+    publicKey,
+    storeRoot: path.join(root, 'store'),
+    baseUrl: 'http://planner.test/',
+    fetchImpl,
+    now: () => clock++
+  })
+  assert.equal(requests.length, 2)
+  assert.equal(
+    requests[1],
+    'full',
+    'latency sample makes one complete pack cheaper than two ranges'
+  )
+  assert.equal(result.stats.wasteBytes, gap.length)
+})
+
+test('authenticated invalid zstd and output overflow clean decoder temporaries', async (t) => {
+  const { zstdCompressSync } = await import('node:zlib')
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-decode-')))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  let bytes
+  const server = createServer((req, res) =>
+    res.writeHead(200, { 'Content-Length': bytes.length }).end(bytes)
+  )
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  for (const [i, frame] of [
+    Buffer.from('invalid-zstd'),
+    zstdCompressSync(Buffer.alloc(1024))
+  ].entries()) {
+    bytes = frame
+    const hash = sha256(Buffer.from('target'))
+    const packHash = sha256(frame)
+    const manifest = signManifest(
+      {
+        ...applicability,
+        schemaVersion: 1,
+        releaseId: 'r',
+        seq: 1,
+        tree: [{ path: 'file', sha256: hash, size: 6 }],
+        packs: [{ sha256: packHash, path: 'packs/a.pack', size: frame.length }],
+        objects: {
+          [hash]: {
+            packSha256: packHash,
+            offset: 0,
+            length: frame.length,
+            compressedSha256: packHash
+          }
+        },
+        patches: []
+      },
+      privateKey
+    )
+    const storeRoot = path.join(root, String(i))
+    await assert.rejects(
+      stageRelease({
+        ...applicability,
+        manifest,
+        publicKey,
+        storeRoot,
+        baseUrl: `http://127.0.0.1:${server.address().port}/`
+      })
+    )
+    await assertOnlyVerifiedCache(storeRoot, manifest)
+  }
+})
+
+test('multiple packs recycle disk spool within a one-pack budget', async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-recycle-')))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const input = path.join(root, 'input')
+  await fs.mkdir(input)
+  for (let i = 0; i < 4; i++) await fs.writeFile(path.join(input, String(i)), randomBytes(1024))
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const output = path.join(root, 'output')
+  const { manifest } = await buildRelease({
+    ...applicability,
+    input,
+    output,
+    release: 'r',
+    seq: 1,
+    privateKey,
+    maxPackBytes: 1100,
+    returnPackBytes: false
+  })
+  assert.equal(manifest.packs.length, 4)
+  const storeRoot = path.join(root, 'store')
+  await fs.mkdir(storeRoot)
+  const orphans = ['.download-Ab12xy', '.stage-Z987ab']
+  const preserved = ['.download-unrelated', '.stage-1234567', 'release-123', 'a'.repeat(64)]
+  for (const name of [...orphans, ...preserved]) {
+    await fs.mkdir(path.join(storeRoot, name))
+    await fs.writeFile(path.join(storeRoot, name, 'sentinel'), 'preserve or reap')
+  }
+  await fs.symlink(input, path.join(storeRoot, '.download-Link12'), 'dir')
+  const remainingFiles = []
+  const server = createServer(async (req, res) => {
+    const spool = (await fs.readdir(storeRoot)).find(
+      (name) => /^\.download-[a-zA-Z0-9]{6}$/.test(name) && name !== '.download-Link12'
+    )
+    remainingFiles.push((await fs.readdir(path.join(storeRoot, spool))).length)
+    const bytes = await fs.readFile(path.join(output, req.url))
+    res.writeHead(200, { 'Content-Length': bytes.length }).end(bytes)
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const result = await stageRelease({
+    ...applicability,
+    manifest,
+    publicKey,
+    storeRoot,
+    maxSpoolBytes: 1100,
+    baseUrl: `http://127.0.0.1:${server.address().port}/`
+  })
+  assert.deepEqual(remainingFiles, [0, 0, 0, 0])
+  for (const name of orphans)
+    await assert.rejects(fs.lstat(path.join(storeRoot, name)), { code: 'ENOENT' })
+  for (const name of preserved)
+    assert.equal(
+      await fs.readFile(path.join(storeRoot, name, 'sentinel'), 'utf8'),
+      'preserve or reap'
+    )
+  assert.ok((await fs.lstat(path.join(storeRoot, '.download-Link12'))).isSymbolicLink())
+
+  assert.equal(result.stats.peakSpoolBytes, Math.max(...manifest.packs.map((p) => p.size)))
+  assert.equal(result.stats.planModes.full, 4)
+  assert.equal(result.stats.wasteBytes, 0)
+  assert.equal(
+    (await fs.readdir(storeRoot)).some(
+      (name) => /^\.download-[a-zA-Z0-9]{6}$/.test(name) && name !== '.download-Link12'
+    ),
+    false
+  )
+  for (const entry of manifest.tree)
+    assert.equal(sha256(await fs.readFile(path.join(result.directory, entry.path))), entry.sha256)
+})
+
+test('latency switches remaining cross-pack patches to consolidated objects before decode', async (t) => {
+  const { zstdCompressSync } = await import('node:zlib')
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-mode-')))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const base = randomBytes(1024 * 1024)
+  const targets = [Buffer.from(base), Buffer.from(base)]
+  targets[0][0] ^= 1
+  targets[1][1] ^= 1
+  const data = [randomBytes(1024), ...targets]
+  const compressed = data.map((bytes) => zstdCompressSync(bytes))
+  const patchFrames = targets.map((bytes) => zstdCompressSync(bytes, { dictionary: base }))
+  const bodies = [
+    Buffer.concat([compressed[0], Buffer.alloc(1024)]),
+    Buffer.concat([compressed[1], compressed[2], Buffer.alloc(1024)]),
+    ...patchFrames
+  ]
+  const packs = bodies.map((bytes, i) => ({
+    sha256: sha256(bytes),
+    size: bytes.length,
+    path: `packs/${i}.pack`
+  }))
+  const tree = data.map((bytes, i) => ({
+    path: String(i),
+    size: bytes.length,
+    sha256: sha256(bytes)
+  }))
+  const objects = Object.fromEntries(
+    tree.map((f, i) => [
+      f.sha256,
+      {
+        packSha256: packs[i ? 1 : 0].sha256,
+        offset: i === 2 ? compressed[1].length : 0,
+        length: compressed[i].length,
+        compressedSha256: sha256(compressed[i])
+      }
+    ])
+  )
+  const patches = patchFrames.map((bytes, i) => ({
+    fromSha256: sha256(base),
+    toSha256: tree[i + 1].sha256,
+    packSha256: packs[i + 2].sha256,
+    offset: 0,
+    length: bytes.length,
+    compressedSha256: sha256(bytes)
+  }))
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const applicability = { hostAbi: 'abi', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const manifest = signManifest(
+    { ...applicability, schemaVersion: 1, releaseId: 'r', seq: 1, tree, packs, objects, patches },
+    privateKey
+  )
+  const local = path.join(root, 'local')
+  await fs.mkdir(local)
+  await fs.writeFile(path.join(local, 'base'), base)
+  let clock = 0
+  const requests = []
+  const fetchImpl = async (url, options) => {
+    const i = Number(new URL(url).pathname.match(/(\d).pack/)[1])
+    requests.push(i)
+    clock += 100000
+    const range = options.headers.Range?.match(/bytes=(\d+)-(\d+)/)
+    const start = range ? Number(range[1]) : 0,
+      end = range ? Number(range[2]) + 1 : bodies[i].length
+    return new Response(bodies[i].subarray(start, end), {
+      status: range ? 206 : 200,
+      headers: {
+        'Content-Length': String(end - start),
+        ...(range ? { 'Content-Range': `bytes ${start}-${end - 1}/${bodies[i].length}` } : {})
+      }
+    })
+  }
+  const result = await stageRelease({
+    ...applicability,
+    manifest,
+    publicKey,
+    storeRoot: path.join(root, 'store'),
+    localRoots: [local],
+    baseUrl: 'http://mode-switch.test/',
+    fetchImpl,
+    maxSpoolBytes: compressed[1].length + compressed[2].length,
+    now: () => clock++
+  })
+  assert.deepEqual(requests, [0, 1])
+  assert.equal(result.stats.planModes.mixed, 1)
+  assert.equal(result.stats.planModes.object, 1)
+  assert.ok(result.stats.peakSpoolBytes <= compressed[1].length + compressed[2].length)
+  for (const entry of tree)
+    assert.equal(sha256(await fs.readFile(path.join(result.directory, entry.path))), entry.sha256)
+})
