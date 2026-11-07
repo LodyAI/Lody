@@ -7,6 +7,12 @@ import { describe, expect, it } from 'vitest';
 import { Bytes } from '@lody/e2ee-core';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import {
+  E2eePasskeyCancelled,
+  enrollVaultPasskey,
+  unlockVaultWithPasskey,
+  type E2eePasskeyPort,
+} from '@lody/e2ee-client/passkey-unlock';
+import {
   makeWorkspaceRecovery,
   type RecoveryVault,
   type RecoverySubmitResult,
@@ -1326,6 +1332,146 @@ describe('encrypted recovery vault and genuine workflow', () => {
     }));
 });
 
+describe('passkey unlock through the platform port', () => {
+  /** A platform authenticator with real discoverable credentials and a fixed PRF. */
+  const authenticator = (options: { prf?: boolean; verified?: boolean; length?: number } = {}) => {
+    const credentials = new Map<string, { handle: Uint8Array; secret: number }>();
+    const calls = { registered: 0, authenticated: 0 };
+    const port: E2eePasskeyPort = {
+      available: async () => true,
+      register: async (request) => {
+        calls.registered += 1;
+        const credentialId = `credential${credentials.size}A`;
+        credentials.set(credentialId, {
+          handle: new Uint8Array(request.userHandle),
+          secret: 40 + credentials.size,
+        });
+        return { credentialId, prfEnabled: options.prf ?? true };
+      },
+      authenticate: async (request) => {
+        calls.authenticated += 1;
+        const [credentialId, credential] = [...credentials].find(
+          ([id]) =>
+            request.allowCredentialIds.length === 0 || request.allowCredentialIds.includes(id)
+        )!;
+        return {
+          credentialId,
+          userHandle: credential.handle,
+          userVerified: options.verified ?? true,
+          prfFirst: new Uint8Array(options.length ?? 32).fill(credential.secret),
+        };
+      },
+    };
+    return { port, calls };
+  };
+  const vaultFixture = Effect.fnUntraced(function* (dir: string) {
+    const storage = yield* makeLabRecoveryVaultStore({
+      path: join(dir, 'vault.sqlite'),
+      mode: 'create',
+    });
+    const created = yield* createRecoveryVault({
+      locator: 'https://synthetic.invalid/vault',
+      ...storage,
+    });
+    return { storage, vault: created.vault };
+  });
+  it('enrolls through a real assertion, then opens V on a device with no file', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { storage, vault } = yield* vaultFixture(dir);
+            const { port, calls } = authenticator();
+            yield* enrollVaultPasskey({ port, vault, label: 'iCloud Keychain' });
+            expect(calls).toEqual({ registered: 1, authenticated: 1 });
+            expect(yield* vault.listPasskeys()).toHaveLength(1);
+            const opened = yield* unlockVaultWithPasskey({
+              port,
+              open: ({ vaultId, credential }) =>
+                openRecoveryVaultWithPasskey({
+                  vaultId,
+                  locator: 'https://synthetic.invalid/vault',
+                  credential,
+                  ...storage,
+                }),
+            });
+            expect(opened.vaultId).toBe(vault.vaultId);
+          })
+        )
+      );
+    }));
+  it.each([
+    ['reports no PRF at registration', { prf: false }],
+    ['skips user verification', { verified: false }],
+    ['returns a wrong-length result', { length: 16 }],
+  ])('writes nothing when an authenticator %s', (_name, options) =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { vault } = yield* vaultFixture(dir);
+            const failed = yield* Effect.result(
+              enrollVaultPasskey({ port: authenticator(options).port, vault, label: 'Other' })
+            );
+            expect(failed).toMatchObject({ _tag: 'Failure', failure: { code: 'prf-unavailable' } });
+            expect(yield* vault.listPasskeys()).toHaveLength(0);
+          })
+        )
+      );
+    })
+  );
+  it('lists enrolled passkeys so a second registration cannot overwrite them', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { vault } = yield* vaultFixture(dir);
+            const { port } = authenticator();
+            yield* enrollVaultPasskey({ port, vault, label: 'First' });
+            const seen: (readonly string[])[] = [];
+            yield* enrollVaultPasskey({
+              port: {
+                ...port,
+                register: (request) => {
+                  seen.push(request.excludeCredentialIds);
+                  return port.register(request);
+                },
+                authenticate: (request) =>
+                  port.authenticate({
+                    ...request,
+                    allowCredentialIds: ['credential1A'],
+                  }),
+              },
+              vault,
+              label: 'Second',
+            });
+            expect(seen[0]).toEqual([(yield* vault.listPasskeys())[0]!.credentialId]);
+          })
+        )
+      );
+    }));
+  it('passes a dismissed prompt through without changing the vault', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { vault } = yield* vaultFixture(dir);
+            const { port } = authenticator();
+            const cancelled = new E2eePasskeyCancelled();
+            const failed = yield* Effect.result(
+              enrollVaultPasskey({
+                port: { ...port, register: () => Promise.reject(cancelled) },
+                vault,
+                label: 'Dismissed',
+              })
+            );
+            expect(failed).toMatchObject({ _tag: 'Failure', failure: cancelled });
+            expect(yield* vault.listPasskeys()).toHaveLength(0);
+          })
+        )
+      );
+    }));
+});
 describe('passkey wrapping of one vault master key', () => {
   const output = (fill: number) => new Uint8Array(32).fill(fill).buffer;
   const passkey = Effect.fnUntraced(function* (credentialId: string, fill: number) {
