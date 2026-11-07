@@ -450,6 +450,7 @@ type CliE2eeWorkspaceOptions = {
   onUnavailable: () => void;
   /** A latest ledger read succeeded. `startedAt` was taken before its network I/O. */
   onAuthorityConfirmed?: (startedAt: number) => void;
+  onWindowNotice?: (notice: { signInExpired: boolean } | null) => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
@@ -1201,6 +1202,7 @@ async function openWorkspaceOwned(
       while (pending && !isClosed()) {
         pending = false;
         const startedAt = Date.now();
+        const confirmRead = opened.executionAuthorization.beginLatestRead();
         let status = await run(opened.runtime.status());
         let cursor: string | undefined;
         let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
@@ -1261,7 +1263,10 @@ async function openWorkspaceOwned(
         }
         refreshRetryAttempts = 0;
         clearRefreshRetry();
-        if (!closed) options.onAuthorityConfirmed?.(startedAt);
+        if (!closed) {
+          confirmRead();
+          options.onAuthorityConfirmed?.(startedAt);
+        }
       }
     })()
       .catch(async (error: unknown) => {

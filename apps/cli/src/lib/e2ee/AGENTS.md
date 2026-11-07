@@ -21,7 +21,7 @@
 - Encrypted claims authorize every machine-resolved local project the turn reaches, never
   the request alone. [Scope](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#project-scope-at-the-receiving-machine).
 - Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
-  RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
+  RAM-only <15min/read-start, [outage windows](../../../../../specs/e2ee/execution-freshness-outage.md). Credential revoke: fence/clear grants before drain,
   never network-retry.
   A shared grant pins the ledger generation after its policy check, then rechecks the
   signer and machine against that ledger; a later ingest fails `isCurrent()`.

@@ -1,6 +1,10 @@
 import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
 import { StreamsClient } from '@loro-dev/streams-client';
-import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
+import {
+  CloudE2eeMemberRemoved,
+  CloudE2eeDeviceRevoked,
+  ledgerReadFailure,
+} from './cloud-e2ee-errors';
 import { Effect } from 'effect';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getCliPlatformKind } from './cli-platform';
@@ -191,10 +195,14 @@ export function createCloudE2eePort(
 ): CloudE2eePort {
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
-  const client = (signal: AbortSignal) =>
+  const client = (signal: AbortSignal, onStatus?: (status: number) => void) =>
     new ConvexHttpClient(authBaseUrl, {
       logger: false,
-      fetch: (input, init) => fetchImpl(input, { ...init, signal }),
+      fetch: async (input, init) => {
+        const response = await fetchImpl(input, { ...init, signal });
+        onStatus?.(response.status);
+        return response;
+      },
     });
   const tokenSchema = z.object({
     token: z.string().min(1),
@@ -300,15 +308,22 @@ export function createCloudE2eePort(
       };
     },
     getHistory: async (input) => {
+      let status: number | undefined;
       try {
         return e2eeHistoryPageSchema.parse(
-          await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
+          await client(AbortSignal.timeout(30_000), (value) => {
+            status = value;
+          }).action(api.e2eeWorkspaces.history, {
             ...input,
             ...(options.token === undefined ? {} : { cliToken: options.token }),
           })
         );
       } catch (cause) {
-        return classifyE2eeRejection(cause);
+        try {
+          return classifyE2eeRejection(cause);
+        } catch (classified) {
+          throw ledgerReadFailure(classified, status);
+        }
       }
     },
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),

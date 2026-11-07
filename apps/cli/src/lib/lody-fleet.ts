@@ -114,10 +114,10 @@ import { closeProcessLocalLoroWriterLegacy } from '@lody/shared/local-loro-write
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
 const FLEET_REMOTE_BRIDGE_OFFLINE_GRACE_MS = 15_000;
-/** How long an encrypted runtime stays attached with nothing confirming its access. This is
- * the approved 15-minute revocation bound (specs/e2ee/whitepaper.md), the same limit as the
- * execution grant in e2ee/execution-authorization.ts. */
-const FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS = 15 * 60_000;
+/** How long an encrypted runtime stays attached with nothing confirming its access: the
+ * longest window of specs/e2ee/execution-freshness-outage.md, so the bridge outlasts every
+ * request that window allows. e2ee/execution-authorization.ts decides each request. */
+const FLEET_ENCRYPTED_AUTHORITY_LIMIT_MS = 24 * 60 * 60_000;
 const isExplicitAccessRefusal = (error: unknown) =>
   isCloudE2eeMemberRemoved(error) ||
   isCloudE2eeDeviceRevoked(error) ||
@@ -1009,6 +1009,19 @@ export class LodyFleet {
           logger: workspaceLogger,
           onEncryptedAuthorityConfirmed: (startedAt) =>
             this.confirmEncryptedAuthority(workspace.id, startedAt),
+          onEncryptedWindowNotice: (notice) => {
+            const code = `e2ee_access_unconfirmed:${workspace.id}`;
+            if (notice)
+              this.runtimeStateReporter.upsertIssue({
+                code,
+                severity: 'warning',
+                recoverable: true,
+                message: notice.signInExpired
+                  ? 'Encrypted workspace access could not be confirmed. Sign in again to restore it.'
+                  : 'Encrypted workspace access could not be confirmed. Lody is working from the verified ledger on this machine.',
+              });
+            else this.runtimeStateReporter.clearIssue(code);
+          },
           onStorageWriteFailure: () => this.runtimeStateReporter.reportStorageWriteFailure(),
           onInboxAvailabilityChange: (message) => {
             const code = `inbox_unavailable:${workspace.id}`;

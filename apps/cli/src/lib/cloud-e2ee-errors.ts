@@ -35,3 +35,36 @@ export function isCloudE2eeDeviceRevoked(value: unknown): boolean {
   }
   return false;
 }
+
+/** Not sent by the service yet: an expired sign-in currently arrives as an ordinary refusal. */
+const SIGN_IN_EXPIRED_CODE = 'e2ee_sign_in_expired';
+
+/** Maps a failed latest ledger read to the outage rule of
+ * specs/e2ee/execution-freshness-outage.md. Anything else stays a refusal. */
+export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown {
+  if (!(cause instanceof Error)) return cause;
+  if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) return cause;
+  if ('data' in cause) {
+    const data = cause.data as { code?: unknown } | null | undefined;
+    return data?.code === SIGN_IN_EXPIRED_CODE
+      ? new CloudE2eeLedgerOutage({ signInExpired: true, cause })
+      : cause;
+  }
+  // A reply the client cannot read: invalid JSON, an unknown envelope or a failed schema.
+  if (cause.name === 'ZodError' || cause.name === 'SyntaxError') return cause;
+  if (cause.message.startsWith('Invalid response:')) return cause;
+  if (httpStatus !== undefined && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 429)
+    return cause;
+  return new CloudE2eeLedgerOutage({ cause });
+}
+
+/** The latest ledger read got no answer. It carries no access decision, unlike a refusal.
+ * `signInExpired` also asks the user to sign in again. */
+export class CloudE2eeLedgerOutage extends Error {
+  readonly signInExpired: boolean;
+  constructor(options: { signInExpired?: boolean; cause?: unknown } = {}) {
+    super('e2ee_ledger_outage', { cause: options.cause });
+    this.name = 'CloudE2eeLedgerOutage';
+    this.signInExpired = options.signInExpired ?? false;
+  }
+}

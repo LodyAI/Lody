@@ -42,6 +42,8 @@ const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 interface LodyOptions {
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: number) => void;
+  /** Execution relies on an outage window, or `null` once that ends. */
+  onEncryptedWindowNotice?: (notice: { signInExpired: boolean } | null) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -136,6 +138,7 @@ export class Lody {
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
         onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
+        onWindowNotice: options.onEncryptedWindowNotice,
         onRemoved: async (reason, recorded) => {
           const owner = await removalOwner;
           if (!owner) return;
