@@ -159,3 +159,5 @@
   row markers without rewriting catalog session state.
 
 - Definite send failures must leave the composer available for a fresh turn. Keep the failed pending turn retryable until an explicit replacement; never reuse its attachments for the new turn or relax the fence for unconfirmed delivery.
+
+- Conversation-list Mark Read availability respects the local viewed-message watermark, just like unread emphasis. Swipe actions require an explicit button tap, never a full-swipe commit. When a chat row’s swipe commands change, replace its cell to discard the previous swipe presentation.

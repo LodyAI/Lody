@@ -83,7 +83,15 @@ precondition(row.preview == "session" && row.navigates && row.action && row.diff
 precondition(SessionRows.row(child).modelName == "session.notRun")
 var viewed = root
 viewed.lastViewedMessageAt = root.lastMessageAt
-precondition(!SessionRows.row(viewed).unread && SessionRows.isUnread(viewed), "A local view clears emphasis, not the read action")
+precondition(!SessionRows.row(viewed).unread && SessionRows.isUnread(viewed), "A local view clears emphasis without changing the server watermark")
+precondition(SessionRows.row(viewed).actions.map(\.id) == ["archive"], "Viewed output must not offer Mark Read")
+var laterOutput = viewed
+laterOutput.lastMessageAt = (viewed.lastMessageAt ?? 0) + 1
+precondition(SessionRows.row(laterOutput).unread)
+precondition(SessionRows.row(laterOutput).actions.map(\.id) == ["read", "archive"], "New output restores Mark Read")
+laterOutput.lastReadAt = laterOutput.lastMessageAt
+precondition(!SessionRows.row(laterOutput).unread)
+precondition(SessionRows.row(laterOutput).actions.map(\.id) == ["archive"], "Remote read removes Mark Read")
 let chatRow = SessionRows.row(chat)
 precondition(chatRow.badge == "inbox.badge.attention" && chatRow.imageTint == "warning" && chatRow.subtitle.isEmpty)
 

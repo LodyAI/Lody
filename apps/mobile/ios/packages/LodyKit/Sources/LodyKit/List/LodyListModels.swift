@@ -1,6 +1,6 @@
 import UIKit
 
-struct LodyListAction {
+struct LodyListAction: Equatable {
   var id: String = ""
   var title: String = ""
   var symbol: String = ""
