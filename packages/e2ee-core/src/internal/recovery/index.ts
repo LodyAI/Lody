@@ -29,6 +29,7 @@ export {
   makeWorkspaceRecovery,
   abandonWorkspaceRecovery,
   memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   type WorkspaceRecoveryInput,
   type RecoveryCredentialRegistration,
   type RecoverySubmitResult,

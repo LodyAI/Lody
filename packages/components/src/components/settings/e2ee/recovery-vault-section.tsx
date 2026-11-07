@@ -21,12 +21,18 @@ const styles = stylex.create({
     fontSize: text.subheadlineSize,
   },
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap' },
+  line: { display: 'block' },
 });
 
+type WorkspaceStatus =
+  | { kind: 'notSet' }
+  | { kind: 'saved' }
+  | { kind: 'verified'; update: number };
 type Plan = {
+  hasVault: boolean;
   replaceable: boolean;
   replacing: boolean;
-  covered: readonly { id: string; name: string }[];
+  covered: readonly { id: string; name: string; status: WorkspaceStatus }[];
   uncovered: readonly { id: string; name: string }[];
 };
 type Result =
@@ -95,6 +101,8 @@ export function RecoveryVaultSection() {
     };
   }, [enabled, e2ee, result]);
   if (!enabled || !e2ee) return null;
+  // One state decides which actions exist, so only one primary action shows at a time.
+  const mode = !plan ? 'unknown' : plan.replacing ? 'replacing' : plan.hasVault ? 'ready' : 'none';
   const run = async (work: () => Promise<Result | undefined>) => {
     if (busy) return;
     setBusy(true);
@@ -123,39 +131,42 @@ export function RecoveryVaultSection() {
       <div {...stylex.props(styles.body)}>
         <p>{t('e2ee.recovery.lead')}</p>
         <div {...stylex.props(styles.actions)}>
-          <Button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const created = await e2ee.createRecoveryVault();
-                return created.outcome === 'created'
-                  ? { kind: 'created', vaultId: created.vaultId }
-                  : undefined;
-              })
-            }
-          >
-            {t('e2ee.recovery.create')}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const opened = await e2ee.inspectRecoveryFile();
-                return opened.outcome === 'opened'
-                  ? { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces }
-                  : undefined;
-              })
-            }
-          >
-            {t('e2ee.recovery.check')}
-          </Button>
-          {plan?.replaceable && !plan.replacing && (
+          {mode === 'none' && (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const created = await e2ee.createRecoveryVault();
+                  return created.outcome === 'created'
+                    ? { kind: 'created', vaultId: created.vaultId }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.create')}
+            </Button>
+          )}
+          {mode === 'ready' && (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const opened = await e2ee.inspectRecoveryFile();
+                  return opened.outcome === 'opened'
+                    ? { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.check')}
+            </Button>
+          )}
+          {mode === 'ready' && (
             <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
               {t('e2ee.recovery.replace')}
             </Button>
           )}
-          {!!plan?.uncovered.length && (
+          {mode === 'ready' && !!plan?.uncovered.length && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -171,7 +182,7 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.restore')}
             </Button>
           )}
-          {passkey && !!plan?.uncovered.length && (
+          {mode === 'ready' && passkey && !!plan?.uncovered.length && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -187,7 +198,7 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.restorePasskey')}
             </Button>
           )}
-          {passkey && plan?.replaceable && (
+          {mode === 'ready' && passkey && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -201,7 +212,7 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.passkeyAdd')}
             </Button>
           )}
-          {passkey && plan?.replaceable && (
+          {mode === 'ready' && passkey && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -268,12 +279,21 @@ export function RecoveryVaultSection() {
             )}
           </div>
         )}
-        {!!plan?.covered.length && (
+        {mode === 'ready' && !!plan?.covered.length && (
           <div {...stylex.props(styles.body)}>
             <p>{t('e2ee.recovery.workspaces')}</p>
             {plan.covered.map((workspace) => (
               <div key={workspace.id} {...stylex.props(styles.actions)}>
                 <span>{workspace.name}</span>
+                <span>
+                  {workspace.status.kind === 'verified'
+                    ? t('e2ee.recovery.workspace.verified', { update: workspace.status.update })
+                    : t(
+                        workspace.status.kind === 'saved'
+                          ? 'e2ee.recovery.workspace.saved'
+                          : 'e2ee.recovery.workspace.notSet'
+                      )}
+                </span>
                 <Button
                   variant="secondary"
                   disabled={busy}
@@ -382,7 +402,7 @@ export function RecoveryVaultSection() {
                 </li>
               ))}
             </ul>
-            {plan?.replaceable && !plan.replacing && (
+            {mode === 'ready' && (
               <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
                 {t('e2ee.recovery.eventNotMe')}
               </Button>
@@ -514,12 +534,15 @@ export function RecoveryVaultSection() {
               )}
             </AlertDialog.Title>
             <AlertDialog.Description>
-              {t(
-                dialog === 'continue'
-                  ? 'e2ee.recovery.replaceContinueBody'
-                  : 'e2ee.recovery.replaceBody'
-              )}{' '}
-              {t('e2ee.recovery.replaceOldFile')}
+              {/* Separate lines, not a joining space: Chinese takes no space between sentences. */}
+              <span {...stylex.props(styles.line)}>
+                {t(
+                  dialog === 'continue'
+                    ? 'e2ee.recovery.replaceContinueBody'
+                    : 'e2ee.recovery.replaceBody'
+                )}
+              </span>
+              <span {...stylex.props(styles.line)}>{t('e2ee.recovery.replaceOldFile')}</span>
             </AlertDialog.Description>
           </AlertDialog.Header>
           {!!plan?.uncovered.length && (

@@ -658,10 +658,11 @@ void test('the plan names workspaces this device cannot act on', async () => {
     })
   )
   assert.deepEqual(plan, {
+    hasVault: true,
     replaceable: true,
     replacing: false,
-    covered: [{ id: 'here', name: 'Here' }],
-    uncovered: [{ id: 'elsewhere', name: 'Elsewhere' }]
+    covered: [{ id: 'here', name: 'Here', status: { kind: 'notSet' } }],
+    uncovered: [{ id: 'elsewhere', name: 'Elsewhere', status: { kind: 'notSet' } }]
   })
   rmSync(dir, { recursive: true, force: true })
 })

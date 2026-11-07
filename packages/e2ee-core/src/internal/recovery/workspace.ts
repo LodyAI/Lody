@@ -978,3 +978,34 @@ export const memoryRecoveryEpochKeys = () => {
     },
   };
 };
+
+/**
+ * Each workspace's recovery stage on this device, read from the local journal alone, so it
+ * needs no V. `testedEpoch` is the key update the last real envelope test covered. A later
+ * update needs a new test, which only the ledger can tell.
+ */
+export const readWorkspaceRecoveryProgress = Effect.fnUntraced(function* (
+  local: RecoveryVaultLocalStore,
+  vaultId: string
+) {
+  const prefix = `vault-v1/${vaultId}/workspace/`;
+  const progress: {
+    readonly genesis: string;
+    readonly membershipId: string;
+    readonly stage: typeof ProgressSchema.Type.stage;
+    readonly testedEpoch: number | null;
+  }[] = [];
+  for (const row of yield* local.list(prefix)) {
+    const parts = row.key.slice(prefix.length).split('/');
+    if (parts.length !== 2) continue;
+    const decoded = Schema.decodeUnknownResult(ProgressSchema)(parseCanonical(row.value));
+    if (Result.isFailure(decoded) || decoded.success.skipped) continue;
+    progress.push({
+      genesis: parts[0]!,
+      membershipId: parts[1]!,
+      stage: decoded.success.stage,
+      testedEpoch: decoded.success.testedEpoch,
+    });
+  }
+  return progress;
+});

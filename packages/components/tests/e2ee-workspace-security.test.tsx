@@ -32,6 +32,7 @@ describe('recovery vault settings', () => {
     const calls = new Map<string, number>();
     const answers: Record<string, unknown> = {
       'e2ee.recoveryReplacementPlan': {
+        hasVault: true,
         replaceable: true,
         replacing: false,
         covered: [],
@@ -69,6 +70,116 @@ describe('recovery vault settings', () => {
       act(() => root.unmount());
       container.remove();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('recovery vault settings actions', () => {
+  const mount = async (plan: unknown) => {
+    const answers: Record<string, unknown> = {
+      'e2ee.recoveryReplacementPlan': plan,
+      'e2ee.recentAccountSecurityEvents': [],
+      'e2ee.recoveryPasskeyAvailable': true,
+    };
+    vi.stubGlobal('ipc', {
+      invoke: async (channel: string) => answers[channel],
+      on: () => () => {},
+    });
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <RecoveryVaultSection />
+        </Provider>
+      );
+    });
+    for (let tick = 0; tick < 20; tick++) await act(async () => {});
+    const buttons = [...container.querySelectorAll('button')];
+    return {
+      labels: buttons.map((button) => button.textContent),
+      primary: buttons
+        .filter((button) => button.dataset.variant === 'primary')
+        .map((b) => b.textContent),
+      text: container.textContent ?? '',
+      done: () => {
+        act(() => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+      },
+    };
+  };
+  const workspace = (id: string, status: unknown) => ({ id, name: `Workspace ${id}`, status });
+
+  it('offers only creation when the account has no vault', async () => {
+    const view = await mount({
+      hasVault: false,
+      replaceable: false,
+      replacing: false,
+      covered: [workspace('a', { kind: 'notSet' })],
+      uncovered: [],
+    });
+    try {
+      expect(view.labels).toEqual(['e2ee.recovery.create']);
+      expect(view.primary).toEqual(['e2ee.recovery.create']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('shows each workspace status and one primary action when a vault exists', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: false,
+      covered: [
+        workspace('a', { kind: 'notSet' }),
+        workspace('b', { kind: 'saved' }),
+        workspace('c', { kind: 'verified', update: 3 }),
+      ],
+      uncovered: [workspace('d', { kind: 'notSet' })],
+    });
+    try {
+      expect(view.labels).not.toContain('e2ee.recovery.create');
+      for (const label of [
+        'e2ee.recovery.check',
+        'e2ee.recovery.replace',
+        'e2ee.recovery.restore',
+        'e2ee.recovery.passkeyAdd',
+      ])
+        expect(view.labels).toContain(label);
+      expect(view.primary).toHaveLength(1);
+      for (const status of [
+        'e2ee.recovery.workspace.notSet',
+        'e2ee.recovery.workspace.saved',
+        'e2ee.recovery.workspace.verified',
+      ])
+        expect(view.text).toContain(status);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('offers only continue and abandon while a replacement runs', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: true,
+      covered: [workspace('a', { kind: 'verified', update: 1 })],
+      uncovered: [],
+    });
+    try {
+      expect(view.labels).toEqual([
+        'e2ee.recovery.replaceContinue',
+        'e2ee.recovery.replaceAbandon',
+      ]);
+      expect(view.primary).toEqual(['e2ee.recovery.replaceContinue']);
+    } finally {
+      view.done();
     }
   });
 });

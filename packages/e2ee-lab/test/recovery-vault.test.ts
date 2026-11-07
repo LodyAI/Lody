@@ -16,6 +16,7 @@ import {
   abandonWorkspaceRecovery,
   makeWorkspaceRecovery,
   memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   type RecoveryVault,
   type RecoverySubmitResult,
   type WorkspaceRecoveryInput,
@@ -1614,6 +1615,44 @@ describe('encrypted recovery vault and genuine workflow', () => {
               })
             ).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
             expect(connected).toBe(0);
+          })
+        )
+      );
+    }));
+  it('reads each workspace recovery stage from this device journal without V', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            const genesis = hex(r.f.initial.genesis.toBytes());
+            expect(yield* readWorkspaceRecoveryProgress(r.local, r.newVault.vault.vaultId)).toEqual(
+              []
+            );
+            r.failEnvelope(true);
+            yield* Effect.result(r.newOwner.setup());
+            expect(yield* readWorkspaceRecoveryProgress(r.local, r.newVault.vault.vaultId)).toEqual(
+              [
+                {
+                  genesis,
+                  membershipId: hex(r.f.membership.toBytes()),
+                  stage: 'registered',
+                  testedEpoch: null,
+                },
+              ]
+            );
+            r.failEnvelope(false);
+            yield* r.newOwner.setup();
+            expect(yield* readWorkspaceRecoveryProgress(r.local, r.newVault.vault.vaultId)).toEqual(
+              [
+                {
+                  genesis,
+                  membershipId: hex(r.f.membership.toBytes()),
+                  stage: 'recoverable',
+                  testedEpoch: 0,
+                },
+              ]
+            );
           })
         )
       );
