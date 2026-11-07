@@ -840,13 +840,39 @@ describe('machine E2EE local runtime', () => {
           expect(yield* resolveDerived({ origin: true })).toMatchObject({
             derivedFrom: { sessionId: 'session', userTurnId: 'active' },
           });
+          // Origin lookup must retain the signed row even with a cached dispatch.
+          const resolveCachedOrigin = makeVerifiedExecutionOriginal({
+            workspaceId: 'workspace',
+            selfDevice: hex(owner.publicKey.toBytes()),
+            isClosed: () => false,
+            origins: new ExecutionOrigins(originalsFile),
+            readIncoming: () => Effect.succeed({ frame: Uint8Array.of(1) }),
+            openDispatch: () => Effect.die('origin lookup must use signed history'),
+            ledger: () => Effect.succeed(view),
+            openContent: (_intent, request) => ownerBinding.openAuthenticated(request),
+          });
+          const cachedOrigin = () =>
+            resolveCachedOrigin(
+              {
+                workspaceId: 'workspace',
+                sessionId: 'session',
+                userTurnId: 'derived',
+              },
+              replica,
+              { origin: true }
+            );
+          expect(yield* cachedOrigin()).toMatchObject({
+            derivedFrom: { sessionId: 'session', userTurnId: 'active' },
+          });
           const derivedRow = replica.getList('history').get(4) as LoroMap;
           (derivedRow.get('derivedFrom') as LoroMap).set('userTurnId', 'revoked');
           replica.commit();
           expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          expect(yield* cachedOrigin()).toBeUndefined();
           derivedRow.delete('derivedFrom');
           replica.commit();
           expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          expect(yield* cachedOrigin()).toBeUndefined();
           const revokedKey = hex(other.publicKey.toBytes());
           const revocation = yield* signLedgerRecord(
             Result.getOrThrow(
