@@ -7,7 +7,23 @@ import { createServer } from 'node:http'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { buildRelease } from './build.mjs'
 import { signManifest, sha256 } from './protocol.mjs'
+import { readObject, putObject, collectObjects } from './cas.mjs'
 import { stageRelease } from './download.mjs'
+
+async function assertOnlyVerifiedCache(storeRoot, manifest) {
+  const sizes = new Map(manifest.tree.map((entry) => [entry.sha256, entry.size]))
+  for (const name of await fs.readdir(storeRoot)) {
+    assert.equal(name, '.objects', 'failed transfer must not publish a snapshot or retain staging')
+    for (const hash of await fs.readdir(path.join(storeRoot, name))) {
+      assert.ok(sizes.has(hash), 'cache contains only completed target objects')
+      const file = path.join(storeRoot, name, hash)
+      assert.ok((await fs.lstat(file)).isFile())
+      const bytes = await fs.readFile(file)
+      assert.equal(bytes.length, sizes.get(hash))
+      assert.equal(sha256(bytes), hash)
+    }
+  }
+}
 
 test('signed build stages 401 files, reuses content across skipped releases and isolates HTTP failures', async (t) => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-test-')))
@@ -111,7 +127,7 @@ test('signed build stages 401 files, reuses content across skipped releases and 
   await started
   activeCancel.abort()
   await rejected
-  assert.deepEqual(await fs.readdir(cancelledStore), [])
+  await assertOnlyVerifiedCache(cancelledStore, built.manifest)
   const alias = path.join(root, 'alias')
   await fs.symlink(staged.directory, alias)
   await assert.rejects(stageRelease({ ...options, localRoots: [alias] }), /Unsafe local root/)
@@ -171,7 +187,7 @@ test('signed build stages 401 files, reuses content across skipped releases and 
     mode = failure
     const storeRoot = path.join(root, failure)
     await assert.rejects(stageRelease({ ...options, storeRoot }))
-    assert.deepEqual(await fs.readdir(storeRoot), [])
+    await assertOnlyVerifiedCache(storeRoot, built.manifest)
   }
 })
 
@@ -277,4 +293,86 @@ test('401 unique tiny objects merge into one bounded range around locally reused
     )
   assert.deepEqual(await fs.readFile(path.join(result.directory, 'bulk')), bulk)
   assert.ok(result.stats.downloadedBytes < built.packs[0].bytes.length)
+})
+
+test('completed objects survive interruption, corrupt cache is fetched again, and GC only removes cache', async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'ota-resume-')))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const input = path.join(root, 'input')
+  await fs.mkdir(input)
+  await fs.writeFile(path.join(input, 'a'), randomBytes(128))
+  await fs.writeFile(path.join(input, 'b'), randomBytes(128))
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const applicability = { hostAbi: 'abi1', channel: 'nightly', platform: 'linux', arch: 'x64' }
+  const built = await buildRelease({
+    ...applicability,
+    input,
+    output: path.join(root, 'out'),
+    release: 'r1',
+    seq: 1,
+    privateKey,
+    maxPackBytes: 150
+  })
+  let requests = 0
+  let interrupt = true
+  const options = {
+    ...applicability,
+    manifest: built.manifest,
+    publicKey,
+    storeRoot: path.join(root, 'store'),
+    baseUrl: 'https://synthetic.invalid/',
+    fetchImpl: async (url) => {
+      requests++
+      if (interrupt && requests === 2) throw new Error('interrupted')
+      const pack = built.packs.find((p) => url.pathname === '/' + p.path)
+      return new Response(pack.bytes, { status: 200 })
+    }
+  }
+  await assert.rejects(stageRelease(options), /interrupted/)
+  await assertOnlyVerifiedCache(options.storeRoot, built.manifest)
+  assert.equal((await fs.readdir(path.join(options.storeRoot, '.objects'))).length, 1)
+  interrupt = false
+  requests = 0
+  const result = await stageRelease(options)
+  assert.equal(requests, 1)
+  requests = 0
+  await stageRelease(options)
+  assert.equal(requests, 0)
+  const hash = built.manifest.tree[0].sha256
+  await fs.writeFile(path.join(options.storeRoot, '.objects', hash), Buffer.alloc(128))
+  await stageRelease({ ...options, cacheBytes: 0 })
+  assert.equal(requests, 1)
+  assert.deepEqual(await fs.readdir(path.join(options.storeRoot, '.objects')), [])
+  assert.equal(sha256(await fs.readFile(path.join(result.directory, 'a'))), hash)
+  interrupt = true
+  requests = 0
+  const failedStore = path.join(root, 'zero-budget')
+  await assert.rejects(
+    stageRelease({ ...options, storeRoot: failedStore, cacheBytes: 0 }),
+    /interrupted/
+  )
+  await assertOnlyVerifiedCache(failedStore, built.manifest)
+  assert.deepEqual(await fs.readdir(path.join(failedStore, '.objects')), [])
+})
+
+test('cache GC evicts least recently verified objects and protects active references', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ota-lru-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const objects = []
+  for (const text of ['first', 'other', 'third']) {
+    const bytes = Buffer.from(text)
+    const hash = sha256(bytes)
+    const file = await putObject(root, hash, bytes)
+    await fs.utimes(file, new Date(1000), new Date(1000))
+    objects.push({ hash, file })
+  }
+  await readObject(objects[0].file, objects[0].hash, 5, { now: () => 3000 })
+  await collectObjects(root, new Set([objects[2].hash]), 10)
+  await assert.rejects(fs.stat(objects[1].file), { code: 'ENOENT' })
+  assert.equal((await fs.stat(objects[0].file)).mtimeMs, 3000)
+  await assert.rejects(readObject(objects[0].file, objects[0].hash, 5, { maxBytes: 4 }), {
+    code: 'INVALID_OBJECT'
+  })
+  await collectObjects(root, new Set(), 0)
+  assert.deepEqual(await fs.readdir(root), [])
 })

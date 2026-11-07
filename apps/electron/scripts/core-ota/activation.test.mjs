@@ -1,3 +1,4 @@
+import { CoreUpdaterService } from '../../src/main/services/core-updater-service.ts'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { openInstalledCore } from './bootstrap.mjs'
@@ -87,7 +88,15 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     await restarted.stage('two')
     const selection = await restarted.begin()
     await assert.rejects(restarted.acknowledge({ ...selection, attemptId: 'wrong' }))
-    await restarted.acknowledge(selection)
+    await assert.rejects(restarted.abandon({ ...selection, attemptId: 'wrong' }))
+    const quittingService = new CoreUpdaterService({}, restarted)
+    quittingService.selection = selection
+    await quittingService.abandonHealthAttempt()
+    const gracefulRestart = await openActivation(options)
+    const retrySelection = await gracefulRestart.begin()
+    assert.equal(retrySelection.releaseId, selection.releaseId)
+    assert.notEqual(retrySelection.attemptId, selection.attemptId)
+    await gracefulRestart.acknowledge(retrySelection)
     const healthy = await openActivation(options)
     const healthySelection = await healthy.begin()
     assert.equal(healthySelection.releaseId, 'two')
@@ -108,7 +117,26 @@ test('restart rejects interrupted release; healthy release survives and corrupti
     assert.equal(stagedState.current, null)
     assert.equal(stagedState.staged, 'three')
     const nextLaunch = await openActivation(options)
-    assert.equal((await nextLaunch.begin()).releaseId, 'three')
+    const failedSelection = await nextLaunch.begin()
+    assert.equal(failedSelection.releaseId, 'three')
+    const failedService = new CoreUpdaterService({}, nextLaunch)
+    failedService.selection = failedSelection
+    failedService.setHealthRescue(async () => {
+      const persisted = JSON.parse(
+        await readFile(path.join(owner.directory, 'pointer.json'), 'utf8')
+      )
+      assert.ok(persisted.rejected.includes('three'))
+      assert.equal(persisted.attempt, null)
+      throw new Error('quit rejected')
+    })
+    await assert.rejects(failedService.failInitialHealth(), /quit rejected/)
+    const failureState = JSON.parse(
+      await readFile(path.join(owner.directory, 'pointer.json'), 'utf8')
+    )
+    assert.ok(failureState.rejected.includes('three'))
+    assert.equal(failureState.attempt, null)
+    const recovered = await openActivation(options)
+    assert.equal((await recovered.begin()).builtin, true)
     await chmod(path.join(owner.directory, 'releases', 'three'), 0o700)
     await writeFile(
       path.join(owner.directory, 'pointer.json'),

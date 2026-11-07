@@ -199,6 +199,24 @@ export async function openActivation({ root, installed, lease, publicKey }) {
       await save()
       return { releaseId: state.current, attemptId, builtin: !state.current }
     },
+    async fail({ releaseId, attemptId }) {
+      await lease.assertHeld()
+      if (state.attempt?.releaseId !== releaseId || state.attempt?.attemptId !== attemptId)
+        throw new Error('Stale failure acknowledgement')
+      state.rejected = [...new Set([...state.rejected, releaseId])]
+      state.current = state.previous
+      state.previous = null
+      state.attempt = null
+      await save()
+    },
+    // A deliberate shutdown keeps the release eligible for a fresh health attempt.
+    async abandon({ releaseId, attemptId }) {
+      await lease.assertHeld()
+      if (state.attempt?.releaseId !== releaseId || state.attempt?.attemptId !== attemptId)
+        throw new Error('Stale shutdown acknowledgement')
+      state.attempt = null
+      await save()
+    },
     async acknowledge({ releaseId, attemptId }) {
       if (state.attempt?.releaseId !== releaseId || state.attempt?.attemptId !== attemptId)
         throw new Error('Stale health acknowledgement')

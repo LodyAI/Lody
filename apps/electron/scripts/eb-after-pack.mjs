@@ -458,7 +458,13 @@ export default async function afterPack(context, config) {
     const hostAbi = hash.digest('hex')
     const moduleDirectory = path.join(resourcesDir, 'core-ota')
     fs.mkdirSync(moduleDirectory, { recursive: true })
-    for (const name of ['activation.mjs', 'bootstrap.mjs', 'protocol.mjs', 'download.mjs'])
+    for (const name of [
+      'activation.mjs',
+      'bootstrap.mjs',
+      'protocol.mjs',
+      'download.mjs',
+      'cas.mjs'
+    ])
       fs.copyFileSync(
         path.join(scriptsDirectory, 'core-ota', name),
         path.join(moduleDirectory, name)

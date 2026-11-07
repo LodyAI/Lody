@@ -1,3 +1,4 @@
+import { mainArtifactBoundary, mainEntryFileName } from './scripts/main-artifact-boundary.mjs'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
@@ -83,6 +84,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     main: {
+      plugins: [
+        mainArtifactBoundary({
+          hostDependencies: Object.keys(
+            JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf8')).dependencies
+          )
+        })
+      ],
       envDir: false,
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: { ...viteEnvDefine, __LODY_E2E_CLOCK_BUILD__: 'false' },
@@ -92,6 +100,16 @@ export default defineConfig(({ mode }) => {
             index: resolve(__dirname, 'src/main/index.ts'),
             application: resolve(__dirname, 'src/main/application.ts'),
             'native-storage-smoke': resolve(__dirname, 'src/main/native-storage-smoke.mts')
+          }
+        },
+        rollupOptions: {
+          // Preserve source evaluation boundaries: shared-chunk hoisting can pull
+          // application stores into the Host's synchronous startup closure.
+          preserveEntrySignatures: 'strict',
+          output: {
+            entryFileNames: mainEntryFileName,
+            preserveModules: true,
+            preserveModulesRoot: resolve(__dirname, 'src/main')
           }
         },
         externalizeDeps: {

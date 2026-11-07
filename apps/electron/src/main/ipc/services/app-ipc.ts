@@ -640,7 +640,12 @@ export class AppIpc extends IpcService {
     const window = findWindow(event.sender)
     if (window && event.senderFrame === event.sender.mainFrame) {
       markRendererMounted(window)
-      if (window === getMainWindow()) await getCoreUpdater()?.acknowledgeHealthy()
+      if (window === getMainWindow()) {
+        // Exercise a registered application dependency before accepting the
+        // renderer's round trip through the preload and IPC dispatcher.
+        getIpcServiceDeps().cliService.getCliState()
+        await getCoreUpdater()?.acknowledgeHealthy()
+      }
     }
   }
 

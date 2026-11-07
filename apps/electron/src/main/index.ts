@@ -127,7 +127,11 @@ async function start(): Promise<void> {
       ? await CoreUpdaterService.open(
           process.resourcesPath,
           `${app.getPath('userData')}/core-ota`,
-          () => ownsSingleInstanceLock && app.hasSingleInstanceLock()
+          () => ownsSingleInstanceLock && app.hasSingleInstanceLock(),
+          () => {
+            app.relaunch()
+            app.exit(1)
+          }
         )
       : null
   if (core) setCoreUpdater(core)

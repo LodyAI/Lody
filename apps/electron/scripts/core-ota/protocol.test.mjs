@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
-import { buildRelease } from './build.mjs'
+import { buildRelease, buildDesktopRelease } from './build.mjs'
 import {
   canonicalJson,
   sha256,
@@ -171,4 +171,73 @@ test('dictionary patch is smaller, replays exact target, retains full fallback a
     canonicalJson(result.manifest)
   )
   await assert.rejects(buildRelease({ ...options, seq: 6 }), /Existing output differs/)
+})
+
+test('budget-split disk packs reconstruct the signed target without returned buffers', async (t) => {
+  const f = await fixture(t)
+  const output = join(f.root, 'split')
+  const result = await buildRelease({
+    ...f.options,
+    output,
+    maxPackBytes: 40,
+    returnPackBytes: false
+  })
+  assert.ok(result.manifest.packs.length > 1)
+  verifyManifest(result.manifest, publicKey)
+  for (const pack of result.packs) assert.equal(pack.bytes, undefined)
+  for (const item of result.manifest.tree) {
+    const frame = result.manifest.objects[item.sha256]
+    const pack = result.manifest.packs.find((p) => p.sha256 === frame.packSha256)
+    assert.ok(pack.size <= 40)
+    const bytes = await readFile(join(output, pack.path))
+    assert.equal(sha256(bytes), pack.sha256)
+    const compressed = bytes.subarray(frame.offset, frame.offset + frame.length)
+    assert.equal(sha256(compressed), frame.compressedSha256)
+    assert.equal(sha256(zstdDecompressSync(compressed)), item.sha256)
+  }
+  await assert.rejects(
+    buildRelease({ ...f.options, output: join(f.root, 'tiny'), maxPackBytes: 1 }),
+    /Frame exceeds/
+  )
+})
+
+test('desktop publisher retains nested Core closure under out and excludes Host-only artifacts', async (t) => {
+  const f = await fixture(t)
+  const out = join(f.root, 'desktop')
+  await mkdir(join(out, 'main', 'deps'), { recursive: true })
+  await mkdir(join(out, 'preload'))
+  await mkdir(join(out, 'renderer'))
+  await writeFile(join(out, 'main', 'application.js'), "import './deps/shared.js'")
+  await writeFile(join(out, 'main', 'deps', 'shared.js'), 'export const shared = 1')
+  await writeFile(join(out, 'main', 'host.js'), 'host only')
+  await writeFile(
+    join(out, 'main', 'core-artifacts.json'),
+    JSON.stringify({ version: 1, main: ['application.js', 'deps/shared.js'] })
+  )
+  await writeFile(join(out, 'preload', 'index.js'), 'preload')
+  await writeFile(join(out, 'renderer', 'index.html'), '<html></html>')
+  const { input, ...options } = f.options
+  const result = await buildDesktopRelease({
+    ...options,
+    output: join(f.root, 'published'),
+    buildOutput: out
+  })
+  verifyManifest(result.manifest, publicKey)
+  assert.deepEqual(
+    result.manifest.tree.map((entry) => entry.path),
+    [
+      'out/main/application.js',
+      'out/main/deps/shared.js',
+      'out/preload/index.js',
+      'out/renderer/index.html'
+    ]
+  )
+  for (const entry of result.manifest.tree) {
+    const frame = result.manifest.objects[entry.sha256]
+    const pack = result.packs.find((p) => sha256(p.bytes) === frame.packSha256)
+    assert.equal(
+      sha256(zstdDecompressSync(pack.bytes.subarray(frame.offset, frame.offset + frame.length))),
+      entry.sha256
+    )
+  }
 })

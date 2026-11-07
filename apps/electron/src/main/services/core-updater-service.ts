@@ -16,6 +16,12 @@ export class CoreUpdaterService {
   private downloaded = false
   private abort?: AbortController
   private healthy = false
+  private shuttingDown = false
+  private healthTimer?: ReturnType<typeof setTimeout>
+  private recovering = false
+  private rescue?: () => unknown
+  private mainReady = false
+  private rendererReady = false
   private selection: any
   private metadata: any
   private activation: any
@@ -26,7 +32,7 @@ export class CoreUpdaterService {
     this.fetchImpl = fetchImpl
   }
 
-  static async open(resources: string, root: string, isOwner: () => boolean) {
+  static async open(resources: string, root: string, isOwner: () => boolean, rescue?: () => void) {
     let context
     try {
       context = await bootstrapCore({ resourcesPath: resources, root, isOwner })
@@ -39,6 +45,7 @@ export class CoreUpdaterService {
     if (metadata.platform !== process.platform || metadata.arch !== process.arch)
       throw new Error('Invalid installed Core target')
     const service = new CoreUpdaterService(metadata, context.activation)
+    service.rescue = rescue
     service.selection = context.selection
     service.entry = context.entry
     service.installedApplication = join(resources, 'app.asar/out/main/application.js')
@@ -50,6 +57,10 @@ export class CoreUpdaterService {
   private resolver?: ReturnType<typeof registerHooks>
   async loadApplication(builtin: () => Promise<any>) {
     if (!this.entry) return builtin()
+    this.healthTimer = setTimeout(() => {
+      void this.failInitialHealth().catch(console.error)
+    }, 60_000)
+    this.healthTimer.unref()
     if (!this.resolver && this.installedApplication) {
       const installedRequire = createRequire(this.installedApplication)
       const installedParentURL = pathToFileURL(this.installedApplication).href
@@ -81,14 +92,58 @@ export class CoreUpdaterService {
     } catch (error) {
       this.resolver?.deregister()
       this.resolver = undefined
+      await this.failInitialHealth()
       throw error
     }
   }
 
+  setHealthRescue(rescue: () => unknown) {
+    this.rescue = rescue
+  }
+
+  private async failInitialHealth() {
+    if (this.healthy || this.recovering || this.shuttingDown) return
+    this.recovering = true
+    if (this.healthTimer) clearTimeout(this.healthTimer)
+    await this.activation.fail(this.selection)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => this.rescue?.()),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Core recovery quit remains unconfirmed')),
+            15_000
+          )
+          timer.unref()
+        })
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  async markMainReady() {
+    this.mainReady = true
+    if (this.rendererReady) await this.acknowledgeHealthy()
+  }
+
+  async abandonHealthAttempt() {
+    this.shuttingDown = true
+    if (this.healthTimer) clearTimeout(this.healthTimer)
+    if (!this.recovering && this.selection && !this.selection.builtin && !this.healthy)
+      await this.activation.abandon(this.selection).catch((error: unknown) => {
+        console.warn('[Core OTA] Could not record graceful shutdown', error)
+      })
+  }
+
   async acknowledgeHealthy() {
+    this.rendererReady = true
+    if (!this.mainReady || this.recovering || this.shuttingDown) return
     if (!this.selection || this.selection.builtin || this.healthy) return
     await this.activation.acknowledge(this.selection)
     this.healthy = true
+    if (this.healthTimer) clearTimeout(this.healthTimer)
   }
 
   stop() {

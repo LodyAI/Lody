@@ -114,11 +114,14 @@ test('public feed stages a signed executable Core and confirms its matching atte
       const service = await CoreUpdaterService.open(${JSON.stringify(resources)}, ${JSON.stringify(join(root, 'store'))}, () => true);
       const application = await service.loadApplication(() => { throw Error('unexpected builtin') });
       if (application.marker !== 42) throw Error('CJS external resolution failed');
-      await service.acknowledgeHealthy();`
+      await service.markMainReady(); await service.acknowledgeHealthy();`
     // Confirm this process before the independent restart begins its own attempt.
+    await restarted.markMainReady()
     await restarted.acknowledgeHealthy()
     execFileSync(process.execPath, ['--input-type=module', '-e', probe], { stdio: 'pipe' })
+    await restarted.markMainReady()
     await restarted.acknowledgeHealthy()
+    await restarted.markMainReady()
     await restarted.acknowledgeHealthy()
   } finally {
     async function unlock(directory) {
@@ -156,4 +159,155 @@ test('missing or incompatible public Core candidates defer to native updater', a
     assert.equal((await service.check(() => {})).handled, false)
     assert.equal(service.ready, false)
   }
+})
+
+test('health waits for main initialization even when renderer IPC completes first', async () => {
+  let acknowledged = false
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async acknowledge() {
+        acknowledged = true
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  await service.acknowledgeHealthy()
+  assert.equal(acknowledged, false)
+  await service.markMainReady()
+  assert.equal(acknowledged, true)
+})
+
+test('health timeout rescues an unconfirmed Core without abandoning the failed attempt', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let rescued = false
+  let abandoned = false
+  let resolveRescue
+  const rescueDone = new Promise((resolve) => {
+    resolveRescue = resolve
+  })
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async fail() {},
+      async abandon() {
+        abandoned = true
+      }
+    }
+  )
+  service.entry = new URL(import.meta.url).pathname
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  service.rescue = () => {
+    rescued = true
+    resolveRescue?.()
+  }
+  // Importing this cached test module avoids evaluating application code in the fixture.
+  await service.loadApplication(async () => ({}))
+  t.mock.timers.tick(60_000)
+  await rescueDone
+  assert.equal(rescued, true)
+  await service.abandonHealthAttempt()
+  assert.equal(abandoned, false)
+})
+
+test('external evaluation failure requests clean rescue without evaluating builtin in the process', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lody-core-failure-'))
+  try {
+    const entry = join(root, 'broken.mjs')
+    await writeFile(entry, 'throw new Error("partial Core evaluation")')
+    const service = new CoreUpdaterService({}, { async fail() {} })
+    service.entry = entry
+    let rescued = false
+    let builtinLoaded = false
+    service.rescue = () => {
+      rescued = true
+    }
+    await assert.rejects(
+      service.loadApplication(async () => {
+        builtinLoaded = true
+      }),
+      /partial Core evaluation/
+    )
+    assert.equal(rescued, true)
+    assert.equal(builtinLoaded, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('graceful quit cancels initial health rescue and retains candidate eligibility', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let abandoned = false
+  let rescued = false
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async abandon() {
+        abandoned = true
+      },
+      async fail() {
+        throw new Error('must not reject graceful quit')
+      }
+    }
+  )
+  service.entry = new URL(import.meta.url).pathname
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  service.setHealthRescue(() => {
+    rescued = true
+  })
+  await service.loadApplication(async () => ({}))
+  await service.abandonHealthAttempt()
+  t.mock.timers.tick(120_000)
+  assert.equal(abandoned, true)
+  assert.equal(rescued, false)
+})
+
+test('successful initial health never triggers rescue for later renderer notifications', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let rescued = false
+  const service = new CoreUpdaterService({}, { async acknowledge() {} })
+  service.entry = new URL(import.meta.url).pathname
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  service.setHealthRescue(() => {
+    rescued = true
+  })
+  await service.loadApplication(async () => ({}))
+  await service.markMainReady()
+  await service.acknowledgeHealthy()
+  t.mock.timers.tick(120_000)
+  await service.acknowledgeHealthy()
+  assert.equal(rescued, false)
+})
+
+test('recovery wait is bounded without forcing an unconfirmed quit', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let signalStarted
+  const started = new Promise((resolve) => {
+    signalStarted = resolve
+  })
+  const service = new CoreUpdaterService({}, { async fail() {} })
+  service.setHealthRescue(() => {
+    signalStarted()
+    return new Promise(() => {})
+  })
+  const outcome = assert.rejects(service.failInitialHealth(), /quit remains unconfirmed/)
+  await started
+  t.mock.timers.tick(15_000)
+  await outcome
+})
+
+test('activation shutdown write failure does not prevent independent teardown', async () => {
+  const service = new CoreUpdaterService(
+    {},
+    {
+      async abandon() {
+        throw new Error('disk unavailable')
+      }
+    }
+  )
+  service.selection = { builtin: false, releaseId: 'candidate', attemptId: 'attempt' }
+  let released = false
+  await service.abandonHealthAttempt()
+  released = true
+  assert.equal(released, true)
 })

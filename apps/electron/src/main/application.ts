@@ -1,3 +1,4 @@
+import { getCoreUpdater } from './services/core-updater-service'
 import { closeDesktopE2eeAccount, resumeDesktopE2eeAccount } from './services/e2ee-account-runtime'
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
 import {
@@ -49,7 +50,7 @@ import {
   reportPreviousUnconfirmedDesktopQuit,
   waitForQuitRecovery
 } from './services/desktop-shutdown'
-import { cancelRequestedRelaunch, relaunchIfRequested } from './relaunch-intent'
+import { cancelRequestedRelaunch, relaunchIfRequested, quitAndRelaunch } from './relaunch-intent'
 import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
 import { LoroDataPlaneRelay } from './services/loro-data-plane-relay'
@@ -398,6 +399,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       // torn down, so a Stay answer leaves relays and the CLI running.
       prepare: () => closeProductWindowsForQuit(() => unconfirmedQuitResources.add('renderer')),
       stop: async () => {
+        await getCoreUpdater()?.abandonHealthAttempt()
         setAppQuitting(true)
         setWindowsTrayAvailable(false)
         windowsTrayService.stop()
@@ -502,6 +504,8 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     app.on('before-quit', (event) => {
       void beforeQuit(event)
     })
+    getCoreUpdater()?.setHealthRescue(() => quitAndRelaunch())
+    await getCoreUpdater()?.markMainReady()
 
     process.on('exit', () => {
       setWindowsTrayAvailable(false)

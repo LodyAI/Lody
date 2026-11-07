@@ -109,7 +109,12 @@ function markRendererCommitted(): void {
   if (rendererMounted) return
   rendererMounted = true
   try {
-    void getIpcServices()?.app.notifyRendererMounted()
+    const services = getIpcServices()
+    if (!services) throw new Error('Preload IPC bridge unavailable')
+    void services.cli
+      .getState()
+      .then(() => services.app.notifyRendererMounted())
+      .catch((error: unknown) => console.warn('[Lody] startup IPC probe failed', error))
   } catch (e) {
     console.warn('[Lody] notifyRendererMounted bridge failed', e)
   }
