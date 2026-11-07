@@ -1,0 +1,41 @@
+[versions]
+agp = "9.4.1"
+kotlin = "2.4.21"
+coroutines = "1.11.0"
+composeBom = "2026.09.00"
+# M3 Expressive APIs used by the approved native component migration.
+material3 = "1.5.0-alpha23"
+markdownRenderer = "0.46.0"
+quickjs = "1.0.15"
+activity = "1.13.0"
+webkit = "1.18.0"
+
+[libraries]
+# AGP 9 ships Kotlin 2.2; this newer plugin on the build classpath drives built-in Kotlin.
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+quickjs = { module = "io.github.dokar3:quickjs-kt", version.ref = "quickjs" }
+# JVM build with desktop natives, so unit tests can run the real engine.
+quickjs-jvm = { module = "io.github.dokar3:quickjs-kt-jvm", version.ref = "quickjs" }
+markdown-parser = { module = "org.jetbrains:markdown", version = "0.7.17" }
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
+markdown-renderer-code = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "markdownRenderer" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version = "5.2.1" }
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version = "2.9.4" }
+lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version = "2.9.4" }
+test-core = { module = "androidx.test:core", version = "1.7.0" }
+json-test = { module = "org.json:json", version = "20250517" }
+webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-runtime = { module = "androidx.compose.runtime:runtime" }
+compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+junit = { module = "junit:junit", version = "4.13.2" }
+test-runner = { module = "androidx.test:runner", version = "1.7.0" }
+test-junit = { module = "androidx.test.ext:junit", version = "1.3.0" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

@@ -1,0 +1,88 @@
+{
+  "source": "Lody Mobile ios/packages/cloud-runtime",
+  "commit": "216d24ee8163821783f6cbd41604c761fc61ee74",
+  "license": "AGPL-3.0-only",
+  "path": "ios/packages/cloud-runtime",
+  "note": "Base commit snapshot plus reviewed local capability-refresh and directory Tab changes shared verbatim with ios/packages/cloud-runtime; recorded in e7df50f. Agent Role creation (role run config and emoji in the listing, sendTurn agentRoleId resolved from the fresh row, createSession role provenance) shared verbatim with ios/packages/cloud-runtime in the same change. Creation options expose confirmed online machine IDs for the Android computer picker, copied verbatim from the shared runtime in this change. Conversation Roles (web session composer): sendTurn accepts agentRoleId on later turns, applying the Role's pins, memory and provenance without repeating its prompt prefix, and a cleared agentRoleId as an explicit None; the session composer projection exposes the latest turn's agentRoleId. Copied verbatim from the shared runtime in this change. Role mention items carry the Role's emoji, copied verbatim from the shared runtime. Multi-repository projects (web Project groups: projectGroups listing, createSession projectGroupId with the frozen projectRun, catalog sessions under group:<id>) copied verbatim from the shared runtime. Creation availability is isolated per machine; selected config probes recover after failure; matching per-model controls and creation change notifications are copied verbatim from the shared runtime in this change. Agent discovery merges live repo metadata with authoritative machine Flock rows, copied verbatim from the iOS runtime in this change.",
+  "localSourceFiles": [
+    "contract/runtime-contract.json",
+    "src/contract/projects.ts",
+    "src/runtime/create-session.ts",
+    "src/runtime/handlers/projects.ts",
+    "src/runtime/machine-rpc.ts",
+    "src/runtime/capability-refresh.ts",
+    "src/contract/methods.ts",
+    "src/contract/sessions.ts",
+    "src/models/catalog.ts",
+    "src/protocol/catalog.ts",
+    "src/runtime/directory-tab.ts",
+    "src/runtime/handlers/sessions.ts",
+    "src/contract/settings.ts",
+    "src/models/agent-roles.ts",
+    "src/protocol/agent-roles.ts",
+    "src/runtime/agent-roles.ts",
+    "src/runtime/role-settings.ts",
+    "src/runtime/session.ts",
+    "src/models/send.ts",
+    "src/runtime/machine-presence.ts",
+    "src/runtime/project.ts",
+    "src/contract/mentions.ts",
+    "src/models/mentions.ts",
+    "src/protocol/project-groups.ts",
+    "src/runtime/project-groups.ts",
+    "src/protocol/capability.ts",
+    "src/runtime/index.ts"
+  ],
+  "messageActionsNote": "Adds native fork read/send contract with exact completed-turn validation; keeps Android edit-and-resend on the shared contract.",
+  "tabVisibility": {
+    "commit": "79bd3bb",
+    "files": [
+      "src/runtime/archive-session.ts",
+      "src/runtime/handlers/sessions.ts",
+      "src/contract/methods.ts",
+      "src/contract/sessions.ts",
+      "src/protocol/catalog.ts",
+      "src/models/catalog.ts",
+      "contract/runtime-contract.json"
+    ],
+    "note": "Reviewed shared isTabClosed projection and acknowledged field-only writes. No archive or agent lifecycle changes."
+  },
+  "roleSendMetadata": {
+    "commit": "4708fbf",
+    "files": [
+      "src/runtime/handlers/sessions.ts"
+    ],
+    "note": "Read authoritative session Agent Config from merged legacy and field-level metadata for Role sends; refuse deleted sessions. Exported from the reviewed iOS source commit."
+  },
+  "sessionDiagnostics": {
+    "commit": "8fb07e9d4cd50683015c4045b4dd4950448e5c22",
+    "files": [
+      "src/runtime/session.ts",
+      "src/runtime/index.ts",
+      "src/runtime/handlers/lifecycle.ts",
+      "src/contract/methods.ts",
+      "src/contract/session-events.ts",
+      "scripts/contract-swift.mjs",
+      "package.json",
+      "contract/runtime-contract.json"
+    ],
+    "note": "Upstream 7028f2bf read/resume tracing and fc9bb555 Zod schema support, preserving local Role and Tab fixes. Exported from reviewed source commit."
+  },
+  "messageReferences": {
+    "commit": "959c3ff717971a3956b53955cd59a5ce61dcd57c",
+    "files": [
+      "src/protocol/message-references.ts",
+      "src/runtime/handlers/sessions.ts",
+      "src/runtime/project.ts",
+      "src/runtime/session.ts"
+    ],
+    "note": "Web-compatible mention spans and readable user-message projection; exported unchanged from reviewed source commit."
+  },
+  "legacyMessageReferences": {
+    "commit": "5c7fb693674f58516486b7e3c6424fb4e2de5a07",
+    "files": [
+      "src/protocol/message-references.ts"
+    ],
+    "note": "Readable legacy skill expansions and file reference spans."
+  }
+}

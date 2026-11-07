@@ -1,0 +1,1417 @@
+[
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-hello",
+    "method": "hello",
+    "payload": {
+      "protocol": 1,
+      "methods": ["hello", "ensureSession"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-ensure",
+    "method": "ensureSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-ensure",
+    "method": "ensureSession",
+    "error": {
+      "code": "session_not_ready",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-grant",
+    "method": "grant",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "catalog",
+    "payload": {
+      "catalog": "{\"projects\":[]}",
+      "revision": 4
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-shortcut",
+    "method": "shortcutCloud",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "operation": "getStreamToken",
+      "args": {
+        "target": {
+          "kind": "index",
+          "ownerUserId": "user-1",
+          "visibility": "workspace"
+        },
+        "write": false
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-github",
+    "method": "githubMentions",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "repoFullName": "lody/app"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-share",
+    "method": "shareRequest",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "operation": "management",
+      "args": {
+        "workspaceId": "workspace-1",
+        "action": "list",
+        "cursor": null
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-share-revoke",
+    "method": "shareRequest",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "operation": "api",
+      "args": {
+        "method": "revoke",
+        "args": {
+          "shareId": "share-1",
+          "expectedRevision": 2
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "shareProgress",
+    "payload": {
+      "editorId": "ios-share-1",
+      "phase": "uploading",
+      "percent": 40
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "machinePresence",
+    "payload": {
+      "state": "live",
+      "onlineMachineIds": ["machine-1"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "synced",
+    "payload": {
+      "revision": 4,
+      "streams": 2
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "syncError",
+    "payload": {
+      "reason": "network_or_auth",
+      "stream": "meta"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "sessionSubscriptions",
+    "payload": {
+      "ids": ["session-1", "session-2"],
+      "reserved": ["session-2"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "session",
+    "payload": {
+      "sessionId": "session-1",
+      "synced": true,
+      "backgroundWork": {
+        "id": "task-1",
+        "state": "receiving"
+      },
+      "session": "{\"v\":1,\"history\":[]}"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "sessionCache",
+    "payload": {
+      "sessionId": "session-2",
+      "synced": false,
+      "session": "{\"v\":1,\"history\":[]}"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "sessionCache",
+    "payload": {
+      "sessionId": "session-2",
+      "backgroundWork": {
+        "id": "task-2",
+        "state": "failed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "event",
+    "method": "diagnostic",
+    "payload": {
+      "stage": "bootstrap_ok",
+      "stream": "meta"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-start",
+    "method": "start",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-start",
+    "method": "start",
+    "error": {
+      "code": "invalid_params",
+      "retryable": false,
+      "detail": "workspaceId: Too small"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-restore",
+    "method": "restoreSessions",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-restore-none",
+    "method": "restoreSessions",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-active",
+    "method": "setActive",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-open",
+    "method": "openSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-close",
+    "method": "closeSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-release",
+    "method": "releaseReserve",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-ping",
+    "method": "ping",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-shortcuts",
+    "method": "promptShortcuts",
+    "payload": {
+      "action": "list",
+      "entries": [
+        {
+          "v": 1,
+          "id": "shortcut-1",
+          "workspaceId": "workspace-1",
+          "ownerUserId": "user-1",
+          "visibility": "workspace",
+          "name": "Summarize",
+          "slug": "summarize",
+          "scope": {},
+          "revision": "rev-1",
+          "createdAt": 1700000000000,
+          "updatedAt": 1700000000000,
+          "bodyDocId": "body-1",
+          "dependencySummary": []
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-settings",
+    "method": "remoteSettings",
+    "payload": {
+      "settings": [
+        {
+          "kind": "mcp",
+          "id": "mcp-2",
+          "name": "Search",
+          "readOnly": false,
+          "detail": "stdio",
+          "enabledByDefault": true,
+          "configured": true
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-memory",
+    "method": "memorySettings",
+    "payload": {
+      "machines": [
+        {
+          "id": "machine-1",
+          "name": "Studio"
+        }
+      ],
+      "machineId": "machine-1",
+      "entries": [
+        {
+          "machineId": "machine-1",
+          "providerId": "nowledge-mem",
+          "memoryId": "memory-1",
+          "name": "Work"
+        }
+      ],
+      "identities": [
+        {
+          "id": "memory-1",
+          "name": "Work"
+        }
+      ],
+      "status": "ready",
+      "cached": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-roles",
+    "method": "agentRoles",
+    "payload": {
+      "roles": [
+        {
+          "id": "role-1",
+          "ownerUserId": "user-1",
+          "visibility": "workspace",
+          "name": "Reviewer",
+          "description": "",
+          "promptPrefix": "Review carefully",
+          "revision": 1,
+          "updatedAt": 1700000000000,
+          "targets": [
+            {
+              "machineId": "machine-1",
+              "agentConfigId": "agent-1",
+              "machineName": "Studio",
+              "agentName": "Claude",
+              "state": "configured"
+            }
+          ]
+        }
+      ],
+      "agents": [
+        {
+          "id": "agent-1",
+          "name": "Claude",
+          "machineId": "machine-1",
+          "machineName": "Studio",
+          "cliType": "builtin",
+          "agentType": "claude"
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-shares",
+    "method": "publishedShares",
+    "payload": {
+      "outcome": "page",
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "page": [
+        {
+          "shareId": "share-1",
+          "rootSessionId": "session-1",
+          "publisherUserId": "user-1",
+          "status": "active",
+          "title": "Launch notes",
+          "revision": 2,
+          "credentialVersion": 1,
+          "createdAt": 1700000000000,
+          "updatedAt": 1700000000000,
+          "totalBytes": 2048,
+          "conversationCount": 1,
+          "canManage": true,
+          "canRevoke": true,
+          "hasLocalLink": false
+        }
+      ],
+      "isDone": false,
+      "continueCursor": "cursor-2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-mentions",
+    "method": "mentionCatalog",
+    "payload": {
+      "items": [
+        {
+          "path": "session-2",
+          "name": "Fix login",
+          "kind": "session",
+          "subtitle": "app",
+          "insertText": "@session:session-2"
+        }
+      ],
+      "truncated": false,
+      "incomplete": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-shortcut-save",
+    "method": "promptShortcuts",
+    "payload": {
+      "action": "save",
+      "entry": {
+        "v": 1,
+        "id": "shortcut-2",
+        "workspaceId": "workspace-1",
+        "ownerUserId": "user-1",
+        "visibility": "workspace",
+        "name": "Review",
+        "slug": "review",
+        "scope": {
+          "project": {
+            "kind": "github",
+            "repository": "lody/app"
+          }
+        },
+        "revision": "rev-2",
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000000,
+        "bodyDocId": "body-2",
+        "dependencySummary": [
+          {
+            "kind": "file",
+            "project": {
+              "kind": "github",
+              "repository": "lody/app"
+            },
+            "path": "README.md"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-shares-denied",
+    "method": "publishedShares",
+    "payload": {
+      "outcome": "failed",
+      "error": "shares_forbidden"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-settings",
+    "method": "remoteSettings",
+    "error": {
+      "code": "setting_read_only",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-memory",
+    "method": "memorySettings",
+    "error": {
+      "code": "memory_forbidden",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-roles",
+    "method": "agentRoles",
+    "error": {
+      "code": "role_conflict",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-shortcuts",
+    "method": "promptShortcuts",
+    "error": {
+      "code": "workspace_changed",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-mentions",
+    "method": "mentionCatalog",
+    "error": {
+      "code": "metadata_not_ready",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-options",
+    "method": "creationOptions",
+    "payload": {
+      "sessionId": "session-new",
+      "availability": "online",
+      "project": {
+        "id": "machine-1:local:p1",
+        "machineId": "machine-1",
+        "name": "App",
+        "rootPath": "/Users/dev/app"
+      },
+      "agents": [
+        {
+          "id": "agent-1",
+          "name": "Claude",
+          "machineId": "machine-1",
+          "machineName": "Studio",
+          "cliType": "builtin",
+          "agentType": "claude"
+        }
+      ],
+      "capabilities": [
+        {
+          "machineId": "machine-1",
+          "cliType": "builtin",
+          "agentType": "claude",
+          "models": [
+            {
+              "id": "sonnet",
+              "name": "Sonnet"
+            }
+          ],
+          "modes": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ],
+          "legacyModes": [
+            {
+              "id": "default",
+              "name": "Default"
+            }
+          ],
+          "configOptions": [
+            {
+              "id": "model",
+              "name": "Model",
+              "category": "model",
+              "type": "select",
+              "options": [
+                {
+                  "id": "sonnet",
+                  "name": "Sonnet"
+                }
+              ],
+              "currentValue": "sonnet"
+            },
+            {
+              "id": "fast",
+              "name": "Fast mode",
+              "type": "boolean",
+              "options": [],
+              "currentValue": false
+            }
+          ],
+          "reasoningEfforts": {
+            "sonnet": ["low", "high"]
+          },
+          "steer": true
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-options",
+    "method": "creationOptions",
+    "error": {
+      "code": "project_unavailable",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-projects-browse",
+    "method": "localProjects",
+    "payload": {
+      "outcome": "directory",
+      "path": "/Users/dev",
+      "parentPath": "/Users",
+      "entries": [
+        {
+          "name": "app",
+          "absolutePath": "/Users/dev/app"
+        }
+      ],
+      "truncated": true,
+      "nextCursor": "cursor-2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-projects-history",
+    "method": "localProjects",
+    "payload": {
+      "outcome": "history",
+      "sessions": [
+        {
+          "acpSessionId": "acp-1",
+          "title": "Fix login",
+          "status": "imported",
+          "importedSessionId": "session-9"
+        }
+      ],
+      "failures": [
+        {
+          "acpSessionId": "acp-2",
+          "message": "missing transcript"
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-projects-targets",
+    "method": "localProjects",
+    "payload": {
+      "outcome": "targets",
+      "targets": [
+        {
+          "machineId": "machine-1",
+          "machineName": "Studio",
+          "localProjectId": "p1",
+          "projectName": "App",
+          "rootPath": "/Users/dev/app",
+          "provider": {
+            "cliType": "builtin",
+            "agentType": "claude"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-projects-add",
+    "method": "localProjects",
+    "payload": {
+      "outcome": "project",
+      "project": {
+        "id": "machine-1:local:p2",
+        "machineId": "machine-1",
+        "name": "Docs",
+        "rootPath": "/Users/dev/docs"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-projects-browse",
+    "method": "localProjects",
+    "error": {
+      "code": "machine_unavailable",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-sharing",
+    "method": "sessionSharing",
+    "payload": {
+      "outcome": "state",
+      "entry": {
+        "shareId": "share-1",
+        "rootSessionId": "session-1",
+        "publisherUserId": "user-1",
+        "status": "active",
+        "revision": 2,
+        "credentialVersion": 1,
+        "selectedSourceIds": ["session-1"],
+        "canManage": true,
+        "canRevoke": true
+      },
+      "url": "https://share.lody.ai/s/share-1#secret",
+      "candidates": [
+        {
+          "id": "session-1",
+          "title": "Launch notes"
+        }
+      ],
+      "selected": ["session-1"],
+      "pending": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-sharing-close",
+    "method": "sessionSharing",
+    "payload": {
+      "outcome": "closed"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-sharing",
+    "method": "sessionSharing",
+    "error": {
+      "code": "share_busy",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-preview",
+    "method": "sessionPreview",
+    "payload": {
+      "url": "https://quiet-river.trycloudflare.com/?__lody_preview_token=synthetic"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-preview-denied",
+    "method": "sessionPreview",
+    "payload": {
+      "error": "backend_rejected",
+      "status": 400
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-simulator",
+    "method": "iosSimulatorControl",
+    "payload": {
+      "type": "ios-simulator/control_response",
+      "sessionId": "session-1",
+      "success": true,
+      "preview": {
+        "operationId": "op-1",
+        "udid": "00000000-0000-4000-8000-000000000001",
+        "phase": "booting",
+        "transport": "remote"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-simulator-old",
+    "method": "iosSimulatorControl",
+    "payload": {
+      "error": "unsupported",
+      "capabilities": {
+        "previewControl": 1
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-simulator",
+    "method": "iosSimulatorControl",
+    "error": {
+      "code": "metadata_not_ready",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-item-detail",
+    "method": "itemDetail",
+    "payload": {
+      "itemId": "tool-1",
+      "rev": 3,
+      "blocks": [
+        {
+          "type": "diff",
+          "path": "src/app.ts",
+          "oldText": "a\n",
+          "newText": "b\n"
+        },
+        {
+          "type": "terminal_output",
+          "output": "ok",
+          "exitStatus": {
+            "exitCode": 0,
+            "signal": null
+          }
+        }
+      ],
+      "rawInput": {
+        "value": {
+          "command": "ls"
+        }
+      },
+      "rawOutput": {
+        "value": null
+      },
+      "options": [
+        {
+          "optionId": "allow",
+          "name": "Allow",
+          "kind": "allow_once"
+        }
+      ],
+      "truncated": true,
+      "nextCursor": "4"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-item-detail",
+    "method": "itemDetail",
+    "error": {
+      "code": "item_not_found",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-turn-diff",
+    "method": "turnDiff",
+    "payload": {
+      "status": "ok",
+      "base": "turn",
+      "path": "src/app.ts",
+      "old": {
+        "kind": "text",
+        "text": "a\n"
+      },
+      "new": {
+        "kind": "missing",
+        "text": ""
+      },
+      "add": 0,
+      "del": 1
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-file-diff",
+    "method": "fileDiff",
+    "payload": {
+      "status": "unavailable",
+      "base": "current",
+      "path": "src/app.ts",
+      "reason": "not_tracked",
+      "message": "File is outside the repository"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-workspace-changes",
+    "method": "workspaceChanges",
+    "payload": {
+      "status": "ok",
+      "base": "main",
+      "files": [
+        {
+          "path": "README.md",
+          "add": 1,
+          "del": 0,
+          "kind": "modified"
+        },
+        {
+          "path": "src/new.ts"
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-read-file",
+    "method": "readFile",
+    "payload": {
+      "status": "ok",
+      "path": "README.md",
+      "kind": "text",
+      "text": "# Hello\n",
+      "bytes": 8
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-read-file-binary",
+    "method": "readFile",
+    "payload": {
+      "status": "ok",
+      "path": "logo.png",
+      "kind": "binary",
+      "base64": "iVBORw0KGgo=",
+      "mimeType": "image/png",
+      "bytes": 8
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-read-file-missing",
+    "method": "readFile",
+    "payload": {
+      "status": "error",
+      "path": "missing.md",
+      "code": "not_found"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-list-dir",
+    "method": "listDir",
+    "payload": {
+      "entries": [
+        {
+          "name": "components",
+          "type": "directory"
+        },
+        {
+          "name": "app.ts",
+          "type": "file"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-list-dir",
+    "method": "listDir",
+    "error": {
+      "code": "project_unavailable",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-create-session",
+    "method": "createSession",
+    "payload": {
+      "state": "created",
+      "session": {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "machineId": "machine-1",
+        "title": "Fix login",
+        "status": "idle",
+        "archived": false,
+        "pinned": false,
+        "projectId": "machine-1:local:p1",
+        "createdAt": "2026-10-24T00:00:00.000Z",
+        "cliType": "builtin",
+        "agentType": "claude"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-delete-session",
+    "method": "deleteSession",
+    "payload": {
+      "sessionIds": ["session-1", "session-3"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-archive-session",
+    "method": "archiveSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-pin-session",
+    "method": "pinSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-mark-read",
+    "method": "markSessionRead",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-rename-session",
+    "method": "renameSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-turn-quota",
+    "method": "checkTurnQuota",
+    "payload": {
+      "state": "not_sent",
+      "reason": "free_session_turn_limit_reached"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-send-turn",
+    "method": "sendTurn",
+    "payload": {
+      "state": "accepted",
+      "id": "00000000-0000-4000-8000-000000000003"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-edit-read",
+    "method": "editSession",
+    "payload": {
+      "state": "ready",
+      "id": "turn-1",
+      "text": "Hello",
+      "attachments": [
+        {
+          "type": "image",
+          "editId": "original:0",
+          "imageId": "image-1",
+          "mimeType": "image/png",
+          "fileName": "shot.png",
+          "sizeBytes": 2048,
+          "width": 640,
+          "height": 480
+        },
+        {
+          "type": "file",
+          "editId": "original:1",
+          "fileId": "file-1",
+          "fileName": "notes.md",
+          "mimeType": "text/markdown",
+          "sizeBytes": 12,
+          "sha256": "abc123",
+          "textPreview": true,
+          "transport": "r2",
+          "uploadedAt": 1700000000000
+        }
+      ]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-edit-send",
+    "method": "editSession",
+    "payload": {
+      "state": "accepted",
+      "id": "turn-2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-control-turn",
+    "method": "controlTurn",
+    "payload": {
+      "state": "applied"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-respond-permission",
+    "method": "respondPermission",
+    "payload": {
+      "state": "accepted"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-create-session-quota",
+    "method": "createSession",
+    "payload": {
+      "state": "rejected",
+      "reason": "free_session_limit_reached"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-create-session-lost",
+    "method": "createSession",
+    "payload": {
+      "state": "unknown"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-delete-session",
+    "method": "deleteSession",
+    "error": {
+      "code": "metadata_not_ready",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-rename-session",
+    "method": "renameSession",
+    "error": {
+      "code": "invalid_session",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-turn-quota-allowed",
+    "method": "checkTurnQuota",
+    "payload": {
+      "state": "allowed"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-send-turn-queued",
+    "method": "sendTurn",
+    "payload": {
+      "state": "queued",
+      "id": "00000000-0000-4000-8000-000000000004"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-send-turn-guide",
+    "method": "sendTurn",
+    "payload": {
+      "state": "uploaded",
+      "id": "00000000-0000-4000-8000-000000000005",
+      "awaitingGuide": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-send-turn-lost",
+    "method": "sendTurn",
+    "payload": {
+      "state": "unknown",
+      "id": "00000000-0000-4000-8000-000000000006",
+      "reason": "ack_timeout"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-send-turn-quota",
+    "method": "sendTurn",
+    "payload": {
+      "state": "not_sent",
+      "reason": "free_session_turn_limit_reached"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-edit-stale",
+    "method": "editSession",
+    "payload": {
+      "state": "not_sent",
+      "reason": "message_no_longer_editable"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-edit-lost",
+    "method": "editSession",
+    "payload": {
+      "state": "unknown"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-control-stop",
+    "method": "controlTurn",
+    "payload": {
+      "state": "stopped"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-control-missed",
+    "method": "controlTurn",
+    "payload": {
+      "state": "not_applied",
+      "reason": "unknown"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-control-turn",
+    "method": "controlTurn",
+    "error": {
+      "code": "stale_turn",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-respond-stale",
+    "method": "respondPermission",
+    "payload": {
+      "state": "stale"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-respond-permission",
+    "method": "respondPermission",
+    "error": {
+      "code": "invalid_answers",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-probe-schema",
+    "method": "probeSchema",
+    "payload": {
+      "creationOptionsTrial": {
+        "machine-1:local:p1": "ok agents=1 capabilities=1"
+      },
+      "machines": {
+        "machine-1": {
+          "otherKeys": ["agentConfig", "project"],
+          "capabilities": [
+            {
+              "key": ["acpCapability", "agent-1"],
+              "cliType": "builtin",
+              "agentType": "claude",
+              "models": [
+                {
+                  "id": "sonnet",
+                  "name": "Sonnet"
+                }
+              ],
+              "modes": null,
+              "configOptionFields": ["fast"]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-probe-schema",
+    "method": "probeSchema",
+    "error": {
+      "code": "metadata_not_ready",
+      "retryable": false
+    }
+  }
+]

@@ -1,0 +1,4 @@
+.work/
+build/
+*.xcodeproj/
+fixtures.json

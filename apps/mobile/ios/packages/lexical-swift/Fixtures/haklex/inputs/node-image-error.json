@@ -1,0 +1,21 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "image",
+        "src": "https://invalid.example.invalid/broken-image.jpg",
+        "altText": "Broken image mockup",
+        "caption": "Error badge stays centered without being squeezed by the img",
+        "width": 1200,
+        "height": 720,
+        "accent": "#7ba8c4",
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

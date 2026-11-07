@@ -1,0 +1,36 @@
+---
+description: Never nest ternary expressions; use a dictionary or if/switch
+alwaysApply: true
+---
+
+# No nested ternaries
+
+A single `cond ? a : b` is fine. Nesting another `?` in either branch is not.
+
+Use a dictionary when the input is a closed set of keys. Use `if` / `switch` when the conditions are ordered or overlapping.
+
+```ts
+// BAD
+const status =
+  state.status === 'offline'
+    ? 'failed'
+    : state.status !== 'live'
+      ? 'syncing'
+      : reply?.finished
+        ? 'completed'
+        : reply
+          ? 'receiving'
+          : 'sent';
+
+// GOOD
+if (state.status === 'offline') return 'failed';
+if (state.status !== 'live') return 'syncing';
+if (!reply) return 'sent';
+if (reply.finished) return 'completed';
+return 'receiving';
+
+// GOOD — closed set
+const tint = { attention: 'warning', failed: 'danger' }[state] ?? 'secondary';
+```
+
+Same rule in Swift, TS, and TSX. Optional chaining (`?.`) and nullish (`??`) are not ternaries.

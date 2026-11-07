@@ -1,0 +1,5 @@
+# Phase 1 — production-shaped runtime host (approved roadmap stage 1)
+
+Keep the application offline. Move runtime ownership out of Activities into an account/workspace-scoped owner. Expose typed state, capabilities, events, errors and cancellable asynchronous commands without Android/JSON types. Preserve the shared runtime protocol. Add classified command deadlines, bounded large-message transport, scope/generation fencing, lifecycle and renderer-loss verification. Standardize source snapshot verification/update and document dependency audit status. Real Auth/GrantProvider networking, persistent account restore, cloud synchronization and writes remain stage 2+.
+
+Acceptance: recreation/navigation retain the same owner; background suspends without failure; switching account/workspace cancels old work and rejects stale events; process restart has a fresh runtime and no replay; a fake implementation works behind the same API; cancellation/timeouts/large messages/capability mismatch/renderer loss are tested; source snapshot drift is detected; builds, JVM/JS/device suites and lint pass.

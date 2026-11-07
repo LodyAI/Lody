@@ -1,0 +1,75 @@
+[
+  {
+    "name": "project",
+    "createdAt": "2026-10-26T08:00:00.000Z",
+    "draft": {
+      "agent": {
+        "agentType": "codex",
+        "cliType": "builtin",
+        "id": "cfg",
+        "machineId": "m1",
+        "machineName": "Studio Mac",
+        "name": "Codex"
+      },
+      "branch": "feature/login",
+      "choice": {
+        "configOptionValues": { "fast-mode": true },
+        "effort": "high",
+        "modeId": "agent-full-access",
+        "modelId": "gpt-5"
+      },
+      "projectId": "github:LodyAI/Lody",
+      "projectName": "LodyAI/Lody",
+      "reasoningEffortConfigId": "reasoning",
+      "sessionId": "s-project",
+      "userId": "u1",
+      "workspaceId": "w1"
+    },
+    "payload": {
+      "id": "send-1",
+      "text": "\n  Fix the “login” bug ✅ in src/auth/session.ts\nwith details",
+      "startedAt": 1729929600123,
+      "attachments": [
+        {
+          "id": "a1",
+          "kind": "image",
+          "name": "screen.png",
+          "size": 2048,
+          "uri": "file:///tmp/screen.png"
+        }
+      ]
+    }
+  },
+  {
+    "name": "chat",
+    "createdAt": "2026-10-26T08:00:01.500Z",
+    "draft": {
+      "agent": {
+        "agentType": "claude",
+        "cliType": "builtin",
+        "id": "c2",
+        "machineId": "m2",
+        "machineName": "Mac mini",
+        "name": "Claude"
+      },
+      "choice": {},
+      "projectName": "",
+      "sessionId": "s-chat",
+      "userId": "u1",
+      "workspaceId": "w1"
+    },
+    "payload": {
+      "id": "send-2",
+      "text": "   ",
+      "startedAt": 1729929601500,
+      "attachments": [
+        {
+          "id": "a2",
+          "kind": "file",
+          "name": "notes.txt",
+          "uri": "file:///tmp/notes.txt"
+        }
+      ]
+    }
+  }
+]

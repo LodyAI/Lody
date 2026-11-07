@@ -1,0 +1,759 @@
+[
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-hello",
+    "method": "hello",
+    "payload": {
+      "protocol": 1,
+      "gen": 3
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-ensure",
+    "method": "ensureSession",
+    "payload": {
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-grant",
+    "method": "grant",
+    "payload": {
+      "token": "synthetic",
+      "gatewayBaseUrl": "https://gateway.example",
+      "expiresIn": 3600
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-grant",
+    "method": "grant",
+    "error": {
+      "code": "grant_failed",
+      "retryable": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-shortcut",
+    "method": "shortcutCloud",
+    "payload": {
+      "value": {
+        "token": "synthetic",
+        "expiresIn": 600,
+        "gatewayBaseUrl": "https://gateway.example",
+        "streamId": "stream-1"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-shortcut",
+    "method": "shortcutCloud",
+    "error": {
+      "code": "shortcut_unavailable",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-github",
+    "method": "githubMentions",
+    "payload": {
+      "items": [
+        {
+          "path": "issue:7",
+          "name": "Fix login",
+          "kind": "issue",
+          "subtitle": "lody/app #7",
+          "insertText": "#7"
+        }
+      ],
+      "truncated": false,
+      "incomplete": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-github",
+    "method": "githubMentions",
+    "error": {
+      "code": "github_mentions_unavailable",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-share",
+    "method": "shareRequest",
+    "payload": {
+      "value": {
+        "workspaceId": "workspace-1",
+        "userId": "user-1",
+        "page": [],
+        "isDone": true,
+        "continueCursor": ""
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-share-revoke",
+    "method": "shareRequest",
+    "payload": {
+      "value": null
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-share",
+    "method": "shareRequest",
+    "error": {
+      "code": "share_request_failed",
+      "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-start",
+    "method": "start",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "active": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-restore",
+    "method": "restoreSessions",
+    "payload": {
+      "ids": ["session-1", "session-2"],
+      "current": "session-1",
+      "reserved": ["session-2"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-restore-none",
+    "method": "restoreSessions",
+    "payload": {
+      "ids": [],
+      "current": null,
+      "reserved": []
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-active",
+    "method": "setActive",
+    "payload": {
+      "active": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-open",
+    "method": "openSession",
+    "payload": {
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-close",
+    "method": "closeSession",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-release",
+    "method": "releaseReserve",
+    "payload": {
+      "sessionId": "session-2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-ping",
+    "method": "ping",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-shortcuts",
+    "method": "promptShortcuts",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "list"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-settings",
+    "method": "remoteSettings",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "kind": "mcp",
+      "remove": {
+        "kind": "mcp",
+        "id": "mcp-1",
+        "name": "Docs",
+        "readOnly": false,
+        "detail": "http",
+        "enabledByDefault": false,
+        "configured": true,
+        "updatedAt": 1700000000000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-memory",
+    "method": "memorySettings",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "action": "import",
+      "memoryId": "memory-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-roles",
+    "method": "agentRoles",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "save",
+      "id": "role-1",
+      "base": null,
+      "fields": {
+        "name": "Reviewer",
+        "description": "",
+        "promptPrefix": "Review carefully",
+        "visibility": "workspace"
+      },
+      "target": {
+        "machineId": "machine-1",
+        "agentConfigId": "agent-1"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-shares",
+    "method": "publishedShares",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "list",
+      "cursor": "cursor-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-mentions",
+    "method": "mentionCatalog",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "category": "session",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-shortcut-save",
+    "method": "promptShortcuts",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "save",
+      "entry": null,
+      "value": {
+        "v": 1,
+        "id": "shortcut-2",
+        "workspaceId": "workspace-1",
+        "ownerUserId": "user-1",
+        "visibility": "workspace",
+        "name": "Review",
+        "slug": "review",
+        "prompt": "Review @README.md",
+        "mentions": [
+          {
+            "start": 7,
+            "end": 17,
+            "label": "@README.md",
+            "target": {
+              "kind": "file",
+              "project": {
+                "kind": "github",
+                "repository": "lody/app"
+              },
+              "path": "README.md"
+            }
+          }
+        ],
+        "scope": {
+          "project": {
+            "kind": "github",
+            "repository": "lody/app"
+          }
+        },
+        "revision": "rev-2",
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000000
+      },
+      "bodyDocId": "body-2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-options",
+    "method": "creationOptions",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "projectId": "machine-1:local:p1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-projects-browse",
+    "method": "localProjects",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "browserId": "browser-1",
+      "userId": "user-1",
+      "action": "browse",
+      "machineId": "machine-1",
+      "path": "/Users/dev",
+      "cursor": "cursor-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-projects-history",
+    "method": "localProjects",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "browserId": "history-1",
+      "userId": "user-1",
+      "action": "history",
+      "history": {
+        "kind": "import",
+        "target": {
+          "machineId": "machine-1",
+          "machineName": "Studio",
+          "localProjectId": "p1",
+          "projectName": "App",
+          "rootPath": "/Users/dev/app",
+          "provider": {
+            "cliType": "builtin",
+            "agentType": "claude"
+          }
+        },
+        "acpSessionIds": ["acp-1", "acp-2"]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-sharing",
+    "method": "sessionSharing",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "editorId": "ios-share-1",
+      "action": "publish",
+      "selected": ["session-1"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-sharing-close",
+    "method": "sessionSharing",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "editorId": "ios-share-1",
+      "action": "close"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-preview",
+    "method": "sessionPreview",
+    "payload": {
+      "sessionId": "session-1",
+      "userId": "user-1",
+      "action": "create"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-simulator",
+    "method": "iosSimulatorControl",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "userId": "user-1",
+      "command": {
+        "action": "start",
+        "udid": "00000000-0000-4000-8000-000000000001"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-item-detail",
+    "method": "itemDetail",
+    "payload": {
+      "sessionId": "session-1",
+      "entryId": "entry-1",
+      "itemId": "tool-1",
+      "cursor": "2"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-turn-diff",
+    "method": "turnDiff",
+    "payload": {
+      "sessionId": "session-1",
+      "entryId": "entry-1",
+      "path": "src/app.ts"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-file-diff",
+    "method": "fileDiff",
+    "payload": {
+      "sessionId": "session-1",
+      "path": "src/app.ts"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-workspace-changes",
+    "method": "workspaceChanges",
+    "payload": {
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-read-file",
+    "method": "readFile",
+    "payload": {
+      "sessionId": "session-1",
+      "path": "README.md"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-list-dir",
+    "method": "listDir",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "relativePath": "src",
+      "userId": "user-1"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-create-session",
+    "method": "createSession",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "projectId": "machine-1:local:p1",
+      "sessionId": "00000000-0000-4000-8000-000000000002",
+      "machineId": "machine-1",
+      "agentConfigId": "agent-1",
+      "userId": "user-1",
+      "title": "Fix login",
+      "billingEntitlement": {
+        "effectivePlanTier": "free",
+        "checkoutPending": false
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-delete-session",
+    "method": "deleteSession",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "sessionIds": ["session-1", "session-3"]
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-archive-session",
+    "method": "archiveSession",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "archived": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-pin-session",
+    "method": "pinSession",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "pinned": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-mark-read",
+    "method": "markSessionRead",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "lastReadAt": 1700000000000
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-rename-session",
+    "method": "renameSession",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "sessionId": "session-1",
+      "title": "Renamed"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-turn-quota",
+    "method": "checkTurnQuota",
+    "payload": {
+      "sessionId": "session-1",
+      "billingEntitlement": null
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-send-turn",
+    "method": "sendTurn",
+    "payload": {
+      "sessionId": "session-1",
+      "id": "00000000-0000-4000-8000-000000000003",
+      "backgroundTaskId": "task-1",
+      "queue": false,
+      "guide": false,
+      "machineId": "machine-1",
+      "userId": "user-1",
+      "text": "Hello",
+      "attachmentBlocks": [
+        {
+          "type": "image",
+          "imageId": "image-1",
+          "mimeType": "image/png",
+          "sizeBytes": 2048
+        }
+      ],
+      "cliType": "builtin",
+      "agentType": "claude",
+      "modelId": {
+        "value": null
+      },
+      "reasoningEffort": {
+        "value": "high"
+      },
+      "reasoningEffortConfigId": "reasoning_effort",
+      "configOptionValues": {
+        "fast": true
+      },
+      "billingEntitlement": {
+        "effectivePlanTier": "plus",
+        "checkoutPending": false
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-edit-read",
+    "method": "editSession",
+    "payload": {
+      "sessionId": "session-1",
+      "expectedUserTurnId": "turn-1",
+      "userId": "user-1",
+      "billingEntitlement": null,
+      "action": "read"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-edit-send",
+    "method": "editSession",
+    "payload": {
+      "sessionId": "session-1",
+      "expectedUserTurnId": "turn-1",
+      "id": "turn-2",
+      "userId": "user-1",
+      "billingEntitlement": {
+        "effectivePlanTier": "free",
+        "checkoutPending": false
+      },
+      "action": "send",
+      "backgroundTaskId": "task-2",
+      "text": "Edited",
+      "retainedIds": ["original:0"],
+      "attachmentBlocks": []
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-control-turn",
+    "method": "controlTurn",
+    "payload": {
+      "action": "steer",
+      "sessionId": "session-1",
+      "machineId": "machine-1",
+      "turnId": "turn-3",
+      "messageId": "turn-4",
+      "interrupt": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-respond-permission",
+    "method": "respondPermission",
+    "payload": {
+      "sessionId": "session-1",
+      "entryId": "entry-1",
+      "itemId": "tool-1",
+      "requestId": "permission-1",
+      "optionId": "submit",
+      "answers": {
+        "Scope": "Repository",
+        "Checks": ["Lint", "Tests"]
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-probe-schema",
+    "method": "probeSchema",
+    "payload": {
+      "workspaceId": "workspace-1"
+    }
+  }
+]
