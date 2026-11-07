@@ -886,6 +886,7 @@ void test('account security events show known kinds, newest first, and nothing e
     { id: 'a', kind: 'vault_replacement_reserved', occurredAt: 1_000 }
   ])
   assert.deepEqual(JSON.parse(service.requests.at(-1)).args[0], { limit: 20 })
+})
 
 void test('a passkey label is the user name for it, trimmed and bounded', () => {
   assert.equal(passkeyLabel('  Work   MacBook  '), 'Work MacBook')
