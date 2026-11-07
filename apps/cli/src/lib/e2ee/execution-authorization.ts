@@ -49,8 +49,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       localProjectId?: string
     ) => Effect.Effect<{ allowed: boolean; isCurrent?: () => boolean }, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
-    /** A window is in use, or `null` once access is confirmed or refused again. */
-    onWindowNotice?: (notice: { signInExpired: boolean } | null) => void;
+    /** True while a window is in use, false once access is confirmed or refused again. */
+    onWindowNotice?: (active: boolean) => void;
     runtime: Pick<
       Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
       'status' | 'ingest' | 'executionLedger' | 'executionGeneration'
@@ -69,13 +69,13 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       now.monotonic - start.monotonic < BigInt(ttl) * 1_000_000n;
     const grants = new Map<string, Stamp>();
     let lastRead: Stamp | undefined;
-    let outage: { at: Stamp; signInExpired: boolean } | undefined;
+    let outage: { at: Stamp } | undefined;
     let windowGeneration = 0;
-    let noticed: boolean | undefined;
+    let noticed = false;
     const clearNotice = () => {
-      if (noticed === undefined) return;
-      noticed = undefined;
-      options.onWindowNotice?.(null);
+      if (!noticed) return;
+      noticed = false;
+      options.onWindowNotice?.(false);
     };
     const confirmRead = (started: Stamp) => {
       if (!lastRead || started.monotonic > lastRead.monotonic) lastRead = started;
@@ -154,10 +154,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (Cause.hasInterrupts(cause)) return Effect.interrupt;
         return Effect.gen(function* () {
           const failure = Cause.squash(cause);
-          if (failure instanceof CloudE2eeLedgerOutage)
-            outage = { at: yield* stamp, signInExpired: failure.signInExpired };
-          else if (Cause.isTimeoutError(failure))
-            outage = { at: yield* stamp, signInExpired: false };
+          if (failure instanceof CloudE2eeLedgerOutage || Cause.isTimeoutError(failure))
+            outage = { at: yield* stamp };
           else endWindow();
           return undefined;
         });
@@ -294,10 +292,9 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         if (relaxed) {
-          const signInExpired = outage?.signInExpired ?? false;
-          if (noticed !== signInExpired) {
-            noticed = signInExpired;
-            options.onWindowNotice?.({ signInExpired });
+          if (!noticed) {
+            noticed = true;
+            options.onWindowNotice?.(true);
           }
         } else grants.set(requesterDevice, grantedFrom);
         if (access === 'read') return { _tag: 'Authorized' };

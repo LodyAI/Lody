@@ -36,9 +36,6 @@ export function isCloudE2eeDeviceRevoked(value: unknown): boolean {
   return false;
 }
 
-/** Not sent by the service yet: an expired sign-in currently arrives as an ordinary refusal. */
-const SIGN_IN_EXPIRED_CODE = 'e2ee_sign_in_expired';
-
 /** Node's codes for a connection lost while a response body was still arriving. */
 const SOCKET_FAILURE_CODES = new Set([
   'UND_ERR_SOCKET',
@@ -70,12 +67,7 @@ const REFUSAL_TEXT = /e2ee_[a-z_]+|\bunauthori[sz]ed\b|\bforbidden\b|\brevoked\b
 export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown {
   if (!(cause instanceof Error)) return cause;
   if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) return cause;
-  if ('data' in cause) {
-    const data = cause.data as { code?: unknown } | null | undefined;
-    return data?.code === SIGN_IN_EXPIRED_CODE
-      ? new CloudE2eeLedgerOutage({ signInExpired: true, cause })
-      : cause;
-  }
+  if ('data' in cause) return cause;
   if (httpStatus === undefined) return new CloudE2eeLedgerOutage({ cause });
   // A refusal already received stands, even if its body was then cut off.
   if (httpStatus >= 400 && httpStatus < 500 && httpStatus !== 429) return cause;
@@ -86,13 +78,10 @@ export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown 
     : cause;
 }
 
-/** The latest ledger read got no answer. It carries no access decision, unlike a refusal.
- * `signInExpired` also asks the user to sign in again. */
+/** The latest ledger read got no answer. It carries no access decision, unlike a refusal. */
 export class CloudE2eeLedgerOutage extends Error {
-  readonly signInExpired: boolean;
-  constructor(options: { signInExpired?: boolean; cause?: unknown } = {}) {
+  constructor(options: { cause?: unknown } = {}) {
     super('e2ee_ledger_outage', { cause: options.cause });
     this.name = 'CloudE2eeLedgerOutage';
-    this.signInExpired = options.signInExpired ?? false;
   }
 }

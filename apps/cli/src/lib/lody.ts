@@ -43,8 +43,8 @@ const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 interface LodyOptions {
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
-  /** Execution relies on an outage window, or `null` once that ends. */
-  onEncryptedWindowNotice?: (notice: { signInExpired: boolean } | null) => void;
+  /** True while execution relies on an outage window. */
+  onEncryptedWindowNotice?: (active: boolean) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {

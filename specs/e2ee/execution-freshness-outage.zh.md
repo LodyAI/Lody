@@ -69,6 +69,5 @@ Translation: current
 
 - 实现：`apps/cli/src/lib/e2ee/execution-authorization.ts`，故障规则在 `apps/cli/src/lib/cloud-e2ee-errors.ts` 的 `ledgerReadFailure`。
 - "不确定的挂起/恢复会结束窗口"靠比较墙钟和单调时钟的变化量，因为长时间挂起不再必然超过授权时长。
-- 登录过期靠 `e2ee_sign_in_expired` 识别。服务端目前还不发送这个错误码：它把登录过期报告为未授权，会结束窗口。
 - 提示是 `lody daemon status` 显示的运行时问题，其他客户端界面还没有显示。
 - 已执行的验证：`apps/cli/tests/e2ee-runtime.test.ts`（"backend outage windows"）和 `apps/cli/tests/lody-fleet-local-catalog.test.ts`，使用合成账本和注入时钟。没有运行真实的后端故障。

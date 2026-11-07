@@ -1016,16 +1016,15 @@ export class LodyFleet {
           logger: workspaceLogger,
           onEncryptedAuthorityConfirmed: (startedAt) =>
             this.confirmEncryptedAuthority(workspace.id, startedAt),
-          onEncryptedWindowNotice: (notice) => {
+          onEncryptedWindowNotice: (active) => {
             const code = `e2ee_access_unconfirmed:${workspace.id}`;
-            if (notice)
+            if (active)
               this.runtimeStateReporter.upsertIssue({
                 code,
                 severity: 'warning',
                 recoverable: true,
-                message: notice.signInExpired
-                  ? 'Encrypted workspace access could not be confirmed. Sign in again to restore it.'
-                  : 'Encrypted workspace access could not be confirmed. Lody is working from the verified ledger on this machine.',
+                message:
+                  'Encrypted workspace access could not be confirmed. Lody is working from the verified ledger on this machine.',
               });
             else this.runtimeStateReporter.clearIssue(code);
           },

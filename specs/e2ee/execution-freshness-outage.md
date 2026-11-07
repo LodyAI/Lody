@@ -96,8 +96,6 @@ allowed while the bridge it needs has already detached.
   in `ledgerReadFailure` (`apps/cli/src/lib/cloud-e2ee-errors.ts`).
 - "Rollback or uncertain suspend/resume ends it" compares the change in wall clock with
   the change in monotonic clock, because a long suspend no longer always outlasts the grant.
-- An expired sign-in is recognized by `e2ee_sign_in_expired`. The service does not send that
-  code yet: it reports an expired sign-in as unauthorized, which ends the window.
 - The notice is a runtime issue shown by `lody daemon status`. Other client surfaces do not
   show it yet.
 - Executed validation: `apps/cli/tests/e2ee-runtime.test.ts` ("backend outage windows")

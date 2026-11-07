@@ -133,13 +133,4 @@ describe('latest ledger read failures through the Convex SDK', () => {
       );
     expect(await read()).toBeInstanceOf(CloudE2eeDeviceRevoked);
   });
-
-  it('reads an expired sign-in as an outage that asks to sign in', async () => {
-    network.reply = async () =>
-      json(
-        { status: 'error', errorMessage: 'expired', errorData: { code: 'e2ee_sign_in_expired' } },
-        UDF_FAILED
-      );
-    expect(await read()).toMatchObject({ signInExpired: true });
-  });
 });

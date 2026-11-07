@@ -7710,20 +7710,20 @@ describe('machine execution authorization freshness', () => {
     it('reports the window while it is in use', () =>
       withOutage(({ fixture, io, makeGate }) =>
         Effect.gen(function* () {
-          const notices: unknown[] = [];
+          const notices: boolean[] = [];
           const noticed = yield* makeGate(undefined, (notice) => notices.push(notice));
           io.respond = async () => page(fixture.records);
           yield* noticed.authorizeExecution('workspace', fixture.sender);
           io.respond = async () => {
-            throw new CloudE2eeLedgerOutage({ signInExpired: true });
+            throw new CloudE2eeLedgerOutage();
           };
           at(io, FIFTEEN_MINUTES);
           yield* noticed.authorizeExecution('workspace', fixture.sender);
-          expect(notices).toEqual([{ signInExpired: true }]);
+          expect(notices).toEqual([true]);
           io.respond = async () => page(fixture.records);
           at(io, FIFTEEN_MINUTES + 120_000);
           yield* noticed.authorizeExecution('workspace', fixture.sender);
-          expect(notices).toEqual([{ signInExpired: true }, null]);
+          expect(notices).toEqual([true, false]);
         })
       ));
 
