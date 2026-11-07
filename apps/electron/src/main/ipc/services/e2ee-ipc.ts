@@ -3500,10 +3500,10 @@ export class E2eeIpc extends IpcService {
     const unlock = await this.recoveryUnlock(method)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
-      const passkeys = await this.recoveryOperation(({ store, journalPath }) =>
+      const state = await this.recoveryOperation(({ store, journalPath }) =>
         listRecoveryPasskeys({ store, journalPath, unlock })
       )
-      return { outcome: 'listed' as const, passkeys }
+      return { outcome: 'listed' as const, ...state }
     } finally {
       if ('file' in unlock) unlock.file.fill(0)
     }
@@ -3518,10 +3518,10 @@ export class E2eeIpc extends IpcService {
     const unlock = await this.recoveryUnlock(method)
     if (!unlock) return { outcome: 'cancelled' as const }
     try {
-      const passkeys = await this.recoveryOperation(({ store, journalPath }) =>
+      const { removed, ...state } = await this.recoveryOperation(({ store, journalPath }) =>
         removeRecoveryPasskey({ store, journalPath, unlock, entryId })
       )
-      return { outcome: 'removed' as const, passkeys }
+      return { outcome: removed ? ('removed' as const) : ('incomplete' as const), ...state }
     } finally {
       if ('file' in unlock) unlock.file.fill(0)
     }

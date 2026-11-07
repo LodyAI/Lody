@@ -140,6 +140,9 @@ const IndexSchema = Schema.Struct({
   passkeys: Schema.optional(Schema.Array(PasskeySchema)),
 });
 export type RecoveryVaultIndex = typeof IndexSchema.Type;
+const RemovalSchema = Schema.Struct({ label: Schema.String, done: Schema.Boolean });
+const decodeRemoval = (raw: Uint8Array) =>
+  Result.getOrThrow(Schema.decodeUnknownResult(RemovalSchema)(parseCanonical(raw)));
 const passkeysOf = (value: RecoveryVaultIndex): readonly RecoveryPasskeyReference[] =>
   value.passkeys ?? [];
 /** The index plaintext; a vault with no passkeys keeps its existing bytes. */
@@ -234,6 +237,8 @@ const makeSession = Effect.fnUntraced(function* (input: {
     if (closed) throw vaultError('closed');
   };
   const pinKey = `vault-v1/${vaultId}/index-pin`;
+  const removalPrefix = `vault-v1/${vaultId}/passkey-removal/`;
+  const removalKey = (entryId: string) => `${removalPrefix}${entryId}`;
   const persist = Effect.fnUntraced(function* (
     key: string,
     expected: Uint8Array | null,
@@ -592,25 +597,57 @@ const makeSession = Effect.fnUntraced(function* (input: {
       ),
     /** Remove a passkey and delete its wrap. This stops future use only: a copied wrap
      * plus the credential still opens V, so a suspected compromise replaces the vault. */
+    /** Remove a passkey: journal the intent, commit the index, then delete the wrap.
+     * Removal stops future use only. If the delete fails, the journal keeps it
+     * unfinished, and a retry on this device completes it. An unlisted entry with no
+     * journaled intent is never deleted: it may be another device's candidate. */
     removePasskey: (entryId: string) =>
       ownedOperation(
         Effect.gen(function* () {
           yield* attempt(guard);
+          const key = removalKey(entryId);
+          let raw = yield* local.read(key);
+          let intent = raw ? yield* attempt(() => decodeRemoval(raw!)) : null;
           const before = yield* index(),
-            passkeys = passkeysOf(before.value);
-          if (!passkeys.some((ref) => ref.entryId === entryId))
-            return yield* vaultError('conflict');
-          yield* commitPasskeys(
-            before,
-            passkeys.filter((ref) => ref.entryId !== entryId)
-          );
-          const after = yield* index();
-          if (!after.header) return yield* vaultError('storage');
-          yield* store.deleteUnreferenced(vaultId, entryId, {
-            revision: after.header.revision,
-            digest: ciphertextDigest(after.header),
-          });
-          if (yield* store.readEntry(vaultId, entryId)) return yield* vaultError('storage');
+            passkeys = passkeysOf(before.value),
+            listed = passkeys.find((ref) => ref.entryId === entryId);
+          if (listed) {
+            if (!intent || intent.done) {
+              const next = canonical({ label: listed.label, done: false });
+              yield* persist(key, raw, next);
+              raw = next;
+              intent = { label: listed.label, done: false };
+            }
+            yield* commitPasskeys(
+              before,
+              passkeys.filter((ref) => ref.entryId !== entryId)
+            );
+          } else if (!intent || intent.done) return yield* vaultError('conflict');
+          if (yield* store.readEntry(vaultId, entryId)) {
+            const after = yield* index();
+            if (!after.header) return yield* vaultError('storage');
+            yield* store.deleteUnreferenced(vaultId, entryId, {
+              revision: after.header.revision,
+              digest: ciphertextDigest(after.header),
+            });
+            if (yield* store.readEntry(vaultId, entryId)) return yield* vaultError('storage');
+          }
+          yield* persist(key, raw, canonical({ label: intent.label, done: true }));
+        })
+      ),
+    /** Removals this device began but did not finish: the wrap may still unlock V. */
+    pendingPasskeyRemovals: () =>
+      ownedOperation(
+        Effect.gen(function* () {
+          yield* attempt(guard);
+          const rows = yield* local.list(removalPrefix);
+          const pending: { readonly entryId: string; readonly label: string }[] = [];
+          for (const row of rows) {
+            const intent = yield* attempt(() => decodeRemoval(row.value));
+            if (!intent.done)
+              pending.push({ entryId: row.key.slice(removalPrefix.length), label: intent.label });
+          }
+          return pending;
         })
       ),
     cleanupRetired: (entryId: string, confirmation: { readonly confirmedRecoveryLoss: boolean }) =>
