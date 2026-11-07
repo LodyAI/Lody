@@ -174,6 +174,8 @@ Lody 仍在走向完整的 local-first 支持。
 Lody 的新原生移动端方案位于 [apps/mobile](apps/mobile/README.md)，包含 iOS 和
 Android 客户端，目前仍在开发中。两端保留独立构建工具链，安装和验证步骤见移动端 README。
 
-iOS 客户端基于 **[Innei 的 lody-ios](https://github.com/Innei/lody-ios)**，Android
-复用了其云端协议运行时。感谢 Innei 及上游贡献者，致谢与许可证详见
-[移动端 README](apps/mobile/README.md#credits-and-origins)。
+iOS 客户端直接基于 **[Innei 的 lody-ios](https://github.com/Innei/lody-ios)**。
+感谢 [Innei](https://github.com/Innei) 及上游贡献者构建的原生应用、聊天体验、应用架构和
+Loro/Flock 协议运行时。Android 也复用了具有来源记录的运行时快照。这些工作是本方案的
+重要基础，而不只是设计灵感。原有许可证、版权声明及其他项目致谢均予以保留，详见
+[移动端来源与致谢](apps/mobile/README.md#credits-and-origins)。
