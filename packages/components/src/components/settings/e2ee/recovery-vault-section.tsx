@@ -55,7 +55,8 @@ type Result =
 export function RecoveryVaultSection() {
   const { t } = useTranslation();
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
-  const e2ee = getIpcServices()?.e2ee;
+  // The proxy is new on every call; keep one so the loading effect runs once.
+  const [e2ee] = useState(() => getIpcServices()?.e2ee);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>();
   const [plan, setPlan] = useState<Plan>();
@@ -513,7 +514,11 @@ export function RecoveryVaultSection() {
               )}
             </AlertDialog.Title>
             <AlertDialog.Description>
-              {dialog === 'begin' && t('e2ee.recovery.replaceBody')}{' '}
+              {t(
+                dialog === 'continue'
+                  ? 'e2ee.recovery.replaceContinueBody'
+                  : 'e2ee.recovery.replaceBody'
+              )}{' '}
               {t('e2ee.recovery.replaceOldFile')}
             </AlertDialog.Description>
           </AlertDialog.Header>
@@ -557,9 +562,7 @@ export function RecoveryVaultSection() {
               }}
             >
               {t(
-                dialog === 'continue'
-                  ? 'e2ee.recovery.replaceContinue'
-                  : 'e2ee.recovery.replaceSave'
+                dialog === 'continue' ? 'e2ee.recovery.replaceFinish' : 'e2ee.recovery.replaceSave'
               )}
             </Button>
           </AlertDialog.Footer>
