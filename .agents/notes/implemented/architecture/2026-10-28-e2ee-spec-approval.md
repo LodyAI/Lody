@@ -178,7 +178,7 @@ The scope covers these points:
 
 - **Windows.** When the latest ledger read gets no answer, the machine keeps deciding from its local verified ledger: reads by its own member for 24 hours, execution by its own member for 4 hours. Requests from other members stay at 15 minutes.
 - **Outage or refusal.** No reply, a timeout, a 5xx, a 429 and a server error with no business error code count as an outage. Removed, revoked and unauthorized end the window at once. A reply the client cannot understand is treated as a refusal.
-- **Expired sign-in.** It counts as an outage. Work continues inside the window, and the user is asked to sign in again.
+- **Expired sign-in.** Revised on 2026-11-07 by the owner in the same session, in message `042a6021-a85e-4ce1-973b-a32cf3a92e78` (04:29:38 UTC): it ends the window like unauthorized, because the service reports both the same way. Their first answer counted it as an outage.
 - **Visibility.** The user sees a notice while a window is in use.
 - **Consequence.** The longer bound replaces the 15-minute worst case for the same member's reads and execution, as the Spec's "Changed bound" section states. The implementation updates the 15-minute passages in the whitepaper and foundations to this meaning under this approval.
 
