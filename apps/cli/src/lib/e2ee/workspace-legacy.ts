@@ -1233,6 +1233,11 @@ async function openWorkspaceOwned(
             });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
+          if (
+            page.checkpoint.length !== checkpoint.length ||
+            page.checkpoint.headHash !== checkpoint.headHash
+          )
+            throw new Error('e2ee_ledger_checkpoint_changed');
           // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
           movedBack ||=
             page.checkpoint.length < trusted.length ||
