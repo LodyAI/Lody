@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -100,4 +101,76 @@ void test('daily desktop logs normalize pairing display forms in strings and for
   const text = await readFile(path.join(logDir, '2026-09-24.log'), 'utf8')
   for (const form of forms) assert.equal(text.includes(form), false)
   assert.equal((text.match(/\[redacted\]/g) ?? []).length, forms.length * 2)
+})
+
+void test('Host and Core source copies share logging and one run record across partial initialization', () => {
+  execFileSync(process.execPath, ['--experimental-vm-modules', '--input-type=module'], {
+    input: `
+      import assert from 'node:assert/strict'
+      import { readFileSync } from 'node:fs'
+      import { stripTypeScriptTypes } from 'node:module'
+      import { SourceTextModule, SyntheticModule, createContext } from 'node:vm'
+      import { EventEmitter } from 'node:events'
+      const source = stripTypeScriptTypes(readFileSync(new URL(${JSON.stringify(new URL('./desktop-log.ts', import.meta.url).href)}), 'utf8'))
+      for (const fail of [false, true]) {
+        const sink = []
+        const records = []
+        const app = Object.assign(new EventEmitter(), {
+          getVersion: () => 'fixture', getPath: () => '/fixture',
+          whenReady: () => new Promise(() => {})
+        })
+        const owner = Object.assign(new EventEmitter(), {
+          pid: 42, versions: {}, platform: 'fixture'
+        })
+        const context = createContext({ process: owner, console: { error() {} },
+          setInterval: () => ({ unref() {} }) })
+        const log = Object.fromEntries(['info', 'warn', 'error', 'debug', 'flushSync']
+          .map(name => [name, (...args) => sink.push([name, ...args])]))
+        const dependencies = {
+          electron: { app, powerMonitor: new EventEmitter() },
+          'node:fs': { readFileSync: () => { throw new Error('absent') },
+            writeFileSync: (path, text) => records.push(JSON.parse(text)) },
+          'node:path': { join: (...parts) => parts.join('/') },
+          '@lody/shared/node/installation-profile': { getLodyDataDir: () => '/fixture' },
+          './platform': { mainPlatformKind: 'local', desktopInstallationProfile: {} },
+          './desktop-log-core': {
+            createDesktopLog: () => log,
+            mirrorConsoleToDesktopLog: () => { if (fail) throw new Error('partial install') },
+            createMainThreadLagProbe: () => () => {},
+            describePreviousDesktopRun: () => null, parseDesktopRunRecord: () => null
+          }
+        }
+        async function load(identifier) {
+          const module = new SourceTextModule(source, { context, identifier })
+          await module.link(specifier => {
+            const values = dependencies[specifier]
+            return new SyntheticModule(Object.keys(values), function () {
+              for (const [key, value] of Object.entries(values)) this.setExport(key, value)
+            }, { context })
+          })
+          await module.evaluate()
+          return module.namespace
+        }
+        const host = await load('host/desktop-log')
+        host.installDesktopLog()
+        host.beginDesktopRunRecord()
+        const core = await load('core/desktop-log')
+        assert.equal(core.getDesktopLog(), host.getDesktopLog())
+        assert.equal(core.installDesktopLog(), host.getDesktopLog())
+        core.beginDesktopRunRecord()
+        assert.equal(records.length, 1)
+        assert.equal(records[0].pid, 42)
+        assert.equal(sink.filter(entry => String(entry[2]).includes('main process started')).length, 1)
+        sink.length = 0
+        core.getDesktopLog().warn('cli', 'Core stderr')
+        assert.deepEqual(sink, fail ? [] : [['warn', 'cli', 'Core stderr']])
+        if (!fail) {
+          app.emit('will-quit')
+          assert.equal(records.length, 2)
+          assert.equal(records[1].cleanExit, true)
+        }
+      }
+    `,
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
 })

@@ -32,6 +32,9 @@ on a Lody data volume. Space alone never blocks. Only relaunch/quit clears it;
 background agents keep running
 ([decision](../../../../../.agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md)).
 
+Core OTA changes must preserve the emitted snapshot boundary, initial health barrier
+and clean-relaunch recovery described in [the Core OTA contract](../../../scripts/core-ota/README.md).
+
 ## Public browser
 
 - The public browser (`services/public-browser-service.ts`) has NO network guard:

@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { verifyCoreResources } from './verify-core-resources.mjs'
 
 const electronDir = fileURLToPath(new URL('../', import.meta.url))
 const electronViteEntry = fileURLToPath(
@@ -32,3 +33,4 @@ function run(entry, args) {
 }
 
 run(electronViteEntry, ['build', '--mode', 'oss'])
+await verifyCoreResources(fileURLToPath(new URL('../out/', import.meta.url)))

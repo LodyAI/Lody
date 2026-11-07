@@ -1,3 +1,4 @@
+import { getCoreUpdater } from './core-updater-service'
 import { startProcessLegacy } from '@lody/shared/node/process'
 import { appendFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -93,6 +94,7 @@ export class AppUpdaterService {
   private downloadedFile: string | undefined
   private errorCount = 0
   private installInFlight = false
+  private coreCandidate = false
   /** A Sparkle install this service started still holds the app-quitting flag. */
   private sparkleInstallRequested = false
 
@@ -158,17 +160,26 @@ export class AppUpdaterService {
   /** Stop periodic checks; a recovered quit calls `start()` again to resume them. */
   stop(): void {
     this.started = false
+    getCoreUpdater()?.stop()
     if (this.intervalRef) {
       clearInterval(this.intervalRef)
       this.intervalRef = null
     }
   }
 
-  async checkForUpdates(): Promise<CheckForElectronUpdateResult> {
+  async checkForUpdates(fullRescue = false): Promise<CheckForElectronUpdateResult> {
     if (!this.isUpdaterEnabled()) {
       return {
         started: false,
         error: 'updater_disabled'
+      }
+    }
+    this.coreCandidate = false
+    if (!fullRescue && getCoreUpdater()) {
+      const result = await getCoreUpdater()!.check((patch) => this.setState(patch))
+      if (result.handled) {
+        this.coreCandidate = getCoreUpdater()!.ready
+        return result
       }
     }
     if (this.sparkleBridge) {
@@ -225,7 +236,15 @@ export class AppUpdaterService {
     }
   }
 
-  async quitAndInstall(): Promise<QuitAndInstallElectronUpdateResult> {
+  async quitAndInstall(fullRescue = false): Promise<QuitAndInstallElectronUpdateResult> {
+    const core = getCoreUpdater()
+    if (core && this.coreCandidate && !fullRescue) {
+      if (!core.ready) return { ok: false, error: 'update_not_downloaded' }
+      setAppQuitting(true)
+      const outcome = await quitAndRelaunch()
+      if (outcome === 'cancelled') setAppQuitting(false)
+      return outcome === 'quitting' ? { ok: true } : { ok: false, error: 'update_quit_cancelled' }
+    }
     if (this.sparkleBridge) {
       try {
         setAppQuitting(true)

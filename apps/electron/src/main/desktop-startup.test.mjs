@@ -3,7 +3,7 @@ import { before, after, test } from 'node:test'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 import { createRequire } from 'node:module'
 import { createConnection, createServer, Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
@@ -19,7 +19,8 @@ import {
 const electronRoot = fileURLToPath(new URL('../../', import.meta.url))
 const require = createRequire(new URL('../../package.json', import.meta.url))
 let root
-let entryCode
+let bundledChunks
+let entryFile
 let applicationImport
 let CliSupervisor
 const hostApi = require('@lody/shared/node/local-cli-host-lease')
@@ -50,12 +51,17 @@ before(async () => {
     build: { ...config.build, write: false, outDir: root }
   })
   const output = (Array.isArray(result) ? result[0] : result).output
-  const entry = output.find((item) => item.type === 'chunk' && item.isEntry)
-  entryCode = entry.code
+  bundledChunks = new Map(
+    output.filter((item) => item.type === 'chunk').map((item) => [item.fileName, item.code])
+  )
+  const entry = output.find(
+    (item) =>
+      item.type === 'chunk' && item.facadeModuleId === join(electronRoot, 'src/main/index.ts')
+  )
+  entryFile = entry.fileName
   const application = output.find(
     (item) =>
       item.type === 'chunk' &&
-      item.isDynamicEntry &&
       item.moduleIds.includes(join(electronRoot, 'src/main/application.ts'))
   )
   assert.ok(application, 'business application must remain a separate, lazy module')
@@ -234,7 +240,29 @@ function launch(
       events.push(['launch', JSON.parse(JSON.stringify(event))])
     }
   }
-  runInNewContext(entryCode, {
+  const chunkCache = new Map()
+  function loadChunk(filename) {
+    if (chunkCache.has(filename)) return chunkCache.get(filename)
+    const exports = {}
+    chunkCache.set(filename, exports)
+    runInNewContext(bundledChunks.get(filename), {
+      ...sandbox,
+      exports,
+      require(id) {
+        const target = posix.normalize(posix.join(posix.dirname(filename), id))
+        if (
+          id.startsWith('.') &&
+          `./${target}` !== applicationImport &&
+          bundledChunks.has(target)
+        ) {
+          return loadChunk(target)
+        }
+        return sandbox.require(id.startsWith('.') ? `./${target}` : id)
+      }
+    })
+    return exports
+  }
+  const sandbox = {
     exports: {},
     console: {
       ...console,
@@ -278,7 +306,8 @@ function launch(
       throw new Error(`Forbidden pre-ownership dependency: ${id}`)
     },
     __dirname: root
-  })
+  }
+  loadChunk(entryFile)
   ready.resolve()
   return {
     done: completed.promise,

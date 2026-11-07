@@ -1,6 +1,11 @@
+import { HOST_ABI, assertHostCompatible } from './core-ota/compatibility.mjs'
+import { computeHostBuildId } from './core-ota/host-build.mjs'
 import fs from 'node:fs'
+import { createPublicKey } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 
 import {
   stagedRoostBindingPath,
@@ -51,7 +56,7 @@ function assertPackagedDeepSeekAssets(packedCliDir) {
  *    ABI-mismatched bindings fail the build instead of crash-looping on user
  *    machines. The runtime probe runs only when the target matches the build host.
  */
-export default async function afterPack(context) {
+async function afterPackInstalled(context) {
   const archName = ARCH_NAMES[context.arch]
   const platform = context.electronPlatformName
 
@@ -71,6 +76,19 @@ export default async function afterPack(context) {
     )
     resourcesDir = path.join(context.appOutDir, 'resources')
   }
+  // Use builder's own ASAR reader so this structural check also runs when
+  // cross-packaging; ordinary Node fs cannot inspect an archive's entries.
+  const require = createRequire(import.meta.url)
+  const builderRequire = createRequire(require.resolve('electron-builder'))
+  const asar = createRequire(builderRequire.resolve('app-builder-lib'))('@electron/asar')
+  const archive = path.join(resourcesDir, 'app.asar')
+  const catalog = JSON.parse(asar.extractFile(archive, 'out/main/core-artifacts.json').toString())
+  for (const file of catalog.main) {
+    const entry = asar.statFile(archive, `out/main/${file}`)
+    if (!entry || entry.files)
+      throw new Error(`[core-artifacts] Missing packaged main file: ${file}`)
+  }
+  console.log(`[core-artifacts] verified ${catalog.main.length} packaged main files`)
   const publicEdKey = process.env.SPARKLE_ED_PUBLIC_KEY
   if (typeof publicEdKey === 'string' && shouldInjectSparklePublicKey({ platform, publicEdKey })) {
     const plistPath = sparkleInfoPlistPath({
@@ -347,7 +365,7 @@ export default async function afterPack(context) {
     cliRuntimePath,
     [
       '-e',
-      `require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
+      `if (Number(process.versions.node.split('.')[0]) !== 24 || Number(process.versions.napi) < 10 || Number(process.versions.electron.split('.')[0]) !== 44) throw Error('Unsupported Core Host runtime capabilities'); console.log('core-host-runtime=' + JSON.stringify(process.versions)); require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
     ],
     {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -370,6 +388,12 @@ export default async function afterPack(context) {
   console.log('[main-native-storage-smoke] E2EE SQLite and encrypted custody wrote and reopened')
 
   console.log(`[embedded-cli-smoke] OK for ${platform}-${archName} (boot + native bindings)`)
+  return JSON.parse(
+    mainSmoke.stdout
+      .split('\n')
+      .find((line) => line.startsWith('core-host-runtime='))
+      .slice('core-host-runtime='.length)
+  )
 }
 
 function resolvePackedCliRuntimePath({ binaryPath, productFilename, resourcesDir, platform }) {
@@ -392,4 +416,91 @@ function resolvePackedCliRuntimePath({ binaryPath, productFilename, resourcesDir
   }
 
   return helperPath
+}
+
+export default async function afterPack(context, config) {
+  const runtime = await afterPackInstalled(context)
+  const resourcesDir =
+    context.electronPlatformName === 'darwin' || context.electronPlatformName === 'mas'
+      ? path.join(
+          context.appOutDir,
+          `${context.packager.appInfo.productFilename}.app`,
+          'Contents',
+          'Resources'
+        )
+      : path.join(context.appOutDir, 'resources')
+  if (config) {
+    if (Object.keys(config).sort().join() !== 'arch,channel,feedUrl,platform,product,publicKey')
+      throw new Error('Invalid public Core config fields')
+    const platform = context.electronPlatformName
+    const arch = ARCH_NAMES[context.arch]
+    if (
+      config.platform !== platform ||
+      config.arch !== arch ||
+      config.product !== 'lody-oss' ||
+      !['stable', 'nightly'].includes(config.channel)
+    )
+      throw new Error('Core config target mismatch')
+    const packageVersion = context.packager.appInfo.version
+    const expectedChannel = /nightly/i.test(packageVersion) ? 'nightly' : 'stable'
+    if (config.channel !== expectedChannel)
+      throw new Error('Core channel does not match packaged version')
+    const url = new URL(config.feedUrl)
+    if (url.protocol !== 'https:' || url.username || url.password)
+      throw new Error('Core feed must be HTTPS')
+    if (
+      typeof config.publicKey !== 'string' ||
+      config.publicKey.includes('PRIVATE KEY') ||
+      createPublicKey(config.publicKey).asymmetricKeyType !== 'ed25519'
+    )
+      throw new Error('Core requires an Ed25519 public key')
+    const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url))
+    const require = createRequire(import.meta.url)
+    const builderRequire = createRequire(require.resolve('electron-builder'))
+    const asar = createRequire(builderRequire.resolve('app-builder-lib'))('@electron/asar')
+    const archive = path.join(resourcesDir, 'app.asar')
+    const entries = new Set(asar.listPackage(archive))
+    const appPackage = JSON.parse(asar.extractFile(archive, 'package.json').toString())
+    const catalog = JSON.parse(asar.extractFile(archive, 'out/main/core-artifacts.json').toString())
+    const electronVersion =
+      context.packager.config.electronVersion ??
+      JSON.parse(fs.readFileSync(require.resolve('electron/package.json'), 'utf8')).version
+    // Matching-target probes report the packaged runtime, never the builder's Node.
+    // Cross-packaging advertises only the pinned runtime's guaranteed baseline.
+    const hostCapabilities = {
+      electron: runtime?.electron ?? electronVersion,
+      node: runtime?.node ?? '24.0.0',
+      nodeApi: runtime?.napi ? `${runtime.napi}.0.0` : '10.0.0'
+    }
+    for (const name of Object.keys(appPackage.dependencies ?? {}).sort()) {
+      const file = `node_modules/${name}/package.json`
+      if (entries.has(`/${file}`)) {
+        hostCapabilities[`packages/${name}`] = JSON.parse(
+          asar.extractFile(archive, file).toString()
+        ).version
+      }
+    }
+    const metadata = { schemaVersion: 2, ...config, hostAbi: HOST_ABI, hostCapabilities }
+    assertHostCompatible(
+      { ...config, hostAbi: catalog.hostAbi, hostRequirements: catalog.hostRequirements },
+      metadata
+    )
+    const moduleDirectory = path.join(resourcesDir, 'core-ota')
+    fs.mkdirSync(moduleDirectory, { recursive: true })
+    for (const name of [
+      'activation.mjs',
+      'bootstrap.mjs',
+      'protocol.mjs',
+      'download.mjs',
+      'cas.mjs',
+      'compatibility.mjs'
+    ])
+      fs.copyFileSync(
+        path.join(scriptsDirectory, 'core-ota', name),
+        path.join(moduleDirectory, name)
+      )
+    const metadataFile = path.join(resourcesDir, 'core-ota-host.json')
+    const hostBuildId = await computeHostBuildId(context.appOutDir, metadataFile, metadata)
+    fs.writeFileSync(metadataFile, JSON.stringify({ ...metadata, hostBuildId }))
+  }
 }

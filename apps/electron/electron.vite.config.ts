@@ -1,3 +1,4 @@
+import { mainArtifactBoundary, mainEntryFileName } from './scripts/main-artifact-boundary.mjs'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
@@ -83,6 +84,17 @@ export default defineConfig(({ mode }) => {
 
   return {
     main: {
+      plugins: [
+        mainArtifactBoundary({
+          readHostPackageVersion: (name: string) =>
+            JSON.parse(
+              fs.readFileSync(resolve(__dirname, 'node_modules', name, 'package.json'), 'utf8')
+            ).version,
+          hostDependencies: Object.keys(
+            JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf8')).dependencies
+          )
+        })
+      ],
       envDir: false,
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: { ...viteEnvDefine, __LODY_E2E_CLOCK_BUILD__: 'false' },
@@ -90,7 +102,18 @@ export default defineConfig(({ mode }) => {
         lib: {
           entry: {
             index: resolve(__dirname, 'src/main/index.ts'),
+            application: resolve(__dirname, 'src/main/application.ts'),
             'native-storage-smoke': resolve(__dirname, 'src/main/native-storage-smoke.mts')
+          }
+        },
+        rollupOptions: {
+          // Preserve source evaluation boundaries: shared-chunk hoisting can pull
+          // application stores into the Host's synchronous startup closure.
+          preserveEntrySignatures: 'strict',
+          output: {
+            entryFileNames: mainEntryFileName,
+            preserveModules: true,
+            preserveModulesRoot: resolve(__dirname, 'src/main')
           }
         },
         externalizeDeps: {
@@ -102,6 +125,9 @@ export default defineConfig(({ mode }) => {
             '@devframes/json-render',
             '@lody/cli-supervisor',
             '@lody/shared',
+            '@lody/cloud-api',
+            '@lody/platform',
+            '@lody/loro-streams-rpc',
             'devframe',
             'effect'
           ]
