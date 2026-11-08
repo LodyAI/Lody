@@ -1,7 +1,7 @@
 """Photo resizing and selection in all composer hosts with an authorized local library."""
 import sys
 from driver import UI
-from attachment_geometry import check_media_geometry
+from attachment_geometry import check_media_geometry, check_composer_attachment_targets
 import catalog
 
 ui = UI(*sys.argv[1:])
@@ -98,4 +98,6 @@ ui.wait(lambda items: not any(i.get('AXUniqueId') == 'attachment-photos-confirm'
 assert ui.element(field).get('AXValue') == draft, 'Photo import changed the draft'
 ui.wait(lambda items: any((i.get('AXLabel') or '').startswith(prefix) and i.get('AXLabel') not in initial_attachments for i in items), 'Selected photo did not reach the draft')
 ui.capture('selected-photo-attached')
+photo_label = next(item['AXLabel'] for item in ui.state() if (item.get('AXLabel') or '').startswith(prefix) and item.get('AXLabel') not in initial_attachments)
+check_composer_attachment_targets(ui, field, photo_label)
 print('PASS: repeated edge/inset resizing, retained selection, both top corners, partial scroll, renumbering and draft-preserving import')
