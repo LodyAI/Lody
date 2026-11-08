@@ -110,6 +110,45 @@ export const RenameSessionParams = z
   .object({ workspaceId, sessionId, title: z.string() })
   .meta({ id: 'RenameSessionParams' });
 
+export const SetSessionOwnerParams = z
+  .object({ workspaceId, sessionId, userId: z.string().min(1) })
+  .meta({ id: 'SetSessionOwnerParams' });
+
+export const SessionWorkspacePathParams = z
+  .object({ workspaceId, sessionId })
+  .meta({ id: 'SessionWorkspacePathParams' });
+
+export const SessionWorkspacePathResult = z
+  .object({ path: z.string().nullable() })
+  .meta({ id: 'SessionWorkspacePathResult' });
+
+export const ConversationMarkdownParams = z
+  .object({
+    workspaceId,
+    sessionId,
+    /** Display names keyed by userId; the builder shows them only for multi-human sessions. */
+    participants: z.record(z.string(), z.string()),
+    /** Localized header line used only when the final assistant turn is unfinished. */
+    incompleteNotice: z.string(),
+  })
+  .meta({ id: 'ConversationMarkdownParams' });
+
+export const ConversationMarkdownResult = z
+  .discriminatedUnion('state', [
+    z.object({ state: z.literal('empty') }),
+    z.object({
+      state: z.literal('ready'),
+      markdown: z.string(),
+      estimatedTokens: z.number(),
+      overBudget: z.boolean(),
+      toolCallsCollapsed: z.boolean(),
+      thinkingTruncated: z.boolean(),
+      terminalTrimmed: z.boolean(),
+      toolResultsTruncated: z.number(),
+    }),
+  ])
+  .meta({ id: 'ConversationMarkdownResult' });
+
 export const CheckTurnQuotaParams = z
   .object({ sessionId, billingEntitlement: BillingEntitlement.nullable() })
   .meta({ id: 'CheckTurnQuotaParams' });

@@ -44,6 +44,7 @@ public enum LodyIcon: String, CaseIterable, Sendable {
     case star = "lody.icon.star"
     case pin = "lody.icon.pin"
     case bell = "lody.icon.bell"
+    case clock = "lody.icon.clock"
     case eye = "lody.icon.eye"
     case lock = "lody.icon.lock"
     case user = "lody.icon.user"

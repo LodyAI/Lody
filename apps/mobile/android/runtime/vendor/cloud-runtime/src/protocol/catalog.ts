@@ -173,7 +173,8 @@ export function projectRows(
       openedByRootSessionId:
         text(value.openedByRootSessionId).trim() || undefined,
       parentSessionId: text(value.parentSessionId).trim() || undefined,
-      childSessionPlacement: text(value.childSessionPlacement).trim() || undefined,
+      childSessionPlacement:
+        text(value.childSessionPlacement).trim() || undefined,
       machineId,
       title: text(value.title) || labels.untitled,
       status:
@@ -191,6 +192,8 @@ export function projectRows(
       lastRunningSeen: stamp(value.lastRunningSeen),
       awaitingUserSince: stamp(value.awaitingUserSince),
       branchName: text(value.branchName) || undefined,
+      baseBranch:
+        text(value.baseBranch).trim() || text(project.branch).trim() || undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
       pullRequests: pullRequestReferences(
@@ -202,7 +205,12 @@ export function projectRows(
       workspaceUnpushed: value.workspaceUnpushed === true || undefined,
     });
     if (runId) {
-      projects.push({ id: projectId, machineId, name: text(run.name) || labels.local, rootPath: '' });
+      projects.push({
+        id: projectId,
+        machineId,
+        name: text(run.name) || labels.local,
+        rootPath: '',
+      });
     } else if (localId || repo) {
       const githubRepo = repo || text(project.githubRepoFullName);
       projects.push({

@@ -141,6 +141,29 @@ object LodyIcons {
         )
     }
 
+    val Clock: ImageVector by lazy {
+        lodyIcon(
+            "Clock",
+            "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0Z",
+            "M12 6v6l4 2",
+        )
+    }
+
+    val Play: ImageVector by lazy {
+        lodyIcon(
+            "Play",
+            "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z",
+        )
+    }
+
+    val Pause: ImageVector by lazy {
+        lodyIcon(
+            "Pause",
+            "M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z",
+            "M6 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z",
+        )
+    }
+
     val Close: ImageVector by lazy {
         lodyIcon(
             "Close",
@@ -679,6 +702,9 @@ object LodyIcons {
             "filter" to Filter,
             "sort" to Sort,
             "plus" to Plus,
+            "clock" to Clock,
+            "play" to Play,
+            "pause" to Pause,
             "close" to Close,
             "check" to Check,
             "back" to Back,

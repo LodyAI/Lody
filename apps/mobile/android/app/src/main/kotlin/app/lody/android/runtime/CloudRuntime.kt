@@ -45,6 +45,12 @@ sealed interface RuntimeCommand {
     /** Stops the watched session's running turn (upstream `controlTurn`). A write, never retried. */
     data class StopTurn(val sessionId: String, val machineId: String, val turnId: String) : RuntimeCommand
     data class MessageAction(val kind: String, val payload: org.json.JSONObject) : RuntimeCommand
+    /** The workspace's schedules and the zones their rules are authored in. Read only. */
+    data object ListSchedules : RuntimeCommand
+    /** One schedule with its prompt, model, mode and project. Read only. */
+    data class ScheduleDetail(val scheduleId: String) : RuntimeCommand
+    /** An owner write (create / edit / pause / resume / run / delete); never retried here. */
+    data class ScheduleCommand(val request: ScheduleCommandRequest) : RuntimeCommand
     data object Ping : RuntimeCommand
     data object InspectSchema : RuntimeCommand
 }
@@ -57,6 +63,10 @@ sealed interface RuntimeResult {
     data class LocalProjects(val value: org.json.JSONObject) : RuntimeResult
     data class Shortcut(val value: org.json.JSONObject) : RuntimeResult
     data class ProjectGroups(val value: List<ProjectGroup>) : RuntimeResult
+    data class Schedules(val value: ScheduleList) : RuntimeResult
+    data class Schedule(val value: app.lody.android.runtime.ScheduleDetail) : RuntimeResult
+    /** The schedule a command wrote. */
+    data class ScheduleWritten(val scheduleId: String) : RuntimeResult
     data class Created(val value: CreationReceipt) : RuntimeResult
     /** Upstream send state (`sent` / `queued` / `not_sent` / `unknown`); a machine ACK is delivery only. */
     data class Sent(val state: String, val reason: String? = null) : RuntimeResult

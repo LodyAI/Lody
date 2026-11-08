@@ -23,9 +23,11 @@ compact = tab('Chats')['frame']
 assert compact['width'] < expanded['width'] * .8, (expanded, compact)
 ui.screenshot('compact')
 tap('Chats')  # Native minimized tab expands on tap.
-assert tab('Projects')['frame']['width'] > 80
-tap('Projects')
-assert tab('Projects')['AXValue'] == 1
+assert tab('Schedules')['frame']['width'] > 80
+assert not any(i.get('AXLabel') == 'Projects' and i.get('type') == 'RadioButton' for i in ui.state()), 'Projects tab is hidden'
+tap('Schedules')
+assert tab('Schedules')['AXValue'] == 1
+ui.element('home-schedules-list')
 tap('Settings')
 assert tab('Settings')['AXValue'] == 1
 tap('Chats')

@@ -87,6 +87,12 @@ const reserved = new Set<string>();
 export const retainedSessionIds = () => [...sessions.keys()];
 export const reservedSessionIds = () => [...reserved];
 export const sessionDoc = (id: string) => sessions.get(id)?.doc;
+/** Full persisted history of a synchronized session, for whole-conversation exports. */
+export function readyHistory(id: string): Record<string, any>[] {
+  const state = sessions.get(id);
+  if (!state?.ready) throw new Error('session_not_ready');
+  return state.doc.getList('history').toJSON() as Record<string, any>[];
+}
 function traceCode(value: unknown) {
   const pattern = /^[a-z][a-z0-9_]{0,47}$/;
   if (typeof value === 'string') return pattern.test(value) ? value : undefined;
@@ -652,7 +658,11 @@ export async function sendTurn(
     agentConfigId?: string;
     billingEntitlement?: BillingEntitlement | null;
   },
-  expand: (text: string) => Promise<string | { text: string; spans: MessageReference[] }> = async (text) => text,
+  expand: (
+    text: string,
+  ) => Promise<string | { text: string; spans: MessageReference[] }> = async (
+    text,
+  ) => text,
   selectMcp: (persisted: unknown) => Promise<string[]> = async (ids) =>
     Array.isArray(ids) ? ids : [],
 ): Promise<SendTurnResult> {
@@ -780,11 +790,15 @@ export async function sendTurn(
     // A Role runs a turn only while every value it pins is what will run (web). Any turn
     // may pick one, but its prompt prefix only ever starts the conversation.
     let role: TurnRole | undefined;
-    const started = ((state.doc.toJSON().history as any[] | undefined) ?? []).some(
-      (entry) => entry.role === 'user',
-    );
+    const started = (
+      (state.doc.toJSON().history as any[] | undefined) ?? []
+    ).some((entry) => entry.role === 'user');
     if (args.agentRoleId !== undefined && args.agentRoleId !== null) {
-      if (typeof args.agentRoleId !== 'string' || !args.agentRoleId || !args.agentConfigId)
+      if (
+        typeof args.agentRoleId !== 'string' ||
+        !args.agentRoleId ||
+        !args.agentConfigId
+      )
         throw new Error('role_unavailable');
       role = await resolveTurnRole(
         {
@@ -800,7 +814,8 @@ export async function sendTurn(
       if (sessions.get(state.id) !== state || !state.ready)
         throw new Error('session_not_ready');
       const applied = roleRunConfigApplied(role.runConfig, {
-        modelId: args.modelId === null ? null : (args.modelId ?? previous.modelId),
+        modelId:
+          args.modelId === null ? null : (args.modelId ?? previous.modelId),
         modeId: args.modeId ?? previous.modeId,
         configOptionValues,
       });
@@ -822,7 +837,12 @@ export async function sendTurn(
       prompt: [started ? '' : (role?.promptPrefix ?? ''), text]
         .filter((part) => part.trim())
         .join('\n\n'),
-      inputBlocks: [...(text ? [{ type: 'text', text, ...(spans?.length ? { spans } : {}) }] : []), ...attachments],
+      inputBlocks: [
+        ...(text
+          ? [{ type: 'text', text, ...(spans?.length ? { spans } : {}) }]
+          : []),
+        ...attachments,
+      ],
       // An explicit pick wins; otherwise the turn inherits what the session
       // already used, and an unset value leaves the machine on its default.
       modeId: args.modeId ?? previous.modeId,

@@ -24,14 +24,17 @@ const licenses=path.join(output,'main/runtime/licenses');await rm(licenses,{recu
 await copyFile(path.join(root,'vendor/cloud-runtime/LICENSE'),path.join(licenses,'CloudRuntime-LICENSE.txt'));
 const lock=JSON.parse(await readFile(path.join(root,'package-lock.json')));
 const inventory=[];
+const DECLARED_ONLY={'loro-mirror':'MIT'};
 for (const [location, info] of Object.entries(lock.packages)) {
  if (!location || info.dev || info.devOptional) continue;
  const name=info.name ?? location.split('node_modules/').at(-1);
  const version=info.version;
  const dir=path.join(root,location);
  const file=(await readdir(dir)).find(name=>/^LICENSE(?:\.|$)/i.test(name));
- if(!file) throw Error(`Missing license: ${name}@${version}`);
- const text=await readFile(path.join(dir,file));
+ // A reviewed package that declares its license only in package.json (no text shipped upstream).
+ const declared=DECLARED_ONLY[name]===info.license ? info.license : undefined;
+ if(!file && !declared) throw Error(`Missing license: ${name}@${version}`);
+ const text=file ? await readFile(path.join(dir,file)) : Buffer.from(`${name}@${version} is licensed ${declared}, as declared in its package.json; the package ships no license text.\n`);
  await writeFile(path.join(licenses,name.replaceAll('/','-')+'-'+version+'-LICENSE.txt'),text);
  inventory.push({name,version,licenseSha256:createHash('sha256').update(text).digest('hex')});
 }

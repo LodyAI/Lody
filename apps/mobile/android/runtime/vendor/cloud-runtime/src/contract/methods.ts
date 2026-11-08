@@ -25,6 +25,14 @@ import {
   ProjectGroupsResult,
 } from './projects.ts';
 import {
+  ScheduleCommandParams,
+  ScheduleCommandResult,
+  ScheduleDetail,
+  ScheduleDetailParams,
+  SchedulesParams,
+  SchedulesResult,
+} from './schedules.ts';
+import {
   OpenSessionParams,
   ReleaseReserveParams,
   RestoreSessionsParams,
@@ -97,6 +105,11 @@ import {
   MarkSessionReadParams,
   PinSessionParams,
   RenameSessionParams,
+  SetSessionOwnerParams,
+  SessionWorkspacePathParams,
+  SessionWorkspacePathResult,
+  ConversationMarkdownParams,
+  ConversationMarkdownResult,
   RespondPermissionParams,
   RespondPermissionResult,
   SendTurnParams,
@@ -188,6 +201,21 @@ export const runtimeCalls = {
     result: ProjectGroupsResult,
     timeoutMs: 45_000,
   },
+  schedules: {
+    params: SchedulesParams,
+    result: SchedulesResult,
+    timeoutMs: 45_000,
+  },
+  scheduleDetail: {
+    params: ScheduleDetailParams,
+    result: ScheduleDetail,
+    timeoutMs: 45_000,
+  },
+  scheduleCommand: {
+    params: ScheduleCommandParams,
+    result: ScheduleCommandResult,
+    timeoutMs: 70_000,
+  },
   localProjects: {
     params: LocalProjectsParams,
     result: LocalProjectsResult,
@@ -261,6 +289,21 @@ export const runtimeCalls = {
     params: RenameSessionParams,
     result: Empty,
     timeoutMs: 45_000,
+  },
+  setSessionOwner: {
+    params: SetSessionOwnerParams,
+    result: Empty,
+    timeoutMs: 45_000,
+  },
+  sessionWorkspacePath: {
+    params: SessionWorkspacePathParams,
+    result: SessionWorkspacePathResult,
+    timeoutMs: 15_000,
+  },
+  conversationMarkdown: {
+    params: ConversationMarkdownParams,
+    result: ConversationMarkdownResult,
+    timeoutMs: 15_000,
   },
   checkTurnQuota: {
     params: CheckTurnQuotaParams,
