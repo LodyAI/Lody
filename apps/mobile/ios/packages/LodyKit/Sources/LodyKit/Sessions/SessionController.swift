@@ -382,7 +382,7 @@ class SessionController: UIViewController {
         [weak self] _ in self?.openWorkspaceChanges()
       })
     }
-    var children: [UIMenuElement] = changes + simulatorMenu()
+    var children: [UIMenuElement] = changes
     children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
       self?.find(query: "", keyboard: true)
     })

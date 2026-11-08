@@ -32,6 +32,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.focus.onFocusChanged
@@ -681,7 +688,7 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
     ) {
         RoundButton(LodyIcons.Back, stringResource(R.string.chat_back), visualSize = LodySize.controlMd, onClick = onBack)
         Column(Modifier.weight(1f)) {
-            Text(title, style = LodyTheme.typography.bodyEmphasis, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ConversationTitle(title)
             if (machine.isNotBlank()) MachineItem(machine, machineOnline, loadMachine)
         }
         Row(Modifier.clip(CircleShape).background(colors.bgOverlay).border(0.5.dp, colors.borderSubtle, CircleShape), verticalAlignment = Alignment.CenterVertically) {
@@ -718,6 +725,38 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
             }
         }
     }
+}
+
+/** Mask only overflowing glyphs; Text retains the complete title in accessibility semantics. */
+@Composable
+internal fun ConversationTitle(title: String, modifier: Modifier = Modifier) {
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    var overflowing by remember(title, rtl) { mutableStateOf(false) }
+    Text(
+        title,
+        style = LodyTheme.typography.bodyEmphasis,
+        color = LodyTheme.colors.textPrimary,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { overflowing = it.didOverflowWidth },
+        modifier = modifier.fillMaxWidth()
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                if (overflowing && size.width > 0f) {
+                    val fade = LodySpacing.xl.toPx().coerceAtMost(size.width)
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = if (rtl) listOf(Color.Transparent, Color.Black) else listOf(Color.Black, Color.Transparent),
+                            startX = if (rtl) 0f else size.width - fade,
+                            endX = if (rtl) fade else size.width,
+                        ),
+                        blendMode = BlendMode.DstIn,
+                    )
+                }
+            },
+    )
 }
 
 /** Web's round glass-like control (header back, scroll to latest). */

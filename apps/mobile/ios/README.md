@@ -75,7 +75,8 @@ Send and Stop; conversation activity/status colors remain unchanged. Appearance 
 without an accent-color picker. Process status labels use the same regular type
 as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
-Conversation titles use 16 pt semibold system text. User bubbles fill the available
+Conversation titles use 16 pt semibold system text, fading at the trailing edge
+only on overflow rather than inserting an ellipsis. VoiceOver retains the full title. User bubbles fill the available
 reading width beside the avatar; long-press offers Copy, plus Edit for the last
 eligible user message, without inline action buttons. Below the conversation title,
 secondary-gray machine text starts with a presence icon; tapping the header opens

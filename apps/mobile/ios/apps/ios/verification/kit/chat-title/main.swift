@@ -386,3 +386,29 @@ ChatNavigationTitle.configureButton(button, title: "", subtitle: "")
 precondition(button.intrinsicContentSize.width >= 44 && button.intrinsicContentSize.height == 44,
   "Compact titles retain the minimum navigation touch target")
 print("PASS: title uses native horizontal spacing and preserves its touch target")
+
+let overflowTitle = String(repeating: "Long conversation title ", count: 12)
+ChatNavigationTitle.configureButton(button, title: overflowTitle, subtitle: "Machine")
+for direction: UISemanticContentAttribute in [.forceLeftToRight, .forceRightToLeft] {
+  button.titleHost.semanticContentAttribute = direction
+  button.bounds = CGRect(x: 0, y: 0, width: 180, height: 44)
+  button.setNeedsLayout()
+  button.layoutIfNeeded()
+  button.titleHost.setNeedsLayout()
+  button.titleHost.layoutIfNeeded()
+  let mask = button.titleHost.layer.mask as! CAGradientLayer
+  precondition(mask.frame == button.titleHost.bounds, "Fade is bounded to title, not subtitle or buttons")
+  precondition(mask.endPoint.x == (direction == .forceRightToLeft ? 0 : 1), "Fade follows trailing edge")
+  precondition(button.titleHost.subviews[0].bounds.width > button.titleHost.bounds.width,
+    "Title renders at natural width instead of ellipsizing")
+  precondition(button.accessibilityLabel!.contains(overflowTitle), "Full title remains accessible")
+  precondition(button.captionLabel.layer.mask == nil, "Subtitle remains unaffected")
+}
+ChatNavigationTitle.configureButton(button, title: "Short", subtitle: "Machine")
+button.bounds.size.width = 400
+button.setNeedsLayout()
+button.layoutIfNeeded()
+button.titleHost.setNeedsLayout()
+button.titleHost.layoutIfNeeded()
+precondition(button.titleHost.layer.mask == nil, "A fitting title removes the overflow fade")
+print("PASS: overflowing titles retain full text with directional fade; fitting titles stay unmasked")

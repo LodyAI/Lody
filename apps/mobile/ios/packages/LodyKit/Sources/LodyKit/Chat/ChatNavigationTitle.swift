@@ -26,9 +26,8 @@ struct ChatNavigationTitleBridge: View {
       .lodyTextStyle(.conversationTitle, fontOnly: true)
       .foregroundStyle(Color.primary)
       .lineLimit(1)
-      .truncationMode(.tail)
       .contentTransition(.numericText())
-      .fixedSize(horizontal: false, vertical: true)
+      .fixedSize(horizontal: true, vertical: true)
       .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 }
@@ -37,6 +36,7 @@ final class ChatNavigationTitleHost: UIView {
   private let model: ChatNavigationTitleModel
   private let hosting: UIHostingController<ChatNavigationTitleBridge>
   private var probe: ChatTitleTransitionProbe?
+  private let overflowMask = CAGradientLayer()
   var onTransitionReport: ((String) -> Void)?
 
   var text: String { model.text }
@@ -55,7 +55,7 @@ final class ChatNavigationTitleHost: UIView {
     hosting.view.isUserInteractionEnabled = false
     hosting.view.isAccessibilityElement = false
     hosting.view.accessibilityElementsHidden = true
-    clipsToBounds = false
+    clipsToBounds = true
     isUserInteractionEnabled = false
     isAccessibilityElement = false
     accessibilityElementsHidden = true
@@ -67,6 +67,7 @@ final class ChatNavigationTitleHost: UIView {
   func apply(_ text: String, animated: Bool) {
     guard text != model.text else { return }
     let update = { self.model.text = text }
+    defer { setNeedsLayout() }
     let motion = animated
       && !model.text.isEmpty
       && !text.isEmpty
@@ -83,7 +84,23 @@ final class ChatNavigationTitleHost: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    hosting.view.frame = bounds
+    let natural = (text as NSString).size(withAttributes: [.font: LodyTextStyle.conversationTitle.uiFont])
+    let width = max(bounds.width, ceil(natural.width))
+    let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
+    hosting.view.frame = CGRect(x: rtl ? bounds.width - width : 0, y: 0, width: width, height: bounds.height)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    if natural.width > bounds.width && bounds.width > 0 {
+      overflowMask.frame = bounds
+      overflowMask.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
+      overflowMask.locations = [0, NSNumber(value: Double(max(0, 1 - 24 / bounds.width))), 1]
+      overflowMask.startPoint = CGPoint(x: rtl ? 1 : 0, y: 0.5)
+      overflowMask.endPoint = CGPoint(x: rtl ? 0 : 1, y: 0.5)
+      layer.mask = overflowMask
+    } else {
+      layer.mask = nil
+    }
+    CATransaction.commit()
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {

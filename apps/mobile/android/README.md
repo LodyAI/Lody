@@ -119,7 +119,9 @@ not render app pages.
 
 User messages offer Copy through a long-press menu, with Edit available only for
 the latest runtime-confirmed editable message. Conversation titles use the 16 sp
-body-emphasis style. The header shows the computer below the title in secondary text with a presence
+body-emphasis style, clipping overflow with a soft trailing-edge fade rather than
+an ellipsis (mirrored in RTL, absent when the title fits). Accessibility retains
+the full title. The header shows the computer below the title in secondary text with a presence
 icon; tapping it opens the owner/visibility panel. There is no bottom computer capsule. The panel
 loads owner and private/shared display metadata from `machines:listVisibleMachines`
 through the verified native account and reads current runtime presence on opening.

@@ -30,7 +30,8 @@ class ChatTabsMenuTest {
         val root = CatalogSession("root", "m", "p", "Current", "idle", false, false, "")
         val child = root.copy(id = "child", title = "Closed child", parentSessionId = "root", isTabClosed = true)
         val closed = mutableStateOf(listOf(child))
-        val title = mutableStateOf("Current")
+        val longTitle = "A conversation title that is much wider than the available header space ".repeat(4)
+        val title = mutableStateOf(longTitle)
         fun nodes(): List<AccessibilityNodeInfo> {
             val result = mutableListOf<AccessibilityNodeInfo>()
             fun visit(node: AccessibilityNodeInfo) { result += node; for (i in 0 until node.childCount) node.getChild(i)?.let(::visit) }
@@ -61,6 +62,7 @@ class ChatTabsMenuTest {
             }
             val tabsLabel = context.resources.getQuantityString(app.lody.android.R.plurals.chat_directory_tabs, 1, 1)
             assertNull(find(tabsLabel))
+            assertNotNull("The full overflowing title remains accessible", find(longTitle))
             tap(more, create)
             tap(create, "Created in current directory")
             tap(more, history)
