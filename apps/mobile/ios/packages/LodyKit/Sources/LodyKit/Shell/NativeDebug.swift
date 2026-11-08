@@ -14,6 +14,8 @@ enum NativeDebug {
       root = ChatListPreviewController()
     } else if LodyUIVerify.has("--ui-review-mentions") {
       root = SessionPreviewController(scenario: "mentions")
+    } else if LodyUIVerify.has("--ui-review-usage") || LodyUIVerify.has("--ui-review-usage-popup") {
+      root = SessionPreviewController(scenario: LodyUIVerify.has("--ui-review-usage-popup") ? "usage-popup" : "usage")
     } else if let review = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-review-bar=") }) {
       root = SessionPreviewController(scenario: "bar-" + String(review.dropFirst("--ui-review-bar=".count)))
     } else {
@@ -31,6 +33,19 @@ enum NativeDebug {
     guard LodyUIVerify.enabled || _isDebugAssertConfiguration() else { return }
     guard let scenario = params["verifyCase"] else {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
+      return
+    }
+    if scenario == "inline-code" {
+      let page = UIViewController()
+      page.view.backgroundColor = .lodyBackground
+      let store = ChatMarkdownStore(traits: page.traitCollection)
+      let markdown = store.view(id: "inline-preview",
+        text: "Body with `inline code` and **`bold code`**.\n\n```\nfenced code keeps its ink\n```",
+        secondary: false, streaming: false, width: 330)
+      markdown.frame = CGRect(x: 24, y: 120, width: 330, height: markdown.measuredHeight)
+      page.view.addSubview(markdown)
+      LodyShell.shared.pushRootNative(page, title: "Inline code")
+      ChatContextViewProbe.checkInlineCode()
       return
     }
     if scenario == "home-native-alert" {
@@ -79,7 +94,7 @@ enum NativeDebug {
       }
       content = page
     }
-    if scenario.hasPrefix("session-preview-bar-") {
+    if scenario.hasPrefix("session-preview-bar-") || scenario.hasPrefix("session-preview-usage") {
       LodyShell.shared.pushRootNative(content, title: "")
       return
     }

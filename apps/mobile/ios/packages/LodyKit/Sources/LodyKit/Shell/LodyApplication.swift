@@ -1,6 +1,5 @@
 import GoogleSignIn
 import LodyCore
-import LodyDesignSystem
 import UIKit
 
 /// One scene owns the runtime and the application coordinators, independently of page lifetimes.
@@ -11,20 +10,18 @@ public final class LodyApplication {
   private let push = PushLifecycle()
 
   public func launch(_ application: UIApplication, options: [UIApplication.LaunchOptionsKey: Any]?) {
-    // Inter / JetBrains Mono for design-system surfaces (the Home chat list).
-    LodyFonts.register()
     _ = accent.application(application, didFinishLaunchingWithOptions: options)
     _ = push.application(application, didFinishLaunchingWithOptions: options)
   }
   public func active() { accent.applicationDidBecomeActive(.shared); push.applicationDidBecomeActive(.shared); shares.wake() }
+  public func pushToken(_ data: Data) { PushNotifications.shared.deviceToken(data) }
+  public func pushRegistrationFailed() { DiagnosticsStore.shared.record("notification", "apns_registration_failed") }
   public func background() { push.applicationDidEnterBackground(.shared) }
 
   private let runtime = DataRuntime(localStore: .shared)
   private var observers: [NSObjectProtocol] = []
   private var onboarding: LodyPageController?
   private var link: (route: String, user: String?)?
-  private var identified: String?
-  private var hasIdentified = false
   private let shares = NativeShareCoordinator()
   private var offeredCommunity = false
 
@@ -80,12 +77,6 @@ public final class LodyApplication {
     guard !LodyUIVerify.enabled else { return }
     let auth = AuthSession.shared.snapshot
     guard auth.localReady, !auth.busy else { return }
-    let user = auth.account?.user.id
-    if !hasIdentified || identified != user {
-      hasIdentified = true
-      identified = user
-      PushNotifications.shared.identify(user)
-    }
     if auth.account == nil {
       shares.stop()
       guard onboarding == nil else { return }

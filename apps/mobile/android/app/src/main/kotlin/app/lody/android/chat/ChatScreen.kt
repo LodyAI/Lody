@@ -82,6 +82,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     var status by remember(id, scope) { mutableStateOf("syncing") }
     var messages by remember(id, scope) { mutableStateOf(emptyList<SessionMessage>()) }
     // The latest user turn's run config, from the session snapshot (iOS `composerJSON`).
+    var usage by remember(id, scope) { mutableStateOf<app.lody.android.runtime.SessionUsage?>(null) }
     var snapshotChoice by remember(id, scope) { mutableStateOf<RunChoice?>(null) }
     var entries by remember(id, scope) { mutableStateOf(emptyList<ChatEntry>()) }
     // Turns this page sent that the transcript has not shown yet (optimistic, never resent).
@@ -167,6 +168,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 }
                 messages = snapshot.messages
                 snapshotChoice = snapshot.composer
+                usage = snapshot.usage
                 status = snapshot.status
                 if (snapshot.messages.any { it.streaming }) delay(33)
             }
@@ -532,6 +534,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             val modelName = capability?.models?.firstOrNull { it.id == modelId }?.name ?: session?.modelName ?: agentName
             if (context.session?.isTabClosed != true) ChatComposer(
                 field,
+                usage = if (chosen && modelId != usage?.modelId) usage?.copy(quota = null) else usage,
                 onPromptChange = { if (it.text.length <= 32000) { field = app.lody.android.chat.MentionPresentation.edit(field, it); prompt = field.text } },
                 onFocusChange = { composerFocused = it },
                 referencePresentation = mentions.presentation(LodyTheme.colors.accentDefault),
@@ -789,6 +792,7 @@ internal fun ChatComposer(
     onRemoveAttachment: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    usage: app.lody.android.runtime.SessionUsage? = null,
 ) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
@@ -951,6 +955,7 @@ internal fun ChatComposer(
                                 else AgentMark(agentCliType, agentType, colors.iconPrimary, Modifier.size(LodyIconSize.md))
                             }
                         }
+                        SessionUsageButton(usage)
                         Send()
                     }
                 }
@@ -1004,6 +1009,7 @@ internal fun ChatComposer(
                         if (plan) Icon(LodyIcons.PermissionPlan, contentDescription = stringResource(R.string.run_config_plan), tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
                         if (fast) Text(fastLabel, style = type.caption, color = colors.accentFg)
                     }
+                    SessionUsageButton(usage)
                     Send()
                 }
             }

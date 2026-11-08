@@ -512,8 +512,21 @@ export type CloudApi = {
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
+  accountSecurityEvents: {
+    list: Query<
+      { cursor?: string | null; limit?: number },
+      { events: E2eeAccountSecurityEvent[]; nextCursor: string | null }
+    >;
+  };
   e2eeRecoveryVault: {
     hasAccountVault: Query<Record<string, never>, { exists: boolean }>;
+    replacementState: Query<
+      Record<string, never>,
+      { current: string | null; replacing: string | null }
+    >;
+    reserveReplacementVault: Mutation<{ vaultId: string }, { ok: true }>;
+    finishReplacement: Mutation<{ oldVaultId: string; newVaultId: string }, { ok: true }>;
+    abandonReplacement: Mutation<{ vaultId: string }, { ok: true }>;
     putImmutable: Mutation<RecoveryVaultPutRequest, { ok: true }>;
     readEntry: Query<RecoveryVaultReadRequest, RecoveryVaultCiphertextDto | null>;
     readIndex: Query<RecoveryVaultIndexReadRequest, RecoveryVaultCiphertextDto | null>;
@@ -1233,3 +1246,13 @@ export interface ReferralLedgerEntry {
   frozen: number;
   createdAt: number;
 }
+
+/**
+ * An account security event: only its kind and time. The client chooses where to send
+ * the user; the service never supplies a destination. Unknown kinds are ignored.
+ */
+export type E2eeAccountSecurityEvent = {
+  id: string;
+  kind: 'vault_replacement_reserved' | 'vault_replacement_finished' | 'personal_device_recovered';
+  occurredAt: number;
+};

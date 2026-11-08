@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PROVIDER_SETUP_PROTOCOL_VERSION,
   type AgentConfigId,
@@ -12,9 +12,53 @@ import {
   type ProviderSetupTask,
 } from '@lody/shared';
 import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '../src/atoms/settings';
-import { resolveLodyAgentState } from '../src/components/settings/lody-agent-setting';
+import {
+  LodyAgentSetting,
+  supportsLodyAgentConnections,
+  resolveLodyAgentState,
+} from '../src/components/settings/lody-agent-setting';
 import { useVisibleSettingsTabs } from '../src/components/settings/settings-tabs';
 import { TestCloudPlatformProvider } from './test-platform';
+
+const mounted = vi.hoisted(() => ({
+  configs: [] as AgentConfigMeta[],
+  setups: [] as ProviderSetupTask[],
+}));
+vi.mock('../src/hooks/use-visible-machine-metas', () => ({
+  useVisibleMachineMetas: () => ({
+    machines: new Map([[machineId, setupCapable]]),
+    isLoading: false,
+  }),
+}));
+vi.mock('../src/hooks/use-machine-flock-agent-configs', () => ({
+  useMachineFlockAgentConfigsForMachineIds: () => {},
+}));
+vi.mock('../src/hooks/use-refresh-machine-acp-capabilities', () => ({
+  useRefreshMachineAcpCapabilities: () => async () => ({ success: true }),
+}));
+vi.mock('../src/atoms/agents', async () => {
+  const { atom } = await import('jotai');
+  const { atomFamily } = await import('jotai/utils');
+  const configs = atomFamily((value: AgentConfigMeta[]) => atom(value));
+  const setups = atomFamily((value: ProviderSetupTask[]) => atom(value));
+  return {
+    getAgentConfigsByMachineAtomFamily: () => configs(mounted.configs),
+    getProviderSetupsByMachineAtomFamily: () => setups(mounted.setups),
+    cmdCreateProviderSetupAtom: atom(null),
+    cmdRetryProviderSetupAtom: atom(null),
+    deleteProviderSetupAtom: atom(null),
+  };
+});
+vi.mock('../src/components/settings/acp-authentication-panel', () => ({
+  AcpAuthenticationPanel: () => <div data-auth="true" />,
+}));
+vi.mock('../src/components/settings/lody-agent-connections-controller', () => ({
+  LodyAgentConnectionsController: ({
+    signIn,
+  }: {
+    signIn: (ids: string[]) => import('react').ReactNode;
+  }) => <div data-connections="true">{signIn([])}</div>,
+}));
 
 const machineId = 'machine-a' as MachineId;
 const otherMachineId = 'machine-b' as MachineId;
@@ -115,6 +159,36 @@ describe('Lody Agent settings entry', () => {
     container.remove();
   });
 
+  it('exposes endpoints with one auth panel while awaiting auth and after publication', () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(lodyAgentBetaEnabledAtom, true);
+    const pending = setup(config('pending'));
+    const render = () =>
+      act(() =>
+        root.render(
+          <TestCloudPlatformProvider>
+            <Provider store={store}>
+              <LodyAgentSetting />
+            </Provider>
+          </TestCloudPlatformProvider>
+        )
+      );
+    mounted.setups = [{ ...pending, status: 'queued' }];
+    render();
+    expect(container.querySelector('[data-connections]')).toBeNull();
+    mounted.setups = [{ ...pending, status: 'awaiting-auth' }];
+    render();
+    expect(container.querySelector('[data-connections]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-auth]')).toHaveLength(1);
+    mounted.configs = [pending.config];
+    render();
+    expect(container.querySelector('[data-connections]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-auth]')).toHaveLength(1);
+    mounted.configs = [];
+    mounted.setups = [];
+  });
+
   it('appears only while developer mode and the Lody Agent beta are both on', () => {
     const store = createStore();
     function Entries() {
@@ -138,5 +212,23 @@ describe('Lody Agent settings entry', () => {
     act(() => store.set(developerModeEnabledAtom, true));
     renderEntries();
     expect(container.textContent).toContain('lody-agent');
+  });
+});
+
+describe('Lody Agent connection transport support', () => {
+  it('requires remote provider support even when remote credentials are supported', () => {
+    const target = machine({
+      sorbetProviders: 1,
+      sorbetCredentials: 1,
+      sorbetCredentialsRemote: 1,
+    });
+    expect(supportsLodyAgentConnections(target, machineId)).toBe(true);
+    expect(supportsLodyAgentConnections(target, otherMachineId)).toBe(false);
+    expect(
+      supportsLodyAgentConnections(
+        machine({ sorbetProvidersRemote: 1, sorbetCredentialsRemote: 1 }),
+        otherMachineId
+      )
+    ).toBe(true);
   });
 });

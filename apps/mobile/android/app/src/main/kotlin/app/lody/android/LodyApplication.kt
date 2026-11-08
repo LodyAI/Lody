@@ -27,6 +27,8 @@ open class LodyApplication : Application() {
     /** The Projects tab's "+": add a local folder or a GitHub repository. */
     lateinit var projectAdding: app.lody.android.home.ProjectAdding
         private set
+    lateinit var notifications: app.lody.android.notifications.PushNotifications
+        private set
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
@@ -61,6 +63,7 @@ open class LodyApplication : Application() {
             account.withVerifiedAccount(scope) { credential -> uploads.upload(credential.token, scope.workspaceId, sessionId, items) }
         }
         account = AccountController(CloudAuthHttp(OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
+            if (::notifications.isInitialized) notifications.clear()
             prepared = null
             submissions.activate(null)
             cloud.disconnect()
@@ -69,6 +72,8 @@ open class LodyApplication : Application() {
         members = WorkspaceMembers(cache, account::members)
         projectAdding = app.lody.android.home.LiveProjectAdding(runtimeOwner, account, app.lody.android.chat.GitHubHttpClient())
         cloud = CatalogRepository(account, runtimeOwner, applicationScope, cache) { scope, grant -> prepared = scope to grant }
+        notifications = app.lody.android.notifications.PushNotifications(this, account, applicationScope)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(notifications)
         ProcessLifecycleOwner.get().lifecycle.addObserver(RuntimeLifecycle(runtimeOwner, applicationScope, NetworkAvailability(this).available) {
             ConnectionTrace.mark("network_validated")
             cloud.networkAvailable()

@@ -59,7 +59,7 @@ What that week actually looked like:
 
 ### Authentic Apple HIG Native Experience
 
-- **Human Interface Guidelines Compliance**: Native adoption of iOS semantic colors, automatic light and dark mode adaptation, and Dynamic Type with SF Pro and SF Mono.
+- **Human Interface Guidelines Compliance**: Native adoption of iOS semantic colors, automatic light and dark mode adaptation, and Dynamic Type with system fonts. `LodyTextStyle` retains semantic sizes, weights, line heights and tracking for UIKit and SwiftUI; code uses the system monospaced face. Native UI needs no bundled font registration.
 - **Native Navigation**: The UIKit shell owns navigation controllers, transparent headers, and automatic scroll edge effects. Home uses an adaptive native split with session and inspector navigation. Transient flows open as native sheets through `LodyShell.presentNative`, and system grouped rows use UIKit `UICollectionViewListCell` via `LodyGroupedList`.
 - **Bilingual by Default**: English and Simplified Chinese product copy lives in `packages/LodyKit/Sources/LodyKit/Resources/Localizable.xcstrings`. Swift uses `String(localized:)`, Xcode compiles the catalog, and CI checks translation coverage and format arguments. Permission prompts live in `apps/ios/App/InfoPlist.xcstrings`.
 
@@ -69,6 +69,16 @@ What that week actually looked like:
 - **CoreText Markdown Rendering**: Deeply integrated with [MarkdownView](https://github.com/Lakr233/MarkdownView) and [Litext](https://github.com/Lakr233/Litext), natively supporting complex tables, syntax-highlighted code blocks, task lists, LaTeX math formulas, and system text selection handles.
 - **Smooth Character Fade-In**: Balanced batch scheduling paired with low-level `CTRunDraw` character alpha transitions delivers gentle, flicker-free streaming output during AI generation.
 - **Native Input (`ChatComposerView`)**: Pixel-perfect keyboard avoidance matching system input methods, local draft persistence with automatic restoration, and real-time model thinking effort controls.
+
+The iOS app uses fixed Ink accents in both light and dark appearances, including
+Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
+without an accent-color picker. Process status labels use the same regular type
+as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
+thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+Chat inline code matches the body size in a monospaced face. Prose blocks use
+secondary-label grey (links retain link blue); fenced code retains its own sizing
+and colours. With MarkdownView's shared code colour, a list or quote containing a
+fence keeps its original code colours throughout that block.
 
 ### Code Diffs & Workspace File Browsing
 
@@ -244,3 +254,16 @@ Lody iOS is made possible thanks to these open-source projects and creators:
 
 See [native backend configuration](docs/backend-configuration.md) for the optional
 `../.env.local`, production defaults, public TLS endpoints and isolated local stores.
+
+### Native canvas appearance
+
+App-owned dark backgrounds are fixed soft `#111113`. `LodyTint` provides plain,
+grouped and opaque canvases, while `LodyAppearance` uses the same dark base for
+`bgBase` and `bgGrouped`. Light backgrounds retain their existing semantics.
+Camera and simulator media surfaces use the fixed dark color in both themes;
+launch uses the matching dynamic `CanvasBackground` asset. Appearance settings
+only offer the app icon: legacy `darkBackground` values are ignored, not migrated.
+This supersedes the optional pure-black background described in the historical
+Home design and settings migration documents. Masks, scrims, shadows, media
+content and foreground colors remain unchanged. The native `design` check tests
+legacy values, both themes and increased contrast, including text readability.

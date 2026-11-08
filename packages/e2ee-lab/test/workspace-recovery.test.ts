@@ -214,7 +214,6 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
                       vault,
                       local: storage.local,
                       reference: reference!,
-                      personalSigner: fresh,
                       ports: ({ genesis, membershipId: selected, recovery }) =>
                         Effect.gen(function* () {
                           expect(genesis.equals(f.genesis)).toBe(true);
@@ -229,10 +228,11 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
                           });
                           temporaryInstalled = installed;
                           return {
+                            personalSigner: fresh,
                             ledger: f.ledger,
                             installed,
                             fetchCurrentEnvelope,
-                            submitOriginalAsRecovery: (record, identity) =>
+                            submitOriginalAsRecovery: (record, identity, _credential) =>
                               Effect.scoped(
                                 Effect.gen(function* () {
                                   const r = yield* openLabExistingWorkspace({

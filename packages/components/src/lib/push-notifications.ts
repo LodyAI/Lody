@@ -1,3 +1,9 @@
+import {
+  initOneSignal,
+  isOneSignalSupported,
+  getOneSignalPermissionState,
+  getOneSignalPushSubscriptionOptedIn,
+} from './onesignal';
 import { isNativeAppShell } from './native-platform';
 
 export type PushRegistration = {
@@ -27,9 +33,11 @@ declare global {
 }
 
 type PushPort = {
+  selfHostedEnabled?: boolean;
   register(input: PushRegistration): Promise<unknown>;
   unregister(input: { installationId: string }): Promise<unknown>;
 };
+let selfHostedEnabled = false;
 let port: PushPort | undefined;
 let userId: string | undefined;
 let generation = 0;
@@ -37,6 +45,7 @@ let language = 'en';
 let registeredGeneration: number | undefined;
 let pending: Promise<unknown> = Promise.resolve();
 let writes: Promise<unknown> = Promise.resolve();
+let revocations: Promise<unknown> = Promise.resolve();
 const installationKey = 'lody:push-installation';
 const enabledKey = 'lody:push-enabled';
 function installationId() {
@@ -49,7 +58,9 @@ function installationId() {
 }
 export function installPushPort(value: PushPort): () => void {
   port = value;
+  selfHostedEnabled = value.selfHostedEnabled === true;
   const refresh = () => {
+    if (!selfHostedEnabled) return;
     void subscribe(generation, true).catch(() => console.error('Push refresh failed'));
   };
   const changed = (event: MessageEvent) => {
@@ -60,7 +71,7 @@ export function installPushPort(value: PushPort): () => void {
     )
       refresh();
   };
-  const web = !isNativeAppShell() && isPushSupported();
+  const web = !isNativeAppShell() && isDirectPushSupported();
   if (web) {
     window.addEventListener('focus', refresh);
     navigator.serviceWorker.addEventListener('message', changed);
@@ -147,7 +158,8 @@ async function save(input: Omit<PushRegistration, 'installationId' | 'language'>
 }
 
 async function subscribe(epoch: number, create: boolean) {
-  if (!port || !userId) return;
+  await revocations;
+  if (!selfHostedEnabled || !port || !userId) return;
   if (isNativeAppShell()) {
     const bridge = window.__LODY_PUSH__;
     if (!enabled() || !bridge || (await bridge.permission()) !== 'granted' || epoch !== generation)
@@ -223,7 +235,7 @@ function equalKey(a: Uint8Array, b: Uint8Array) {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-export function isPushSupported(): boolean {
+function isDirectPushSupported(): boolean {
   if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) return false;
   if (isNativeAppShell()) return Boolean(window.__LODY_PUSH__);
   return Boolean(
@@ -247,17 +259,8 @@ const client = {
       .catch(() => {})
       .then(async () => {
         if (epoch !== generation) return;
-        // Replace old provider subscriptions only after the user opens the new app.
-        if (!isNativeAppShell())
-          await webLock(async () => {
-            if (!currentWebAccount(epoch)) return;
-            for (const reg of await navigator.serviceWorker.getRegistrations()) {
-              if (new URL(reg.scope).pathname === '/push/onesignal/') {
-                await (await reg.pushManager.getSubscription())?.unsubscribe();
-                await reg.unregister();
-              }
-            }
-          });
+        await logoutOneSignal();
+        if (epoch !== generation) return;
         await subscribe(epoch, true);
       });
     await pending;
@@ -271,7 +274,11 @@ const client = {
     localStorage.removeItem(installationKey);
     const localCleanup = async () => {
       if (isNativeAppShell()) await window.__LODY_PUSH__?.unregister();
-      else {
+      else if (
+        typeof navigator !== 'undefined' &&
+        'serviceWorker' in navigator &&
+        navigator.locks
+      ) {
         // Revoke display permission without waiting behind a browser network operation.
         await revokeWebAccount(() => !localStorage.getItem('lody:push-user')).catch(() => {});
         await webLock(async () => {
@@ -281,10 +288,12 @@ const client = {
         });
       }
     };
-    await Promise.allSettled([
+    revocations = Promise.allSettled([
+      revocations,
       localCleanup(),
       writes.catch(() => {}).then(() => current?.unregister({ installationId: id })),
     ]);
+    await revocations;
   },
   User: {
     async setLanguage(value: string) {
@@ -301,11 +310,20 @@ const client = {
         ++generation;
         const id = installationId();
         const current = port;
-        await Promise.allSettled([
+        revocations = Promise.allSettled([
+          revocations,
+          oneSignalCommand(async () => {
+            const sdk = await initOneSignal();
+            await sdk?.User.PushSubscription.optOut();
+          }),
           writes.catch(() => {}).then(() => current?.unregister({ installationId: id })),
           (async () => {
             if (isNativeAppShell()) await window.__LODY_PUSH__?.unregister();
-            else {
+            else if (
+              typeof navigator !== 'undefined' &&
+              navigator.serviceWorker &&
+              navigator.locks
+            ) {
               await revokeWebAccount(() => !enabled()).catch(() => {});
               await webLock(async () => {
                 if (enabled()) return;
@@ -314,6 +332,7 @@ const client = {
             }
           })(),
         ]);
+        await revocations;
       },
       async getOptedIn() {
         if (!enabled() || registeredGeneration !== generation) return false;
@@ -338,9 +357,98 @@ const client = {
     },
   },
 };
+// Serialize provider identity writes so delayed login cannot overtake logout.
+let oneSignalWrites: Promise<unknown> = Promise.resolve();
+function oneSignalCommand(task: () => Promise<void>) {
+  const result = oneSignalWrites.catch(() => {}).then(task);
+  oneSignalWrites = result;
+  return result;
+}
+async function logoutOneSignal() {
+  return oneSignalCommand(async () => {
+    const sdk = await initOneSignal();
+    if (!sdk) return;
+    await sdk.User.PushSubscription.optOut();
+    await sdk.logout?.();
+  });
+}
+const oneSignalClient: typeof client = {
+  async login(id: string) {
+    // Retire any direct account before binding the restored provider.
+    const cleanup = client.logout();
+    const epoch = generation;
+    await cleanup;
+    if (epoch !== generation) return;
+    userId = id;
+    localStorage.setItem('lody:push-user', id);
+    await revocations;
+    await oneSignalCommand(async () => {
+      const sdk = await initOneSignal();
+      if (!sdk || epoch !== generation) return;
+      if (
+        localStorage.getItem(enabledKey) === null &&
+        (await getOneSignalPushSubscriptionOptedIn(sdk))
+      )
+        localStorage.setItem(enabledKey, 'true');
+      await sdk.login(`lody-push-v2:${id}`);
+      if (epoch !== generation) return;
+      await sdk.User.setLanguage(language === 'zh' ? 'zh' : 'en');
+      if (!enabled()) await sdk.User.PushSubscription.optOut();
+      else if ((await getOneSignalPermissionState(sdk)) === 'granted')
+        await sdk.User.PushSubscription.optIn();
+    });
+  },
+  async logout() {
+    await logoutPush();
+  },
+  User: {
+    async setLanguage(value: string) {
+      language = value;
+      await oneSignalCommand(async () => {
+        const sdk = await initOneSignal();
+        await sdk?.User.setLanguage(value === 'zh' ? 'zh' : 'en');
+      });
+    },
+    PushSubscription: {
+      async optIn() {
+        if (!userId) throw new Error('Sign in before enabling notifications');
+        const epoch = generation;
+        await revocations;
+        await oneSignalCommand(async () => {
+          const sdk = await initOneSignal();
+          if (!sdk || epoch !== generation || !userId) return;
+          await sdk.User.PushSubscription.optIn();
+          if (epoch === generation) localStorage.setItem(enabledKey, 'true');
+        });
+      },
+      async optOut() {
+        await client.User.PushSubscription.optOut();
+      },
+      async getOptedIn() {
+        const sdk = await initOneSignal();
+        return Boolean(
+          userId && enabled() && sdk && (await getOneSignalPushSubscriptionOptedIn(sdk))
+        );
+      },
+    },
+  },
+  Notifications: {
+    async requestPermission(fallback?: boolean) {
+      const sdk = await initOneSignal();
+      return sdk ? sdk.Notifications.requestPermission(fallback) : false;
+    },
+    async getPermissionState() {
+      const sdk = await initOneSignal();
+      return sdk ? getOneSignalPermissionState(sdk) : 'default';
+    },
+  },
+};
+export function isPushSupported(): boolean {
+  return selfHostedEnabled ? isDirectPushSupported() : isOneSignalSupported();
+}
 export type PushClient = typeof client;
 export async function initPush(): Promise<PushClient | null> {
-  return isPushSupported() ? client : null;
+  return isPushSupported() ? (selfHostedEnabled ? client : oneSignalClient) : null;
 }
 export async function getPushPermissionState(value: PushClient) {
   return value.Notifications.getPermissionState();
@@ -374,15 +482,10 @@ export async function logoutPush() {
   // Persistent OS/browser registrations outlive the delayed in-memory login.
   // Local revocation must also run when no authenticated port was mounted.
   if (typeof window === 'undefined') return;
-  if (
-    !isNativeAppShell() &&
-    (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !navigator.locks)
-  )
-    return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      client.logout(),
+      Promise.allSettled([client.logout(), logoutOneSignal()]),
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, 3000);
       }),

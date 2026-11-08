@@ -10,11 +10,11 @@ PR: [#2026](https://github.com/LodyAI/Lody/pull/2026)
 
 2026-11-06 起，仅可信锚一项被取代：owner 去掉了独立确认，通过认证的恢复包里的 genesis 就是锚。见[恢复保险库](../../../../specs/e2ee/recovery-vault.zh.md#可信锚)。
 
-根据 owner 于 2026-10-28 的决定，账本 v1 记录格式可按现状冻结。恢复设备 tag 4 与 `possess/v2` 不变，可信锚独立确认，generation 和账本材料存入 `formatVersion: 1` 的加密恢复包；tag 9、capability 1 和 tag 10 也已批准。这是格式结论，不代表生产开放或恢复保险库验收；保险库仍为 draft，且不在 MVP 内。
+根据 owner 于 2026-10-28 的决定，账本 v1 记录格式可按现状冻结。恢复设备 tag 4 与 `possess/v2` 不变，可信锚独立确认，generation 和账本材料存入 `formatVersion: 1` 的加密恢复包；tag 9、capability 1 和 tag 10 也已批准。这是格式结论，不代表生产开放。恢复保险库 Spec 此后已获批准；保险库不在 MVP 内。
 
 ## 决定与剩余工作
 
-Owner 接受现有恢复记录与证明、genesis 不变、私有 generation 和可信材料，以及独立确认可信锚、实际解密当前代信封并核对承诺的验收条件。[批准记录](../../implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)由 [#2032](https://github.com/LodyAI/Lody/pull/2032) 更新。[恢复保险库 Spec](../../../../specs/e2ee/recovery-vault.zh.md)记录已批准边界，整体仍为 draft。自撤和登记顺序不需要改变 tag 4/5/7 字节。离线导出、平台保管和账号政策仍单独决定；生产仍须先经真机验收和白名单灰度。
+Owner 接受现有恢复记录与证明、genesis 不变、私有 generation 和可信材料，以及独立确认可信锚、实际解密当前代信封并核对承诺的验收条件。[批准记录](../../implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)由 [#2032](https://github.com/LodyAI/Lody/pull/2032) 更新。[恢复保险库 Spec](../../../../specs/e2ee/recovery-vault.zh.md)记录这些已批准边界，并已获批准；保险库不在 MVP 内。自撤和登记顺序不需要改变 tag 4/5/7 字节。离线导出、平台保管和账号政策仍单独决定；生产仍须先经真机验收和白名单灰度。
 
 ## 恢复格式与理由
 
@@ -44,7 +44,7 @@ R持钥签名 = Ed25519_R("lody-e2ee/possess/v2\0" ||
 
 **顺序与自撤：**生成 R，上传不可变私有包并回读解密；经索引 CAS 选择胜出者；有效个人设备 D 用 R 证明签署 tag 4，持久保存原始记录和位置，提交并对账，然后验证登记；最后发布、读取、解密当前代信封并核对承诺，才标记可恢复。普通替换先验证新 R 再撤旧；泄漏时可先撤旧。若 D 自撤，用 tag 5 的原始签名字节对账，之后的 tag 7 换代须由其他有资格的个人设备签署；R 可以登记新个人设备，但不能换代。若已无合格管理员，不能承诺能换代。撤销设置提示性的 rotation-required，不阻断诚实客户端封装内容。这些是顺序和可用性规则，不改变现有 tag 4/5/7 编码；不承诺跨存储原子性。
 
-**冻结前建议补充的账本固定向量：**独立固定恢复 tag 4 字节、`possess/v2` 签名字节与签名、记录哈希和重放状态；补充更改 genesis、成员、kind、R 签名/加密公钥或批准者，以及非规范或截断记录的负向量。保留现有 tag 9/10 和未知能力向量；冻结后不得重新生成已冻结向量。这些是建议补充的验证，不代表本次已运行新测试。
+**冻结前的账本固定向量：**[恢复向量](../../../../packages/e2ee-core/test/ledger-recovery-vector.json)由独立生成器（`generate-ledger-recovery-vector.py`）固定恢复 tag 4 字节、`possess/v2` 签名字节与签名、记录哈希和重放状态。负向记录覆盖更改 genesis、成员、证明或记录里的 kind、R 签名或加密公钥，机器设备、账本外设备或恢复设备批准，批准签名错误，以及非规范或截断的记录字节；`replay.test.ts` 逐条断言失败码和位置。现有账本 v1 向量及其 tag 9/10、未知能力记录保持不变。冻结后不得重新生成已冻结向量。
 
 ## 格式盘点与处理建议
 
@@ -63,9 +63,21 @@ R持钥签名 = Ed25519_R("lody-e2ee/possess/v2\0" ||
 | 公开内容分享                                                                                                                                      | [白皮书](../../../../specs/e2ee/whitepaper.md)要求明确发布副本；本审查未发现独立 E2EE 分享确认的持久或线格式。                                                                                                                                                                            | 未发现向量或版本。这不代表已审查全部产品分享实现。                                                                                                                                                                                                 | **可推迟**，未来格式须另行版本化和审查。机器共享见上表。                                                          |
 | [Node 密钥保管](../../../../packages/e2ee-core/src/adapters/node-custody/index.ts)                                                                | `desktop-custody/v1\0`、长度前缀 AAD、nonce 和密文；设备、凭证、已安装和候选代钥有不同 v1 purpose 域；另有 OS 包装和 rewrap journal。                                                                                                                                                     | 有行为测试，未发现独立固定 blob 向量。错误域/长度返回 `corrupt`；不导入旧格式。仅当前版本，须保留原始密钥文件。                                                                                                                                    | **可推迟**；改变格式前补固定 blob/AAD 和中断 rewrap 向量。                                                        |
 
+### 本文之后审查的格式
+
+本文写于账本用户编号修订（#2365）之前，没有覆盖下列格式，也没有覆盖核验码。
+
+| 格式 | 定义 | 固定向量 |
+| --- | --- | --- |
+| 由账户 ID 得到的账本用户编号 | [`account-user-id.ts`](../../../../packages/e2ee-core/src/internal/foundation/account-user-id.ts) | `foundation.test.ts` 中两条正向向量和负向用例；账本向量中的用户编号是填充值 |
+| 核验码 | [`snapshot-codec.ts`](../../../../packages/e2ee-core/src/internal/ledger/snapshot-codec.ts) 的 `snapshot-digest/v4`；QR `lody-ledger:1:<version>:<head>:<digest>` | 状态摘要和快照 v4 字节都没有 |
+| HPKE 和 epoch 密钥信封 | [`hpke.ts`](../../../../packages/e2ee-core/src/internal/crypto/hpke.ts)、[`envelope.ts`](../../../../packages/e2ee-core/src/internal/keys/envelope.ts) | 有 HPKE 和 epoch 历史向量；完整的签名信封没有 |
+| 短码配对 | [`pairing`](../../../../packages/e2ee-core/src/internal/pairing/index.ts) | `pairing-vector.json` |
+| 恢复保险库（不在 MVP 内） | [`vault.ts`](../../../../packages/e2ee-core/src/internal/recovery/vault.ts) | 恢复凭证向量，以及 `recovery-vault-vector.json`：恢复文件，file-wrap、prf-wrap、workspace-entry 和索引密文，`formatVersion: 1` 私钥包和 passkey 索引，含负向输入 |
+
 ## 向量和域审查
 
-冻结后保持现有独立账本生成器和提交字节不变。建议补充的向量仅限上文列出的恢复记录及负例；已有 tag 9/10 向量保持不变。
+冻结后两个独立账本生成器及其提交字节都保持不变。恢复向量只补充上文列出的恢复记录及负例；已有 tag 9/10 向量保持不变。
 本次检查的上述账本、内容、策略、附件和 custody 域使用不同字面命名空间，未发现碰撞。schedule 哈希没有专用域和显式版本，未来语义演进存在歧义；这并不是已证明的跨协议碰撞。RPC 编码器产生无填充 base64url；本审查未证明存在接受填充别名的独立解析器。检查的账本 codec 未证实存在未固定长度上限或接受非规范编码的问题。
 
 ## 证据与限制

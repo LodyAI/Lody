@@ -244,6 +244,10 @@ export const cloudOperations = {
     ),
   },
   pushSubscriptions: {
+    configuration: defineCloudQuery<Record<string, never>, { selfHostedEnabled: boolean }>(
+      'cloudAccount',
+      'pushSubscriptions:configuration'
+    ),
     register: defineCloudMutation<PushRegistration, null>(
       'cloudAccount',
       'pushSubscriptions:register'

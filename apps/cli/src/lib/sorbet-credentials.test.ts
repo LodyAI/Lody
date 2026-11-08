@@ -25,7 +25,7 @@ describe('daemon Sorbet credentials', () => {
       customAcp: { command: 'untrusted' },
       runtimeOverrides: { command: 'untrusted' },
     };
-    const document = { getAgentConfigById: vi.fn(async () => config as never) };
+    const document = { getAgentConfigForMachineLaunch: vi.fn(async () => config as never) };
     const handler = createSorbetCredentialsHandler(document, machine, logger);
     run
       .mockResolvedValueOnce({
@@ -35,14 +35,33 @@ describe('daemon Sorbet credentials', () => {
       .mockResolvedValueOnce({ kind: 'credentials', credentials: [] });
     expect(await handler.list(id)).toEqual([{ providerId: 'x', type: 'oauth' }]);
     await handler.logout(id, 'x');
-    expect(document.getAgentConfigById).toHaveBeenCalledWith(id, machine);
+    expect(document.getAgentConfigForMachineLaunch).toHaveBeenCalledWith(id, machine);
     expect(run).toHaveBeenNthCalledWith(1, logger, { type: 'list' }, undefined);
     expect(run).toHaveBeenNthCalledWith(2, logger, { type: 'logout', providerId: 'x' }, undefined);
   });
 
+  it('allows custom endpoint creation for an unpublished setup resolved by the daemon', async () => {
+    const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
+    const document = {
+      getAgentConfigById: async () => null,
+      getAgentConfigForMachineLaunch: async () => config as never,
+    };
+    const handler = createSorbetCredentialsHandler(document, machine, logger);
+    const provider = {
+      name: 'Example',
+      protocol: 'openai-completions' as const,
+      baseUrl: 'https://example.com/v1',
+      models: [],
+    };
+    run.mockResolvedValueOnce({ kind: 'provider', provider: { ...provider, id: 'custom' } });
+    expect(await handler.createProvider(id, provider)).toEqual({ ...provider, id: 'custom' });
+    run.mockResolvedValueOnce({ kind: 'providers', providers: [{ ...provider, id: 'custom' }] });
+    expect(await handler.listProviders(id)).toEqual([{ ...provider, id: 'custom' }]);
+  });
+
   it('holds the shared mutation owner after disconnect until the logout runner finishes cleanup', async () => {
     const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
-    const document = { getAgentConfigById: async () => config as never };
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
     const handler = createSorbetCredentialsHandler(document, machine, logger);
     const otherWorkspace = createSorbetCredentialsHandler(document, machine, logger);
     const signal = new AbortController();
@@ -80,10 +99,12 @@ describe('daemon Sorbet credentials', () => {
     { id: 'other', machineId: machine, cliType: 'builtin', agentType: 'sorbet' },
   ])('rejects an unavailable or untrusted provider before launching', async (config) => {
     run.mockClear();
-    const document = { getAgentConfigById: async () => config as never };
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
     const handler = createSorbetCredentialsHandler(document, machine, logger);
     await expect(handler.list(id)).rejects.toThrow('configuration unavailable');
     await expect(handler.logout(id, 'x')).rejects.toThrow('configuration unavailable');
+    await expect(handler.listProviders(id)).rejects.toThrow('configuration unavailable');
+    await expect(handler.deleteProvider(id, 'x')).rejects.toThrow('configuration unavailable');
     expect(run).not.toHaveBeenCalled();
   });
 });

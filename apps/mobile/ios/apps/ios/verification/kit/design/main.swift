@@ -1,4 +1,5 @@
 import UIKit
+import LodyDesignSystem
 
 func luminance(_ color: UIColor) -> CGFloat {
   var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
@@ -38,9 +39,22 @@ let dark = UITraitCollection(userInterfaceStyle: .dark)
 let lightHigh = UITraitCollection(traitsFrom: [light, UITraitCollection(accessibilityContrast: .high)])
 let darkHigh = UITraitCollection(traitsFrom: [dark, UITraitCollection(accessibilityContrast: .high)])
 
-for background in ["soft", "black"] {
+for background in ["", "soft", "black", "unknown"] {
   UserDefaults.standard.set(background, forKey: "darkBackground")
   for traits in [light, dark, lightHigh, darkHigh] {
+    let soft = UIColor(red: 17.0 / 255, green: 17.0 / 255, blue: 19.0 / 255, alpha: 1)
+    let expected = traits.userInterfaceStyle == .dark ? soft : UIColor.systemBackground
+    let grouped = traits.userInterfaceStyle == .dark ? soft : UIColor.systemGroupedBackground
+    for canvas in [UIColor.lodyBackground, .lodyOpaqueBackground] {
+      precondition(same(canvas, expected, traits), "Legacy background preferences cannot change the opaque canvas")
+    }
+    precondition(same(.lodyGroupedBackground, grouped, traits))
+    precondition(same(.lodySoftDarkBackground, soft, traits), "Camera surfaces stay soft dark even in light mode")
+    if traits.userInterfaceStyle == .dark {
+      precondition(same(LodyUIColor.bgBase, soft, traits))
+      precondition(same(LodyUIColor.bgGrouped, soft, traits))
+    }
+    precondition(contrast(.white, .lodySoftDarkBackground, traits) >= 7, "Camera controls remain readable")
     precondition(same(.lodyGround, .lodyBackground, traits), "The design ground is the system Lody background")
     precondition(contrast(.lodyInk, .lodyGround, traits) >= 12, "Ink reads as primary text")
     precondition(contrast(.lodySecondary, .lodyGround, traits) >= 4.5, "Secondary text meets 4.5:1 on \(background)")
@@ -91,20 +105,23 @@ for style in ["soft", "black"] {
                "The dark sidebar lifts above the \(style) detail")
 }
 UserDefaults.standard.removeObject(forKey: "darkBackground")
-UserDefaults.standard.removeObject(forKey: "accentColor")
-precondition(LodyAccentChoice.current == .ink, "Installs without a stored accent follow the Ink default")
-precondition(LodyAccentChoice(rawValue: "ink") == .ink && LodyAccentChoice.ink.rawValue == "ink")
-UserDefaults.standard.set("blue", forKey: "accentColor")
-precondition(LodyAccentChoice.current == .blue, "An explicit accent choice survives the new default")
-UserDefaults.standard.removeObject(forKey: "accentColor")
-for traits in [light, dark] {
-  precondition(same(LodyAccentChoice.ink.color, .lodyInk, traits), "Ink is the ink token")
-  precondition(contrast(LodyAccentChoice.ink.foregroundColor, LodyAccentChoice.ink.color, traits) >= 7,
-               "Labels on an Ink fill stay legible")
-  precondition(same(.lodyAccent, .lodyInk, traits))
-  precondition(same(.lodyUserBubble, .lodyInset, traits), "The user bubble is a neutral inset, not an accent tint")
+let savedAccent = UserDefaults.standard.object(forKey: "accentColor")
+for legacy in ["", "blue", "purple", "pink", "#FFFFAA", "#123ABC", "unknown"] {
+  UserDefaults.standard.set(legacy, forKey: "accentColor")
+  for background in ["soft", "black"] {
+    UserDefaults.standard.set(background, forKey: "darkBackground")
+    for traits in [light, dark, lightHigh, darkHigh] {
+      precondition(same(LodyAccent.color, .lodyInk, traits), "Legacy preferences cannot change Ink")
+      precondition(same(LodyAccent.foregroundColor, .lodyGround, traits))
+      precondition(contrast(LodyAccent.foregroundColor, LodyAccent.color, traits) >= 7)
+      precondition(same(.lodyAccent, .lodyInk, traits))
+      precondition(same(.lodyUserBubble, .lodyInset, traits))
+      let button = UIButton.Configuration.lodyProminent()
+      precondition(same(button.baseBackgroundColor!, .lodyInk, traits))
+      precondition(same(button.baseForegroundColor!, .lodyGround, traits))
+    }
+  }
 }
-UserDefaults.standard.set("pink", forKey: "accentColor")
-precondition(same(.lodyUserBubble, .lodyInset, light), "The bubble stays neutral under any accent")
-UserDefaults.standard.removeObject(forKey: "accentColor")
+UserDefaults.standard.set(savedAccent, forKey: "accentColor")
+UserDefaults.standard.removeObject(forKey: "darkBackground")
 print("design ok")

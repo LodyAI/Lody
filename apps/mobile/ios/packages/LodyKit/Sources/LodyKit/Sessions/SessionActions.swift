@@ -179,6 +179,10 @@ final class SessionActions {
       _ = try await runtime.workspaceCall(RuntimeContract.Calls.RenameSession.self) { workspace, _ in
         .init(workspaceId: workspace, sessionId: sessionId, title: title)
       }
+    case .owner(let userId):
+      _ = try await runtime.workspaceCall(RuntimeContract.Calls.SetSessionOwner.self) { workspace, _ in
+        .init(workspaceId: workspace, sessionId: sessionId, userId: userId)
+      }
     case .delete(let ids):
       let payload = json(["workspaceId": workspaceId, "sessionId": sessionId, "sessionIds": ids])
       guard OutboxSession.shared.allowsDeletion(payload) else {

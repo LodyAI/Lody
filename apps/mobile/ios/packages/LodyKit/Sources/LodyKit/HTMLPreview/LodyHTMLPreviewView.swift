@@ -54,8 +54,8 @@ final class LodyHTMLPreviewView: LodyAppearanceView, WKNavigationDelegate, WKUID
     let web = WKWebView(frame: bounds, configuration: configuration)
     web.navigationDelegate = self
     web.uiDelegate = self
-    web.backgroundColor = .systemBackground
-    web.underPageBackgroundColor = .systemBackground
+    web.backgroundColor = .lodyBackground
+    web.underPageBackgroundColor = .lodyBackground
     web.scrollView.contentInsetAdjustmentBehavior = .automatic
     web.accessibilityIdentifier = "html-preview"
     web.isAccessibilityElement = false

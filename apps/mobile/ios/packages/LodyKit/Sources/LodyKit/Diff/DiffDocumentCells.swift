@@ -23,7 +23,7 @@ final class DiffDocumentSideView: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     clipsToBounds = true
-    gutterBase.backgroundColor = .systemBackground
+    gutterBase.backgroundColor = .lodyBackground
     number.textAlignment = .right
     code.numberOfLines = 0
     for view in [codeBand, code, gutterBase, gutterBand, bar, number] as [UIView] {

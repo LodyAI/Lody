@@ -49,10 +49,16 @@ do {
 
   app.record("notification", "privacy", fields: ["body": "private conversation", "token": "private-token",
     "message": "private-id", "reason": "private-account", "code": "credential", "active": "2", "activity": DiagnosticsStore.correlation("private-activity"),
-    "stage": "private-stage", "serverCode": "private-server-code", "httpStatus": "999", "networkCode": "private-network-code"])
+    "stage": "private-stage", "serverCode": "private-server-code", "httpStatus": "999", "networkCode": "private-network-code",
+    "cfRay": "private-trace", "requestId": "private-request", "serverErrorFingerprint": "private-fingerprint",
+    "requestBytes": "-1", "responseBytes": "1.5", "sourceBytes": "NaN", "imageBytes": "99999999999999999", "elapsedMs": "Infinity",
+    "sourceType": "image/private-name", "uploadType": "private-type", "converted": "private-bool",
+    "responseType": "private-content-type", "responseBody": "private-body", "serverCodeState": "private-state"])
   app.flush()
   let (text, privacyRecords) = try exported(app)
   try expect((privacyRecords.last?["fields"] as? [String: String])?["httpStatus"] == nil, "Export excludes invalid HTTP status values")
+  let privacyFields = privacyRecords.last?["fields"] as? [String: String]
+  try expect(privacyFields?.count == 2, "Only the validated count and correlation survive arbitrary metadata")
   for secret in ["private conversation", "private-token", "private-id", "private-account", "private-activity", "credential", "private-stage", "private-server-code", "private-network-code"] {
     try expect(!text.contains(secret), "Export excludes unapproved or unvalidated metadata")
   }

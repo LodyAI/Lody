@@ -125,6 +125,9 @@ function PersonalPairingSession({
   const [recovering, setRecovering] = useState(
     Boolean(runtime.pendingPersonalJoin || inFlight(runtime, accountId, workspaceId))
   );
+  const [recoveryTimes, setRecoveryTimes] = useState<{ startedAt?: string; finishedAt?: string }>(
+    {}
+  );
   useEffect(() => {
     live.current = true;
     return () => {
@@ -136,6 +139,7 @@ function PersonalPairingSession({
     const submission = inFlight(runtime, accountId, workspaceId);
     setRecovering(Boolean(runtime.pendingPersonalJoin || submission));
     if (runtime.pendingPersonalJoin || submission) {
+      setRecoveryTimes({ startedAt: new Date().toISOString() });
       const pendingJoin = runtime.pendingPersonalJoin;
       void (async () => {
         if (!submission) return { pending: await pendingJoin!(workspaceId) };
@@ -166,6 +170,7 @@ function PersonalPairingSession({
             setJoining(recovered.pending);
             if (recovered.pending) setPhase('waiting');
           }
+          setRecoveryTimes((times) => ({ ...times, finishedAt: new Date().toISOString() }));
           setRecovering(false);
         },
         (error) => {
@@ -173,6 +178,7 @@ function PersonalPairingSession({
           setRecoveryError(error instanceof Error ? error.message : '');
           setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
           setPhase('error');
+          setRecoveryTimes((times) => ({ ...times, finishedAt: new Date().toISOString() }));
           setRecovering(false);
         }
       );
@@ -296,6 +302,14 @@ function PersonalPairingSession({
     });
   return (
     <Card.Root>
+      <span
+        hidden
+        data-testid="e2ee-personal-pairing-state"
+        data-phase={phase}
+        data-recovering={String(recovering)}
+        data-recovery-started-at={recoveryTimes.startedAt}
+        data-recovery-finished-at={recoveryTimes.finishedAt}
+      />
       {phase === 'error' && (
         <E2eeIdentityRecovery
           error={recoveryError}

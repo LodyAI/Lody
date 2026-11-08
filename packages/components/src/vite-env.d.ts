@@ -15,6 +15,8 @@ interface ImportMetaEnv {
   readonly VITE_SITE_URL?: string;
   readonly VITE_CONVEX_DEPLOY_URL?: string;
   readonly VITE_CONVEX_SITE_URL: string;
+  readonly VITE_ONESIGNAL_APP_ID: string;
+  readonly VITE_ONESIGNAL_SAFARI_WEB_ID: string;
   readonly VITE_PUSH_VAPID_PUBLIC_KEY: string;
   /**
    * Escape hatch that pins the Machine RPC response live transport. Unset (the

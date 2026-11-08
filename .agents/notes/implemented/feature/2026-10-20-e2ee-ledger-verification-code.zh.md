@@ -1,6 +1,6 @@
 # 加密工作区页面的账本核验码
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [English](2026-10-20-e2ee-ledger-verification-code.md)
@@ -13,7 +13,7 @@ PRs: [LodyAI/Lody#1625](https://github.com/LodyAI/Lody/pull/1625)
 
 ## 决定
 
-- **核验码是什么。** 核心库的 `ledgerStateDigest(view)` 返回 `comparisonNote` 已在计算的摘要，即 `sha256("snapshot-digest/v2" ‖ CBOR[2, 创世, 长度, head, 授权状态])`，但不要求账本中的设备作为签名者。控制页不持有设备密钥，无法调用 `comparisonNote`。[白皮书](../../../../specs/e2ee/whitepaper.zh.md)要求安全码绑定实际状态：仅有 head 时，状态可能是错的，例如通过快照初始化的客户端。
+- **核验码是什么。** 核心库的 `ledgerStateDigest(view)` 返回 `comparisonNote` 已在计算的摘要，即 `sha256("snapshot-digest/v4" ‖ CBOR[4, 创世, 长度, head, 授权状态])`，但不要求账本中的设备作为签名者。控制页不持有设备密钥，无法调用 `comparisonNote`。[白皮书](../../../../specs/e2ee/whitepaper.zh.md)要求安全码绑定实际状态：仅有 head 时，状态可能是错的，例如通过快照初始化的客户端。
 - **版本**即已验证记录数。二维码内容为 `lody-ledger:1:<版本>:<head>:<摘要>`；复制的文本是一行带版本的标题，加上分成 16 组、每组 4 位的摘要。
 - **比对规则**（`e2ee-ledger-verification.ts`）：
   - 版本和摘要相同（有 head 时 head 也相同）：一致；
@@ -25,7 +25,7 @@ PRs: [LodyAI/Lody#1625](https://github.com/LodyAI/Lody/pull/1625)
   
   按白皮书要求，位置不同绝不直接判定为攻击。
 - **扫码**使用 `getUserMedia` 加 `jsqr`（Apache-2.0）。只在用户按下摄像头按钮后启动，识别到第一帧即释放摄像头；粘贴始终可用。macOS 构建增加摄像头 entitlement 和 `NSCameraUsageDescription`。
-- **姓名和头像**是展示数据，不是账本事实。账本里的用户 ID 指明账户但不含展示数据，这个页面从独立的目录取得资料。页面接受 `you` 和 `memberProfiles` 两个参数；路由只提供 `you`，且仅在本机持有创建时的 pin 时对应到创世成员，其他成员显示“成员 N”。提示文案请用户当面确认对方是哪位成员。
+- **姓名和头像**是展示数据，不是账本事实。账本里的用户 ID 指明账户但不含展示数据，这个页面从独立的目录取得资料。页面接受 `you` 和 `memberProfiles` 两个参数；路由只提供 `you`，且仅在当前设备持有创建时的 pin 时对应到创世成员，其他成员显示“成员 N”。提示文案请用户当面确认对方是哪位成员。
 
 ## 备选方案
 

@@ -61,9 +61,20 @@ import app.lody.android.designsystem.LodyTheme
 
 /** Launcher: sign-in when there is no account, otherwise the Home chat list. Reads app-owned state only. */
 class HomeActivity : ComponentActivity() {
+    private var pushIntent by mutableStateOf<Intent?>(null)
+    private val notificationPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {
+        (application as LodyApplication).notifications.refresh()
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pushIntent = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        pushIntent = intent
         val app = application as LodyApplication
         val auth = app.account.state.value
         if (savedInstanceState == null && auth.account == null && !auth.busy && auth.failure == null && auth.notice == null) app.account.restore()
@@ -99,9 +110,36 @@ class HomeActivity : ComponentActivity() {
                     })
                 }
                 val user = account.account
+                val pushClick by app.notifications.click.collectAsState()
+                LaunchedEffect(account.verified, pushIntent) {
+                    if (account.verified) {
+                        pushIntent?.let {
+                            app.notifications.acceptClick(it.getStringExtra("route"), it.getStringExtra("recipientUserId"))
+                            it.removeExtra("route"); it.removeExtra("recipientUserId")
+                        }
+                        pushIntent = null
+                        if (android.os.Build.VERSION.SDK_INT >= 33) {
+                            val prefs = getSharedPreferences("push-permission-v1", MODE_PRIVATE)
+                            if (!prefs.getBoolean("requested", false)) {
+                                prefs.edit().putBoolean("requested", true).apply()
+                                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    }
+                }
                 var selectedId by rememberSaveable(user?.id, catalog.workspace?.id) { mutableStateOf<String?>(null) }
                 var selectedTitle by rememberSaveable(user?.id, catalog.workspace?.id) { mutableStateOf("") }
                 var creating by rememberSaveable(user?.id, catalog.workspace?.id) { mutableStateOf(false) }
+                LaunchedEffect(pushClick, account.verified, catalog.workspace?.id, catalog.snapshot) {
+                    val target = pushClick ?: return@LaunchedEffect
+                    if (!account.verified) return@LaunchedEffect
+                    val workspace = user?.workspaces?.firstOrNull { it.id == target.workspaceId } ?: return@LaunchedEffect
+                    if (catalog.workspace?.id != workspace.id) { app.cloud.select(workspace); return@LaunchedEffect }
+                    if (catalog.snapshot?.sessions?.any { it.id == target.sessionId } == true) {
+                        selectedId = target.sessionId; selectedTitle = ""; creating = false
+                        app.notifications.consumeClick()
+                    }
+                }
                 val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments) }
                 val selectedSession = catalog.snapshot?.sessions?.firstOrNull { it.id == selectedId }
                 LaunchedEffect(selectedSession, activeScope, resumed) {

@@ -8,7 +8,7 @@ class Credential(val token: String) {
 }
 /** [image] is the workspace logo (HTTPS only), null when it has none. */
 data class WorkspaceMember(val id: String, val name: String, val image: String? = null)
-data class Workspace(val id: String, val name: String, val image: String? = null)
+data class Workspace(val id: String, val name: String, val image: String? = null, val slug: String? = null)
 /** [image] is the user's avatar (HTTPS only), null when they have none. */
 data class Account(val id: String, val name: String, val workspaces: List<Workspace>, val image: String? = null)
 

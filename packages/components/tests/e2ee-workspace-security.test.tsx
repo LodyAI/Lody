@@ -10,6 +10,8 @@ import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
+import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
+import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
 const navigation = vi.hoisted(() => ({ target: null as unknown }));
@@ -25,6 +27,52 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock('../src/components/settings/account-setting', () => ({
   AccountSettingsComponent: () => <p>ordinary settings</p>,
 }));
+describe('recovery vault settings', () => {
+  it('asks the desktop for its recovery state once, not on every render', async () => {
+    const calls = new Map<string, number>();
+    const answers: Record<string, unknown> = {
+      'e2ee.recoveryReplacementPlan': {
+        replaceable: true,
+        replacing: false,
+        covered: [],
+        uncovered: [],
+      },
+      'e2ee.recentAccountSecurityEvents': [],
+      'e2ee.recoveryPasskeyAvailable': true,
+    };
+    const ipc = {
+      invoke: async (channel: string) => {
+        calls.set(channel, (calls.get(channel) ?? 0) + 1);
+        return answers[channel];
+      },
+      on: () => () => {},
+    };
+    vi.stubGlobal('ipc', ipc);
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <RecoveryVaultSection />
+          </Provider>
+        );
+      });
+      for (let tick = 0; tick < 20; tick++) await act(async () => {});
+      expect(container.textContent).toContain('e2ee.recovery.replace');
+      expect(calls.get('e2ee.recoveryReplacementPlan')).toBe(1);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('encrypted workspace settings', () => {
   let root: Root,
     container: HTMLDivElement,

@@ -34,6 +34,10 @@
 - The cloud runtime starts with the verified native account identity and watches machine presence; offline probes still omit identity. Network readiness and catalog synchronization are separate states; a WebView heartbeat never means cloud LIVE.
 - Keep one app module and manual construction while these boundaries remain small. JSON belongs in adapters; do not introduce a second Streams client in native code or a dependency-injection framework for this probe.
 
+## Push notifications
+
+- `notifications/PushNotifications` is process-owned. Register only with a verified native account, never a cached identity or a WebView token. Only backend `selfHostedEnabled: true` selects FCM; confirmed `false` selects OneSignal identity `lody-push-v2:<userId>`. Failed/malformed provider queries preserve the existing selection, never silently fall back. Registration exchanges the BetterAuth session for a session-bound Convex JWT, never a bare CLI key. Account teardown stops new work and joins submitted mutations before unregister and SDK logout. Submitted mutation waits ignore caller cancellation but have a 15-second deadline. A timeout leaves remote commit unknown even after later cleanup; do not claim total fencing or add durable ID/token rotation or uncertainty queues. Backend same-token ownership transfer also means a rotated installation ID alone is not a fence. Keep public Firebase client options separate from backend service credentials. Notification clicks and foreground display in both providers require an explicit nonblank `recipientUserId` exactly matching the verified account. The OneSignal foreground lifecycle listener suppresses display when signed out/unverified or direct FCM is selected. Notification routes resolve workspace slugs through verified membership and preserve the exact session target. See [configuration and device acceptance](README.md#push-notifications).
+
 ## Catalog cache and connection recovery
 
 - `CatalogRepository` replaces the old cloud probe controller and owns the selected workspace, one runtime subscription and the typed display projection. Pages observe its StateFlow; they never own a WebView or parse cache JSON.
@@ -47,6 +51,8 @@
 - An open creation page refreshes on runtime, catalog and presence events, without a polling timer. Unknown presence must not replace cached options. Missing capabilities are probed only for the selected online provider; the RPC reader skips binary-progress frames and merges validated final capabilities into a workspace/provider-scoped display overlay. Keep these changes in the shared source and reviewed snapshot.
 
 ## Home UI
+
+- Dark app/page base and grouped backgrounds use soft black `#111113`, aligned with iOS, including launch/window surfaces. Never add an opaque pure-black background or pure-black mode; preserve translucent scrims/shadows and artwork.
 
 - `home/HomeActivity` is the launcher: native sign-in without an account, otherwise `home/ChatListScreen`, which opens `chat/ChatScreen` for a row. It reads `AccountController` / `CatalogRepository` state only and picks the first workspace when none is restored.
 - Layout matches iOS Home: Chats tab has the workspace capsule (logo + name) leading, search and the view menu trailing, and `HomeSyncPill` floating centred over the bar for syncing / offline / briefly connected (web `MobileConnectionStatus`); search takes over the bar and hides the capsule. A floating bar holds labelled Chats / Projects / Settings tabs plus a separate new-chat button. Projects opens a project's chats in place; Settings shows account, workspace switching and sign-out.
@@ -129,3 +135,5 @@
   active status but not unread. Preserve Tab inputs through owner filters, keep
   Tabs hidden as list entries, and apply the summary to status grouping as well as
   row markers without rewriting catalog session state.
+
+- Conversation usage is a display-only session projection (`SessionUsageJson`): context tokens take precedence, compacting replaces the ring, and quota-only rings prefer the five-hour window (including zero) then the longest reported window. The runtime emits `usage.quota` only after eligibility and selected provider/config/model resolution; native requires `quotaEligible: true`; native code must not infer subscription eligibility from provider names or per-turn token totals. Missing data stays hidden; an explicitly reported empty plan says unavailable. Reset times switch between localized relative and absolute presentation.

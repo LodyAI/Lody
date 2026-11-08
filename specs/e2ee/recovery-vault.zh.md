@@ -323,10 +323,13 @@ Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控�
 
 - [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts) 要求同一对象里同时有 `enabled: true`
   和 `results.first`。真实认证结果没有 `enabled`，所以现有代码会拒绝它。[Lab 测试](../../packages/e2ee-lab/test/recovery-vault.test.ts)
-  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。
+  能通过，是因为用了合成对象。这是代码和旧措辞的缺口，不是保证的降低。已被 [#2364](https://github.com/LodyAI/Lody/pull/2364) 修正：
+  注册看 `enabled`（`verifiedPasskeyRegistration`），解锁看 `results.first`（`verifiedPasskeyPrf`），见 [`crypto.ts`](../../packages/e2ee-core/src/internal/recovery/crypto.ts)。
 - [`vault.ts`](../../packages/e2ee-core/src/internal/recovery/vault.ts) 已经为每个凭据建一个 `prf-wrap` 条目，
   但 vaultId 和定位符要由调用方提供，这些条目也不在索引引用之内。
 - core 和 Lab 之外没有包使用保险库。[#2125](https://github.com/LodyAI/Lody/pull/2125) 是未合入的 draft PR，且有冲突。
+
+已运行：[`recovery-vault-vector.json`](../../packages/e2ee-core/test/recovery-vault-vector.json) 由独立生成器写出，固定恢复文件，file-wrap、prf-wrap、workspace-entry 和索引密文，`formatVersion: 1` 私钥包和 passkey 索引，并包含必须拒绝的输入。`recovery-package.test.ts` 分别用恢复文件和 passkey PRF 打开它。向量里的 nonce 固定只是为了可复现。
 
 外部来源：[WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) 用于 `enabled`、注册结果可选、用户验证 PRF、
 `user.id` 覆盖和 RP 范围；[Apple](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct)

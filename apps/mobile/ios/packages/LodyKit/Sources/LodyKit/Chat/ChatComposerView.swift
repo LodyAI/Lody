@@ -17,6 +17,9 @@ import UniformTypeIdentifiers
 private struct ChatComposerState: Decodable {
   var mentionItems: [ChatMentionItem]?
   var actionBar: ChatActionBarState?
+#if !LODY_SHARE_EXTENSION
+  var usage: ChatSessionUsage?
+#endif
   var editable = true
   var canSend = false
   var sending = false
@@ -199,16 +202,15 @@ final class ChatComposerInput: TextView {
   static func makeEditorView() -> LexicalView {
     let theme = Theme()
     theme.root = [.font: UIFont.dynamic(of: 17), .foregroundColor: UIColor.label]
-    theme.setValue(.text, forSubtype: TextNodeThemeSubtype.code, value: [.fontFamily: "Menlo", .backgroundColor: UIColor.tertiarySystemFill])
     theme.code = [
-      .fontFamily: "Menlo", .paddingHead: 8.0, .paddingTail: -8.0,
+      .paddingHead: 8.0, .paddingTail: -8.0,
       .codeBlockCustomDrawing: CodeBlockCustomDrawingAttributes(background: .secondarySystemFill, border: .separator, borderWidth: 0.5),
     ]
     theme.quote = [
       .paddingHead: 12.0,
       .quoteCustomDrawing: QuoteCustomDrawingAttributes(barColor: .separator, barWidth: 3, rounded: true, barInsets: .zero),
     ]
-    setHeadingFont(of: theme, body: UIFont.dynamic(of: 17))
+    setContentFonts(of: theme, body: UIFont.dynamic(of: 17))
     let history = EditorHistoryPlugin()
     let config = EditorConfig(theme: theme, plugins: [ListPlugin(), LinkPlugin(), MarkdownShortcutPlugin(), history])
     let view = LexicalView(editorConfig: config, featureFlags: FeatureFlags(), textViewType: ChatComposerInput.self)
@@ -218,7 +220,10 @@ final class ChatComposerInput: TextView {
   }
 
   // Matches ChatMarkdownTheme's title font, which the transcript uses for every heading level.
-  private static func setHeadingFont(of theme: Theme, body: UIFont) {
+  private static func setContentFonts(of theme: Theme, body: UIFont) {
+    let code = UIFont.monospacedSystemFont(ofSize: body.pointSize, weight: .regular)
+    theme.setValue(.text, forSubtype: TextNodeThemeSubtype.code, value: [.font: code, .backgroundColor: UIColor.tertiarySystemFill])
+    theme.code?[.font] = code
     let font = UIFont.systemFont(ofSize: body.pointSize * 20 / 17, weight: .semibold)
     for tag in ["h1", "h2", "h3", "h4", "h5", "h6"] {
       theme.setValue(.heading, forSubtype: tag, value: [.font: font])
@@ -246,7 +251,7 @@ final class ChatComposerInput: TextView {
     didSet {
       guard let font, (editor.getTheme().root?[.font] as? UIFont) != font else { return }
       editor.getTheme().root?[.font] = font
-      Self.setHeadingFont(of: editor.getTheme(), body: font)
+      Self.setContentFonts(of: editor.getTheme(), body: font)
       try? editor.update { editor.dirtyType = .fullReconcile }
     }
   }
@@ -521,9 +526,9 @@ private enum ChatComposerActionMode {
 
   var color: UIColor {
     switch self {
-    case .send: LodyAccentChoice.current.color
+    case .send: LodyAccent.color
     case .loading: .systemGray
-    case .stop: .systemRed
+    case .stop: LodyAccent.color
     }
   }
 
@@ -583,14 +588,14 @@ private final class ChatComposerActionVisual: UIView {
 
   @objc private func refreshAccent() {
     backgroundColor = mode?.color
-    symbol.tintColor = mode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = mode == .loading ? .white : LodyAccent.foregroundColor
   }
 
   func render(_ nextMode: ChatComposerActionMode) {
     guard mode != nextMode else { return }
     let shouldAnimate = mode != nil && window != nil
     mode = nextMode
-    symbol.tintColor = nextMode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = nextMode == .loading ? .white : LodyAccent.foregroundColor
     guard shouldAnimate else {
       backgroundColor = nextMode.color
       applyContent(nextMode)
@@ -662,6 +667,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// The collapsed one-line composer's run-config affordance: the agent mark beside
   /// Send. Tapping it opens the composer and then its model panel.
   private let collapsedMark = UIButton(type: .system)
+  private let usageButton = UIButton(type: .system)
+  private var usageWidth: NSLayoutConstraint!
+#if !LODY_SHARE_EXTENSION
+  private weak var usagePanel: ChatUsagePanel?
+  var usageNow: () -> Date = Date.init
+#endif
   private var movingAgentMark: UIImageView?
   private weak var optionsPopover: ChatComposerModelPanel?
   private let attachmentBar = ChatAttachmentBar()
@@ -962,12 +973,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     for view in [mentionButton, modelButton, permissionButton] { controls.addArrangedSubview(view) }
     // Above the composer's glass, on the keyboard: not part of the merged glass surface.
     addSubview(mentionPanel)
-    for view in [attachmentBar, editorView, hint, formatBar, accessoryBar, attach, attachmentStack, controls, collapsedMark, send, grabber] {
+    for view in [attachmentBar, editorView, hint, formatBar, accessoryBar, attach, attachmentStack, controls, collapsedMark, usageButton, send, grabber] {
       inputSurface.contentView.addSubview(view)
     }
-    for view in [composer, mentionPanel, mentionButton, permissionButton, queueView, actionBar, inputSurface, attachmentStack, notice, attachmentBar, quotaNotice, editorView, hint, formatBar, accessoryBar, send, attach, modelButton, controls, collapsedMark, grabber] {
+    for view in [composer, mentionPanel, mentionButton, permissionButton, queueView, actionBar, inputSurface, attachmentStack, notice, attachmentBar, quotaNotice, editorView, hint, formatBar, accessoryBar, send, attach, modelButton, controls, collapsedMark, usageButton, grabber] {
       view.translatesAutoresizingMaskIntoConstraints = false
     }
+    usageWidth = usageButton.widthAnchor.constraint(equalToConstant: 0)
+    usageWidth.isActive = true
+    usageButton.isHidden = true
+    usageButton.accessibilityIdentifier = "session-usage"
+#if !LODY_SHARE_EXTENSION
+    usageButton.addTarget(self, action: #selector(presentUsage), for: .touchUpInside)
+#endif
     inputHeight = editorView.heightAnchor.constraint(equalToConstant: 48)
     accessoryHeight = accessoryBar.heightAnchor.constraint(equalToConstant: 0)
     formatHeight = formatBar.heightAnchor.constraint(equalToConstant: 0)
@@ -1030,11 +1048,14 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       send.widthAnchor.constraint(equalToConstant: 44), send.heightAnchor.constraint(equalToConstant: 44),
       controls.leadingAnchor.constraint(equalTo: attach.trailingAnchor),
       controls.centerYAnchor.constraint(equalTo: send.centerYAnchor),
-      controls.trailingAnchor.constraint(lessThanOrEqualTo: send.leadingAnchor, constant: -2),
+      controls.trailingAnchor.constraint(lessThanOrEqualTo: usageButton.leadingAnchor, constant: -2),
       mentionButton.widthAnchor.constraint(equalToConstant: 44), mentionButton.heightAnchor.constraint(equalToConstant: 44),
       permissionButton.widthAnchor.constraint(equalToConstant: 44), permissionButton.heightAnchor.constraint(equalToConstant: 44),
       modelButton.heightAnchor.constraint(equalToConstant: 44),
-      collapsedMark.trailingAnchor.constraint(equalTo: send.leadingAnchor),
+      collapsedMark.trailingAnchor.constraint(equalTo: usageButton.leadingAnchor),
+      usageButton.trailingAnchor.constraint(equalTo: send.leadingAnchor),
+      usageButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
+      usageButton.heightAnchor.constraint(equalToConstant: 44),
       collapsedMark.centerYAnchor.constraint(equalTo: send.centerYAnchor),
       collapsedMark.heightAnchor.constraint(equalToConstant: 44),
     ])
@@ -1627,9 +1648,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     input.textContainer.maximumNumberOfLines = expanded ? 0 : 1
     input.textContainer.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
+#if !LODY_SHARE_EXTENSION
+    renderUsage()
+#endif
     renderCollapsedMark()
     let showsMark = showsCollapsedMark(expanded: expanded)
-    var trailingInset: CGFloat = 46
+    var trailingInset: CGFloat = 46 + usageWidth.constant
     if showsMark { trailingInset += collapsedMarkWidth }
     if expanded { trailingInset = 20 }
     input.textContainerInset = UIEdgeInsets(top: topInset, left: leadingInset, bottom: verticalInset, right: trailingInset)
@@ -1858,6 +1882,53 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let room = input.bounds.width - 44 * 2 - 24
     return room > 0 && named.size().width <= room ? named : compact
   }
+
+#if !LODY_SHARE_EXTENSION
+  private func renderUsage() {
+    let usage = state.usage
+    if let panel = usagePanel, panel.usage != usage { panel.dismiss(animated: false) }
+    let visible = usage?.visible == true
+    usageButton.isHidden = !visible
+    usageWidth.constant = visible ? 62 : 0
+    guard let usage, visible else {
+      usagePanel?.dismiss(animated: false)
+      return
+    }
+    var config = UIButton.Configuration.plain()
+    config.contentInsets = .zero
+    config.imagePadding = 4
+    config.baseForegroundColor = .secondaryLabel
+    config.title = "\(Int((usage.percentage ?? 0).rounded()))%"
+    config.image = ChatUsageRing.image(usage.percentage ?? 0)
+    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+      var result = incoming
+      result.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+      return result
+    }
+    if usage.isContextCompacting == true {
+      config.title = nil
+      config.image = nil
+      config.showsActivityIndicator = true
+    }
+    usageButton.configuration = config
+    usageButton.accessibilityLabel = usage.isContextCompacting == true ? ChatSessionUsage.text("compacting") : ChatSessionUsage.text("title")
+    usageButton.accessibilityValue = ChatSessionUsage.used(usage.percentage ?? 0)
+  }
+
+  @objc func presentUsage() {
+    guard let usage = state.usage, usage.visible, let controller = presenter(), usagePanel == nil else { return }
+    let panel = ChatUsagePanel(usage: usage, now: usageNow)
+    panel.modalPresentationStyle = .popover
+    if let popover = panel.popoverPresentationController {
+      popover.sourceView = usageButton
+      popover.sourceRect = usageButton.bounds
+      popover.permittedArrowDirections = .down
+      popover.delegate = panel
+    }
+    usagePanel = panel
+    controller.present(panel, animated: true)
+  }
+#endif
 
   @objc private func presentComposerOptions() {
     if cardStyle, let onRunConfig {

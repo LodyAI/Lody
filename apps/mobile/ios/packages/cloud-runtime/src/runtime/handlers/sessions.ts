@@ -5,6 +5,8 @@ import { machineRpc } from '../machine-rpc';
 import type { Value } from '@loro-dev/flock-wasm/base64';
 import { tabOwner } from '../directory-tab';
 import { projectRows } from '../../protocol/catalog.ts';
+import { buildConversationMarkdown } from '../../protocol/conversation-markdown.ts';
+import { resolveSessionWorkspacePath } from '../../protocol/session-workspace-path.ts';
 import {
   archiveSession,
   setTabClosed,
@@ -12,6 +14,7 @@ import {
   markSessionRead,
   pinSession,
   renameSession,
+  setSessionOwner,
 } from '../archive-session';
 import { creationOptions, createSession } from '../create-session';
 import { readWorkspaceProjects } from '../project-groups';
@@ -23,6 +26,7 @@ import {
   controlTurn,
   editSession,
   sessionDoc,
+  readyHistory,
   releaseDeletedSessions,
   respondPermission,
   sendTurn,
@@ -259,6 +263,98 @@ export function registerSessions(
     await renameSession(args, replica);
     republish(replica);
     return {};
+  });
+  channel.handle('setSessionOwner', async (args) => {
+    const replica = metaWrite(args);
+    await setSessionOwner(args, replica);
+    republish(replica);
+    return {};
+  });
+  /** Metadata may be one legacy object or per-field rows; see `sessionActionMeta`. */
+  function metaOf(flock: MetaReplica['flock'], room: string) {
+    return sessionActionMeta(
+      flock.get(['m', room]),
+      flock.scan({ prefix: ['m', room] }),
+      flock.get(['e', room]),
+    );
+  }
+  const text = (value: unknown) =>
+    typeof value === 'string' ? value.trim() : '';
+  channel.handle('sessionWorkspacePath', (args) => {
+    const { flock } = metaWrite(args);
+    const meta = metaOf(flock, `session-${args.sessionId}`);
+    if (!meta) throw new Error('session_not_found');
+    const machineId = text(meta.machineId);
+    const project = (meta.project ?? {}) as Record<string, unknown>;
+    const machine = machineId
+      ? state.machineReplicas.get(machineId)
+      : undefined;
+    const localId =
+      project.kind === 'local' ? text(project.localProjectId) : '';
+    const local = localId ? machine?.get(['localProject', localId]) : undefined;
+    const legacy = machineId
+      ? metaOf(flock, `machine-${machineId}`)?.workspacePaths
+      : undefined;
+    return {
+      path: resolveSessionWorkspacePath({
+        sessionId: args.sessionId,
+        ownerSessionId: text(meta.parentSessionId) || undefined,
+        isWorktree: meta.isWorktree === true,
+        dotlodyPath: text(machine?.get(['dotlodyPath'])) || null,
+        localProjectRootPath:
+          local && typeof local === 'object' && !Array.isArray(local)
+            ? text((local as Record<string, unknown>).rootPath) || null
+            : null,
+        repoFullName:
+          (project.kind === 'github'
+            ? text(project.repoFullName)
+            : text(project.githubRepoFullName)) ||
+          text(meta.repoFullName) ||
+          null,
+        legacyWorkspacePath:
+          legacy && typeof legacy === 'object'
+            ? text((legacy as Record<string, unknown>)[args.sessionId]) || null
+            : null,
+      }),
+    };
+  });
+  channel.handle('conversationMarkdown', (args) => {
+    const { flock } = metaWrite(args);
+    const meta = metaOf(flock, `session-${args.sessionId}`);
+    if (!meta) throw new Error('session_not_found');
+    const history = readyHistory(args.sessionId);
+    if (!history.length) return { state: 'empty' as const };
+    const project = (meta.project ?? {}) as Record<string, unknown>;
+    // Web `conversationCopySource`: `owner/repo · branch` provenance for the header.
+    const repo =
+      (project.kind === 'github'
+        ? text(project.repoFullName)
+        : text(project.githubRepoFullName)) || text(meta.repoFullName);
+    const last = history.at(-1);
+    const { markdown, stats } = buildConversationMarkdown({
+      workspaceId: args.workspaceId,
+      history,
+      title: text(meta.title) || undefined,
+      source:
+        [repo, text(meta.branchName)].filter(Boolean).join(' \u00b7 ') ||
+        undefined,
+      participants: args.participants,
+      incompleteFinalResponse:
+        last?.role === 'assistant' && !last.finished
+          ? args.incompleteNotice
+          : undefined,
+    });
+    return {
+      state: 'ready' as const,
+      markdown,
+      estimatedTokens: stats.estimatedTokens,
+      overBudget: stats.overBudget,
+      toolCallsCollapsed: stats.toolCallsCollapsed,
+      thinkingTruncated: stats.thinkingTruncated,
+      terminalTrimmed:
+        stats.terminalOutputOmitted || stats.terminalOutputTruncated,
+      toolResultsTruncated: stats.toolResultsTruncated,
+    };
   });
   channel.handle('respondPermission', respondPermission);
   channel.handle('controlTurn', controlTurn);

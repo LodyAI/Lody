@@ -84,7 +84,7 @@
 | done | 搜索（含归档）                         | `InboxScreen.tsx`                                                          | OSS home / archive 过滤                                          |
 | done | 文件树、回合变更、全文 diff            | `FilesScreen.tsx`、`TurnChangesScreen.tsx`、`FileDiffScreen.tsx`           | 移动端预期能力（README）                                         |
 | done | Worked-for 紧凑格式                    | `ChatWorkDuration`、`verification/chat/main.swift`                         | `1h 01m 05s`；减法见 #8                                          |
-| done | 推送 + Dynamic Island                  | `PushNotifications.swift`、`live-activity/`                                | 官方 README 的 mobile 职责；岛内批准见缺失                       |
+| done | 推送（Live Activities 已移除）         | `PushNotifications.swift`                                                  | 原生通知；不恢复 ActivityKit                                     |
 | done | 模型 / effort / mode / permission      | `ModelScreen.tsx`、`ChatComposerModelPanel.swift`                          | 同一 ACP capability；UI 不同                                     |
 | done | @ mentions（七类）                     | `mentions.ts`、`ChatMentionPanel.swift`、`MentionPickerScreen.tsx`         | 原生目录、短引用与发送时 expansion，见 `docs/mentions-design.md` |
 | wip  | Agent Conversation Sync UI             | `ProjectHistoryScreen.tsx`、`project-history.ts`                           | 导入在机器侧；手动批量，非自动镜像                               |

@@ -74,6 +74,14 @@ export interface AccountIdentity {
   credentialHash: Uint8Array
 }
 interface PersonalJoins {
+  recoveryIdentity(pin: {
+    genesisHash: string
+    genesisRecordHex: string
+    membershipId: string
+  }): Effect.Effect<
+    { device: DeviceSigner & { enc: Bytes.EncryptionPublicKey }; credentialHash: string },
+    unknown
+  >
   accountIdentity(pin: {
     genesisHash: string
     genesisRecordHex: string
@@ -307,6 +315,27 @@ export function makeDesktopPersonalJoins(input: {
       credentialHash: raw(credential.credentialHash)
     }
   })
+  /** The new device a restore admits through R: the account-pairing identity, plus the
+   * signer core needs for its possession proof. */
+  const recoveryIdentity = Effect.fnUntraced(function* (pin: {
+    genesisHash: string
+    genesisRecordHex: string
+    membershipId: string
+  }) {
+    const genesis = Result.getOrThrow(Bytes.genesisHash(raw(pin.genesisHash)))
+    // A retry after a pending restore reuses this device: core's journal is bound to it.
+    const retained = yield* Effect.result(custody.openDevice(genesis))
+    if (Result.isSuccess(retained)) {
+      const credential = yield* custody.deviceCredential(genesis, retained.success.publicKey)
+      return {
+        device: retained.success,
+        credentialHash: createHash('sha256').update(raw(credential)).digest('hex')
+      }
+    }
+    const identity = yield* accountIdentity(pin)
+    const device = yield* custody.openDevice(genesis)
+    return { device, credentialHash: hex(identity.credentialHash) }
+  })
   const origin = Effect.fnUntraced(function* (workspaceId: string, supplied?: string) {
     const row = yield* sql(() => rowFor(workspaceId))
     const retainedHistory = yield* sql(() =>
@@ -384,6 +413,7 @@ export function makeDesktopPersonalJoins(input: {
   })
   return {
     accountIdentity,
+    recoveryIdentity,
     pending: (workspaceId: string) =>
       sql(() => {
         const row = rowFor(workspaceId)

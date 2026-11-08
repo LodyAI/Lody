@@ -96,14 +96,22 @@ internal class GitHubPullRequestWrites(private val http: GitHubHttp = GitHubHttp
     }
 }
 
-internal class GitHubHttpClient : GitHubHttp {
+internal class GitHubHttpClient(private val retryOnConnectionFailure: Boolean = true) : GitHubHttp {
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+        .retryOnConnectionFailure(retryOnConnectionFailure)
         .connectTimeout(15, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
 
     override suspend fun request(method: String, url: String, token: String, body: JSONObject?): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
+        val payload = body?.toString()?.toRequestBody("application/json".toMediaType())
+        val requestBody = if (!retryOnConnectionFailure && payload != null) object : RequestBody() {
+            override fun contentType() = payload.contentType()
+            override fun contentLength() = payload.contentLength()
+            override fun isOneShot() = true // Also forbid status-based automatic mutation replay.
+            override fun writeTo(sink: okio.BufferedSink) = payload.writeTo(sink)
+        } else payload
         val request = Request.Builder().url(url).header("Authorization", "Bearer $token").header("Accept", "application/vnd.github+json").apply {
             if (url.startsWith("https://api.github.com/")) header("X-GitHub-Api-Version", "2022-11-28")
-            method(method, body?.toString()?.toRequestBody("application/json".toMediaType()))
+            method(method, requestBody)
         }.build()
         val call = client.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }

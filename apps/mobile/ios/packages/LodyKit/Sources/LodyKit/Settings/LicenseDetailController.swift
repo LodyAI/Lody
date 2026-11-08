@@ -43,7 +43,7 @@ final class LicenseDetailController: UIViewController {
     if let url = entry.url {
       stack.addArrangedSubview(LicenseText(url, font: .dynamic(of: 15), color: .secondaryLabel))
     }
-    let mono = UIFont(name: "Menlo", size: 13 * UIFont.dynamicScale()) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+    let mono = UIFont.monospacedSystemFont(ofSize: 13 * UIFont.dynamicScale(), weight: .regular)
     stack.addArrangedSubview(
       LicenseText(LodyLicenses.text(entry), font: mono, color: .label, lineHeight: 20 * UIFont.dynamicScale())
     )

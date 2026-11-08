@@ -699,6 +699,12 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
     retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
       withLock(joins.retire(workspaceId, pairingSessionId)),
     preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),
+    /** The new device a restore admits through R; see `recoveryIdentity`. */
+    recoveryIdentity: (pin: {
+      genesisHash: string
+      genesisRecordHex: string
+      membershipId: string
+    }) => withLock(joins.recoveryIdentity(pin)),
     /** Account-wide pairing identity for one workspace; see `accountIdentity`. */
     accountPairingIdentity: (pin: {
       genesisHash: string

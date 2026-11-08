@@ -101,6 +101,25 @@ describe('personal desktop approval', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   };
+  it('exposes only recovery lifecycle and phase for diagnostics', async () => {
+    delete runtime.personalPairingOffer;
+    delete runtime.inspectPersonalJoin;
+    delete runtime.approvePersonalJoin;
+    const pending =
+      Promise.withResolvers<Awaited<ReturnType<NonNullable<Runtime['pendingPersonalJoin']>>>>();
+    runtime.pendingPersonalJoin = () => pending.promise;
+    await render(false);
+    const diagnostic = () =>
+      container.querySelector('[data-testid="e2ee-personal-pairing-state"]')!;
+    expect(diagnostic().getAttribute('data-phase')).toBe('idle');
+    expect(diagnostic().getAttribute('data-recovering')).toBe('true');
+    expect(diagnostic().getAttribute('data-recovery-started-at')).toMatch(/^\d{4}-/);
+    expect(diagnostic().getAttribute('data-recovery-finished-at')).toBeNull();
+    await act(async () => pending.resolve(null));
+    expect(diagnostic().getAttribute('data-recovering')).toBe('false');
+    expect(diagnostic().getAttribute('data-recovery-finished-at')).toMatch(/^\d{4}-/);
+    expect(diagnostic().outerHTML).not.toContain(offer.pairingSessionId);
+  });
   it.each([false, true])(
     'a request-only personal host can join with desktop approval even when ledger display allows approval (%s)',
     async (canApprove) => {

@@ -24,7 +24,7 @@ struct AuthCatalogScope {
 @MainActor enum ShareStore { static func clear() {} }
 @MainActor final class PushNotifications {
   static let shared = PushNotifications()
-  func identify(_ value: String?) {}
+  func identify(_ value: String?, credential: String? = nil) {}
 }
 @MainActor final class LodyToastOverlay {
   static let shared = LodyToastOverlay()

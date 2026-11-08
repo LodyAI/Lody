@@ -10,7 +10,7 @@ import { open as openFile, readFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import {
   E2eeDeviceRevokedError,
   E2eeMemberRemovedError
@@ -36,6 +36,7 @@ import {
   cleanupRemovedDesktopWorkspace,
   publicAccessLoss,
   desktopAccountPairingDatabase,
+  desktopE2eeHasWorkspaceIdentity,
   desktopE2eeRecoveryJournalPath
 } from '../../services/e2ee-account-runtime'
 import {
@@ -45,12 +46,29 @@ import {
 } from '../../services/e2ee-account-pairing-host.mjs'
 import {
   MAX_RECOVERY_FILE_BYTES,
+  abandonAccountVaultReplacement,
+  beginAccountVaultReplacement,
+  continueAccountVaultReplacement,
+  defaultPasskeyLabel,
+  enrollRecoveryPasskey,
+  listRecoveryPasskeys,
+  passkeyLabel,
+  removeRecoveryPasskey,
   createAccountRecoveryVault,
   inspectRecoveryFile,
+  recentAccountSecurityEvents,
+  recoveryReplacementPlan,
+  recoveryRestoreTarget,
   recoveryVaultEnabled,
   recoveryVaultFailure,
-  saveRecoveryFile
+  restoreAccountWorkspaces,
+  saveRecoveryFile,
+  setupWorkspaceRecovery,
+  type RecoveryUnlock,
+  type RecoveryVaultReplacement,
+  type RecoveryWorkspaceTarget
 } from '../../services/e2ee-recovery-vault.mjs'
+import { desktopPasskeyPort } from '../../services/e2ee-passkey-macos.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -836,9 +854,12 @@ export class E2eeIpc extends IpcService {
     }
     return id
   }
-  private memberScope(workspaceId: string) {
+  /** `identity` lets one operation bind a later owner to the sign-in it started under. */
+  private memberScope(
+    workspaceId: string,
+    identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+  ) {
     const auth = getIpcServiceDeps().authService
-    const identity = auth.getCachedSessionIdentity()
     let original: Owner | undefined
     return <A>(work: (owner: Owner) => Effect.Effect<A, unknown>, create = false) =>
       withDesktopE2eeAccount(
@@ -960,11 +981,43 @@ export class E2eeIpc extends IpcService {
       throw error
     })
   }
+  /** A new invitation can reach a removed member before any refresh or token request has
+   * told this device. Its accepted earlier join would refuse the offer as a conflict, so
+   * this device's credential confirms the removal first; local removal erases that join.
+   * A membership that is still current keeps the conflict. Returns whether it was removed. */
+  private async endRemovedMemberJoin(
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
+  ) {
+    const access = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? Effect.gen(function* () {
+            if (!(yield* owner.bootstrap.acceptedMemberJoin(workspaceId))) return null
+            return {
+              accountId: owner.accountId,
+              workspaceId,
+              credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+              status: yield* owner.host.status(workspaceId)
+            }
+          })
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (!access) return false
+    try {
+      await this.endOnAccessLoss(access, cloud, undefined, true)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_member_removed') return true
+      throw error
+    }
+    return false
+  }
   @IpcMethod()
   async prepareMemberJoin(source: E2eeMemberOffer) {
     sender()
     const offer = MemberOfferSchema.parse(source)
-    const scope = this.memberScope(offer.workspaceId)
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const scope = this.memberScope(offer.workspaceId, identity)
     const cloud = await desktopE2eeCloudClient()
     const pending = await scope(
       (owner) =>
@@ -989,7 +1042,12 @@ export class E2eeIpc extends IpcService {
           : Effect.fail(new Error('e2ee_account_mismatch'))
       )
     }
-    const original = await scope((owner) =>
+    // Removal cleanup replaces the account owner. The new join binds to the current owner,
+    // still under the sign-in generation this operation started with.
+    const joining = (await this.endRemovedMemberJoin(offer.workspaceId, scope, cloud))
+      ? this.memberScope(offer.workspaceId, identity)
+      : scope
+    const original = await joining((owner) =>
       owner.accountId === cloud.accountId
         ? owner.bootstrap.prepareMemberJoin(offer)
         : Effect.fail(new Error('e2ee_account_mismatch'))
@@ -3210,7 +3268,17 @@ export class E2eeIpc extends IpcService {
       accountId: string
       store: RecoveryVaultStore['Service']
       journalPath: string
+      client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client']
       exists: Effect.Effect<boolean, unknown>
+      replacement: RecoveryVaultReplacement
+      accountWorkspaces: Effect.Effect<
+        readonly {
+          readonly id: string
+          readonly name: string
+          readonly genesisHash: string
+        }[],
+        unknown
+      >
     }) => Effect.Effect<A, unknown>
   ): Promise<A> {
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
@@ -3221,7 +3289,10 @@ export class E2eeIpc extends IpcService {
           accountId,
           store: client.recoveryVault(),
           journalPath: desktopE2eeRecoveryJournalPath(accountId),
-          exists: client.hasRecoveryVault()
+          client,
+          exists: client.hasRecoveryVault(),
+          replacement: client.recoveryVaultReplacement(),
+          accountWorkspaces: client.recoveryVaultAccountWorkspaces()
         })
       ).catch((error) => {
         throw recoveryVaultFailure(error)
@@ -3266,6 +3337,368 @@ export class E2eeIpc extends IpcService {
     )
     return { outcome: 'created' as const, vaultId: created.vaultId }
   }
+  /** Default-off: recent account security events, for the security settings list. */
+  @IpcMethod()
+  async recentAccountSecurityEvents() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const { client } = await desktopE2eeCloudClient()
+    return Effect.runPromise(recentAccountSecurityEvents(client.accountSecurityEvents())).catch(
+      (error) => {
+        throw recoveryVaultFailure(error)
+      }
+    )
+  }
+  /** Default-off: what replacing the recovery file would cover from this device. */
+  @IpcMethod()
+  async recoveryReplacementPlan() {
+    sender()
+    return this.recoveryOperation(
+      ({ accountId, store, journalPath, replacement, accountWorkspaces }) =>
+        recoveryReplacementPlan({
+          store,
+          journalPath,
+          replacement,
+          accountWorkspaces,
+          hasIdentity: (workspaceId) =>
+            Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId))
+        })
+    )
+  }
+  /** Default-off: save a new file and reserve its vault. The current vault keeps working. */
+  @IpcMethod()
+  async beginRecoveryReplacement() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      defaultPath: 'lody-recovery.lodyrecovery',
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const target = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
+    if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
+    const path = target.filePath
+    const begun = await this.recoveryOperation(({ store, journalPath, replacement }) =>
+      beginAccountVaultReplacement({
+        store,
+        journalPath,
+        replacement,
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        persist: (file) =>
+          Effect.tryPromise(async () => {
+            await saveRecoveryFile(path, file)
+            return new Uint8Array(await readFile(path))
+          })
+      })
+    )
+    return { outcome: 'begun' as const, vaultId: begun.vaultId }
+  }
+  private passkeyPort() {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    return desktopPasskeyPort({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      window: () => {
+        if (!owner) throw new Error('e2ee_recovery_failed')
+        return owner.getNativeWindowHandle()
+      }
+    })
+  }
+  /** How the user chose to open the vault, or null when they cancel the file dialog. */
+  private async recoveryUnlock(method: 'file' | 'passkey'): Promise<RecoveryUnlock | null> {
+    if (method === 'passkey')
+      return {
+        passkey: this.passkeyPort(),
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+      }
+    const file = await this.chooseRecoveryFile()
+    return file ? { file } : null
+  }
+  /** Ask for a recovery file and read it, or null when the user cancels. */
+  private async chooseRecoveryFile() {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      properties: ['openFile' as const],
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const chosen = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = chosen.filePaths[0]
+    return chosen.canceled || !path ? null : this.readRecoveryFile(path)
+  }
+  /** Read a chosen recovery file, bounded before any parsing. */
+  private async readRecoveryFile(path: string) {
+    const handle = await openFile(path, 'r')
+    try {
+      const buffer = new Uint8Array(MAX_RECOVERY_FILE_BYTES + 1)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+      if (bytesRead > MAX_RECOVERY_FILE_BYTES) {
+        buffer.fill(0)
+        throw new Error('e2ee_recovery_invalid-input')
+      }
+      return buffer.subarray(0, bytesRead)
+    } finally {
+      await handle.close()
+    }
+  }
+  /** This device's recovery targets: the workspaces it holds an identity for. */
+  private async recoveryTargets(
+    accountId: string,
+    client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client'],
+    workspaces: readonly { readonly id: string; readonly name: string }[]
+  ) {
+    const targets: RecoveryWorkspaceTarget[] = []
+    for (const { id, name } of workspaces) {
+      if (!(await desktopE2eeHasWorkspaceIdentity(accountId, id))) continue
+      const { host, credential } = await withDesktopE2eeAccount(
+        (owner) =>
+          Effect.map(owner.bootstrap.deviceCredential(id), (credential) => ({
+            host: owner.host,
+            credential
+          })),
+        id,
+        false
+      )
+      targets.push({
+        id,
+        name,
+        append: (request) => client.appendRecord(request),
+        refresh: () => host.refreshWorkspaceLedger(id, (request) => client.history(request)),
+        mailbox: (recovery) => client.mailbox({ workspaceId: id, credential: recovery }),
+        deliver: () =>
+          Effect.asVoid(
+            host.keyRound(
+              id,
+              (signal) => client.mailbox({ workspaceId: id, credential }, signal),
+              (signal) => client.staging({ workspaceId: id, credential }, signal),
+              (signal) => (request) => client.history(request, signal)
+            )
+          ),
+        owner: (ports) => host.workspaceRecovery(id, ports),
+        abandonOwner: (ports) => host.workspaceRecoveryAbandon(id, ports)
+      })
+    }
+    return targets
+  }
+  /** Default-off: from the new file, prove every workspace, revoke old Rs and retire the
+   * old vault. A suspected leak revokes first. The file never reaches the renderer. */
+  @IpcMethod()
+  async continueRecoveryReplacement(input: { compromised: boolean }) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const compromised = input?.compromised === true
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
+    try {
+      return await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+              (workspaces) =>
+                continueAccountVaultReplacement({
+                  store,
+                  journalPath,
+                  replacement,
+                  workspaces,
+                  file,
+                  compromised
+                })
+            )
+          )
+      )
+    } finally {
+      file.fill(0)
+    }
+  }
+  /** Default-off: set up recovery for one workspace from the account's recovery file. */
+  @IpcMethod()
+  async setupWorkspaceRecovery(workspaceId: string, method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      return await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              Effect.promise(() =>
+                this.recoveryTargets(
+                  accountId,
+                  client,
+                  rows.filter((row) => row.id === workspaceId)
+                )
+              ),
+              ([target]) =>
+                target
+                  ? setupWorkspaceRecovery({ store, journalPath, replacement, target, unlock })
+                  : Effect.fail({ code: 'missing' })
+            )
+          )
+      )
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: list the vault's passkeys, opening it with the file or a passkey. */
+  @IpcMethod()
+  async listRecoveryPasskeys(method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const state = await this.recoveryOperation(({ store, journalPath }) =>
+        listRecoveryPasskeys({ store, journalPath, unlock })
+      )
+      return { outcome: 'listed' as const, ...state }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: remove one passkey. Removing changes the index, so V must open again. */
+  @IpcMethod()
+  async removeRecoveryPasskey(entryId: string, method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (typeof entryId !== 'string' || !/^[0-9a-f]{64}$/.test(entryId))
+      throw new Error('e2ee_recovery_invalid-input')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const { removed, ...state } = await this.recoveryOperation(({ store, journalPath }) =>
+        removeRecoveryPasskey({ store, journalPath, unlock, entryId })
+      )
+      return { outcome: removed ? ('removed' as const) : ('incomplete' as const), ...state }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: a readable default passkey name for this device. */
+  @IpcMethod()
+  async recoveryPasskeyDefaultLabel() {
+    sender()
+    return defaultPasskeyLabel({
+      platform: process.platform,
+      systemVersion: process.getSystemVersion()
+    })
+  }
+  /** Default-off: whether this device can attempt a passkey ceremony. */
+  @IpcMethod()
+  async recoveryPasskeyAvailable() {
+    sender()
+    return recoveryVaultEnabled() && this.passkeyPort().available()
+  }
+  /** Default-off: add a passkey. Adding one needs V, so the user picks the file first. */
+  @IpcMethod()
+  async addRecoveryPasskey(label: string) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const name = passkeyLabel(label)
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
+    const port = this.passkeyPort()
+    try {
+      const added = await this.recoveryOperation(({ store, journalPath }) =>
+        enrollRecoveryPasskey({ store, journalPath, file, port, label: name })
+      )
+      return { outcome: 'added' as const, passkeys: added.passkeys }
+    } finally {
+      file.fill(0)
+    }
+  }
+  /** Default-off: restore every workspace a file or passkey covers onto this device. */
+  @IpcMethod()
+  async restoreFromRecoveryFile(method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const results = await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, accountWorkspaces }) =>
+          Effect.flatMap(
+            Effect.flatMap(accountWorkspaces, (rows) =>
+              Effect.forEach(rows, (row) =>
+                Effect.map(
+                  Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
+                  (has) => ({ ...row, has })
+                )
+              )
+            ),
+            (rows) =>
+              restoreAccountWorkspaces({
+                store,
+                journalPath,
+                unlock,
+                workspaces: rows.map((row) =>
+                  recoveryRestoreTarget<E2eeWorkspaceHistoryPage>({
+                    ...row,
+                    hasIdentity: () => row.has,
+                    append: (request) => client.appendRecord(request),
+                    history: (next) => client.history({ workspaceId: row.id, ...next }),
+                    mailbox: (credential) => client.mailbox({ workspaceId: row.id, credential }),
+                    stagedGroup: (credential, key) =>
+                      client.staging({ workspaceId: row.id, credential }).readGroup(key),
+                    identity: (pin) =>
+                      Effect.tryPromise(() =>
+                        withDesktopE2eeAccount(
+                          (owner) => owner.bootstrap.recoveryIdentity(pin),
+                          row.id
+                        )
+                      ),
+                    adopt: (join) =>
+                      Effect.tryPromise(() =>
+                        withDesktopE2eeAccount(
+                          (owner) =>
+                            Effect.gen(function* () {
+                              yield* owner.bootstrap.preparePersonalJoin({
+                                version: 1,
+                                workspaceId: row.id,
+                                genesisHash: row.genesisHash,
+                                genesisRecordHex: join.genesisRecordHex,
+                                endorser: join.endorser,
+                                membershipId: join.membershipId,
+                                pairingSessionId: join.pairingSessionId
+                              })
+                              yield* owner.bootstrap.acceptPersonalHistory(row.id, join.pages)
+                              yield* owner.host.open(row.id)
+                              yield* owner.host.installRecoveredKeys(row.id, join.recovered)
+                            }),
+                          row.id
+                        )
+                      )
+                  })
+                )
+              })
+          )
+      )
+      return { outcome: 'restored' as const, results }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: give up an unfinished replacement. Needs no file: this device's journal
+   * names each new R. */
+  @IpcMethod()
+  async abandonRecoveryReplacement() {
+    sender()
+    return this.recoveryOperation(
+      ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+        Effect.flatMap(accountWorkspaces, (rows) =>
+          Effect.flatMap(
+            Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+            (workspaces) =>
+              abandonAccountVaultReplacement({ store, journalPath, replacement, workspaces })
+          )
+        )
+    )
+  }
   /** Default-off: open a vault from a chosen recovery file and authenticate its
    * index. This checks the file; it neither restores a workspace nor admits a device. */
   @IpcMethod()
@@ -3282,20 +3715,7 @@ export class E2eeIpc extends IpcService {
       : await dialog.showOpenDialog(options)
     const path = chosen.filePaths[0]
     if (chosen.canceled || !path) return { outcome: 'cancelled' as const }
-    const file = await (async () => {
-      const handle = await openFile(path, 'r')
-      try {
-        const buffer = new Uint8Array(MAX_RECOVERY_FILE_BYTES + 1)
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-        if (bytesRead > MAX_RECOVERY_FILE_BYTES) {
-          buffer.fill(0)
-          throw new Error('e2ee_recovery_invalid-input')
-        }
-        return buffer.subarray(0, bytesRead)
-      } finally {
-        await handle.close()
-      }
-    })()
+    const file = await this.readRecoveryFile(path)
     try {
       const inspected = await this.recoveryOperation(({ store, journalPath }) =>
         inspectRecoveryFile({ store, journalPath, file })

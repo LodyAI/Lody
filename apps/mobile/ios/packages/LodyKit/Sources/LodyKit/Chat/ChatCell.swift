@@ -396,24 +396,10 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   }
 
   static func processTitle(_ row: ChatRow, traits: UITraitCollection) -> NSAttributedString {
-    if !row.running && !row.attention {
-      return NSAttributedString(string: row.text, attributes: [
-        .font: LodyDesign.mono(12, compatibleWith: traits),
-        .foregroundColor: UIColor.lodySecondary,
-      ])
-    }
-    let title = NSMutableAttributedString(string: row.text, attributes: [
-      .font: LodyDesign.font(.subheadline, size: 14.5, weight: .semibold, compatibleWith: traits),
-      .foregroundColor: UIColor.lodyInk,
-    ])
-    guard let duration = row.workDurationMs else { return title }
-    let range = (row.text as NSString).range(of: ChatWorkDuration.label(duration), options: .backwards)
-    guard range.location != NSNotFound else { return title }
-    title.addAttributes([
+    NSAttributedString(string: row.text, attributes: [
       .font: LodyDesign.mono(12, compatibleWith: traits),
       .foregroundColor: UIColor.lodySecondary,
-    ], range: range)
-    return title
+    ])
   }
 
   private static func detailFont(_ traits: UITraitCollection) -> UIFont {
@@ -421,9 +407,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   }
 
   private static func processLines(_ row: ChatRow, traits: UITraitCollection) -> (title: CGFloat, detail: CGFloat) {
-    let font = !row.running && !row.attention
-      ? LodyDesign.mono(12, compatibleWith: traits)
-      : LodyDesign.font(.subheadline, size: 14.5, weight: .semibold, compatibleWith: traits)
+    let font = LodyDesign.mono(12, compatibleWith: traits)
     let title = ceil(font.lineHeight)
     let detail = row.detail.isEmpty ? 0 : ceil(detailFont(traits).lineHeight) + 2
     return (title, detail)

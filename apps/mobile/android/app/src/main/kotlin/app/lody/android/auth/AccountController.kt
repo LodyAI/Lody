@@ -53,8 +53,10 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
         previous?.cancel()
         val identity = ++epoch
         mutable.value = AuthState(busy = true)
-        return tasks.launch {
-            previous?.join()
+        return tasks.launch(start = CoroutineStart.UNDISPATCHED) {
+            // Retain the predecessor drain even when an intermediate operation is cancelled.
+            withContext(NonCancellable) { previous?.join() }
+            currentCoroutineContext().ensureActive()
             if (identity != epoch) return@launch
             try { block() }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -160,6 +162,15 @@ class AccountController(private val api: CloudAuthApi, private val store: Creden
         return result
     }
     suspend fun members(scope: RuntimeScope): List<WorkspaceMember> = withVerifiedAccount(scope) { api.members(it, scope.workspaceId) }
+    internal suspend fun <T> withVerifiedIdentity(userId: String, block: suspend (Credential) -> T): T {
+        val identity = epoch
+        val token = credential ?: throw AuthFailure("account_changed")
+        if (!state.value.verified || state.value.account?.id != userId) throw AuthFailure("account_changed")
+        val result = block(token)
+        currentCoroutineContext().ensureActive()
+        if (epoch != identity || credential !== token) throw AuthFailure("account_changed")
+        return result
+    }
     internal suspend fun <T> withVerifiedAccount(scope: RuntimeScope, block: suspend (Credential) -> T): T {
         val identity = epoch
         val token = credential ?: throw AuthFailure("account_changed")

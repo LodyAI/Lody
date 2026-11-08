@@ -65,7 +65,7 @@ class SettingsController: UIViewController {
       push("remote-settings", title: text("remote.\(kind)"), params: state.scope.merging(["kind": kind]) { _, new in new })
     } else if id == "workspace-general", let workspace {
       var params: [String: Any] = [
-        "workspaceId": workspace.id, "name": workspace.name, "color": LodyAccentChoice.hex(.lodyAccent.resolvedColor(with: traitCollection)),
+        "workspaceId": workspace.id, "name": workspace.name, "color": LodyAccent.hex(.lodyAccent.resolvedColor(with: traitCollection)),
       ]
       params["image"] = workspace.image
       LodyShell.shared.presentNative(

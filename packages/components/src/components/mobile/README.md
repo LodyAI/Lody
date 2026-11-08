@@ -91,7 +91,8 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   `mobile-session-menu-sheet.tsx` (the `…` button: machine/branch info, optional
   Owner row, Find/Fork/Rename/Copy/Archive).
 - `mobile-file-viewer-drawer.tsx` — full-screen right drawer over the still-mounted
-  conversation. Session HTML opens in preview with an eye toggle for source;
+  conversation. Session files open read-only with an explicit edit toggle for
+  writable files; reopening the drawer restores read-only mode. Session HTML opens in preview with an eye toggle for source;
   WebKit uses the shared script-free HTML/CSS preview. The project file browser
   also previews complete HTML by default with the same source toggle.
   `glass-icon-button.tsx` — the frosted header's `GlassIconButton`

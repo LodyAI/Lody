@@ -31,7 +31,7 @@ class SessionController: UIViewController {
   weak var tasksPage: TasksController?
   var permissionPage: PermissionController?
   var permissionScope: (userId: String, workspaceId: String)?
-  var openingFile = false
+  var openingFiles: Set<String> = []
   var mentions: MentionCatalogStore?
   var mentionSequence = 0
   var editable = ""
@@ -60,6 +60,8 @@ class SessionController: UIViewController {
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
+  var copyService = SessionCopyService.live
+  var pendingOwner: (sessionId: String, userId: String)?
 
   init(sessionId: String, findQuery: String = "", choice: ModelChoice? = nil, source: SessionSource = .live,
        feed: SessionFeedService = .live, environment: SessionSendEnvironment = .live, permission: PermissionService = .live,
@@ -180,6 +182,8 @@ class SessionController: UIViewController {
           await WorkspaceMembers.load(userId: state.userId, workspaceId: state.workspaceId) { [weak self] members in
             guard let self, self.source.state.key == state.key else { return }
             self.chat.members = members
+            // Change owner lists the members, so the menu follows the loaded list.
+            if let session = self.source.state.catalog.session(self.sessionId) { self.updateMoreMenu(session) }
           }
         }
       }
@@ -374,10 +378,12 @@ class SessionController: UIViewController {
         [weak self] _ in self?.openWorkspaceChanges()
       })
     }
-    more.menu = UIMenu(children: changes + simulatorMenu() + [
-      UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
-        self?.find(query: "", keyboard: true)
-      },
+    var children: [UIMenuElement] = changes + simulatorMenu()
+    children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
+      self?.find(query: "", keyboard: true)
+    })
+    children += sessionMenuItems(session)
+    more.menu = UIMenu(children: children + [
       UIAction(title: String(localized: "session.action.share", bundle: .lody), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
         self?.perform("share")
       },
@@ -414,7 +420,7 @@ class SessionController: UIViewController {
     LodyShell.shared.openSessionFromExternal(target)
   }
 
-  private func perform(_ action: String) {
+  func perform(_ action: String) {
     actions.perform(action, row: sessionId, from: self)
   }
 

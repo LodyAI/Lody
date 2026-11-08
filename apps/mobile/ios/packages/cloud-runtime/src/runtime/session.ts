@@ -1,3 +1,4 @@
+import type { SessionUsage } from '../protocol/session-usage.ts';
 import type { MessageReference } from '../protocol/message-references.ts';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
@@ -53,6 +54,7 @@ type SessionState = {
   pending?: ReturnType<typeof setTimeout>;
   firstQueuedAt: number;
   lastSignal: string;
+  lastUsage?: string;
   unsent: Map<
     string,
     {
@@ -85,6 +87,12 @@ const reserved = new Set<string>();
 export const retainedSessionIds = () => [...sessions.keys()];
 export const reservedSessionIds = () => [...reserved];
 export const sessionDoc = (id: string) => sessions.get(id)?.doc;
+/** Full persisted history of a synchronized session, for whole-conversation exports. */
+export function readyHistory(id: string): Record<string, any>[] {
+  const state = sessions.get(id);
+  if (!state?.ready) throw new Error('session_not_ready');
+  return state.doc.getList('history').toJSON() as Record<string, any>[];
+}
 function traceCode(value: unknown) {
   const pattern = /^[a-z][a-z0-9_]{0,47}$/;
   if (typeof value === 'string') return pattern.test(value) ? value : undefined;
@@ -188,6 +196,27 @@ function backgroundProgress(state: SessionState) {
     state.backgroundWork = undefined;
   return { id: work.id, state: status } as const;
 }
+type QuotaProjection = Pick<
+  SessionUsage,
+  'quota' | 'quotaEligible' | 'modelId' | 'modelLabel'
+>;
+let readUsage: (
+  sessionId: string,
+  modelId?: string,
+) => QuotaProjection = () => ({ quota: null, quotaEligible: false });
+export function setSessionUsageReader(read: typeof readUsage) {
+  readUsage = read;
+}
+/** Catalog updates reuse retained session owners; no new stream or timer. */
+export function refreshSessionUsage() {
+  for (const state of sessions.values()) {
+    const history = state.doc.getList('history').toJSON() as any[];
+    const modelId = history.findLast((e) => e?.role === 'user')?.inputConfig
+      ?.modelId;
+    const usage = JSON.stringify(readUsage(state.id, modelId));
+    if (usage !== state.lastUsage) flush(state);
+  }
+}
 function flush(state: SessionState) {
   clearTimeout(state.pending);
   state.pending = undefined;
@@ -200,6 +229,9 @@ function flush(state: SessionState) {
     new Map([...state.unsent].map(([key, pending]) => [key, pending.outcome])),
     state.steerReceipts,
   );
+  const quota = readUsage(state.id, snapshot.composer?.modelId);
+  state.lastUsage = JSON.stringify(quota);
+  if (snapshot.usage) snapshot.usage = { ...snapshot.usage, ...quota };
   state.emit({
     type: active === state ? 'session' : 'sessionCache',
     sessionId: state.id,
