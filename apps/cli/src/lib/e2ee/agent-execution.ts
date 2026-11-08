@@ -331,11 +331,23 @@ export function makeEncryptedAgentExecution(options: {
     // Each touched project needs its own switch; every grant's fence must still hold.
     const authorizeTargets = (authorize: AuthorizeEncryptedExecution) =>
       authorizeAll(authorize, intent.workspaceId, authorityDevice, intent.localProjectIds);
+    // A ledger read that could not complete decides nothing: the turn waits inside
+    // its signed window and the watcher retries, as for missing evidence.
+    const unavailable = Effect.fnUntraced(function* () {
+      return {
+        state:
+          (yield* Clock.currentTimeMillis) < verified.expiresAt
+            ? ('pending-evidence' as const)
+            : ('expired' as const),
+      };
+    });
     let authorization = yield* authorizeTargets(authorizeExecution);
     if (authorization._tag !== 'Authorized')
       return authorization.reason === 'e2ee_machine_not_shared'
         ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
-        : { state: 'denied' };
+        : authorization.reason === 'unavailable'
+          ? yield* unavailable()
+          : { state: 'denied' };
     let scheduleCurrent: (() => boolean) | undefined;
     if (verified.schedule) {
       if (!options.authorizeSchedule) return { state: 'denied' };
@@ -360,13 +372,15 @@ export function makeEncryptedAgentExecution(options: {
       // Schedule signer refreshes may advance the ledger snapshot. Recheck the
       // turn signer without dropping the independent Schedule source fences.
       authorization = yield* authorizeTargets(authorizeExecution);
-      if (authorization._tag !== 'Authorized')
+      if (authorization._tag !== 'Authorized') {
+        if (authorization.reason === 'unavailable') return yield* unavailable();
         return {
           state: 'denied',
           ...(authorization.reason === 'e2ee_machine_not_shared'
             ? { reason: 'e2ee_machine_not_shared' as const }
             : {}),
         };
+      }
     }
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.
