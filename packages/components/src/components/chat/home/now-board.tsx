@@ -13,11 +13,11 @@ import {
   CircleX,
   GitMerge,
   GitPullRequest,
+  GitPullRequestDraft,
   Hand,
   ChevronDown,
   ChevronUp,
   History,
-  PencilLine,
   type LucideIcon,
 } from 'lucide-react';
 import { flushSync } from 'react-dom';
@@ -254,7 +254,7 @@ const REASON_GLYPH: Record<HomeNowReason, { glyph: LucideIcon | null; tone: styl
     working: { glyph: null, tone: styles.quiet },
     ciFailed: { glyph: CircleX, tone: styles.failed },
     finished: { glyph: CircleCheck, tone: styles.good },
-    draft: { glyph: PencilLine, tone: styles.quiet },
+    draft: { glyph: GitPullRequestDraft, tone: styles.quiet },
     readyToMerge: { glyph: GitMerge, tone: styles.good },
     openPr: { glyph: GitPullRequest, tone: styles.quiet },
     recent: { glyph: History, tone: styles.quiet },
