@@ -6,7 +6,11 @@ import {
   writeLocalSessionImageReceipt,
   listLocalSessionImages,
 } from './session-file-blob-store';
-import { LocalAttachmentStore } from './session-local-attachments';
+import {
+  prepareLocalAttachment,
+  resolveLocalAttachment,
+  downloadLocalAttachment,
+} from './session-local-attachments';
 import type {
   SorbetCustomProvider,
   SorbetCustomProviderInput,
@@ -881,7 +885,6 @@ export class MessageHandler {
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
-  private localAttachments: LocalAttachmentStore;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
   private turnPostProcessingService: TurnPostProcessingService;
@@ -2547,6 +2550,7 @@ export class MessageHandler {
   }
 
   private async buildAcpPromptBlocks(args: {
+    requesterUserId?: string;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     userTurnId?: string;
@@ -2563,14 +2567,9 @@ export class MessageHandler {
 
     for (const block of args.inputBlocks) {
       if (block.type === 'local_attachment') {
-        if (!args.userTurnId) throw new Error('Local attachment requires its original turn');
-        const resolved = await this.localAttachments.resolve(
-          {
-            sessionId: args.sessionId,
-            turnId: args.userTurnId,
-          },
-          block
-        );
+        if (this.encryptedAttachments || args.requesterUserId !== this.userId)
+          throw new Error('Local attachment paths require the machine owner');
+        const resolved = await resolveLocalAttachment(block, this.machineId);
         if (block.kind === 'image') {
           if (resolved.sizeBytes > 20 * 1024 * 1024)
             throw new Error('Local image exceeds image input limit');
@@ -3183,11 +3182,6 @@ export class MessageHandler {
     this.machineName = config.machineName;
     this.cliVersion = config.cliVersion;
     this.machineId = config.machineId as MachineId;
-    this.localAttachments = new LocalAttachmentStore({
-      accountId: this.userId,
-      workspaceId: this.workspaceId,
-      machineId: this.machineId,
-    });
     this.sessionActivePresence = new SessionActivePresenceControllerLegacy(
       this.workspaceDocument,
       this.machineId,
@@ -3910,10 +3904,16 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
-        downloadFileChunk: async (request) =>
-          request.attachment
-            ? this.downloadRegisteredAttachment(request)
-            : fileReader.downloadFileChunk(request),
+        downloadFileChunk: async (request) => {
+          if (
+            request.attachment?.machineId !== undefined &&
+            request.attachment.machineId !== this.machineId
+          )
+            return { status: 'error', code: 'invalid_path' };
+          return fileReader.downloadFileChunk(
+            request.attachment ? { ...request, path: request.attachment.path } : request
+          );
+        },
         openCodeCollabText: async (request) => await codeReader.openText(request),
         refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
@@ -4090,16 +4090,7 @@ export class MessageHandler {
       },
       onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
     });
-    const inheritLocalAttachment = async (
-      attachment: import('@lody/shared').SessionLocalAttachment,
-      sessionId: SessionId,
-      turnId: string
-    ) => {
-      if (this.encryptedAttachments) throw new Error('Protected local attachments are unavailable');
-      return this.localAttachments.inherit(attachment, { sessionId, turnId });
-    };
     this.sessionForkService = new SessionForkService({
-      rebindLocalAttachment: inheritLocalAttachment,
       workspaceDocument: this.workspaceDocument,
       sessionManager: this.sessionManager,
       userResolver: this.sessionUserResolver,
@@ -4122,7 +4113,6 @@ export class MessageHandler {
       );
     });
     this.sessionEditAndResendService = new SessionEditAndResendService({
-      rebindLocalAttachment: inheritLocalAttachment,
       workspaceDocument: this.workspaceDocument,
       sessionManager: this.sessionManager,
       executionService: this.executionService,
@@ -7564,11 +7554,11 @@ export class MessageHandler {
     }
   }
 
-  private async downloadRegisteredAttachment(
+  private async downloadOwnerLocalAttachment(
     request: import('@lody/shared').FileDownloadRequest
   ): Promise<import('@lody/shared').FileDownloadResponse> {
     if (this.encryptedAttachments) return { status: 'error', code: 'unsupported_protocol' };
-    return this.localAttachments.download(request);
+    return downloadLocalAttachment(request, this.machineId);
   }
 
   async handleLocalMachineRpc(
@@ -7696,7 +7686,7 @@ export class MessageHandler {
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
         return request.params.attachment
-          ? this.downloadRegisteredAttachment(request.params)
+          ? this.downloadOwnerLocalAttachment(request.params)
           : this.filePreviewService.downloadFileChunk(request.params);
 
       case 'project/probe-local-member': {
@@ -8237,7 +8227,7 @@ export class MessageHandler {
         }
         break;
       }
-      case 'session/attachment-resolve': {
+      case 'session/attachment-prepare': {
         try {
           if (
             context.source !== 'local' ||
@@ -8245,49 +8235,17 @@ export class MessageHandler {
             message.workspaceId !== this.workspaceId ||
             this.encryptedAttachments
           )
-            throw new Error('Local attachment is unavailable on this machine');
-          const resolved = await this.localAttachments.resolve(
-            {
-              sessionId: message.sessionId,
-              turnId: message.attachment.turnId,
-            },
-            message.attachment
-          );
+            throw new Error('Local attachment preparation is unavailable for this target');
+          const attachment = await prepareLocalAttachment(message);
           context.send({
-            type: 'session/attachment-resolve_response',
-            sessionId: message.sessionId,
-            success: true,
-            path: resolved.path,
-          });
-        } catch (error) {
-          context.send({
-            type: 'session/attachment-resolve_response',
-            sessionId: message.sessionId,
-            success: false,
-            error: formatErrorMessage(error),
-          });
-        }
-        break;
-      }
-      case 'session/attachment-register': {
-        try {
-          if (
-            context.source !== 'local' ||
-            message.machineId !== this.machineId ||
-            message.workspaceId !== this.workspaceId ||
-            this.encryptedAttachments
-          )
-            throw new Error('Local attachment registration is unavailable for this target');
-          const attachment = await this.localAttachments.register(message);
-          context.send({
-            type: 'session/attachment-register_response',
+            type: 'session/attachment-prepare_response',
             sessionId: message.sessionId,
             success: true,
             attachment,
           });
         } catch (error) {
           context.send({
-            type: 'session/attachment-register_response',
+            type: 'session/attachment-prepare_response',
             sessionId: message.sessionId,
             success: false,
             error: formatErrorMessage(error),

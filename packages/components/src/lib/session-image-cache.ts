@@ -14,7 +14,6 @@ type CacheEntry = {
   blob: Blob;
   blobUrl: string;
   dataUrl?: string;
-  sizeBytes: number;
 };
 
 const imageCache = new Map<string, CacheEntry>();
@@ -52,7 +51,7 @@ const evictIfNeeded = (): void => {
   for (const [key, entry] of imageCache) {
     imageCache.delete(key);
     URL.revokeObjectURL(entry.blobUrl);
-    totalCachedBytes = Math.max(0, totalCachedBytes - entry.sizeBytes);
+    totalCachedBytes = Math.max(0, totalCachedBytes - entry.blob.size);
     if (totalCachedBytes <= MAX_CACHE_BYTES) {
       break;
     }
@@ -106,7 +105,7 @@ const writeBlobToMemoryCache = (key: string, blob: Blob, preparedUrl?: string): 
   const existingEntry = imageCache.get(key);
   if (existingEntry) {
     URL.revokeObjectURL(existingEntry.blobUrl);
-    totalCachedBytes = Math.max(0, totalCachedBytes - existingEntry.sizeBytes);
+    totalCachedBytes = Math.max(0, totalCachedBytes - existingEntry.blob.size);
     imageCache.delete(key);
   }
 
@@ -115,7 +114,6 @@ const writeBlobToMemoryCache = (key: string, blob: Blob, preparedUrl?: string): 
     key,
     blob,
     blobUrl,
-    sizeBytes: blob.size,
   };
 
   imageCache.set(key, entry);

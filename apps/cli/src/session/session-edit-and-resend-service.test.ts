@@ -1,8 +1,6 @@
 import { mkdtemp, writeFile, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { LocalAttachmentStore } from '../lib/session-local-attachments';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -82,9 +80,6 @@ const historyFixture = (): SessionHistoryInput[] => [
 
 function createHarness(
   options: {
-    rebindLocalAttachment?: ConstructorParameters<
-      typeof SessionEditAndResendService
-    >[0]['rebindLocalAttachment'];
     active?: boolean;
     prepareError?: Error;
     persistError?: Error;
@@ -234,7 +229,6 @@ function createHarness(
     workspaceId: 'workspace-1',
     machineId,
     enqueueDispatch: () => events.push('dispatch'),
-    rebindLocalAttachment: options.rebindLocalAttachment,
   });
 
   return withHistoryPort({
@@ -655,53 +649,37 @@ it.each([false, true])(
 );
 
 it.each([false, true])(
-  'rebinds local attachments before replacing history, preserving history on missing source: %s',
+  'preserves direct local attachments on resend even when source is missing: %s',
   async (missing) => {
     const root = await mkdtemp(path.join(tmpdir(), 'resend-local-'));
     try {
       const source = path.join(root, 'input.txt');
       await writeFile(source, 'synthetic');
-      const scope = { workspaceId: 'workspace-1', machineId, sessionId, turnId: 'user-2' };
-      const store = new LocalAttachmentStore({ ...scope, accountId: 'test' }, root);
-      const attachment = await store.register({
-        ...scope,
-        referenceId: randomUUID(),
+      const attachment = {
+        type: 'local_attachment' as const,
+        machineId,
         path: source,
-        managed: false,
-        kind: 'file',
+        kind: 'file' as const,
         fileName: 'input.txt',
         mimeType: 'text/plain',
-      });
+        sizeBytes: 9,
+      };
       const history = historyFixture();
       history[2]!.items = [attachment];
       const harness = createHarness({
         history,
-        rebindLocalAttachment: (item, targetSession, turnId) =>
-          store.inherit(item, { sessionId: targetSession, turnId }),
       });
       if (missing) await unlink(source);
       const result = await harness.service.editAndResend({
         ...spec,
         inputConfig: { ...spec.inputConfig, inputBlocks: [attachment] },
       });
-      if (missing) {
-        expect(result.success).toBe(false);
-        expect(
-          (await harness.realDoc.sessionData.history.readAll()).map((entry) => entry.id)
-        ).toContain('user-2');
-        expect(
-          (await harness.realDoc.sessionData.history.readAll()).map((entry) => entry.id)
-        ).not.toContain('user-3');
-      } else {
-        expect(result.success).toBe(true);
-        const replacement = (await harness.realDoc.sessionData.history.readAll()).find(
-          (entry) => entry.id === 'user-3'
-        )!;
-        expect(replacement.items).toMatchObject([{ type: 'local_attachment', turnId: 'user-3' }]);
-        await expect(
-          store.resolve({ ...scope, turnId: 'user-3' }, replacement.items[0] as typeof attachment)
-        ).resolves.toMatchObject({ sizeBytes: 9 });
-      }
+      expect(result.success).toBe(true);
+      const replacement = (await harness.realDoc.sessionData.history.readAll()).find(
+        (entry) => entry.id === 'user-3'
+      )!;
+      expect(replacement.items).toEqual([attachment]);
+      expect(replacement.inputConfig?.inputBlocks).toEqual([attachment]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -394,10 +394,8 @@ const SessionVisualAnnotationReferenceInputBlockSchema =
 export const SessionLocalAttachmentSchema = z
   .object({
     type: z.literal('local_attachment'),
-    referenceId: z.string().uuid(),
     machineId: MachineIdSchema,
-    sessionId: SessionIdSchema,
-    turnId: SharedTrimmedNonEmptyStringSchema,
+    path: SharedTrimmedNonEmptyStringSchema,
     kind: z.enum(['file', 'image']),
     fileName: SharedTrimmedNonEmptyStringSchema,
     mimeType: SharedTrimmedNonEmptyStringSchema,
@@ -1940,42 +1938,21 @@ export const SessionImageResolveLocalResponseSchema = z
   })
   .strict();
 
-export const SessionAttachmentResolveRequestSchema = z
+export const SessionAttachmentPrepareRequestSchema = z
   .object({
-    type: z.literal('session/attachment-resolve'),
+    type: z.literal('session/attachment-prepare'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     sessionId: SessionIdSchema,
-    attachment: SessionLocalAttachmentSchema,
-  })
-  .strict();
-export const SessionAttachmentResolveResponseSchema = z
-  .object({
-    type: z.literal('session/attachment-resolve_response'),
-    sessionId: SessionIdSchema,
-    success: z.boolean(),
-    path: z.string().optional(),
-    error: z.string().optional(),
-  })
-  .strict();
-export const SessionAttachmentRegisterRequestSchema = z
-  .object({
-    type: z.literal('session/attachment-register'),
-    machineId: MachineIdSchema,
-    workspaceId: WorkspaceIdSchema,
-    sessionId: SessionIdSchema,
-    turnId: SharedTrimmedNonEmptyStringSchema,
-    referenceId: z.string().uuid(),
     path: SharedTrimmedNonEmptyStringSchema,
-    managed: z.boolean(),
     kind: z.enum(['file', 'image']),
     fileName: SharedTrimmedNonEmptyStringSchema,
     mimeType: SharedTrimmedNonEmptyStringSchema,
   })
   .strict();
-export const SessionAttachmentRegisterResponseSchema = z
+export const SessionAttachmentPrepareResponseSchema = z
   .object({
-    type: z.literal('session/attachment-register_response'),
+    type: z.literal('session/attachment-prepare_response'),
     sessionId: SessionIdSchema,
     success: z.boolean(),
     error: z.string().optional(),
@@ -2553,8 +2530,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionFileSendLocalRequestSchema,
   SessionImagePrepareLocalRequestSchema,
   SessionImageResolveLocalRequestSchema,
-  SessionAttachmentRegisterRequestSchema,
-  SessionAttachmentResolveRequestSchema,
+  SessionAttachmentPrepareRequestSchema,
   SessionHistoryReadRequestSchema,
   SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
@@ -2594,8 +2570,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionFileSendLocalResponseSchema,
   SessionImagePrepareLocalResponseSchema,
   SessionImageResolveLocalResponseSchema,
-  SessionAttachmentRegisterResponseSchema,
-  SessionAttachmentResolveResponseSchema,
+  SessionAttachmentPrepareResponseSchema,
   SessionHistoryReadResponseSchema,
   SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,

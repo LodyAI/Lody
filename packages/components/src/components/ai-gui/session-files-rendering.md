@@ -110,7 +110,17 @@ ready Roost inputs and their acceptance receipts.
 
 `session-attachment-preparation.ts` seeds `session-image-cache.ts` with each
 successful image preparation before releasing its source. Same-desktop images
-remain image payloads with local transport; ordinary files use scoped host registration references.
+remain image payloads with local transport; ordinary files carry their absolute path and owning machine. Generated files
+use the durable path returned by preparation; originals retain their selected path
+and file metadata directly, without preparation IPC or a registration RPC. Resend,
+fork, and queued inputs carry that payload unchanged, without inheritance mappings.
+The path identifies the file; it does not grant read access. Local preview uses the
+host's disk-machine authorization. Remote attachment downloads use the existing
+workspace-contained file reader, so generated files outside its allowed roots cannot
+be downloaded remotely. Local RPC downloads require machine-owner authorization;
+ACP path reads require the frozen requester to be the machine owner and reject the
+encrypted route.
+
 Local images need no cloud token or upload completion for sending or execution.
 Images are automatically published by the background upload owner when authorized
 cloud access is available, with retries after connectivity returns; publication
@@ -200,10 +210,10 @@ the extra thumbnail-load gap documented in the
 - Still plain non-zoomable `<img>`, by scope not by accident: tool-call `image`
   content blocks in `view.tsx` and markdown images in `markdown-renderer.tsx`.
 
-Local image attachments on the original desktop automatically resolve their scoped registration
+Path-based local image attachments on the original desktop use their payload path
 and display an inline image through Electron’s file-resource URL, with the existing zoomable
-viewer on click. Failed resolution or image loading shows an inline retry action. Ordinary
-local attachment cards open the registered path on the original desktop. On another
+viewer on click. Failed preview or image loading shows an inline retry action. Ordinary
+local attachment cards open the payload path on the original desktop. On another
 device, clicking downloads current bytes through the existing authenticated file
 RPC; it never starts from rendering alone. Show a spinner during the request and
 an inline error on failure. Web/desktop uses a browser download, native mobile uses

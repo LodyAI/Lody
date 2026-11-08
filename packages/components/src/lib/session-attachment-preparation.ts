@@ -88,8 +88,8 @@ export async function prepareDraftAttachments(args: {
       if (route === 'local') {
         if (args.content.mode === 'protected')
           throw new Error('Protected local attachment preparation is unavailable');
-        if (!attachment.localReferenceId) {
-          attachment.localReferenceId = crypto.randomUUID();
+        if (attachment.kind === 'image' && !attachment.localImageId) {
+          attachment.localImageId = crypto.randomUUID();
           args.update(attachments);
         }
         if (attachment.kind === 'image') {
@@ -102,7 +102,6 @@ export async function prepareDraftAttachments(args: {
               workspaceId: args.record.workspaceId,
               sessionId: args.record.sessionId,
               machineId: machineId!,
-              turnId: args.record.entry.id!,
               attachment,
               signal,
             }),

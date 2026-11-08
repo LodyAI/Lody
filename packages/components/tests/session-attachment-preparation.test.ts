@@ -643,31 +643,22 @@ it('sends a same-machine image without daemon capability metadata', async () => 
   expect(local.files).toEqual(['image.png']);
 });
 
-it('passes an original path through the actual native bridge without reading file bytes', async () => {
+it('keeps an original path without host preparation or reading file bytes', async () => {
   const { prepareElectronLocalAttachment } = await vi.importActual<
     typeof import('../src/lib/electron-local-attachment')
   >('../src/lib/electron-local-attachment');
-  const referenceId = crypto.randomUUID();
   const expected = {
     type: 'local_attachment' as const,
-    referenceId,
+    path: '/synthetic/original.txt',
     machineId: 'machine',
-    sessionId: 'session',
-    turnId: 'turn',
     kind: 'file' as const,
     fileName: 'original.txt',
     mimeType: 'text/plain',
     sizeBytes: 9,
   };
-  let request: unknown;
-  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({
-    localProjects: {
-      prepareLocalAttachment: async (payload: unknown) => {
-        request = payload;
-        return { ok: true, attachment: expected };
-      },
-    },
-  } as never);
+  const bridge = vi.spyOn(electronIpc, 'getIpcServices').mockImplementation(() => {
+    throw new Error('Original paths do not need host preparation');
+  });
   try {
     const source = new Blob(['synthetic']);
     source.arrayBuffer = async () => {
@@ -678,7 +669,6 @@ it('passes an original path through the actual native bridge without reading fil
         workspaceId: 'workspace',
         sessionId: 'session',
         machineId: 'machine',
-        turnId: 'turn',
         signal: new AbortController().signal,
         attachment: {
           id: 'draft',
@@ -688,16 +678,9 @@ it('passes an original path through the actual native bridge without reading fil
           mimeType: 'text/plain',
           lastModified: 0,
           localSourcePath: '/synthetic/original.txt',
-          localReferenceId: referenceId,
         },
       })
     ).resolves.toEqual(expected);
-    expect(request).toMatchObject({
-      source: { path: '/synthetic/original.txt' },
-      referenceId,
-      turnId: 'turn',
-    });
-    expect((request as { source: unknown }).source).not.toHaveProperty('bytes');
   } finally {
     bridge.mockRestore();
   }

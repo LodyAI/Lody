@@ -6994,15 +6994,9 @@ function LocalAttachmentImage({
       try {
         const ipc = getIpcServices();
         if (!ipc) throw new Error('Local attachment unavailable');
-        const path = await ipc.localProjects.resolveLocalAttachment({
-          workspaceId,
-          sessionId,
-          attachment: attachmentRef.current,
-        });
-        if (!active) return;
         const preview = await ipc.machineRpc.previewFile({
           machineId: attachmentRef.current.machineId,
-          path,
+          path: attachmentRef.current.path,
           workspaceRoot: null,
         });
         if (!active) return;
@@ -7063,7 +7057,13 @@ export const LocalAttachmentCard = ({
   const { openLocalFile } = useContext(SessionChatActionContext);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
-  const binding = `${workspaceId}:${sessionId}:${attachment.referenceId}:${machineId}`;
+  const binding = JSON.stringify([
+    workspaceId,
+    sessionId,
+    attachment.machineId,
+    attachment.path,
+    machineId,
+  ]);
   const currentBinding = useRef<string | null>(binding);
   currentBinding.current = binding;
   useEffect(
@@ -7073,18 +7073,8 @@ export const LocalAttachmentCard = ({
     []
   );
   const remote = machineId !== attachment.machineId;
-  const available =
-    !readonly &&
-    sessionId === attachment.sessionId &&
-    !!workspaceId &&
-    (remote ? !!runtime : !!openLocalFile);
-  if (
-    !readonly &&
-    !remote &&
-    workspaceId &&
-    sessionId === attachment.sessionId &&
-    attachment.kind === 'image'
-  ) {
+  const available = !readonly && !!workspaceId && (remote ? !!runtime : !!openLocalFile);
+  if (!readonly && !remote && workspaceId && attachment.kind === 'image') {
     return (
       <LocalAttachmentImage
         key={JSON.stringify([workspaceId, sessionId, attachment])}
@@ -7127,8 +7117,8 @@ export const LocalAttachmentCard = ({
               attachment.machineId as MachineId,
               {
                 sessionId,
-                path: attachment.fileName,
-                attachment: { ...attachment, sessionId },
+                path: attachment.path,
+                attachment,
                 ...range,
               },
               session?.parentSessionId ?? sessionId
@@ -7154,22 +7144,8 @@ export const LocalAttachmentCard = ({
             });
           return;
         }
-        const ipc = getIpcServices();
-        if (!ipc) {
-          setOpening(false);
-          setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'));
-          return;
-        }
-        void ipc.localProjects
-          .resolveLocalAttachment({ workspaceId, sessionId, attachment })
-          .then((filePath) => {
-            if (currentBinding.current === binding)
-              openLocalFile?.(filePath, { pathKind: 'canonical' });
-          })
-          .catch(() =>
-            setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'))
-          )
-          .finally(() => setOpening(false));
+        openLocalFile?.(attachment.path, { pathKind: 'canonical' });
+        setOpening(false);
       }}
     />
   );

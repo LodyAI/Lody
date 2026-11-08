@@ -16,8 +16,7 @@ import type { SessionId, WorkspaceId } from '@lody/shared/ids'
 import {
   SessionIdSchema,
   LocalProjectHistoryProviderSchema,
-  SessionAttachmentRegisterRequestSchema,
-  SessionAttachmentResolveRequestSchema,
+  SessionAttachmentPrepareRequestSchema,
   SessionImagePrepareLocalRequestSchema,
   SessionImageResolveLocalRequestSchema
 } from '@lody/shared/message-schemas'
@@ -35,7 +34,7 @@ type LocalAttachmentSource = { path: string } | { bytes: ArrayBuffer }
 async function withLocalAttachmentSource<T>(
   source: LocalAttachmentSource | undefined,
   kind: 'image' | 'attachment',
-  prepare: (sourcePath: string, managed: boolean) => Promise<T>
+  prepare: (sourcePath: string) => Promise<T>
 ): Promise<T | { ok: false; error: string }> {
   let staging: string | undefined
   try {
@@ -59,7 +58,7 @@ async function withLocalAttachmentSource<T>(
       if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath))
         throw new Error(`invalid_${kind}_path`)
     }
-    return await prepare(sourcePath, managed)
+    return await prepare(sourcePath)
   } catch (error) {
     return { ok: false, error: formatUnknownError(error) }
   } finally {
@@ -179,55 +178,27 @@ export class LocalProjectsIpc extends IpcService {
   }
 
   @IpcMethod()
-  async resolveLocalAttachment(payload: {
-    workspaceId: string
-    sessionId: string
-    attachment: import('@lody/shared').SessionLocalAttachment
-  }) {
-    const request = SessionAttachmentResolveRequestSchema.parse({
-      ...payload,
-      type: 'session/attachment-resolve',
-      machineId: payload.attachment.machineId
-    })
-    const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
-      ...request,
-      machineId: request.machineId as import('@lody/shared/ids').MachineId,
-      workspaceId: request.workspaceId as WorkspaceId
-    })
-    if (!result.ok) throw new Error(result.error)
-    const response = result.responses.find(
-      (item) => item.type === 'session/attachment-resolve_response'
-    )
-    if (!response?.success || !response.path)
-      throw new Error(response?.error ?? 'local_attachment_unavailable')
-    return response.path
-  }
-
-  @IpcMethod()
   async prepareLocalAttachment(payload: {
     workspaceId: string
     sessionId: string
     machineId: string
-    turnId: string
-    referenceId: string
     kind: 'file' | 'image'
     fileName: string
     mimeType: string
-    source: LocalAttachmentSource
+    source: { bytes: ArrayBuffer }
   }) {
-    return withLocalAttachmentSource(payload?.source, 'attachment', async (sourcePath, managed) => {
-      const request = SessionAttachmentRegisterRequestSchema.parse({
-        type: 'session/attachment-register',
+    if (!payload?.source || typeof payload.source !== 'object' || !('bytes' in payload.source))
+      return { ok: false as const, error: 'invalid_attachment_bytes' }
+    return withLocalAttachmentSource(payload.source, 'attachment', async (sourcePath) => {
+      const request = SessionAttachmentPrepareRequestSchema.parse({
+        type: 'session/attachment-prepare',
         workspaceId: payload.workspaceId,
         sessionId: payload.sessionId,
         machineId: payload.machineId,
-        turnId: payload.turnId,
-        referenceId: payload.referenceId,
         kind: payload.kind,
         fileName: payload.fileName,
         mimeType: payload.mimeType,
-        path: sourcePath,
-        managed
+        path: sourcePath
       })
       const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
         ...request,
@@ -236,7 +207,7 @@ export class LocalProjectsIpc extends IpcService {
       })
       if (!result.ok) return { ok: false as const, error: result.error }
       const response = result.responses.find(
-        (item) => item.type === 'session/attachment-register_response'
+        (item) => item.type === 'session/attachment-prepare_response'
       )
       if (!response || !response.success || !response.attachment)
         return { ok: false as const, error: response?.error ?? 'local_attachment_not_supported' }

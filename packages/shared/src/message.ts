@@ -781,35 +781,18 @@ export type SessionImageResolveLocalResponse = import('zod').infer<
   typeof import('./message-schemas').SessionImageResolveLocalResponseSchema
 >;
 
-export type SessionAttachmentResolveRequest = {
-  type: 'session/attachment-resolve';
+export type SessionAttachmentPrepareRequest = {
+  type: 'session/attachment-prepare';
   machineId: MachineId;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  attachment: import('./ai').SessionLocalAttachment;
-};
-export type SessionAttachmentResolveResponse = {
-  type: 'session/attachment-resolve_response';
-  sessionId: SessionId;
-  success: boolean;
-  path?: string;
-  error?: string;
-};
-export type SessionAttachmentRegisterRequest = {
-  type: 'session/attachment-register';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  turnId: string;
-  referenceId: string;
   path: string;
-  managed: boolean;
   kind: 'file' | 'image';
   fileName: string;
   mimeType: string;
 };
-export type SessionAttachmentRegisterResponse = {
-  type: 'session/attachment-register_response';
+export type SessionAttachmentPrepareResponse = {
+  type: 'session/attachment-prepare_response';
   sessionId: SessionId;
   success: boolean;
   error?: string;
@@ -1016,8 +999,7 @@ export type LocalSessionControlRequest =
   | SessionFileSendLocalRequest
   | SessionImagePrepareLocalRequest
   | SessionImageResolveLocalRequest
-  | SessionAttachmentRegisterRequest
-  | SessionAttachmentResolveRequest
+  | SessionAttachmentPrepareRequest
   | SessionHistoryReadRequest
   | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
@@ -1051,8 +1033,7 @@ export type LocalSessionControlResponse =
   | SessionFileSendLocalResponse
   | SessionImagePrepareLocalResponse
   | SessionImageResolveLocalResponse
-  | SessionAttachmentRegisterResponse
-  | SessionAttachmentResolveResponse
+  | SessionAttachmentPrepareResponse
   | SessionHistoryReadResponse
   | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse

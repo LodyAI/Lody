@@ -696,7 +696,7 @@ describe('MessageHandler image upload flow', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
-  it('registers local files without upload and sends local images as visual input plus the original file URI', async () => {
+  it('prepares generated files without upload and sends local images as visual input plus the durable file URI', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-prompt-'));
     vi.stubEnv('LODY_DATA_DIR', tempDir);
     const { handler, host } = createHarness();
@@ -705,14 +705,11 @@ describe('MessageHandler image upload flow', () => {
     const bytes = Buffer.from('synthetic image bytes');
     await fs.writeFile(source, bytes);
     const request = {
-      type: 'session/attachment-register' as const,
+      type: 'session/attachment-prepare' as const,
       machineId: 'machine-1',
       workspaceId: 'ws-1',
       sessionId: 'session-1',
-      turnId: 'turn-1',
-      referenceId: randomUUID(),
       path: source,
-      managed: false,
       kind: 'image' as const,
       fileName: 'image.png',
       mimeType: 'image/png',
@@ -734,13 +731,14 @@ describe('MessageHandler image upload flow', () => {
         workspaceId: 'ws-1',
         sessionId: 'session-1',
         userTurnId: 'turn-1',
+        requesterUserId: 'user-1',
         inputBlocks: [attachment],
       });
       expect(blocks).toEqual([
         { type: 'image', data: bytes.toString('base64'), mimeType: 'image/png' },
         expect.objectContaining({
           type: 'resource_link',
-          uri: pathToFileURL(await fs.realpath(source)).href,
+          uri: pathToFileURL(attachment.path).href,
         }),
       ]);
       await expect(
@@ -748,6 +746,7 @@ describe('MessageHandler image upload flow', () => {
           workspaceId: 'ws-1',
           sessionId: 'session-1',
           userTurnId: 'other-turn',
+          requesterUserId: 'other-user',
           inputBlocks: [attachment, { type: 'text', text: 'must not run' }],
         })
       ).rejects.toThrow();
@@ -761,7 +760,7 @@ describe('MessageHandler image upload flow', () => {
         ok: true,
         result: { status: 'ok', data: bytes.toString('base64'), sizeBytes: bytes.length },
       });
-      await fs.unlink(source);
+      await fs.unlink(attachment.path);
       const missing = await handler.handleLocalMachineRpc({
         machineId: 'machine-1',
         workspaceId: 'ws-1',
