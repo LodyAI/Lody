@@ -52,6 +52,8 @@
 
 ## Home UI
 
+- The Chats project index is enabled only for project grouping with multiple sections and scrollable content. Touch activation must begin within a touch-target-sized region around the visible scrollbar thumb, never the whole trailing rail; ordinary list gestures remain available until long press wins. Scrubbing targets rendered headers after family folding, and release, cancellation, loss of foreground lifecycle, or unavailable scrolling retracts the capsule.
+
 - Dark app/page base and grouped backgrounds use soft black `#111113`, aligned with iOS, including launch/window surfaces. Never add an opaque pure-black background or pure-black mode; preserve translucent scrims/shadows and artwork.
 
 - `home/HomeActivity` is the launcher: native sign-in without an account, otherwise `home/ChatListScreen`, which opens `chat/ChatScreen` for a row. It reads `AccountController` / `CatalogRepository` state only and picks the first workspace when none is restored.

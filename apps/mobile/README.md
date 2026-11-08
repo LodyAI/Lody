@@ -9,6 +9,10 @@ permission requests, failures, and unread replies remain visible from the list.
 Tabs stay inside their conversation; independently opened child conversations
 retain their own status.
 
+In Chats’ project grouping, holding the scrollbar thumb expands a project index.
+Slide through its icons to jump between visible groups; releasing retracts it.
+Time/status grouping, search, and conversation pages keep their existing scrolling.
+
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
 clients currently use Lody Cloud; they are not a mobile frontend for the OSS

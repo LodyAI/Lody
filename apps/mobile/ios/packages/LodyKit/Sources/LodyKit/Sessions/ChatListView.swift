@@ -52,6 +52,16 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       updateBackdrop()
     }
   }
+  var projectIndexEnabled = false {
+    didSet {
+      guard projectIndexEnabled != oldValue else { return }
+      projectIndex.cancel()
+      rebuildProjectIndex()
+    }
+  }
+  private lazy var projectIndex = InboxProjectIndex(scroll: collection)
+  private var applyingSections = false
+  private var sectionGeneration = 0
   private var detailsObserver: NSObjectProtocol?
 
   override init(frame: CGRect) {
@@ -83,7 +93,10 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     layoutConfiguration.interSectionSpacing = LodySpacing.md
     layout.configuration = layoutConfiguration
     let collection = ChatListCollectionView(frame: bounds, collectionViewLayout: layout)
-    collection.onLayout = { [weak self] in self?.updateBackdrop() }
+    collection.onLayout = { [weak self] in
+      self?.updateBackdrop()
+      self?.refreshProjectIndex()
+    }
     self.collection = collection
     collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     collection.backgroundColor = .clear
@@ -121,6 +134,10 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     placeholder.adjustsFontForContentSizeCategory = true
     placeholder.isHidden = true
     addSubview(placeholder)
+    projectIndex.accessibilityLabel = String(localized: "inbox.projectIndex.accessibility", bundle: .lody)
+    projectIndex.accessibilityHint = String(localized: "inbox.projectIndex.hint", bundle: .lody)
+    projectIndex.jump = { [weak self] in self?.jumpToSection($0) }
+    addSubview(projectIndex)
     detailsObserver = NotificationCenter.default.addObserver(forName: .lodyChatRowDetailsChanged, object: nil, queue: .main) {
       [weak self] _ in MainActor.assumeIsolated { self?.detailsChanged() }
     }
@@ -143,7 +160,10 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    if projectIndex.frame.size != bounds.size { projectIndex.cancel() }
     collection.frame = bounds
+    projectIndex.frame = bounds
+    refreshProjectIndex()
     updateBackdrop()
     let inset = LodyLayout.screenPaddingX * 2
     placeholder.frame = CGRect(x: inset, y: bounds.midY - 60, width: max(0, bounds.width - inset * 2), height: 120)
@@ -155,6 +175,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   }
 
   func setSections(_ sections: [LodyListSection]) {
+    projectIndex.cancel()
+    projectIndex.update([])
+    applyingSections = true
+    sectionGeneration += 1
+    let generation = sectionGeneration
     lastSections = sections
     var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
     var next: [Item: Entry] = [:]
@@ -200,10 +225,61 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     snapshot.reloadItems(Array(actionsChanged))
     snapshot.reconfigureItems(Array(changed.subtracting(actionsChanged)))
     dataSource.apply(snapshot, animatingDifferences: window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
-      self?.updateBackdrop()
+      guard let self, self.sectionGeneration == generation else { return }
+      self.applyingSections = false
+      self.updateBackdrop()
+      self.rebuildProjectIndex()
     }
     updateBackdrop()
     updatePlaceholder()
+  }
+
+  private func rebuildProjectIndex() {
+    guard !applyingSections else { return }
+    let snapshot = dataSource.snapshot()
+    let sections = Dictionary(lastSections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let items: [InboxProjectIndex.Item] = projectIndexEnabled ? snapshot.sectionIdentifiers.compactMap { id in
+      guard let section = sections[id], snapshot.numberOfItems(inSection: id) > 0 else { return nil }
+      let tints = section.rows.flatMap { [$0.imageTint, $0.collapsedImageTint] }
+      let tint = ["danger", "warning", "blue"].first(where: tints.contains)
+        ?? (section.rows.contains(where: \.unread) ? "blue" : "")
+      let symbol = ["pinned": "pin.fill", "group:chat": "bubble.left" ][id] ?? ""
+      // Use the root's repository, never a cross-project opened child or Pinned's first row.
+      let repository = section.rows.first?.repository ?? ""
+      let image = symbol.isEmpty ? RepositoryImages.url(repository)?.absoluteString ?? "" : ""
+      return InboxProjectIndex.Item(id: id, title: section.header, symbol: symbol, tint: tint, image: image)
+    } : []
+    projectIndex.update(items)
+    collection.showsVerticalScrollIndicator = items.count < 2
+    refreshProjectIndex()
+  }
+
+  private func refreshProjectIndex() {
+    guard !applyingSections else { return }
+    let top = collection.contentOffset.y + collection.adjustedContentInset.top
+    let path = collection.indexPathsForVisibleItems.filter { path in
+      (collection.layoutAttributesForItem(at: path)?.frame.maxY ?? 0) > top
+    }.min()
+    let id = path.flatMap { dataSource.itemIdentifier(for: $0)?.section }
+    projectIndex.refresh(current: id)
+  }
+
+  private func jumpToSection(_ id: String) {
+    guard projectIndexEnabled, !applyingSections else { return }
+    let snapshot = dataSource.snapshot()
+    guard snapshot.sectionIdentifiers.contains(id), let item = snapshot.itemIdentifiers(inSection: id).first,
+      let path = dataSource.indexPath(for: item),
+      let attributes = collection.layoutAttributesForItem(at: path) else { return }
+    // Item geometry is unpinned and belongs to the committed snapshot. Never query
+    // supplementary attributes with a path retained across a diffable update.
+    let headerHeight = collection.collectionViewLayout.layoutAttributesForSupplementaryView(
+      ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: path.section)
+    )?.frame.height ?? 0
+    let lower = -collection.adjustedContentInset.top
+    let upper = max(lower, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+    let y = min(upper, max(lower, attributes.frame.minY - headerHeight - collection.adjustedContentInset.top))
+    collection.setContentOffset(CGPoint(x: collection.contentOffset.x, y: y), animated: false)
+    collection.layoutIfNeeded()
   }
 
   private func toggleOpener(_ id: String) {

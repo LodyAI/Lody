@@ -1,5 +1,7 @@
 package app.lody.android.home
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import app.lody.android.runtime.CatalogProject
 import app.lody.android.runtime.CatalogPullRequest
 import app.lody.android.runtime.CatalogSession
@@ -16,6 +18,55 @@ import java.time.ZoneOffset
 class ChatListModelTest {
     private fun session(id: String, project: String, status: String = "idle", archived: Boolean = false, pinned: Boolean = false, at: String) =
         CatalogSession(id, "m", project, "Chat $id", status, archived, pinned, at)
+
+    @Test fun projectIndexTouchTargetFollowsThumbWithoutActivatingWholeRail() {
+        val target = projectIndexTouchBounds(Rect(393f, 200f, 396f, 232f), 400f, 44f)
+        assertEquals(Rect(356f, 194f, 400f, 238f), target)
+        assertTrue(target.contains(Offset(360f, 216f)))
+        assertFalse(target.contains(Offset(390f, 100f)))
+        assertFalse(target.contains(Offset(390f, 300f)))
+        assertFalse(target.contains(Offset(350f, 216f)))
+        assertEquals(Rect(356f, 100f, 400f, 160f),
+            projectIndexTouchBounds(Rect(393f, 100f, 396f, 160f), 400f, 44f))
+    }
+
+    @Test fun projectIndexScrubRemainsAnchoredWhenCapsuleCannotAlignWithFinger() {
+        // A dense capsule can clamp at either viewport edge; its visual top must not
+        // affect selection. Touches at either end of a tall thumb share this mapping.
+        for (heldY in listOf(4f, 60f, 740f, 796f)) {
+            for (origin in listOf(0, 1, 20, 38, 39)) {
+                fun scrub(y: Float) = projectIndexScrubTarget(origin, y - heldY, 16f, 40)
+                assertEquals(origin, scrub(heldY))
+                assertEquals(origin, scrub(heldY - 1f))
+                assertEquals(origin, scrub(heldY + 1f))
+                assertEquals((origin + 1).coerceAtMost(39), scrub(heldY + 16f))
+                assertEquals((origin - 1).coerceAtLeast(0), scrub(heldY - 16f))
+                assertEquals(0, scrub(heldY - 1000f))
+                assertEquals(39, scrub(heldY + 1000f))
+            }
+        }
+    }
+
+    @Test fun projectIndexJumpsToRenderedHeadersAfterFamilyFolding() {
+        val parent = session("parent", "p-zed", at = "2026-10-01T00:00:00Z")
+        val sections = ChatListModel.home(snapshot.copy(sessions = listOf(
+            parent.copy(id = "pin", pinned = true),
+            parent,
+            parent.copy(id = "child", openedBySessionId = "parent"),
+            parent.copy(id = "other", projectId = "p-alpha"),
+            parent.copy(id = "plain", projectId = "m:unassigned"),
+        )), HomeGrouping.Project)
+        fun rendered(folded: Set<String>) = sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded)) }
+        fun assertDestinations(groups: List<HomeSection>, expected: List<Int>) {
+            val targets = projectIndexTargets(groups)
+            assertEquals(expected, targets)
+            val rows = groups.flatMap { listOf(it.id) + it.chats.map(ChatItem::id) }
+            assertEquals(groups.map(HomeSection::id), targets.map(rows::get))
+        }
+        assertDestinations(rendered(emptySet()), listOf(0, 2, 5, 7))
+        assertDestinations(rendered(setOf("parent")), listOf(0, 2, 4, 6))
+        assertEquals(emptyList<Int>(), projectIndexTargets(emptyList()))
+    }
 
     @Test fun internalTabsContributeStatusWithoutBecomingRows() {
         val parent = session("parent", "p-zed", at = "2026-10-01T00:00:00Z").copy(userId = "me")

@@ -138,6 +138,16 @@ The conversations button appears only with open child Tabs. More contains New
 current working directory conversation and access to closed conversations, so
 creation and recovery remain available without the conversations button.
 
+Chats grouped by project expose a narrow scrollbar when the list overflows and has
+multiple sections. Hold the thumb to expand a project-icon capsule, slide to jump
+to a section, and release to retract. The thumb has a 44dp-wide touch target
+centered vertically on its visible position; backgrounding or loss of scrollable
+content also retracts the index. Scrubbing uses displacement from the initial
+hold, so clamping the capsule at a viewport edge does not change the selection. The capsule includes Pinned and unassigned
+chats, highlights the selected section, and carries conversation status dots.
+Ordinary list gestures and other grouping/search views retain their behavior.
+TalkBack exposes an action to expand the index and activate named sections.
+
 ## Verification
 
 With an emulator or device connected:

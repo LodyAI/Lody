@@ -113,6 +113,18 @@ secondary-label grey (links retain link blue); fenced code retains its own sizin
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
 
+In compact Chats Home, project grouping adds a scrollbar that expands into a glass
+project index after a long press on its thumb. The app owns this thumb and its hit
+geometry because UIKit does not expose native scrollbar geometry publicly.
+Scrubbing jumps through the rendered sections, including Pinned and unassigned
+chats; release or cancellation retracts it. Search, time/status groupings and the iPad sidebar retain their existing lists.
+The thumb has a 44 pt target, VoiceOver adjustment moves between groups, and Reduce
+Motion disables the morph. Snapshot replacement cancels scrubbing before section
+identities change. Repository groups reuse cached owner avatars with a single-initial
+fallback. Expansion anchors the selected slot to the initial hold position, preserving
+selection even when the rail is clamped to the safe area.
+`verify:native --case chat-list-scroll` covers the control.
+
 ### Code Diffs & Workspace File Browsing
 
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.
