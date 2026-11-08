@@ -322,8 +322,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       self?.deselectFileOnReturn(animated: animated, coordinator: coordinator)
     }
     navigation.onWillDisappear = { [weak self] coordinator in
+      // Freeze the header as it is: rewriting the item (e.g. adding a native subtitle) mid-swipe
+      // makes the bar re-lay its title area, so the title slides out of step with the back button.
       self?.setTitleDisappearing(true)
-      self?.preserveTitleSubtitle()
       coordinator?.animate(alongsideTransition: nil) { context in
         guard context.isCancelled else { return }
         self?.setTitleDisappearing(false)
@@ -669,21 +670,13 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       ChatNavigationTitle.detach(button: titleButton, from: owner.navigationItem)
       return
     }
-    if titleDisappearing {
-      ChatNavigationTitle.preserveSubtitle(titleSubtitle(), on: owner.navigationItem)
-      return
-    }
+    if titleDisappearing { return }
     ChatNavigationTitle.apply(
       title: navigationTitle,
       subtitle: titleSubtitle(),
       button: titleButton,
       to: owner.navigationItem
     )
-  }
-
-  private func preserveTitleSubtitle() {
-    guard let owner = scrollOwner else { return }
-    ChatNavigationTitle.preserveSubtitle(titleSubtitle(), on: owner.navigationItem)
   }
 
   private func setTitleDisappearing(_ disappearing: Bool) {

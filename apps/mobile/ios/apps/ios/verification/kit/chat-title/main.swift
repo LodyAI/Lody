@@ -116,25 +116,15 @@ precondition(containsText(nav.navigationBar, "Project name"), "Nav bar must show
 precondition(containsText(nav.navigationBar, "Studio"), "Nav bar must show the computer name")
 precondition(subtitleAttachments(button) == 2, "Folder and computer symbols must survive layout")
 
+// A swipe back must not re-lay the bar mid-transition: the disappearing page keeps its title
+// view and gains no native subtitle, so the title moves with the back button.
+let frameBeforeSwipe = button.convert(button.bounds, to: nav.navigationBar)
 ChatNavigationTitle.setDisappearing(true, on: session.navigationItem)
-ChatNavigationTitle.preserveSubtitle("Project name · Studio", on: session.navigationItem)
-session.navigationItem.titleView = nil
-session.navigationItem.title = "Session title"
 nav.view.setNeedsLayout()
 nav.view.layoutIfNeeded()
-precondition(session.navigationItem.titleView == nil, "A disappearing page must let screens keep the slot for the pop transition")
-precondition(
-  session.navigationItem.subtitle == "Project name · Studio",
-  "A screens header update that nils titleView must keep UINavigationItem.subtitle"
-)
-precondition(
-  containsText(nav.navigationBar, "Project name"),
-  "Project name must stay visible after titleView is cleared"
-)
-precondition(
-  containsText(nav.navigationBar, "Studio"),
-  "Computer name must stay visible after titleView is cleared"
-)
+precondition(session.navigationItem.subtitle == nil, "A disappearing page must not add a native subtitle beside its title view")
+precondition(session.navigationItem.titleView === button, "A disappearing page keeps its title view through the pop")
+precondition(button.convert(button.bounds, to: nav.navigationBar) == frameBeforeSwipe, "The title must not move when the swipe begins")
 
 ChatNavigationTitle.setDisappearing(false, on: session.navigationItem)
 precondition(session.navigationItem.titleView === button, "Cancelled return must restore the tappable title")
@@ -149,12 +139,9 @@ ChatNavigationTitle.apply(title: "Session title", subtitle: "Project name · Stu
 precondition(session.navigationItem.titleView === button)
 precondition(session.navigationItem.title == "Session title", "Attaching takes the title back from the static route title")
 
-// A full-screen preview preserves the fallback without removing our titleView.
-ChatNavigationTitle.preserveSubtitle("Project name · Studio", on: session.navigationItem)
 ChatNavigationTitle.apply(title: "Session title", subtitle: "Project name · Studio", button: button, to: session.navigationItem)
 nav.view.layoutIfNeeded()
-precondition(session.navigationItem.subtitle == nil, "Preview return must not show a second subtitle alongside the retained titleView")
-precondition(session.navigationItem.titleView === button)
+precondition(session.navigationItem.subtitle == nil && session.navigationItem.titleView === button)
 
 button.layoutIfNeeded()
 

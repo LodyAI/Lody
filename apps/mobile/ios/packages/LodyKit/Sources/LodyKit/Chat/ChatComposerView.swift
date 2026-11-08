@@ -1752,7 +1752,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     var configuration = UIButton.Configuration.plain()
     configuration.image = face.withRenderingMode(.alwaysOriginal)
-    configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+    // The 44 pt target keeps its width but leans its padding leading, so the mark sits close
+    // to the context ring and Send.
+    configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 6)
     collapsedMark.configuration = configuration
     collapsedMark.imageView?.alpha = movingAgentMark == nil ? 1 : 0
     collapsedMark.isEnabled = modelButton.isEnabled
@@ -1892,22 +1894,28 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     if let panel = usagePanel, panel.usage != usage { panel.dismiss(animated: false) }
     let visible = usage?.visible == true
     usageButton.isHidden = !visible
-    usageWidth.constant = visible ? 62 : 0
+    usageWidth.constant = 0
     guard let usage, visible else {
       usagePanel?.dismiss(animated: false)
       return
     }
+    // Sized to its content (ring, gap, percentage, 2 pt each side) so the agent mark, the ring
+    // and Send sit close together.
+    let font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    let title = "\(Int((usage.percentage ?? 0).rounded()))%"
     var config = UIButton.Configuration.plain()
-    config.contentInsets = .zero
+    config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 2)
     config.imagePadding = 4
     config.baseForegroundColor = .secondaryLabel
-    config.title = "\(Int((usage.percentage ?? 0).rounded()))%"
+    config.title = title
     config.image = ChatUsageRing.image(usage.percentage ?? 0)
     config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
       var result = incoming
-      result.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+      result.font = font
       return result
     }
+    let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
+    usageWidth.constant = ceil(ChatUsageRing.side + 4 + titleWidth + 4)
     if usage.isContextCompacting == true {
       config.title = nil
       config.image = nil
