@@ -51,14 +51,19 @@ extension SessionController {
     let state = source.state
     guard let name = state.catalog.machineNames[session.machineId], !name.isEmpty else { return nil }
     let status = state.presence.status(of: session.machineId)
-    let symbols = ["win32": "pc", "linux": "server.rack"]
     let statusText = String(localized: String.LocalizationValue("devices." + status), bundle: .lody)
     return [
-      "id": "machine", "symbol": symbols[state.catalog.machineOs[session.machineId] ?? ""] ?? "desktopcomputer",
+      "id": "machine", "symbol": "desktopcomputer",
       // Colour only for a confirmed problem; unknown presence stays neutral.
       "tint": status == "offline" ? "warning" : "secondary",
       "accessibilityLabel": "\(name), \(statusText)",
       "menuTitle": name,
+      "machine": ["id": session.machineId, "workspaceId": state.workspaceId,
+        "status": status, "members": chat.members.values.sorted { $0.id < $1.id }.map { member -> [String: String] in
+          var value = ["id": member.id, "name": member.name]
+          if let image = member.image { value["image"] = image }
+          return value
+        }],
       "actions": [["id": "status", "title": statusText, "symbol": status == "online" ? "checkmark.circle" : "circle.dashed", "disabled": true]],
     ]
   }

@@ -966,7 +966,7 @@ private fun SectionTitle(text: String) {
     Text(
         text,
         style = LodyTheme.typography.subhead,
-        color = LodyTheme.colors.textTertiary,
+        color = LodyTheme.colors.textSecondary,
         modifier = Modifier
             .fillMaxWidth()
             .background(LodyTheme.colors.bgBase)

@@ -219,6 +219,16 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* The chip still shows the session's model; choices wait for the next load. */ }
     }
+    val machineReader = remember(application) { MachineDetailsReader(application.account) }
+    val loadMachine: suspend () -> MachinePanelData = {
+        val details = try { session?.let { machineReader.read(scope, it.machineId) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        val online = try { application.creation.options(scope, null).onlineMachineIds?.let { session?.machineId in it } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        MachinePanelData(details?.ownerUserId?.let { members[it] }, details?.shared, online)
+    }
     val capability = session?.let { options?.capability(it.machineId, it.cliType, it.agentType, it.agentConfigId) }
     var chosen by rememberSaveable(id) { mutableStateOf(false) }
     var chosenModel by rememberSaveable(id) { mutableStateOf<String?>(null) }
@@ -518,6 +528,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             if (bar != null && context.session?.isTabClosed != true) {
                 ChatActionBar(
                     bar, context.machineName, context.machineKind,
+                    loadMachine = loadMachine,
                     writing = writing,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
@@ -663,7 +674,7 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
     ) {
         RoundButton(LodyIcons.Back, stringResource(R.string.chat_back), visualSize = LodySize.controlMd, onClick = onBack)
-        Text(title, modifier = Modifier.weight(1f), style = LodyTheme.typography.headline, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(title, modifier = Modifier.weight(1f), style = LodyTheme.typography.bodyEmphasis, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Row(Modifier.clip(CircleShape).background(colors.bgOverlay).border(0.5.dp, colors.borderSubtle, CircleShape), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(LodySize.controlLg)
@@ -1033,12 +1044,13 @@ internal fun ChatActionBar(
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
+    loadMachine: suspend () -> MachinePanelData = { MachinePanelData() },
 ) {
     val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
     if (machine.isEmpty() && !context && !diff && bar.actions.isEmpty()) return
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
-        if (machine.isNotEmpty()) MachineItem(machine, machineKind)
+        if (machine.isNotEmpty()) MachineItem(machine, loadMachine)
         if (context || diff) ContextItem(bar, diffDot, onCopied, modifier)
     }
     @Composable fun Action() {
@@ -1114,26 +1126,38 @@ private fun BarCell(label: String, onClick: () -> Unit, modifier: Modifier = Mod
     )
 }
 
+internal data class MachinePanelData(
+    val owner: app.lody.android.auth.WorkspaceMember? = null,
+    val shared: Boolean? = null,
+    val online: Boolean? = null,
+)
+
 @Composable
-private fun MachineItem(name: String, kind: app.lody.android.create.CreateSessionModel.MachineKind) {
+private fun MachineItem(name: String, load: suspend () -> MachinePanelData) {
     val colors = LodyTheme.colors
     var open by remember { mutableStateOf(false) }
-    val icon = when (kind) {
-        app.lody.android.create.CreateSessionModel.MachineKind.Laptop -> LodyIcons.Machine
-        app.lody.android.create.CreateSessionModel.MachineKind.Desktop -> LodyIcons.Desktop
-        app.lody.android.create.CreateSessionModel.MachineKind.Server -> LodyIcons.Server
+    var data by remember(name) { mutableStateOf(MachinePanelData()) }
+    LaunchedEffect(open, name) {
+        if (open) { data = MachinePanelData(); data = load() }
     }
     Box(Modifier.barCapsule(colors)) {
         BarCell("${stringResource(R.string.bar_machine)}, $name", onClick = { open = true }) {
-            Icon(icon, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+            Icon(LodyIcons.Desktop, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
         }
         DropdownMenu(open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(name, style = LodyTheme.typography.body, color = colors.textPrimary) },
-                leadingIcon = { Icon(icon, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md)) },
-                onClick = { open = false },
-                enabled = false,
-            )
+            Column(Modifier.widthIn(max = LodyLayout.readableMaxWidth).padding(LodySpacing.lg), verticalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                    Icon(LodyIcons.Desktop, contentDescription = null, modifier = Modifier.size(LodyIconSize.md))
+                    Text(name, style = LodyTheme.typography.bodyEmphasis, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(when (data.online) { true -> R.string.machine_online; false -> R.string.home_offline; null -> R.string.machine_status_unknown }), style = LodyTheme.typography.footnote, color = colors.textSecondary)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+                    val ownerName = data.owner?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.machine_owner_unknown)
+                    app.lody.android.home.Avatar(data.owner?.image, ownerName, LodySize.controlSm)
+                    Text(ownerName, style = LodyTheme.typography.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(stringResource(when (data.shared) { true -> R.string.machine_shared; false -> R.string.projects_github_private; null -> R.string.machine_visibility_unknown }), style = LodyTheme.typography.subhead, color = colors.textSecondary)
+            }
         }
     }
 }

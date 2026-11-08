@@ -1,3 +1,4 @@
+import LodyDesignSystem
 import CoreText
 import SwiftUI
 import UIKit
@@ -22,7 +23,7 @@ struct ChatNavigationTitleBridge: View {
 
   var body: some View {
     Text(model.text)
-      .font(.headline)
+      .lodyTextStyle(.conversationTitle, fontOnly: true)
       .foregroundStyle(Color.primary)
       .lineLimit(1)
       .truncationMode(.tail)
@@ -166,7 +167,7 @@ final class ChatNavigationTitleButton: UIButton {
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
-    let titleFont = UIFont.preferredFont(forTextStyle: .headline)
+    let titleFont = LodyTextStyle.conversationTitle.uiFont
     let titleWidth = (titleHost.text as NSString).size(withAttributes: [.font: titleFont]).width
     let subtitleWidth = captionLabel.attributedText?.size().width ?? 0
     return CGSize(width: ceil(8 + max(titleWidth, subtitleWidth)), height: 44)
@@ -177,7 +178,7 @@ final class ChatNavigationTitleButton: UIButton {
     let inset: CGFloat = 8
     let width = max(0, bounds.width - inset)
     let x = effectiveUserInterfaceLayoutDirection == .rightToLeft ? 0 : inset
-    let titleFont = UIFont.preferredFont(forTextStyle: .headline)
+    let titleFont = LodyTextStyle.conversationTitle.uiFont
     let captionFont = UIFont.preferredFont(forTextStyle: .caption1)
     let titleLine = titleHost.text.isEmpty ? 0 : ceil(titleFont.lineHeight)
     let subtitleLine = captionLabel.isHidden ? 0 : ceil(captionFont.lineHeight)

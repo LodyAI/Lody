@@ -1,6 +1,11 @@
 package app.lody.android.chat
 
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -304,15 +309,17 @@ val TranscriptMargin = LodySpacing.lg
 @Composable
 private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
     val colors = LodyTheme.colors
+    var menu by remember(entry.id) { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = TranscriptMargin)
+            .padding(horizontal = LodySpacing.sm)
             .padding(top = LodySpacing.lg, bottom = LodySpacing.xl),
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm, Alignment.End),
         verticalAlignment = Alignment.Top,
     ) {
-        Column(Modifier.weight(1f, fill = false), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+        Column(Modifier.weight(1f, fill = false).combinedClickable(onClick = {}, onLongClick = { menu = true }), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             Row(
                 Modifier.height(UserHeaderHeight).padding(end = LodySpacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
@@ -346,11 +353,20 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
                 modifier = Modifier
                     .widthIn(max = LodyLayout.readableMaxWidth)
                     .background(colors.fillSecondary, RoundedCornerShape(UserBubbleRadius))
-                    .padding(horizontal = LodySpacing.xl, vertical = LodySpacing.lg),
+                    .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg),
             )
-            Row {
-                if (entry.id == actions.editable) MessageActionButton(LodyIcons.Edit, stringResource(R.string.message_edit)) { actions.edit(entry.id) }
-                MessageCopyButton(entry.text)
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.message_copy)) },
+                    leadingIcon = { Icon(LodyIcons.Copy, contentDescription = null) },
+                    enabled = entry.text.isNotBlank(),
+                    onClick = { clipboard.setText(AnnotatedString(entry.text)); menu = false },
+                )
+                if (entry.id == actions.editable) DropdownMenuItem(
+                    text = { Text(stringResource(R.string.message_edit)) },
+                    leadingIcon = { Icon(LodyIcons.Edit, contentDescription = null) },
+                    onClick = { menu = false; actions.edit(entry.id) },
+                )
             }
         }
         // Beside the bubble's top: past the header line and the gap under it.

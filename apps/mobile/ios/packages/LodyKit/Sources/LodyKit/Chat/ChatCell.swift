@@ -219,6 +219,12 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   var onEdit: (() -> Void)?
   func updateEditAccessibility() {
     var actions = label.linkActions
+    if let row, row.kind == "user" {
+      actions.append(UIAccessibilityCustomAction(name: String(localized: "native.chat.copy", bundle: .lody)) { _ in
+        UIPasteboard.general.setMessageMarkdown(row.text)
+        return true
+      })
+    }
     if canEdit?() == true {
       actions.append(UIAccessibilityCustomAction(name: String(localized: "native.chat.editAction", bundle: .lody)) { [weak self] _ in
         guard self?.canEdit?() == true else { return false }
@@ -490,7 +496,11 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       }]
       if self.canEdit?() == true {
         let edit = self.onEdit
-        actions.append(UIAction(title: String(localized: "native.chat.editAction", bundle: .lody), image: UIImage(systemName: "pencil")) { _ in edit?() })
+        let canEdit = self.canEdit
+        actions.append(UIAction(title: String(localized: "native.chat.editAction", bundle: .lody), image: UIImage(systemName: "pencil")) { _ in
+          guard canEdit?() == true else { return }
+          edit?()
+        })
       }
       return UIMenu(children: actions)
     }
@@ -564,7 +574,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
     return CGRect(x: 2, y: textY, width: 20, height: min(textHeight, 20))
   }
   static func textWidth(_ row: ChatRow, width: CGFloat) -> CGFloat {
-    if row.kind == "user" { return max(1, width * 0.84 - 26 - avatarSlot) }
+    if row.kind == "user" { return max(1, width - 26 - avatarSlot) }
     if row.kind == "delivery" { return max(1, width * 0.84) }
     if row.kind == "summary" && row.actionable { return max(1, width - leading(row) - chevronSlot) }
     return max(1, width - leading(row))
@@ -586,7 +596,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       return
     }
     if row.kind == "user" {
-      let size = label.sizeThatFits(CGSize(width: width * 0.84 - 26 - Self.avatarSlot, height: .greatestFiniteMagnitude))
+      let size = label.sizeThatFits(CGSize(width: width - 26 - Self.avatarSlot, height: .greatestFiniteMagnitude))
       expandable = size.height + 20 > ChatMessageContent.maximumCollapsedHeight
       messageContent.expandable = expandable
       messageContent.expanded = expanded
@@ -600,7 +610,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       let disclosureKey = expanded ? "native.chat.message.collapse" : "native.chat.message.expand"
       if expandable { accessibilityValue = String(localized: String.LocalizationValue(disclosureKey), bundle: .lody) }
       let height = ChatMessageContent.height(textHeight: size.height, limit: collapsedHeight, expanded: expanded)
-      let bubbleWidth = expandable ? width * 0.84 - Self.avatarSlot : size.width + 26
+      let bubbleWidth = expandable ? width - Self.avatarSlot : size.width + 26
       // Every bubble of a turn leaves the avatar column free; the first also has the header.
       let header = row.author.isEmpty ? 0 : Self.authorHeader
       let bubbleRight = width - Self.avatarSlot

@@ -183,7 +183,10 @@ class SessionController: UIViewController {
             guard let self, self.source.state.key == state.key else { return }
             self.chat.members = members
             // Change owner lists the members, so the menu follows the loaded list.
-            if let session = self.source.state.catalog.session(self.sessionId) { self.updateMoreMenu(session) }
+            if let session = self.source.state.catalog.session(self.sessionId) {
+              self.updateMoreMenu(session)
+              self.render()
+            }
           }
         }
       }

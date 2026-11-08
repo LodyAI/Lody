@@ -403,4 +403,9 @@
     <string name="usage_resets">Resets %1$s</string>
     <string name="usage_relative">Show relative time</string>
     <string name="usage_absolute">Show absolute time</string>
+    <string name="machine_online">Online</string>
+    <string name="machine_status_unknown">Status unknown</string>
+    <string name="machine_owner_unknown">Owner unknown</string>
+    <string name="machine_shared">Shared</string>
+    <string name="machine_visibility_unknown">Visibility unknown</string>
 </resources>

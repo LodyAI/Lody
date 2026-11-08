@@ -117,6 +117,13 @@ raised surfaces, translucent scrims/shadows and artwork retain their own colors.
 There is no separate pure-black mode. The protocol WebView is offscreen and does
 not render app pages.
 
+User messages offer Copy through a long-press menu, with Edit available only for
+the latest runtime-confirmed editable message. Conversation titles use the 16 sp
+body-emphasis style. The computer button always uses a monitor glyph; its panel
+loads owner and private/shared display metadata from `machines:listVisibleMachines`
+through the verified native account and reads current runtime presence on opening.
+Missing or failed metadata stays explicitly unknown, never implicitly private.
+
 ## Verification
 
 With an emulator or device connected:

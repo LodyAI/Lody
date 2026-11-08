@@ -75,6 +75,12 @@ Send and Stop; conversation activity/status colors remain unchanged. Appearance 
 without an accent-color picker. Process status labels use the same regular type
 as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+Conversation titles use 16 pt semibold system text. User bubbles fill the available
+reading width beside the avatar; long-press offers Copy, plus Edit for the last
+eligible user message, without inline action buttons. The computer capsule always
+uses a monitor; its panel groups name and presence, owner avatar and name, then
+private/shared visibility. Visibility comes from the public machine-registration
+query on opening; unavailable data is shown as unknown, never inferred as private.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
 secondary-label grey (links retain link blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a

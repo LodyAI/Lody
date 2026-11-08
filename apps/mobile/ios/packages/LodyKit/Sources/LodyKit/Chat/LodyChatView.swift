@@ -59,7 +59,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     didSet {
       for cell in collection.visibleCells {
         (cell as? ChatCell)?.updateEditAccessibility()
-        (cell as? ChatMessageActionsCell)?.updateEdit()
         (cell as? ChatMessageAttachmentsCell)?.updateEditAccessibility()
       }
     }
@@ -374,16 +373,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row)
         return cell
       }
-      if row.kind == "meta" || row.kind == "userActions" {
+      if row.kind == "meta" {
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "meta", for: index) as! ChatMessageActionsCell
-        let userText = self.transcript.entries.first { $0.id == row.entryID }?.items.compactMap { $0.type == "text" ? $0.text : nil }.joined(separator: "\n\n") ?? ""
-        let text = row.kind == "userActions" ? userText : ChatMessageShare.content(in: self.transcript, entryID: row.entryID)?.text ?? ""
-        cell.canEdit = { [weak self] in self?.editableMessageID == row.entryID }
+        let text = ChatMessageShare.content(in: self.transcript, entryID: row.entryID)?.text ?? ""
         cell.configure(row, copyable: !text.isEmpty)
-        cell.detailsButton.isHidden = row.kind == "userActions" || !turnInfoEnabled
+        cell.detailsButton.isHidden = !turnInfoEnabled
         cell.onCopy = { UIPasteboard.general.setMessageMarkdown(text) }
-        cell.editButton.removeAction(identifiedBy: .init("edit"), for: .touchUpInside)
-        cell.editButton.addAction(UIAction(identifier: .init("edit")) { [weak self] _ in self?.onEditMessage(["entryId": row.entryID]) }, for: .touchUpInside)
         cell.forkButton.removeAction(identifiedBy: .init("fork"), for: .touchUpInside)
         cell.forkButton.addAction(UIAction(identifier: .init("fork")) { [weak self] _ in self?.onForkMessage(["entryId": row.entryID]) }, for: .touchUpInside)
         cell.detailsButton.removeAction(identifiedBy: .init("turn-info"), for: .touchUpInside)

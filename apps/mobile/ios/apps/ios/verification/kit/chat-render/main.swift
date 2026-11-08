@@ -930,3 +930,34 @@ memberCell.configure(memberRow, text: NSAttributedString(string: memberRow.text)
 precondition(memberCell.accessibilityValue?.contains("Alice") == true && memberCell.accessibilityValue != unresolvedIdentity)
 precondition(memberCell.row?.text == "Existing message")
 print("PASS: an existing user message reconfigures with the resolved member identity")
+
+// User actions remain accessible without an inline footer, and stale Edit actions cannot edit.
+var editableUserMessage = true
+var editedUserMessage = ""
+memberCell.canEdit = { editableUserMessage }
+memberCell.onEdit = { editedUserMessage = memberRow.entryID }
+memberCell.updateEditAccessibility()
+let copyUserAction = memberCell.accessibilityCustomActions!.first { $0.name == String(localized: "native.chat.copy", bundle: .lody) }!
+precondition(copyUserAction.actionHandler != nil, "User Copy remains accessible without a footer")
+let editUserAction = memberCell.accessibilityCustomActions!.first { $0.name == String(localized: "native.chat.editAction", bundle: .lody) }!
+precondition(editUserAction.actionHandler!(editUserAction))
+precondition(editedUserMessage == memberRow.entryID)
+editableUserMessage = false
+editedUserMessage = ""
+precondition(!editUserAction.actionHandler!(editUserAction))
+precondition(editedUserMessage.isEmpty)
+memberCell.updateEditAccessibility()
+precondition(memberCell.accessibilityCustomActions!.count == 1)
+longCell.configure(longRow, text: NSAttributedString(string: longBody, attributes: [.font: userFont]))
+longCell.layoutIfNeeded()
+precondition(longCell.messageContent.frame.minX >= 0)
+precondition(longCell.messageContent.frame.width > longCell.bounds.width * 0.8)
+precondition(longCell.messageContent.frame.maxX <= longCell.bounds.width - ChatCell.avatarSlot)
+print("PASS: user copy/edit eligibility and wider bubbles preserve the avatar column")
+
+let userMessages = try JSONDecoder().decode([ChatEntry].self, from: Data(#"[{"id":"user-menu","role":"user","status":"completed","finished":true,"items":[{"itemId":"prompt","type":"text","text":"Synthetic prompt"}]}]"#.utf8))
+let userRows = ChatTranscript(entries: userMessages).rows()
+precondition(userRows.map(\.kind) == ["user"], "User messages expose actions through long press, not an extra footer")
+precondition(userRows.first?.text == "Synthetic prompt")
+
+print("PASS: user messages retain text without an inline footer")

@@ -459,7 +459,6 @@ extension LodyChatView {
     if row.kind == "tasksHeader" { return row.detail.isEmpty ? ChatFileCell.headerHeight : 56 }
     if row.subagent != nil { return ChatSubagentCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "meta" { return 44 }
-    if row.kind == "userActions" { return 44 }
     if row.kind == "duration" { return ChatCell.processHeight(for: row, width: width, traits: traitCollection) }
     if row.kind == "changesHeader" { return ChatFileCell.headerHeight }  // Same height as the tasks row without a step.
     let measured = measure(row, width: width)

@@ -396,4 +396,9 @@
     <string name="usage_resets">重置时间：%1$s</string>
     <string name="usage_relative">显示相对时间</string>
     <string name="usage_absolute">显示绝对时间</string>
+    <string name="machine_online">在线</string>
+    <string name="machine_status_unknown">状态未知</string>
+    <string name="machine_owner_unknown">所有者未知</string>
+    <string name="machine_shared">共享</string>
+    <string name="machine_visibility_unknown">共享状态未知</string>
 </resources>
