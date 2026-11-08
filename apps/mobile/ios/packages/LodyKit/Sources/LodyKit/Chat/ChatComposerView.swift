@@ -1578,8 +1578,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attachmentBar.render(attachments)
     attachmentBar.isHidden = !expanded
     let showsAttachmentRow = expanded && attachmentBar.hasVisiblePills
-    attachmentHeight.constant = showsAttachmentRow ? 48 : 0
-    attachmentTop.constant = showsAttachmentRow ? 12 : 0
+    attachmentHeight.constant = showsAttachmentRow ? ChatAttachmentBar.tileSide : 0
+    attachmentTop.constant = showsAttachmentRow ? 8 : 0
     attachmentStack.render(attachments)
     attachmentStack.isHidden = expanded || attachments.isEmpty
     hint.text = attachments.isEmpty ? state.placeholder : String(localized: "native.chat.composer.addMessage", bundle: .lody)
@@ -1644,9 +1644,14 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     formatBar.alpha = fullProgress
     formatBar.isHidden = fullProgress == 0
     formatBar.accessibilityElementsHidden = !fullScreen
-    let verticalInset = expanded ? 14 : max(0, (48 - input.font!.lineHeight) / 2)
-    let topInset = showsGrabber ? 4 : verticalInset
-    var leadingInset: CGFloat = 20
+    var verticalInset = max(0, (48 - input.font!.lineHeight) / 2)
+    if expanded { verticalInset = cardStyle ? 10 : 14 }
+    var topInset = showsGrabber ? 4 : verticalInset
+    if showsAttachmentRow { topInset = 8 }
+    // UITextView adds line-fragment padding inside its text-container inset.
+    // Align the visible text and placeholder with the attachment row's 16 pt edge.
+    let expandedInset = 16 - input.textContainer.lineFragmentPadding
+    var leadingInset: CGFloat = expandedInset
     if !expanded {
       leadingInset = attachmentStack.isHidden ? 46 : 46 + attachmentStack.stackWidth + 8
     }
@@ -1659,18 +1664,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let showsMark = showsCollapsedMark(expanded: expanded)
     var trailingInset: CGFloat = 46 + usageWidth.constant
     if showsMark { trailingInset += collapsedMarkWidth }
-    if expanded { trailingInset = 20 }
+    if expanded { trailingInset = expandedInset }
     input.textContainerInset = UIEdgeInsets(top: topInset, left: leadingInset, bottom: verticalInset, right: trailingInset)
-    hintLeading.constant = leadingInset + 5
+    hintLeading.constant = leadingInset + input.textContainer.lineFragmentPadding
     hintTop.constant = topInset
     let height = input.sizeThatFits(CGSize(width: max(1, input.bounds.width), height: .greatestFiniteMagnitude)).height
     let overflows = height > ChatMessageContent.maximumCollapsedHeight
     let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + formatHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
-    // Card style rests at one line above its controls and opens to three while editing; the
-    // glass sheet keeps its taller writing area.
+    // Attached media takes the third line's room so larger previews grow upward
+    // without adding an empty writing line. Typed text can still grow naturally.
     var minimumHeight: CGFloat = 132
     if cardStyle {
-      let lines: CGFloat = input.isFirstResponder ? 3 : 1
+      var lines: CGFloat = 1
+      if input.isFirstResponder { lines = showsAttachmentRow ? 2 : 3 }
       minimumHeight = topInset + verticalInset + lines * input.font!.lineHeight
     }
     let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
