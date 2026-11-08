@@ -70,7 +70,7 @@ final class SimulatorController: UIViewController {
     Task { [weak self] in
       guard let self else { return }
       do { try await store.stop(); SettingsPage.pop(self) }
-      catch { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: "error") }
+      catch { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error) }
     }
   }
 }

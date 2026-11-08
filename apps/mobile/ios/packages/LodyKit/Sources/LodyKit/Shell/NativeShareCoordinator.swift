@@ -138,7 +138,7 @@ final class NativeShareCoordinator {
     LodyShell.shared.openSessionFromExternal(draft.sessionId)
   }
 
-  private func toast(_ key: String) { LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: "error") }
+  private func toast(_ key: String) { LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: .error) }
   private func report(_ error: Error, operation: String) {
     DiagnosticsStore.shared.record("share", "failed", fields: ["operation": operation, "error": error.localizedDescription])
   }

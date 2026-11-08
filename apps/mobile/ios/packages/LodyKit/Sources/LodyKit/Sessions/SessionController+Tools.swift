@@ -51,7 +51,7 @@ extension SessionController {
     guard let simulator else { return }
     LodyShell.shared.pushNative(SimulatorController(store: simulator), title: simulator.name, from: self)
   }
-  private func toolError(_ error: Error) { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: "error") }
+  private func toolError(_ error: Error) { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error) }
 
   static func livePullRequest(_ reference: SessionPullRequest, _ state: SessionListState) -> PullRequestController {
     let scope = SettingsActor.live(["workspaceId": state.workspaceId, "userId": state.userId])
@@ -127,12 +127,12 @@ extension SessionController {
           let message = error == "unsupported" ? String(localized: "session.preview.unsupported", bundle: .lody) : reply.message ?? String(localized: "session.preview.generic", bundle: .lody)
           throw SettingsError(message)
         }
-        if action == "stop" { LodyToastOverlay.shared.show(message: String(localized: "session.preview.stopped", bundle: .lody), kind: "info"); return }
+        if action == "stop" { LodyToastOverlay.shared.show(message: String(localized: "session.preview.stopped", bundle: .lody), kind: .neutral); return }
         guard let address = reply.url, let url = URL(string: address), url.scheme == "https", url.user == nil, url.password == nil,
               url.host?.hasSuffix(".trycloudflare.com") == true else { throw SettingsError(String(localized: "session.preview.generic", bundle: .lody)) }
         if action == "copy" {
           UIPasteboard.general.string = address
-          LodyToastOverlay.shared.show(message: String(localized: "session.preview.copied", bundle: .lody), kind: "info")
+          LodyToastOverlay.shared.show(message: String(localized: "session.preview.copied", bundle: .lody), kind: .neutral)
         } else { present(SFSafariViewController(url: url), animated: true) }
       } catch {
         guard viewIfLoaded?.window != nil else { return }

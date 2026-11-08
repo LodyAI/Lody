@@ -71,7 +71,7 @@ final class PreferencesController: UIViewController {
     guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
     UIApplication.shared.open(url) { opened in
       guard !opened else { return }
-      LodyToastOverlay.shared.show(message: String(localized: "settings.preferences.languageFailed", bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: "settings.preferences.languageFailed", bundle: .lody), kind: .error)
     }
   }
 

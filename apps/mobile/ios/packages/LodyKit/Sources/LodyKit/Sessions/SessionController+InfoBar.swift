@@ -110,7 +110,7 @@ extension SessionController {
     case "context:branch":
       guard !bar.branch.isEmpty else { return }
       UIPasteboard.general.string = bar.branch
-      LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: "info")
+      LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: .neutral)
     default:
       if id.hasPrefix("more:"), let action = SessionInfoBar.Action(rawValue: String(id.dropFirst(5))) { performInfoBarAction(action) }
     }
@@ -153,7 +153,7 @@ extension SessionController {
     var payload: [String: Any] = ["workspaceId": state.workspaceId, "repository": pr.repository, "number": pr.number, "operation": operation]
     if let method { payload["method"] = method }
     let pending = operation == "merge" ? "bar.merge.pending" : "bar.ready.pending"
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(pending), bundle: .lody), kind: "info")
+    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(pending), bundle: .lody), kind: .neutral)
     Task { @MainActor [weak self] in
       defer {
         if let self, self.source.state.key == state.key {
@@ -168,11 +168,11 @@ extension SessionController {
         self.githubUpdates.finish(success: true)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         let done = operation == "merge" ? "bar.merge.done" : "bar.ready.done"
-        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(done), bundle: .lody), kind: "success")
+        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(done), bundle: .lody), kind: .neutral)
       } catch {
         guard let self, self.source.state.key == state.key else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)
-        LodyToastOverlay.shared.show(message: Self.writeError(error, operation: operation), kind: "error")
+        LodyToastOverlay.shared.show(message: Self.writeError(error, operation: operation), kind: .error)
       }
     }
   }

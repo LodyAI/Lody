@@ -729,7 +729,7 @@ final class ScheduleEditorController: LodyFormController {
         case .delete:
           LodyShell.shared.close(from: self)
         case .run:
-          LodyToastOverlay.shared.show(message: String(format: self.text("runStarted"), item.title), kind: "success")
+          LodyToastOverlay.shared.show(message: String(format: self.text("runStarted"), item.title), kind: .neutral)
           self.render()
         default:
           self.item?.enabled = action == .resume

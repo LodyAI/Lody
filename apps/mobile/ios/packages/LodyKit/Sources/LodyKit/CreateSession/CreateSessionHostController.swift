@@ -130,7 +130,7 @@ class CreateSessionHostController: UIViewController {
       }
     }
     controller.restoreDraft = { [weak self] token in self?.input.restoreDraft(token: token) }
-    controller.showMessage = { LodyToastOverlay.shared.show(message: $0, kind: "error") }
+    controller.showMessage = { LodyToastOverlay.shared.show(message: $0, kind: $1) }
     controller.onCancel = { [weak self] in self?.close() }
     let prefsKey = CreateSessionService.prefsKey(userId: params.userId, workspaceId: params.workspaceId)
     controller.onPrefs = { [weak self] prefs in
@@ -264,7 +264,7 @@ class CreateSessionHostController: UIViewController {
           // A pushed form hands over to the conversation prepared beneath it: the sent text flies
           // into its bubble while the form fades, never sliding back like a return to Home.
           do { try await onCreated(built.created as! [String: Any]); close(crossfade: params.pushed == true) }
-          catch { controller.submissionFailed(); LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: "error") }
+          catch { controller.submissionFailed(); LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: .error) }
         }
       } else { LodyShell.shared.finish(from: self, value: built.created); close() }
       return
@@ -279,7 +279,7 @@ class CreateSessionHostController: UIViewController {
         opening = false
         created = nil
         controller.submissionFailed()
-        LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: .error)
         return
       }
       opening = false

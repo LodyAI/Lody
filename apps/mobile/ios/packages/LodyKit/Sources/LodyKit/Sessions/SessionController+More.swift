@@ -82,9 +82,9 @@ extension SessionController {
       guard let self else { return }
       do {
         try await self.source.write(workspace, self.sessionId, .owner(member.id))
-        LodyToastOverlay.shared.show(message: String(format: self.text("session.owner.changed"), member.name), kind: "info")
+        LodyToastOverlay.shared.show(message: String(format: self.text("session.owner.changed"), member.name), kind: .neutral)
       } catch {
-        LodyToastOverlay.shared.show(message: self.text("session.owner.changeFailed"), kind: "error")
+        LodyToastOverlay.shared.show(message: self.text("session.owner.changeFailed"), kind: .error)
       }
       if let current = self.pendingOwner, current == target { self.pendingOwner = nil }
       self.render()
@@ -127,7 +127,7 @@ extension SessionController {
   private func copyLink(deeplink: Bool) {
     let state = source.state
     guard let link = Self.sessionLink(sessionId: sessionId, workspaceId: state.workspaceId, slug: state.workspace?.slug, deeplink: deeplink) else {
-      LodyToastOverlay.shared.show(message: text("session.copy.linkFailed"), kind: "error")
+      LodyToastOverlay.shared.show(message: text("session.copy.linkFailed"), kind: .error)
       return
     }
     Self.copy(link, toast: "session.copy.urlCopied")
@@ -142,12 +142,12 @@ extension SessionController {
         let path = try await self.copyService.workspacePath(workspace, id)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard self.source.state.workspaceId == workspace else { return }
         if path.isEmpty {
-          LodyToastOverlay.shared.show(message: self.text("session.copy.pathUnavailable"), kind: "error")
+          LodyToastOverlay.shared.show(message: self.text("session.copy.pathUnavailable"), kind: .neutral)
         } else {
           Self.copy(path, toast: "session.copy.pathCopied")
         }
       } catch {
-        LodyToastOverlay.shared.show(message: self.text("session.copy.pathFailed"), kind: "error")
+        LodyToastOverlay.shared.show(message: self.text("session.copy.pathFailed"), kind: .error)
       }
     }
   }
@@ -166,13 +166,13 @@ extension SessionController {
         guard self.source.state.workspaceId == params.workspaceId else { return }
         switch result {
         case .empty:
-          LodyToastOverlay.shared.show(message: self.text("session.copy.markdownEmpty"), kind: "error")
+          LodyToastOverlay.shared.show(message: self.text("session.copy.markdownEmpty"), kind: .neutral)
         case .ready(let ready):
           UIPasteboard.general.string = ready.markdown
-          LodyToastOverlay.shared.show(message: Self.describeMarkdown(ready), kind: "info")
+          LodyToastOverlay.shared.show(message: Self.describeMarkdown(ready), kind: .neutral)
         }
       } catch {
-        LodyToastOverlay.shared.show(message: self.text("session.copy.markdownFailed"), kind: "error")
+        LodyToastOverlay.shared.show(message: self.text("session.copy.markdownFailed"), kind: .error)
       }
     }
   }
@@ -196,7 +196,7 @@ extension SessionController {
 
   private static func copy(_ value: String, toast key: String) {
     UIPasteboard.general.string = value
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: "info")
+    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: .neutral)
   }
 
   private func text(_ key: String) -> String {
