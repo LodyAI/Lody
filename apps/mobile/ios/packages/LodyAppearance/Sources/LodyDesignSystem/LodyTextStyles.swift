@@ -11,6 +11,8 @@ public extension LodyTextStyle {
     static let title = LodyTextStyle(weight: .semibold, size: 22, lineHeight: 28, tracking: -0.4, dynamicType: .title2)
     /// Navigation bar titles, sheet titles, card titles.
     static let headline = LodyTextStyle(weight: .semibold, size: 17, lineHeight: 22, tracking: -0.22, dynamicType: .headline)
+    /// Compact conversation navigation title.
+    static let conversationTitle = LodyTextStyle(weight: .semibold, size: 16, lineHeight: 22, tracking: -0.18, dynamicType: .headline)
     /// List row titles, form values.
     static let body = LodyTextStyle(weight: .regular, size: 16, lineHeight: 22, tracking: -0.18, dynamicType: .body)
     /// Unread rows, emphasized values.
@@ -41,6 +43,7 @@ public extension LodyTextStyle {
         ("largeTitle", .largeTitle),
         ("title", .title),
         ("headline", .headline),
+        ("conversationTitle", .conversationTitle),
         ("body", .body),
         ("bodyEmphasis", .bodyEmphasis),
         ("reading", .reading),

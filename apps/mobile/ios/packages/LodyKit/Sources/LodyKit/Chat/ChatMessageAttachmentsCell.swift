@@ -25,8 +25,12 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
   func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
     guard canEdit?() == true else { return nil }
     let edit = onEdit
+    let eligible = canEdit
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-      UIMenu(children: [UIAction(title: String(localized: "native.chat.editAction", bundle: .lody), image: UIImage(systemName: "pencil")) { _ in edit?() }])
+      UIMenu(children: [UIAction(title: String(localized: "native.chat.editAction", bundle: .lody), image: UIImage(systemName: "pencil")) { _ in
+        guard eligible?() == true else { return }
+        edit?()
+      }])
     }
   }
   static let tileHeight: CGFloat = 76

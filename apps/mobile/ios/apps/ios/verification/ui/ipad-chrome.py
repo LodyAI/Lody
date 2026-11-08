@@ -88,16 +88,12 @@ workspace = workspace_item['frame']
 fab = chrome['create']['frame']
 ui.capture('sidebar-glass-fab')
 
-# The workspace panel lists only workspaces: logo, name, trailing checkmark on the current one.
-# Devices and Edit Workspace moved out (Settings › General edits the workspace).
+# The native workspace menu retains full names and closes on current selection.
 tap_label(workspace_item['AXLabel'])
-current = ui.element('workspace-row:ui-home')
-assert current['frame']['height'] >= 44, current
-assert not any(item.get('AXLabel') in (catalog.text('workspace.edit.action'), catalog.text('devices.title')) for item in ui.state()), \
-    'Workspace panel must not offer Devices or Edit Workspace'
+ui.wait(lambda items: any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'Missing workspace action')
 ui.capture('workspace-menu')
-ui.axe('tap', '--id', 'workspace-row:ui-home', '--post-delay', '.6')
-ui.wait(lambda items: not any(item.get('AXUniqueId') == 'workspace-panel' for item in items), 'Choosing a row must close the panel')
+tap_label('我的超长工作区名称不能折行')
+ui.wait(lambda items: not any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'Native menu did not dismiss')
 
 # The sidebar stays beside the chat only in the wide layout.
 rotation.rotate(ui, 'landscape')
@@ -166,7 +162,7 @@ assert_selected('empty-project-session-restored')
 # Business entry points share the same owner: workspace switching clears both
 # columns, then a real system deep link resolves its workspace and opens detail.
 tap_label(workspace_item['AXLabel'])
-ui.element('workspace-panel')
+ui.wait(lambda items: any(i.get('AXLabel') == '另一个工作区' for i in items), 'Missing workspace menu')
 tap_label('另一个工作区')
 ui.element('ipad-detail-placeholder')
 ui.wait(lambda items: not any(item.get('AXUniqueId') in ('ui-design', 'session-input') for item in items), 'Old workspace content survived the switch')

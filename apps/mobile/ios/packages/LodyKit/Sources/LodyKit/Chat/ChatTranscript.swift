@@ -500,7 +500,6 @@ struct ChatTranscript {
           result.insert(ChatRow(id: entry.id + ":delivery", entryID: entry.id, kind: "delivery",
             text: String(localized: String.LocalizationValue(key), bundle: .lody), attention: delivery == "rejected" || delivery == "unknown"), at: 0)
         }
-        if !result.isEmpty { result.append(ChatRow(id: entry.id + ":userActions", entryID: entry.id, kind: "userActions", text: "")) }
         return result
       }
       let answer = ChatTranscript.answerRun(entry.items)

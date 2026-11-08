@@ -125,6 +125,19 @@ raised surfaces, translucent scrims/shadows and artwork retain their own colors.
 There is no separate pure-black mode. The protocol WebView is offscreen and does
 not render app pages.
 
+User messages offer Copy through a long-press menu, with Edit available only for
+the latest runtime-confirmed editable message. Conversation titles use the 16 sp
+body-emphasis style, clipping overflow with a soft trailing-edge fade rather than
+an ellipsis (mirrored in RTL, absent when the title fits). Accessibility retains
+the full title. The header shows the computer below the title in secondary text with a presence
+icon; tapping it opens the owner/visibility panel. There is no bottom computer capsule. The panel
+loads owner and private/shared display metadata from `machines:listVisibleMachines`
+through the verified native account and reads current runtime presence on opening.
+Missing or failed metadata stays explicitly unknown, never implicitly private.
+The conversations button appears only with open child Tabs. More contains New
+current working directory conversation and access to closed conversations, so
+creation and recovery remain available without the conversations button.
+
 ## Verification
 
 With an emulator or device connected:

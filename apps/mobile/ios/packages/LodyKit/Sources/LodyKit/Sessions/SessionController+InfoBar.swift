@@ -21,7 +21,7 @@ extension SessionController {
     let bar = SessionInfoBar(session: session, repository: repository, busy: busy)
     infoBar = bar
     var result: [String: Any] = [:]
-    result["items"] = [machineItem(session)].compactMap { $0 } + resourceItems
+    result["items"] = resourceItems
     if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
@@ -45,22 +45,6 @@ extension SessionController {
       ]
     }
     return result
-  }
-
-  private func machineItem(_ session: SessionItem) -> [String: Any]? {
-    let state = source.state
-    guard let name = state.catalog.machineNames[session.machineId], !name.isEmpty else { return nil }
-    let status = state.presence.status(of: session.machineId)
-    let symbols = ["win32": "pc", "linux": "server.rack"]
-    let statusText = String(localized: String.LocalizationValue("devices." + status), bundle: .lody)
-    return [
-      "id": "machine", "symbol": symbols[state.catalog.machineOs[session.machineId] ?? ""] ?? "desktopcomputer",
-      // Colour only for a confirmed problem; unknown presence stays neutral.
-      "tint": status == "offline" ? "warning" : "secondary",
-      "accessibilityLabel": "\(name), \(statusText)",
-      "menuTitle": name,
-      "actions": [["id": "status", "title": statusText, "symbol": status == "online" ? "checkmark.circle" : "circle.dashed", "disabled": true]],
-    ]
   }
 
   /// PR number, else branch, else the repository name without its owner (web truncated the

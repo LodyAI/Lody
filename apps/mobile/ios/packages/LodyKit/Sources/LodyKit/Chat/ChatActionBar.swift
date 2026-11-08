@@ -17,6 +17,16 @@ struct ChatMenuAction: Decodable, Equatable, Identifiable {
 /// the computer and live resources, the repository context with ±diff, and the repository
 /// action. Colour is kept for status (PR state, CI, diff), so Send stays the one accent on screen.
 struct ChatActionBarState: Decodable, Equatable {
+  #if !LODY_SHARE_EXTENSION
+  struct Machine: Decodable, Equatable {
+    let id: String
+    let workspaceId: String
+    let status: String
+    let members: [WorkspaceMember]
+  }
+
+  #endif
+
   struct Item: Decodable, Equatable, Identifiable {
     let id: String
     let symbol: String
@@ -154,8 +164,9 @@ struct ChatActionBarContent: View {
       ?? items[0]
     return Menu {
       ForEach(items) { item in
-        Button { open(item) } label: { Label(item.accessibilityLabel, systemImage: item.symbol) }
-          .disabled(item.id == "machine")
+        Button {
+          open(item)
+        } label: { Label(item.accessibilityLabel, systemImage: item.symbol) }
       }
     } label: {
       HStack(spacing: 2) {
@@ -178,19 +189,21 @@ struct ChatActionBarContent: View {
   }
 
   @ViewBuilder private func item(_ item: ChatActionBarState.Item) -> some View {
-    let actions = item.actions ?? []
-    Group {
-      if actions.isEmpty {
-        Button { open(item) } label: { glyph(item) }
-      } else if item.tap == true {
-        Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) } primaryAction: { open(item) }
-      } else {
-        Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) }
-      }
-    }
+    resourceItem(item)
     .buttonStyle(.plain)
     .accessibilityLabel(item.accessibilityLabel)
     .accessibilityIdentifier(Self.identifier(item.id))
+  }
+
+  @ViewBuilder private func resourceItem(_ item: ChatActionBarState.Item) -> some View {
+    let actions = item.actions ?? []
+    if actions.isEmpty {
+      Button { open(item) } label: { glyph(item) }
+    } else if item.tap == true {
+      Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) } primaryAction: { open(item) }
+    } else {
+      Menu { menu(actions, prefix: item.id, title: item.menuTitle) } label: { glyph(item) }
+    }
   }
 
   private static func identifier(_ id: String) -> String {
@@ -596,3 +609,70 @@ struct MergeOptionsContent: View {
     .fixedSize(horizontal: false, vertical: true)
   }
 }
+
+#if !LODY_SHARE_EXTENSION
+// The Share extension reuses composer chrome but has no conversation machine panel.
+/// Read-only machine details, fetched on presentation from the public visibility endpoint.
+struct ChatMachinePanel: View {
+  let name: String
+  let machine: ChatActionBarState.Machine
+  @State private var ownerID: String?
+  private var owner: WorkspaceMember? { machine.members.first { $0.id == ownerID } }
+  @State private var shared: Bool?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 8) {
+        Image(systemName: "desktopcomputer")
+        Text(name).fontWeight(.medium).lineLimit(1)
+        Spacer(minLength: 8)
+        Label(String(localized: String.LocalizationValue("devices." + machine.status), bundle: .lody),
+          systemImage: machine.status == "online" ? "circle.fill" : "circle")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      HStack(spacing: 8) {
+        if let owner {
+          ChatOwnerAvatar(member: owner)
+          Text(owner.name)
+        } else {
+          Image(systemName: "person.crop.circle")
+          Text(String(localized: "devices.ownerUnknown", bundle: .lody))
+        }
+      }
+      Label(visibilityLabel, systemImage: visibilitySymbol)
+        .foregroundStyle(.secondary)
+    }
+    .font(.subheadline)
+    .padding(16)
+    .frame(idealWidth: 300, maxWidth: 360)
+    .task(id: machine.workspaceId + ":" + machine.id) {
+      ownerID = nil
+      shared = nil
+      guard !LodyUIVerify.enabled else { return }
+      do {
+        let rows = try await GitHubCloud.call("query", path: "machines:listVisibleMachines",
+          args: ["workspaceId": machine.workspaceId]) as? [[String: Any]]
+        try Task.checkCancellation()
+        guard let row = rows?.first(where: { $0["machineId"] as? String == machine.id }),
+          let ownerID = row["ownerUserId"] as? String,
+          let visibility = row["sharedWithTeam"] as? Bool else { return }
+        self.ownerID = ownerID
+        shared = visibility
+      } catch {
+        // Unknown is not private; never infer visibility from ownership or connectivity.
+      }
+    }
+  }
+
+  private var visibilitySymbol: String {
+    guard let shared else { return "questionmark.circle" }
+    return shared ? "person.2" : "lock"
+  }
+
+  private var visibilityLabel: String {
+    guard let shared else { return String(localized: "devices.visibilityUnknown", bundle: .lody) }
+    return String(localized: String.LocalizationValue(shared ? "devices.shared" : "devices.private"), bundle: .lody)
+  }
+}
+
+#endif

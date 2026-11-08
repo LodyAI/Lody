@@ -1,6 +1,74 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "devices.ownerUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Owner unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有者暂不可用"
+          }
+        }
+      }
+    },
+    "devices.visibilityUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visibility unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共享状态暂不可用"
+          }
+        }
+      }
+    },
+    "devices.private": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Private"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "私有"
+          }
+        }
+      }
+    },
+    "devices.shared": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shared"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共享"
+          }
+        }
+      }
+    },
     "bar.context.currentBranch": {
       "extractionState": "manual",
       "localizations": {
@@ -24333,7 +24401,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新建当前工作目录对话"
+            "value": "新建当前目录对话"
           }
         }
       }

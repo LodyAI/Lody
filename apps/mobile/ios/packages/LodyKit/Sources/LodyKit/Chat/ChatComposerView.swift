@@ -731,6 +731,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?)?
   private var sentStates: [String: String] = [:]
   var sendHandoff = true
+  /// A pushed creation host keeps its keyboard edge until the destination replaces it.
+  var dismissesKeyboardOnSend = true
   var autoFocus = false
   private var lastRestoreToken = 0
   private var hasInitialDraft = false
@@ -2068,8 +2070,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     takeDraft()
     saveDraft()
     pendingSendID = id
-    // Sending ends the editing: the keyboard goes down and the composer rests again.
-    if input.isFirstResponder { input.resignFirstResponder() }
+    // A pushed creation page disappears with its keyboard. Ending editing earlier
+    // lowers the form before its destination can receive the flying message.
+    if dismissesKeyboardOnSend && input.isFirstResponder { input.resignFirstResponder() }
     updateComposer()
   }
   @objc private func reconnect() {

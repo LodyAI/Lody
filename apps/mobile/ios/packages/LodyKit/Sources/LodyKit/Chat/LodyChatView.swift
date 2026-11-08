@@ -29,7 +29,6 @@ private final class ChatCollectionView: UICollectionView {
 private final class ChatNavigationController: UIViewController {
   var updateTitle: (() -> Void)?
   var onWillAppear: ((Bool, UIViewControllerTransitionCoordinator?) -> Void)?
-  var onWillDisappear: ((UIViewControllerTransitionCoordinator?) -> Void)?
   var onDidAppear: (() -> Void)?
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
@@ -39,11 +38,6 @@ private final class ChatNavigationController: UIViewController {
     super.viewWillAppear(animated)
     onWillAppear?(animated, transitionCoordinator ?? parent?.transitionCoordinator)
     updateTitle?()
-  }
-  override func viewWillDisappear(_ animated: Bool) {
-    super.viewWillDisappear(animated)
-    let coordinator = transitionCoordinator ?? parent?.transitionCoordinator
-    onWillDisappear?(coordinator)
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
@@ -59,7 +53,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     didSet {
       for cell in collection.visibleCells {
         (cell as? ChatCell)?.updateEditAccessibility()
-        (cell as? ChatMessageActionsCell)?.updateEdit()
         (cell as? ChatMessageAttachmentsCell)?.updateEditAccessibility()
       }
     }
@@ -99,14 +92,15 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onTitleMenu: ([String: Any]) -> Void = { _ in }
   var onComposerOptionChange: ([String: Any]) -> Void = { _ in }
   var onMentionBrowse: ([String: Any]) -> Void = { _ in }
-  private let titleButton = ChatNavigationTitleButton()
+  let titleButton = ChatNavigationTitleButton()
+  var pageOwnsHeader = false
+  var pageHeaderHeight: CGFloat { pageOwnsHeader ? 56 : 0 }
   var tabsAnchorView: UIView { titleButton }
   private var navigationTitle = ""
   private var navigationSubtitle = ""
   private var navigationMachine = ""
   private var navigationMachineState = ""
   private var navigationBranch = ""
-  private var titleDisappearing = false
   private let navigation = ChatNavigationController()
   let findClip = CALayer()
   let collection: UICollectionView
@@ -307,8 +301,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     super.init(frame: frame)
     titleButton.accessibilityIdentifier = "chat-navigation-title"
     titleButton.accessibilityHint = nil
-    titleButton.isUserInteractionEnabled = false
-    titleButton.accessibilityTraits = .header
+    titleButton.isUserInteractionEnabled = true
+    titleButton.addAction(UIAction { [weak self] _ in self?.onTitlePress([:]) }, for: .touchUpInside)
+    titleButton.accessibilityTraits = [.header, .button]
     navigation.view = UIView(frame: .zero)
     navigation.view.isUserInteractionEnabled = false
     navigation.updateTitle = { [weak self] in self?.attachTitle() }
@@ -318,18 +313,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       self?.deliverPendingContent()
     }
     navigation.onWillAppear = { [weak self] animated, coordinator in
-      self?.setTitleDisappearing(false)
       self?.deselectFileOnReturn(animated: animated, coordinator: coordinator)
-    }
-    navigation.onWillDisappear = { [weak self] coordinator in
-      // Freeze the header as it is: rewriting the item (e.g. adding a native subtitle) mid-swipe
-      // makes the bar re-lay its title area, so the title slides out of step with the back button.
-      self?.setTitleDisappearing(true)
-      coordinator?.animate(alongsideTransition: nil) { context in
-        guard context.isCancelled else { return }
-        self?.setTitleDisappearing(false)
-        self?.attachTitle()
-      }
     }
     backgroundColor = .lodyBackground
     registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (view: LodyChatView, _: UITraitCollection) in
@@ -375,16 +359,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row)
         return cell
       }
-      if row.kind == "meta" || row.kind == "userActions" {
+      if row.kind == "meta" {
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "meta", for: index) as! ChatMessageActionsCell
-        let userText = self.transcript.entries.first { $0.id == row.entryID }?.items.compactMap { $0.type == "text" ? $0.text : nil }.joined(separator: "\n\n") ?? ""
-        let text = row.kind == "userActions" ? userText : ChatMessageShare.content(in: self.transcript, entryID: row.entryID)?.text ?? ""
-        cell.canEdit = { [weak self] in self?.editableMessageID == row.entryID }
+        let text = ChatMessageShare.content(in: self.transcript, entryID: row.entryID)?.text ?? ""
         cell.configure(row, copyable: !text.isEmpty)
-        cell.detailsButton.isHidden = row.kind == "userActions" || !turnInfoEnabled
+        cell.detailsButton.isHidden = !turnInfoEnabled
         cell.onCopy = { UIPasteboard.general.setMessageMarkdown(text) }
-        cell.editButton.removeAction(identifiedBy: .init("edit"), for: .touchUpInside)
-        cell.editButton.addAction(UIAction(identifier: .init("edit")) { [weak self] _ in self?.onEditMessage(["entryId": row.entryID]) }, for: .touchUpInside)
         cell.forkButton.removeAction(identifiedBy: .init("fork"), for: .touchUpInside)
         cell.forkButton.addAction(UIAction(identifier: .init("fork")) { [weak self] _ in self?.onForkMessage(["entryId": row.entryID]) }, for: .touchUpInside)
         cell.detailsButton.removeAction(identifiedBy: .init("turn-info"), for: .touchUpInside)
@@ -546,9 +526,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     super.layoutSubviews()
     layoutFind()
     simulatorPreview.layout(in: CGRect(
-      x: safeAreaInsets.left, y: safeAreaInsets.top,
+      x: safeAreaInsets.left, y: safeAreaInsets.top + pageHeaderHeight,
       width: bounds.width - safeAreaInsets.left - safeAreaInsets.right,
-      height: max(0, composer.frame.minY - safeAreaInsets.top - 40)))
+      height: max(0, composer.frame.minY - safeAreaInsets.top - pageHeaderHeight - 40)))
     bringSubviewToFront(simulatorPreview)
     adoptComposerIfNeeded()
     bindScrollOwnerIfNeeded()
@@ -665,24 +645,17 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   private func attachTitle() {
     bindScrollOwnerIfNeeded()
     guard window != nil, let owner = scrollOwner else { return }
-    ChatNavigationTitle.setDisappearing(titleDisappearing, on: owner.navigationItem)
+    guard !pageOwnsHeader else { return }
     guard !navigationTitle.isEmpty || !navigationSubtitle.isEmpty || !navigationMachine.isEmpty || !navigationBranch.isEmpty else {
       ChatNavigationTitle.detach(button: titleButton, from: owner.navigationItem)
       return
     }
-    if titleDisappearing { return }
     ChatNavigationTitle.apply(
       title: navigationTitle,
       subtitle: titleSubtitle(),
       button: titleButton,
       to: owner.navigationItem
     )
-  }
-
-  private func setTitleDisappearing(_ disappearing: Bool) {
-    titleDisappearing = disappearing
-    guard let owner = scrollOwner else { return }
-    ChatNavigationTitle.setDisappearing(disappearing, on: owner.navigationItem)
   }
 
   override func willMove(toSuperview newSuperview: UIView?) {

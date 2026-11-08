@@ -266,7 +266,7 @@
     </plurals>
     <string name="create_no_available_agents">这台电脑没有可用助手，请选择其他电脑。</string>
     <string name="create_waiting_agents">正在等待助手同步…</string>
-    <string name="chat_new_tab">新建当前工作目录对话</string>
+    <string name="chat_new_tab">新建当前目录对话</string>
     <string name="chat_current_tab">当前对话</string>
     <string name="chat_tab_creation_failed">无法创建 Tab 对话。</string>
     <string name="chat_tab_creation_unknown">创建结果暂未确认，再次点击可打开该对话。</string>
@@ -396,6 +396,11 @@
     <string name="usage_resets">重置时间：%1$s</string>
     <string name="usage_relative">显示相对时间</string>
     <string name="usage_absolute">显示绝对时间</string>
+    <string name="machine_online">在线</string>
+    <string name="machine_status_unknown">状态未知</string>
+    <string name="machine_owner_unknown">所有者未知</string>
+    <string name="machine_shared">共享</string>
+    <string name="machine_visibility_unknown">共享状态未知</string>
     <!-- Schedules tab -->
     <string name="home_tab_schedules">定时任务</string>
     <string name="schedules_new">新建定时任务</string>

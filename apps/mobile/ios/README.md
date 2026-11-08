@@ -75,6 +75,39 @@ Send and Stop; conversation activity/status colors remain unchanged. Appearance 
 without an accent-color picker. Process status labels use the same regular type
 as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
+conversation More. UIKit owns presentation, width, height, scrolling and title
+truncation; there is no six-row limit or custom fade. Actions retain full names,
+circular avatars and native selected state. Selecting the current workspace is a
+no-op; catalog changes refresh the menu. The root menu title displays the account
+email in UIKit’s heading style, projected explicitly through the session source
+and chrome model. Empty email removes the heading; synthetic sources never fall
+back to the live account. Workspace management stays in Settings.
+
+Conversation Back, title/machine, Tabs and More controls belong to the page, so
+UIKit’s interactive pop moves them with its content instead of separately animating
+the system back circle. The transparent header registers its controls with UIKit through
+`UIScrollEdgeElementContainerInteraction`, retaining the transcript’s native `.soft`
+top-edge blur. A noninteractive 55% semantic canvas tint protects the title and
+machine subtitle, fading to transparent over 32 pt below the header rather than
+adding an opaque chrome material. The transcript scrolls underneath;
+content/find insets keep initial content and search below the controls. The shell hides native navigation only for conversations;
+detail pages retain their native bars. Back uses the existing navigation/split
+owner, and controls retain native glass styling and accessibility labels. The book-layout
+conversation list popover anchors to the visible page sidebar button and its bounds;
+native navigation-bar controls retain their bar-item anchors.
+
+Conversation titles use 16 pt semibold system text, fading at the trailing edge
+only on overflow rather than inserting an ellipsis. VoiceOver retains the full title. User bubbles fill the available
+reading width beside the avatar; long-press offers Copy, plus Edit for the last
+eligible user message, without inline action buttons. Below the conversation title,
+secondary-gray machine text starts with a presence icon; tapping the header opens
+the panel with name and presence, owner avatar and name, then
+private/shared visibility. Visibility comes from the public machine-registration
+query on opening; unavailable data is shown as unknown, never inferred as private.
+The bottom machine capsule is omitted. The trailing Tabs button appears only with
+other open Tabs; More retains closed-Tab recovery and New current working directory
+conversation, using the existing create-Tab operation.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
 secondary-label grey (links retain link blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a

@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 final class InboxChrome {
   struct Model {
+    var accountEmail = ""
     var workspaces: [AuthWorkspace]
     var selected: AuthWorkspace?
     var devices: InboxDevices
@@ -119,6 +120,7 @@ final class InboxChrome {
     let compactLayout = host.traitCollection.horizontalSizeClass != .regular
     workspace.setDetail(compactLayout ? "" : [model.devices.summary, running].filter { !$0.isEmpty }.joined(separator: " · "))
     updateSync(model.connection, compact: compactLayout)
+    workspace.setAccountEmail(model.accountEmail)
     workspace.setItems(menuItems(model))
     layout()
     let regular = host.traitCollection.horizontalSizeClass == .regular
@@ -149,6 +151,8 @@ final class InboxChrome {
   }
 
   private func clear() {
+    workspace.setAccountEmail("")
+    workspace.setItems([])
     guard let header else { return }
     if let item = workspaceItem, header.leftItems == [item] { header.leftItems = nil }
     if let right = header.rightItems, right.contains(where: { $0 === filterItem || $0 === host?.navigationItem.searchBarPlacementBarButtonItem }) {

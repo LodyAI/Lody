@@ -1,3 +1,4 @@
+import LodyDesignSystem
 import CoreText
 import SwiftUI
 import UIKit
@@ -22,12 +23,11 @@ struct ChatNavigationTitleBridge: View {
 
   var body: some View {
     Text(model.text)
-      .font(.headline)
+      .lodyTextStyle(.conversationTitle, fontOnly: true)
       .foregroundStyle(Color.primary)
       .lineLimit(1)
-      .truncationMode(.tail)
       .contentTransition(.numericText())
-      .fixedSize(horizontal: false, vertical: true)
+      .fixedSize(horizontal: true, vertical: true)
       .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 }
@@ -36,6 +36,7 @@ final class ChatNavigationTitleHost: UIView {
   private let model: ChatNavigationTitleModel
   private let hosting: UIHostingController<ChatNavigationTitleBridge>
   private var probe: ChatTitleTransitionProbe?
+  private let overflowMask = CAGradientLayer()
   var onTransitionReport: ((String) -> Void)?
 
   var text: String { model.text }
@@ -54,7 +55,7 @@ final class ChatNavigationTitleHost: UIView {
     hosting.view.isUserInteractionEnabled = false
     hosting.view.isAccessibilityElement = false
     hosting.view.accessibilityElementsHidden = true
-    clipsToBounds = false
+    clipsToBounds = true
     isUserInteractionEnabled = false
     isAccessibilityElement = false
     accessibilityElementsHidden = true
@@ -66,6 +67,7 @@ final class ChatNavigationTitleHost: UIView {
   func apply(_ text: String, animated: Bool) {
     guard text != model.text else { return }
     let update = { self.model.text = text }
+    defer { setNeedsLayout() }
     let motion = animated
       && !model.text.isEmpty
       && !text.isEmpty
@@ -82,7 +84,23 @@ final class ChatNavigationTitleHost: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    hosting.view.frame = bounds
+    let natural = (text as NSString).size(withAttributes: [.font: LodyTextStyle.conversationTitle.uiFont])
+    let width = max(bounds.width, ceil(natural.width))
+    let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
+    hosting.view.frame = CGRect(x: rtl ? bounds.width - width : 0, y: 0, width: width, height: bounds.height)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    if natural.width > bounds.width && bounds.width > 0 {
+      overflowMask.frame = bounds
+      overflowMask.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
+      overflowMask.locations = [0, NSNumber(value: Double(max(0, 1 - 24 / bounds.width))), 1]
+      overflowMask.startPoint = CGPoint(x: rtl ? 1 : 0, y: 0.5)
+      overflowMask.endPoint = CGPoint(x: rtl ? 0 : 1, y: 0.5)
+      layer.mask = overflowMask
+    } else {
+      layer.mask = nil
+    }
+    CATransaction.commit()
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -166,18 +184,18 @@ final class ChatNavigationTitleButton: UIButton {
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
-    let titleFont = UIFont.preferredFont(forTextStyle: .headline)
+    let titleFont = LodyTextStyle.conversationTitle.uiFont
     let titleWidth = (titleHost.text as NSString).size(withAttributes: [.font: titleFont]).width
     let subtitleWidth = captionLabel.attributedText?.size().width ?? 0
-    return CGSize(width: ceil(8 + max(titleWidth, subtitleWidth)), height: 44)
+    return CGSize(width: ceil(max(44, max(titleWidth, subtitleWidth))), height: 44)
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    let inset: CGFloat = 8
-    let width = max(0, bounds.width - inset)
-    let x = effectiveUserInterfaceLayoutDirection == .rightToLeft ? 0 : inset
-    let titleFont = UIFont.preferredFont(forTextStyle: .headline)
+    // UIKit already supplies navigation spacing; use the full title allocation.
+    let width = max(0, bounds.width)
+    let x: CGFloat = 0
+    let titleFont = LodyTextStyle.conversationTitle.uiFont
     let captionFont = UIFont.preferredFont(forTextStyle: .caption1)
     let titleLine = titleHost.text.isEmpty ? 0 : ceil(titleFont.lineHeight)
     let subtitleLine = captionLabel.isHidden ? 0 : ceil(captionFont.lineHeight)
@@ -249,10 +267,6 @@ enum ChatNavigationTitle {
     item.subtitle = nil
   }
 
-  static func setDisappearing(_ disappearing: Bool, on item: UINavigationItem) {
-    LodyNavigationHeader.of(item).suspended = disappearing
-  }
-
   static func detach(button: UIButton, from item: UINavigationItem) {
     let header = LodyNavigationHeader.of(item)
     guard header.titleView === button else { return }
@@ -284,17 +298,9 @@ enum ChatNavigationTitle {
     }
     append(branch, symbol: "arrow.triangle.branch")
     append(project, symbol: "folder")
-    append(machine, symbol: "desktopcomputer")
-    if !machine.isEmpty && !machineState.isEmpty {
-      text.append(NSAttributedString(string: " ", attributes: attributes))
-      let symbol = machineState == "unknown" ? "circle" : "circle.fill"
-      let tint: UIColor = machineState == "online" ? .systemBlue : .secondaryLabel
-      if let dot = symbolAttachment(symbol, font: UIFont.systemFont(ofSize: 10), color: tint) {
-        text.append(NSAttributedString(attachment: dot))
-      }
-      if machineState == "offline" {
-        text.append(NSAttributedString(string: " · " + String(localized: "devices.offline", bundle: .lody), attributes: attributes))
-      }
+    if !machine.isEmpty {
+      let symbol = machineState == "online" ? "checkmark.circle" : machineState == "offline" ? "circle.slash" : "questionmark.circle"
+      append(machine, symbol: symbol)
     }
     return text.length == 0 ? nil : AttributedString(text)
   }

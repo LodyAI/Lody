@@ -773,7 +773,7 @@ private struct SectionTitle: View {
     } else {
       Text(text)
         .lodyTextStyle(.subhead)
-        .foregroundStyle(LodyColor.textTertiary)
+        .foregroundStyle(LodyColor.textPrimary)
         .padding(.horizontal, LodyLayout.screenPaddingX)
         .padding(.top, LodySpacing.xs)
         .padding(.bottom, LodySpacing.xs)
@@ -784,7 +784,7 @@ private struct SectionTitle: View {
 }
 
 /// Compact person identity; shares the native image cache with message avatars.
-private struct ChatOwnerAvatar: View {
+struct ChatOwnerAvatar: View {
   let member: WorkspaceMember
   @State private var loaded: UIImage?
   @State private var loadedURL: URL?

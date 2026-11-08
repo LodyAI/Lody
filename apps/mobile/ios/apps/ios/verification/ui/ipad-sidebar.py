@@ -88,8 +88,7 @@ ui.wait(lambda items: not any(item.get('AXLabel') == close_settings for item in 
 pad.show_list(ui)
 
 tap_label(workspace_item['AXLabel'])
-ui.element('workspace-panel')
-ui.element('workspace-row:ui-home')
+ui.wait(lambda items: any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'Missing native workspace menu')
 ui.capture('workspace-menu')
 tap_label('另一个工作区')
 ui.element('ipad-detail-placeholder')

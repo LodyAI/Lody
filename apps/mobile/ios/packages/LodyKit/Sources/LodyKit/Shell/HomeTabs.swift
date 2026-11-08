@@ -92,9 +92,15 @@ final class HomeCompactNavigation: UINavigationController, UINavigationControlle
   override func viewDidLoad() {
     super.viewDidLoad()
     delegate = self
+    PageHeaderPopGestureDelegate.install(on: self)
+  }
+
+  func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+    PageHeaderPopGestureDelegate.install(on: self)
   }
 
   func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
-    setNavigationBarHidden(viewController is HomeTabsController, animated: animated)
+    let page = (viewController as? UINavigationController)?.topViewController ?? viewController
+    setNavigationBarHidden(viewController is HomeTabsController || (page as? LodyPageController)?.ownsHeader == true, animated: animated)
   }
 }

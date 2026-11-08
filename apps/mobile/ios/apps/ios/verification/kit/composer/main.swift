@@ -801,6 +801,29 @@ relayComposer.restoreDraft(token: 1)
 precondition(relayInput.text == "Keep until adopted", "An adopted send must remain restorable")
 print("Composer relay: prepare preserves draft, adoption consumes once, failure restores")
 
+// Pushed creation keeps focus until navigation removes the form.
+throwWindow.isHidden = false
+for dismisses in [false, true] {
+  let creationComposer = ChatComposerView(frame: CGRect(x: 0, y: 500, width: 390, height: 180))
+  creationComposer.cardStyle = true
+  creationComposer.dismissesKeyboardOnSend = dismisses
+  throwWindow.addSubview(creationComposer)
+  creationComposer.setComposerState(ready)
+  creationComposer.setInitialDraft("Creation keyboard handoff")
+  let creationInput = descendants(creationComposer).compactMap { $0 as? UITextView }.first!
+  precondition(creationInput.becomeFirstResponder())
+  creationComposer.commitSend(["id": "creation-focus-\(dismisses)", "queue": false])
+  precondition(creationInput.isFirstResponder == !dismisses,
+    "Only the pushed creation host retains focus through its send")
+  precondition(creationInput.text.isEmpty, "Retaining focus must still consume the draft")
+  creationComposer.restoreDraft(token: 1)
+  precondition(creationInput.text == "Creation keyboard handoff", "Failed creation restores the draft")
+  ChatSendHandoff.cancel(id: "creation-focus-\(dismisses)")
+  creationInput.resignFirstResponder()
+  creationComposer.removeFromSuperview()
+}
+print("Composer: pushed creation retains focus, ordinary send dismisses, failure restores")
+
 let queueComposer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 244))
 let runningState = #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 queueComposer.setComposerState(runningState)

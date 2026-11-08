@@ -14,7 +14,7 @@ final class LodyShell {
       headerShown: !title.isEmpty, headerVariant: "transparent")
     let root = LodyPageController(spec: spec, inSheet: false, content: content)
     let navigation = UINavigationController(rootViewController: root)
-    navigation.delegate = delegate
+    configureNavigation(navigation)
     self.navigation = navigation
     window.rootViewController = navigation
     window.makeKeyAndVisible()
@@ -60,7 +60,10 @@ final class LodyShell {
     } else { pushRootNative(content, title: content.title ?? "") }
   }
 
-  func configureNavigation(_ controller: UINavigationController) { controller.delegate = delegate }
+  func configureNavigation(_ controller: UINavigationController) {
+    controller.delegate = delegate
+    PageHeaderPopGestureDelegate.install(on: controller)
+  }
 
   @discardableResult
   func pushRootNative(_ content: UIViewController, title: String, headerShown: Bool = true) -> LodyPageController? {
@@ -80,15 +83,25 @@ final class LodyShell {
   }
 
   @discardableResult
-  func presentNavigation(_ container: UINavigationController, detents: [Double] = [1], popoverFrom item: UIBarButtonItem? = nil) -> UIViewController? {
+  func presentNavigation(_ container: UINavigationController, detents: [Double] = [1], popoverFrom item: UIBarButtonItem? = nil,
+    sourceView: UIView? = nil, sourceRect: CGRect? = nil) -> UIViewController? {
     guard let navigation, navigation.presentedViewController == nil else { return nil }
     let modal: UIViewController
-    if item == nil { modal = ShellNavigationHost(container) }
+    let isPopover = item != nil || sourceView != nil
+    if !isPopover { modal = ShellNavigationHost(container) }
     else { modal = container }
-    modal.modalPresentationStyle = item == nil ? .formSheet : .popover
-    if let item, let popover = modal.popoverPresentationController {
+    modal.modalPresentationStyle = isPopover ? .popover : .formSheet
+    if isPopover, let popover = modal.popoverPresentationController {
       container.preferredContentSize = CGSize(width: 320, height: 600)
-      popover.barButtonItem = item
+      if let sourceView {
+        popover.barButtonItem = nil
+        popover.sourceView = sourceView
+        popover.sourceRect = sourceRect ?? sourceView.bounds
+      } else {
+        popover.sourceView = nil
+        popover.sourceRect = .zero
+        popover.barButtonItem = item
+      }
       popover.permittedArrowDirections = .up
     } else if let sheet = modal.sheetPresentationController {
       Self.configure(sheet, ShellPageSpec(title: "", style: "formSheet", animation: "slide", dismissible: true,
@@ -189,7 +202,7 @@ final class LodyShell {
     guard let presenter = top else { return }
     let spec = page.spec
     let container = UINavigationController(rootViewController: page)
-    container.delegate = delegate
+    configureNavigation(container)
     container.setNavigationBarHidden(!spec.headerShown, animated: false)
     container.modalPresentationStyle = Self.modalStyle(spec.style)
     if spec.style == "overFullScreen" { container.view.backgroundColor = .clear }

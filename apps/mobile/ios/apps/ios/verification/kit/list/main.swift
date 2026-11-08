@@ -751,30 +751,33 @@ assert(LodyFlatRows.separatorLeading(textLeading: 46, isLast: true) == nil, "The
 assert(LodyFlatRows.minHeight(hasSubtitle: false) == 44 && LodyFlatRows.minHeight(hasSubtitle: true) == 52, "Flat rows keep 44 / 52 pt minimums")
 print("PASS: flat system rows place icons on the rail and hairlines under the text column")
 
-// The workspace capsule opens WorkspaceSwitcherPanel, never a UIMenu: a menu cannot put the
-// current workspace's checkmark at the trailing edge.
+// Workspace selection is a native button menu, with full titles and system state.
 let capsule = LodyMenuButton()
 let capsuleButton = capsule.subviews.compactMap { $0 as? UIButton }.first!
 capsule.accessibilityIdentifier = "workspace-menu"
-capsule.setItems([LodyMenuItem(id: "workspace", title: "Workspace", selected: true)])
-assert(capsuleButton.menu == nil && !capsuleButton.showsMenuAsPrimaryAction, "The capsule presents the switcher panel")
-assert(capsuleButton.accessibilityIdentifier == "workspace-menu", "The capsule's identifier is on its control")
-
-let switcher = WorkspaceSwitcherPanel(items: [
-  LodyMenuItem(id: "current", title: "Current", selected: true, monogram: "C"),
+let longWorkspace = "Workspace with a name longer than the native menu can display in one line"
+capsule.setItems([
+  LodyMenuItem(id: "current", title: longWorkspace, selected: true, monogram: "W"),
   LodyMenuItem(id: "other", title: "Other", monogram: "O"),
-]) { _ in }
-switcher.view.frame = CGRect(x: 0, y: 0, width: 300, height: 200)
-switcher.beginAppearanceTransition(true, animated: false)
-switcher.endAppearanceTransition()
-let switcherList = switcher.view.subviews.compactMap { $0 as? UICollectionView }.first!
-switcherList.layoutIfNeeded()
-let currentRow = switcherList.cellForItem(at: IndexPath(item: 0, section: 0)) as! UICollectionViewListCell
-let otherRow = switcherList.cellForItem(at: IndexPath(item: 1, section: 0)) as! UICollectionViewListCell
-assert(currentRow.accessories.count == 1 && otherRow.accessories.isEmpty, "Only the current workspace carries the trailing checkmark")
-assert(currentRow.accessibilityTraits.contains(.selected) && !otherRow.accessibilityTraits.contains(.selected), "VoiceOver reads the current workspace as selected")
-assert(switcher.preferredContentSize.height >= 2 * 44, "Rows keep 44 pt targets")
-print("PASS: the workspace capsule opens a panel listing only workspaces, checkmark trailing on the current one")
+])
+assert(capsuleButton.showsMenuAsPrimaryAction)
+assert(capsuleButton.menu!.title.isEmpty)
+capsule.setAccountEmail("preview@example.test")
+assert(capsuleButton.menu!.title == "preview@example.test")
+capsule.setAccountEmail("changed@example.test")
+assert(capsuleButton.menu!.title == "changed@example.test")
+capsule.setAccountEmail("  ")
+assert(capsuleButton.menu!.title.isEmpty, "Clearing account identity removes the menu heading without changing workspaces")
+let menuActions = capsuleButton.menu!.children.compactMap { $0 as? UIAction }
+assert(menuActions.map(\.title) == [longWorkspace, "Other"])
+assert(menuActions.map(\.state) == [.on, .off])
+assert(menuActions.allSatisfy { $0.image?.size == CGSize(width: 24, height: 24) })
+capsule.setItems([LodyMenuItem(id: "other", title: "Renamed", selected: true)])
+let updatedAction = capsuleButton.menu!.children.first as! UIAction
+assert(updatedAction.title == "Renamed" && updatedAction.state == .on)
+capsule.setItems([])
+assert(capsuleButton.menu == nil)
+print("PASS: workspace menus preserve full names, avatars and selection, refresh on catalog changes and clear when empty")
 
 // Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
 let retinaFormat = UIGraphicsImageRendererFormat()

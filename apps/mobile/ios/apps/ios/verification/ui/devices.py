@@ -36,13 +36,13 @@ def tap_label(text):
     ui.axe('tap', '-x', str(f['x'] + f['width']/2), '-y', str(f['y'] + f['height']/2), '--post-delay', '.7')
 
 
-def workspace_panel_has_no_devices():
-    # Device liveness stays in the capsule's summary; the workspace panel lists only workspaces.
+def workspace_menu_has_no_devices():
+    # Device liveness stays in the capsule's summary; the workspace menu lists only workspaces.
     tap_label(catalog.text('inbox.workspaceSwitch.accessibility', name=''))
-    ui.element('workspace-panel')
-    assert not any(i.get('AXLabel') == catalog.text('devices.title') for i in ui.state()), 'Devices left the workspace panel'
-    ui.axe('tap', '--id', 'workspace-row:ui-home', '--post-delay', '.6')
-    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'workspace-panel' for i in items), 'Workspace panel did not close')
+    label('我的超长工作区名称不能折行')
+    assert not any(i.get('AXLabel') == catalog.text('devices.title') for i in ui.state()), 'Devices left the workspace menu'
+    tap_label('我的超长工作区名称不能折行')
+    ui.wait(lambda items: not any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'Workspace menu did not close')
 
 
 def send_enabled(value):
@@ -81,7 +81,7 @@ if 'devices-pad' in str(ui.output):
 ui.element('ui-design')
 label(catalog.text('devices.summary', count=2, total=3))
 ui.capture('home-mixed')
-workspace_panel_has_no_devices()
+workspace_menu_has_no_devices()
 presence([])
 label(catalog.text('devices.summary', count=0, total=3))
 ui.capture('home-offline')
@@ -132,4 +132,4 @@ if 'devices-pad' not in str(ui.output):
     tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('create.title')))
 
 (ui.output / 'device-events.json').write_text(json.dumps(events, indent=2))
-print('PASS: device counts in the capsule (not the workspace panel), unknown/offline distinction, per-session status and one-shot creation preserves drafts and attachments. Offline service fixture; no cloud request or message sent. Visual review required.')
+print('PASS: device counts in the capsule (not the workspace menu), unknown/offline distinction, per-session status and one-shot creation preserves drafts and attachments. Offline service fixture; no cloud request or message sent. Visual review required.')
