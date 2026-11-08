@@ -898,7 +898,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const showProjectLine = showProjectContext && !isNestedChild;
   // The branch rides on the same second line as the project segment; nested
   // children skip it like the project context does.
-  const showBranchLine = showBranchContext && Boolean(branchName) && !isNestedChild;
+  const showBranchLine =
+    showBranchContext &&
+    (item.kind === 'github' || item.isWorktree === true) &&
+    Boolean(branchName) &&
+    !isNestedChild;
   const showMetaLine = showProjectLine || showBranchLine;
   const projectLabel = showProjectLine ? resolveUpdatedItemProjectLabel(item) : null;
   const titleNode = (
