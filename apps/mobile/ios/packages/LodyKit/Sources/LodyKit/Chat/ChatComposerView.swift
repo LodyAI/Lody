@@ -1246,10 +1246,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attachmentPages.push(OverlayPage(id: "recent-photos", layout: attachmentMediaLayout,
       appearance: ChatRecentPhotosView.initialAppearance) { [weak self] in
       let photos = ChatRecentPhotosView()
-      photos.onAppearanceChange = { [weak self] appearance in
-        guard let self, self.attachmentPages.pageID == "recent-photos" else { return }
-        self.attachmentPages.controller.updateAppearance(appearance)
-      }
       photos.onBack = { [weak self] in self?.attachmentPages.back() }
       photos.onLibrary = { [weak self] in
         self?.finishAttachmentOverlay { owner, controller in owner.libraryPicker.present(from: controller) }
