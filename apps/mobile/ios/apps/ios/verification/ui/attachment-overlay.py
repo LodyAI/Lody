@@ -16,21 +16,6 @@ def tap(identifier):
     ui.axe('tap', '-x', str(f['x'] + f['width']/2), '-y', str(f['y'] + f['height']/2),
            '--tap-style', 'physical', '--post-delay', '.6')
 
-def choose_layout(value):
-    title = catalog.text('native.chat.attachment.grid.' + value)
-    if ui.element('attachment-photos-layout').get('AXValue') != title:
-        tap('attachment-photos-layout')
-    def settled(items):
-        toggle = next((i for i in items if i.get('AXUniqueId') == 'attachment-photos-layout'), None)
-        grid = next((i for i in items if i.get('AXUniqueId') == 'attachment-photos-grid'), None)
-        screen = next((i for i in items if i.get('type') == 'Application'), None)
-        if not toggle or not grid or not screen:
-            return False
-        width = screen['frame']['width'] - 24 - (24 if value == 'inset' else 0)
-        return toggle.get('AXValue') == title and abs(grid['frame']['width']-width) < 1
-    ui.wait(settled, 'Layout toggle and viewport did not settle')
-    time.sleep(.4)
-
 def keyboard():
     return ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').startswith('UIKeyboardLayoutStar')), None), 'Keyboard missing')['frame']
 
@@ -66,8 +51,6 @@ ui.wait(lambda items: any((i.get('AXUniqueId') or '').startswith('attachment-men
 ui.capture('menu-over-keyboard')
 tap('attachment-menu-recentPhotos')
 ui.element('attachment-photos-access')
-if ui.element('attachment-photos-layout').get('AXValue') != catalog.text('native.chat.attachment.grid.edgeToEdge'):
-    choose_layout('edgeToEdge')
 check_media_geometry(ui, 'attachment-photos-grid')
 ui.capture('before-authorization')
 tap('attachment-photos-access')
@@ -140,80 +123,10 @@ assert ui.element('attachment-photos-confirm')['frame']['height'] == 44
 ui.capture('authorization-returned')
 ui.capture('multiline-photos')
 
-if mode == 'full':
-    edge = ui.element('attachment-photos-grid')['frame']
-    toggle = ui.element('attachment-photos-layout')['frame']
-    confirm = ui.element('attachment-photos-confirm')['frame']
-    assert toggle['height'] == 44 and toggle['width'] == 44
-    assert 0 < confirm['x']-toggle['x']-toggle['width'] <= 8, 'Toggle must be adjacent to confirm'
-
-    choose_layout('inset')
-    inset = ui.element('attachment-photos-grid')['frame']
-    gaps = [inset['x']-edge['x'], inset['y']-edge['y'],
-            edge['x']+edge['width']-inset['x']-inset['width'],
-            edge['y']+edge['height']-inset['y']-inset['height']]
-    assert all(abs(gap-12) < 1 for gap in gaps), ('Insets must be 12pt on all four edges', gaps)
-    ui.capture('layout-inset-equal-edges')
-    # Destroy the entire page stack, then build a new one from the saved preference.
-    tap('attachment-photos-back')
-    ui.axe('tap', '-x', '200', '-y', '300', '--tap-style', 'physical', '--post-delay', '.6')
-    tap('session-attach')
-    tap('attachment-menu-recentPhotos')
-    assert ui.element('attachment-photos-layout').get('AXValue') == catalog.text('native.chat.attachment.grid.inset'), 'Layout preference was lost'
-    ui.capture('layout-preference-restored')
-    choose_layout('edgeToEdge')
-    check_media_geometry(ui, 'attachment-photos-grid')
-    ui.capture('layout-edge-to-edge')
-    # Reverse before the previous corner spring settles; keep the same panel
-    # and verify its final layout before inspecting the recorded transition.
-    toggle = ui.element('attachment-photos-layout')['frame']
-    for _ in range(2):
-        ui.axe('tap', '-x', str(toggle['x']+toggle['width']/2),
-               '-y', str(toggle['y']+toggle['height']/2),
-               '--tap-style', 'physical', '--post-delay', '.05')
-    choose_layout('edgeToEdge')
-    ui.capture('layout-corner-reversed')
-
-    f = ui.element('attachment-photos-grid')['frame']
-    ui.axe('swipe', '--start-x', str(f['x']+f['width']/2), '--start-y', str(f['y']+f['height']-110),
-           '--end-x', str(f['x']+f['width']/2), '--end-y', str(f['y']+f['height']-260), '--duration', '1.2', '--post-delay', '1')
-    visible = [i for i in ui.state() if (i.get('AXUniqueId') or '').startswith('attachment-photo-')
-               and i['frame']['y'] < f['y']+f['height'] and i['frame']['y']+i['frame']['height'] > f['y']+1]
-    anchor = min(visible, key=lambda i: (i['frame']['y'], i['frame']['x']))
-    assert anchor['AXUniqueId'] != 'attachment-photo-0', 'Scroll fixture did not move'
-    fraction = (f['y']-anchor['frame']['y'])/anchor['frame']['height']
-    ui.capture('layout-scrolled-edge')
-    choose_layout('inset')
-    current = ui.element(anchor['AXUniqueId'])['frame']
-    f = ui.element('attachment-photos-grid')['frame']
-    assert abs((f['y']-current['y'])/current['height']-fraction) < .08, ('Switch lost the visible photo anchor', anchor, current, f, fraction)
-    ui.capture('layout-scrolled-inset')
-    choose_layout('edgeToEdge')
-    for _ in range(2):
-        ui.axe('swipe', '--start-x', str(f['x']+f['width']/2), '--start-y', str(f['y']+f['height']-110),
-               '--end-x', str(f['x']+f['width']/2), '--end-y', str(f['y']+70), '--duration', '.5', '--post-delay', '.6')
-    photos = [i for i in ui.state() if (i.get('AXUniqueId') or '').startswith('attachment-photo-')]
-    last = max(photos, key=lambda i: int(i['AXUniqueId'].rsplit('-', 1)[1]))
-    bottom = last['frame']['y'] + last['frame']['height']
-    ui.capture('layout-bottom-edge')
-    choose_layout('inset')
-    last_frame = ui.element(last['AXUniqueId'])['frame']
-    assert abs(last_frame['y']+last_frame['height']-bottom) < 2, 'Switch must stay pinned to the bottom'
-    ui.capture('layout-bottom-inset')
-    choose_layout('edgeToEdge')
-    for _ in range(3):
-        ui.axe('swipe', '--start-x', str(f['x']+f['width']/2), '--start-y', str(f['y']+70),
-               '--end-x', str(f['x']+f['width']/2), '--end-y', str(f['y']+f['height']-110), '--duration', '.4', '--post-delay', '.5')
+assert not any(i.get('AXUniqueId') == 'attachment-photos-layout' for i in ui.state())
 tap('attachment-photo-0')
 assert ui.element('attachment-photos-confirm').get('AXValue') == '1'
 ui.capture('single-selection-accent')
-if mode == 'full':
-    choose_layout('inset')
-    assert ui.element('attachment-photos-confirm').get('AXValue') == '1'
-    ui.capture('layout-inset-selected')
-    choose_layout('edgeToEdge')
-    assert ui.element('attachment-photos-confirm').get('AXValue') == '1'
-
 tap('attachment-photo-0')
 assert ui.element('attachment-photos-confirm').get('AXValue') == '0'
 ui.capture('selection-cleared-neutral')
