@@ -88,7 +88,8 @@ ui.wait(lambda items: not any(item.get('AXLabel') == close_settings for item in 
 pad.show_list(ui)
 
 tap_label(workspace_item['AXLabel'])
-labeled(catalog.text('workspace.edit.action'))
+ui.element('workspace-panel')
+ui.element('workspace-row:ui-home')
 ui.capture('workspace-menu')
 tap_label('另一个工作区')
 ui.element('ipad-detail-placeholder')

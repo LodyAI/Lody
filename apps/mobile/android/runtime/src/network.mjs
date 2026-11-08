@@ -7,6 +7,7 @@ import {createReadAccess} from './read-access.mjs';
 import {createCommands} from './create-commands.mjs';
 import {controlTurn,itemDetail,sendTurn,stopSessions} from '../vendor/cloud-runtime/src/runtime/session.ts';
 import {cloudCommands} from './cloud-commands.mjs';
+import {scheduleCommands} from './schedule-commands.mjs';
 const emit=message=>globalThis.webkit.messageHandlers.dataRuntime.postMessage(message);
 const access=createReadAccess(globalThis.fetch.bind(globalThis),emit);
 globalThis.fetch=access.fetch;
@@ -37,5 +38,5 @@ const sendWithReferences = args => sendTurn(args, async text => {
  });
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
-globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed']});
+globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...detail});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand']});

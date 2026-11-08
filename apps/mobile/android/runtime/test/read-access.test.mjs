@@ -82,3 +82,9 @@ test('creation permissions stay inside workspace and separate stream purposes', 
  for(const [stream,method] of [['other:s:s1','POST'],['workspace:mf:m','POST'],['workspace:meta','PUT'],['workspace:rpc:req:m','GET'],['workspace:rpc:res:m:r','POST'],['workspace:s:s1/bootstrap','POST']])await assert.rejects(access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream),{method}),/network_denied/);
  access.setActive(false);await assert.rejects(access.fetch('https://streams.example.org/ds/lody/workspace%3As%3As1',{method:'POST'}),/inactive_write/);
 });
+
+test('schedule streams: the registry and one schedule doc are created, read and appended inside the workspace',async()=>{
+ const access=createReadAccess(async()=>new Response('ok'));access.configure(config);
+ for(const [stream,method] of [['workspace:sr','GET'],['workspace:sr','POST'],['workspace:sr','PUT'],['workspace:sr/bootstrap','GET'],['workspace:schedule:s1','PUT'],['workspace:schedule:s1','POST'],['workspace:schedule:s1','GET']])assert.equal(await(await access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream).replace('%2F','/'),{method})).text(),'ok');
+ for(const [stream,method] of [['workspace:sr','DELETE'],['other:sr','GET'],['other:schedule:s1','PUT'],['workspace:schedule:s1','DELETE'],['workspace:schedule:a:b','PUT'],['workspace:schedule:s1/bootstrap','POST']])await assert.rejects(access.fetch('https://streams.example.org/ds/lody/'+encodeURIComponent(stream).replace('%2F','/'),{method}),/network_denied/);
+});

@@ -53,6 +53,7 @@ enum LodyNativePages {
     "project-visibility-preview": { _ in ProjectVisibilityPreviewController() },
     "github-settings": { _ in GitHubSettingsController() },
     "github-settings-preview": { _ in GitHubSettingsPreviewController() },
+    "schedules": { _ in SchedulesController() },
     "prompt-shortcuts": { _ in PromptShortcutsController() },
     "prompt-shortcuts-preview": { _ in PromptShortcutsPreviewController() },
     "agent-roles": { _ in AgentRolesController() },

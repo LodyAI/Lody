@@ -33,6 +33,8 @@ export type Session = {
   lastRunningSeen?: number;
   awaitingUserSince?: number;
   branchName?: string;
+  /** Web `session.baseBranch || project.branch`: the branch the session started from. */
+  baseBranch?: string;
   iosSimulatorPreviewRequestId?: string;
   pullRequests?: import('./pull-request').PullRequestReference[];
   diff?: { add: number; del: number };

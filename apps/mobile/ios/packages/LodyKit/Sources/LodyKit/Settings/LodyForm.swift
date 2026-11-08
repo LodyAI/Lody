@@ -63,7 +63,12 @@ final class LodyFormGroup: UIStackView {
   static let margin: CGFloat = 16
   private let footerLabel = LodyFormGroup.caption(size: 12.5)
 
-  init(header: String? = nil, footer: String? = nil, _ rows: UIView...) {
+  convenience init(header: String? = nil, footer: String? = nil, _ rows: UIView...) {
+    self.init(header: header, footer: footer, rows: rows)
+  }
+
+  /// Rows built at run time (editors whose fields depend on earlier choices).
+  init(header: String? = nil, footer: String? = nil, rows: [UIView]) {
     super.init(frame: .zero)
     axis = .vertical
     spacing = 0

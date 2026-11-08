@@ -1,4 +1,4 @@
-"""Native Home workspace icon and name editing with reflected catalog updates."""
+"""Home workspace panel (workspaces only, trailing checkmark) and Settings icon/name editing reflected in it."""
 import sys
 import time
 import subprocess
@@ -13,15 +13,30 @@ def home_ready():
     ui.wait(lambda items: any(i.get('AXLabel') == avatar_label for i in items), 'Missing workspace avatar')
 home_ready()
 
-ui.axe('tap', '--label', avatar_label, '--post-delay', '.5')
-ui.wait(
-    lambda items: any(i.get('AXLabel') == catalog.text('workspace.edit.action') for i in items),
-    'Workspace menu must include the edit action',
-)
-edit_workspace = next(i for i in ui.state() if i.get('AXLabel') == catalog.text('workspace.edit.action'))
-assert 'selected' not in str(edit_workspace.get('traits') or []).lower(), edit_workspace
+def open_panel(label):
+    ui.axe('tap', '--label', label, '--post-delay', '.5')
+    panel = ui.element('workspace-panel')
+    current = ui.element('workspace-row:ui-home')
+    # The checkmark sits at the far right of the current row, which VoiceOver reads as selected.
+    assert current['frame']['height'] >= 44, current
+    assert 'selected' in str(current.get('traits') or []).lower(), current
+    texts = {i.get('AXLabel') for i in ui.state()}
+    assert catalog.text('workspace.edit.action') not in texts, 'Edit Workspace moved to Settings'
+    assert catalog.text('devices.title') not in texts, 'Devices moved to Settings'
+    return panel
+
+
+def close_panel():
+    ui.axe('tap', '--id', 'workspace-row:ui-home', '--post-delay', '.6')
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'workspace-panel' for i in items), 'Choosing the current workspace closes the panel')
+
+
+open_panel(avatar_label)
 ui.capture('workspace-menu')
-ui.axe('tap', '--label', catalog.text('workspace.edit.action'), '--post-delay', '.8')
+close_panel()
+# The workspace editor lives in Settings › General.
+ui.axe('tap', '--id', 'home-tab-settings', '--post-delay', '.6')
+ui.axe('tap', '--id', 'workspace-general', '--post-delay', '.8')
 ui.element('workspace-name')
 ui.wait(
     lambda items: any(i.get('AXLabel') == catalog.text('workspace.edit.nameFooter') for i in items)
@@ -53,13 +68,14 @@ renamed = ui.element('workspace-name')['AXValue']
 ui.capture('workspace-editor-filled')
 ui.axe('tap', '--label', catalog.text('workspace.edit.save'), '--post-delay', '1')
 renamed_label = catalog.workspace_switch(renamed)
+ui.element('workspace-general')
+ui.axe('tap', '--id', 'home-tab-chats', '--post-delay', '.6')
 ui.wait(
     lambda items: any(i.get('AXLabel') == renamed_label for i in items),
-    'Saving the workspace name must update the home menu',
+    'Saving the workspace name must update the home capsule',
 )
 ui.capture('workspace-renamed')
-ui.axe('tap', '--label', renamed_label, '--post-delay', '.5')
-edit_workspace = next(i for i in ui.state() if i.get('AXLabel') == catalog.text('workspace.edit.action'))
-assert 'selected' not in str(edit_workspace.get('traits') or []).lower(), edit_workspace
+open_panel(renamed_label)
 ui.capture('workspace-menu-after-edit')
-print('PASS: workspace icon selection returns and the saved name updates the Home menu.')
+close_panel()
+print('PASS: the workspace panel lists only workspaces with a trailing checkmark; the Settings editor returns icon selection and the saved name updates the Home capsule and panel.')

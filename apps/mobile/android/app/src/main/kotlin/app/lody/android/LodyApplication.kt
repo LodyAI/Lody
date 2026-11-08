@@ -29,6 +29,9 @@ open class LodyApplication : Application() {
         private set
     lateinit var notifications: app.lody.android.notifications.PushNotifications
         private set
+    /** The Schedules tab's reads and owner writes through the shared runtime. */
+    lateinit var schedules: app.lody.android.schedules.ScheduleService
+        private set
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
@@ -71,6 +74,7 @@ open class LodyApplication : Application() {
         account.browserStore = BrowserAuthStore(KeystoreCredentialStore(this, "browser-auth"))
         members = WorkspaceMembers(cache, account::members)
         projectAdding = app.lody.android.home.LiveProjectAdding(runtimeOwner, account, app.lody.android.chat.GitHubHttpClient())
+        schedules = app.lody.android.schedules.RuntimeScheduleService(runtimeOwner)
         cloud = CatalogRepository(account, runtimeOwner, applicationScope, cache) { scope, grant -> prepared = scope to grant }
         notifications = app.lody.android.notifications.PushNotifications(this, account, applicationScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(notifications)

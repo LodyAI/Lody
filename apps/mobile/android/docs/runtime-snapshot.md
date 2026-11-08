@@ -1,10 +1,10 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 98-file snapshot of this monorepo's `ios/packages/cloud-runtime`, commit `216d24ee8163821783f6cbd41604c761fc61ee74` (`git archive <commit> ios/packages/cloud-runtime`). It additionally includes the reviewed, capability-refresh and directory Tab source from e7df50f files listed in PROVENANCE.json, copied verbatim from the iOS runtime. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 110-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `e0e7ddc076b998e404f973b2990994e29e85c805` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
-1. Select and record a reviewed upstream commit. Export only `packages/cloud-runtime` into a temporary directory using `git archive <commit> packages/cloud-runtime`; do not copy a live checkout wholesale.
+1. Select and record a reviewed upstream commit. Export only `apps/mobile/ios/packages/cloud-runtime` into a temporary directory using `git archive <commit> apps/mobile/ios/packages/cloud-runtime`; do not copy a live checkout wholesale.
 2. Compare that export against the current snapshot. Review protocol changes, licensing and browser dependencies. Preserve Android adaptation in `runtime/src`, outside the snapshot.
 3. Replace the snapshot only after reviewing the diff; update PROVENANCE and SHA256 together. Generate hashes with the exported `hashes()` function in `runtime/snapshot.mjs`, directed at the reviewed source directory. No build regenerates the manifest automatically.
 4. Run snapshot verification, `npm ci`, JS tests, asset build, JVM and Android bridge tests. Update `runtime/contract/fixtures.json` only for an intentional contract change. Capture actual WebView/WASM results and verify release assets contain no diagnostics.
@@ -42,3 +42,7 @@ Agent discovery merges live `agent-*` repo metadata with machine Flock configs,
 matching the daemon. Machine configs win by machine/config identity; deleted
 metadata and agents outside readable healthy machines are excluded. Only display
 fields reach native UI, never launch environments or credentials.
+
+## Schedules
+
+`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the `loro-crdt/base64` alias. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
