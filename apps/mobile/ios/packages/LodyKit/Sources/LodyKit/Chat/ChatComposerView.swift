@@ -776,8 +776,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   var restsCollapsed = false {
     didSet { if restsCollapsed != oldValue { updateComposer() } }
   }
-  /// The card is open: always on the new-chat page; while editing in a conversation.
-  private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder) }
+  /// The card is open: always on the new-chat page; in a conversation while editing, and at
+  /// rest while a typed draft remains, so the prompt keeps showing its lines.
+  private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder || hasDraftText) }
+  private var hasDraftText: Bool { !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
   private lazy var surfaceLayout: any ChatComposerSurfaceLayout = ChatComposerLiquidGlassSurfaceLayout(
     container: composer,
     inputSurface: inputSurface
@@ -1671,7 +1673,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
     // A conversation's card opens with focus (the expansion's own animation carries it).
-    let cardFocusChanged = cardStyle && !restsCollapsed && cardFocused != input.isFirstResponder
+    // A conversation's card can also stay open across a focus change when a draft keeps it open.
+    let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
     cardFocused = input.isFirstResponder
     if fullProgress > 0 {
       let fullHeight = fullScreenInputHeight(chrome: chrome - formatHeight.constant + 44)
@@ -1749,7 +1752,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     var configuration = UIButton.Configuration.plain()
     configuration.image = face.withRenderingMode(.alwaysOriginal)
-    configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+    // The 44 pt target keeps its width but leans its padding leading, so the mark sits close
+    // to the context ring and Send.
+    configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 6)
     collapsedMark.configuration = configuration
     collapsedMark.imageView?.alpha = movingAgentMark == nil ? 1 : 0
     collapsedMark.isEnabled = modelButton.isEnabled
@@ -1889,22 +1894,28 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     if let panel = usagePanel, panel.usage != usage { panel.dismiss(animated: false) }
     let visible = usage?.visible == true
     usageButton.isHidden = !visible
-    usageWidth.constant = visible ? 62 : 0
+    usageWidth.constant = 0
     guard let usage, visible else {
       usagePanel?.dismiss(animated: false)
       return
     }
+    // Sized to its content (ring, gap, percentage, 2 pt each side) so the agent mark, the ring
+    // and Send sit close together.
+    let font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    let title = "\(Int((usage.percentage ?? 0).rounded()))%"
     var config = UIButton.Configuration.plain()
-    config.contentInsets = .zero
+    config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 2)
     config.imagePadding = 4
     config.baseForegroundColor = .secondaryLabel
-    config.title = "\(Int((usage.percentage ?? 0).rounded()))%"
+    config.title = title
     config.image = ChatUsageRing.image(usage.percentage ?? 0)
     config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
       var result = incoming
-      result.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+      result.font = font
       return result
     }
+    let titleWidth = (title as NSString).size(withAttributes: [.font: font]).width
+    usageWidth.constant = ceil(ChatUsageRing.side + 4 + titleWidth + 4)
     if usage.isContextCompacting == true {
       config.title = nil
       config.image = nil
@@ -2057,6 +2068,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     takeDraft()
     saveDraft()
     pendingSendID = id
+    // Sending ends the editing: the keyboard goes down and the composer rests again.
+    if input.isFirstResponder { input.resignFirstResponder() }
     updateComposer()
   }
   @objc private func reconnect() {
