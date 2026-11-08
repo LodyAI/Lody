@@ -2791,9 +2791,15 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "type": "string" }
-        }
+        },
+        "ownedMachineIds": { "type": "array", "items": { "type": "string" } }
       },
-      "required": ["items", "deviceTimeZone", "machineTimeZones"]
+      "required": [
+        "items",
+        "deviceTimeZone",
+        "machineTimeZones",
+        "ownedMachineIds"
+      ]
     },
     "ScheduleState": {
       "type": "object",

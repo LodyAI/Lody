@@ -115,6 +115,8 @@ export const SchedulesResult = z
     deviceTimeZone: z.string(),
     /** Machines' IANA zones by id, for authoring wall-clock rules. */
     machineTimeZones: z.record(z.string(), z.string()),
+    /** Computers the signed-in user owns: the only ones a schedule can target. */
+    ownedMachineIds: z.array(z.string()),
   })
   .meta({ id: 'SchedulesResult' });
 

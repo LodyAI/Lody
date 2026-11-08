@@ -5505,22 +5505,26 @@ extension RuntimeContract {
     public var items: [ScheduleItem]
     public var deviceTimeZone: String
     public var machineTimeZones: [String: String]
-    public init(items: [ScheduleItem], deviceTimeZone: String, machineTimeZones: [String: String]) {
+    public var ownedMachineIds: [String]
+    public init(items: [ScheduleItem], deviceTimeZone: String, machineTimeZones: [String: String], ownedMachineIds: [String]) {
       self.items = items
       self.deviceTimeZone = deviceTimeZone
       self.machineTimeZones = machineTimeZones
+      self.ownedMachineIds = ownedMachineIds
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.items = try c.decode([ScheduleItem].self, forKey: Key("items"))
       self.deviceTimeZone = try c.decode(String.self, forKey: Key("deviceTimeZone"))
       self.machineTimeZones = try c.decode([String: String].self, forKey: Key("machineTimeZones"))
+      self.ownedMachineIds = try c.decode([String].self, forKey: Key("ownedMachineIds"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.items, forKey: Key("items"))
       try c.encode(self.deviceTimeZone, forKey: Key("deviceTimeZone"))
       try c.encode(self.machineTimeZones, forKey: Key("machineTimeZones"))
+      try c.encode(self.ownedMachineIds, forKey: Key("ownedMachineIds"))
     }
   }
 

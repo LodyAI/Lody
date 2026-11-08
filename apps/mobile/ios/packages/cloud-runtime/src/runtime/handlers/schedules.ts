@@ -287,12 +287,14 @@ export function registerSchedules(ctx: RuntimeContext) {
     check();
     const agentList = agents(meta);
     const machineTimeZones: Record<string, string> = {};
+    const ownedMachineIds: string[] = [];
     for (const id of new Set([
       ...state.machineReplicas.keys(),
       ...rows.map((row) => row.machineId),
     ])) {
-      const zone = machine(meta, id).timeZone;
-      if (zone) machineTimeZones[id] = zone;
+      const host = machine(meta, id);
+      if (host.timeZone) machineTimeZones[id] = host.timeZone;
+      if (host.owner && host.owner === state.userId) ownedMachineIds.push(id);
     }
     return {
       items: rows
@@ -300,6 +302,7 @@ export function registerSchedules(ctx: RuntimeContext) {
         .sort((a, b) => b.updatedAt - a.updatedAt),
       deviceTimeZone: deviceTimeZone(),
       machineTimeZones,
+      ownedMachineIds: ownedMachineIds.sort(),
     };
   });
 
