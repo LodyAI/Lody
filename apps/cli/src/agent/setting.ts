@@ -230,7 +230,7 @@ registryAgentsById.dimcode = {
 registryAgentsById.devin = {
   id: 'devin',
   name: 'Devin',
-  version: '3000.11.3',
+  version: '3000.12.28',
   distribution: {
     binary: Object.fromEntries(
       (
@@ -245,7 +245,7 @@ registryAgentsById.devin = {
       ).map(([platform, target]) => [
         platform,
         {
-          archive: `https://static.devin.ai/cli/3000.11.3/devin-3000.11.3-${target}.${platform.startsWith('windows-') ? 'zip' : 'tar.gz'}`,
+          archive: `https://static.devin.ai/cli/3000.12.28/devin-3000.12.28-${target}.${platform.startsWith('windows-') ? 'zip' : 'tar.gz'}`,
           cmd: platform.startsWith('windows-') ? './bin/devin.exe' : './bin/devin',
           args: ['acp'],
         },
