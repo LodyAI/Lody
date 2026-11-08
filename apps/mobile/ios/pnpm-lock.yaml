@@ -87,6 +87,9 @@ importers:
       loro-crdt:
         specifier: 1.15.1
         version: 1.15.1
+      loro-mirror:
+        specifier: 2.3.2
+        version: 2.3.2(loro-crdt@1.15.1)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -691,6 +694,9 @@ packages:
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
+  immer@10.2.0:
+    resolution: {integrity: sha512-d/+XTN3zfODyjr89gM3mPq1WNX2B8pYsu7eORitdwyA2sBubnTl3laYlBk4sXY5FUa5qTZGBDPJICVbvqzjlbw==}
+
   is-plain-object@2.0.4:
     resolution: {integrity: sha512-h5PpgXkWitc38BBMYawTYMWJHFZJVnBquFE57xFpjB8pJFiF6gZ+bU+WyI/yqXiFR5mdLsgYNaPe8uao6Uv9Og==}
     engines: {node: '>=0.10.0'}
@@ -712,6 +718,11 @@ packages:
 
   loro-crdt@1.15.1:
     resolution: {integrity: sha512-J3568cXG75MNotTJg2XVhlIEW8POjAZRFhK+3yXYBaQVB1LHn/Ksk3DIqoTOBUf+cgE4yVeqPbh7VUTX2QLV2g==}
+
+  loro-mirror@2.3.2:
+    resolution: {integrity: sha512-qTCZ37FEgWHnepnRQwqOZWLE8QxG2E+Qzx1gw9SE5187H6Yow3tkWXZ6BCSmjX5BoSJf4kEblS6aGJxgDnV29g==}
+    peerDependencies:
+      loro-crdt: ^1.13.3
 
   lru_map@0.4.1:
     resolution: {integrity: sha512-I+lBvqMMFfqaV8CJCISjI3wbjmwVu/VyOoU7+qtu9d7ioW5klMgsTTiUOUp+DJvfTTzKXoPbyC6YfgkNcyPSOg==}
@@ -1460,6 +1471,8 @@ snapshots:
 
   ieee754@1.2.1: {}
 
+  immer@10.2.0: {}
+
   is-plain-object@2.0.4:
     dependencies:
       isobject: 3.0.1
@@ -1475,6 +1488,11 @@ snapshots:
       typescript: 6.0.3
 
   loro-crdt@1.15.1: {}
+
+  loro-mirror@2.3.2(loro-crdt@1.15.1):
+    dependencies:
+      immer: 10.2.0
+      loro-crdt: 1.15.1
 
   lru_map@0.4.1: {}
 
