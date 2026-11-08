@@ -16,6 +16,43 @@ const {
 };
 
 describe('local session control node validators', () => {
+  it('accepts a selected authentication method only on start in both validators', () => {
+    const base = {
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      requestId: 'request-1',
+    };
+    const start = { ...base, action: 'start', configId: 'config-1' };
+    const controls = [
+      { ...base, action: 'cancel', authenticationRequestId: 'auth-1' },
+      {
+        ...base,
+        action: 'submit-code',
+        authenticationRequestId: 'auth-1',
+        authorizationCode: 'synthetic-code',
+      },
+      {
+        ...base,
+        action: 'submit-input',
+        authenticationRequestId: 'auth-1',
+        interactionId: 'interaction-1',
+        authenticationInput: JSON.stringify({ action: 'accept' }),
+      },
+    ];
+    for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+      expect(validate(start)).toBe(true);
+      expect(validate({ ...start, methodId: 'sorbet:opencode-go:api_key' })).toBe(true);
+      for (const methodId of ['', ' ', 'x'.repeat(1025), 1, null]) {
+        expect(validate({ ...start, methodId })).toBe(false);
+      }
+      for (const control of controls) {
+        expect(validate(control)).toBe(true);
+        expect(validate({ ...control, methodId: 'sorbet:opencode-go:api_key' })).toBe(false);
+      }
+    }
+  });
+
   it('transports local DSH Provider discovery without workspace or launch inputs', () => {
     const request = { type: 'machine/dsh-providers', machineId: 'machine-1' };
     const response = {
