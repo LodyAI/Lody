@@ -20,7 +20,10 @@ The Lody Agent page exposes saved connections and custom endpoints while the
 initial setup is awaiting authentication, using the pending config on the target
 machine. Completing authentication lets the daemon resume verification; only a
 successful verification publishes the Agent config. Runtime preparation and
-verification do not mount connection-management probes.
+verification do not mount connection-management probes. Selecting a sign-in method
+opens a dialog for its progress, input and errors. Each custom endpoint retains an
+API key action while the advertised-method cache refreshes; the daemon validates
+the selected method against the agent before requesting credentials.
 
 Connection management uses the target machine’s local capabilities for same-machine
 IPC and its remote capabilities for encrypted workspace RPC. A remote machine in a

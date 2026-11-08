@@ -592,6 +592,10 @@ function isLocalSessionControlRequest(value) {
       (value.action === 'start'
         ? typeof value.configId === 'string' &&
           value.configId.trim().length > 0 &&
+          (typeof value.methodId === 'undefined' ||
+            (typeof value.methodId === 'string' &&
+              value.methodId.trim().length > 0 &&
+              value.methodId.length <= 1024)) &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&
@@ -632,7 +636,7 @@ function isLocalSessionControlRequest(value) {
       typeof value.customAcp === 'undefined' &&
       typeof value.runtimeOverrides === 'undefined' &&
       typeof value.env === 'undefined' &&
-      typeof value.methodId === 'undefined'
+      (value.action === 'start' || typeof value.methodId === 'undefined')
     );
   }
 
