@@ -78,51 +78,70 @@ export function makeExecutionOriginRecovery(
     ) => Effect.Effect<{ plaintext: Uint8Array }, unknown, import('effect').Scope.Scope>
   ) {
     const key = `${docId}:${id.peer}:${id.counter}`;
-    const work = Effect.gen(function* () {
-      for (let page = 0; page < 8; page += 1) {
-        const before = cursors.get(key);
-        const result = yield* Effect.tryPromise({
-          try: (signal) => readPage({ ...access, docId, before }, signal),
+    /** Reads one page and retains any matching original; `done` ends the search. */
+    const scan = Effect.fnUntraced(function* (before: string | undefined) {
+      const result = yield* Effect.tryPromise({
+        try: (signal) => readPage({ ...access, docId, before }, signal),
+        catch: (cause) => cause,
+      });
+      let found = false;
+      for (const message of result.messages) {
+        const requests = yield* Effect.try({
+          try: () => executionOriginalFrames(message, namespace, docId),
           catch: (cause) => cause,
         });
-        let found = false;
-        for (const message of result.messages) {
-          const requests = yield* Effect.try({
-            try: () => executionOriginalFrames(message, namespace, docId),
-            catch: (cause) => cause,
-          });
-          for (const request of requests) {
-            const opened = yield* open(request);
-            try {
-              const retained = yield* Effect.try({
-                try: () => origins.retain(`doc:${docId}`, request, opened.plaintext, id),
-                catch: (cause) => cause,
-              });
-              found = retained || found;
-            } finally {
-              opened.plaintext.fill(0);
-            }
+        for (const request of requests) {
+          const opened = yield* open(request);
+          try {
+            const retained = yield* Effect.try({
+              try: () => origins.retain(`doc:${docId}`, request, opened.plaintext, id),
+              catch: (cause) => cause,
+            });
+            found = retained || found;
+          } finally {
+            opened.plaintext.fill(0);
           }
         }
-        if (found || result.atStart) {
-          cursors.delete(key);
-          return undefined;
-        }
-        if (result.before === before)
-          return yield* Effect.fail(new Error('e2ee_origin_cursor_stalled'));
-        cursors.set(key, result.before);
       }
-      return undefined;
+      return { done: found || result.atStart, before: result.before };
     });
     // SDK reads cooperate with the caller's abort signal. Timeout leaves the
     // unclaimed turn pending; cleanup and cancellation stay in its Effect scope.
-    yield* work.pipe(
-      Effect.timeout('3 seconds'),
-      Effect.catch((cause) =>
-        isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)
-          ? Effect.fail(cause)
-          : Effect.void
-      )
+    const bounded = <A>(work: Effect.Effect<A, unknown, import('effect').Scope.Scope>) =>
+      work.pipe(
+        Effect.timeout('3 seconds'),
+        Effect.catch((cause) =>
+          isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)
+            ? Effect.fail(cause)
+            : Effect.succeed(undefined)
+        )
+      );
+    const resumed = cursors.get(key);
+    if (resumed !== undefined) {
+      // A frame this machine just wrote reaches the stream after the first attempt,
+      // so a resumed search rereads the newest page first. It has its own budget,
+      // so a slow head cannot stop the older scan from moving forward.
+      const head = yield* bounded(scan(undefined));
+      if (head?.done) {
+        cursors.delete(key);
+        return;
+      }
+    }
+    // At most 8 pages and two 3-second budgets per attempt.
+    yield* bounded(
+      Effect.gen(function* () {
+        for (let page = resumed === undefined ? 0 : 1; page < 8; page += 1) {
+          const before = cursors.get(key);
+          const result = yield* scan(before);
+          if (result.done) {
+            cursors.delete(key);
+            return;
+          }
+          if (result.before === before)
+            return yield* Effect.fail(new Error('e2ee_origin_cursor_stalled'));
+          cursors.set(key, result.before);
+        }
+      })
     );
   });
   return { recover, clear: () => cursors.clear() };
