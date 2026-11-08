@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   storeLocalSessionImage,
+  listLocalSessionImages,
   readLocalSessionImage,
   readLocalSessionImageReceipt,
   writeLocalSessionImageReceipt,
@@ -185,6 +186,33 @@ describe('session file blob store', () => {
       readLocalSessionImageReceipt({ ...scope, accountId: 'another-account' }, image.localImageId!)
     ).rejects.toThrow('Local image reference mismatch');
     await expect(readLocalSessionImage(scope, image)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const original = await makeSource('original.png', 'original');
+    const reference = await storeLocalSessionImage(
+      scope,
+      {
+        ...image,
+        imageId: '22222222-2222-4222-8222-222222222222',
+        localImageId: '22222222-2222-4222-8222-222222222222',
+      },
+      original
+    );
+    const registered = await readLocalSessionImage(scope, reference);
+    expect(registered.path).toBe(original);
+    expect(registered.bytes.toString()).toBe('original');
+    expect(
+      await sessionFileBlobExists({ ...scope, fileId: `image-${reference.localImageId}` })
+    ).toBe(false);
+    expect(await listLocalSessionImages(scope)).toContainEqual({
+      sessionId: scope.sessionId,
+      image: reference,
+    });
+    await writeFile(original, 'edited');
+    expect((await readLocalSessionImage(scope, reference)).bytes.toString()).toBe('edited');
+    await cleanupBackfilledSessionFileBlobs({ homeDir });
+    expect(await readFile(original, 'utf8')).toBe('edited');
+    await rm(original);
+    await expect(readLocalSessionImage(scope, reference)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects new writes when the local blob quota is full', async () => {

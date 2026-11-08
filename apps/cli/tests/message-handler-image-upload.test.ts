@@ -772,6 +772,84 @@ describe('MessageHandler image upload flow', () => {
         result: { status: 'error', code: 'file_not_found' },
       });
       expect(await fs.readdir(tempDir)).not.toContain('session-files');
+      const imageRequest = {
+        type: 'session/image-prepare-local' as const,
+        machineId: 'machine-1',
+        workspaceId: 'ws-1',
+        sessionId: 'session-1',
+        imageId: '11111111-1111-4111-8111-111111111111',
+        source: { path: source },
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      };
+      await handler.handleMessage(imageRequest as never, {
+        source: 'runtime',
+        send: (message) => responses.push(message),
+      });
+      expect(responses.at(-1)).toMatchObject({ success: false });
+      await handler.handleMessage(imageRequest as never, {
+        source: 'local',
+        send: (message) => responses.push(message),
+      });
+      expect(responses.at(-1)).toMatchObject({ success: true });
+      const image = { type: 'image', ...responses.at(-1).image };
+      const promptArgs = {
+        workspaceId: 'ws-1',
+        sessionId: 'session-1',
+        requesterUserId: 'user-1',
+        inputBlocks: [image],
+      };
+      const edited = Buffer.from('edited original');
+      await fs.writeFile(source, edited);
+      expect(await host.buildAcpPromptBlocks!(promptArgs)).toEqual([
+        { type: 'image', data: edited.toString('base64'), mimeType: 'image/png' },
+        expect.objectContaining({ type: 'resource_link', uri: pathToFileURL(source).href }),
+      ]);
+      await expect(
+        host.buildAcpPromptBlocks!({ ...promptArgs, requesterUserId: 'other-user' })
+      ).rejects.toThrow('machine owner');
+      await handler.handleMessage(
+        {
+          type: 'session/image-resolve-local',
+          machineId: 'machine-1',
+          workspaceId: 'ws-1',
+          sessionId: 'session-1',
+          image,
+        } as never,
+        { source: 'local', send: (message) => responses.push(message) }
+      );
+      expect(responses.at(-1)).toMatchObject({ success: true, path: source });
+      await fs.unlink(source);
+      await expect(host.buildAcpPromptBlocks!(promptArgs)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await handler.handleMessage(
+        {
+          ...imageRequest,
+          imageId: '22222222-2222-4222-8222-222222222222',
+          source: { base64: bytes.toString('base64') },
+        } as never,
+        { source: 'local', send: (message) => responses.push(message) }
+      );
+      expect(responses.at(-1)).toMatchObject({ success: true });
+      const generatedBlocks = await host.buildAcpPromptBlocks!({
+        ...promptArgs,
+        inputBlocks: [{ type: 'image', ...responses.at(-1).image }],
+      });
+      expect(generatedBlocks[0]).toEqual({
+        type: 'image',
+        data: bytes.toString('base64'),
+        mimeType: 'image/png',
+      });
+      expect(generatedBlocks[1]).toMatchObject({ type: 'resource_link' });
+      const storedFiles = await fs.readdir(
+        path.join(tempDir, 'session-files', 'ws-1', 'session-1')
+      );
+      expect(storedFiles.sort()).toEqual([
+        'image-11111111-1111-4111-8111-111111111111.imagemeta',
+        'image-22222222-2222-4222-8222-222222222222',
+        'image-22222222-2222-4222-8222-222222222222.imagemeta',
+      ]);
     } finally {
       vi.unstubAllEnvs();
       await fs.rm(tempDir, { recursive: true, force: true });

@@ -33,7 +33,6 @@ type LocalAttachmentSource = { path: string } | { bytes: ArrayBuffer }
 // Keep staged bytes alive until the daemon has finished consuming them.
 async function withLocalAttachmentSource<T>(
   source: LocalAttachmentSource | undefined,
-  kind: 'image' | 'attachment',
   prepare: (sourcePath: string) => Promise<T>
 ): Promise<T | { ok: false; error: string }> {
   let staging: string | undefined
@@ -43,20 +42,16 @@ async function withLocalAttachmentSource<T>(
     let sourcePath: string
     if (managed) {
       const bytes = source.bytes
-      const maxBytes = kind === 'image' ? 20 * 1024 * 1024 : SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES
-      if (
-        !(bytes instanceof ArrayBuffer) ||
-        (kind === 'image' && bytes.byteLength === 0) ||
-        bytes.byteLength > maxBytes
-      )
-        throw new Error(`invalid_${kind}_bytes`)
-      staging = await fs.mkdtemp(path.join(os.tmpdir(), `lody-local-${kind}-`))
+      const maxBytes = SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > maxBytes)
+        throw new Error('invalid_attachment_bytes')
+      staging = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-attachment-'))
       sourcePath = path.join(staging, 'source')
       await fs.writeFile(sourcePath, Buffer.from(bytes), { mode: 0o600 })
     } else {
       sourcePath = source.path
       if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath))
-        throw new Error(`invalid_${kind}_path`)
+        throw new Error('invalid_attachment_path')
     }
     return await prepare(sourcePath)
   } catch (error) {
@@ -64,8 +59,7 @@ async function withLocalAttachmentSource<T>(
   } finally {
     if (staging) {
       const cleanup = fs.rm(staging, { recursive: true, force: true })
-      if (kind === 'image') await cleanup.catch(() => undefined)
-      else await cleanup
+      await cleanup
     }
   }
 }
@@ -126,7 +120,16 @@ export class LocalProjectsIpc extends IpcService {
     mimeType: string
     source: LocalAttachmentSource
   }) {
-    return withLocalAttachmentSource(payload?.source, 'image', async (sourcePath) => {
+    try {
+      const source = payload?.source
+      if (!source || typeof source !== 'object') throw new Error('invalid_image_source')
+      if (
+        'bytes' in source &&
+        (!(source.bytes instanceof ArrayBuffer) ||
+          source.bytes.byteLength === 0 ||
+          source.bytes.byteLength > 20 * 1024 * 1024)
+      )
+        throw new Error('invalid_image_bytes')
       const request = SessionImagePrepareLocalRequestSchema.parse({
         type: 'session/image-prepare-local',
         workspaceId: payload.workspaceId,
@@ -135,7 +138,8 @@ export class LocalProjectsIpc extends IpcService {
         imageId: payload.imageId,
         fileName: payload.fileName,
         mimeType: payload.mimeType,
-        path: sourcePath
+        source:
+          'bytes' in source ? { base64: Buffer.from(source.bytes).toString('base64') } : source
       })
       const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
         ...request,
@@ -149,7 +153,9 @@ export class LocalProjectsIpc extends IpcService {
       if (!response?.success || !response.image)
         return { ok: false as const, error: response?.error ?? 'local_image_not_supported' }
       return { ok: true as const, image: response.image }
-    })
+    } catch (error) {
+      return { ok: false as const, error: formatUnknownError(error) }
+    }
   }
 
   @IpcMethod()
@@ -189,7 +195,7 @@ export class LocalProjectsIpc extends IpcService {
   }) {
     if (!payload?.source || typeof payload.source !== 'object' || !('bytes' in payload.source))
       return { ok: false as const, error: 'invalid_attachment_bytes' }
-    return withLocalAttachmentSource(payload.source, 'attachment', async (sourcePath) => {
+    return withLocalAttachmentSource(payload.source, async (sourcePath) => {
       const request = SessionAttachmentPrepareRequestSchema.parse({
         type: 'session/attachment-prepare',
         workspaceId: payload.workspaceId,

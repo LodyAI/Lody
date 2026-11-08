@@ -2619,8 +2619,8 @@ export class MessageHandler {
       imageInputBlocks.map(async (block) => {
         if (block.localImageId && block.machineId === this.machineId) {
           try {
-            if (this.encryptedAttachments)
-              throw new Error('Protected local images are unavailable');
+            if (this.encryptedAttachments || args.requesterUserId !== this.userId)
+              throw new Error('Local image paths require the machine owner');
             const storageSessionId = block.storageSessionId ?? args.sessionId;
             const local = await readLocalSessionImage(
               this.localImageScope(storageSessionId),
@@ -2637,7 +2637,7 @@ export class MessageHandler {
               mimeType: local.image.mimeType,
               sizeBytes: local.bytes.length,
             };
-            return { inputBlock: block, downloaded };
+            return { inputBlock: block, downloaded, localPath: local.path };
           } catch (error) {
             if (block.transport === 'local') throw error;
             // Published images retain their ordinary cloud recovery path if the
@@ -2653,7 +2653,7 @@ export class MessageHandler {
           expectedMimeType: block.mimeType,
           encryption: block.encryption,
         });
-        return { inputBlock: block, downloaded };
+        return { inputBlock: block, downloaded, localPath: undefined };
       })
     );
     const imageBlocks = imagePromptAttachments.map(({ downloaded }) => downloaded.block);
@@ -2661,10 +2661,28 @@ export class MessageHandler {
     // Keep ACP image blocks for visual context, and also expose the same bytes
     // through a baseline ACP resource_link so agents can read/re-upload the file
     // by path when they need to echo or transform it.
-    const imageAttachmentBlocks = await this.materializeSessionImageAttachments({
-      sessionId: args.sessionId,
-      imageBlocks: imagePromptAttachments,
-    });
+    const imageAttachmentBlocks: ContentBlock[] = [];
+    for (const attachment of imagePromptAttachments) {
+      if (attachment.localPath) {
+        imageAttachmentBlocks.push({
+          type: 'resource_link',
+          uri: pathToFileURL(attachment.localPath).href,
+          name: this.resolveSessionImageAttachmentFileName(
+            attachment.inputBlock,
+            attachment.downloaded.mimeType
+          ),
+          mimeType: attachment.downloaded.mimeType,
+          size: attachment.downloaded.sizeBytes,
+        });
+      } else {
+        imageAttachmentBlocks.push(
+          ...(await this.materializeSessionImageAttachments({
+            sessionId: args.sessionId,
+            imageBlocks: [attachment],
+          }))
+        );
+      }
+    }
 
     // Materialize human→agent file attachments under `<workspace>/.lody/attachments/`
     // and reference them with ACP resource links (never inline their contents).
@@ -8145,28 +8163,10 @@ export class MessageHandler {
             this.encryptedAttachments
           )
             throw new Error('Local image preparation is unavailable for this target');
-          if (!path.isAbsolute(message.path)) throw new Error('Image requires an absolute path');
-          const handle = await fs.promises.open(
-            message.path,
-            fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-          );
-          let bytes: Buffer;
-          try {
-            const stat = await handle.stat();
-            if (!stat.isFile() || stat.size <= 0 || stat.size > 20 * 1024 * 1024)
-              throw new Error('Invalid image size');
-            bytes = Buffer.alloc(stat.size + 1);
-            let offset = 0;
-            while (offset < bytes.length) {
-              const read = await handle.read(bytes, offset, bytes.length - offset, offset);
-              if (!read.bytesRead) break;
-              offset += read.bytesRead;
-            }
-            if (offset !== stat.size) throw new Error('Image changed during preparation');
-            bytes = bytes.subarray(0, offset);
-          } finally {
-            await handle.close();
-          }
+          const source =
+            'path' in message.source
+              ? message.source.path
+              : Buffer.from(message.source.base64, 'base64');
           const image = await storeLocalSessionImage(
             this.localImageScope(message.sessionId),
             {
@@ -8177,9 +8177,8 @@ export class MessageHandler {
               storageSessionId: message.sessionId,
               mimeType: message.mimeType,
               fileName: message.fileName,
-              sizeBytes: bytes.length,
             },
-            bytes
+            source
           );
           this.enqueueLocalImageBackfill(message.sessionId, image);
           context.send({
@@ -9525,6 +9524,7 @@ export class MessageHandler {
               ...local.image,
               imageId: uploaded.imageId,
               transport: 'r2',
+              sizeBytes: local.bytes.length,
               ...(uploaded.width ? { width: uploaded.width } : {}),
               ...(uploaded.height ? { height: uploaded.height } : {}),
             };

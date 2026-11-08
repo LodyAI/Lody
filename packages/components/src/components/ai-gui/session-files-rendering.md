@@ -135,8 +135,8 @@ IPC and its file-resource URL after a reload. They never build a cloud download
 URL for a pending local image. Local cache keys additionally include the owning
 machine and immutable `localImageId`. Preview callers retain the full image
 payload, including MIME, size and storage session. Published `r2` images with
-retained local identity prefer the scoped host snapshot, preserving offline previews
-after backfill. If that snapshot cannot be loaded, including on another device or
+retained local identity prefer the scoped host file, preserving offline previews
+after backfill. If that file cannot be loaded, including on another device or
 without IPC, they use the normal workspace-authenticated cloud image path. A
 missing cloud token leaves a local miss unavailable. Pending local images remain
 host-only on any resolution or preview failure. Legacy local-attachment image

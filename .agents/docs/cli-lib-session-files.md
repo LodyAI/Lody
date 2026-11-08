@@ -1,18 +1,18 @@
 # Session file attachments in the CLI
 
 Attachments choose their transport before authentication or source-byte reads. Native
-same-machine ordinary files use durable local references; images use immutable local snapshots; remote targets and clients
+same-machine ordinary files use durable local references; images use local files; remote targets and clients
 without native provenance use the existing transfer boundary. The
 [local-reference Spec](../../specs/local-attachment-references.md) explains the
 ownership decision, while [attachment drafts](../../specs/session-files.md) owns
 send-time preparation. A failed local preparation retains the complete draft and
 never falls back to upload.
 
-## Same-desktop image snapshots
+## Same-desktop images
 
 New images use `SessionImagePayload` with `transport: 'local'`, a machine ID and
-UUID `localImageId` equal to the initial `imageId`. The renderer prepares through Electron `prepareLocalImage`; the CLI stores
-the complete snapshot before readiness. Preparation and dispatch do not wait for
+UUID `localImageId` equal to the initial `imageId`. The renderer prepares through Electron `prepareLocalImage`; the CLI persists the source reference before readiness. Existing source files are
+used directly, while pathless image bytes are saved once. Preparation and dispatch do not wait for
 cloud upload. Protected plaintext preparation is rejected.
 
 `message-handler.ts` owns image backfill and restart recovery, using
@@ -25,21 +25,20 @@ Publication changes transport to `r2` and supplies a cloud image ID while retain
 `localImageId`, machine and storage-session metadata. Durable receipts reconcile
 history, frozen execution inputs and queued inputs through one promotion path, including references authored
 after upload completes. Receipt adoption validates scoped metadata without reopening
-the snapshot; only execution and a new upload read the bytes. Recovery
+the source file; only execution and a new upload read the bytes. Recovery
 checks the receipt first, so completed uploads do not depend on local byte availability. Dispatch reconciles its target and current queue before
-execution. Published inputs prefer the original snapshot on its machine and can
-use their uploaded bytes when the snapshot is unavailable.
+execution. Published inputs prefer the local file on its machine and can
+use their uploaded bytes when the local file is unavailable.
 
-Snapshot publication writes and flushes a private temporary file, then atomically renames it.
-Bytes are published before metadata; a retry reuses accepted metadata and bytes.
-Local reads use the saved MIME and size metadata without hashing the snapshot or
-comparing display metadata supplied by the caller.
+Original-path preparation persists metadata without copying the image. Subsequent
+local reads and uploads read current source bytes: edits are visible, and missing
+or unreadable files fail. Cleanup never removes original source files.
 
-The blob store pins these snapshots under the session-file quota rather than
-applying automatic image retention GC: queued or frozen inputs may still own the
-identity. Storage pressure rejects admission instead of guessing that an older
-snapshot is unused. ACP receives image bytes and a workspace copy for its resource
-link, keeping the durable snapshot out of the Agent's writable path.
+Pathless image publication writes and flushes a private temporary file, then
+atomically renames it before publishing metadata. These saved files stay under the
+session-file quota without automatic retention GC because queued or frozen inputs
+may still reference them. Storage pressure rejects admission. ACP receives image
+bytes and a resource link to the local file; it does not create a workspace copy.
 
 History, fullscreen and queued previews preserve the complete image metadata.
 `resolveLocalImage` checks the scoped local reference before the renderer fetches

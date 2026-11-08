@@ -1905,7 +1905,10 @@ export const SessionImagePrepareLocalRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     sessionId: SessionIdSchema,
     imageId: z.string().uuid(),
-    path: SharedTrimmedNonEmptyStringSchema,
+    source: z.union([
+      z.object({ path: SharedTrimmedNonEmptyStringSchema }).strict(),
+      z.object({ base64: z.string().min(1).max(27962028) }).strict(),
+    ]),
     fileName: SharedTrimmedNonEmptyStringSchema,
     mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
   })

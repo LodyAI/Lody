@@ -394,7 +394,38 @@ describe('local IPC socket server', () => {
 
   it('enforces the control request body limit over sockets', async () => {
     const paths = makePaths();
-    await startLocalIpcSocketServers(makeServerConfig(paths));
+    const config = makeServerConfig(paths);
+    const bytes = Buffer.alloc(20 * 1024 * 1024, 42);
+    config.control.dispatchSession.mockImplementation(async (message, options) => {
+      expect(message.type).toBe('session/image-prepare-local');
+      expect(Buffer.from(message.source.base64, 'base64').equals(bytes)).toBe(true);
+      const response: LocalSessionControlResponse = {
+        type: 'session/image-prepare-local_response',
+        sessionId: 'session-1',
+        success: true,
+      };
+      options?.onResponse?.(response);
+      return [response];
+    });
+    await startLocalIpcSocketServers(config);
+    await expect(
+      Effect.runPromise(
+        makeLocalControlClientSocket({ socketPath: paths.controlSocketPath }).sessionControl({
+          type: 'session/image-prepare-local',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          sessionId: 'session-1',
+          imageId: '11111111-1111-4111-8111-111111111111',
+          fileName: 'image.png',
+          mimeType: 'image/png',
+          source: { base64: bytes.toString('base64') },
+        })
+      )
+    ).resolves.toContainEqual({
+      type: 'session/image-prepare-local_response',
+      sessionId: 'session-1',
+      success: true,
+    });
 
     await expect(postOversizedControlBody(paths.controlSocketPath)).resolves.toEqual({
       status: 413,

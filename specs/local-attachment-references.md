@@ -49,19 +49,22 @@ export; it never uploads original paths implicitly.
 
 ## Images
 
-Images remain image payloads. Same-desktop preparation saves an independent local
-snapshot before sending, so preview and Agent execution do not wait for cloud
-authentication or upload. An authorized background uploader publishes the snapshot,
-retries after connectivity returns and resumes from durable metadata and receipts.
-Publication retains local identity for subsequent offline reads. Receipts reconcile
-history, frozen inputs and queued references, including messages written after an
-upload completes. Remote targets retain the existing image transfer route.
+Images remain image payloads. Same-desktop images with a source path use that file
+directly; preparation does not copy it. Pathless images are saved once before
+sending. Preview and Agent execution do not wait for cloud authentication or upload.
+An authorized background uploader reads the local file, retries after connectivity
+returns and resumes from durable metadata and receipts. Publication retains local
+identity for offline reads. Receipts reconcile history, frozen inputs and queued
+references, including messages written after upload completes. Remote targets retain
+the existing image transfer route.
 
-ACP receives visual image bytes and a workspace copy for its resource link, keeping
-the durable snapshot outside the Agent's writable path. Snapshots stay retained
-while frozen inputs may reference them; quota pressure rejects new admission rather
-than guessing which snapshots are unused. Protected plaintext preparation remains
-unsupported. OSS composition remains local-only and gains no cloud capability.
+ACP receives visual image bytes and a resource link to the local file. Source edits
+are visible to subsequent local reads and uploads; moving or deleting an unpublished
+source makes it unavailable. Sending does not freeze the file contents. Preparation
+and cleanup never modify or delete original files. Pathless image storage remains
+subject to quota and is retained while frozen inputs may reference it. Protected
+plaintext preparation remains unsupported. OSS composition remains local-only and
+gains no cloud capability.
 
 ## Compatibility and evidence
 
