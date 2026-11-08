@@ -218,6 +218,88 @@ jobs:
           node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
             --group "$GROUP" --shard "$SHARD" "${full[@]}"
 
+  # Chromium only: WebKit needs apt system libraries that exceed this job's budget, so
+  # WebKit and the other browser suites stay in the manual e2ee-acceptance.yml.
+  # Not a dependency of the required Tests check.
+  browser-tests:
+    name: Browser tests (E2EE client, Chromium)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Select browser test scope
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            run=false
+            # Fail open: an unreadable base runs the job.
+            if ! git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+              || ! git diff --name-only "$PR_BASE_SHA" HEAD >/tmp/browser-changed-files; then
+              run=true
+            elif grep -qE '^(packages/(e2ee-client|e2ee-core|platform|cloud-api|shared|loro-streams-rpc)/|pnpm-lock\.yaml$|\.github/workflows/ci\.yml$)' /tmp/browser-changed-files; then
+              run=true
+            fi
+          fi
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up workspace toolchain
+        if: steps.paths.outputs.run == 'true'
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install browser test dependencies
+        if: steps.paths.outputs.run == 'true'
+        # The logout and cache recovery case bundles the real component implementations.
+        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... --filter acp-extension-core... --filter acp-extension-dsh... install --frozen-lockfile --ignore-scripts
+
+      - name: Resolve Playwright cache
+        id: playwright
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          version=$(pnpm --filter @lody/e2ee-client exec playwright --version | awk '{print $2}')
+          echo "key=playwright-chromium-${RUNNER_OS}-${RUNNER_ARCH}-${version}" >> "$GITHUB_OUTPUT"
+
+      # Restore everywhere; only main pushes save, as with the pnpm store.
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        if: steps.paths.outputs.run == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright.outputs.key }}
+
+      - name: Install Chromium
+        if: steps.paths.outputs.run == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
+        # The runner image already carries Chromium's system libraries.
+        run: pnpm --filter @lody/e2ee-client exec playwright install chromium
+
+      - name: Save Playwright browsers
+        if: steps.paths.outputs.run == 'true' && github.event_name == 'push' && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright.outputs.key }}
+
+      - name: Build shared RPC schema dependencies
+        if: steps.paths.outputs.run == 'true'
+        run: |
+          pnpm --filter acp-extension-core build
+          pnpm --filter acp-extension-dsh build
+
+      - name: Run E2EE client browser tests in Chromium
+        if: steps.paths.outputs.run == 'true'
+        run: pnpm --filter @lody/e2ee-client exec vitest run --config vitest.browser.config.ts -t '^(?!.*\bwebkit\b)'
+
   # Stable required check: green only when every group succeeded.
   # Cancellation supersedes this run; do not turn cancelled groups into a failure.
   tests:

@@ -2,7 +2,10 @@
 
 [`ci.yml`](ci.yml) runs static checks and affected package tests on pull requests,
 and full checks on main pushes and manual dispatch. Ordinary E2EE package tests
-remain in those suites.
+remain in those suites. Its `Browser tests` job runs the E2EE client browser tests
+in Chromium when a PR touches the E2EE, platform, shared or RPC packages, the
+lockfile or `ci.yml`; it is not part of the required `Tests` check. Main pushes
+save the Chromium download for later runs.
 
 [`conversation-acceptance.yml`](conversation-acceptance.yml) runs the Storybook
 hydration, history-header and scrolling browser regressions on manual dispatch.
