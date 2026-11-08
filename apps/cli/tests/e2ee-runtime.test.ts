@@ -733,6 +733,61 @@ describe('machine E2EE local runtime', () => {
       )
   );
 
+  effectIt.effect('keeps scanning older pages when every page is slow', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-slow-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        // Each page takes 1.6 s: the test answers it only after moving the clock.
+        const pending: { before?: string; answer: () => void }[] = [];
+        let arrived = Promise.withResolvers<void>();
+        const older: string[] = [];
+        const recovery = makeExecutionOriginRecovery(
+          new ExecutionOrigins(join(directory, 'origins.sqlite')),
+          (input, signal) =>
+            new Promise((resolve, reject) => {
+              const page = input.before === undefined ? 40 : Number(input.before);
+              pending.push({
+                before: input.before,
+                answer: () => {
+                  if (input.before !== undefined) older.push(input.before);
+                  resolve({ messages: [], before: String(page - 1), atStart: page <= 1 });
+                },
+              });
+              signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+              arrived.resolve();
+            }),
+          { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+          `lody-e2ee:${'ab'.repeat(32)}`
+        );
+        const attempt = Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(
+            recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+              Effect.die('no frame')
+            )
+          );
+          for (let step = 0; step < 20; step++) {
+            const next = yield* Effect.raceFirst(
+              Effect.promise(() => arrived.promise).pipe(Effect.as('read' as const)),
+              Fiber.await(fiber).pipe(Effect.as('done' as const))
+            );
+            if (next === 'done') return;
+            arrived = Promise.withResolvers<void>();
+            const read = pending.shift()!;
+            yield* TestClock.adjust(1600);
+            read.answer();
+            yield* Effect.yieldNow;
+          }
+        });
+        for (let round = 0; round < 4; round++) yield* attempt;
+        // Every attempt still moves the older scan forward despite rereading the head.
+        expect(new Set(older).size).toBeGreaterThanOrEqual(4);
+      })
+    )
+  );
+
   it('binds signed history to its device and ledger actor, independently of display account IDs', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
     const source = new LoroDoc();
