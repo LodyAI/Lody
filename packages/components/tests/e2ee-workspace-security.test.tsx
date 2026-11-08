@@ -369,6 +369,60 @@ describe('encrypted workspace settings', () => {
     if (!button) throw new Error(`missing ${key}`);
     await act(async () => button.click());
   };
+  it.each(['plan', 'failure'] as const)(
+    'drops the previous account recovery %s as soon as the account changes',
+    async (shown) => {
+      // Account B's answer has not arrived yet: nothing from account A may stay.
+      const answers: Record<string, (account: string) => Promise<unknown>> = {
+        'e2ee.recoveryReplacementPlan': async (account) => {
+          if (account !== 'account') return new Promise(() => {});
+          if (shown === 'failure') throw new Error('e2ee_recovery_unavailable');
+          return {
+            hasVault: true,
+            replaceable: true,
+            replacing: false,
+            covered: [{ id: 'workspace', name: 'Account A workspace', status: { kind: 'notSet' } }],
+            uncovered: [],
+          };
+        },
+        'e2ee.recentAccountSecurityEvents': async () => [],
+        'e2ee.recoveryPasskeyAvailable': async () => false,
+      };
+      let account = 'account';
+      vi.stubGlobal('ipc', {
+        invoke: (channel: string) => answers[channel]?.(account) ?? Promise.resolve(undefined),
+        on: () => () => {},
+      });
+      store.set(developerModeEnabledAtom, true);
+      store.set(e2eeRecoveryVaultEnabledAtom, true);
+      try {
+        await render();
+        for (let tick = 0; tick < 5; tick++) await act(async () => {});
+        const previous = shown === 'plan' ? 'Account A workspace' : 'e2ee.recovery.planFailed';
+        expect(container.textContent).toContain(previous);
+
+        account = 'account-b';
+        platform = {
+          ...platform,
+          identity: {
+            ...platform.identity,
+            session: createStaticStore({
+              status: 'authenticated' as const,
+              user: { id: 'account-b', name: 'Other', email: 'other@example.test' },
+            }),
+          },
+        } as PlatformProvider;
+        const mode = store.get(workspaceContentModeAtom)!;
+        store.set(workspaceContentModeAtom, { ...mode, accountId: 'account-b' });
+        await render();
+        for (let tick = 0; tick < 5; tick++) await act(async () => {});
+        expect(container.textContent).not.toContain(previous);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   const renderSharing = () =>
     act(async () =>
       root.render(
