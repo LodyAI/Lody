@@ -6,6 +6,14 @@ PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
 
+## Agent Role summaries
+
+Role rows resolve saved model, mode and option IDs against the bound machine's
+agent capabilities, using the same selector catalog as the editor. Unknown IDs
+remain visible when a capability is missing; display labels never replace stored
+execution values. Multi-machine rows compare raw summaries before displaying a
+shared label, so equal model names do not hide different model IDs.
+
 ## Lody Agent setup
 
 The Lody Agent page exposes saved connections and custom endpoints while the
