@@ -1,4 +1,4 @@
-"""Home workspace panel (workspaces only, trailing checkmark) and Settings icon/name editing reflected in it."""
+"""Native Home workspace menu and Settings icon/name editing reflected in it."""
 import sys
 import time
 import subprocess
@@ -13,27 +13,39 @@ def home_ready():
     ui.wait(lambda items: any(i.get('AXLabel') == avatar_label for i in items), 'Missing workspace avatar')
 home_ready()
 
-def open_panel(label):
+def menu_row(name):
+    return ui.wait(lambda items: next((i for i in items if i.get('AXLabel') == name), None), 'Missing native workspace action: ' + name)
+
+def open_menu(label):
     ui.axe('tap', '--label', label, '--post-delay', '.5')
-    panel = ui.element('workspace-panel')
-    current = ui.element('workspace-row:ui-home')
-    # The checkmark sits at the far right of the current row, which VoiceOver reads as selected.
-    assert current['frame']['height'] >= 44, current
-    assert 'selected' in str(current.get('traits') or []).lower(), current
+    menu_row(workspace_name)
     texts = {i.get('AXLabel') for i in ui.state()}
-    assert catalog.text('workspace.edit.action') not in texts, 'Edit Workspace moved to Settings'
-    assert catalog.text('devices.title') not in texts, 'Devices moved to Settings'
-    return panel
+    assert catalog.text('workspace.edit.action') not in texts
+    assert catalog.text('devices.title') not in texts
 
+def close_menu():
+    ui.axe('tap', '--label', workspace_name, '--post-delay', '.6')
+    ui.wait(lambda items: not any(i.get('AXLabel') == workspace_name for i in items), 'Menu did not close')
 
-def close_panel():
-    ui.axe('tap', '--id', 'workspace-row:ui-home', '--post-delay', '.6')
-    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'workspace-panel' for i in items), 'Choosing the current workspace closes the panel')
-
-
-open_panel(avatar_label)
+open_menu(avatar_label)
 ui.capture('workspace-menu')
-close_panel()
+ui.axe('tap', '-x', '350', '-y', '700', '--post-delay', '.5')
+ui.wait(lambda items: not any(i.get('AXLabel') == workspace_name for i in items), 'Outside tap did not dismiss menu')
+home_ready()
+open_menu(avatar_label)
+close_menu()
+home_ready()
+open_menu(avatar_label)
+ui.axe('drag', '--start-x', '140', '--start-y', '510', '--end-x', '140', '--end-y', '260', '--duration', '1', '--post-delay', '.5')
+ui.capture('workspace-menu-scrolled')
+last = menu_row('Workspace 5 — Research and international collaboration with a very long name')
+ui.axe('tap', '--label', last['AXLabel'], '--post-delay', '.6')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'workspace-menu' and 'Workspace 5' in (i.get('AXLabel') or '') for i in items), 'Workspace selection did not update the capsule')
+ui.axe('tap', '--id', 'workspace-menu', '--post-delay', '.5')
+menu_row(workspace_name)
+ui.capture('workspace-menu-selection-updated')
+close_menu()
+home_ready()
 # The workspace editor lives in Settings › General.
 ui.axe('tap', '--id', 'home-tab-settings', '--post-delay', '.6')
 ui.axe('tap', '--id', 'workspace-general', '--post-delay', '.8')
@@ -75,7 +87,8 @@ ui.wait(
     'Saving the workspace name must update the home capsule',
 )
 ui.capture('workspace-renamed')
-open_panel(renamed_label)
+workspace_name = renamed
+open_menu(renamed_label)
 ui.capture('workspace-menu-after-edit')
-close_panel()
-print('PASS: the workspace panel lists only workspaces with a trailing checkmark; the Settings editor returns icon selection and the saved name updates the Home capsule and panel.')
+close_menu()
+print('PASS: the native workspace menu selects, dismisses outside, reopens and updates; the Settings editor returns icon selection and the saved name updates the Home capsule and menu.')

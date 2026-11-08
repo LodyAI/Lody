@@ -75,6 +75,12 @@ Send and Stop; conversation activity/status colors remain unchanged. Appearance 
 without an accent-color picker. Process status labels use the same regular type
 as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
+conversation More. UIKit owns presentation, width, height, scrolling and title
+truncation; there is no six-row limit or custom fade. Actions retain full names,
+circular avatars and native selected state. Selecting the current workspace is a
+no-op; catalog changes refresh the menu. Workspace management stays in Settings.
+
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
 the system back circle. The transparent header registers its controls with UIKit through

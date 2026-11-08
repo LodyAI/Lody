@@ -15,6 +15,31 @@
       "id": "ui-states",
       "name": "Design states",
       "slug": "design-states"
+    },
+    {
+      "id": "ui-wide-1",
+      "name": "Workspace 1 — Research and international collaboration with a very long name",
+      "slug": "wide-1"
+    },
+    {
+      "id": "ui-wide-2",
+      "name": "Workspace 2 — Research and international collaboration with a very long name",
+      "slug": "wide-2"
+    },
+    {
+      "id": "ui-wide-3",
+      "name": "Workspace 3 — Research and international collaboration with a very long name",
+      "slug": "wide-3"
+    },
+    {
+      "id": "ui-wide-4",
+      "name": "Workspace 4 — Research and international collaboration with a very long name",
+      "slug": "wide-4"
+    },
+    {
+      "id": "ui-wide-5",
+      "name": "Workspace 5 — Research and international collaboration with a very long name",
+      "slug": "wide-5"
     }
   ],
   "catalog": {
