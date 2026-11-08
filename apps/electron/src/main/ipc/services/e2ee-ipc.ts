@@ -984,12 +984,28 @@ export class E2eeIpc extends IpcService {
   /** A new invitation can reach a removed member before any refresh or token request has
    * told this device. Its accepted earlier join would refuse the offer as a conflict, so
    * this device's credential confirms the removal first; local removal erases that join.
-   * A membership that is still current keeps the conflict. Returns whether it was removed. */
+   * A membership that is still current keeps the conflict. Returns whether it was removed.
+   * A removal this device already recorded but could not finish erasing (a busy lease or an
+   * unavailable key store) resumes from its durable receipt here: nothing else reopens a
+   * workspace the member has lost, so without this the new invitation would stay refused. */
   private async endRemovedMemberJoin(
     workspaceId: string,
     scope: ReturnType<E2eeIpc['memberScope']>,
     cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
   ) {
+    const recorded = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? owner.bootstrap.removedReason(workspaceId)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (recorded) {
+      await cleanupRemovedDesktopWorkspace({
+        accountId: cloud.accountId,
+        workspaceId,
+        reason: recorded
+      })
+      return true
+    }
     const access = await scope((owner) =>
       owner.accountId === cloud.accountId
         ? Effect.gen(function* () {
@@ -2446,7 +2462,8 @@ export class E2eeIpc extends IpcService {
       if (retiring) retiring.failure = cause
       if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)
         throw new Error('e2ee_account_mismatch')
-      // Receipt survives a busy process lease or interrupted cleanup; the next open retries it.
+      // Receipt survives a busy process lease or interrupted cleanup; the next open of the
+      // workspace, or preparing a new invitation to it, resumes the erase.
       return true
     })
     if (deleted) {
@@ -3626,7 +3643,13 @@ export class E2eeIpc extends IpcService {
             Effect.flatMap(accountWorkspaces, (rows) =>
               Effect.forEach(rows, (row) =>
                 Effect.map(
-                  Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
+                  // An identity that cannot be read right now (a removal still erasing, a busy
+                  // lease) counts as present: nothing is restored over it, and the other
+                  // workspaces still restore. An unfinished restore of it still resumes.
+                  Effect.catch(
+                    Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
+                    () => Effect.succeed(true)
+                  ),
                   (has) => ({ ...row, has })
                 )
               )
