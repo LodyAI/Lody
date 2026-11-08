@@ -116,7 +116,7 @@ fence keeps its original code colours throughout that block.
 In compact Chats Home, project grouping reveals an opaque project index while
 scrolling, over the existing full-width list. Tap a logo or scrub the rail to jump
 through committed rendered sections, including Pinned and unassigned chats. Only
-the visible 44 pt rail intercepts touches; no index recognizer is installed on rows.
+the visible 56 pt rail intercepts touches; no index recognizer is installed on rows.
 It stays visible through dragging/deceleration and for 0.8 seconds after scrolling
 or scrubbing ends. Renewed interaction invalidates pending dismissal. Snapshot
 replacement, backgrounding, detachment and size changes cancel the interaction.
@@ -124,13 +124,19 @@ Search, time/status groupings and the iPad sidebar retain their existing lists.
 VoiceOver adjustment follows rendered group order. Repository identities flow from
 catalog `repoFullName` through the root row to cached GitHub owner avatars, displayed
 in dedicated 24 pt image views at full opacity; projects without artwork use one
-initial. Dense rails show spaced landmarks and the selected logo without shrinking
-artwork; scrubbing and VoiceOver still reach every project. Pinned and unassigned
+initial. Targets are 48 × 48 pt with 48 pt centre spacing, 12 pt capsule end
+padding and an 8 pt trailing screen inset. Dense rails show a bounded set of evenly
+spaced landmarks without shrinking targets or artwork. Landmarks stay fixed during
+a gesture; selection highlights a landmark only when that destination is selected.
+Scrubbing anchors to the tapped destination with an 8 pt movement allowance, then
+maps each direction to the rail endpoint; small finger drift does not jump to a
+different proportional destination. Scrubbing and VoiceOver still reach every project. Pinned and unassigned
 groups keep their symbols. The opaque semantic
 background follows light/dark appearance. Entrance and exit use a short 12 pt slide
 and fade, with full opacity at rest. Dismissal disables touch targets immediately;
 Reduce Motion uses immediate visibility changes.
 `verify:native --case chat-list-scroll` covers hit bounds, direct navigation,
+48 pt target spacing, stable dense landmark taps, complete scrub/VoiceOver reach,
 deterministic linger cancellation and cached artwork.
 
 ### Code Diffs & Workspace File Browsing

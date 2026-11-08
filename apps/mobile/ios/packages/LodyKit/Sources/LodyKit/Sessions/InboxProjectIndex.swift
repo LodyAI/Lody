@@ -29,6 +29,7 @@ final class InboxProjectIndex: UIView {
   private var usable = false
   private var current: String?
   private var scrubbed: Int?
+  private var scrubOrigin: (y: CGFloat, index: Int)?
   private var generation = 0
   private var cancelDismiss: (() -> Void)?
   private let surface = UIView()
@@ -45,7 +46,7 @@ final class InboxProjectIndex: UIView {
     accessibilityIdentifier = "project-index"
     accessibilityTraits = .adjustable
     surface.backgroundColor = .secondarySystemBackground
-    surface.layer.cornerRadius = 22
+    surface.layer.cornerRadius = 28
     surface.clipsToBounds = true
     surface.isUserInteractionEnabled = false
     addSubview(surface)
@@ -118,39 +119,35 @@ final class InboxProjectIndex: UIView {
     if !touching { self.current = current }
     guard let scroll else { return }
     let inset = scroll.adjustedContentInset
-    let available = bounds.height - inset.top - inset.bottom - 8
-    usable = items.count > 1 && scroll.contentSize.height > scroll.bounds.height - inset.top - inset.bottom + 1 && available >= 48
+    let available = bounds.height - inset.top - inset.bottom - 24
+    let pitch: CGFloat = 48
+    let padding: CGFloat = 12
+    let capacity = max(0, Int((available - 2 * padding) / pitch))
+    usable = items.count > 1 && scroll.contentSize.height > scroll.bounds.height - inset.top - inset.bottom + 1 && capacity >= 2
     guard usable else { cancel(); return }
-    let height = min(available, CGFloat(items.count) * 32 + 16)
-    rail = CGRect(x: bounds.width - 48, y: inset.top + 4 + (available - height) / 2, width: 44, height: height)
+    let count = min(items.count, capacity)
+    let height = CGFloat(count) * pitch + 2 * padding
+    rail = CGRect(x: bounds.width - 64, y: inset.top + 12 + (available - height) / 2, width: 56, height: height)
     surface.bounds = CGRect(origin: .zero, size: rail.size)
     surface.center = CGPoint(x: rail.midX, y: rail.midY)
-    let pitch = (height - 16) / CGFloat(items.count)
-    // Dense rails retain proportional scrubbing, but paint readable landmarks instead
-    // of squeezing every logo. Always reserve room for the selected project's mark.
+    // Landmarks stay fixed as selection changes, including throughout a scrub.
+    // Omitted destinations remain reachable through anchored scrubbing and VoiceOver.
+    let landmarks = (0..<count).map { Int((Double($0) * Double(items.count - 1) / Double(count - 1)).rounded()) }
     let selected = items.firstIndex { $0.id == self.current }
-    let cellHeight = max(32, pitch)
-    func frame(_ index: Int) -> CGRect {
-      let center = 8 + (CGFloat(index) + 0.5) * pitch
-      let y = min(height - 8 - cellHeight, max(8, center - cellHeight / 2))
-      return CGRect(x: 0, y: y, width: 44, height: cellHeight)
-    }
-    var occupied = selected.map { [frame($0)] } ?? []
     for (index, cell) in cells.enumerated() {
-      cell.frame = frame(index)
-      cell.isHidden = index != selected && occupied.contains { $0.minY < cell.frame.maxY && cell.frame.minY < $0.maxY }
-      if !cell.isHidden && index != selected { occupied.append(cell.frame) }
-      let side: CGFloat = 24
-      let glyph = CGRect(x: (44 - side) / 2, y: (cellHeight - side) / 2, width: side, height: side)
+      guard let slot = landmarks.firstIndex(of: index) else { cell.isHidden = true; continue }
+      cell.isHidden = false
+      cell.frame = CGRect(x: 4, y: padding + CGFloat(slot) * pitch, width: 48, height: pitch)
+      let glyph = CGRect(x: 12, y: 12, width: 24, height: 24)
       cell.viewWithTag(1)?.frame = glyph
       cell.viewWithTag(2)?.frame = glyph
       cell.viewWithTag(3)?.frame = CGRect(x: glyph.maxX - 3, y: glyph.minY, width: 6, height: 6)
-      if items[index].id == self.current {
-        selection.frame = cell.frame.insetBy(dx: 4, dy: 0)
-        selection.layer.cornerRadius = min(18, cellHeight / 2)
+      if index == selected {
+        selection.frame = cell.frame.insetBy(dx: 4, dy: 4)
+        selection.layer.cornerRadius = 20
       }
     }
-    selection.isHidden = !items.contains { $0.id == self.current }
+    selection.isHidden = !landmarks.contains { $0 == selected }
     accessibilityValue = items.first { $0.id == self.current }?.title
     accessibilityFrame = UIAccessibility.convertToScreenCoordinates(rail, in: self)
   }
@@ -176,18 +173,30 @@ final class InboxProjectIndex: UIView {
     scrolling = false
     feedback.prepare()
     let localY = y - rail.minY
-    if let index = cells.indices.first(where: { !cells[$0].isHidden && cells[$0].frame.minY <= localY && localY < cells[$0].frame.maxY }) {
-      select(index)
-    } else {
-      scrub(at: y)
-    }
+    let visible = cells.indices.filter { !cells[$0].isHidden }
+    guard let index = visible.min(by: { abs(cells[$0].frame.midY - localY) < abs(cells[$1].frame.midY - localY) }) else { return }
+    scrubOrigin = (y, index)
+    select(index)
   }
 
   func scrub(at y: CGFloat) {
-    guard touching, !items.isEmpty else { return }
-    let pitch = (rail.height - 16) / CGFloat(items.count)
-    let index = min(items.count - 1, max(0, Int((y - rail.minY - 8) / pitch)))
-    select(index)
+    guard touching, let origin = scrubOrigin, !items.isEmpty else { return }
+    // Keep the tapped landmark anchored. Crossing into scrub mode must not switch
+    // to an unrelated absolute proportional index after a one-point finger drift.
+    let delta = y - origin.y
+    let allowance: CGFloat = 8
+    guard abs(delta) > allowance else { select(origin.index); return }
+    let distance: CGFloat
+    let destinations: Int
+    if delta < 0 {
+      distance = max(1, origin.y - allowance - rail.minY)
+      destinations = -origin.index
+    } else {
+      distance = max(1, rail.maxY - origin.y - allowance)
+      destinations = items.count - 1 - origin.index
+    }
+    let progress = min(1, (abs(delta) - allowance) / distance)
+    select(origin.index + Int((CGFloat(destinations) * progress).rounded()))
   }
 
   private func select(_ index: Int) {
@@ -202,6 +211,7 @@ final class InboxProjectIndex: UIView {
   func endTouch() {
     touching = false
     scrubbed = nil
+    scrubOrigin = nil
     if !scrolling && !isHidden { linger() }
   }
 
@@ -233,6 +243,7 @@ final class InboxProjectIndex: UIView {
     touching = false
     scrolling = false
     scrubbed = nil
+    scrubOrigin = nil
     present(false, animated: false)
   }
 

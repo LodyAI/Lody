@@ -49,12 +49,51 @@ class ChatListModelTest {
     }
 
     @Test fun projectIndexDirectTouchSelectsTheIconUnderTheFinger() {
-        for (pitch in listOf(16f, 32f)) {
+        for (pitch in listOf(48f, 96f)) {
             for (index in 0 until 40) {
                 assertEquals(index, projectIndexScrubTarget(4f + (index + 0.5f) * pitch, 4f, pitch, 40))
             }
+            // A down just either side of a cell boundary must tolerate finger jitter.
+            val boundary = 4f + pitch
+            for (side in listOf(-1f, 1f)) {
+                val down = boundary + side * 0.5f
+                val tapped = if (side < 0) 0 else 1
+                for (movement in listOf(-8f, -1f, 0f, 1f, 8f)) {
+                    assertEquals(tapped, projectIndexScrubTarget(down + movement, 4f, pitch, 40, down, 8f))
+                }
+                // Beyond slop, resume the existing absolute targeting in either direction.
+                assertEquals(0, projectIndexScrubTarget(down - 9f, 4f, pitch, 40, down, 8f))
+                assertEquals(1, projectIndexScrubTarget(down + 9f, 4f, pitch, 40, down, 8f))
+            }
             assertEquals(0, projectIndexScrubTarget(-100f, 4f, pitch, 40))
             assertEquals(39, projectIndexScrubTarget(10000f, 4f, pitch, 40))
+        }
+    }
+
+    @Test fun projectIndexKeepsLargeTargetsAndTapsDisplayedLandmarks() {
+        assertEquals(listOf(0, 1, 2), projectIndexLandmarks(3, 600f, 12f, 48f))
+        val landmarks = projectIndexLandmarks(100, 264f, 12f, 48f)
+        assertEquals(listOf(0, 25, 50, 74, 99), landmarks)
+        landmarks.forEachIndexed { cell, destination ->
+            assertEquals(destination, landmarks[projectIndexScrubTarget(12f + cell * 48f + 24f, 12f, 48f, landmarks.size)])
+        }
+        assertTrue(projectIndexLandmarks(100, 119f, 12f, 48f).isEmpty())
+    }
+
+    @Test fun projectIndexLandmarkScrubStaysAnchoredThenReachesEveryDestination() {
+        val height = 264f
+        val landmarks = projectIndexLandmarks(100, height, 12f, 48f)
+        landmarks.forEachIndexed { cell, anchor ->
+            val down = 12f + cell * 48f + 24f
+            for (offset in listOf(-8f, -1f, 0f, 1f, 8f)) {
+                assertEquals(anchor, projectIndexLandmarkScrub(down + offset, down, anchor, height, 8f, 100))
+            }
+            val reached = (0..2640).map {
+                projectIndexLandmarkScrub(it / 10f, down, anchor, height, 8f, 100)
+            }
+            assertEquals((0 until 100).toList(), reached.distinct())
+            assertEquals(0, projectIndexLandmarkScrub(-100f, down, anchor, height, 8f, 100))
+            assertEquals(99, projectIndexLandmarkScrub(1000f, down, anchor, height, 8f, 100))
         }
     }
 

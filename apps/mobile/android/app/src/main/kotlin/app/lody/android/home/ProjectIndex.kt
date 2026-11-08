@@ -8,6 +8,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -42,9 +43,33 @@ internal fun projectIndexTargets(sections: List<HomeSection>): List<Int> {
     return sections.map { section -> index.also { index += 1 + section.chats.size } }
 }
 
-/** Coordinates are local to the visible capsule, including its top padding. */
-internal fun projectIndexScrubTarget(y: Float, inset: Float, pitch: Float, count: Int): Int =
-    ((y - inset) / pitch.coerceAtLeast(1f)).toInt().coerceIn(0, count - 1)
+/** Capsule-local coordinates; retain the down target inside touch slop, then use absolute cells. */
+internal fun projectIndexScrubTarget(
+    y: Float, inset: Float, pitch: Float, count: Int, down: Float = y, slop: Float = 0f,
+): Int {
+    val targetY = if (kotlin.math.abs(y - down) <= slop) down else y
+    return ((targetY - inset) / pitch.coerceAtLeast(1f)).toInt().coerceIn(0, count - 1)
+}
+
+/** Keep both ends reachable without ever shrinking a target. */
+internal fun projectIndexLandmarks(count: Int, height: Float, inset: Float, pitch: Float): List<Int> {
+    val slots = ((height - 2 * inset) / pitch).toInt().coerceIn(0, count)
+    if (slots < 2) return emptyList()
+    return List(slots) { (it.toDouble() * (count - 1) / (slots - 1)).roundToInt() }
+}
+
+/** Anchor to the tapped landmark, including a dead zone before traversing omitted sections. */
+internal fun projectIndexLandmarkScrub(
+    y: Float, down: Float, anchor: Int, height: Float, slop: Float, count: Int,
+): Int {
+    val delta = y - down
+    val distance = (kotlin.math.abs(delta) - slop).coerceAtLeast(0f)
+    val end = if (delta < 0) 0 else count - 1
+    val travel = (if (delta < 0) down else height - down).coerceAtLeast(0f) - slop
+    if (distance == 0f) return anchor
+    val fraction = (distance / travel.coerceAtLeast(1f)).coerceIn(0f, 1f)
+    return (anchor + (end - anchor) * fraction).roundToInt().coerceIn(0, count - 1)
+}
 
 /** Losing availability discards a pending linger; returning never resurrects it. */
 internal data class ProjectIndexVisibility(
@@ -74,6 +99,7 @@ internal fun ProjectIndexList(
         Box(modifier) { content() }
         return
     }
+    val dragging by state.interactionSource.collectIsDraggedAsState()
     val density = LocalDensity.current
     val lingerMillis = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
         originalTimeoutMillis = 800L, containsIcons = true, containsControls = true,
@@ -107,13 +133,14 @@ internal fun ProjectIndexList(
     BoxWithConstraints(modifier) {
         val height = with(density) { (maxHeight - bottom).toPx().coerceAtLeast(0f) }
         val width = with(density) { maxWidth.toPx() }
-        val inset = with(density) { LodySpacing.xs.toPx() }
-        val wide = with(density) { LodySize.touchTarget.toPx() }
-        val pitch = with(density) { LodySize.controlSm.toPx() }.coerceAtMost(
-            ((height - inset * 2) / sections.size).coerceAtLeast(0f),
-        )
-        val capsuleHeight = pitch * sections.size + inset * 2
-        val available = foreground && pitch > 0 && (state.canScrollForward || state.canScrollBackward)
+        val edge = with(density) { LodySpacing.sm.toPx() }
+        val inset = with(density) { LodySpacing.md.toPx() }
+        val capsuleWidth = LodySize.controlLg + LodySpacing.sm
+        val wide = with(density) { capsuleWidth.toPx() }
+        val pitch = with(density) { LodySize.controlLg.toPx() }
+        val landmarks = projectIndexLandmarks(sections.size, height, inset, pitch)
+        val capsuleHeight = pitch * landmarks.size + inset * 2
+        val available = foreground && landmarks.isNotEmpty() && (state.canScrollForward || state.canScrollBackward)
         val scrolling = state.isScrollInProgress
         LaunchedEffect(available, scrolling, identities) {
             visibility = visibility.update(available, scrolling = scrolling)
@@ -126,6 +153,10 @@ internal fun ProjectIndexList(
             }
         }
         val current = targets.indexOfLast { it <= state.firstVisibleItemIndex }.coerceAtLeast(0)
+        // A bottom header may not reach the top of the viewport. Retain an explicit
+        // selection until the reader drags the list again, including for range actions.
+        LaunchedEffect(dragging) { if (dragging) interaction = 0 }
+        val active = if (!dragging && interaction > 0) selected else current
         fun select(index: Int) {
             if (!available || !visibility.shown || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
             if (index != selected) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -142,17 +173,25 @@ internal fun ProjectIndexList(
             if (available) AnimatedVisibility(
                 visible = visibility.shown,
                 modifier = Modifier.offset {
-                    IntOffset((width - inset - wide).roundToInt(), ((height - capsuleHeight) / 2).roundToInt())
+                    IntOffset((width - edge - wide).roundToInt(), ((height - capsuleHeight) / 2).roundToInt())
                 }.then(if (visibility.shown) Modifier else Modifier.clearAndSetSemantics {}),
-                enter = slideInHorizontally(tween(180, easing = FastOutSlowInEasing)) { it + inset.roundToInt() },
-                exit = slideOutHorizontally(tween(140, easing = FastOutSlowInEasing)) { it + inset.roundToInt() },
+                enter = slideInHorizontally(tween(180, easing = FastOutSlowInEasing)) { it + edge.roundToInt() },
+                exit = slideOutHorizontally(tween(140, easing = FastOutSlowInEasing)) { it + edge.roundToInt() },
             ) {
                 Box(
-                    Modifier.size(LodySize.touchTarget, with(density) { capsuleHeight.toDp() })
+                    Modifier.size(capsuleWidth, with(density) { capsuleHeight.toDp() })
                         .clip(CircleShape)
                         .background(colors.bgOverlay)
-                        .semantics { contentDescription = label }
-                        .then(if (!visibility.shown) Modifier else Modifier.pointerInput(identities, pitch, inset) {
+                        .semantics {
+                            contentDescription = label
+                            stateDescription = titles.getValue(sections[active].id)
+                            progressBarRangeInfo = ProgressBarRangeInfo(active.toFloat(), 0f..sections.lastIndex.toFloat(), sections.size - 2)
+                            setProgress { value ->
+                                if (!value.isFinite()) false
+                                else { select(value.roundToInt().coerceIn(sections.indices)); true }
+                            }
+                        }
+                        .then(if (!visibility.shown) Modifier else Modifier.pointerInput(identities, landmarks, pitch, inset) {
                             awaitEachGesture {
                                 val down = awaitFirstDown()
                                 // Compose can expand minimum touch bounds; reject anything outside
@@ -161,7 +200,8 @@ internal fun ProjectIndexList(
                                     down.position.y !in 0f..size.height.toFloat()) return@awaitEachGesture
                                 down.consume()
                                 visibility = visibility.update(true, touching = true)
-                                var last = projectIndexScrubTarget(down.position.y, inset, pitch, sections.size)
+                                val anchor = landmarks[projectIndexScrubTarget(down.position.y, inset, pitch, landmarks.size)]
+                                var last = anchor
                                 latestSelect(last)
                                 try {
                                     while (true) {
@@ -169,7 +209,15 @@ internal fun ProjectIndexList(
                                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                         change.consume()
                                         if (!change.pressed) break
-                                        val index = projectIndexScrubTarget(change.position.y, inset, pitch, sections.size)
+                                        val index = if (landmarks.size == sections.size) {
+                                            projectIndexScrubTarget(
+                                                change.position.y, inset, pitch, sections.size,
+                                                down.position.y, viewConfiguration.touchSlop,
+                                            )
+                                        } else projectIndexLandmarkScrub(
+                                            change.position.y, down.position.y, anchor, size.height.toFloat(),
+                                            viewConfiguration.touchSlop, sections.size,
+                                        )
                                         if (index != last) { latestSelect(index); last = index }
                                     }
                                 } finally {
@@ -180,10 +228,11 @@ internal fun ProjectIndexList(
                             }
                         }),
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = LodySpacing.xs)) {
-                        sections.forEachIndexed { index, section ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = LodySpacing.md)) {
+                        landmarks.forEach { index ->
+                            val section = sections[index]
                             val title = titles.getValue(section.id)
-                            val highlighted = if (visibility.touching) selected else current
+                            val highlighted = active
                             Box(Modifier.fillMaxWidth().height(with(density) { pitch.toDp() }).clipToBounds()
                                 .semantics(mergeDescendants = true) {
                                     contentDescription = title
@@ -191,16 +240,16 @@ internal fun ProjectIndexList(
                                     this.selected = index == highlighted
                                     onClick { select(index); true }
                                 }, contentAlignment = Alignment.Center) {
-                                Box(Modifier.size(LodySize.chip.coerceAtMost(with(density) { pitch.toDp() }))
+                                Box(Modifier.size(LodySize.controlSm)
                                     .background(if (index == highlighted) colors.accentSubtle else androidx.compose.ui.graphics.Color.Transparent, CircleShape),
                                     contentAlignment = Alignment.Center) {
                                     val repository = section.repository
                                     when (section.header) {
-                                        HomeSection.Header.Pinned -> Icon(LodyIcons.Pin, null, Modifier.size(LodyIconSize.sm), colors.iconSecondary)
-                                        HomeSection.Header.Chats -> Icon(LodyIcons.Session, null, Modifier.size(LodyIconSize.sm), colors.iconSecondary)
-                                        else -> if (repository != null) RepositoryIcon(repository, LodyIconSize.sm, opacity = 1f)
+                                        HomeSection.Header.Pinned -> Icon(LodyIcons.Pin, null, Modifier.size(LodyIconSize.lg), colors.iconSecondary)
+                                        HomeSection.Header.Chats -> Icon(LodyIcons.Session, null, Modifier.size(LodyIconSize.lg), colors.iconSecondary)
+                                        else -> if (repository != null) RepositoryIcon(repository, LodyIconSize.lg, opacity = 1f)
                                             else if (title.isNotBlank()) Text(title.take(1).uppercase(), style = LodyTheme.typography.caption, color = colors.textSecondary)
-                                            else Icon(LodyIcons.Folder, null, Modifier.size(LodyIconSize.sm), colors.iconSecondary)
+                                            else Icon(LodyIcons.Folder, null, Modifier.size(LodyIconSize.lg), colors.iconSecondary)
                                     }
                                     val attention = section.chats.any { it.attention != null || it.childAttention != null }
                                     if (attention) Box(Modifier.align(Alignment.TopEnd).size(LodySize.dot).background(

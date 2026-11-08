@@ -163,24 +163,57 @@ index.refresh(current: dense[50].id)
 index.setScrolling(true)
 let denseCells = surface.subviews.filter { $0.viewWithTag(2) != nil }
 precondition(denseCells.filter { !$0.isHidden }.count < dense.count)
-index.begin(at: index.rail.midY)
-for item in dense.indices {
-  index.scrub(at: index.rail.minY + 8 + (CGFloat(item) + 0.5) * (index.rail.height - 16) / CGFloat(dense.count))
-  precondition(destination == dense[item].id, "Overflow retains every scrub destination")
-  precondition(!denseCells[item].isHidden, "The selected mark is always visible")
-  let visible = denseCells.filter { !$0.isHidden }
-  for (position, cell) in visible.enumerated() {
-    precondition(cell.viewWithTag(2)!.bounds.size == CGSize(width: 24, height: 24))
-    precondition(surface.bounds.contains(cell.frame))
-    precondition(visible.dropFirst(position + 1).allSatisfy { !cell.frame.intersects($0.frame) })
+// Every displayed landmark has a full 48 pt target. Test taps near both edges,
+// where absolute proportional mapping used to jump after tiny finger motion.
+for height: CGFloat in [300, 540, 874] {
+  index.frame.size.height = height
+  index.refresh(current: dense[50].id)
+  let landmarks = denseCells.indices.filter { !denseCells[$0].isHidden }
+  for landmark in landmarks {
+    index.refresh(current: dense[50].id)
+    let cell = denseCells[landmark]
+    precondition(cell.frame.size == CGSize(width: 48, height: 48))
+    precondition(cell.frame.minY >= 12 && cell.frame.maxY <= surface.bounds.height - 12)
+    for offset: CGFloat in [-22, 0, 22] {
+      index.refresh(current: dense[50].id)
+      let y = index.rail.minY + cell.frame.midY + offset
+      index.begin(at: y)
+      precondition(destination == dense[landmark].id, "A landmark's whole target selects that destination")
+      for drift: CGFloat in [-7, -1, 0, 1, 7] {
+        index.scrub(at: y + drift)
+        precondition(destination == dense[landmark].id, "Small movement stays anchored to the tapped landmark")
+      }
+      index.endTouch()
+    }
+  }
+  index.begin(at: index.rail.midY)
+  var reached = Set<String>()
+  for step in 0...4000 {
+    index.scrub(at: index.rail.minY + CGFloat(step) / 4000 * index.rail.height)
+    reached.insert(destination!)
+    precondition(denseCells.indices.filter { !denseCells[$0].isHidden } == landmarks,
+      "Scrubbing must not replace or move the displayed landmarks")
+    let visible = denseCells.filter { !$0.isHidden }
+    for (position, cell) in visible.enumerated() {
+      precondition(cell.viewWithTag(2)!.bounds.size == CGSize(width: 24, height: 24))
+      precondition(cell.frame.size == CGSize(width: 48, height: 48))
+      precondition(surface.bounds.contains(cell.frame))
+      precondition(visible.dropFirst(position + 1).allSatisfy { !cell.frame.intersects($0.frame) })
+    }
+  }
+  precondition(reached == Set(dense.map(\.id)), "Overflow retains every scrub destination")
+  index.endTouch()
+  index.refresh(current: dense[0].id)
+  for item in dense.dropFirst() {
+    index.accessibilityIncrement()
+    precondition(destination == item.id, "VoiceOver reaches every dense destination in order")
+  }
+  for item in dense.dropLast().reversed() {
+    index.accessibilityDecrement()
+    precondition(destination == item.id)
   }
 }
-index.endTouch()
-let landmark = denseCells.firstIndex { !$0.isHidden }!
-index.begin(at: index.rail.minY + denseCells[landmark].frame.midY)
-precondition(destination == dense[landmark].id, "Tapping a visible landmark selects its project")
-index.endTouch()
-print("PASS: opaque adaptive themes and readable overflow landmarks with every project reachable")
+print("PASS: 48 pt targets, capsule insets, fixed landmarks, stable taps with finger drift, opaque themes and every dense destination via scrub/VoiceOver")
 
 
 // Drive UIKit animator completions explicitly; no wall-clock waits.
