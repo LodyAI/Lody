@@ -82,6 +82,7 @@ export {
   makeWorkspaceRecovery,
   abandonWorkspaceRecovery,
   memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   RecoveryVaultError,
   type RecoveryVault,
   type RecoveryEntryReference,
