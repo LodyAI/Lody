@@ -79,6 +79,7 @@ checks = {
     'list': [
         'Chrome/LodyMenuButtonStyle.swift',
         'Chrome/LodyMenuButton.swift',
+        'Chrome/WorkspaceSwitcherPanel.swift',
         'LodyTint.swift',
         'List/LodyRowDensity.swift',
         'List/LodyListCellBackground.swift',

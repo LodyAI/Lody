@@ -139,7 +139,6 @@ final class InboxController: UIViewController {
 
   private func wireChrome() {
     chrome.selectWorkspace = { [weak self] id in self?.selectWorkspace(id) }
-    chrome.editWorkspace = { [weak self] in self?.editWorkspace() }
     chrome.setView = { [weak self] mode in self?.setView(mode) }
     chrome.setSort = { [weak self] sort in
       guard let self else { return }
@@ -289,17 +288,6 @@ final class InboxController: UIViewController {
       return
     }
     Task { try? await NativeHomeFixture.request("selectWorkspace", ["workspaceId": id]) }
-  }
-
-  private func editWorkspace() {
-    guard let workspace = source.state.workspace else { return }
-    var params: [String: Any] = [
-      "workspaceId": workspace.id, "name": workspace.name,
-      "color": LodyAccent.hex(UIColor.lodyAccent.resolvedColor(with: traitCollection)),
-    ]
-    params["image"] = workspace.image
-    LodyShell.shared.presentNative(WorkspaceEditorController(params: params),
-      title: String(localized: "workspace.edit.title", bundle: .lody), detents: [0.5])
   }
 
   func newSession() {

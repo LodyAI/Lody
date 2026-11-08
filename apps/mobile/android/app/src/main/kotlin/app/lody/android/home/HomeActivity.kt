@@ -5,7 +5,6 @@ import app.lody.android.BackendEnvironment
 import app.lody.android.auth.WorkspaceMember
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -190,9 +189,10 @@ class HomeActivity : ComponentActivity() {
                                     selectedTitle = if (selectedId == row.id) row.title else ""
                                 },
                                 onNewChat = { creating = true },
-                                projects = app.projectAdding,
+                                schedules = app.schedules,
+                                creation = creator,
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
-                                onOpenUrl = { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                                onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )
                         }
                     }

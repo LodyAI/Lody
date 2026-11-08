@@ -4,8 +4,8 @@
 // hides the capsule. Connection trouble floats as a centred pill over the bar (web parity). Chats
 // are grouped by time. A row leads with its title and trails with status or age; an optional second line carries
 // project, branch and PR state, chosen in the view menu. A floating bar holds labelled Chats /
-// Projects / Settings tabs and a separate new-chat button. This phase is read-only, so new chat
-// explains that it is not available yet.
+// Schedules / Settings tabs and a separate create button: a new chat, or "+" for a new schedule on
+// Schedules. The Projects tab is hidden for now; its cards, menus and sheets stay for its return.
 
 package app.lody.android.home
 
@@ -161,16 +161,19 @@ data class ChatListUiState(
 
 enum class HomeTab(@StringRes val label: Int) {
     Chats(R.string.home_tab_chats),
-    Projects(R.string.home_tab_projects),
+    Schedules(R.string.home_tab_schedules),
     Settings(R.string.home_tab_settings);
 
     val icon: ImageVector
         get() = when (this) {
             Chats -> LodyIcons.Sessions
-            Projects -> LodyIcons.Folder
+            Schedules -> LodyIcons.Clock
             Settings -> LodyIcons.Settings
         }
 }
+
+/** The schedule editor's route for a new schedule (never a schedule id: ids are `[A-Za-z0-9_-]`). */
+private const val NEW_SCHEDULE = "+"
 
 private val BarHeight = LodySize.controlLg + LodySpacing.sm
 
@@ -181,10 +184,13 @@ fun ChatListScreen(
     onSignOut: () -> Unit,
     onOpenChat: (ChatItem) -> Unit,
     onNewChat: () -> Unit,
-    /** The Projects tab's "+" (add a local folder or a GitHub repository); none hides it. */
-    projects: ProjectAdding? = null,
+    /** The Schedules tab's list and writes; none leaves the tab loading. */
+    schedules: app.lody.android.schedules.ScheduleService? = null,
+    /** Computers, agents, models and modes for the schedule editor. */
+    creation: app.lody.android.create.CreationService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
-    onOpenUrl: (String) -> Unit = {},
+    /** Opens a conversation by id (a schedule's last run). */
+    onOpenSession: (String) -> Unit = {},
 ) {
     val colors = LodyTheme.colors
     val chatsListState = rememberLazyListState()
@@ -201,20 +207,14 @@ fun ChatListScreen(
     var tab by rememberSaveable { mutableStateOf(HomeTab.Chats) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
-    var projectId by rememberSaveable { mutableStateOf<String?>(null) }
-    // A project without open chats still opens (to its empty list).
-    val project = state.projects.firstOrNull { it.id == projectId }
-        ?: state.snapshot?.projects?.firstOrNull { it.id == projectId }?.let { ChatGroup(it.id, it.name, ChatGroup.Kind.Project, emptyList()) }
     val snackbar = remember { SnackbarHostState() }
     val notices = androidx.compose.runtime.rememberCoroutineScope()
-    // The Projects "+": its menu, then the sheet it opens ("local" / "github").
-    var addMenu by remember { mutableStateOf(false) }
-    var addSheet by rememberSaveable { mutableStateOf<String?>(null) }
-    val addedFormat = stringResource(R.string.projects_add_done)
-    val added = { name: String ->
-        addSheet = null
-        notices.launch { snackbar.showSnackbar(addedFormat.format(name)) }
-        Unit
+    val notice = { text: String -> notices.launch { snackbar.showSnackbar(text) }; Unit }
+    // Schedules: the list for this workspace and the open editor (a schedule id or [NEW_SCHEDULE]).
+    val scheduleList = app.lody.android.schedules.rememberSchedulesState(schedules, scope)
+    var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
+    LaunchedEffect(tab, scheduleList, state.sync) {
+        if (tab == HomeTab.Schedules) scheduleList?.refresh()
     }
     val closeSearch = { searching = false; query = "" }
     val context = LocalContext.current
@@ -230,17 +230,17 @@ fun ChatListScreen(
     var idleExpanded by rememberSaveable { mutableStateOf(false) }
     val owner = state.userId.takeIf { homeScope == HomeScope.Mine }
     val sections = remember(state.snapshot, grouping, owner) { state.snapshot?.let { ChatListModel.home(it, grouping, owner) }.orEmpty() }
-    // Projects: newest activity first; the view menu picks the source and hides empty projects,
-    // search filters the cards in place.
-    var projectSource by remember { mutableStateOf(ProjectViewPrefs.source(context)) }
-    var hideEmpty by remember { mutableStateOf(ProjectViewPrefs.hideEmpty(context)) }
-    val projectQuery = if (searching && tab == HomeTab.Projects) query else ""
-    val cards = remember(state.snapshot, owner, projectSource, hideEmpty, projectQuery) {
-        state.snapshot?.let { ProjectCards.build(it, owner, projectSource, hideEmpty, projectQuery) }.orEmpty()
-    }
 
-    BackHandler(enabled = searching || project != null) {
-        if (searching) closeSearch() else projectId = null
+    BackHandler(enabled = searching) { closeSearch() }
+
+    val editing = scheduleEditor
+    if (editing != null && scheduleList != null) {
+        // Full screen over Home, like a new chat; the list keeps its state underneath.
+        app.lody.android.schedules.ScheduleEditorScreen(
+            scheduleList, editing.takeUnless { it == NEW_SCHEDULE }, state.snapshot, creation,
+            onClose = { scheduleEditor = null }, onNotice = notice,
+        )
+        return
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -251,57 +251,46 @@ fun ChatListScreen(
         topBar = {
             when {
                 searching -> SearchTopBar(query, onQueryChange = { query = it }, onClose = closeSearch)
-                project != null -> TitleTopBar(project.name, onBack = { projectId = null })
                 tab == HomeTab.Chats -> Box {
                     HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
                         ViewMenu(homeScope, selectScope, grouping, selectGrouping, details, toggleDetail)
                     }
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
-                // Projects keeps the Chats header (workspace, sync, search, view) without a title.
-                tab == HomeTab.Projects -> Box {
-                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {
-                        ProjectsViewMenu(
-                            homeScope, selectScope,
-                            projectSource, { next -> projectSource = next; ProjectViewPrefs.saveSource(context, next) },
-                            hideEmpty, { next -> hideEmpty = next; ProjectViewPrefs.saveHideEmpty(context, next) },
-                        )
-                    }
+                // Schedules keeps the Chats header (workspace, sync, search) without a title or view menu.
+                tab == HomeTab.Schedules -> Box {
+                    HomeTopBar(state, onSearch = { searching = true }, onSelectWorkspace = onSelectWorkspace) {}
                     HomeSyncPill(state.sync, Modifier.align(Alignment.Center).statusBarsPadding())
                 }
                 else -> TitleTopBar(stringResource(tab.label), onBack = null)
             }
         },
         bottomBar = {
-            if (!searching && project == null) {
-                val adds = tab == HomeTab.Projects && projects != null && scope != null
+            if (!searching) {
+                val adds = tab == HomeTab.Schedules && scheduleList != null
                 HomeBottomBar(
                     selected = tab,
                     collapsed = tab == HomeTab.Chats && barCollapsed,
-                    onSelect = { tab = it; addMenu = false },
+                    onSelect = { tab = it },
                     adds = adds,
-                    onCreate = { if (adds) addMenu = !addMenu else onNewChat() },
+                    onCreate = { if (adds) scheduleEditor = NEW_SCHEDULE else onNewChat() },
                 )
             }
         },
     ) { padding ->
         when {
-            searching && tab == HomeTab.Projects -> ProjectCardList(
-                cards, padding, empty = if (query.isBlank()) "" else stringResource(R.string.home_projects_search_empty, query.trim()),
-                onOpen = { projectId = it.id; closeSearch() },
+            tab == HomeTab.Schedules -> app.lody.android.schedules.SchedulesList(
+                scheduleList, if (searching) query else "", padding,
+                onOpen = { scheduleEditor = it.scheduleId },
+                onNew = { scheduleEditor = NEW_SCHEDULE },
+                onOpenSession = onOpenSession,
+                onNotice = notice,
             )
             searching -> HomeList(
                 ChatListModel.searchTimeline(state.timeline, query).map { HomeSection("bucket-${it.bucket}", HomeSection.Header.Bucket(it.bucket), it.chats) },
                 details, padding, empty = stringResource(R.string.home_search_empty, query.trim()).takeIf { query.isNotBlank() },
                 pinsLabels = false, onOpenChat = onOpenChat,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
-            )
-            project != null -> HomeList(
-                state.snapshot?.let { catalog ->
-                    ChatListModel.home(catalog.copy(sessions = catalog.sessions.filter { it.projectId == project.id }), HomeGrouping.Time, owner)
-                }.orEmpty(),
-                details - ChatRowDetail.Project, padding, state.placeholder,
-                owners = state.members.takeIf { homeScope == HomeScope.Team }, onOpenChat = onOpenChat,
             )
             // A project header already names the project, so rows drop it from their detail line.
             tab == HomeTab.Chats -> HomeList(
@@ -315,22 +304,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            tab == HomeTab.Projects -> ProjectCardList(cards, padding, empty = stringResource(R.string.home_projects_empty), onOpen = { projectId = it.id })
             else -> SettingsList(state, padding, onSelectWorkspace, onSignOut)
-        }
-    }
-    if (projects != null && scope != null) {
-        // Over the screen, so the capsules rise above the bar from the "+".
-        ProjectAddMenu(
-            open = addMenu && tab == HomeTab.Projects && !searching && project == null,
-            bottomInset = BarHeight + LodySpacing.xs + LodySpacing.sm,
-            onDismiss = { addMenu = false },
-            onLocal = { addMenu = false; addSheet = "local" },
-            onGitHub = { addMenu = false; addSheet = "github" },
-        )
-        when (addSheet) {
-            "local" -> LocalFolderSheet(projects, scope, onDismiss = { addSheet = null }, onAdded = added)
-            "github" -> GitHubRepoSheet(projects, scope, onDismiss = { addSheet = null }, onAdded = added, onOpenUrl = onOpenUrl)
         }
     }
     }
@@ -617,8 +591,8 @@ private fun SearchTopBar(query: String, onQueryChange: (String) -> Unit, onClose
 @Composable
 internal fun HomeBottomBar(selected: HomeTab, collapsed: Boolean, onSelect: (HomeTab) -> Unit, adds: Boolean = false, onCreate: () -> Unit) {
     val colors = LodyTheme.colors
-    // On Projects the button adds a project ("+"); elsewhere it starts a chat.
-    val create = stringResource(if (adds) R.string.projects_add_title else R.string.home_new_chat)
+    // On Schedules the button adds a schedule ("+"); elsewhere it starts a chat.
+    val create = stringResource(if (adds) R.string.schedules_new else R.string.home_new_chat)
     val progress by animateFloatAsState(
         if (collapsed) 1f else 0f,
         tween(LodyMotion.slowMillis, easing = LodyMotion.standard), label = "home-bar-collapse",
@@ -789,7 +763,7 @@ private val TimeBucket.label: Int
         TimeBucket.Older -> R.string.home_bucket_older
     }
 
-/** Projects as cards (iOS `ProjectCardView`), newest activity first. */
+/** Projects as cards (iOS `ProjectCardView`), newest activity first. Unused while the Projects tab is hidden. */
 @Composable
 private fun ProjectCardList(cards: List<ProjectCard>, padding: PaddingValues, empty: String, onOpen: (ProjectCard) -> Unit) {
     if (cards.isEmpty()) {

@@ -21,7 +21,7 @@ test('the local project reference carries an explicit worktree choice',async()=>
  const source=await readFile(new URL('../vendor/cloud-runtime/src/runtime/create-session.ts',import.meta.url),'utf8');
  const {transform}=await import('esbuild');const vm=await import('node:vm');
  const start=source.indexOf('export async function createSession(');
- const code=(await transform(source.slice(start).replace('export async function','async function'),{loader:'ts'})).code;
+ const code=(await transform(source.slice(start).replace(/^export /gm,''),{loader:'ts'})).code;
  for(const worktree of [false,true]) {
   let meta;
   class Flock {set(key,value){if(key[0]==='m')meta=value}commit(){}exportJson(){return {}}}

@@ -43,6 +43,7 @@ export async function buildDataRuntime(
     StreamsCrdt: '@loro-dev/streams-crdt',
     StreamsClient: '@loro-dev/streams-client',
     Fzstd: 'fzstd',
+    Immer: 'immer',
   })) {
     await writeFile(
       output + '/' + name + '-LICENSE.txt',

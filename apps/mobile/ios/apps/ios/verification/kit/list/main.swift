@@ -751,27 +751,30 @@ assert(LodyFlatRows.separatorLeading(textLeading: 46, isLast: true) == nil, "The
 assert(LodyFlatRows.minHeight(hasSubtitle: false) == 44 && LodyFlatRows.minHeight(hasSubtitle: true) == 52, "Flat rows keep 44 / 52 pt minimums")
 print("PASS: flat system rows place icons on the rail and hairlines under the text column")
 
-// Catalog updates must not replace an unchanged, potentially presented menu.
-let stableMenu = LodyMenuButton()
-let nativeMenuButton = stableMenu.subviews.compactMap { $0 as? UIButton }.first!
-var workspaceChoice = LodyMenuItem(id: "workspace", title: "Workspace", selected: true)
-stableMenu.setItems([workspaceChoice])
-let originalMenu = nativeMenuButton.menu!
-for _ in 0..<10 { stableMenu.setItems([workspaceChoice]) }
-assert(nativeMenuButton.menu === originalMenu, "Unchanged updates must preserve the presented menu")
-workspaceChoice.title = "Renamed workspace"
-stableMenu.setItems([workspaceChoice])
-assert(nativeMenuButton.menu !== originalMenu, "Changed menu content must still update")
+// The workspace capsule opens WorkspaceSwitcherPanel, never a UIMenu: a menu cannot put the
+// current workspace's checkmark at the trailing edge.
+let capsule = LodyMenuButton()
+let capsuleButton = capsule.subviews.compactMap { $0 as? UIButton }.first!
+capsule.accessibilityIdentifier = "workspace-menu"
+capsule.setItems([LodyMenuItem(id: "workspace", title: "Workspace", selected: true)])
+assert(capsuleButton.menu == nil && !capsuleButton.showsMenuAsPrimaryAction, "The capsule presents the switcher panel")
+assert(capsuleButton.accessibilityIdentifier == "workspace-menu", "The capsule's identifier is on its control")
 
-var devicesMenu = LodyMenuItem(id: "devices", title: "Devices", children: [LodyMenuItem(id: "device", title: "Offline")])
-stableMenu.setItems([workspaceChoice, devicesMenu])
-let offlineMenu = nativeMenuButton.menu!
-devicesMenu.children[0].title = "Online"
-stableMenu.setItems([workspaceChoice, devicesMenu])
-assert(nativeMenuButton.menu !== offlineMenu, "Nested device changes must still refresh")
-let onlineMenu = nativeMenuButton.menu!
-stableMenu.setItems([workspaceChoice, devicesMenu])
-assert(nativeMenuButton.menu === onlineMenu, "Nested equal values must preserve the menu")
+let switcher = WorkspaceSwitcherPanel(items: [
+  LodyMenuItem(id: "current", title: "Current", selected: true, monogram: "C"),
+  LodyMenuItem(id: "other", title: "Other", monogram: "O"),
+]) { _ in }
+switcher.view.frame = CGRect(x: 0, y: 0, width: 300, height: 200)
+switcher.beginAppearanceTransition(true, animated: false)
+switcher.endAppearanceTransition()
+let switcherList = switcher.view.subviews.compactMap { $0 as? UICollectionView }.first!
+switcherList.layoutIfNeeded()
+let currentRow = switcherList.cellForItem(at: IndexPath(item: 0, section: 0)) as! UICollectionViewListCell
+let otherRow = switcherList.cellForItem(at: IndexPath(item: 1, section: 0)) as! UICollectionViewListCell
+assert(currentRow.accessories.count == 1 && otherRow.accessories.isEmpty, "Only the current workspace carries the trailing checkmark")
+assert(currentRow.accessibilityTraits.contains(.selected) && !otherRow.accessibilityTraits.contains(.selected), "VoiceOver reads the current workspace as selected")
+assert(switcher.preferredContentSize.height >= 2 * 44, "Rows keep 44 pt targets")
+print("PASS: the workspace capsule opens a panel listing only workspaces, checkmark trailing on the current one")
 
 // Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
 let retinaFormat = UIGraphicsImageRendererFormat()

@@ -49,6 +49,14 @@ the Firebase Android app registered for `ai.lody.android`:
 - `LODY_FIREBASE_PROJECT_ID`
 - `LODY_FIREBASE_SENDER_ID`
 
+The project [gradle.properties](gradle.properties) contains the default public
+Firebase client values for `ai.lody.android`, with their source fields in
+`google-services.json`. For another Firebase app, override all four values using
+the client whose `client_info.android_client_info.package_name` matches the
+application ID, then rebuild. The JSON file itself is not loaded automatically.
+Overrides can use Gradle `-PLODY_FIREBASE_…=…` arguments or user-level Gradle
+properties. Empty values disable direct FCM registration.
+
 They must match the project used by the backend FCM service account. Never put
 service-account JSON or server credentials in the app. A build without these
 options still supports OneSignal; selecting direct FCM then reports `unavailable`

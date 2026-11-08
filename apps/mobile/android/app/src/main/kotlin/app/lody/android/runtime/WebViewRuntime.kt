@@ -56,6 +56,13 @@ open class WebViewRuntime internal constructor(
                 )
             })
         }
+        // Schedule failures arrive in-band as `{error}` (business faults with the runtime's code).
+        RuntimeCommand.ListSchedules -> RuntimeResult.Schedules(ScheduleJson.list(ScheduleJson.checked(call("schedules", deadline = CommandDeadline.QUERY))))
+        is RuntimeCommand.ScheduleDetail -> RuntimeResult.Schedule(ScheduleJson.detail(ScheduleJson.checked(call("scheduleDetail", JSONArray().put(command.scheduleId), CommandDeadline.QUERY))))
+        is RuntimeCommand.ScheduleCommand -> {
+            val value = ScheduleJson.checked(call("scheduleCommand", JSONArray().put(ScheduleJson.command(command.request)), CommandDeadline.WRITE))
+            RuntimeResult.ScheduleWritten(value.optString("scheduleId").ifEmpty { command.request.scheduleId })
+        }
         is RuntimeCommand.ShortcutBody -> RuntimeResult.Shortcut(call("shortcutBody", JSONArray().put(command.id), CommandDeadline.QUERY) as JSONObject)
         is RuntimeCommand.LocalProjects -> {
             val args = JSONArray().put(command.action).put(command.browserId)

@@ -549,7 +549,10 @@ function groupProjectId(group: WorkspaceProject, machineId: string): string {
 }
 
 /** A machine's merged metadata row (`['m', 'machine-<id>']` plus field rows). */
-function machineMeta(flock: Flock, machineId: string): Record<string, unknown> {
+export function machineMeta(
+  flock: Flock,
+  machineId: string,
+): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   const id = `machine-${machineId}`;
   for (const row of flock.scan()) {
