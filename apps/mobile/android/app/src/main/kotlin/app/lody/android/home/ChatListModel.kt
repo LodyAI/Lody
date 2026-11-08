@@ -75,7 +75,7 @@ enum class StatusGroup {
 }
 
 /** One Home group; the screen localizes [header]. */
-data class HomeSection(val id: String, val header: Header, val chats: List<ChatItem>) {
+data class HomeSection(val id: String, val header: Header, val chats: List<ChatItem>, val repository: String? = null) {
     val rootCount: Int get() = chats.count { it.nestedUnder == null }
     val folds: Boolean get() = (header as? Header.Status)?.group == StatusGroup.Idle && rootCount > ChatListModel.IDLE_LIMIT
     fun visibleChats(idleExpanded: Boolean): List<ChatItem> {
@@ -193,12 +193,16 @@ object ChatListModel {
 
     /** One group per project, most recently active first; unassigned chats form the "Chats" group. */
     fun byProject(snapshot: CatalogSnapshot): List<HomeSection> {
-        val names = snapshot.projects.associate { it.id to it.name }
+        val projects = snapshot.projects.associateBy { it.id }
         return families(snapshot)
             .groupBy { family -> family.first().let { if (isChat(it.projectId)) CHATS_ID else it.projectId } }
             .map { (key, chats) ->
-                val header = if (key == CHATS_ID) HomeSection.Header.Chats else HomeSection.Header.Project(names[key].orEmpty())
-                HomeSection("project-$key", header, chats.flatten())
+                val header = if (key == CHATS_ID) HomeSection.Header.Chats else HomeSection.Header.Project(projects[key]?.name.orEmpty())
+                HomeSection("project-$key", header, chats.flatten(),
+                    projects[key]?.repoFullName?.takeIf { it.isNotBlank() }
+                        ?: key.removePrefix("github:").takeIf { key.startsWith("github:") && '/' in it }
+                        ?: chats.firstOrNull()?.firstOrNull()?.repository,
+                )
             }
     }
 

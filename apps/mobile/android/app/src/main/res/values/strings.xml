@@ -533,5 +533,4 @@
         <item quantity="other">Every %d minutes</item>
     </plurals>
     <string name="home_project_index">Project index</string>
-    <string name="home_project_index_hold">Show or hide project index</string>
 </resources>

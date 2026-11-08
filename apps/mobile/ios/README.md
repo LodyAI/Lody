@@ -113,17 +113,25 @@ secondary-label grey (links retain link blue); fenced code retains its own sizin
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
 
-In compact Chats Home, project grouping adds a scrollbar that expands into a glass
-project index after a long press on its thumb. The app owns this thumb and its hit
-geometry because UIKit does not expose native scrollbar geometry publicly.
-Scrubbing jumps through the rendered sections, including Pinned and unassigned
-chats; release or cancellation retracts it. Search, time/status groupings and the iPad sidebar retain their existing lists.
-The thumb has a 44 pt target, VoiceOver adjustment moves between groups, and Reduce
-Motion disables the morph. Snapshot replacement cancels scrubbing before section
-identities change. Repository groups reuse cached owner avatars with a single-initial
-fallback. Expansion anchors the selected slot to the initial hold position, preserving
-selection even when the rail is clamped to the safe area.
-`verify:native --case chat-list-scroll` covers the control.
+In compact Chats Home, project grouping reveals an opaque project index while
+scrolling, over the existing full-width list. Tap a logo or scrub the rail to jump
+through committed rendered sections, including Pinned and unassigned chats. Only
+the visible 44 pt rail intercepts touches; no index recognizer is installed on rows.
+It stays visible through dragging/deceleration and for 0.8 seconds after scrolling
+or scrubbing ends. Renewed interaction invalidates pending dismissal. Snapshot
+replacement, backgrounding, detachment and size changes cancel the interaction.
+Search, time/status groupings and the iPad sidebar retain their existing lists.
+VoiceOver adjustment follows rendered group order. Repository identities flow from
+catalog `repoFullName` through the root row to cached GitHub owner avatars, displayed
+in dedicated 24 pt image views at full opacity; projects without artwork use one
+initial. Dense rails show spaced landmarks and the selected logo without shrinking
+artwork; scrubbing and VoiceOver still reach every project. Pinned and unassigned
+groups keep their symbols. The opaque semantic
+background follows light/dark appearance. Entrance and exit use a short 12 pt slide
+and fade, with full opacity at rest. Dismissal disables touch targets immediately;
+Reduce Motion uses immediate visibility changes.
+`verify:native --case chat-list-scroll` covers hit bounds, direct navigation,
+deterministic linger cancellation and cached artwork.
 
 ### Code Diffs & Workspace File Browsing
 

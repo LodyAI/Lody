@@ -1,7 +1,5 @@
 package app.lody.android.home
 
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import app.lody.android.runtime.CatalogProject
 import app.lody.android.runtime.CatalogPullRequest
 import app.lody.android.runtime.CatalogSession
@@ -19,32 +17,59 @@ class ChatListModelTest {
     private fun session(id: String, project: String, status: String = "idle", archived: Boolean = false, pinned: Boolean = false, at: String) =
         CatalogSession(id, "m", project, "Chat $id", status, archived, pinned, at)
 
-    @Test fun projectIndexTouchTargetFollowsThumbWithoutActivatingWholeRail() {
-        val target = projectIndexTouchBounds(Rect(393f, 200f, 396f, 232f), 400f, 44f)
-        assertEquals(Rect(356f, 194f, 400f, 238f), target)
-        assertTrue(target.contains(Offset(360f, 216f)))
-        assertFalse(target.contains(Offset(390f, 100f)))
-        assertFalse(target.contains(Offset(390f, 300f)))
-        assertFalse(target.contains(Offset(350f, 216f)))
-        assertEquals(Rect(356f, 100f, 400f, 160f),
-            projectIndexTouchBounds(Rect(393f, 100f, 396f, 160f), 400f, 44f))
+    @Test fun projectIndexAppearsDuringScrollAndLingersAfterScrollOrDirectTouch() {
+        var index = ProjectIndexVisibility()
+        assertFalse(index.shown)
+        index = index.update(available = true, scrolling = true)
+        assertTrue(index.shown)
+        assertFalse(index.lingering)
+        assertEquals(index, index.hide())
+        index = index.update(available = true, scrolling = false)
+        assertTrue(index.shown)
+        assertTrue(index.lingering)
+        index = index.update(available = true, touching = true)
+        assertEquals(index, index.hide())
+        // A jump may start and finish scrolling while the user still scrubs.
+        index = index.update(available = true, scrolling = true)
+            .update(available = true, scrolling = false)
+        assertTrue(index.shown)
+        assertFalse(index.lingering)
+        index = index.update(available = true, touching = false)
+        assertTrue(index.lingering)
+        assertFalse(index.hide().shown)
     }
 
-    @Test fun projectIndexScrubRemainsAnchoredWhenCapsuleCannotAlignWithFinger() {
-        // A dense capsule can clamp at either viewport edge; its visual top must not
-        // affect selection. Touches at either end of a tall thumb share this mapping.
-        for (heldY in listOf(4f, 60f, 740f, 796f)) {
-            for (origin in listOf(0, 1, 20, 38, 39)) {
-                fun scrub(y: Float) = projectIndexScrubTarget(origin, y - heldY, 16f, 40)
-                assertEquals(origin, scrub(heldY))
-                assertEquals(origin, scrub(heldY - 1f))
-                assertEquals(origin, scrub(heldY + 1f))
-                assertEquals((origin + 1).coerceAtMost(39), scrub(heldY + 16f))
-                assertEquals((origin - 1).coerceAtLeast(0), scrub(heldY - 16f))
-                assertEquals(0, scrub(heldY - 1000f))
-                assertEquals(39, scrub(heldY + 1000f))
+    @Test fun projectIndexDismissesOnBackgroundOrUnavailableListWithoutResurrection() {
+        val held = ProjectIndexVisibility().update(available = true, scrolling = true, touching = true)
+        val dismissed = held.update(available = false)
+        assertEquals(ProjectIndexVisibility(), dismissed)
+        assertFalse(dismissed.update(available = true, scrolling = false).shown)
+        assertFalse(dismissed.hide().shown)
+        assertTrue(dismissed.update(available = true, scrolling = true).shown)
+    }
+
+    @Test fun projectIndexDirectTouchSelectsTheIconUnderTheFinger() {
+        for (pitch in listOf(16f, 32f)) {
+            for (index in 0 until 40) {
+                assertEquals(index, projectIndexScrubTarget(4f + (index + 0.5f) * pitch, 4f, pitch, 40))
             }
+            assertEquals(0, projectIndexScrubTarget(-100f, 4f, pitch, 40))
+            assertEquals(39, projectIndexScrubTarget(10000f, 4f, pitch, 40))
         }
+    }
+
+    @Test fun projectIndexUsesCatalogIdentityWithoutChatRepositoryMetadata() {
+        val project = CatalogProject("github:owner/repo", "m", "Project", "/project", "catalog/repo")
+        val chat = session("chat", project.id, at = "2026-10-01T00:00:00Z")
+        fun section(projects: List<CatalogProject>) = ChatListModel.byProject(
+            snapshot.copy(projects = projects, sessions = listOf(chat)),
+        ).single()
+        assertEquals("catalog/repo", section(listOf(project)).repository)
+        assertEquals("owner/repo", section(listOf(project.copy(repoFullName = null))).repository)
+        assertEquals("owner/repo", section(emptyList()).repository)
+        val local = project.copy(id = "local", repoFullName = null)
+        assertNull(ChatListModel.byProject(snapshot.copy(projects = listOf(local),
+            sessions = listOf(chat.copy(projectId = local.id)))).single().repository)
     }
 
     @Test fun projectIndexJumpsToRenderedHeadersAfterFamilyFolding() {

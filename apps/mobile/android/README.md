@@ -138,15 +138,21 @@ The conversations button appears only with open child Tabs. More contains New
 current working directory conversation and access to closed conversations, so
 creation and recovery remain available without the conversations button.
 
-Chats grouped by project expose a narrow scrollbar when the list overflows and has
-multiple sections. Hold the thumb to expand a project-icon capsule, slide to jump
-to a section, and release to retract. The thumb has a 44dp-wide touch target
-centered vertically on its visible position; backgrounding or loss of scrollable
-content also retracts the index. Scrubbing uses displacement from the initial
-hold, so clamping the capsule at a viewport edge does not change the selection. The capsule includes Pinned and unassigned
-chats, highlights the selected section, and carries conversation status dots.
-Ordinary list gestures and other grouping/search views retain their behavior.
-TalkBack exposes an action to expand the index and activate named sections.
+Chats grouped by project show a solid project-icon capsule while scrolling when
+multiple sections overflow the viewport. It slides in over 180 ms and out over
+140 ms, staying opaque over the full-width list throughout. Dismissal removes
+pointer and accessibility targets immediately; compressed icon cells clip their
+contents so neighboring icons cannot overlap. It lingers for 800 ms after scrolling
+or interaction ends (extended by the system accessibility timeout preference).
+Tap an icon to jump or scrub directly across the icons; only the visible capsule
+captures index gestures.
+Backgrounding, leaving the list or losing scrollable content dismisses it and
+cancels pending jumps. Pinned and unassigned chats have dedicated symbols; project
+logos use catalog repository identity and the existing memory/disk image cache,
+with a repository glyph while loading or on failure, or a monogram for local
+projects. The index highlights the current section and carries status dots.
+TalkBack can activate each named section. Other grouping/search views retain
+their ordinary list behavior.
 
 ## Verification
 

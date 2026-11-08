@@ -244,7 +244,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       let tint = ["danger", "warning", "blue"].first(where: tints.contains)
         ?? (section.rows.contains(where: \.unread) ? "blue" : "")
       let symbol = ["pinned": "pin.fill", "group:chat": "bubble.left" ][id] ?? ""
-      // Use the root's repository, never a cross-project opened child or Pinned's first row.
+      // HomeRows preserves raw repository identity even when grouping hides row.place.
+      // Use the root, never a cross-project opened child or Pinned's first row.
       let repository = section.rows.first?.repository ?? ""
       let image = symbol.isEmpty ? RepositoryImages.url(repository)?.absoluteString ?? "" : ""
       return InboxProjectIndex.Item(id: id, title: section.header, symbol: symbol, tint: tint, image: image)
@@ -262,6 +263,19 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     }.min()
     let id = path.flatMap { dataSource.itemIdentifier(for: $0)?.section }
     projectIndex.refresh(current: id)
+  }
+
+  func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    refreshProjectIndex()
+    projectIndex.setScrolling(true)
+  }
+
+  func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+    if !decelerate { projectIndex.setScrolling(false) }
+  }
+
+  func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+    projectIndex.setScrolling(false)
   }
 
   private func jumpToSection(_ id: String) {
