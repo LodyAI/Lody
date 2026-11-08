@@ -6525,6 +6525,50 @@ describe('encrypted queued input evidence', () => {
 });
 
 describe('machine execution authorization freshness', () => {
+  it('waits for a ledger read that is unavailable instead of refusing the turn', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-unavailable-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          let authorization: { _tag: 'Authorized' } | { _tag: 'Denied'; reason: 'unavailable' } = {
+            _tag: 'Denied',
+            reason: 'unavailable',
+          };
+          const gate = makeEncryptedAgentExecution({
+            machineUserId: 'synthetic-machine-account',
+            genesis: '11'.repeat(32),
+            workspaceId: 'workspace',
+            targetMachineId: 'machine',
+            journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 0),
+            resolveVerifiedOriginal: (input) =>
+              Effect.succeed({
+                requesterDevice: 'aa'.repeat(32),
+                requesterCryptoUserId: 'bb'.repeat(32),
+                // The original's own deadline bounds the wait.
+                expiresAt: input.userTurnId === 'expired' ? 1 : Number.MAX_SAFE_INTEGER,
+              }),
+            authorizeExecution: () => Effect.sync(() => authorization),
+          });
+          const intent = (userTurnId: string) => ({
+            workspaceId: 'workspace',
+            sessionId: 'session',
+            userTurnId,
+            requesterUserId: 'synthetic-member',
+            inputConfig: { prompt: userTurnId },
+          });
+          // A slow or failed read decides nothing: the turn waits inside its window.
+          expect((yield* gate.claim(intent('slow-backend'))).state).toBe('pending-evidence');
+          authorization = { _tag: 'Authorized' };
+          expect((yield* gate.claim(intent('slow-backend'))).state).toBe('claimed');
+          authorization = { _tag: 'Denied', reason: 'unavailable' };
+          expect((yield* gate.claim(intent('expired'))).state).toBe('expired');
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   effectIt.effect.each([
     'valid',
     'no-source-capability',
