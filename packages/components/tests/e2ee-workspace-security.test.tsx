@@ -75,14 +75,19 @@ describe('recovery vault settings', () => {
 });
 
 describe('recovery vault settings actions', () => {
+  // A plan given as a function is asked again on every load, so it can fail and then recover.
   const mount = async (plan: unknown) => {
     const answers: Record<string, unknown> = {
-      'e2ee.recoveryReplacementPlan': plan,
       'e2ee.recentAccountSecurityEvents': [],
       'e2ee.recoveryPasskeyAvailable': true,
     };
     vi.stubGlobal('ipc', {
-      invoke: async (channel: string) => answers[channel],
+      invoke: async (channel: string) =>
+        channel === 'e2ee.recoveryReplacementPlan'
+          ? typeof plan === 'function'
+            ? plan()
+            : plan
+          : answers[channel],
       on: () => () => {},
     });
     const store = createStore();
@@ -98,14 +103,29 @@ describe('recovery vault settings actions', () => {
         </Provider>
       );
     });
-    for (let tick = 0; tick < 20; tick++) await act(async () => {});
-    const buttons = [...container.querySelectorAll('button')];
+    const settle = async () => {
+      for (let tick = 0; tick < 20; tick++) await act(async () => {});
+    };
+    await settle();
+    const buttons = () => [...container.querySelectorAll('button')];
     return {
-      labels: buttons.map((button) => button.textContent),
-      primary: buttons
-        .filter((button) => button.dataset.variant === 'primary')
-        .map((b) => b.textContent),
-      text: container.textContent ?? '',
+      get labels() {
+        return buttons().map((button) => button.textContent);
+      },
+      get primary() {
+        return buttons()
+          .filter((button) => button.dataset.variant === 'primary')
+          .map((b) => b.textContent);
+      },
+      get text() {
+        return container.textContent ?? '';
+      },
+      click: async (label: string) => {
+        const button = buttons().find((b) => b.textContent === label);
+        if (!button) throw new Error(`no ${label} button`);
+        await act(async () => button.click());
+        await settle();
+      },
       done: () => {
         act(() => root.unmount());
         container.remove();
@@ -178,6 +198,78 @@ describe('recovery vault settings actions', () => {
         'e2ee.recovery.replaceAbandon',
       ]);
       expect(view.primary).toEqual(['e2ee.recovery.replaceContinue']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('still offers restore during a replacement when a workspace is not covered', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: true,
+      covered: [workspace('a', { kind: 'verified', update: 1 })],
+      uncovered: [workspace('b', { kind: 'notSet' })],
+    });
+    try {
+      for (const label of [
+        'e2ee.recovery.restore',
+        'e2ee.recovery.restorePasskey',
+        'e2ee.recovery.replaceContinue',
+        'e2ee.recovery.replaceAbandon',
+      ])
+        expect(view.labels).toContain(label);
+      expect(view.labels).not.toContain('e2ee.recovery.replace');
+      expect(view.primary).toEqual(['e2ee.recovery.replaceContinue']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('shows the workspace status this device cannot read as unknown', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: false,
+      covered: [workspace('a', { kind: 'unknown' })],
+      uncovered: [],
+    });
+    try {
+      expect(view.text).toContain('e2ee.recovery.workspace.unknown');
+    } finally {
+      view.done();
+    }
+  });
+
+  it('keeps read-only actions and offers retry when the recovery state cannot be read', async () => {
+    let fail = true;
+    const view = await mount(async () => {
+      if (fail) throw new Error('e2ee_recovery_storage');
+      return {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'saved' })],
+        uncovered: [],
+      };
+    });
+    try {
+      expect(view.text).toContain('e2ee.recovery.planFailed');
+      for (const label of [
+        'common.retry',
+        'e2ee.recovery.check',
+        'e2ee.recovery.restore',
+        'e2ee.recovery.restorePasskey',
+        'e2ee.recovery.create',
+      ])
+        expect(view.labels).toContain(label);
+      expect(view.primary).toEqual(['common.retry']);
+      fail = false;
+      await view.click('common.retry');
+      expect(view.text).not.toContain('e2ee.recovery.planFailed');
+      expect(view.labels).not.toContain('common.retry');
+      expect(view.primary).toEqual(['e2ee.recovery.check']);
+      expect(view.text).toContain('e2ee.recovery.workspace.saved');
     } finally {
       view.done();
     }

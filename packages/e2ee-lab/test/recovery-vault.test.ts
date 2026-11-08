@@ -1657,6 +1657,47 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('reports an unreadable journal row as unknown instead of failing the whole read', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            const vaultId = r.newVault.vault.vaultId;
+            const genesis = hex(r.f.initial.genesis.toBytes());
+            yield* r.newOwner.setup();
+            const prefix = `vault-v1/${vaultId}/workspace/`;
+            // Rows that are not canonical CBOR or not a progress record.
+            yield* r.local.compareAndSwap(`${prefix}aa/bb`, null, Uint8Array.of(0xff, 0x00, 0x13));
+            yield* r.local.compareAndSwap(`${prefix}cc/dd`, null, Uint8Array.of(0x01));
+            // The store refuses empty writes, so an empty row can only come back from disk.
+            const damaged = {
+              ...r.local,
+              list: (at: string) =>
+                Effect.map(r.local.list(at), (found) => [
+                  ...found,
+                  { key: `${prefix}ee/ff`, value: new Uint8Array(0) },
+                ]),
+            };
+            const rows = yield* readWorkspaceRecoveryProgress(damaged, vaultId);
+            expect(rows).toEqual(
+              expect.arrayContaining([
+                { genesis: 'aa', membershipId: 'bb', stage: 'unknown', testedEpoch: null },
+                { genesis: 'cc', membershipId: 'dd', stage: 'unknown', testedEpoch: null },
+                { genesis: 'ee', membershipId: 'ff', stage: 'unknown', testedEpoch: null },
+                {
+                  genesis,
+                  membershipId: hex(r.f.membership.toBytes()),
+                  stage: 'recoverable',
+                  testedEpoch: 0,
+                },
+              ])
+            );
+            expect(rows).toHaveLength(4);
+          })
+        )
+      );
+    }));
   it('names the workspaces a device cannot act on', () => {
     expect(
       planVaultReplacement(

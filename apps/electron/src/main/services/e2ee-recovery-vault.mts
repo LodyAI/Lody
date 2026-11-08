@@ -240,6 +240,8 @@ export type RecoveryWorkspaceStatus =
   | { readonly kind: 'notSet' }
   | { readonly kind: 'saved' }
   | { readonly kind: 'verified'; readonly update: number }
+  /** This device's journal row for the workspace could not be read. */
+  | { readonly kind: 'unknown' }
 
 /** What a replacement would cover, and whether one is already running. */
 export const recoveryReplacementPlan = (
@@ -271,6 +273,7 @@ export const recoveryReplacementPlan = (
       const status = (genesisHash: string | undefined): RecoveryWorkspaceStatus => {
         const found = progress.find((row) => row.genesis === genesisHash)
         if (!found) return { kind: 'notSet' }
+        if (found.stage === 'unknown') return { kind: 'unknown' }
         return found.stage === 'recoverable' && found.testedEpoch !== null
           ? { kind: 'verified', update: found.testedEpoch }
           : { kind: 'saved' }

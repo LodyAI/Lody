@@ -982,7 +982,10 @@ export const memoryRecoveryEpochKeys = () => {
 /**
  * Each workspace's recovery stage on this device, read from the local journal alone, so it
  * needs no V. `testedEpoch` is the key update the last real envelope test covered. A later
- * update needs a new test, which only the ledger can tell.
+ * update needs a new test, which only the ledger can tell. A row this reader cannot decode
+ * (empty, not canonical CBOR, or not a progress record) is reported with stage `unknown`
+ * rather than failing the read: the journal persists, so one damaged row would otherwise
+ * hide every workspace's state on this device for good. The row itself is left untouched.
  */
 export const readWorkspaceRecoveryProgress = Effect.fnUntraced(function* (
   local: RecoveryVaultLocalStore,
@@ -992,17 +995,30 @@ export const readWorkspaceRecoveryProgress = Effect.fnUntraced(function* (
   const progress: {
     readonly genesis: string;
     readonly membershipId: string;
-    readonly stage: typeof ProgressSchema.Type.stage;
+    readonly stage: typeof ProgressSchema.Type.stage | 'unknown';
     readonly testedEpoch: number | null;
   }[] = [];
   for (const row of yield* local.list(prefix)) {
     const parts = row.key.slice(prefix.length).split('/');
     if (parts.length !== 2) continue;
-    const decoded = Schema.decodeUnknownResult(ProgressSchema)(parseCanonical(row.value));
-    if (Result.isFailure(decoded) || decoded.success.skipped) continue;
+    const genesis = parts[0]!,
+      membershipId = parts[1]!;
+    let value: unknown;
+    try {
+      value = parseCanonical(row.value);
+    } catch {
+      progress.push({ genesis, membershipId, stage: 'unknown', testedEpoch: null });
+      continue;
+    }
+    const decoded = Schema.decodeUnknownResult(ProgressSchema)(value);
+    if (Result.isFailure(decoded)) {
+      progress.push({ genesis, membershipId, stage: 'unknown', testedEpoch: null });
+      continue;
+    }
+    if (decoded.success.skipped) continue;
     progress.push({
-      genesis: parts[0]!,
-      membershipId: parts[1]!,
+      genesis,
+      membershipId,
       stage: decoded.success.stage,
       testedEpoch: decoded.success.testedEpoch,
     });
