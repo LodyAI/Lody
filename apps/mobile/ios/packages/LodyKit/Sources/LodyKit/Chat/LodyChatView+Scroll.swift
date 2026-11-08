@@ -737,7 +737,7 @@ extension LodyChatView {
           guard let self, let source else { return }
           if key == "copy" {
             UIPasteboard.general.setMessageMarkdown(content.text)
-            LodyToastOverlay.shared.show(message: String(localized: "native.chat.message.copied", bundle: .lody), kind: "info")
+            LodyToastOverlay.shared.show(message: String(localized: "native.chat.message.copied", bundle: .lody), kind: .neutral)
           } else if key == "image" {
             var snapshot = content
             snapshot.workspace = self.imageWorkspace

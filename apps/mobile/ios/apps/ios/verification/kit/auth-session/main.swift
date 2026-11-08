@@ -26,9 +26,10 @@ struct AuthCatalogScope {
   static let shared = PushNotifications()
   func identify(_ value: String?, credential: String? = nil) {}
 }
+enum LodyToastKind { case error }
 @MainActor final class LodyToastOverlay {
   static let shared = LodyToastOverlay()
-  func show(message: String, kind: String) {}
+  func show(message: String, kind: LodyToastKind) {}
 }
 final class LocalStore: @unchecked Sendable {
   static let shared = LocalStore()

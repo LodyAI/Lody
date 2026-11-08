@@ -35,6 +35,23 @@ enum NativeDebug {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
       return
     }
+    if scenario.hasPrefix("toast-") {
+      guard LodyUIVerify.enabled, let presenter = LodyShell.shared.presenter else { return }
+      LodyToastOverlay.shared.dismiss()
+      if ["toast-archive", "toast-unarchive", "toast-error"].contains(scenario) {
+        let session = SessionItem(id: "toast-session", title: "Toast verification", archived: scenario == "toast-unarchive")
+        let state = SessionListState(userId: "toast-user", workspaceId: "toast-workspace", catalog: SessionCatalog(sessions: [session]))
+        let source = SessionSource(changes: [], read: { state }, write: { _, _, _ in
+          if scenario == "toast-error" { throw NSError(domain: "ToastVerification", code: 1) }
+        })
+        SessionActions(source: source).perform("archive", row: session.id, from: presenter)
+      } else {
+        let kind: LodyToastKind = scenario == "toast-warning" ? .warning : .neutral
+        let key = scenario == "toast-warning" ? "create.toast.branchRequired" : "diff.toast.copied"
+        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: kind)
+      }
+      return
+    }
     if scenario == "inline-code" {
       let page = UIViewController()
       page.view.backgroundColor = .lodyBackground

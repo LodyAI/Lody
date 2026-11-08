@@ -67,17 +67,17 @@ final class SessionActions {
       let archived = !session.archived
       write(workspace, session.id, .archive(archived)) { failed in
         let key = archived ? "archive" : "unarchive"
-        Self.toast(failed ? "\(key)Failed" : "\(key)d")
+        Self.toast(failed ? "\(key)Failed" : "\(key)d", kind: failed ? .error : .neutral)
       }
     case "pin":
       let pinned = !session.pinned
       write(workspace, session.id, .pin(pinned)) { failed in
-        if failed { Self.toast(pinned ? "pinFailed" : "unpinFailed") }
+        if failed { Self.toast(pinned ? "pinFailed" : "unpinFailed", kind: .error) }
       }
     case "read":
       guard let message = session.lastMessageAt, (session.lastReadAt ?? -.infinity) < message else { return }
       write(workspace, session.id, .read(max(LodyRelativeTime.now(), message))) { failed in
-        if failed { Self.toast("readFailed") }
+        if failed { Self.toast("readFailed", kind: .error) }
       }
     case "rename":
       promptRename(session, workspace: workspace, from: controller)
@@ -106,7 +106,7 @@ final class SessionActions {
       let next = String((alert?.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
       guard !next.isEmpty else { return }
       self?.write(workspace, session.id, .rename(next)) { failed in
-        if failed { Self.toast("renameFailed") }
+        if failed { Self.toast("renameFailed", kind: .error) }
       }
     })
     controller.present(alert, animated: true)
@@ -133,21 +133,21 @@ final class SessionActions {
     alert.addAction(UIAlertAction(title: String(localized: "session.action.delete", bundle: .lody), style: .destructive) { [weak self] _ in
       guard let self, Self.deleting.isDisjoint(with: keys) else { return }
       Self.deleting.formUnion(keys)
-      LodyToastOverlay.shared.show(message: String(localized: "session.delete.pending", bundle: .lody), kind: "info")
+      LodyToastOverlay.shared.show(message: String(localized: "session.delete.pending", bundle: .lody), kind: .neutral)
       self.write(state.workspaceId, session.id, .delete(ids)) { failed in
         Self.deleting.subtract(keys)
         if failed {
-          LodyToastOverlay.shared.show(message: String(localized: "session.delete.failed", bundle: .lody), kind: "error")
+          LodyToastOverlay.shared.show(message: String(localized: "session.delete.failed", bundle: .lody), kind: .error)
         } else {
-          LodyToastOverlay.shared.show(message: String(localized: "session.delete.success", bundle: .lody), kind: "info")
+          LodyToastOverlay.shared.show(message: String(localized: "session.delete.success", bundle: .lody), kind: .neutral)
         }
       }
     })
     controller.present(alert, animated: true)
   }
 
-  private static func toast(_ key: String) {
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("session.toast." + key), bundle: .lody), kind: "error")
+  private static func toast(_ key: String, kind: LodyToastKind) {
+    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("session.toast." + key), bundle: .lody), kind: kind)
   }
 
   private static func json(_ object: [String: Any]) -> String {

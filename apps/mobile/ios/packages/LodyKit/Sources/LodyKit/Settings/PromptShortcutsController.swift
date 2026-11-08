@@ -125,7 +125,7 @@ class PromptShortcutsController: UIViewController {
       var value: PromptShortcutValue?
       if let entry {
         guard case .read(let read)? = try? await service(.read(entry)) else {
-          LodyToastOverlay.shared.show(message: PromptShortcutSections.text("changed"), kind: "error")
+          LodyToastOverlay.shared.show(message: PromptShortcutSections.text("changed"), kind: .warning)
           self?.refresh()
           return
         }

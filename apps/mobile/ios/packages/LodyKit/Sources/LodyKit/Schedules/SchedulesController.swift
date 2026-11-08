@@ -153,7 +153,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       guard let self, self.version == id else { return }
       // A failed refresh keeps the last list; the error shows only when there is nothing to show.
       if let value { self.result = value }
-      if pulled, self.result != nil, let failure { LodyToastOverlay.shared.show(message: failure, kind: "error") }
+      if pulled, self.result != nil, let failure { LodyToastOverlay.shared.show(message: failure, kind: .error) }
       self.failure = failure
       self.loading = false
       self.refresh.endRefreshing()
@@ -313,7 +313,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   func newSchedule() {
     let state = source.state
     guard state.workspace != nil, !state.workspaceId.isEmpty else {
-      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: .neutral)
       return
     }
     open(nil)
@@ -394,10 +394,10 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       do {
         _ = try await service.command(params)
         if action == .run {
-          LodyToastOverlay.shared.show(message: String(format: ScheduleFormat.text("runStarted"), item.title), kind: "success")
+          LodyToastOverlay.shared.show(message: String(format: ScheduleFormat.text("runStarted"), item.title), kind: .neutral)
         }
       } catch {
-        LodyToastOverlay.shared.show(message: ScheduleFailure.message(error, write: true), kind: "error")
+        LodyToastOverlay.shared.show(message: ScheduleFailure.message(error, write: true), kind: .error)
       }
       guard let self else { return }
       self.busy.remove(item.scheduleId)
@@ -407,7 +407,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   private func openChat(_ item: ScheduleItem) {
     guard let sessionId = item.lastSessionId, source.state.catalog.session(sessionId) != nil else {
-      LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: .error)
       return
     }
     SessionActions(source: source).open(sessionId, from: self)

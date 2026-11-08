@@ -327,7 +327,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
           overlay?.close { self.titleMenuSelected("tab:" + next.id) }
         }
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.changeFailed", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.changeFailed", bundle: .lody), kind: .error)
       }
     }
   }
@@ -375,12 +375,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
           LodyShell.shared.openSessionFromExternal(target)
         case .rejected:
           self.attemptedTab = nil
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: "error")
+          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: .error)
         case .unknown:
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: "info")
+          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
         }
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: "info")
+        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
       }
     }
   }

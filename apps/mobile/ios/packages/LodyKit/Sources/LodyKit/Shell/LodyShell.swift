@@ -118,7 +118,7 @@ final class LodyShell {
 
   func sessionIntent(_ action: String, _ fields: [String: Any]) {
     do { try SessionNavigation.handle(action, fields) }
-    catch { LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: "error") }
+    catch { LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: .error) }
   }
 
   func finish(from controller: UIViewController?, value: Any?) {

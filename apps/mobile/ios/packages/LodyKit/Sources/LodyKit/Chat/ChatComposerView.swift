@@ -1372,7 +1372,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     addAttachments([file])
     LodyToastOverlay.shared.show(
       message: String.localizedStringWithFormat(String(localized: "native.chat.composer.pasteAsFile", bundle: .lody), String(describing: file.name)),
-      kind: "success",
+      kind: .neutral,
       actionTitle: String(localized: "native.chat.composer.pasteUndo", bundle: .lody)
     ) { [weak self] in
       self?.undoPastedTextFile(id: file.id, paste: paste, location: location)

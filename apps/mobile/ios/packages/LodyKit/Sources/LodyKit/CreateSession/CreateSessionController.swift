@@ -24,7 +24,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   var onSelection: ((CreateSessionForm) -> Void)?
   var onSubmit: ((CreateSessionDraft?, [String: Any]) -> Void)?
   var onCancel: (() -> Void)?
-  var showMessage: ((String) -> Void)?
+  var showMessage: ((String, LodyToastKind) -> Void)?
   var restoreDraft: ((Int) -> Void)?
   private(set) var sending = false
   /// Pushed full screen: lead with a back button instead of the sheet's close button.
@@ -534,7 +534,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     }
     if !form.deferUnresolved && form.current.github && form.current.branch.trimmingCharacters(in: .whitespaces).isEmpty {
       restore()
-      message(String(localized: "create.toast.branchRequired", bundle: .lody))
+      message(String(localized: "create.toast.branchRequired", bundle: .lody), kind: .warning)
       return false
     }
     form.updateChoice(form.current.choice)
@@ -556,8 +556,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     if let restoreDraft { restoreDraft(restoreToken) } else { composer.restoreDraft(token: restoreToken) }
   }
 
-  func message(_ text: String) {
-    if let showMessage { return showMessage(text) }
+  func message(_ text: String, kind: LodyToastKind = .error) {
+    if let showMessage { return showMessage(text, kind) }
     let alert = UIAlertController(title: text, message: nil, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default))
     present(alert, animated: true)

@@ -276,7 +276,7 @@ final class AuthSession {
   }
 
   private func toast(_ key: String) {
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: "error")
+    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: .error)
   }
 
   private func publish() {

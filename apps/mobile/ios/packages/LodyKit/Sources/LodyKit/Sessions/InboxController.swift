@@ -188,7 +188,7 @@ final class InboxController: UIViewController {
       case .success(let hits):
         self.search = (key, catalog, hits)
       case .failure:
-        LodyToastOverlay.shared.show(message: String(localized: "search.toast.failed", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "search.toast.failed", bundle: .lody), kind: .error)
         self.search = (key, catalog, InboxSections.match(catalog, keyword: term))
       }
       self.render()
@@ -294,7 +294,7 @@ final class InboxController: UIViewController {
   func newSession() {
     let state = source.state
     guard state.workspace != nil else {
-      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: .neutral)
       return
     }
     SessionActions.create(["workspaceId": state.workspaceId, "zoomSourceLabel": String(localized: "tabs.newSession", bundle: .lody)])
