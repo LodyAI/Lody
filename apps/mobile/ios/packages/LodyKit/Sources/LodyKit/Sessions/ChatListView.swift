@@ -72,6 +72,9 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       if index == 0 && title.isEmpty { sectionConfig.headerMode = .none }
       let section = NSCollectionLayoutSection.list(using: sectionConfig, layoutEnvironment: environment)
       section.interGroupSpacing = 0
+      if index > 0 {
+        section.decorationItems = [.background(elementKind: ChatGroupSeparator.kind)]
+      }
       section.boundarySupplementaryItems.forEach {
         $0.pinToVisibleBounds = self?.pinsGroupLabels == true && !title.isEmpty
         $0.zIndex = 2
@@ -82,6 +85,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
     layoutConfiguration.interSectionSpacing = LodySpacing.md
     layout.configuration = layoutConfiguration
+    layout.register(ChatGroupSeparator.self, forDecorationViewOfKind: ChatGroupSeparator.kind)
     let collection = ChatListCollectionView(frame: bounds, collectionViewLayout: layout)
     collection.onLayout = { [weak self] in self?.updateBackdrop() }
     self.collection = collection
@@ -484,8 +488,8 @@ private struct GroupHeader: View {
     HStack(spacing: LodyLayout.listRowGap) {
       Glyph(icon: icon)
       Text(row.title)
-        .lodyTextStyle(.bodyEmphasis)
-        .foregroundStyle(LodyColor.textPrimary)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
         .lineLimit(1)
       Spacer(minLength: LodySpacing.sm)
       if expanded == false || !canToggle, !row.badge.isEmpty, row.badge != "0" {
@@ -764,6 +768,29 @@ private struct MoreRowContent: View {
   }
 }
 
+/// A section boundary stays in the scroll flow while UIKit pins its label independently.
+private final class ChatGroupSeparator: UICollectionReusableView {
+  static let kind = "chat-group-separator"
+  private let line = UIView()
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    isUserInteractionEnabled = false
+    accessibilityElementsHidden = true
+    line.backgroundColor = LodyUIColor.borderSubtle.withAlphaComponent(0.5)
+    addSubview(line)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    let inset = LodyLayout.screenPaddingX
+    line.frame = CGRect(x: inset, y: 0, width: max(0, bounds.width - inset * 2), height: 1 / traitCollection.displayScale)
+  }
+}
+
 private struct SectionTitle: View {
   let text: String
 
@@ -772,8 +799,8 @@ private struct SectionTitle: View {
       Color.clear.frame(height: LodySpacing.sm)
     } else {
       Text(text)
-        .lodyTextStyle(.subhead)
-        .foregroundStyle(LodyColor.textPrimary)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
         .padding(.horizontal, LodyLayout.screenPaddingX)
         .padding(.top, LodySpacing.xs)
         .padding(.bottom, LodySpacing.xs)
