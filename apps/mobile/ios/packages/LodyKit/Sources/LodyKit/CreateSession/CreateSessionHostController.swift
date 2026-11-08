@@ -80,6 +80,7 @@ class CreateSessionHostController: UIViewController {
     navigation.view.backgroundColor = .clear
     input.composerRelay = relays
     input.composer.sendHandoff = params.sendHandoff ?? true
+    input.composer.dismissesKeyboardOnSend = params.pushed != true
     // Web's mobile landing composer: a card that keeps its controls row in view.
     input.composer.cardStyle = true
     wire()
