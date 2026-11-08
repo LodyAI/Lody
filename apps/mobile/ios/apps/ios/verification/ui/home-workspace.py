@@ -19,6 +19,7 @@ def menu_row(name):
 def open_menu(label):
     ui.axe('tap', '--label', label, '--post-delay', '.5')
     menu_row(workspace_name)
+    menu_row("preview@example.test")
     texts = {i.get('AXLabel') for i in ui.state()}
     assert catalog.text('workspace.edit.action') not in texts
     assert catalog.text('devices.title') not in texts

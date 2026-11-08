@@ -761,6 +761,13 @@ capsule.setItems([
   LodyMenuItem(id: "other", title: "Other", monogram: "O"),
 ])
 assert(capsuleButton.showsMenuAsPrimaryAction)
+assert(capsuleButton.menu!.title.isEmpty)
+capsule.setAccountEmail("preview@example.test")
+assert(capsuleButton.menu!.title == "preview@example.test")
+capsule.setAccountEmail("changed@example.test")
+assert(capsuleButton.menu!.title == "changed@example.test")
+capsule.setAccountEmail("  ")
+assert(capsuleButton.menu!.title.isEmpty, "Clearing account identity removes the menu heading without changing workspaces")
 let menuActions = capsuleButton.menu!.children.compactMap { $0 as? UIAction }
 assert(menuActions.map(\.title) == [longWorkspace, "Other"])
 assert(menuActions.map(\.state) == [.on, .off])

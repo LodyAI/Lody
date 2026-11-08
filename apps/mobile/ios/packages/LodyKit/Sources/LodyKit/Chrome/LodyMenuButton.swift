@@ -24,6 +24,7 @@ final class LodyMenuButton: UIView {
   private var avatar = LodyMenuAvatar()
   private var photoURL: URL?
   private var photo: UIImage?
+  private var accountEmail = ""
   private var label = ""
   private var labelHidden = false
   private var detail = ""
@@ -89,6 +90,13 @@ final class LodyMenuButton: UIView {
     apply()
   }
 
+  func setAccountEmail(_ value: String) {
+    let email = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard accountEmail != email else { return }
+    accountEmail = email
+    updateMenu()
+  }
+
   func setItems(_ value: [LodyMenuItem]) {
     guard items != value else { return }
     items = value
@@ -96,7 +104,7 @@ final class LodyMenuButton: UIView {
   }
 
   private func updateMenu() {
-    button.menu = items.isEmpty ? nil : UIMenu(children: items.map { item in
+    button.menu = items.isEmpty ? nil : UIMenu(title: accountEmail, children: items.map { item in
       UIAction(title: item.title, image: menuImage(item), identifier: UIAction.Identifier(item.id),
                state: item.selected ? .on : .off) { [weak self] _ in
         guard let self, let current = self.items.first(where: { $0.id == item.id }), !current.selected else { return }

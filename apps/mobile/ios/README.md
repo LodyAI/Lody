@@ -79,7 +79,10 @@ The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, lik
 conversation More. UIKit owns presentation, width, height, scrolling and title
 truncation; there is no six-row limit or custom fade. Actions retain full names,
 circular avatars and native selected state. Selecting the current workspace is a
-no-op; catalog changes refresh the menu. Workspace management stays in Settings.
+no-op; catalog changes refresh the menu. The root menu title displays the account
+email in UIKit’s heading style, projected explicitly through the session source
+and chrome model. Empty email removes the heading; synthetic sources never fall
+back to the live account. Workspace management stays in Settings.
 
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating

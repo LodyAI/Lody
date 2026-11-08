@@ -359,7 +359,7 @@ enum NativeHomeFixture {
   private static func publish() {
     let catalogs = ["ui-home": catalog, "ui-states": statesCatalog]
     let empty: [String: Any] = ["projects": [], "sessions": [], "machineIds": []]
-    let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": ""], "workspaces": workspaces],
+    let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": "preview@example.test"], "workspaces": workspaces],
       "workspaceId": selected, "catalog": catalogs[selected] ?? empty,
       "loading": syncPreview,
       "presence": ["workspaceId": selected, "presence": presence]]
