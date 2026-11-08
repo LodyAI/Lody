@@ -776,8 +776,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   var restsCollapsed = false {
     didSet { if restsCollapsed != oldValue { updateComposer() } }
   }
-  /// The card is open: always on the new-chat page; while editing in a conversation.
-  private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder) }
+  /// The card is open: always on the new-chat page; in a conversation while editing, and at
+  /// rest while a typed draft remains, so the prompt keeps showing its lines.
+  private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder || hasDraftText) }
+  private var hasDraftText: Bool { !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
   private lazy var surfaceLayout: any ChatComposerSurfaceLayout = ChatComposerLiquidGlassSurfaceLayout(
     container: composer,
     inputSurface: inputSurface
@@ -1671,7 +1673,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
     // A conversation's card opens with focus (the expansion's own animation carries it).
-    let cardFocusChanged = cardStyle && !restsCollapsed && cardFocused != input.isFirstResponder
+    // A conversation's card can also stay open across a focus change when a draft keeps it open.
+    let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
     cardFocused = input.isFirstResponder
     if fullProgress > 0 {
       let fullHeight = fullScreenInputHeight(chrome: chrome - formatHeight.constant + 44)
@@ -2057,6 +2060,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     takeDraft()
     saveDraft()
     pendingSendID = id
+    // Sending ends the editing: the keyboard goes down and the composer rests again.
+    if input.isFirstResponder { input.resignFirstResponder() }
     updateComposer()
   }
   @objc private func reconnect() {

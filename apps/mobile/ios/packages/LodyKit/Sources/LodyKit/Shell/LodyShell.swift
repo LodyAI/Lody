@@ -119,11 +119,21 @@ final class LodyShell {
     try await callback(name, value)
   }
 
-  func close(from controller: UIViewController?) {
+  /// `crossfade` replaces a pushed page with the one beneath it by a short fade instead of the
+  /// sliding back transition, for pages that hand over to the destination rather than return.
+  func close(from controller: UIViewController?, crossfade: Bool = false) {
     guard let page = Self.page(of: controller) else { return }
     if HomeController.current?.closePanel(from: page) == true { return }
     guard let navigation = page.navigationController else { return }
     if navigation.viewControllers.first === page { navigation.presentingViewController?.dismiss(animated: true) }
+    else if crossfade {
+      let fade = CATransition()
+      fade.type = .fade
+      fade.duration = 0.2
+      fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      navigation.view.layer.add(fade, forKey: kCATransition)
+      navigation.popViewController(animated: false)
+    }
     else { navigation.popViewController(animated: true) }
   }
 

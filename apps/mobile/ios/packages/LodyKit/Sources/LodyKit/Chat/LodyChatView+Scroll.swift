@@ -453,7 +453,8 @@ extension LodyChatView {
       return ChatPlanCell.height(body: body, expanded: expandedPlans.contains(row.id), review: !row.planPermissionItemID.isEmpty, decision: row.planDecision)
     }
     if row.kind == "attachments" {
-      return ChatMessageAttachmentsCell.height(count: row.attachments.count, width: width, expanded: expandedAttachments.contains(row.entryID))
+      return ChatMessageAttachmentsCell.height(count: row.attachments.count, width: width,
+        expanded: expandedAttachments.contains(row.entryID), author: !row.author.isEmpty)
     }
     if row.kind == "chat_failed" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "tasksHeader" { return row.detail.isEmpty ? ChatFileCell.headerHeight : 56 }

@@ -260,7 +260,9 @@ class CreateSessionHostController: UIViewController {
     guard relays, input.relayPayload != nil else {
       if let onCreated {
         Task {
-          do { try await onCreated(built.created as! [String: Any]); close() }
+          // A pushed form hands over to the conversation prepared beneath it: the sent text flies
+          // into its bubble while the form fades, never sliding back like a return to Home.
+          do { try await onCreated(built.created as! [String: Any]); close(crossfade: params.pushed == true) }
           catch { controller.submissionFailed(); LodyToastOverlay.shared.show(message: String(localized: "session.toast.openFailed", bundle: .lody), kind: "error") }
         }
       } else { LodyShell.shared.finish(from: self, value: built.created); close() }
@@ -289,8 +291,8 @@ class CreateSessionHostController: UIViewController {
     close()
   }
 
-  private func close() {
-    LodyShell.shared.close(from: self)
+  private func close(crossfade: Bool = false) {
+    LodyShell.shared.close(from: self, crossfade: crossfade)
   }
 }
 

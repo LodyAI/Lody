@@ -488,11 +488,12 @@ struct ChatTranscript {
         if !text.isEmpty {
           result.append(ChatRow(id: entry.id + (result.isEmpty ? ":user" : ":user-text"), entryID: entry.id, kind: "user", text: text, references: references))
         }
-        // The turn's first bubble carries its sender, time and read state (web's header).
-        if let first = result.firstIndex(where: { $0.kind == "user" }) {
-          result[first].author = entry.userId ?? ChatAuthors.unknownSender
-          result[first].authorTime = ChatAuthors.time(entry.timestamp)
-          result[first].readState = ChatAuthors.readState(entry.status)
+        // The turn's first row (its attachments, else its bubble) carries its sender, time and
+        // read state (web's header), so attachments read as part of the message.
+        if !result.isEmpty {
+          result[0].author = entry.userId ?? ChatAuthors.unknownSender
+          result[0].authorTime = ChatAuthors.time(entry.timestamp)
+          result[0].readState = ChatAuthors.readState(entry.status)
         }
         if let delivery = entry.delivery, delivery != "accepted" {
           let key = "native.chat.message.guide." + delivery
@@ -910,12 +911,13 @@ extension ChatPendingSend {
       }
       let body = displayText ?? text
       if !body.isEmpty {
-        var row = ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body)
-        // A local send in flight is the signed-in user's own turn.
-        row.author = ChatAuthors.unknownSender
-        row.authorTime = ChatAuthors.time(Date().ISO8601Format())
-        row.readState = "sending"
-        result.append(row)
+        result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body))
+      }
+      // A local send in flight is the signed-in user's own turn; its first row carries the header.
+      if !result.isEmpty {
+        result[0].author = ChatAuthors.unknownSender
+        result[0].authorTime = ChatAuthors.time(Date().ISO8601Format())
+        result[0].readState = "sending"
       }
     }
     if failed == true {
