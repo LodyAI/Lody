@@ -70,11 +70,12 @@ enum NativeDebug {
     for (prefix, page) in variants where scenario.hasPrefix(prefix) && scenario != page {
       id = page; fields["scenario"] = String(scenario.dropFirst(prefix.count)); break
     }
-    if ["send-queue", "send-guide", "send-interrupt", "send-scroll-guide", "send-scroll-queue", "send-scroll-normal"].contains(scenario) {
+    if ["send-queue", "send-guide", "send-interrupt", "send-scroll-guide", "send-scroll-queue", "send-scroll-normal", "send-header-preview"].contains(scenario) {
       id = "send-preview"
-      fields["queue"] = scenario != "send-scroll-normal"
+      fields["queue"] = scenario != "send-scroll-normal" && scenario != "send-header-preview"
       fields["steer"] = scenario != "send-interrupt"
-      fields["longContext"] = scenario.hasPrefix("send-scroll-")
+      fields["longContext"] = scenario.hasPrefix("send-scroll-") || scenario == "send-header-preview"
+      fields["headerPreview"] = scenario == "send-header-preview"
       fields["queuedMessageBehavior"] = scenario.hasSuffix("guide") ? "guide" : "queue"
     }
     let aliases = ["pull-request-preview": "pull-request-native-preview", "permission-native-waiting": "permission-native-preview",

@@ -195,3 +195,20 @@ ui.axe('tap', '--id', 'BackButton', '--post-delay', '1')
 home('relinked-return')
 
 print('PASS: warm, cold, toolbar and relinked session links return to one Home.')
+
+# Exercise the real page-owned header over a long transcript without fixture controls.
+open_url('debug?verifyCase=send-header-preview')
+ui.element('session-input')
+ui.wait(lambda items: any('The first check is an ordinary new turn' in (i.get('AXLabel') or '') for i in items), 'Header fixture transcript did not load')
+header = ui.element('chat-navigation-title')['frame']
+transcript = ui.element('chat-transcript')['frame']
+assert transcript['y'] < header['y'] + header['height'], 'Transcript no longer underlaps the header'
+assert not any(i.get('AXUniqueId') == 'send-connect' for i in ui.state()), 'Debug controls obscure the header'
+ui.capture('transparent-header-resting')
+ui.axe('drag', '--start-x', '200', '--start-y', '320', '--end-x', '200',
+       '--end-y', '570', '--duration', '1', '--post-delay', '1')
+ui.element('chat-scroll-to-bottom')
+after = ui.element('chat-navigation-title')['frame']
+assert all(abs(header[key] - after[key]) < 1 for key in ('x', 'y', 'width', 'height')), 'Scrolling moved the header'
+ui.capture('transparent-header-underlap')
+print('PASS: transparent header stays fixed over scrolled content; inspect the native soft edge visually.')

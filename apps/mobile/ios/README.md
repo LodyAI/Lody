@@ -77,9 +77,10 @@ as their duration. Normal replies use 16 pt body text and 18 pt semibold heading
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
 Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
-the system back circle. A page-owned native blur backdrop spans the header and top
-safe area, with the transcript scrolling underneath and its content/find insets
-keeping initial content and search below the controls. The shell hides native navigation only for conversations;
+the system back circle. The transparent header registers its controls with UIKit through
+`UIScrollEdgeElementContainerInteraction`, retaining the transcript’s native `.soft`
+top-edge effect instead of a tinted material band. The transcript scrolls underneath;
+content/find insets keep initial content and search below the controls. The shell hides native navigation only for conversations;
 detail pages retain their native bars. Back uses the existing navigation/split
 owner, and controls retain native glass styling and accessibility labels. The book-layout
 conversation list popover anchors to the visible page sidebar button and its bounds;

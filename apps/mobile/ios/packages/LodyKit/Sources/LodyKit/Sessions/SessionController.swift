@@ -455,11 +455,11 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
     for control in [sidebarButton, backButton, chat.titleButton, tabsButton, moreButton] { pageHeader.addArrangedSubview(control) }
     chat.titleButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
     chat.titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    // The backdrop and controls share the page's transform during interactive navigation.
-    let backdrop = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
-    backdrop.isUserInteractionEnabled = false
-    backdrop.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(backdrop)
+    // Let UIKit shape the existing soft scroll edge around the page-owned controls.
+    let edge = UIScrollEdgeElementContainerInteraction()
+    edge.scrollView = chat.collection
+    edge.edge = .top
+    pageHeader.addInteraction(edge)
     view.addSubview(pageHeader)
     chat.translatesAutoresizingMaskIntoConstraints = false
     pageHeader.translatesAutoresizingMaskIntoConstraints = false
@@ -468,10 +468,6 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
       pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
       pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
       pageHeader.heightAnchor.constraint(equalToConstant: chat.pageHeaderHeight),
-      backdrop.topAnchor.constraint(equalTo: view.topAnchor),
-      backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      backdrop.bottomAnchor.constraint(equalTo: pageHeader.bottomAnchor),
       chat.topAnchor.constraint(equalTo: view.topAnchor),
       chat.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       chat.trailingAnchor.constraint(equalTo: view.trailingAnchor),
