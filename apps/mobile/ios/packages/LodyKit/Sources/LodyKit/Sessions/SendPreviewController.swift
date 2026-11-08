@@ -26,7 +26,10 @@ final class SendPreviewController: SessionController {
       sessionId: SendPreviewFixture.sessionId,
       source: SessionSource(changes: [SendPreviewFixture.change], read: {
         var state = fixture.state
-        if headerPreview { state.userId = "ui-header-preview" }
+        if headerPreview {
+          state.userId = "ui-header-preview"
+          state.catalog.machineNames["fixture"] = "Studio MacBook Pro"
+        }
         return state
       }, write: { _, _, _ in }),
       feed: fixture.feed, environment: environment

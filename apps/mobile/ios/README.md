@@ -79,7 +79,9 @@ Conversation Back, title/machine, Tabs and More controls belong to the page, so
 UIKit’s interactive pop moves them with its content instead of separately animating
 the system back circle. The transparent header registers its controls with UIKit through
 `UIScrollEdgeElementContainerInteraction`, retaining the transcript’s native `.soft`
-top-edge effect instead of a tinted material band. The transcript scrolls underneath;
+top-edge blur. A noninteractive 55% semantic canvas tint protects the title and
+machine subtitle, fading to transparent over 32 pt below the header rather than
+adding an opaque chrome material. The transcript scrolls underneath;
 content/find insets keep initial content and search below the controls. The shell hides native navigation only for conversations;
 detail pages retain their native bars. Back uses the existing navigation/split
 owner, and controls retain native glass styling and accessibility labels. The book-layout

@@ -460,7 +460,18 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
     edge.scrollView = chat.collection
     edge.edge = .top
     pageHeader.addInteraction(edge)
+    let tint = SessionHeaderTint()
+    tint.isUserInteractionEnabled = false
+    tint.backgroundColor = UIColor.lodyBackground.withAlphaComponent(0.55)
+    tint.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(tint)
     view.addSubview(pageHeader)
+    NSLayoutConstraint.activate([
+      tint.topAnchor.constraint(equalTo: view.topAnchor),
+      tint.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      tint.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      tint.bottomAnchor.constraint(equalTo: pageHeader.bottomAnchor, constant: 32),
+    ])
     chat.translatesAutoresizingMaskIntoConstraints = false
     pageHeader.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
@@ -632,3 +643,20 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
   }
 }
 #endif
+
+/// Canvas tint only: UIKit retains ownership of the underlying soft-edge blur.
+@MainActor
+private final class SessionHeaderTint: UIView {
+  private let fade = CAGradientLayer()
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    fade.frame = bounds
+    fade.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
+    fade.locations = [0, NSNumber(value: Double(max(0, bounds.height - 32) / max(1, bounds.height))), 1]
+    layer.mask = fade
+    CATransaction.commit()
+  }
+}

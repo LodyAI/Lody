@@ -200,6 +200,7 @@ print('PASS: warm, cold, toolbar and relinked session links return to one Home.'
 open_url('debug?verifyCase=send-header-preview')
 ui.element('session-input')
 ui.wait(lambda items: any('The first check is an ordinary new turn' in (i.get('AXLabel') or '') for i in items), 'Header fixture transcript did not load')
+assert 'Studio MacBook Pro' in ui.element('chat-navigation-title').get('AXLabel', ''), 'Missing machine subtitle'
 header = ui.element('chat-navigation-title')['frame']
 transcript = ui.element('chat-transcript')['frame']
 assert transcript['y'] < header['y'] + header['height'], 'Transcript no longer underlaps the header'
