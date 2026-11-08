@@ -1579,6 +1579,11 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  /** Absent transport preserves the existing cloud image contract. */
+  transport?: 'local' | 'r2';
+  machineId?: string;
+  /** Immutable local snapshot identity retained after relay publication. */
+  localImageId?: string;
   encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;

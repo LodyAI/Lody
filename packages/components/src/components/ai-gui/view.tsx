@@ -6467,7 +6467,7 @@ function useImageBlobUrls(
   }, [open]);
 
   useEffect(() => {
-    if (!open || activeIndex === -1 || !workspaceId || !authToken) {
+    if (!open || activeIndex === -1 || !workspaceId) {
       return undefined;
     }
 
@@ -6478,20 +6478,23 @@ function useImageBlobUrls(
     let active = true;
     indicesToLoad.forEach((i) => {
       const entry = entries[i];
-      if (!entry) {
+      if (!entry || (!authToken && entry.transport !== 'local' && !entry.localImageId)) {
         return;
       }
 
       void getSessionImageBlobUrl({
         workspaceId,
-        sessionId: entry.sessionId,
-        imageId: entry.imageId,
+        ...entry,
+        mimeType: entry.mimeType,
+        sizeBytes: entry.sizeBytes,
+        transport: entry.transport,
+        machineId: entry.machineId,
         encryption: entry.encryption,
         attachmentToken:
           attachmentRuntime?.workspaceId === workspaceId
             ? attachmentRuntime.attachmentToken
             : undefined,
-        token: authToken,
+        token: authToken ?? '',
         variant: 'original',
       })
         .then((url) => {
@@ -6678,9 +6681,9 @@ export const WorkspaceUserImageBlock = ({
   const imageLoadUnavailableLabel = t('sessions.imageLoadUnavailable', 'Unable to load image');
   const imageLoadFailedLabel = t('sessions.imageLoadFailed', 'Failed to load image');
   const cachedThumbnailUrl =
-    workspaceId && authToken
+    workspaceId && (authToken || entry.transport === 'local' || entry.localImageId)
       ? peekSessionImageUrl(
-          { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+          { workspaceId, ...entry, transport: entry.transport, machineId: entry.machineId },
           useNativeIOSShareSafeImageUrl
         )
       : null;
@@ -6691,7 +6694,7 @@ export const WorkspaceUserImageBlock = ({
 
     setLocalActiveImageKey(null);
 
-    if (!workspaceId || !authToken) {
+    if (!workspaceId || (!authToken && entry.transport !== 'local' && !entry.localImageId)) {
       setThumbnailBlobUrl(null);
       setIsThumbnailLoading(false);
       setThumbnailLoadingError(imageLoadUnavailableLabel);
@@ -6701,7 +6704,7 @@ export const WorkspaceUserImageBlock = ({
     }
 
     const cachedUrl = peekSessionImageUrl(
-      { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+      { workspaceId, ...entry, transport: entry.transport, machineId: entry.machineId },
       useNativeIOSShareSafeImageUrl
     );
     if (cachedUrl) {
@@ -6722,14 +6725,17 @@ export const WorkspaceUserImageBlock = ({
 
     void loadImageUrl({
       workspaceId,
-      sessionId: entry.sessionId,
-      imageId: entry.imageId,
+      ...entry,
+      mimeType: entry.mimeType,
+      sizeBytes: entry.sizeBytes,
+      transport: entry.transport,
+      machineId: entry.machineId,
       encryption: entry.encryption,
       attachmentToken:
         attachmentRuntime?.workspaceId === workspaceId
           ? attachmentRuntime.attachmentToken
           : undefined,
-      token: authToken,
+      token: authToken ?? '',
       variant: 'thumbnail',
       thumbnailWidth,
       thumbnailHeight,
@@ -6756,6 +6762,12 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.mimeType,
+    entry.sizeBytes,
+    entry.localImageId,
+    entry.storageSessionId,
+    entry.transport,
+    entry.machineId,
     entry.encryption,
     attachmentRuntime,
     entry.sessionId,

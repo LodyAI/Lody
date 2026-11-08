@@ -1,12 +1,47 @@
 # Session file attachments in the CLI
 
 Attachments choose their transport before authentication or source-byte reads. Native
-same-machine input uses a durable local reference; remote targets and clients
+same-machine ordinary files use durable local references; images use immutable local snapshots; remote targets and clients
 without native provenance use the existing transfer boundary. The
 [local-reference Spec](../../specs/local-attachment-references.md) explains the
 ownership decision, while [attachment drafts](../../specs/session-files.md) owns
 send-time preparation. A failed local preparation retains the complete draft and
 never falls back to upload.
+
+## Same-desktop image snapshots
+
+New images use `SessionImagePayload` with `transport: 'local'`, a machine ID and
+UUID `localImageId` equal to the initial `imageId`. The renderer requires
+`localImages: 1` and prepares through Electron `prepareLocalImage`; the CLI stores
+the complete snapshot before readiness. Preparation and dispatch do not wait for
+cloud upload. Protected plaintext preparation is rejected.
+
+`message-handler.ts` owns image backfill and restart recovery, using
+`session-attachment-transfer.ts` for uploads. Publication requires the cloud
+attachment-upload capability and an authorized bridge; local-only OSS composition
+never acquires cloud access. It
+retries with a capped delay until success or cancellation; generation fences
+prevent retired work from publishing. Shutdown aborts and awaits owned tasks.
+Publication changes transport to `r2` and supplies a cloud image ID while retaining
+`localImageId`, machine and storage-session metadata. Durable receipts reconcile
+history, frozen execution inputs and queued inputs, including references authored
+after upload completes. Dispatch reconciles its target and current queue before
+execution. Published inputs prefer the original snapshot on its machine and can
+use their uploaded bytes when the snapshot is unavailable.
+
+The blob store pins these snapshots under the session-file quota rather than
+applying automatic image retention GC: queued or frozen inputs may still own the
+identity. Storage pressure rejects admission instead of guessing that an older
+snapshot is unused. ACP receives image bytes and a workspace copy for its resource
+link, keeping the durable snapshot out of the Agent's writable path.
+
+History, fullscreen and queued previews preserve the complete image metadata.
+`resolveLocalImage` checks the scoped local reference before the renderer fetches
+the host file resource. Published images retaining local identity try this path
+first and use authenticated cloud downloads when local bytes are unavailable.
+Pending local images never fall back to cloud URLs. Images without local identity
+retain the legacy cloud image behavior. Existing image-shaped `local_attachment` records
+continue through the registry below.
 
 ## Native local references
 

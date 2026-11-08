@@ -14,6 +14,7 @@ import {
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { prepareDraftAttachments } from '@/lib/session-attachment-preparation';
+import { validateExtendedImageTarget } from '@/lib/session-attachment-routing';
 
 /** One-time message reservations share delivery policy across the composer and quota continue. */
 export const SCHEDULED_MESSAGE_POLICY = {
@@ -61,10 +62,16 @@ export async function prepareScheduledMessage(args: {
     signal: args.signal,
     token: () => args.token,
     localMachineId: () => args.localMachineId,
-    validateLocalTarget: async () => {
+    validateLocalTarget: async (kind) => {
       const machine = await args.runtime.repo.getDocMeta(getMachineRoomId(args.machineId));
-      if (args.machineId !== args.localMachineId || (machine?.meta as MachineMeta | undefined)?.protocolCapabilities?.localAttachments !== 1)
-        throw new Error('Update the local daemon to send local attachments');
+      const capability = kind === 'image' ? 'localImages' : 'localAttachments';
+      if (
+        args.machineId !== args.localMachineId ||
+        (machine?.meta as MachineMeta | undefined)?.protocolCapabilities?.[capability] !== 1
+      )
+        throw new Error(
+          `Update the local daemon to send local ${kind === 'image' ? 'images' : 'attachments'}`
+        );
     },
     record: {
       workspaceId: args.runtime.workspaceId,
@@ -91,6 +98,14 @@ export async function prepareScheduledMessage(args: {
         attachments.map((item) => (item.id === id ? { ...item, progress } : item))
       ),
   });
+  await validateExtendedImageTarget({
+    blocks: prepared.entry.inputConfig?.inputBlocks ?? [],
+    targetMachineId: args.machineId,
+    readMachine: async (target) =>
+      (await args.runtime.repo.getDocMeta(getMachineRoomId(target)))?.meta as
+        | MachineMeta
+        | undefined,
+  });
   return ScheduledMessageSchema.parse({
     ...args.message,
     inputBlocks: prepared.entry.inputConfig?.inputBlocks,
@@ -111,6 +126,14 @@ export async function saveScheduledMessage(args: {
   const now = args.now ?? getServerNow();
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
+  await validateExtendedImageTarget({
+    blocks: args.draft.message?.inputBlocks ?? [],
+    targetMachineId: args.draft.machineId,
+    readMachine: async (target) =>
+      (await args.runtime.repo.getDocMeta(getMachineRoomId(target)))?.meta as
+        | MachineMeta
+        | undefined,
+  });
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>

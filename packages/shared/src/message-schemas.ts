@@ -138,6 +138,9 @@ const OptionalStringSchema = z.preprocess(
 export const SessionImagePayloadSchema = z
   .object({
     imageId: SharedStringSchema,
+    transport: z.enum(['local', 'r2']).optional(),
+    machineId: MachineIdSchema.optional(),
+    localImageId: z.string().uuid().optional(),
     encryption: EncryptedAttachmentSchema.optional(),
     mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
     fileName: OptionalStringSchema,
@@ -148,6 +151,16 @@ export const SessionImagePayloadSchema = z
   })
   .strict()
   .superRefine((image, ctx) => {
+    if (
+      image.transport === 'local' &&
+      (!image.machineId ||
+        !image.localImageId ||
+        image.imageId !== image.localImageId ||
+        image.encryption)
+    )
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid local image reference' });
+    if (image.localImageId && !image.machineId)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Local image requires its machine' });
     const manifest = image.encryption;
     if (
       manifest &&
@@ -516,7 +529,11 @@ export const normalizeSessionTurnInputConfig = (
   if (
     !inputBlocks &&
     Array.isArray(record.inputBlocks) &&
-    record.inputBlocks.some((block) => block?.type === 'local_attachment')
+    record.inputBlocks.some(
+      (block) =>
+        block?.type === 'local_attachment' ||
+        (block?.type === 'image' && block?.transport === 'local')
+    )
   )
     throw new Error('Invalid local attachment input');
   if (inputBlocks) {
@@ -1883,6 +1900,46 @@ export const SessionFileUploadResponseSchema = z
   })
   .strict();
 
+export const SessionImagePrepareLocalRequestSchema = z
+  .object({
+    type: z.literal('session/image-prepare-local'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    imageId: z.string().uuid(),
+    path: SharedTrimmedNonEmptyStringSchema,
+    fileName: SharedTrimmedNonEmptyStringSchema,
+    mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
+  })
+  .strict();
+export const SessionImagePrepareLocalResponseSchema = z
+  .object({
+    type: z.literal('session/image-prepare-local_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    error: SharedOptionalStringSchema,
+    image: SessionImagePayloadSchema.optional(),
+  })
+  .strict();
+export const SessionImageResolveLocalRequestSchema = z
+  .object({
+    type: z.literal('session/image-resolve-local'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    image: SessionImagePayloadSchema,
+  })
+  .strict();
+export const SessionImageResolveLocalResponseSchema = z
+  .object({
+    type: z.literal('session/image-resolve-local_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    error: SharedOptionalStringSchema,
+    path: SharedOptionalStringSchema,
+  })
+  .strict();
+
 export const SessionAttachmentResolveRequestSchema = z
   .object({
     type: z.literal('session/attachment-resolve'),
@@ -2494,6 +2551,8 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageUploadRequestSchema,
   SessionFileUploadRequestSchema,
   SessionFileSendLocalRequestSchema,
+  SessionImagePrepareLocalRequestSchema,
+  SessionImageResolveLocalRequestSchema,
   SessionAttachmentRegisterRequestSchema,
   SessionAttachmentResolveRequestSchema,
   SessionHistoryReadRequestSchema,
@@ -2533,6 +2592,8 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageUploadResponseSchema,
   SessionFileUploadResponseSchema,
   SessionFileSendLocalResponseSchema,
+  SessionImagePrepareLocalResponseSchema,
+  SessionImageResolveLocalResponseSchema,
   SessionAttachmentRegisterResponseSchema,
   SessionAttachmentResolveResponseSchema,
   SessionHistoryReadResponseSchema,

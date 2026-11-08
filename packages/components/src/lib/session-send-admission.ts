@@ -1,6 +1,7 @@
 import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from './workspace-feature';
+import { validateExtendedImageTarget } from './session-attachment-routing';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   getMachineRoomId,
@@ -80,6 +81,15 @@ export async function acceptSessionUserTurn(
       ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
     ]);
   }
+  await validateExtendedImageTarget({
+    blocks: [
+      ...normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, ''),
+      ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
+    ],
+    targetMachineId: meta?.machineId,
+    readMachine: async (target) =>
+      (await runtime.repo.getDocMeta(getMachineRoomId(target)))?.meta as MachineMeta | undefined,
+  });
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
   const roostBackend = meta?.historyBackend === 'roost';

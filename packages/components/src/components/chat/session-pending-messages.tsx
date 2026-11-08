@@ -196,7 +196,7 @@ function PendingImageAttachment({
   const failed = state === 'failed';
   const readyPreviewUrl =
     attachment.ready?.type === 'image'
-      ? peekSessionImageUrl({ workspaceId, sessionId, imageId: attachment.ready.imageId })
+      ? peekSessionImageUrl({ ...attachment.ready, workspaceId, sessionId, imageId: attachment.ready.imageId, transport: attachment.ready.transport, machineId: attachment.ready.machineId })
       : null;
   const displayedPreviewUrl = readyPreviewUrl ?? previewUrl;
 

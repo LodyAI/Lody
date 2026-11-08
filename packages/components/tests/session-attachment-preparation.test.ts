@@ -41,7 +41,8 @@ const local = vi.hoisted(() => ({
   fail: false,
 }));
 vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => local.enabled }));
-vi.mock('../src/lib/electron-local-attachment', () => ({
+vi.mock('../src/lib/electron-local-attachment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/electron-local-attachment')>()),
   prepareElectronLocalAttachment: async ({
     attachment,
     sessionId,
@@ -70,12 +71,46 @@ vi.mock('../src/lib/electron-local-attachment', () => ({
 const cleanup: Array<() => Promise<void>> = [];
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.spyOn(electronIpc, 'getIpcServices').mockReturnValue({
+    localProjects: {
+      resolveLocalImage: async () => {
+        throw new Error('Local image snapshot unavailable');
+      },
+      prepareLocalImage: async (args: {
+        workspaceId: string;
+        sessionId: string;
+        machineId: string;
+        imageId: string;
+        fileName: string;
+        mimeType: string;
+        source: { bytes: ArrayBuffer };
+      }) => {
+        expect(args).not.toHaveProperty('turnId');
+        if (local.fail) return { ok: false, error: 'Local handoff failed' };
+        local.files.push(new TextDecoder().decode(args.source.bytes));
+        return {
+          ok: true,
+          image: {
+            imageId: args.imageId,
+            localImageId: args.imageId,
+            transport: 'local',
+            machineId: args.machineId,
+            storageSessionId: args.sessionId,
+            fileName: args.fileName,
+            mimeType: args.mimeType,
+            sizeBytes: args.source.bytes.byteLength,
+          },
+        };
+      },
+    },
+  } as never);
 });
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
   upload.run = undefined;
   clearSessionImageCache();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -101,7 +136,7 @@ function fixture(encrypted = false, token: string | null = 'token') {
   };
   const metas = new Map<string, Record<string, unknown>>([
     [getSessionRoomId(SESSION), { id: SESSION, machineId: MACHINE }],
-    [getMachineRoomId(MACHINE), { protocolCapabilities: { localAttachments: 1 } }],
+    [getMachineRoomId(MACHINE), { protocolCapabilities: { localAttachments: 1, localImages: 1 } }],
   ]);
   const resources = createSessionSendResources({
     acquire: async (sessionId) => {
@@ -579,10 +614,43 @@ it('sends a same-machine image without cloud authentication or a cloud transfer'
   await until(f.pending, (sends) => sends.length === 0 || sends.some((s) => !!s.error));
   expect(f.turns()[0]?.items).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ type: 'local_attachment', kind: 'image' }),
+      expect.objectContaining({
+        type: 'image',
+        transport: 'local',
+        machineId: MACHINE,
+        storageSessionId: SESSION,
+        mimeType: 'image/png',
+        sizeBytes: 9,
+        imageId: expect.any(String),
+        localImageId: expect.any(String),
+      }),
       expect.objectContaining({ type: 'text', text: 'keep offline-image' }),
     ])
   );
+  const image = f.turns()[0]?.inputConfig?.inputBlocks?.find((block) => block.type === 'image');
+  expect(image?.imageId).toBe(image?.localImageId);
+  expect(local.files).toEqual(['image.png']);
+  if (!image) throw new Error('Expected a committed image');
+  const identity = { ...image, workspaceId: 'workspace' as WorkspaceId, sessionId: SESSION };
+  const url = peekSessionImageUrl(identity);
+  expect(url).toMatch(/^blob:/);
+  expect(
+    await getSessionImageBlobUrl({
+      ...identity,
+      transport: 'r2',
+      imageId: 'published-image',
+      token: '',
+    })
+  ).toBe(url);
+  clearSessionImageCache();
+  await expect(
+    getSessionImageBlobUrl({
+      ...identity,
+      transport: 'r2',
+      imageId: 'published-image',
+      token: '',
+    })
+  ).rejects.toThrow('Local image snapshot unavailable');
 });
 
 it('retains a same-machine draft when the daemon does not advertise local references', async () => {
@@ -683,7 +751,7 @@ it('admits same-machine draft attachments without cloud identity', async () => {
     await f.delivered(input.id);
     expect(f.turns()[0]?.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'local_attachment', fileName: 'local.png' }),
+        expect.objectContaining({ type: 'image', transport: 'local', fileName: 'local.png' }),
       ])
     );
   } finally {

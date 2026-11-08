@@ -7,7 +7,29 @@ Translation: current
 
 ## Abstract
 
-Electron same-machine attachments use original paths or managed local files without automatic upload or backfill. This requires a distinct reference protocol, trusted registration, Daemon resolution, preview and version compatibility. Originals are not immutable snapshots and do not widen Agent permissions. This draft records the intended guarantees; the [attachment lifecycle](../.agents/docs/cli-lib-session-files.md) describes the implemented boundaries and current limitations.
+Electron same-machine ordinary files use original paths or managed local files without automatic upload or backfill. This requires a distinct reference protocol, trusted registration, Daemon resolution, preview and version compatibility. Originals are not immutable snapshots and do not widen Agent permissions. This draft records the intended guarantees; the [attachment lifecycle](../.agents/docs/cli-lib-session-files.md) describes the implemented boundaries and current limitations.
+
+## Image transport scope
+
+New same-desktop images remain image payloads and use immutable local snapshots,
+not new `local_attachment` references. Sending and local execution must not wait
+for cloud authentication or upload. Where authorized cloud upload is available,
+a separate background owner automatically publishes the snapshot and retries after
+connectivity returns, retaining its local identity and storage session so the original
+desktop can still preview and execute it offline. This is an intentional exception
+to the zero-upload policy for ordinary files described below; existing image-shaped
+`local_attachment` records retain their original semantics.
+
+The image route requires `localImages: 1`, scoped host resolution and preserved
+ACP visual input. Protected workspaces reject unsupported plaintext preparation.
+Snapshots remain retained while frozen inputs may reference them; bounded storage
+admission may reject new images rather than reclaim potentially live snapshots.
+The Agent receives a workspace copy for resource links, not the durable snapshot.
+Packaged offline execution, restart recovery and post-publication offline preview
+remain integration acceptance requirements. This revision remains a draft.
+
+The remaining original-path, zero-upload and local-reference guarantees apply to
+ordinary files and legacy `local_attachment` records.
 
 ## 1. Interface with the attachment draft PR
 

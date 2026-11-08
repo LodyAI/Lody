@@ -768,6 +768,19 @@ export interface SessionFileUploadResponse {
  *
  * Mirrors `SessionFileUploadRequest`; the only difference is the message type.
  */
+export type SessionImagePrepareLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalRequestSchema
+>;
+export type SessionImagePrepareLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalResponseSchema
+>;
+export type SessionImageResolveLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalRequestSchema
+>;
+export type SessionImageResolveLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalResponseSchema
+>;
+
 export type SessionAttachmentResolveRequest = {
   type: 'session/attachment-resolve';
   machineId: MachineId;
@@ -1001,6 +1014,8 @@ export type LocalSessionControlRequest =
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
+  | SessionImagePrepareLocalRequest
+  | SessionImageResolveLocalRequest
   | SessionAttachmentRegisterRequest
   | SessionAttachmentResolveRequest
   | SessionHistoryReadRequest
@@ -1034,6 +1049,8 @@ export type LocalSessionControlResponse =
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse
+  | SessionImagePrepareLocalResponse
+  | SessionImageResolveLocalResponse
   | SessionAttachmentRegisterResponse
   | SessionAttachmentResolveResponse
   | SessionHistoryReadResponse

@@ -17,7 +17,9 @@ import {
   SessionIdSchema,
   LocalProjectHistoryProviderSchema,
   SessionAttachmentRegisterRequestSchema,
-  SessionAttachmentResolveRequestSchema
+  SessionAttachmentResolveRequestSchema,
+  SessionImagePrepareLocalRequestSchema,
+  SessionImageResolveLocalRequestSchema
 } from '@lody/shared/message-schemas'
 import type { LocalProjectHistoryProvider, LocalProjectId } from '@lody/shared/project'
 import { formatUnknownError } from '../../utils'
@@ -71,6 +73,98 @@ export class LocalProjectsIpc extends IpcService {
   @IpcMethod()
   async control(request: LocalProjectControlRequest) {
     return await sendLocalProjectControl(request)
+  }
+
+  @IpcMethod()
+  async prepareLocalImage(payload: {
+    workspaceId: string
+    sessionId: string
+    machineId: string
+    imageId: string
+    fileName: string
+    mimeType: string
+    source: { path: string } | { bytes: ArrayBuffer }
+  }) {
+    let staging: string | undefined
+    try {
+      if (!payload?.source) throw new Error('invalid_request')
+      let sourcePath: string
+      if ('bytes' in payload.source) {
+        const bytes = payload.source.bytes
+        if (
+          !(bytes instanceof ArrayBuffer) ||
+          !bytes.byteLength ||
+          bytes.byteLength > 20 * 1024 * 1024
+        )
+          throw new Error('invalid_image_bytes')
+        staging = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-image-'))
+        sourcePath = path.join(staging, 'source')
+        await fs.writeFile(sourcePath, Buffer.from(bytes), { mode: 0o600 })
+      } else {
+        sourcePath = payload.source.path
+        if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath))
+          throw new Error('invalid_image_path')
+      }
+      const request = SessionImagePrepareLocalRequestSchema.parse({
+        type: 'session/image-prepare-local',
+        workspaceId: payload.workspaceId,
+        sessionId: payload.sessionId,
+        machineId: payload.machineId,
+        imageId: payload.imageId,
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        path: sourcePath
+      })
+      const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
+        ...request,
+        machineId: request.machineId as import('@lody/shared/ids').MachineId,
+        workspaceId: request.workspaceId as WorkspaceId
+      })
+      if (!result.ok) return { ok: false as const, error: result.error }
+      const response = result.responses.find(
+        (item) => item.type === 'session/image-prepare-local_response'
+      )
+      if (!response?.success || !response.image)
+        return { ok: false as const, error: response?.error ?? 'local_image_not_supported' }
+      return { ok: true as const, image: response.image }
+    } catch (error) {
+      return { ok: false as const, error: formatUnknownError(error) }
+    } finally {
+      if (staging) await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
+  @IpcMethod()
+  async resolveLocalImage(payload: {
+    workspaceId: string
+    sessionId: string
+    machineId: string
+    image: import('@lody/shared').SessionImagePayload
+  }) {
+    const request = SessionImageResolveLocalRequestSchema.parse({
+      ...payload,
+      type: 'session/image-resolve-local'
+    })
+    const cliService = getIpcServiceDeps().cliService
+    const localMachineId = await cliService.getLocalMachineId()
+    if (
+      !localMachineId ||
+      request.machineId !== localMachineId ||
+      request.image.machineId !== localMachineId
+    )
+      throw new Error('local_image_machine_mismatch')
+    const result = await cliService.sendLocalSessionControl({
+      ...request,
+      machineId: request.machineId as import('@lody/shared/ids').MachineId,
+      workspaceId: request.workspaceId as WorkspaceId
+    })
+    if (!result.ok) throw new Error(result.error)
+    const response = result.responses.find(
+      (item) => item.type === 'session/image-resolve-local_response'
+    )
+    if (!response?.success || !response.path)
+      throw new Error(response?.error ?? 'local_image_unavailable')
+    return response.path
   }
 
   @IpcMethod()

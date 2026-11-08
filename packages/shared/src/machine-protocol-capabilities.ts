@@ -41,6 +41,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   messageQuotes: 'messageQuotes',
   sessionInputAttachments: 'sessionInputAttachments',
   localAttachments: 'localAttachments',
+  localImages: 'localImages',
   localAttachmentDownload: 'localAttachmentDownload',
   localFileResources: 'localFileResources',
   fileDownload: 'fileDownload',
@@ -211,6 +212,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.messageQuotes]: MESSAGE_QUOTES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localAttachments]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.localImages]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.localAttachmentDownload]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,

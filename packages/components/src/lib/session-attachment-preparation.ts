@@ -1,5 +1,5 @@
 import { resolveAttachmentRoute } from './session-attachment-routing';
-import { prepareElectronLocalAttachment } from './electron-local-attachment';
+import { prepareElectronLocalAttachment, prepareElectronLocalImage } from './electron-local-attachment';
 import { isElectronRenderer } from './electron';
 import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
@@ -12,7 +12,7 @@ import {
   type SessionInputBlock,
 } from '@lody/shared';
 import { prepareSessionFile } from './session-file-preparation';
-import { uploadSessionImage } from './session-image-upload';
+import { uploadSessionImage, validateSessionImageFile } from './session-image-upload';
 import { throwIfSendAborted, type SessionSendResources } from './session-send-resources';
 import { preparedDraftInput } from './session-attachment-draft';
 import type { PendingSessionSend } from './session-pending-sends';
@@ -56,7 +56,7 @@ export async function prepareDraftAttachments(args: {
   token(): string | null;
   attachmentToken?: () => Promise<string>;
   localMachineId(): MachineId | null;
-  validateLocalTarget(): Promise<void>;
+  validateLocalTarget(kind: 'image' | 'file'): Promise<void>;
   update(attachments: DraftAttachmentSend['attachments']): void;
   report(id: string, progress: number): void;
 }): Promise<PreparedSend> {
@@ -83,16 +83,23 @@ export async function prepareDraftAttachments(args: {
       if (route === 'transfer' && args.content.mode !== 'protected')
         await authorizePlaintextAttachmentPreparation(args.record.workspaceId, args.signal, args.record.entry.userId);
       if (route === 'local') {
-        await args.validateLocalTarget();
+        await args.validateLocalTarget(attachment.kind);
         if (args.content.mode === 'protected')
           throw new Error('Protected local attachment preparation is unavailable');
         if (!attachment.localReferenceId) {
           attachment.localReferenceId = crypto.randomUUID();
           args.update(attachments);
         }
-        ready = await args.resources.run(
+        if (attachment.kind === 'image') {
+          const validationError = validateSessionImageFile(file);
+          if (validationError) throw new Error(validationError);
+        }
+        const prepare = attachment.kind === 'image'
+          ? prepareElectronLocalImage
+          : prepareElectronLocalAttachment;
+        ready = await args.resources.run<SessionInputBlock>(
           (signal) =>
-            prepareElectronLocalAttachment({
+            prepare({
               workspaceId: args.record.workspaceId,
               sessionId: args.record.sessionId,
               machineId: machineId!,
@@ -144,6 +151,10 @@ export async function prepareDraftAttachments(args: {
               workspaceId: args.record.workspaceId as WorkspaceId,
               sessionId: args.record.sessionId,
               imageId: ready.imageId,
+              localImageId: ready.localImageId,
+              storageSessionId: ready.storageSessionId,
+              transport: ready.transport,
+              machineId: ready.machineId,
             },
             attachment.source,
             isNativeIOSAppShell(),

@@ -28,6 +28,10 @@ reads the raw history list; composition injects the shared reader.
 Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.
 
+## Image previews
+
+Pending local images use only scoped host previews. Published `r2` images retain local-first previews and authenticated cloud fallback when unavailable. Follow [rendering](components/ai-gui/session-files-rendering.md) for image publication and cache behavior. Extended images always require target `localImages: 1`; sends, schedules, and replay must preserve durable identity.
+
 ## Conversation exports
 
 Conversation Markdown/PNG exports use `usePlaintextCopy` before capture and
