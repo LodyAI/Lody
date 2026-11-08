@@ -395,6 +395,10 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       let key = shown ? "ipad.sidebar.hide" : "ipad.sidebar.show"
       sidebarItem.accessibilityLabel = String(localized: String.LocalizationValue(key), bundle: .lody)
     }
+    if let session {
+      session.setSidebarItem(toggle)
+      return
+    }
     if let toggle {
       if header.leftItems != [toggle] { header.leftItems = [toggle] }
     } else if let current = header.leftItems, current == [bookSidebarItem] || current == [sidebarItem] {
@@ -410,7 +414,9 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   private func showBookList() {
     guard folded, panelOpen, !listInPopover else { return }
     release(primary)
-    if LodyShell.shared.presentNavigation(primary, popoverFrom: bookSidebarItem) != nil {
+    let anchor = session?.sidebarAnchorView
+    if LodyShell.shared.presentNavigation(primary, popoverFrom: anchor == nil ? bookSidebarItem : nil,
+      sourceView: anchor, sourceRect: anchor?.bounds) != nil {
       listInPopover = true
       primary.viewControllers.compactMap { $0 as? LodyPageController }.forEach { $0.isRehosting = true }
       primary.popoverPresentationController?.delegate = self

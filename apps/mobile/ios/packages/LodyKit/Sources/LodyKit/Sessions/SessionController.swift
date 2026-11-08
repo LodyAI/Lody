@@ -3,7 +3,7 @@ import UIKit
 import SwiftUI
 
 @MainActor
-class SessionController: UIViewController {
+class SessionController: UIViewController, LodyPageOwnedHeader {
   typealias BrowserRequest = @MainActor (SessionListState, RuntimeContract.SessionPreviewParamsAction) async throws -> RuntimeContract.SessionPreviewResult
   let chat = LodyChatView(frame: .zero)
   let source: SessionSource
@@ -47,13 +47,16 @@ class SessionController: UIViewController {
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0
   private var listed = false
-  private var moreItem: UIBarButtonItem?
+  private let moreButton = UIButton(type: .system)
+  private let backButton = UIButton(type: .system)
+  private let sidebarButton = UIButton(type: .system)
+  private var sidebarAction: UIAction?
+  private let pageHeader = UIStackView()
   private lazy var tabsButton: DirectoryTabsButton = {
     let button = DirectoryTabsButton()
     button.addAction(UIAction { [weak self] _ in self?.presentTabs() }, for: .touchUpInside)
     return button
   }()
-  private lazy var tabsItem = UIBarButtonItem(customView: tabsButton)
   private var tabViews: [String: Double] = [:]
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
@@ -120,9 +123,10 @@ class SessionController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    chat.frame = view.bounds
-    chat.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    chat.pageOwnsHeader = true
+    view.backgroundColor = .lodyBackground
     view.addSubview(chat)
+    installPageHeader()
     chat.imageSharingEnabled = false
     wireEvents()
     find(query: findQuery, keyboard: false)
@@ -149,6 +153,7 @@ class SessionController: UIViewController {
 
   override func viewIsAppearing(_ animated: Bool) {
     super.viewIsAppearing(animated)
+    updatePageBack()
     browsingVisible = true
     NotificationCenter.default.post(name: LodyScrollEdges.ownerChanged, object: self)
     let slug = source.state.workspace?.slug ?? ""
@@ -158,11 +163,19 @@ class SessionController: UIViewController {
 
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
+    updatePageBack()
     renderPermission()
   }
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
+    #if DEBUG
+    if LodyUIVerify.enabled, let coordinator = transitionCoordinator ?? parent?.transitionCoordinator,
+       coordinator.isInteractive {
+      let probe = SessionHeaderTransitionProbe(page: view, controls: [backButton, chat.titleButton, moreButton], coordinator: coordinator)
+      coordinator.animate(alongsideTransition: nil) { context in probe.finish(cancelled: context.isCancelled) }
+    }
+    #endif
     browsingVisible = false
     PushNotifications.shared.visibleRoute = ""
     if SettingsPage.leaving(self) {
@@ -374,7 +387,7 @@ class SessionController: UIViewController {
 
   private func updateMoreMenu(_ session: SessionItem) {
     let deleting = SessionActions.isDeleting(source.state.workspaceId, sessionId)
-    let more = moreItem ?? UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: nil)
+    let more = moreButton
     more.accessibilityLabel = String(localized: "common.more", bundle: .lody)
     var changes: [UIMenuElement] = []
     if reviewable {
@@ -410,12 +423,86 @@ class SessionController: UIViewController {
         ) { [weak self] _ in self?.perform("delete") },
       ]),
     ])
-    moreItem = more
-    let header = LodyNavigationHeader.of(navigationItem)
-    more.sharesBackground = true
-    tabsItem.sharesBackground = true
-    let items = directoryTabs.count > 1 ? [more, tabsItem] : [more]
-    if header.rightItems != items { header.rightItems = items }
+    tabsButton.isHidden = directoryTabs.count <= 1
+  }
+
+
+  private func installPageHeader() {
+    pageHeader.axis = .horizontal
+    pageHeader.alignment = .center
+    pageHeader.spacing = 8
+    pageHeader.accessibilityIdentifier = "chat-page-header"
+    for (button, symbol) in [(backButton, "chevron.backward"), (moreButton, "ellipsis")] {
+      var configuration = UIButton.Configuration.glass()
+      configuration.image = UIImage(systemName: symbol)
+      configuration.baseForegroundColor = .label
+      configuration.cornerStyle = .capsule
+      button.configuration = configuration
+      NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 44), button.heightAnchor.constraint(equalToConstant: 44)])
+    }
+    backButton.accessibilityIdentifier = "BackButton"
+    backButton.accessibilityLabel = String(localized: "common.back", bundle: .lody)
+    backButton.addAction(UIAction { [weak self] _ in self?.goBack() }, for: .touchUpInside)
+    moreButton.accessibilityIdentifier = "chat-more"
+    moreButton.showsMenuAsPrimaryAction = true
+    var tabsConfiguration = UIButton.Configuration.glass()
+    tabsConfiguration.image = tabsButton.image(for: .normal)
+    tabsConfiguration.baseForegroundColor = .label
+    tabsConfiguration.cornerStyle = .capsule
+    tabsButton.configuration = tabsConfiguration
+    sidebarButton.isHidden = sidebarAction == nil
+    NSLayoutConstraint.activate([sidebarButton.widthAnchor.constraint(equalToConstant: 44), sidebarButton.heightAnchor.constraint(equalToConstant: 44)])
+    for control in [sidebarButton, backButton, chat.titleButton, tabsButton, moreButton] { pageHeader.addArrangedSubview(control) }
+    chat.titleButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    chat.titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    view.addSubview(pageHeader)
+    chat.translatesAutoresizingMaskIntoConstraints = false
+    pageHeader.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      pageHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+      pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+      pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+      pageHeader.heightAnchor.constraint(equalToConstant: 56),
+      chat.topAnchor.constraint(equalTo: pageHeader.bottomAnchor),
+      chat.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      chat.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      chat.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+    ])
+  }
+
+  var sidebarAnchorView: UIView { sidebarButton }
+
+  func setSidebarItem(_ item: UIBarButtonItem?) {
+    if let sidebarAction { sidebarButton.removeAction(sidebarAction, for: .touchUpInside) }
+    sidebarAction = item?.primaryAction
+    if let sidebarAction { sidebarButton.addAction(sidebarAction, for: .touchUpInside) }
+    var configuration = UIButton.Configuration.glass()
+    configuration.image = item?.image
+    configuration.baseForegroundColor = .label
+    configuration.cornerStyle = .capsule
+    sidebarButton.configuration = configuration
+    sidebarButton.accessibilityLabel = item?.accessibilityLabel
+    sidebarButton.isHidden = item == nil
+  }
+
+  private func updatePageBack() {
+    let canPop = (navigationController?.viewControllers.count ?? 0) > 1
+    let canDismiss = navigationController?.presentingViewController != nil
+    let collapsed = splitViewController?.isCollapsed == true
+    backButton.isHidden = !canPop && !canDismiss && !collapsed
+  }
+
+  private func goBack() {
+    guard let navigation = navigationController, navigation.transitionCoordinator == nil else { return }
+    if navigation.viewControllers.count > 1 { navigation.popViewController(animated: true) }
+    else if splitViewController?.isCollapsed == true { splitViewController?.show(.primary) }
+    else if navigation.presentingViewController != nil { navigation.dismiss(animated: true) }
+  }
+
+  override func accessibilityPerformEscape() -> Bool {
+    guard !backButton.isHidden else { return false }
+    goBack()
+    return true
   }
 
   private func wireEvents() {
@@ -489,3 +576,54 @@ class SessionController: UIViewController {
     (try? JSONSerialization.data(withJSONObject: object)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
   }
 }
+
+#if DEBUG
+/// Offline UI evidence uses only owned views and public presentation-layer coordinates.
+@MainActor private final class SessionHeaderTransitionProbe: NSObject {
+  private weak var page: UIView?
+  private let controls: [UIView]
+  private let coordinator: UIViewControllerTransitionCoordinator
+  private var link: CADisplayLink?
+  private var samples: [[Double]] = []
+  private var heldSince = CACurrentMediaTime()
+  private var reportedHold = false
+
+  init(page: UIView, controls: [UIView], coordinator: UIViewControllerTransitionCoordinator) {
+    self.page = page
+    self.controls = controls
+    self.coordinator = coordinator
+    super.init()
+    let link = CADisplayLink(target: self, selector: #selector(sample))
+    self.link = link
+    link.add(to: .main, forMode: .common)
+  }
+
+  @objc private func sample() {
+    guard let page, let window = page.window, samples.count < 600 else { return }
+    let layer = page.layer.presentation() ?? page.layer
+    let root = window.layer.presentation() ?? window.layer
+    var values = [Double(coordinator.percentComplete), Double(layer.convert(.zero, to: root).x)]
+    for control in controls {
+      let child = control.layer.presentation() ?? control.layer
+      values += [Double(child.convert(.zero, to: root).x), Double(child.convert(.zero, to: layer).x)]
+    }
+    if let previous = samples.last, abs(previous[0] - values[0]) > 0.001 { heldSince = CACurrentMediaTime() }
+    samples.append(values)
+    if !reportedHold, values[0] > 0.1, values[0] < 0.8, CACurrentMediaTime() - heldSince > 0.35 {
+      reportedHold = true
+      if let data = try? JSONSerialization.data(withJSONObject: ["sample": values]) {
+        try? data.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lody-header-mid.json"), options: .atomic)
+      }
+    }
+  }
+
+  func finish(cancelled: Bool) {
+    link?.invalidate()
+    link = nil
+    let result: [String: Any] = ["cancelled": cancelled, "samples": samples]
+    if let data = try? JSONSerialization.data(withJSONObject: result) {
+      try? data.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lody-header-transition.json"), options: .atomic)
+    }
+  }
+}
+#endif

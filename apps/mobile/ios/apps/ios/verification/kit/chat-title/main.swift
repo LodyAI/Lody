@@ -116,21 +116,6 @@ precondition(containsText(nav.navigationBar, "Project name"), "Nav bar must show
 precondition(containsText(nav.navigationBar, "Studio"), "Nav bar must show the computer name")
 precondition(subtitleAttachments(button) == 2, "Folder and computer symbols must survive layout")
 
-// A swipe back must not re-lay the bar mid-transition: the disappearing page keeps its title
-// view and gains no native subtitle, so the title moves with the back button.
-let frameBeforeSwipe = button.convert(button.bounds, to: nav.navigationBar)
-ChatNavigationTitle.setDisappearing(true, on: session.navigationItem)
-nav.view.setNeedsLayout()
-nav.view.layoutIfNeeded()
-precondition(session.navigationItem.subtitle == nil, "A disappearing page must not add a native subtitle beside its title view")
-precondition(session.navigationItem.titleView === button, "A disappearing page keeps its title view through the pop")
-precondition(button.convert(button.bounds, to: nav.navigationBar) == frameBeforeSwipe, "The title must not move when the swipe begins")
-
-ChatNavigationTitle.setDisappearing(false, on: session.navigationItem)
-precondition(session.navigationItem.titleView === button, "Cancelled return must restore the tappable title")
-ChatNavigationTitle.apply(title: "Session title", subtitle: "Project name · Studio", button: button, to: session.navigationItem)
-precondition(session.navigationItem.subtitle == nil, "Restoring titleView must drop the native subtitle so the button stays visible")
-
 ChatNavigationTitle.detach(button: button, from: session.navigationItem)
 precondition(session.navigationItem.titleView !== button)
 session.navigationItem.title = "Static route title"

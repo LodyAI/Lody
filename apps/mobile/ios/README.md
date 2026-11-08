@@ -75,6 +75,14 @@ Send and Stop; conversation activity/status colors remain unchanged. Appearance 
 without an accent-color picker. Process status labels use the same regular type
 as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+Conversation Back, title/machine, Tabs and More controls belong to the page, so
+UIKit’s interactive pop moves them with its content instead of separately animating
+the system back circle. The shell hides native navigation only for conversations;
+detail pages retain their native bars. Back uses the existing navigation/split
+owner, and controls retain native glass styling and accessibility labels. The book-layout
+conversation list popover anchors to the visible page sidebar button and its bounds;
+native navigation-bar controls retain their bar-item anchors.
+
 Conversation titles use 16 pt semibold system text, fading at the trailing edge
 only on overflow rather than inserting an ellipsis. VoiceOver retains the full title. User bubbles fill the available
 reading width beside the avatar; long-press offers Copy, plus Edit for the last

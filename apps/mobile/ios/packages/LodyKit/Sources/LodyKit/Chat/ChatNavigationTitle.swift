@@ -267,10 +267,6 @@ enum ChatNavigationTitle {
     item.subtitle = nil
   }
 
-  static func setDisappearing(_ disappearing: Bool, on item: UINavigationItem) {
-    LodyNavigationHeader.of(item).suspended = disappearing
-  }
-
   static func detach(button: UIButton, from item: UINavigationItem) {
     let header = LodyNavigationHeader.of(item)
     guard header.titleView === button else { return }
