@@ -83,7 +83,8 @@ export function WorkspaceSettings() {
   return scope.encrypted ? (
     <>
       <SecuritySettings key={`${scope.accountId}:${scope.workspaceId}`} scope={scope} />
-      <RecoveryVaultSection />
+      {/* Remount per account: no plan, failure, retry or dialog state crosses accounts. */}
+      <RecoveryVaultSection key={scope.accountId ?? ''} />
     </>
   ) : (
     <AccountSettingsComponent surface="workspace" />

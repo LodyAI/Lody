@@ -605,6 +605,8 @@ assert(pictureRows.map(\.kind) == ["attachments", "user"])
 assert(pictureRows.first?.id == "picture-turn:user")
 assert(pictureRows.first?.attachments.first?.image?.id == "image1")
 assert(pictureRows.last?.text == "What is this?", "Attachment filenames must not be flattened into the message bubble")
+precondition(pictureRows.first?.author.isEmpty == false && pictureRows.last?.author.isEmpty == true,
+  "Attachments open the user's message: the turn header belongs to them, not to the bubble below")
 imageTranscript.entries[0].items.removeFirst()
 assert(imageTranscript.rows().map(\.kind) == ["attachments"], "Image-only messages must not add an empty bubble")
 print("Chat image rows: media before caption, stable anchor, and image-only layout passed")
@@ -683,6 +685,9 @@ let pendingRows = localPending.rows(entries: [])
 precondition(pendingRows.map(\.kind) == ["delivery", "attachments", "user"],
   "Delivery belongs above text and attachments")
 precondition(pendingRows.first?.text == localPending.status)
+precondition(pendingRows.first { $0.kind == "attachments" }?.readState == "sending"
+  && pendingRows.first { $0.kind == "user" }?.author.isEmpty == true,
+  "A local send's header sits on its attachments, the first row of the message")
 let blankStatus = try! JSONDecoder().decode(ChatPendingSend.self, from: Data(#"{"id":"blank-status","text":"hello","attachments":[],"status":""}"#.utf8))
 precondition(
   blankStatus.rows(entries: []).contains {

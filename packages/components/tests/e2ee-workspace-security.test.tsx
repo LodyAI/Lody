@@ -32,6 +32,7 @@ describe('recovery vault settings', () => {
     const calls = new Map<string, number>();
     const answers: Record<string, unknown> = {
       'e2ee.recoveryReplacementPlan': {
+        hasVault: true,
         replaceable: true,
         replacing: false,
         covered: [],
@@ -69,6 +70,208 @@ describe('recovery vault settings', () => {
       act(() => root.unmount());
       container.remove();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('recovery vault settings actions', () => {
+  // A plan given as a function is asked again on every load, so it can fail and then recover.
+  const mount = async (plan: unknown) => {
+    const answers: Record<string, unknown> = {
+      'e2ee.recentAccountSecurityEvents': [],
+      'e2ee.recoveryPasskeyAvailable': true,
+    };
+    vi.stubGlobal('ipc', {
+      invoke: async (channel: string) =>
+        channel === 'e2ee.recoveryReplacementPlan'
+          ? typeof plan === 'function'
+            ? plan()
+            : plan
+          : answers[channel],
+      on: () => () => {},
+    });
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <RecoveryVaultSection />
+        </Provider>
+      );
+    });
+    const settle = async () => {
+      for (let tick = 0; tick < 20; tick++) await act(async () => {});
+    };
+    await settle();
+    const buttons = () => [...container.querySelectorAll('button')];
+    return {
+      get labels() {
+        return buttons().map((button) => button.textContent);
+      },
+      get primary() {
+        return buttons()
+          .filter((button) => button.dataset.variant === 'primary')
+          .map((b) => b.textContent);
+      },
+      get text() {
+        return container.textContent ?? '';
+      },
+      click: async (label: string) => {
+        const button = buttons().find((b) => b.textContent === label);
+        if (!button) throw new Error(`no ${label} button`);
+        await act(async () => button.click());
+        await settle();
+      },
+      done: () => {
+        act(() => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+      },
+    };
+  };
+  const workspace = (id: string, status: unknown) => ({ id, name: `Workspace ${id}`, status });
+
+  it('offers only creation when the account has no vault', async () => {
+    const view = await mount({
+      hasVault: false,
+      replaceable: false,
+      replacing: false,
+      covered: [workspace('a', { kind: 'notSet' })],
+      uncovered: [],
+    });
+    try {
+      expect(view.labels).toEqual(['e2ee.recovery.create']);
+      expect(view.primary).toEqual(['e2ee.recovery.create']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('shows each workspace status and one primary action when a vault exists', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: false,
+      covered: [
+        workspace('a', { kind: 'notSet' }),
+        workspace('b', { kind: 'saved' }),
+        workspace('c', { kind: 'verified', update: 3 }),
+      ],
+      uncovered: [workspace('d', { kind: 'notSet' })],
+    });
+    try {
+      expect(view.labels).not.toContain('e2ee.recovery.create');
+      for (const label of [
+        'e2ee.recovery.check',
+        'e2ee.recovery.replace',
+        'e2ee.recovery.restore',
+        'e2ee.recovery.passkeyAdd',
+      ])
+        expect(view.labels).toContain(label);
+      expect(view.primary).toHaveLength(1);
+      for (const status of [
+        'e2ee.recovery.workspace.notSet',
+        'e2ee.recovery.workspace.saved',
+        'e2ee.recovery.workspace.verified',
+      ])
+        expect(view.text).toContain(status);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('offers only continue and abandon while a replacement runs', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: true,
+      covered: [workspace('a', { kind: 'verified', update: 1 })],
+      uncovered: [],
+    });
+    try {
+      expect(view.labels).toEqual([
+        'e2ee.recovery.replaceContinue',
+        'e2ee.recovery.replaceAbandon',
+      ]);
+      expect(view.primary).toEqual(['e2ee.recovery.replaceContinue']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('still offers restore during a replacement when a workspace is not covered', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: true,
+      covered: [workspace('a', { kind: 'verified', update: 1 })],
+      uncovered: [workspace('b', { kind: 'notSet' })],
+    });
+    try {
+      for (const label of [
+        'e2ee.recovery.restore',
+        'e2ee.recovery.restorePasskey',
+        'e2ee.recovery.replaceContinue',
+        'e2ee.recovery.replaceAbandon',
+      ])
+        expect(view.labels).toContain(label);
+      expect(view.labels).not.toContain('e2ee.recovery.replace');
+      expect(view.primary).toEqual(['e2ee.recovery.replaceContinue']);
+    } finally {
+      view.done();
+    }
+  });
+
+  it('shows the workspace status this device cannot read as unknown', async () => {
+    const view = await mount({
+      hasVault: true,
+      replaceable: true,
+      replacing: false,
+      covered: [workspace('a', { kind: 'unknown' })],
+      uncovered: [],
+    });
+    try {
+      expect(view.text).toContain('e2ee.recovery.workspace.unknown');
+    } finally {
+      view.done();
+    }
+  });
+
+  it('keeps read-only actions and offers retry when the recovery state cannot be read', async () => {
+    let fail = true;
+    const view = await mount(async () => {
+      if (fail) throw new Error('e2ee_recovery_storage');
+      return {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'saved' })],
+        uncovered: [],
+      };
+    });
+    try {
+      expect(view.text).toContain('e2ee.recovery.planFailed');
+      for (const label of [
+        'common.retry',
+        'e2ee.recovery.check',
+        'e2ee.recovery.restore',
+        'e2ee.recovery.restorePasskey',
+        'e2ee.recovery.create',
+      ])
+        expect(view.labels).toContain(label);
+      expect(view.primary).toEqual(['common.retry']);
+      fail = false;
+      await view.click('common.retry');
+      expect(view.text).not.toContain('e2ee.recovery.planFailed');
+      expect(view.labels).not.toContain('common.retry');
+      expect(view.primary).toEqual(['e2ee.recovery.check']);
+      expect(view.text).toContain('e2ee.recovery.workspace.saved');
+    } finally {
+      view.done();
     }
   });
 });
@@ -166,6 +369,60 @@ describe('encrypted workspace settings', () => {
     if (!button) throw new Error(`missing ${key}`);
     await act(async () => button.click());
   };
+  it.each(['plan', 'failure'] as const)(
+    'drops the previous account recovery %s as soon as the account changes',
+    async (shown) => {
+      // Account B's answer has not arrived yet: nothing from account A may stay.
+      const answers: Record<string, (account: string) => Promise<unknown>> = {
+        'e2ee.recoveryReplacementPlan': async (account) => {
+          if (account !== 'account') return new Promise(() => {});
+          if (shown === 'failure') throw new Error('e2ee_recovery_unavailable');
+          return {
+            hasVault: true,
+            replaceable: true,
+            replacing: false,
+            covered: [{ id: 'workspace', name: 'Account A workspace', status: { kind: 'notSet' } }],
+            uncovered: [],
+          };
+        },
+        'e2ee.recentAccountSecurityEvents': async () => [],
+        'e2ee.recoveryPasskeyAvailable': async () => false,
+      };
+      let account = 'account';
+      vi.stubGlobal('ipc', {
+        invoke: (channel: string) => answers[channel]?.(account) ?? Promise.resolve(undefined),
+        on: () => () => {},
+      });
+      store.set(developerModeEnabledAtom, true);
+      store.set(e2eeRecoveryVaultEnabledAtom, true);
+      try {
+        await render();
+        for (let tick = 0; tick < 5; tick++) await act(async () => {});
+        const previous = shown === 'plan' ? 'Account A workspace' : 'e2ee.recovery.planFailed';
+        expect(container.textContent).toContain(previous);
+
+        account = 'account-b';
+        platform = {
+          ...platform,
+          identity: {
+            ...platform.identity,
+            session: createStaticStore({
+              status: 'authenticated' as const,
+              user: { id: 'account-b', name: 'Other', email: 'other@example.test' },
+            }),
+          },
+        } as PlatformProvider;
+        const mode = store.get(workspaceContentModeAtom)!;
+        store.set(workspaceContentModeAtom, { ...mode, accountId: 'account-b' });
+        await render();
+        for (let tick = 0; tick < 5; tick++) await act(async () => {});
+        expect(container.textContent).not.toContain(previous);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   const renderSharing = () =>
     act(async () =>
       root.render(

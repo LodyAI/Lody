@@ -1,6 +1,7 @@
 import {
   Bytes,
   memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   RecoveryVaults,
   type EpochStagedGroup,
   type RecoveryVault,
@@ -234,12 +235,20 @@ export const recentAccountSecurityEvents = (
       .sort((a, b) => b.occurredAt - a.occurredAt)
   )
 
+/** One workspace's recovery state on this device, for settings. */
+export type RecoveryWorkspaceStatus =
+  | { readonly kind: 'notSet' }
+  | { readonly kind: 'saved' }
+  | { readonly kind: 'verified'; readonly update: number }
+  /** This device's journal row for the workspace could not be read. */
+  | { readonly kind: 'unknown' }
+
 /** What a replacement would cover, and whether one is already running. */
 export const recoveryReplacementPlan = (
   io: RecoveryVaultIo & {
     readonly replacement: Pick<RecoveryVaultReplacement, 'state'>
     readonly accountWorkspaces: Effect.Effect<
-      readonly { readonly id: string; readonly name: string }[],
+      readonly { readonly id: string; readonly name: string; readonly genesisHash?: string }[],
       unknown
     >
     readonly hasIdentity: (workspaceId: string) => Effect.Effect<boolean, unknown>
@@ -256,18 +265,33 @@ export const recoveryReplacementPlan = (
             ? Effect.map(recoveryRestoreIncomplete(local, id), (incomplete) => !incomplete)
             : Effect.succeed(false)
         )
-      return {
-        replaceable: state.current !== null,
-        replacing: state.replacing !== null,
-        ...planVaultReplacement(
-          workspaces,
-          new Set(
-            yield* Effect.filter(
-              workspaces.map((row) => row.id),
-              usable
-            )
+      const progress = state.current
+        ? yield* readWorkspaceRecoveryProgress(local, state.current)
+        : []
+      // Read from this device's journal, so it needs no V. A key update after the test is
+      // not visible here; the next real test reports it.
+      const status = (genesisHash: string | undefined): RecoveryWorkspaceStatus => {
+        const found = progress.find((row) => row.genesis === genesisHash)
+        if (!found) return { kind: 'notSet' }
+        if (found.stage === 'unknown') return { kind: 'unknown' }
+        return found.stage === 'recoverable' && found.testedEpoch !== null
+          ? { kind: 'verified', update: found.testedEpoch }
+          : { kind: 'saved' }
+      }
+      const plan = planVaultReplacement(
+        workspaces.map((row) => ({ id: row.id, name: row.name, status: status(row.genesisHash) })),
+        new Set(
+          yield* Effect.filter(
+            workspaces.map((row) => row.id),
+            usable
           )
         )
+      )
+      return {
+        hasVault: state.current !== null,
+        replaceable: state.current !== null,
+        replacing: state.replacing !== null,
+        ...plan
       }
     }).pipe(Effect.provide(vaults(io)))
   )

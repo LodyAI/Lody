@@ -263,10 +263,6 @@ enum ChatNavigationTitle {
     header.titleView = button
   }
 
-  static func preserveSubtitle(_ subtitle: String, on item: UINavigationItem) {
-    item.subtitle = subtitle.isEmpty ? nil : subtitle
-  }
-
   static func clearNativeSubtitle(_ item: UINavigationItem) {
     item.subtitle = nil
   }

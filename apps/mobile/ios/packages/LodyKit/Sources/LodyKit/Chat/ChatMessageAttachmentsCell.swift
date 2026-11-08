@@ -49,12 +49,19 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
   var onToggle: (() -> Void)?
   var onPreview: ((ChatMessageAttachment, ChatImageCell?) -> Void)?
   private let toggle = UIButton(type: .system)
+  /// The turn's sender header and avatar: attachments open the user's message like its bubble.
+  private let author = ChatAuthorHeader()
+  private lazy var accessibleAuthor = UIAccessibilityElement(accessibilityContainer: contentView)
+  private var hasAuthor = false
 
-  static func columns(width: CGFloat) -> Int { max(1, Int((width * 0.84 + gap) / (92 + gap))) }
-  static func height(count: Int, width: CGFloat, expanded: Bool) -> CGFloat {
+  /// The grid shares the bubble's column: right-aligned beside the avatar, at most a bubble wide.
+  static func gridWidth(_ width: CGFloat) -> CGFloat { max(1, width * 0.84 - ChatAuthorHeader.avatarSlot) }
+  static func columns(width: CGFloat) -> Int { max(1, Int((gridWidth(width) + gap) / (92 + gap))) }
+  static func height(count: Int, width: CGFloat, expanded: Bool, author: Bool) -> CGFloat {
     let columns = columns(width: width)
     let lines = expanded ? (count + columns - 1) / columns : 1
     return CGFloat(lines) * (tileHeight + gap) + (expanded && count > columns ? 44 : 0) + 4
+      + (author ? ChatAuthorHeader.height : 0)
   }
 
   override init(frame: CGRect) {
@@ -67,6 +74,8 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
     toggle.layer.cornerRadius = 12
     toggle.addAction(UIAction { [weak self] _ in self?.onToggle?() }, for: .touchUpInside)
     contentView.addSubview(toggle)
+    author.install(in: contentView)
+    accessibleAuthor.accessibilityTraits = .staticText
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -78,6 +87,9 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
     self.session = session
     self.expanded = expanded
     accessibilityIdentifier = row.id
+    let spoken = author.apply(row)
+    hasAuthor = spoken != nil
+    accessibleAuthor.accessibilityLabel = spoken
     // Keep image loaders alive across status updates and local-to-server reconciliation.
     if rendered != row.attachments || contextChanged {
       tiles.forEach { $0.removeFromSuperview() }
@@ -186,13 +198,18 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
     let overflow = rendered.count > columns
     let count = expanded || !overflow ? rendered.count : max(0, columns - 1)
     displayedCount = count
-    let tileWidth = (width * 0.84 - CGFloat(columns - 1) * Self.gap) / CGFloat(columns)
+    let gridWidth = Self.gridWidth(width)
+    let right = width - ChatAuthorHeader.avatarSlot
+    let tileWidth = (gridWidth - CGFloat(columns - 1) * Self.gap) / CGFloat(columns)
     let usedColumns = min(columns, rendered.count)
-    let leading = width - CGFloat(usedColumns) * (tileWidth + Self.gap) + Self.gap
+    let leading = right - CGFloat(usedColumns) * (tileWidth + Self.gap) + Self.gap
+    let top: CGFloat = 6 + (hasAuthor ? ChatAuthorHeader.height : 0)
+    author.layout(width: width, top: ChatRowPadding.content)
+    accessibleAuthor.accessibilityFrameInContainerSpace = author.label.frame.union(author.mark.frame)
     for (index, tile) in tiles.enumerated() {
       tile.isHidden = index >= count
       tile.frame = CGRect(x: leading + CGFloat(index % columns) * (tileWidth + Self.gap),
-        y: 6 + CGFloat(index / columns) * (Self.tileHeight + Self.gap), width: tileWidth, height: Self.tileHeight)
+        y: top + CGFloat(index / columns) * (Self.tileHeight + Self.gap), width: tileWidth, height: Self.tileHeight)
       tile.layoutIfNeeded()
       loadingBadges[index].frame = CGRect(x: (tile.bounds.width - 48) / 2,
         y: rendered[index].image == nil ? 6 : (tile.bounds.height - 32) / 2, width: 48, height: 32)
@@ -205,19 +222,20 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
     if expanded {
       toggle.setTitle(String(localized: "native.chat.message.collapse", bundle: .lody), for: .normal)
       toggle.accessibilityLabel = String(localized: "native.chat.attachments.collapse", bundle: .lody)
-      toggle.frame = CGRect(x: width * 0.16, y: bounds.height - 44, width: width * 0.84, height: 44)
+      toggle.frame = CGRect(x: right - gridWidth, y: bounds.height - 44, width: gridWidth, height: 44)
     } else {
       let hidden = rendered.count - count
       toggle.setTitle("+\(hidden)", for: .normal)
       toggle.accessibilityLabel = String.localizedStringWithFormat(String(localized: "native.chat.attachments.expand", bundle: .lody), String(describing: String(hidden)))
-      toggle.frame = CGRect(x: leading + CGFloat(columns - 1) * (tileWidth + Self.gap), y: 6, width: tileWidth, height: Self.tileHeight)
+      toggle.frame = CGRect(x: leading + CGFloat(columns - 1) * (tileWidth + Self.gap), y: top, width: tileWidth, height: Self.tileHeight)
     }
     accessibleToggle.accessibilityIdentifier = toggle.accessibilityIdentifier
     accessibleToggle.accessibilityLabel = toggle.accessibilityLabel
     accessibleToggle.accessibilityTraits = .button
     accessibleToggle.accessibilityFrameInContainerSpace = toggle.frame
     accessibleToggle.activate = { [weak self] in self?.onToggle?() }
-    var accessible = Array(accessibleTiles.prefix(count))
+    var accessible: [Any] = hasAuthor ? [accessibleAuthor] : []
+    accessible += Array(accessibleTiles.prefix(count)) as [Any]
     if overflow { accessible.append(accessibleToggle) }
     contentView.accessibilityElements = accessible
     updateEditAccessibility()
