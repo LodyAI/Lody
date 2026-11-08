@@ -997,13 +997,16 @@ describe('locally accepted Roost input', () => {
     const transferred: string[] = [];
     vi.spyOn(electron, 'isElectronRenderer').mockReturnValue(true);
     vi.spyOn(nativeAttachment, 'prepareElectronLocalAttachment').mockImplementation(
-      async ({ attachment, machineId, sessionId, turnId }) => {
+      async ({ attachment, machineId }) => {
         if (!transferReady) throw new Error('Synthetic local transfer unavailable');
         transferred.push(await attachment.source!.text());
         return {
-          type: 'local_attachment', referenceId: attachment.localReferenceId!,
-          machineId, sessionId, turnId, kind: attachment.kind,
-          fileName: attachment.name, mimeType: attachment.mimeType,
+          type: 'local_attachment',
+          path: '/synthetic/input.txt',
+          machineId,
+          kind: attachment.kind,
+          fileName: attachment.name,
+          mimeType: attachment.mimeType,
           sizeBytes: attachment.source!.size,
         };
       }

@@ -14,7 +14,7 @@ export type HistoryQueryRow = {
   acpTurnId?: unknown;
   userTurnId?: unknown;
   userId?: unknown;
-  inputConfig?: { _lodyDeliveryKind?: unknown };
+  inputConfig?: { _lodyDeliveryKind?: unknown; inputBlocks?: Record<string, unknown>[] };
   items?: Record<string, unknown>[];
 };
 export type HistoryQueryAccess = {
@@ -44,6 +44,9 @@ const itemNames = [
   'objective',
   'status',
   'fileId',
+  'localImageId',
+  'storageSessionId',
+  'machineId',
   'transport',
   'name',
 ] as const;
@@ -62,6 +65,18 @@ export function historyQueryRow(
   const config = access.field(value, 'inputConfig');
   const delivery = access.scalar(access.field(config, '_lodyDeliveryKind'));
   if (delivery !== undefined) row.inputConfig = { _lodyDeliveryKind: delivery };
+  const blocks = access.field(config, 'inputBlocks');
+  if (access.length(blocks)) {
+    row.inputConfig = {
+      ...((row.inputConfig as object) ?? {}),
+      inputBlocks: Array.from({ length: access.length(blocks) }, (_, index) => {
+        const block = access.at(blocks, index);
+        return Object.fromEntries(
+          itemNames.map((name) => [name, access.scalar(access.field(block, name))])
+        );
+      }),
+    };
+  }
   const items = access.field(value, 'items');
   row.items = Array.from({ length: access.length(items) }, (_, index) => {
     const source = access.at(items, index),
@@ -199,6 +214,18 @@ export function selectHistoryActionRows(
     case 'agent-warning':
       addWhere((row) =>
         has(row, (item) => item.type === 'system_notice' && item.name === 'agent_warning')
+      );
+      break;
+    case 'image-backfilled':
+      addWhere((row) =>
+        [...(row.items ?? []), ...(row.inputConfig?.inputBlocks ?? [])].some(
+          (item) =>
+            item.type === 'image' &&
+            item.localImageId === action.localImageId &&
+            item.machineId === action.machineId &&
+            item.storageSessionId === action.image.storageSessionId &&
+            item.transport === 'local'
+        )
       );
       break;
     case 'file-backfilled':

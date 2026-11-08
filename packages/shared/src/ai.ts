@@ -1579,6 +1579,11 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  /** Absent transport preserves the existing cloud image contract. */
+  transport?: 'local' | 'r2';
+  machineId?: string;
+  /** Immutable local snapshot identity retained after relay publication. */
+  localImageId?: string;
   encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;
@@ -1633,13 +1638,11 @@ export function isSessionFileSourcePath(value: string): boolean {
   return !normalized.split('/').some((segment) => segment === '..');
 }
 
-/** A scoped host registration. Never a blob key or an upload candidate. */
+/** A machine-local path, never a blob key or an upload candidate. */
 export type SessionLocalAttachment = {
   type: 'local_attachment';
-  referenceId: string;
   machineId: string;
-  sessionId: string;
-  turnId: string;
+  path: string;
   kind: 'file' | 'image';
   fileName: string;
   mimeType: string;

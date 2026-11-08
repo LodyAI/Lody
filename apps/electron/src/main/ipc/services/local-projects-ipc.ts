@@ -16,8 +16,9 @@ import type { SessionId, WorkspaceId } from '@lody/shared/ids'
 import {
   SessionIdSchema,
   LocalProjectHistoryProviderSchema,
-  SessionAttachmentRegisterRequestSchema,
-  SessionAttachmentResolveRequestSchema
+  SessionAttachmentPrepareRequestSchema,
+  SessionImagePrepareLocalRequestSchema,
+  SessionImageResolveLocalRequestSchema
 } from '@lody/shared/message-schemas'
 import type { LocalProjectHistoryProvider, LocalProjectId } from '@lody/shared/project'
 import { formatUnknownError } from '../../utils'
@@ -26,6 +27,42 @@ import { sendLocalProjectControl } from '../local-project-dispatch'
 
 const SESSION_FILE_SEND_LOCAL_MAX_COUNT = 8
 const SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES = 100 * 1024 * 1024
+
+type LocalAttachmentSource = { path: string } | { bytes: ArrayBuffer }
+
+// Keep staged bytes alive until the daemon has finished consuming them.
+async function withLocalAttachmentSource<T>(
+  source: LocalAttachmentSource | undefined,
+  prepare: (sourcePath: string) => Promise<T>
+): Promise<T | { ok: false; error: string }> {
+  let staging: string | undefined
+  try {
+    if (!source || typeof source !== 'object') throw new Error('invalid_request')
+    const managed = 'bytes' in source
+    let sourcePath: string
+    if (managed) {
+      const bytes = source.bytes
+      const maxBytes = SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > maxBytes)
+        throw new Error('invalid_attachment_bytes')
+      staging = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-attachment-'))
+      sourcePath = path.join(staging, 'source')
+      await fs.writeFile(sourcePath, Buffer.from(bytes), { mode: 0o600 })
+    } else {
+      sourcePath = source.path
+      if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath))
+        throw new Error('invalid_attachment_path')
+    }
+    return await prepare(sourcePath)
+  } catch (error) {
+    return { ok: false, error: formatUnknownError(error) }
+  } finally {
+    if (staging) {
+      const cleanup = fs.rm(staging, { recursive: true, force: true })
+      await cleanup
+    }
+  }
+}
 
 function parseSendSessionFileLocalInput(payload: unknown): SendSessionFileLocalInput | null {
   if (!payload || typeof payload !== 'object') return null
@@ -74,74 +111,35 @@ export class LocalProjectsIpc extends IpcService {
   }
 
   @IpcMethod()
-  async resolveLocalAttachment(payload: {
-    workspaceId: string
-    sessionId: string
-    attachment: import('@lody/shared').SessionLocalAttachment
-  }) {
-    const request = SessionAttachmentResolveRequestSchema.parse({
-      ...payload,
-      type: 'session/attachment-resolve',
-      machineId: payload.attachment.machineId
-    })
-    const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
-      ...request,
-      machineId: request.machineId as import('@lody/shared/ids').MachineId,
-      workspaceId: request.workspaceId as WorkspaceId
-    })
-    if (!result.ok) throw new Error(result.error)
-    const response = result.responses.find(
-      (item) => item.type === 'session/attachment-resolve_response'
-    )
-    if (!response?.success || !response.path)
-      throw new Error(response?.error ?? 'local_attachment_unavailable')
-    return response.path
-  }
-
-  @IpcMethod()
-  async prepareLocalAttachment(payload: {
+  async prepareLocalImage(payload: {
     workspaceId: string
     sessionId: string
     machineId: string
-    turnId: string
-    referenceId: string
-    kind: 'file' | 'image'
+    imageId: string
     fileName: string
     mimeType: string
-    source: { path: string } | { bytes: ArrayBuffer }
+    source: LocalAttachmentSource
   }) {
-    let staging: string | undefined
     try {
-      if (!payload || !payload.source) throw new Error('invalid_request')
-      let sourcePath: string
-      const managed = 'bytes' in payload.source
-      if (managed) {
-        const bytes = (payload.source as { bytes: ArrayBuffer }).bytes
-        if (
-          !(bytes instanceof ArrayBuffer) ||
-          bytes.byteLength > SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES
-        )
-          throw new Error('invalid_attachment_bytes')
-        staging = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-attachment-'))
-        sourcePath = path.join(staging, 'source')
-        await fs.writeFile(sourcePath, Buffer.from(bytes), { mode: 0o600 })
-      } else {
-        sourcePath = (payload.source as { path: string }).path
-        if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath))
-          throw new Error('invalid_attachment_path')
-      }
-      const request = SessionAttachmentRegisterRequestSchema.parse({
-        type: 'session/attachment-register',
+      const source = payload?.source
+      if (!source || typeof source !== 'object') throw new Error('invalid_image_source')
+      if (
+        'bytes' in source &&
+        (!(source.bytes instanceof ArrayBuffer) ||
+          source.bytes.byteLength === 0 ||
+          source.bytes.byteLength > 20 * 1024 * 1024)
+      )
+        throw new Error('invalid_image_bytes')
+      const request = SessionImagePrepareLocalRequestSchema.parse({
+        type: 'session/image-prepare-local',
         workspaceId: payload.workspaceId,
         sessionId: payload.sessionId,
         machineId: payload.machineId,
-        turnId: payload.turnId,
-        referenceId: payload.referenceId,
-        kind: payload.kind,
+        imageId: payload.imageId,
         fileName: payload.fileName,
         mimeType: payload.mimeType,
-        path: sourcePath,
-        managed
+        source:
+          'bytes' in source ? { base64: Buffer.from(source.bytes).toString('base64') } : source
       })
       const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
         ...request,
@@ -150,16 +148,77 @@ export class LocalProjectsIpc extends IpcService {
       })
       if (!result.ok) return { ok: false as const, error: result.error }
       const response = result.responses.find(
-        (item) => item.type === 'session/attachment-register_response'
+        (item) => item.type === 'session/image-prepare-local_response'
+      )
+      if (!response?.success || !response.image)
+        return { ok: false as const, error: response?.error ?? 'local_image_not_supported' }
+      return { ok: true as const, image: response.image }
+    } catch (error) {
+      return { ok: false as const, error: formatUnknownError(error) }
+    }
+  }
+
+  @IpcMethod()
+  async resolveLocalImage(payload: {
+    workspaceId: string
+    sessionId: string
+    machineId: string
+    image: import('@lody/shared').SessionImagePayload
+  }) {
+    const request = SessionImageResolveLocalRequestSchema.parse({
+      ...payload,
+      type: 'session/image-resolve-local'
+    })
+    const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
+      ...request,
+      machineId: request.machineId as import('@lody/shared/ids').MachineId,
+      workspaceId: request.workspaceId as WorkspaceId
+    })
+    if (!result.ok) throw new Error(result.error)
+    const response = result.responses.find(
+      (item) => item.type === 'session/image-resolve-local_response'
+    )
+    if (!response?.success || !response.path)
+      throw new Error(response?.error ?? 'local_image_unavailable')
+    return response.path
+  }
+
+  @IpcMethod()
+  async prepareLocalAttachment(payload: {
+    workspaceId: string
+    sessionId: string
+    machineId: string
+    kind: 'file' | 'image'
+    fileName: string
+    mimeType: string
+    source: { bytes: ArrayBuffer }
+  }) {
+    if (!payload?.source || typeof payload.source !== 'object' || !('bytes' in payload.source))
+      return { ok: false as const, error: 'invalid_attachment_bytes' }
+    return withLocalAttachmentSource(payload.source, async (sourcePath) => {
+      const request = SessionAttachmentPrepareRequestSchema.parse({
+        type: 'session/attachment-prepare',
+        workspaceId: payload.workspaceId,
+        sessionId: payload.sessionId,
+        machineId: payload.machineId,
+        kind: payload.kind,
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        path: sourcePath
+      })
+      const result = await getIpcServiceDeps().cliService.sendLocalSessionControl({
+        ...request,
+        machineId: request.machineId as import('@lody/shared/ids').MachineId,
+        workspaceId: request.workspaceId as WorkspaceId
+      })
+      if (!result.ok) return { ok: false as const, error: result.error }
+      const response = result.responses.find(
+        (item) => item.type === 'session/attachment-prepare_response'
       )
       if (!response || !response.success || !response.attachment)
         return { ok: false as const, error: response?.error ?? 'local_attachment_not_supported' }
       return { ok: true as const, attachment: response.attachment }
-    } catch (error) {
-      return { ok: false as const, error: formatUnknownError(error) }
-    } finally {
-      if (staging) await fs.rm(staging, { recursive: true, force: true })
-    }
+    })
   }
 
   @IpcMethod()

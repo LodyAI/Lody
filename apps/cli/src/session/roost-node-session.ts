@@ -1533,11 +1533,11 @@ const createNodeServicesForLease = async (
 
   const inspectionCheckpoint = async (index: RoostDispatchIndex, cursor: bigint) => {
     let checkpoint = await index.checkpoint(cursor, totalHistoryCount);
-    if (checkpoint?.header.inspectionVersion !== 1) {
+    if (checkpoint?.header.inspectionVersion !== 2) {
       await rebuildDispatchIndex(index, cursor);
       checkpoint = await index.checkpoint(cursor, totalHistoryCount);
     }
-    if (!checkpoint || checkpoint.header.inspectionVersion !== 1) throw staleRead();
+    if (!checkpoint || checkpoint.header.inspectionVersion !== 2) throw staleRead();
     return checkpoint;
   };
   const validateInspection = async (

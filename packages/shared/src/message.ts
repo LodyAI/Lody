@@ -768,35 +768,31 @@ export interface SessionFileUploadResponse {
  *
  * Mirrors `SessionFileUploadRequest`; the only difference is the message type.
  */
-export type SessionAttachmentResolveRequest = {
-  type: 'session/attachment-resolve';
+export type SessionImagePrepareLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalRequestSchema
+>;
+export type SessionImagePrepareLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalResponseSchema
+>;
+export type SessionImageResolveLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalRequestSchema
+>;
+export type SessionImageResolveLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalResponseSchema
+>;
+
+export type SessionAttachmentPrepareRequest = {
+  type: 'session/attachment-prepare';
   machineId: MachineId;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  attachment: import('./ai').SessionLocalAttachment;
-};
-export type SessionAttachmentResolveResponse = {
-  type: 'session/attachment-resolve_response';
-  sessionId: SessionId;
-  success: boolean;
-  path?: string;
-  error?: string;
-};
-export type SessionAttachmentRegisterRequest = {
-  type: 'session/attachment-register';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  turnId: string;
-  referenceId: string;
   path: string;
-  managed: boolean;
   kind: 'file' | 'image';
   fileName: string;
   mimeType: string;
 };
-export type SessionAttachmentRegisterResponse = {
-  type: 'session/attachment-register_response';
+export type SessionAttachmentPrepareResponse = {
+  type: 'session/attachment-prepare_response';
   sessionId: SessionId;
   success: boolean;
   error?: string;
@@ -1001,8 +997,9 @@ export type LocalSessionControlRequest =
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
-  | SessionAttachmentRegisterRequest
-  | SessionAttachmentResolveRequest
+  | SessionImagePrepareLocalRequest
+  | SessionImageResolveLocalRequest
+  | SessionAttachmentPrepareRequest
   | SessionHistoryReadRequest
   | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
@@ -1034,8 +1031,9 @@ export type LocalSessionControlResponse =
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse
-  | SessionAttachmentRegisterResponse
-  | SessionAttachmentResolveResponse
+  | SessionImagePrepareLocalResponse
+  | SessionImageResolveLocalResponse
+  | SessionAttachmentPrepareResponse
   | SessionHistoryReadResponse
   | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse

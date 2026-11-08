@@ -1,4 +1,16 @@
-import { LocalAttachmentStore } from './session-local-attachments';
+import { setTimeout as backfillWait } from 'node:timers/promises';
+import {
+  storeLocalSessionImage,
+  readLocalSessionImage,
+  readLocalSessionImageReceipt,
+  writeLocalSessionImageReceipt,
+  listLocalSessionImages,
+} from './session-file-blob-store';
+import {
+  prepareLocalAttachment,
+  resolveLocalAttachment,
+  downloadLocalAttachment,
+} from './session-local-attachments';
 import type {
   SorbetCustomProvider,
   SorbetCustomProviderInput,
@@ -223,7 +235,11 @@ import { ISession, SessionManager } from '../session/session-manager';
 import { getDefaultSessionWorkdir } from '../session/session';
 import { captureCli } from '@/lib/analytics/posthog';
 import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
-import { createSessionBackend, type SessionBackend } from '@/session/session-backend';
+import {
+  createSessionBackend,
+  readHistoryEntry,
+  type SessionBackend,
+} from '@/session/session-backend';
 import {
   type ContentBlock,
   RequestPermissionRequest,
@@ -806,6 +822,7 @@ export class MessageHandler {
   // so a file is never backfilled by two concurrent workers (re-enqueue dedupe).
   private readonly sessionFileBackfillInFlight = new Set<string>();
   private sessionFileBackfillStopped = false;
+  private readonly localImageBackfills = new Map<string, Promise<void>>();
   // Backfill authorization window (S5/D10 撤权不上传): every enable opens a new
   // generation with a fresh AbortController; disable (offline/revoke) aborts
   // in-flight uploads and bumps the generation. A backfill task may only COMMIT
@@ -868,7 +885,6 @@ export class MessageHandler {
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
-  private localAttachments: LocalAttachmentStore;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
   private turnPostProcessingService: TurnPostProcessingService;
@@ -1830,6 +1846,7 @@ export class MessageHandler {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     file: UploadableImageFile;
+    signal?: AbortSignal;
   }): Promise<UploadedSessionImage> {
     return this.attachmentTransfer().uploadSessionImageFile(args);
   }
@@ -2057,16 +2074,21 @@ export class MessageHandler {
       return [];
     }
 
+    const requiresLocalCopy = args.imageBlocks.some(
+      ({ inputBlock }) => inputBlock.localImageId && inputBlock.machineId === this.machineId
+    );
     let attachmentsDir: string | null;
     try {
       attachmentsDir = await this.ensureSessionAttachmentsDir(args.sessionId);
     } catch (error) {
+      if (requiresLocalCopy) throw error;
       this.logger.debug(
         `[${args.sessionId}] Failed to prepare image attachment directory: ${formatErrorMessage(error)}`
       );
       return [];
     }
     if (!attachmentsDir) {
+      if (requiresLocalCopy) throw new Error('Local image resource directory is unavailable');
       return [];
     }
 
@@ -2124,6 +2146,7 @@ export class MessageHandler {
           await fs.promises.rename(tempPath, destPath);
         } catch (error) {
           await fs.promises.unlink(tempPath).catch(() => undefined);
+          if (inputBlock.localImageId && inputBlock.machineId === this.machineId) throw error;
           this.logger.debug(
             `[${args.sessionId}] Failed to materialize image attachment ${inputBlock.imageId}: ${formatErrorMessage(error)}`
           );
@@ -2527,6 +2550,7 @@ export class MessageHandler {
   }
 
   private async buildAcpPromptBlocks(args: {
+    requesterUserId?: string;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     userTurnId?: string;
@@ -2543,14 +2567,9 @@ export class MessageHandler {
 
     for (const block of args.inputBlocks) {
       if (block.type === 'local_attachment') {
-        if (!args.userTurnId) throw new Error('Local attachment requires its original turn');
-        const resolved = await this.localAttachments.resolve(
-          {
-            sessionId: args.sessionId,
-            turnId: args.userTurnId,
-          },
-          block
-        );
+        if (this.encryptedAttachments || args.requesterUserId !== this.userId)
+          throw new Error('Local attachment paths require the machine owner');
+        const resolved = await resolveLocalAttachment(block, this.machineId);
         if (block.kind === 'image') {
           if (resolved.sizeBytes > 20 * 1024 * 1024)
             throw new Error('Local image exceeds image input limit');
@@ -2598,6 +2617,35 @@ export class MessageHandler {
     // Download prompt images in parallel so multi-image turns do not pay per-image RTT serially.
     const imagePromptAttachments = await Promise.all(
       imageInputBlocks.map(async (block) => {
+        if (block.localImageId && block.machineId === this.machineId) {
+          try {
+            if (this.encryptedAttachments || args.requesterUserId !== this.userId)
+              throw new Error('Local image paths require the machine owner');
+            const storageSessionId = block.storageSessionId ?? args.sessionId;
+            const local = await readLocalSessionImage(
+              this.localImageScope(storageSessionId),
+              block
+            );
+            this.enqueueLocalImageBackfill(storageSessionId, local.image);
+            const downloaded: DownloadedSessionImagePromptBlock = {
+              block: {
+                type: 'image',
+                mimeType: local.image.mimeType,
+                data: local.bytes.toString('base64'),
+              },
+              bytes: local.bytes,
+              mimeType: local.image.mimeType,
+              sizeBytes: local.bytes.length,
+            };
+            return { inputBlock: block, downloaded, localPath: local.path };
+          } catch (error) {
+            if (block.transport === 'local') throw error;
+            // Published images retain their ordinary cloud recovery path if the
+            // host snapshot is missing; pending-local images never fall through.
+          }
+        }
+        if (block.transport === 'local')
+          throw new Error('Image is pending upload on another machine');
         const downloaded = await this.fetchSessionImageForPrompt({
           workspaceId: args.workspaceId,
           sessionId: block.storageSessionId ?? args.sessionId,
@@ -2605,7 +2653,7 @@ export class MessageHandler {
           expectedMimeType: block.mimeType,
           encryption: block.encryption,
         });
-        return { inputBlock: block, downloaded };
+        return { inputBlock: block, downloaded, localPath: undefined };
       })
     );
     const imageBlocks = imagePromptAttachments.map(({ downloaded }) => downloaded.block);
@@ -2613,10 +2661,28 @@ export class MessageHandler {
     // Keep ACP image blocks for visual context, and also expose the same bytes
     // through a baseline ACP resource_link so agents can read/re-upload the file
     // by path when they need to echo or transform it.
-    const imageAttachmentBlocks = await this.materializeSessionImageAttachments({
-      sessionId: args.sessionId,
-      imageBlocks: imagePromptAttachments,
-    });
+    const imageAttachmentBlocks: ContentBlock[] = [];
+    for (const attachment of imagePromptAttachments) {
+      if (attachment.localPath) {
+        imageAttachmentBlocks.push({
+          type: 'resource_link',
+          uri: pathToFileURL(attachment.localPath).href,
+          name: this.resolveSessionImageAttachmentFileName(
+            attachment.inputBlock,
+            attachment.downloaded.mimeType
+          ),
+          mimeType: attachment.downloaded.mimeType,
+          size: attachment.downloaded.sizeBytes,
+        });
+      } else {
+        imageAttachmentBlocks.push(
+          ...(await this.materializeSessionImageAttachments({
+            sessionId: args.sessionId,
+            imageBlocks: [attachment],
+          }))
+        );
+      }
+    }
 
     // Materialize human→agent file attachments under `<workspace>/.lody/attachments/`
     // and reference them with ACP resource links (never inline their contents).
@@ -3134,11 +3200,6 @@ export class MessageHandler {
     this.machineName = config.machineName;
     this.cliVersion = config.cliVersion;
     this.machineId = config.machineId as MachineId;
-    this.localAttachments = new LocalAttachmentStore({
-      accountId: this.userId,
-      workspaceId: this.workspaceId,
-      machineId: this.machineId,
-    });
     this.sessionActivePresence = new SessionActivePresenceControllerLegacy(
       this.workspaceDocument,
       this.machineId,
@@ -3861,10 +3922,16 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
-        downloadFileChunk: async (request) =>
-          request.attachment
-            ? this.downloadRegisteredAttachment(request)
-            : fileReader.downloadFileChunk(request),
+        downloadFileChunk: async (request) => {
+          if (
+            request.attachment?.machineId !== undefined &&
+            request.attachment.machineId !== this.machineId
+          )
+            return { status: 'error', code: 'invalid_path' };
+          return fileReader.downloadFileChunk(
+            request.attachment ? { ...request, path: request.attachment.path } : request
+          );
+        },
         openCodeCollabText: async (request) => await codeReader.openText(request),
         refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
@@ -3980,6 +4047,8 @@ export class MessageHandler {
       this.userId
     );
     this.sessionDispatchWatcher = new SessionDispatchWatcher({
+      reconcileLocalImages: (sessionId, doc, turnId) =>
+        this.reconcileLocalImageReceipts(sessionId, doc, { turnId }),
       encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       machineId: this.machineId,
@@ -4039,16 +4108,7 @@ export class MessageHandler {
       },
       onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
     });
-    const inheritLocalAttachment = async (
-      attachment: import('@lody/shared').SessionLocalAttachment,
-      sessionId: SessionId,
-      turnId: string
-    ) => {
-      if (this.encryptedAttachments) throw new Error('Protected local attachments are unavailable');
-      return this.localAttachments.inherit(attachment, { sessionId, turnId });
-    };
     this.sessionForkService = new SessionForkService({
-      rebindLocalAttachment: inheritLocalAttachment,
       workspaceDocument: this.workspaceDocument,
       sessionManager: this.sessionManager,
       userResolver: this.sessionUserResolver,
@@ -4071,7 +4131,6 @@ export class MessageHandler {
       );
     });
     this.sessionEditAndResendService = new SessionEditAndResendService({
-      rebindLocalAttachment: inheritLocalAttachment,
       workspaceDocument: this.workspaceDocument,
       sessionManager: this.sessionManager,
       executionService: this.executionService,
@@ -7513,11 +7572,11 @@ export class MessageHandler {
     }
   }
 
-  private async downloadRegisteredAttachment(
+  private async downloadOwnerLocalAttachment(
     request: import('@lody/shared').FileDownloadRequest
   ): Promise<import('@lody/shared').FileDownloadResponse> {
     if (this.encryptedAttachments) return { status: 'error', code: 'unsupported_protocol' };
-    return this.localAttachments.download(request);
+    return downloadLocalAttachment(request, this.machineId);
   }
 
   async handleLocalMachineRpc(
@@ -7645,7 +7704,7 @@ export class MessageHandler {
       case 'file/download-chunk':
         await assertOwner(request.params.sessionId as SessionId);
         return request.params.attachment
-          ? this.downloadRegisteredAttachment(request.params)
+          ? this.downloadOwnerLocalAttachment(request.params)
           : this.filePreviewService.downloadFileChunk(request.params);
 
       case 'project/probe-local-member': {
@@ -8095,7 +8154,7 @@ export class MessageHandler {
       case 'session/file-upload':
         await this.handleSessionFileUpload(message, context);
         break;
-      case 'session/attachment-resolve': {
+      case 'session/image-prepare-local': {
         try {
           if (
             context.source !== 'local' ||
@@ -8103,23 +8162,34 @@ export class MessageHandler {
             message.workspaceId !== this.workspaceId ||
             this.encryptedAttachments
           )
-            throw new Error('Local attachment is unavailable on this machine');
-          const resolved = await this.localAttachments.resolve(
+            throw new Error('Local image preparation is unavailable for this target');
+          const source =
+            'path' in message.source
+              ? message.source.path
+              : Buffer.from(message.source.base64, 'base64');
+          const image = await storeLocalSessionImage(
+            this.localImageScope(message.sessionId),
             {
-              sessionId: message.sessionId,
-              turnId: message.attachment.turnId,
+              imageId: message.imageId,
+              localImageId: message.imageId,
+              transport: 'local',
+              machineId: this.machineId,
+              storageSessionId: message.sessionId,
+              mimeType: message.mimeType,
+              fileName: message.fileName,
             },
-            message.attachment
+            source
           );
+          this.enqueueLocalImageBackfill(message.sessionId, image);
           context.send({
-            type: 'session/attachment-resolve_response',
+            type: 'session/image-prepare-local_response',
             sessionId: message.sessionId,
             success: true,
-            path: resolved.path,
+            image,
           });
         } catch (error) {
           context.send({
-            type: 'session/attachment-resolve_response',
+            type: 'session/image-prepare-local_response',
             sessionId: message.sessionId,
             success: false,
             error: formatErrorMessage(error),
@@ -8127,7 +8197,7 @@ export class MessageHandler {
         }
         break;
       }
-      case 'session/attachment-register': {
+      case 'session/image-resolve-local': {
         try {
           if (
             context.source !== 'local' ||
@@ -8135,17 +8205,46 @@ export class MessageHandler {
             message.workspaceId !== this.workspaceId ||
             this.encryptedAttachments
           )
-            throw new Error('Local attachment registration is unavailable for this target');
-          const attachment = await this.localAttachments.register(message);
+            throw new Error('Local image is unavailable for this target');
+          const local = await readLocalSessionImage(
+            this.localImageScope(message.image.storageSessionId ?? message.sessionId),
+            message.image
+          );
           context.send({
-            type: 'session/attachment-register_response',
+            type: 'session/image-resolve-local_response',
+            sessionId: message.sessionId,
+            success: true,
+            path: local.path,
+          });
+        } catch (error) {
+          context.send({
+            type: 'session/image-resolve-local_response',
+            sessionId: message.sessionId,
+            success: false,
+            error: formatErrorMessage(error),
+          });
+        }
+        break;
+      }
+      case 'session/attachment-prepare': {
+        try {
+          if (
+            context.source !== 'local' ||
+            message.machineId !== this.machineId ||
+            message.workspaceId !== this.workspaceId ||
+            this.encryptedAttachments
+          )
+            throw new Error('Local attachment preparation is unavailable for this target');
+          const attachment = await prepareLocalAttachment(message);
+          context.send({
+            type: 'session/attachment-prepare_response',
             sessionId: message.sessionId,
             success: true,
             attachment,
           });
         } catch (error) {
           context.send({
-            type: 'session/attachment-register_response',
+            type: 'session/attachment-prepare_response',
             sessionId: message.sessionId,
             success: false,
             error: formatErrorMessage(error),
@@ -8570,6 +8669,7 @@ export class MessageHandler {
           break;
         }
       }
+      await this.reconcileLocalImageReceipts(sessionId, sessionDoc);
       await backend.flushLocalWrites();
       if (!backend.history.getPublication)
         throw new Error('Native history publication is unavailable');
@@ -9315,6 +9415,152 @@ export class MessageHandler {
    * Failures retry with exponential backoff up to a cap; past the cap the block
    * stays `local` (other devices keep showing pending) and the failure is logged.
    */
+  private localImageScope(sessionId: string) {
+    return {
+      workspaceId: this.workspaceId,
+      accountId: this.userId,
+      machineId: this.machineId,
+      sessionId,
+    };
+  }
+
+  private async promoteLocalImageReceipt(
+    doc: SessionDocument,
+    image: import('@lody/shared').SessionImagePayload,
+    backend: SessionBackend
+  ): Promise<void> {
+    await backend.applyHistoryAction({
+      kind: 'image-backfilled',
+      localImageId: image.localImageId!,
+      machineId: this.machineId,
+      image,
+    });
+    await doc.promoteLocalImageReferences(image);
+  }
+
+  private async reconcileLocalImageReceipts(
+    sessionId: SessionId,
+    doc: SessionDocument,
+    dispatch?: { turnId: string | undefined }
+  ): Promise<void> {
+    if (this.encryptedAttachments || this.sessionFileBackfillStopped) return;
+    const backend = await this.getSessionBackend(doc);
+    // Dispatch checks inspect only the activation target and current queue. Full
+    // shallow history reconciliation belongs to writes and upload completion.
+    const target = dispatch?.turnId ? await readHistoryEntry(backend, dispatch.turnId) : undefined;
+    const rows = dispatch ? (target ? [target] : []) : await backend.readHistoryQuery();
+    const queue = await doc.getMessageQueue();
+    const candidates = [
+      ...rows.flatMap((row) => [...(row.items ?? []), ...(row.inputConfig?.inputBlocks ?? [])]),
+      ...queue.flatMap(
+        (row) => normalizeSessionTurnInputConfig(row.acpSessionConfig)?.inputBlocks ?? []
+      ),
+    ];
+    const seen = new Set<string>();
+    for (const block of candidates) {
+      if (
+        block.type !== 'image' ||
+        block.transport !== 'local' ||
+        block.machineId !== this.machineId ||
+        typeof block.localImageId !== 'string' ||
+        typeof block.storageSessionId !== 'string'
+      )
+        continue;
+      const key = `${block.storageSessionId}:${block.localImageId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const receipt = await readLocalSessionImageReceipt(
+        this.localImageScope(block.storageSessionId),
+        block.localImageId
+      ).catch((error) => {
+        this.logger.warn(`[${sessionId}] Image receipt unavailable: ${formatErrorMessage(error)}`);
+        return null;
+      });
+      if (!receipt) continue;
+      if (this.sessionFileBackfillStopped) return;
+      await this.promoteLocalImageReceipt(doc, receipt, backend);
+    }
+  }
+
+  private enqueueLocalImageBackfill(
+    sessionId: SessionId,
+    image: import('@lody/shared').SessionImagePayload
+  ): void {
+    const signal = this.remoteBackfillAbort?.signal;
+    if (
+      this.sessionFileBackfillStopped ||
+      !signal ||
+      signal.aborted ||
+      !this.cloudPort.attachmentUpload ||
+      this.encryptedAttachments ||
+      !image.localImageId
+    )
+      return;
+    const key = `${sessionId}:${image.localImageId}`;
+    if (this.localImageBackfills.has(key)) return;
+    const generation = this.remoteBackfillGeneration;
+    const work = async () => {
+      for (let attempt = 1; !signal.aborted; attempt++) {
+        try {
+          this.throwIfBackfillSuperseded(generation);
+          const scope = this.localImageScope(sessionId);
+          let receipt = await readLocalSessionImageReceipt(scope, image.localImageId!);
+          if (!receipt) {
+            const local = await readLocalSessionImage(scope, image);
+            const uploaded = await this.uploadSessionImageFile({
+              workspaceId: this.workspaceId,
+              sessionId,
+              file: {
+                absolutePath: local.path,
+                bytes: local.bytes,
+                sizeBytes: local.bytes.length,
+                fileName: local.image.fileName ?? 'image',
+                mimeType: local.image.mimeType,
+              },
+              signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+            });
+            this.throwIfBackfillSuperseded(generation);
+            receipt = {
+              ...local.image,
+              imageId: uploaded.imageId,
+              transport: 'r2',
+              sizeBytes: local.bytes.length,
+              ...(uploaded.width ? { width: uploaded.width } : {}),
+              ...(uploaded.height ? { height: uploaded.height } : {}),
+            };
+            await writeLocalSessionImageReceipt(scope, receipt);
+          }
+          this.throwIfBackfillSuperseded(generation);
+          const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          const backend = await this.getSessionBackend(doc);
+          this.throwIfBackfillSuperseded(generation);
+          await this.promoteLocalImageReceipt(doc, receipt, backend);
+          // The durable receipt is also consumed by later history/queue change checks.
+          void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+          return;
+        } catch (error) {
+          if (signal.aborted) return;
+          this.logger.warn(`[${sessionId}] Image backfill deferred: ${formatErrorMessage(error)}`);
+          // Pending image work does not expire after a fixed attempt count. The
+          // owning bridge aborts both this wait and the actual network request.
+          await backfillWait(sessionFileBackfillDelayMs(attempt), undefined, {
+            signal,
+            ref: false,
+          }).catch(() => undefined);
+        }
+      }
+    };
+    const task = work().finally(() => {
+      this.localImageBackfills.delete(key);
+      if (generation !== this.remoteBackfillGeneration)
+        this.enqueueLocalImageBackfill(sessionId, image);
+    });
+    this.localImageBackfills.set(key, task);
+    void task.catch((error) =>
+      this.logger.warn(`Image backfill failed: ${formatErrorMessage(error)}`)
+    );
+  }
+
   private enqueueSessionFileBackfill(sessionId: SessionId, fileId: string): void {
     if (this.sessionFileBackfillStopped || !this.remoteBackfillEnabled) {
       return;
@@ -9497,6 +9743,14 @@ export class MessageHandler {
   async scanAndBackfillLocalSessionFiles(): Promise<void> {
     if (this.sessionFileBackfillStopped || !this.remoteBackfillEnabled) {
       return;
+    }
+    if (!this.encryptedAttachments && this.cloudPort.attachmentUpload) {
+      try {
+        for (const pending of await listLocalSessionImages(this.localImageScope('_')))
+          this.enqueueLocalImageBackfill(pending.sessionId as SessionId, pending.image);
+      } catch (error) {
+        this.logger.warn(`Image backfill recovery failed: ${formatErrorMessage(error)}`);
+      }
     }
     let pending: Awaited<ReturnType<typeof listPendingLocalSessionFiles>>;
     try {
@@ -11384,6 +11638,8 @@ export class MessageHandler {
     // Stop scheduling/retrying local-file backfill; in-flight uploads finish but
     // no new attempts start. Pending blobs are recovered on next startup scan.
     this.sessionFileBackfillStopped = true;
+    this.remoteBackfillAbort?.abort();
+    await Promise.allSettled(this.localImageBackfills.values());
     this.cancelPendingPermissionRequests();
     this.machineRpcServer?.stop();
     this.encryptedQueryServer?.stop();

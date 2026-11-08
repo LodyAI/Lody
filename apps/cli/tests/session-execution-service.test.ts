@@ -5473,13 +5473,10 @@ describe('SessionExecutionService', () => {
     } satisfies Extract<SessionInputBlock, { type: 'file' }>;
     const buildAcpPromptBlocks: SessionExecutionServiceDeps['buildAcpPromptBlocks'] = async ({
       inputBlocks,
-      userTurnId,
     }) =>
       inputBlocks.flatMap((block): ContentBlock[] => {
         if (block.type === 'local_attachment') {
-          if (userTurnId !== block.turnId)
-            throw new Error('Local attachment requires its original turn');
-          return [{ type: 'resource_link', uri: 'file:///tmp/local.txt', name: block.fileName }];
+          return [{ type: 'resource_link', uri: `file://${block.path}`, name: block.fileName }];
         }
         if (block.type === 'text') return [{ type: 'text', text: block.text }];
         if (block.type === 'file')
@@ -5520,10 +5517,8 @@ describe('SessionExecutionService', () => {
           fileBlock,
           {
             type: 'local_attachment',
-            referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
             machineId: 'machine-1',
-            sessionId: 'session-file-create',
-            turnId: 'turn-user-file',
+            path: '/tmp/local.txt',
             kind: 'file',
             fileName: 'local.txt',
             mimeType: 'text/plain',
