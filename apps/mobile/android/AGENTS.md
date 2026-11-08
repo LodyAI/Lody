@@ -119,7 +119,7 @@
 
 - Team conversation lists show a compact circular owner avatar after the trailing time/status (including children), resolved from the workspace member cache with a name-initial fallback. My tasks omit this avatar; special status stays trailing.
 
-- Current-working-directory conversations open from the trailing conversations button only when open child Tabs exist. Its status summarizes other open conversations with local read watermarks. More owns “新建当前工作目录对话” and closed-conversation recovery even when the button is hidden. Keep close/restore semantics unchanged. The tappable secondary machine subtitle below the title shows presence before the name and opens owner/visibility details; do not duplicate it in the bottom action bar.
+- Current-working-directory conversations open from the trailing conversations button only when open child Tabs exist. Its status summarizes other open conversations with local read watermarks. More owns “新建当前目录对话” and closed-conversation recovery even when the button is hidden. Keep close/restore semantics unchanged. The tappable secondary machine subtitle below the title shows presence before the name and opens owner/visibility details; do not duplicate it in the bottom action bar.
 
 - Every Home grouping (time/project/status) starts with a separate Pinned group when nonempty, within the current owner/project scope. Partition whole visible families before bucketing, so pinned families appear once and retain child folding. Project conversation lists use the same projection; archived chats and hidden Tabs never enter Pinned.
 

@@ -371,3 +371,18 @@ ChatNavigationTitle.configureButton(button, title: "Conversation", subtitle: "",
 let machineCaption = button.captionLabel.attributedText!
 precondition(machineCaption.attribute(.attachment, at: 0, effectiveRange: nil) != nil, "Presence icon precedes the machine name")
 precondition(subtitleText(button).contains("Studio"), "Header retains execution machine")
+
+// Native navigation owns the outer margins; the title must not lose another inset.
+for direction: UISemanticContentAttribute in [.forceLeftToRight, .forceRightToLeft] {
+  button.semanticContentAttribute = direction
+  button.bounds = CGRect(x: 0, y: 0, width: 220, height: 44)
+  button.setNeedsLayout()
+  button.layoutIfNeeded()
+  precondition(button.titleHost.frame.minX == 0 && button.titleHost.frame.width == 220,
+    "Conversation title uses the full native allocation in either layout direction")
+  precondition(button.captionLabel.frame.width == 220, "Machine subtitle shares the title width")
+}
+ChatNavigationTitle.configureButton(button, title: "", subtitle: "")
+precondition(button.intrinsicContentSize.width >= 44 && button.intrinsicContentSize.height == 44,
+  "Compact titles retain the minimum navigation touch target")
+print("PASS: title uses native horizontal spacing and preserves its touch target")

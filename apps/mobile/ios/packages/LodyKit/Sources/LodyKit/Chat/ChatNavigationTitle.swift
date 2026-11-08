@@ -170,14 +170,14 @@ final class ChatNavigationTitleButton: UIButton {
     let titleFont = LodyTextStyle.conversationTitle.uiFont
     let titleWidth = (titleHost.text as NSString).size(withAttributes: [.font: titleFont]).width
     let subtitleWidth = captionLabel.attributedText?.size().width ?? 0
-    return CGSize(width: ceil(8 + max(titleWidth, subtitleWidth)), height: 44)
+    return CGSize(width: ceil(max(44, max(titleWidth, subtitleWidth))), height: 44)
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    let inset: CGFloat = 8
-    let width = max(0, bounds.width - inset)
-    let x = effectiveUserInterfaceLayoutDirection == .rightToLeft ? 0 : inset
+    // UIKit already supplies navigation spacing; use the full title allocation.
+    let width = max(0, bounds.width)
+    let x: CGFloat = 0
     let titleFont = LodyTextStyle.conversationTitle.uiFont
     let captionFont = UIFont.preferredFont(forTextStyle: .caption1)
     let titleLine = titleHost.text.isEmpty ? 0 : ceil(titleFont.lineHeight)

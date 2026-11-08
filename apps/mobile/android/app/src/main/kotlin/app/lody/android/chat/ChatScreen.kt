@@ -675,9 +675,9 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
             // The page colour fades out under the header so the transcript reads beneath it.
             .background(Brush.verticalGradient(0f to colors.bgBase, 0.7f to colors.bgBase.copy(alpha = 0.85f), 1f to colors.bgBase.copy(alpha = 0f)))
             .statusBarsPadding()
-            .padding(horizontal = LodySpacing.md, vertical = LodySpacing.sm),
+            .padding(horizontal = LodySpacing.sm, vertical = LodySpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
+        horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),
     ) {
         RoundButton(LodyIcons.Back, stringResource(R.string.chat_back), visualSize = LodySize.controlMd, onClick = onBack)
         Column(Modifier.weight(1f)) {
