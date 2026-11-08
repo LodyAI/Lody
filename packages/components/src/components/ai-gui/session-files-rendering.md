@@ -168,7 +168,10 @@ the extra thumbnail-load gap documented in the
 - Still plain non-zoomable `<img>`, by scope not by accident: tool-call `image`
   content blocks in `view.tsx` and markdown images in `markdown-renderer.tsx`.
 
-Local attachment cards open the registered path on the original desktop. On another
+Local image attachments on the original desktop automatically resolve their scoped registration
+and display an inline image through Electron’s file-resource URL, with the existing zoomable
+viewer on click. Failed resolution or image loading shows an inline retry action. Ordinary
+local attachment cards open the registered path on the original desktop. On another
 device, clicking downloads current bytes through the existing authenticated file
 RPC; it never starts from rendering alone. Show a spinner during the request and
 an inline error on failure. Web/desktop uses a browser download, native mobile uses

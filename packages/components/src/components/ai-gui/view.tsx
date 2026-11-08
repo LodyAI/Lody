@@ -1,3 +1,4 @@
+import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { shareFileBytesNatively } from '@/lib/session-file-native-save';
@@ -6954,13 +6955,86 @@ export const ImageGroupBubble = ({
   );
 };
 
-/**
- * Container for a run of adjacent `file` blocks. Owns the workspace/token
- * atoms, machine-name resolution, download, and the in-app preview dialog, then
- * renders the pure `SessionFileCard`s. Adjacent file blocks are aggregated into
- * one list (decision #3) at the call site; this component handles however many
- * it is handed.
- */
+const localAttachmentImageStyles = stylex.create({
+  frame: { width: 320, maxWidth: '100%', height: 320 },
+});
+
+function LocalAttachmentImage({
+  attachment,
+  workspaceId,
+  sessionId,
+}: {
+  attachment: SessionLocalAttachment;
+  workspaceId: string;
+  sessionId: SessionId;
+}) {
+  const { t } = useTranslation();
+  // The parent keys this owner by the complete reference and workspace scope.
+  const attachmentRef = useRef(attachment);
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setUrl(null);
+    setFailed(false);
+    void (async () => {
+      try {
+        const ipc = getIpcServices();
+        if (!ipc) throw new Error('Local attachment unavailable');
+        const path = await ipc.localProjects.resolveLocalAttachment({
+          workspaceId,
+          sessionId,
+          attachment: attachmentRef.current,
+        });
+        if (!active) return;
+        const preview = await ipc.machineRpc.previewFile({
+          machineId: attachmentRef.current.machineId,
+          path,
+          workspaceRoot: null,
+        });
+        if (!active) return;
+        if (preview?.status !== 'resource' || preview.kind !== 'binary')
+          throw new Error('Local image preview unavailable');
+        setUrl(preview.url);
+      } catch {
+        if (active) setFailed(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [workspaceId, sessionId, attempt]);
+
+  if (url)
+    return (
+      <div
+        {...stylex.props(localAttachmentImageStyles.frame)}
+        onErrorCapture={() => {
+          setUrl(null);
+          setFailed(true);
+        }}
+      >
+        <SessionFileImagePreview path={attachment.fileName} url={url} />
+      </div>
+    );
+  return (
+    <SessionFileCardLayout
+      fileName={attachment.fileName}
+      mimeType={attachment.mimeType}
+      subtitle={
+        failed
+          ? t('sessions.localAttachmentUnavailable', 'Local attachment unavailable')
+          : t('sessions.markdownImage.loading', 'Loading image…')
+      }
+      actionIcon={failed ? null : <Spinner className="h-4 w-4" />}
+      failed={failed}
+      isInteractive={failed}
+      onClick={() => setAttempt((value) => value + 1)}
+    />
+  );
+}
+
 export const LocalAttachmentCard = ({
   attachment,
   sessionId,
@@ -6992,6 +7066,22 @@ export const LocalAttachmentCard = ({
     sessionId === attachment.sessionId &&
     !!workspaceId &&
     (remote ? !!runtime : !!openLocalFile);
+  if (
+    !readonly &&
+    !remote &&
+    workspaceId &&
+    sessionId === attachment.sessionId &&
+    attachment.kind === 'image'
+  ) {
+    return (
+      <LocalAttachmentImage
+        key={JSON.stringify([workspaceId, sessionId, attachment])}
+        attachment={attachment}
+        workspaceId={workspaceId}
+        sessionId={sessionId}
+      />
+    );
+  }
   return (
     <SessionFileCardLayout
       fileName={attachment.fileName}
@@ -7073,6 +7163,13 @@ export const LocalAttachmentCard = ({
   );
 };
 
+/**
+ * Container for a run of adjacent `file` blocks. Owns the workspace/token
+ * atoms, machine-name resolution, download, and the in-app preview dialog, then
+ * renders the pure `SessionFileCard`s. Adjacent file blocks are aggregated into
+ * one list (decision #3) at the call site; this component handles however many
+ * it is handed.
+ */
 export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
   const readonly = useContext(SessionReadonlyContext);
   return readonly ? (
