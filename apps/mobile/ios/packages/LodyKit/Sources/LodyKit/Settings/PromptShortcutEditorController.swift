@@ -94,7 +94,7 @@ final class PromptShortcutEditorController: LodyFormController {
         self.saved?()
         self.closeForm()
       } else {
-        LodyToastOverlay.shared.show(message: self.text("saveFailed"), kind: "error")
+        LodyToastOverlay.shared.show(message: self.text("saveFailed"), kind: .error)
         self.render()
       }
     }

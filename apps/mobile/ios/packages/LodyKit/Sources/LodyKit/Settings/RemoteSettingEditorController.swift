@@ -84,7 +84,7 @@ final class RemoteSettingEditorController: LodyFormController {
     let copy = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
       guard let self else { return }
       UIPasteboard.general.string = self.item.id
-      LodyToastOverlay.shared.show(message: self.text("idCopied"), kind: "info")
+      LodyToastOverlay.shared.show(message: self.text("idCopied"), kind: .neutral)
     })
     copy.accessibilityLabel = text("copyId")
     copy.widthAnchor.constraint(equalToConstant: 44).isActive = true
@@ -142,7 +142,7 @@ final class RemoteSettingEditorController: LodyFormController {
       self.busy = false
       if let message {
         self.showFailure(message)
-        if self.item.kind != "mcp" { LodyToastOverlay.shared.show(message: message, kind: "error") }
+        if self.item.kind != "mcp" { LodyToastOverlay.shared.show(message: message, kind: .error) }
         self.render()
       } else {
         self.saved?()

@@ -3,7 +3,7 @@ import UIKit
 import SwiftUI
 
 @MainActor
-class SessionController: UIViewController, LodyPageOwnedHeader {
+class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresentationControllerDelegate {
   typealias BrowserRequest = @MainActor (SessionListState, RuntimeContract.SessionPreviewParamsAction) async throws -> RuntimeContract.SessionPreviewResult
   let chat = LodyChatView(frame: .zero)
   let source: SessionSource
@@ -327,7 +327,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
           overlay?.close { self.titleMenuSelected("tab:" + next.id) }
         }
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.changeFailed", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.changeFailed", bundle: .lody), kind: .error)
       }
     }
   }
@@ -375,12 +375,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
           LodyShell.shared.openSessionFromExternal(target)
         case .rejected:
           self.attemptedTab = nil
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: "error")
+          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: .error)
         case .unknown:
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: "info")
+          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
         }
       } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: "info")
+        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
       }
     }
   }
@@ -536,11 +536,18 @@ class SessionController: UIViewController, LodyPageOwnedHeader {
       id: session.machineId, workspaceId: state.workspaceId,
       status: state.presence.status(of: session.machineId), members: Array(chat.members.values))))
     panel.modalPresentationStyle = .popover
+    panel.view.accessibilityIdentifier = "machine-details-popover"
+    panel.popoverPresentationController?.delegate = self
+    panel.popoverPresentationController?.permittedArrowDirections = .up
     panel.preferredContentSize = CGSize(width: 320, height: 150)
     panel.popoverPresentationController?.sourceView = chat.tabsAnchorView
     panel.popoverPresentationController?.sourceRect = chat.tabsAnchorView.bounds
     (parent ?? self).present(panel, animated: true)
   }
+
+  func adaptivePresentationStyle(for controller: UIPresentationController) -> UIModalPresentationStyle { .none }
+
+  func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle { .none }
 
   private func titleMenuSelected(_ id: String) {
     guard id.hasPrefix("tab:") else { return }

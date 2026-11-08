@@ -35,9 +35,10 @@ SUITES = {
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
-CASES = PHONE_CASES + PAD_CASES + ['session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
+CASES = PHONE_CASES + PAD_CASES + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
 HOME_CASES = {'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'project-history-entry', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
 PREVIEW = {
+    'toast': 'session-preview-live',
     'role-mention-chat': 'mention-chat',
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
@@ -157,6 +158,7 @@ PREVIEW = {
     'community-notice': 'community-notice',
 }
 READY = {
+    'toast': 'session-preview-probe',
     'role-mention-sheet': 'create-session-input',
     'agent-roles': 'list-unavailable-action',
     'archived-sessions': 'archived-preview-writes',
@@ -517,7 +519,7 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:

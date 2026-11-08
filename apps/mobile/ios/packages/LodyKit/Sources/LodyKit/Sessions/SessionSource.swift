@@ -98,7 +98,7 @@ final class SessionSource {
           if saved {
             NotificationCenter.default.post(name: .lodySessionViewsDidChange, object: nil)
           } else {
-            LodyToastOverlay.shared.show(message: String(localized: "catalog.toast.localSaveFailed", bundle: .lody), kind: "error")
+            LodyToastOverlay.shared.show(message: String(localized: "catalog.toast.localSaveFailed", bundle: .lody), kind: .error)
           }
         }
       }

@@ -484,8 +484,8 @@ private struct GroupHeader: View {
     HStack(spacing: LodyLayout.listRowGap) {
       Glyph(icon: icon)
       Text(row.title)
-        .lodyTextStyle(.bodyEmphasis)
-        .foregroundStyle(LodyColor.textPrimary)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
         .lineLimit(1)
       Spacer(minLength: LodySpacing.sm)
       if expanded == false || !canToggle, !row.badge.isEmpty, row.badge != "0" {
@@ -772,8 +772,8 @@ private struct SectionTitle: View {
       Color.clear.frame(height: LodySpacing.sm)
     } else {
       Text(text)
-        .lodyTextStyle(.subhead)
-        .foregroundStyle(LodyColor.textPrimary)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
         .padding(.horizontal, LodyLayout.screenPaddingX)
         .padding(.top, LodySpacing.xs)
         .padding(.bottom, LodySpacing.xs)

@@ -349,7 +349,9 @@ precondition(restingBar.isDescendant(of: restingSurface) && !restingBar.isHidden
 precondition(restingBar.convert(restingBar.bounds, to: restingSurface).maxY <= restingInput.convert(restingInput.bounds, to: restingSurface).minY + 0.5,
   "The attachment row must sit above the text")
 let restingTile = restingBar.attachmentFrame(id: "resting-file")!
-precondition(abs(restingTile.height - 48) < 0.5, "Sheet attachments must be 48-point tiles; got \(restingTile)")
+precondition(abs(restingTile.height - 80) < 0.5, "Sheet attachments must be 80-point tiles; got \(restingTile)")
+let restingTextEdge = restingInput.convert(CGPoint(x: restingInput.textContainerInset.left + restingInput.textContainer.lineFragmentPadding, y: 0), to: restingBar).x
+precondition(abs(restingTile.minX - restingTextEdge) < 0.5, "Attachment and visible text must share their leading edge")
 let restingRemove = descendants(restingBar).compactMap { $0 as? UIButton }.first {
   $0.accessibilityLabel == String.localizedStringWithFormat(String(localized: "native.chat.attachment.remove", bundle: .lody), String(describing: "notes.txt"))
 }!
@@ -1212,7 +1214,7 @@ removeMaterialAttachment("b.txt")
 precondition(materialBar.hasVisiblePills && materialHeight == withAttachment,
   "The final attachment reserves its height through dematerialization")
 RunLoop.main.run(until: Date().addingTimeInterval(0.4))
-precondition(!materialBar.hasVisiblePills && materialHeight == withAttachment - 60, "The emptied attachment row releases its 12-point inset and 48-point tile height; got \(withAttachment - materialHeight)")
+precondition(!materialBar.hasVisiblePills && materialHeight == withAttachment - 88, "The emptied attachment row releases its 8-point inset and 80-point tile height; got \(withAttachment - materialHeight)")
 materialInput.resignFirstResponder()
 print("Glass hosts: queue and final attachment retain their space through exit; unrelated pills retain identity")
 

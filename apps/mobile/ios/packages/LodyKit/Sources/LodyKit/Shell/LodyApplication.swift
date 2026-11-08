@@ -144,7 +144,7 @@ public final class LodyApplication {
     case .discard(let failure):
       DiagnosticsStore.shared.record("notification", "navigation_rejected", fields: ["reason": failure.rawValue])
       let keys: [NotificationNavigation.Failure: String] = [.wrongAccount: "wrongAccount", .unknownRoute: "unknown", .noWorkspace: "noWorkspace", .sessionMissing: "gone"]
-      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("notifications.route." + keys[failure]!), bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("notifications.route." + keys[failure]!), bundle: .lody), kind: .error)
     }
     if link != nil { link = nil }
     else if let id = pending?["id"] { PushNotifications.shared.acknowledge(id) }

@@ -86,7 +86,7 @@ final class NotificationSettingsController: UIViewController {
       let push = try await service.status()
       self.push = push
     } catch {
-      LodyToastOverlay.shared.show(message: text("notifications.readFailed"), kind: "error")
+      LodyToastOverlay.shared.show(message: text("notifications.readFailed"), kind: .error)
     }
     render()
   }
@@ -111,7 +111,7 @@ final class NotificationSettingsController: UIViewController {
       }
       await read()
     } catch {
-      LodyToastOverlay.shared.show(message: text("notifications.changeFailed"), kind: "error")
+      LodyToastOverlay.shared.show(message: text("notifications.changeFailed"), kind: .error)
     }
     busy = false
     render()

@@ -17,6 +17,8 @@ public extension LodyTextStyle {
     static let body = LodyTextStyle(weight: .regular, size: 16, lineHeight: 22, tracking: -0.18, dynamicType: .body)
     /// Unread rows, emphasized values.
     static let bodyEmphasis = LodyTextStyle(weight: .medium, size: 16, lineHeight: 22, tracking: -0.18, dynamicType: .body)
+    /// Muted conversation-list group labels.
+    static let groupLabel = LodyTextStyle(weight: .medium, size: 16, lineHeight: 22, tracking: -0.18, dynamicType: .subheadline)
     /// Long-form chat and markdown.
     static let reading = LodyTextStyle(weight: .regular, size: 16, lineHeight: 25, tracking: -0.18, dynamicType: .body)
     /// Composer text, dense paragraphs in cards.
@@ -46,6 +48,7 @@ public extension LodyTextStyle {
         ("conversationTitle", .conversationTitle),
         ("body", .body),
         ("bodyEmphasis", .bodyEmphasis),
+        ("groupLabel", .groupLabel),
         ("reading", .reading),
         ("callout", .callout),
         ("bodySmall", .bodySmall),
