@@ -3644,11 +3644,11 @@ export class E2eeIpc extends IpcService {
               Effect.forEach(rows, (row) =>
                 Effect.map(
                   // An identity that cannot be read right now (a removal still erasing, a busy
-                  // lease) counts as present: nothing is restored over it, and the other
-                  // workspaces still restore. An unfinished restore of it still resumes.
+                  // lease) is unknown: nothing is restored over it, it is reported as failed
+                  // for retry, and the other workspaces still restore.
                   Effect.catch(
                     Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
-                    () => Effect.succeed(true)
+                    () => Effect.succeed('unknown' as const)
                   ),
                   (has) => ({ ...row, has })
                 )

@@ -544,7 +544,7 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
   readonly name: string
   readonly genesisHash: string
   readonly append: RecoveryWorkspaceTarget['append']
-  readonly hasIdentity: () => boolean
+  readonly hasIdentity: () => boolean | 'unknown'
   readonly history: (next?: {
     readonly cursor: string
     readonly checkpoint: P['checkpoint']
