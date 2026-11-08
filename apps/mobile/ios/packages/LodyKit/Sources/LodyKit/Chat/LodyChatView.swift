@@ -94,6 +94,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onMentionBrowse: ([String: Any]) -> Void = { _ in }
   let titleButton = ChatNavigationTitleButton()
   var pageOwnsHeader = false
+  var pageHeaderHeight: CGFloat { pageOwnsHeader ? 56 : 0 }
   var tabsAnchorView: UIView { titleButton }
   private var navigationTitle = ""
   private var navigationSubtitle = ""
@@ -525,9 +526,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     super.layoutSubviews()
     layoutFind()
     simulatorPreview.layout(in: CGRect(
-      x: safeAreaInsets.left, y: safeAreaInsets.top,
+      x: safeAreaInsets.left, y: safeAreaInsets.top + pageHeaderHeight,
       width: bounds.width - safeAreaInsets.left - safeAreaInsets.right,
-      height: max(0, composer.frame.minY - safeAreaInsets.top - 40)))
+      height: max(0, composer.frame.minY - safeAreaInsets.top - pageHeaderHeight - 40)))
     bringSubviewToFront(simulatorPreview)
     adoptComposerIfNeeded()
     bindScrollOwnerIfNeeded()
