@@ -93,7 +93,7 @@ checks = {
         'Text/TextSearch.swift',
     ],
     'list-snapshots': ['List/LodyListModels.swift'],
-    'chat-list-scroll': ['Sessions/ChatListCollectionView.swift'],
+    'chat-list-scroll': ['Sessions/ChatListCollectionView.swift', 'Sessions/InboxProjectIndex.swift', 'Projects/RepositoryIcon.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyTint.swift'],
     'banner': [
         'LodyLocalization.swift',
         'Toast/LodySessionBannerView.swift',

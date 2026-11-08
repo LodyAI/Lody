@@ -2951,6 +2951,40 @@
         }
       }
     },
+    "inbox.projectIndex.accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项目索引"
+          }
+        }
+      }
+    },
+    "inbox.projectIndex.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swipe up or down to move between projects."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向上或向下轻扫以切换项目。"
+          }
+        }
+      }
+    },
     "inbox.section.chat": {
       "extractionState": "manual",
       "localizations": {

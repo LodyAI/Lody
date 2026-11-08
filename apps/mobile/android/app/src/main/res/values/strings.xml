@@ -532,4 +532,5 @@
         <item quantity="one">Every %d minute</item>
         <item quantity="other">Every %d minutes</item>
     </plurals>
+    <string name="home_project_index">Project index</string>
 </resources>

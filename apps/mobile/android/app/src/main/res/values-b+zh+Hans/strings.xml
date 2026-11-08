@@ -523,4 +523,5 @@
     <plurals name="schedules_every_minutes">
         <item quantity="other">每 %d 分钟</item>
     </plurals>
+    <string name="home_project_index">项目索引</string>
 </resources>

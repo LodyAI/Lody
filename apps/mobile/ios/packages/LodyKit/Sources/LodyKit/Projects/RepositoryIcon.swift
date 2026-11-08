@@ -53,6 +53,10 @@ enum RepositoryImages {
 
   static func image(_ repository: String, ready: @escaping (UIImage) -> Void) -> UIImage? {
     guard let url = RepositoryImages.url(repository) else { return nil }
+    return image(for: url, ready: ready)
+  }
+
+  static func image(for url: URL, ready: @escaping (UIImage) -> Void) -> UIImage? {
     if let cached = cache.object(forKey: url as NSURL) { return cached }
     func muted(_ image: UIImage) -> UIImage {
       guard let input = CIImage(image: image),

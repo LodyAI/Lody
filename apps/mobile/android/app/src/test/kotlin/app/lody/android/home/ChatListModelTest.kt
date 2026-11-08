@@ -17,6 +17,121 @@ class ChatListModelTest {
     private fun session(id: String, project: String, status: String = "idle", archived: Boolean = false, pinned: Boolean = false, at: String) =
         CatalogSession(id, "m", project, "Chat $id", status, archived, pinned, at)
 
+    @Test fun projectIndexAppearsDuringScrollAndLingersAfterScrollOrDirectTouch() {
+        var index = ProjectIndexVisibility()
+        assertFalse(index.shown)
+        index = index.update(available = true, scrolling = true)
+        assertTrue(index.shown)
+        assertFalse(index.lingering)
+        assertEquals(index, index.hide())
+        index = index.update(available = true, scrolling = false)
+        assertTrue(index.shown)
+        assertTrue(index.lingering)
+        index = index.update(available = true, touching = true)
+        assertEquals(index, index.hide())
+        // A jump may start and finish scrolling while the user still scrubs.
+        index = index.update(available = true, scrolling = true)
+            .update(available = true, scrolling = false)
+        assertTrue(index.shown)
+        assertFalse(index.lingering)
+        index = index.update(available = true, touching = false)
+        assertTrue(index.lingering)
+        assertFalse(index.hide().shown)
+    }
+
+    @Test fun projectIndexDismissesOnBackgroundOrUnavailableListWithoutResurrection() {
+        val held = ProjectIndexVisibility().update(available = true, scrolling = true, touching = true)
+        val dismissed = held.update(available = false)
+        assertEquals(ProjectIndexVisibility(), dismissed)
+        assertFalse(dismissed.update(available = true, scrolling = false).shown)
+        assertFalse(dismissed.hide().shown)
+        assertTrue(dismissed.update(available = true, scrolling = true).shown)
+    }
+
+    @Test fun projectIndexDirectTouchSelectsTheIconUnderTheFinger() {
+        for (pitch in listOf(48f, 96f)) {
+            for (index in 0 until 40) {
+                assertEquals(index, projectIndexScrubTarget(4f + (index + 0.5f) * pitch, 4f, pitch, 40))
+            }
+            // A down just either side of a cell boundary must tolerate finger jitter.
+            val boundary = 4f + pitch
+            for (side in listOf(-1f, 1f)) {
+                val down = boundary + side * 0.5f
+                val tapped = if (side < 0) 0 else 1
+                for (movement in listOf(-8f, -1f, 0f, 1f, 8f)) {
+                    assertEquals(tapped, projectIndexScrubTarget(down + movement, 4f, pitch, 40, down, 8f))
+                }
+                // Beyond slop, resume the existing absolute targeting in either direction.
+                assertEquals(0, projectIndexScrubTarget(down - 9f, 4f, pitch, 40, down, 8f))
+                assertEquals(1, projectIndexScrubTarget(down + 9f, 4f, pitch, 40, down, 8f))
+            }
+            assertEquals(0, projectIndexScrubTarget(-100f, 4f, pitch, 40))
+            assertEquals(39, projectIndexScrubTarget(10000f, 4f, pitch, 40))
+        }
+    }
+
+    @Test fun projectIndexKeepsLargeTargetsAndTapsDisplayedLandmarks() {
+        assertEquals(listOf(0, 1, 2), projectIndexLandmarks(3, 600f, 12f, 48f))
+        val landmarks = projectIndexLandmarks(100, 264f, 12f, 48f)
+        assertEquals(listOf(0, 25, 50, 74, 99), landmarks)
+        landmarks.forEachIndexed { cell, destination ->
+            assertEquals(destination, landmarks[projectIndexScrubTarget(12f + cell * 48f + 24f, 12f, 48f, landmarks.size)])
+        }
+        assertTrue(projectIndexLandmarks(100, 119f, 12f, 48f).isEmpty())
+    }
+
+    @Test fun projectIndexLandmarkScrubStaysAnchoredThenReachesEveryDestination() {
+        val height = 264f
+        val landmarks = projectIndexLandmarks(100, height, 12f, 48f)
+        landmarks.forEachIndexed { cell, anchor ->
+            val down = 12f + cell * 48f + 24f
+            for (offset in listOf(-8f, -1f, 0f, 1f, 8f)) {
+                assertEquals(anchor, projectIndexLandmarkScrub(down + offset, down, anchor, height, 8f, 100))
+            }
+            val reached = (0..2640).map {
+                projectIndexLandmarkScrub(it / 10f, down, anchor, height, 8f, 100)
+            }
+            assertEquals((0 until 100).toList(), reached.distinct())
+            assertEquals(0, projectIndexLandmarkScrub(-100f, down, anchor, height, 8f, 100))
+            assertEquals(99, projectIndexLandmarkScrub(1000f, down, anchor, height, 8f, 100))
+        }
+    }
+
+    @Test fun projectIndexUsesCatalogIdentityWithoutChatRepositoryMetadata() {
+        val project = CatalogProject("github:owner/repo", "m", "Project", "/project", "catalog/repo")
+        val chat = session("chat", project.id, at = "2026-10-01T00:00:00Z")
+        fun section(projects: List<CatalogProject>) = ChatListModel.byProject(
+            snapshot.copy(projects = projects, sessions = listOf(chat)),
+        ).single()
+        assertEquals("catalog/repo", section(listOf(project)).repository)
+        assertEquals("owner/repo", section(listOf(project.copy(repoFullName = null))).repository)
+        assertEquals("owner/repo", section(emptyList()).repository)
+        val local = project.copy(id = "local", repoFullName = null)
+        assertNull(ChatListModel.byProject(snapshot.copy(projects = listOf(local),
+            sessions = listOf(chat.copy(projectId = local.id)))).single().repository)
+    }
+
+    @Test fun projectIndexJumpsToRenderedHeadersAfterFamilyFolding() {
+        val parent = session("parent", "p-zed", at = "2026-10-01T00:00:00Z")
+        val sections = ChatListModel.home(snapshot.copy(sessions = listOf(
+            parent.copy(id = "pin", pinned = true),
+            parent,
+            parent.copy(id = "child", openedBySessionId = "parent"),
+            parent.copy(id = "other", projectId = "p-alpha"),
+            parent.copy(id = "plain", projectId = "m:unassigned"),
+        )), HomeGrouping.Project)
+        fun rendered(folded: Set<String>) = sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded)) }
+        fun assertDestinations(groups: List<HomeSection>, expected: List<Int>) {
+            val targets = projectIndexTargets(groups)
+            assertEquals(expected, targets)
+            val rows = groups.flatMap { listOf(it.id) + it.chats.map(ChatItem::id) }
+            assertEquals(groups.map(HomeSection::id), targets.map(rows::get))
+        }
+        assertDestinations(rendered(emptySet()), listOf(0, 2, 5, 7))
+        assertDestinations(rendered(setOf("parent")), listOf(0, 2, 4, 6))
+        assertEquals(emptyList<Int>(), projectIndexTargets(emptyList()))
+    }
+
     @Test fun internalTabsContributeStatusWithoutBecomingRows() {
         val parent = session("parent", "p-zed", at = "2026-10-01T00:00:00Z").copy(userId = "me")
         val tab = parent.copy(id = "tab", parentSessionId = "parent", status = "running", userId = "other")

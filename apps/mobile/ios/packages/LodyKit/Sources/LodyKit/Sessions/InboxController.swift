@@ -101,6 +101,8 @@ final class InboxController: UIViewController {
     }, uniquingKeysWith: { _, new in new }) : [:]
     list.setOwners(owners)
     loadViews(state)
+    list.setProjectIndexEnabled(!state.userId.isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && traitCollection.horizontalSizeClass != .regular && HomeGrouping.stored == .project)
     guard !state.userId.isEmpty else {
       chrome.update(nil)
       list.setPlaceholder("")

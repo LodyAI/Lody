@@ -338,3 +338,19 @@ var separateOpenedChat = runningTab
 separateOpenedChat.parentSessionId = nil
 separateOpenedChat.openedBySessionId = tabOwner.id
 precondition(tabRows([separateOpenedChat]).first?.imageTint == "")
+
+// Hiding the repeated project label must not erase raw repository identity used by
+// the index; an opened child from another project must not supply the root logo.
+let logoCatalog = SessionCatalog(projects: [
+  SessionProject(id: "logo-root", name: "Root", repoFullName: "synthetic-owner/root"),
+  SessionProject(id: "logo-child", name: "Child", repoFullName: "another-owner/child"),
+], sessions: [
+  SessionItem(id: "logo-session", projectId: "logo-root"),
+  SessionItem(id: "logo-opened", projectId: "logo-child", openedBySessionId: "logo-session"),
+])
+let logoGroups = InboxSections.home(logoCatalog, grouping: .project, now: now)
+precondition(logoGroups.count == 1 && logoGroups[0].id == "group:logo-root")
+precondition(logoGroups[0].rows[0].place.isEmpty)
+precondition(logoGroups[0].rows[0].repository == "synthetic-owner/root")
+precondition(logoGroups[0].rows[1].repository == "another-owner/child")
+print("PASS: project grouping hides presentation while retaining root and cross-project child repository identity")

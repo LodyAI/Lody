@@ -299,6 +299,7 @@ fun ChatListScreen(
                 padding,
                 empty = state.placeholder,
                 listState = chatsListState,
+                projectIndex = grouping == HomeGrouping.Project,
                 owners = state.members.takeIf { homeScope == HomeScope.Team },
                 idleExpanded = idleExpanded,
                 onToggleIdle = { idleExpanded = !idleExpanded },
@@ -668,6 +669,7 @@ internal fun HomeList(
     onToggleIdle: () -> Unit = {},
     owners: Map<String, WorkspaceMember>? = null,
     pinsLabels: Boolean = true,
+    projectIndex: Boolean = false,
     onOpenChat: (ChatItem) -> Unit,
 ) {
     if (sections.isEmpty()) {
@@ -687,35 +689,38 @@ internal fun HomeList(
     val shown = remember(sections, folded) { sections.map { it.copy(chats = ChatListModel.fold(it.chats, folded)) } }
     val direction = LocalLayoutDirection.current
     // Keep the sticky slot below the app bar; content padding alone scrolls away.
-    LazyColumn(
-        Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
-        state = listState,
-        contentPadding = PaddingValues(
-            start = padding.calculateStartPadding(direction),
-            end = padding.calculateEndPadding(direction),
-            bottom = padding.calculateBottomPadding(),
-        ),
-    ) {
-        shown.forEach { section ->
-            if (pinsLabels) {
-                stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id)) }
-            } else {
-                item(key = section.id) { SectionTitle(titles.getValue(section.id)) }
-            }
-            items(section.visibleChats(idleExpanded), key = { "${section.id}/${it.id}" }) { chat ->
-                ChatRow(
-                    chat, if (section.header is HomeSection.Header.Project && chat.nestedUnder == null) details - ChatRowDetail.Project else details, now,
-                    owner = owners?.let { it[chat.ownerId] ?: WorkspaceMember(chat.ownerId.orEmpty(), "") },
-                    expanded = if (chat.treeParent) chat.id !in folded else null,
-                    onToggle = { toggleOpener(chat.id) },
-                ) { onOpenChat(chat) }
-            }
-            if (section.folds) {
-                item(key = "${section.id}/more") {
-                    MoreRow(
-                        if (idleExpanded) showLess else pluralStringResource(R.plurals.home_group_show_all, section.rootCount, section.rootCount),
-                        onToggleIdle,
-                    )
+    ProjectIndexList(shown, titles, listState, projectIndex, padding.calculateBottomPadding(),
+        Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = padding.calculateStartPadding(direction),
+                end = padding.calculateEndPadding(direction),
+                bottom = padding.calculateBottomPadding(),
+            ),
+        ) {
+            shown.forEach { section ->
+                if (pinsLabels) {
+                    stickyHeader(key = section.id) { SectionTitle(titles.getValue(section.id)) }
+                } else {
+                    item(key = section.id) { SectionTitle(titles.getValue(section.id)) }
+                }
+                items(section.visibleChats(idleExpanded), key = { "${section.id}/${it.id}" }) { chat ->
+                    ChatRow(
+                        chat, if (section.header is HomeSection.Header.Project && chat.nestedUnder == null) details - ChatRowDetail.Project else details, now,
+                        owner = owners?.let { it[chat.ownerId] ?: WorkspaceMember(chat.ownerId.orEmpty(), "") },
+                        expanded = if (chat.treeParent) chat.id !in folded else null,
+                        onToggle = { toggleOpener(chat.id) },
+                    ) { onOpenChat(chat) }
+                }
+                if (section.folds) {
+                    item(key = "${section.id}/more") {
+                        MoreRow(
+                            if (idleExpanded) showLess else pluralStringResource(R.plurals.home_group_show_all, section.rootCount, section.rootCount),
+                            onToggleIdle,
+                        )
+                    }
                 }
             }
         }

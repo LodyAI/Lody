@@ -138,6 +138,27 @@ The conversations button appears only with open child Tabs. More contains New
 current working directory conversation and access to closed conversations, so
 creation and recovery remain available without the conversations button.
 
+Chats grouped by project show a solid project-icon capsule while scrolling when
+multiple sections overflow the viewport. It slides in over 180 ms and out over
+140 ms, staying opaque over the full-width list throughout. Dismissal removes
+pointer and accessibility targets immediately. The capsule is 56 dp wide,
+8 dp from the edge, with 12 dp vertical padding. Targets retain a 48 dp pitch,
+24 dp logos and 32 dp selection highlights. When sections
+exceed the available height, evenly spaced landmarks retain the first and last
+sections instead of compressing targets. It lingers for 800 ms after scrolling
+or interaction ends (extended by the system accessibility timeout preference).
+Tap an icon to jump to that exact section. With landmarks, scrubbing starts from
+the tapped section after touch slop, then traverses every section toward either
+end of the capsule. Only the visible capsule captures index gestures.
+Backgrounding, leaving the list or losing scrollable content dismisses it and
+cancels pending jumps. Pinned and unassigned chats have dedicated symbols; project
+logos use catalog repository identity and the existing memory/disk image cache,
+with a repository glyph while loading or on failure, or a monogram for local
+projects. The index highlights the current section and carries status dots.
+TalkBack can activate named landmarks or adjust the index range one section at
+a time, including omitted sections; its state description names the current section. Other grouping/search views retain
+their ordinary list behavior.
+
 ## Verification
 
 With an emulator or device connected:
