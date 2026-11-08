@@ -696,6 +696,43 @@ describe('machine E2EE local runtime', () => {
     )
   );
 
+  effectIt.effect(
+    'reads the newest page first on every attempt, then continues the older scan',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-newest-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          // A long stream: 40 pages, newest first. The frame this machine just wrote
+          // is uploaded only after the first attempt has already scanned past the head.
+          const reads: (string | undefined)[] = [];
+          const recovery = makeExecutionOriginRecovery(
+            new ExecutionOrigins(join(directory, 'origins.sqlite')),
+            async (input) => {
+              reads.push(input.before);
+              const page = input.before === undefined ? 40 : Number(input.before);
+              return { messages: [], before: String(page - 1), atStart: page <= 1 };
+            },
+            { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+            `lody-e2ee:${'ab'.repeat(32)}`
+          );
+          const attempt = () =>
+            recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+              Effect.die('no frame')
+            );
+          yield* attempt();
+          expect(reads[0]).toBeUndefined();
+          const scanned = reads.length;
+          yield* attempt();
+          // The second attempt sees a frame uploaded since the first, then resumes.
+          expect(reads[scanned]).toBeUndefined();
+          expect(reads[scanned + 1]).toBe(String(40 - scanned));
+        })
+      )
+  );
+
   it('binds signed history to its device and ledger actor, independently of display account IDs', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
     const source = new LoroDoc();

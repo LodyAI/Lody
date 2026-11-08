@@ -79,8 +79,11 @@ export function makeExecutionOriginRecovery(
   ) {
     const key = `${docId}:${id.peer}:${id.counter}`;
     const work = Effect.gen(function* () {
+      // A frame this machine just wrote reaches the stream after the first attempt,
+      // so every attempt reads the newest page before resuming the older scan.
+      const resumed = cursors.get(key);
       for (let page = 0; page < 8; page += 1) {
-        const before = cursors.get(key);
+        const before = page === 0 ? undefined : cursors.get(key);
         const result = yield* Effect.tryPromise({
           try: (signal) => readPage({ ...access, docId, before }, signal),
           catch: (cause) => cause,
@@ -108,6 +111,7 @@ export function makeExecutionOriginRecovery(
           cursors.delete(key);
           return undefined;
         }
+        if (page === 0 && resumed !== undefined) continue;
         if (result.before === before)
           return yield* Effect.fail(new Error('e2ee_origin_cursor_stalled'));
         cursors.set(key, result.before);
