@@ -15,7 +15,6 @@ type CacheEntry = {
   blobUrl: string;
   dataUrl?: string;
   sizeBytes: number;
-  lastAccessedAt: number;
 };
 
 const imageCache = new Map<string, CacheEntry>();
@@ -41,7 +40,6 @@ const getCacheKey = (
 ): string => `${workspaceId}:${sessionId}:${imageId}:${variant}:${requestUrl}`;
 
 const touchCacheEntry = (entry: CacheEntry): void => {
-  entry.lastAccessedAt = Date.now();
   imageCache.delete(entry.key);
   imageCache.set(entry.key, entry);
 };
@@ -118,7 +116,6 @@ const writeBlobToMemoryCache = (key: string, blob: Blob, preparedUrl?: string): 
     blob,
     blobUrl,
     sizeBytes: blob.size,
-    lastAccessedAt: Date.now(),
   };
 
   imageCache.set(key, entry);
@@ -142,11 +139,6 @@ const blobToDataUrl = (blob: Blob): Promise<string> =>
   });
 
 type GetSessionImageCacheEntryArgs = Partial<import('@lody/shared').SessionImagePayload> & {
-  mimeType?: string;
-  sizeBytes?: number;
-  transport?: import('@lody/shared').SessionImagePayload['transport'];
-  machineId?: import('@lody/shared').SessionImagePayload['machineId'];
-  encryption?: import('@lody/shared').EncryptedAttachment;
   attachmentToken?: () => Promise<string>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
@@ -190,7 +182,7 @@ const originalCacheKey = (identity: SessionImageIdentity) =>
         buildSessionImageDownloadUrl(identity.workspaceId, identity.sessionId, identity.imageId)
       );
 
-/** Keep uploaded bytes available before the pending preview releases its source. */
+/** Keep prepared bytes available before the pending preview releases its source. */
 export async function seedSessionImageCache(
   identity: SessionImageIdentity,
   blob: Blob,
@@ -221,7 +213,7 @@ export async function seedSessionImageCache(
   }
 }
 
-/** Synchronous first paint for locally uploaded images; misses retain normal loading. */
+/** Synchronous first paint for prepared images; misses retain normal loading. */
 export function peekSessionImageUrl(
   identity: SessionImageIdentity,
   shareSafe = false

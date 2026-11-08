@@ -99,19 +99,27 @@ including the delivered row's insets. Progress overlays the bottom edge; it adds
 no height. Ready files show their size in the same subtitle slot. Failure reasons
 still belong to their affected card.
 
+`session-attachment-preparation.ts` owns attachment progress and ready receipts for
+both pending sends and schedules; callers only publish its snapshots. Admission
+and preparation use the same locality rule. Each preparation attempt selects its
+route once before processing unready attachments; ready-only sends skip selection.
+Successful items survive retries,
+while canceled work cannot publish progress or prepared references. The memory
+queue owns unfinished sources and ordering; the durable input owner takes over
+ready Roost inputs and their acceptance receipts.
+
 `session-attachment-preparation.ts` seeds `session-image-cache.ts` with each
 successful image preparation before releasing its source. Same-desktop images
-remain image payloads with local transport; ordinary files use local path references.
-Local images require `localImages: 1` and no cloud token or upload completion for
-sending or execution. Images are automatically published by the background upload
-owner when authorized cloud access is available, with retries after connectivity
-returns; publication never gates local execution. Image payloads carrying
-`transport`, `machineId`, or `localImageId` require `localImages: 1` on the execution
-target even after publication, because older strict image schemas reject those
-fields. Send admission, queued/replayed writes, and scheduled-message preparation
-and saving check that target capability without stripping durable identity.
-Published `r2` images may target a different capable machine; only pending local
-images retain the original-host execution restriction.
+remain image payloads with local transport; ordinary files use scoped host registration references.
+Local images need no cloud token or upload completion for sending or execution.
+Images are automatically published by the background upload owner when authorized
+cloud access is available, with retries after connectivity returns; publication
+never gates local execution. Sends, replay, and schedules preserve `transport`,
+`machineId`, and `localImageId` without checking daemon capability metadata.
+Desktop preparation uses the local host when its known machine ID matches the
+selected target; otherwise it transfers through the workspace's authorized path.
+Protected local preparation remains unavailable and cannot fall back to plaintext.
+Published `r2` images may target another machine while retaining their local identity.
 History, fullscreen, and queued previews resolve local images through scoped host
 IPC and its file-resource URL after a reload. They never build a cloud download
 URL for a pending local image. Local cache keys additionally include the owning
@@ -132,7 +140,7 @@ long-press sharing behavior. Browsers supporting `decode()` warm that URL before
 it becomes ready, avoiding a local decode flash. The existing 200 MiB memory bound and object URL
 cleanup remain; eviction/restart uses the image's local or uploaded transport. Cancelled or cache-cleared
 native conversions cannot publish late previews. Preview caching failures do
-not fail an otherwise successful upload.
+not fail otherwise successful preparation.
 
 Behavioral coverage: `tests/session-image-cache.test.ts`,
 `tests/session-attachment-preparation.test.ts`, and

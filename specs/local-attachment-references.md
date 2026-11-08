@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Electron same-machine ordinary files use original paths or managed local files without automatic upload or backfill. This requires a distinct reference protocol, trusted registration, Daemon resolution, preview and version compatibility. Originals are not immutable snapshots and do not widen Agent permissions. This draft records the intended guarantees; the [attachment lifecycle](../.agents/docs/cli-lib-session-files.md) describes the implemented boundaries and current limitations.
+Electron same-machine ordinary files use original paths or managed local files without automatic upload or backfill. This requires a distinct reference protocol, trusted registration, Daemon resolution, and preview. Originals are not immutable snapshots and do not widen Agent permissions. This draft records the intended guarantees; the [attachment lifecycle](../.agents/docs/cli-lib-session-files.md) describes the implemented boundaries and current limitations.
 
 ## Image transport scope
 
@@ -20,8 +20,7 @@ desktop can still preview and execute it offline. This is an intentional excepti
 to the zero-upload policy for ordinary files described below; existing image-shaped
 `local_attachment` records retain their original semantics.
 
-The image route requires `localImages: 1`, scoped host resolution and preserved
-ACP visual input. Protected workspaces reject unsupported plaintext preparation.
+The image route uses scoped host resolution and preserves ACP visual input. Protected workspaces reject unsupported plaintext preparation.
 Snapshots remain retained while frozen inputs may reference them; bounded storage
 admission may reject new images rather than reclaim potentially live snapshots.
 The Agent receives a workspace copy for resource links, not the durable snapshot.
@@ -41,7 +40,7 @@ Reuse the input snapshot, pending manager, and readiness boundary from the draft
 | Electron pathless File/Blob to verified local Daemon | Atomically save to a persistent local attachment directory after Send; return local reference |
 | Web/mobile, or Electron to remote Daemon             | Retain existing upload and verification                                                       |
 
-Same-machine routing requires trusted local runtime identity matching the target machine ID, not Electron detection, hostname, or project kind alone. Unknown identity waits. A known local target with missing capabilities, an offline Daemon, or failed preparation reports failure without upload fallback. Original references do not mechanically inherit upload size caps; generated content still has storage limits. Edited bytes are Blob sources, not original-path references.
+Same-machine routing requires trusted local runtime identity matching the target machine ID, not Electron detection, hostname, or project kind alone. When local identity is unavailable or does not match, use the existing transfer route. A selected local route reports preparation or Daemon failure directly. Original references do not mechanically inherit upload size caps; generated content still has storage limits. Edited bytes are Blob sources, not original-path references.
 
 ## 2. Local-reference contract
 
@@ -71,17 +70,17 @@ Other devices offer an explicit download from the original computer and never tr
 
 Add a distinct local-reference input representation across parsing, history normalization, rendering, queueing, dispatch, resend, and fork. Existing `transport: 'local'` retains its old pending-backfill meaning: neither globally stop its recovery nor silently migrate it. New original references and managed files must never enter the old backfill scan, including during restart recovery.
 
-Advertise a version through [Machine protocol negotiation](../packages/shared/AGENTS.md#machine-protocol-negotiation). Missing support disables new sends. Preserving opaque history in an old reader does not establish execution safety: an old Daemon must reject the entire execution request containing a new reference rather than run the remaining text. Combinations without that compatibility guarantee must not enable local-reference sending.
+Attachment preparation does not perform capability preflights for older Daemons. The receiving boundary validates execution inputs; unsupported inputs fail the request rather than disappearing from it.
 
 ## 3. Implementation scope
 
 The requested outcome is same-machine attachment use without Lody cloud upload. The following choices define the implementation boundary.
 
-- Apply one preparation strategy to new conversations, continuations and queued sends. Capture the original OS path before `snapshotAttachmentDrafts` slices the File; retain provenance only in local draft state. An edited or generated File must use managed bytes. Freeze the target machine with the send and recheck its trusted identity before registration and dispatch. Unknown identity keeps the message pending; known local failures never select cloud upload.
-- Introduce a distinct `local_attachment` input, with an opaque reference ID, owning machine, original submission identity, media kind and display metadata. Do not overload `file.sourcePath` or `transport: 'local'`. The local registry binds account/workspace, session, turn and reference to the canonical path and source kind. Registration is idempotent for the exact submission and rejects a different source under the same key. Retry uses that binding; resend creates a new authorized binding. Fork inheritance is an explicit local operation validating the source and destination, never implicit trust in copied history.
+- Apply one preparation strategy to new conversations, continuations and queued sends. Capture the original OS path before `snapshotAttachmentDrafts` slices the File; retain provenance only in local draft state. An edited or generated File must use managed bytes. Freeze the target machine with the send and select the preparation route once. Missing local identity uses the existing transfer route; a selected local route reports failures directly.
+- Introduce a distinct `local_attachment` input, with an opaque reference ID, owning machine, original submission identity, media kind and display metadata. Do not overload `file.sourcePath` or `transport: 'local'`. The local registry binds account/workspace, session, turn and reference to the canonical path and source kind. The first completed registration owns the submission reference. Retry reuses its saved metadata and bytes without comparing the source again; resend creates a new authorized binding. Fork inheritance is an explicit local operation validating the source and destination, never implicit trust in copied history.
 - Store registry records and generated files in a dedicated durable local store outside the existing blob/backfill directory. Original files are never copied or reclaimed. Initially retain accepted managed files; automatic garbage collection is outside this change. Failed staging may delete only its own unpublished temporary files. A lost registry produces an unavailable reference, never an upload or arbitrary path lookup.
 - Preserve image semantics through the existing ACP image input plus a local resource link. The local resolver supplies bytes only for image input and preview, not for ordinary-file preparation. Protected workspaces use an admitted host-local operation; until that path is supported, they fail explicitly instead of falling back to plaintext IPC or uploading same-machine content.
-- Gate authoring on a versioned machine capability and whole-request rejection of unknown required input kinds. Implement the rejection boundary before enabling authoring. Unsupported combinations show an upgrade-required error and retain the draft. Parsing must not discard a new input and then execute the remaining text.
+- Validate requests at the receiving boundary without attachment-specific version gates or repeated send-time preflights. Parsing must not discard an unsupported input and execute only the remaining text.
 - Render local references as normal attachment cards with an explicit local-only status. Local preview resolves the scoped registration through the existing narrow host boundary. Other devices can explicitly download current bytes, then open their saved copy. Cross-machine resend/fork is blocked until the user replaces the local-only attachment with an explicit transferred attachment. Sharing/export either discloses omission or refuses a complete attachment export; it never reads and uploads the local source implicitly.
 
 Remote targets and clients without native filesystem provenance retain existing transfers. This change does not make remote Agent execution offline, change model-provider input handling, or migrate old pending-backfill attachments. Exact API names and storage encoding are left to implementation; the scope and authorization checks above are not.

@@ -1,5 +1,5 @@
 import { isElectronRenderer } from '../lib/electron';
-import { validateExtendedImageTarget } from '../lib/session-attachment-routing';
+import { resolveAttachmentRoute } from '../lib/session-attachment-routing';
 import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
 import {
   getMachineRoomId,
@@ -54,48 +54,7 @@ export function createWorkspacePendingSends(args: {
     typeof BroadcastChannel === 'undefined'
       ? null
       : new BroadcastChannel(`lody-session-inputs:${scope}`);
-  const validateLocalAttachments = async (
-    send: PendingSessionSend,
-    kind: 'image' | 'file' = 'file'
-  ) => {
-    const target = send.targetMachineId;
-    if (!target || target !== args.localMachineId())
-      throw new Error('Local attachment execution environment changed');
-    const machine = await runtime.repo.getDocMeta(getMachineRoomId(target));
-    const capability = kind === 'image' ? 'localImages' : 'localAttachments';
-    if ((machine?.meta as MachineMeta | undefined)?.protocolCapabilities?.[capability] !== 1)
-      throw new Error(
-        `Update the local daemon to send local ${kind === 'image' ? 'images' : 'attachments'}`
-      );
-  };
-  const validateLocalReferences = async (send: PendingSessionSend) => {
-    await validateExtendedImageTarget({
-      blocks: normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
-      targetMachineId: send.targetMachineId,
-      readMachine: async (target) =>
-        (await runtime.repo.getDocMeta(getMachineRoomId(target)))?.meta as MachineMeta | undefined,
-    });
-    if (
-      normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, '').some(
-        (block) => block.type === 'local_attachment'
-      )
-    )
-      await validateLocalAttachments(send);
-    const localImages = normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, '').filter(
-      (block) => block.type === 'image' && block.transport === 'local'
-    );
-    if (localImages.length) {
-      if (
-        localImages.some(
-          (image) => image.type === 'image' && image.machineId !== send.targetMachineId
-        )
-      )
-        throw new Error('Local image execution environment changed');
-      await validateLocalAttachments(send, 'image');
-    }
-  };
   const validateTarget = async (send: PendingSessionSend) => {
-    await validateLocalReferences(send);
     const found = await runtime.repo.getDocMeta(getSessionRoomId(send.sessionId));
     const meta = found?.meta as SessionMeta | undefined;
     if (isLoroRepoDocDeleted(found) || meta?.isArchived)
@@ -232,13 +191,8 @@ export function createWorkspacePendingSends(args: {
   const admissionOrder = new Map<string, number>();
   let nextAdmission = 0;
   const held = createPendingSessionSends({
-    prepare: (send, signal, update) => {
-      let attachments = send.attachments;
-      const publish = (next: typeof attachments) => {
-        attachments = next;
-        update(next);
-      };
-      return prepareDraftAttachments({
+    prepare: (send, signal, update) =>
+      prepareDraftAttachments({
         content: { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
         record: send,
         signal,
@@ -246,19 +200,10 @@ export function createWorkspacePendingSends(args: {
         token: args.token,
         attachmentToken: runtime.attachmentToken,
         localMachineId: args.localMachineId,
-        validateLocalTarget: (kind) => validateLocalAttachments(send, kind),
-        update: publish,
-        report: (id, progress) =>
-          publish(
-            attachments.map((attachment) =>
-              attachment.id === id ? { ...attachment, progress } : attachment
-            )
-          ),
-      });
-    },
+        update,
+      }),
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {
-        await validateLocalReferences(send);
         if (runtime.contentMode === 'e2ee')
           assertProtectedAttachmentReferences([
             ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
@@ -317,7 +262,11 @@ export function createWorkspacePendingSends(args: {
   });
   return {
     canPrepareAttachmentsLocally: (machineId: MachineId) =>
-      isElectronRenderer() && machineId === args.localMachineId(),
+      resolveAttachmentRoute({
+        native: isElectronRenderer(),
+        localMachineId: args.localMachineId(),
+        targetMachineId: machineId,
+      }) === 'local',
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);

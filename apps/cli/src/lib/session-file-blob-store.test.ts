@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  storeLocalSessionImage,
+  readLocalSessionImage,
+  readLocalSessionImageReceipt,
+  writeLocalSessionImageReceipt,
   cleanupBackfilledSessionFileBlobs,
   copyIntoSessionFileBlobStore,
   getSessionFileBlobDir,
@@ -121,7 +125,7 @@ describe('session file blob store', () => {
     expect(pending).toHaveLength(2);
   });
 
-  it('retains the exact encrypted backfill receipt for restart adoption', async () => {
+  it('retains file and image backfill receipts for restart adoption', async () => {
     const source = await makeSource('private.txt', 'hello');
     const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'encrypted-local', homeDir };
     const encryption = {
@@ -143,6 +147,44 @@ describe('session file blob store', () => {
     expect(await sessionFileBlobExists(args)).toBe(true);
     await markSessionFileBlobBackfilled(args);
     expect(await readSessionFileBlobBackfillReceipt(args)).toBeNull();
+
+    const scope = { ...args, accountId: 'account', machineId: 'machine' };
+    const image = await storeLocalSessionImage(
+      scope,
+      {
+        imageId: '11111111-1111-4111-8111-111111111111',
+        localImageId: '11111111-1111-4111-8111-111111111111',
+        machineId: scope.machineId,
+        storageSessionId: scope.sessionId,
+        transport: 'local',
+        mimeType: 'image/png',
+        sizeBytes: 5,
+      },
+      Buffer.from('image')
+    );
+    expect(
+      await storeLocalSessionImage(
+        scope,
+        { ...image, mimeType: 'image/jpeg', sizeBytes: 11 },
+        Buffer.from('replacement')
+      )
+    ).toEqual(image);
+    const local = await readLocalSessionImage(scope, {
+      ...image,
+      mimeType: 'image/jpeg',
+      sizeBytes: 11,
+    });
+    expect(local.image).toEqual(image);
+    expect(local.bytes.toString()).toBe('image');
+    const receipt = { ...image, transport: 'r2' as const, imageId: 'uploaded-image' };
+    await writeLocalSessionImageReceipt(scope, receipt);
+    // Cloud publication remains adoptable without reopening the local bytes.
+    await rm(local.path);
+    expect(await readLocalSessionImageReceipt(scope, image.localImageId!)).toEqual(receipt);
+    await expect(
+      readLocalSessionImageReceipt({ ...scope, accountId: 'another-account' }, image.localImageId!)
+    ).rejects.toThrow('Local image reference mismatch');
+    await expect(readLocalSessionImage(scope, image)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects new writes when the local blob quota is full', async () => {

@@ -1,8 +1,7 @@
 import { resolveAttachmentRoute } from './session-attachment-routing';
-import { prepareElectronLocalAttachment, prepareElectronLocalImage } from './electron-local-attachment';
+import { prepareElectronLocalAttachment } from './electron-local-attachment';
 import { isElectronRenderer } from './electron';
 import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
-import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import type { WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   inputBlocksToHistoryItems,
@@ -45,7 +44,7 @@ export function finalizePreparedSend(record: DraftAttachmentSend): PreparedSend 
 
 /**
  * Prepare every unready attachment, one at a time, publishing each result
- * through `update`. Rejects with the first failure after trying the rest, so a
+ * through `update`. Rejects after trying the rest when any item fails, so a
  * retry only transfers what failed.
  */
 export async function prepareDraftAttachments(args: {
@@ -56,12 +55,24 @@ export async function prepareDraftAttachments(args: {
   token(): string | null;
   attachmentToken?: () => Promise<string>;
   localMachineId(): MachineId | null;
-  validateLocalTarget(kind: 'image' | 'file'): Promise<void>;
   update(attachments: DraftAttachmentSend['attachments']): void;
-  report(id: string, progress: number): void;
 }): Promise<PreparedSend> {
   let attachments = args.record.attachments;
+  if (!attachments.some((attachment) => !attachment.ready))
+    return finalizePreparedSend(args.record);
+  throwIfSendAborted(args.signal);
+  const machineId = args.record.targetMachineId ?? null;
+  const route = resolveAttachmentRoute({
+    native: isElectronRenderer(),
+    localMachineId: args.localMachineId(),
+    targetMachineId: machineId,
+  });
   let failure: unknown;
+  const report = (id: string, progress: number) => {
+    if (args.signal.aborted) return;
+    attachments = attachments.map((item) => (item.id === id ? { ...item, progress } : item));
+    args.update(attachments);
+  };
   // One transfer at a time per message bounds hashing memory and preserves
   // successful results; different conversations retain independent lifetimes.
   for (const attachment of attachments) {
@@ -74,16 +85,7 @@ export async function prepareDraftAttachments(args: {
         lastModified: attachment.lastModified,
       });
       let ready: SessionInputBlock;
-      const machineId = args.record.targetMachineId ?? null;
-      const route = resolveAttachmentRoute({
-        native: isElectronRenderer(),
-        localMachineId: args.localMachineId(),
-        targetMachineId: machineId,
-      });
-      if (route === 'transfer' && args.content.mode !== 'protected')
-        await authorizePlaintextAttachmentPreparation(args.record.workspaceId, args.signal, args.record.entry.userId);
       if (route === 'local') {
-        await args.validateLocalTarget(attachment.kind);
         if (args.content.mode === 'protected')
           throw new Error('Protected local attachment preparation is unavailable');
         if (!attachment.localReferenceId) {
@@ -94,12 +96,9 @@ export async function prepareDraftAttachments(args: {
           const validationError = validateSessionImageFile(file);
           if (validationError) throw new Error(validationError);
         }
-        const prepare = attachment.kind === 'image'
-          ? prepareElectronLocalImage
-          : prepareElectronLocalAttachment;
         ready = await args.resources.run<SessionInputBlock>(
           (signal) =>
-            prepare({
+            prepareElectronLocalAttachment({
               workspaceId: args.record.workspaceId,
               sessionId: args.record.sessionId,
               machineId: machineId!,
@@ -110,8 +109,6 @@ export async function prepareDraftAttachments(args: {
           args.signal
         );
       } else if (attachment.kind === 'image') {
-        const token = args.token();
-        if (!token) throw new Error('Image transfer requires authentication');
         const image = await args.resources.run(
           (signal) =>
             uploadSessionImage({
@@ -119,17 +116,17 @@ export async function prepareDraftAttachments(args: {
               accountId: args.record.entry.userId,
               workspaceId: args.record.workspaceId as WorkspaceId,
               sessionId: args.record.sessionId,
-              token,
+              token: args.token(),
               attachmentToken: args.attachmentToken,
               file,
               signal,
-              onProgress: (progress) => args.report(attachment.id, progress),
+              onProgress: (progress) => report(attachment.id, progress),
             }),
           args.signal
         );
         ready = { type: 'image', ...image };
       } else {
-        const fileResult = await prepareSessionFile(args.resources, {
+        ready = await prepareSessionFile(args.resources, {
           content: args.content,
           accountId: args.record.entry.userId,
           workspaceId: args.record.workspaceId as WorkspaceId,
@@ -138,9 +135,8 @@ export async function prepareDraftAttachments(args: {
           attachmentToken: args.attachmentToken,
           file,
           signal: args.signal,
-          onProgress: (progress) => args.report(attachment.id, progress.percent),
+          onProgress: (progress) => report(attachment.id, progress.percent),
         });
-        ready = fileResult;
       }
       throwIfSendAborted(args.signal);
       if (args.content.mode === 'protected') assertProtectedAttachmentReferences([ready]);

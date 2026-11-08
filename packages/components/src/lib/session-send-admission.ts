@@ -1,7 +1,6 @@
 import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from './workspace-feature';
-import { validateExtendedImageTarget } from './session-attachment-routing';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   getMachineRoomId,
@@ -55,7 +54,7 @@ export async function acceptSessionUserTurn(
     )
   ) {
     // Keep remote drafts in the composer until mode is known. Native same-machine
-    // preparation uses IPC and revalidates its target before reading source bytes.
+    // preparation uses scoped host IPC without requiring cloud authorization.
     const localTarget =
       !!meta?.machineId &&
       runtime.pendingSends?.canPrepareAttachmentsLocally?.(meta.machineId as MachineId) === true;
@@ -81,17 +80,19 @@ export async function acceptSessionUserTurn(
       ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
     ]);
   }
-  await validateExtendedImageTarget({
-    blocks: [
-      ...normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, ''),
-      ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
-    ],
-    targetMachineId: meta?.machineId,
-    readMachine: async (target) =>
-      (await runtime.repo.getDocMeta(getMachineRoomId(target)))?.meta as MachineMeta | undefined,
-  });
+
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
+  const prepared =
+    !unprepared && attachments?.length
+      ? finalizePreparedSend({
+          workspaceId: runtime.workspaceId,
+          sessionId,
+          entry,
+          queue,
+          attachments,
+        })
+      : { entry, queue };
   const roostBackend = meta?.historyBackend === 'roost';
   if (runtime.contentMode === 'e2ee' && roostBackend)
     throw new Error('e2ee_history_backend_unavailable');
@@ -108,16 +109,6 @@ export async function acceptSessionUserTurn(
     // refusal so an older owner cannot consume the draft or create an empty session.
     if (roostBackend && creation)
       await prepareUserTurnWrite(runtime, { sessionId, entry, delivery, creation });
-    const prepared =
-      !unprepared && attachments?.length
-        ? finalizePreparedSend({
-            workspaceId: runtime.workspaceId,
-            sessionId,
-            entry,
-            queue,
-            attachments,
-          })
-        : { entry, queue };
     pending.enqueue({
       id: entry.id,
       sessionId,
@@ -135,15 +126,6 @@ export async function acceptSessionUserTurn(
   }
   if (roostBackend) throw new Error('Local input acceptance is unavailable');
   if (unprepared) throw new Error('Attachments cannot be sent in this workspace');
-  const prepared = attachments?.length
-    ? finalizePreparedSend({
-        workspaceId: runtime.workspaceId,
-        sessionId,
-        entry,
-        queue,
-        attachments,
-      })
-    : { entry, queue };
   await writeUserTurn(runtime, {
     sessionId,
     entry: prepared.entry,

@@ -9467,6 +9467,20 @@ export class MessageHandler {
     };
   }
 
+  private async promoteLocalImageReceipt(
+    doc: SessionDocument,
+    image: import('@lody/shared').SessionImagePayload,
+    backend: SessionBackend
+  ): Promise<void> {
+    await backend.applyHistoryAction({
+      kind: 'image-backfilled',
+      localImageId: image.localImageId!,
+      machineId: this.machineId,
+      image,
+    });
+    await doc.promoteLocalImageReferences(image);
+  }
+
   private async reconcileLocalImageReceipts(
     sessionId: SessionId,
     doc: SessionDocument,
@@ -9507,13 +9521,7 @@ export class MessageHandler {
       });
       if (!receipt) continue;
       if (this.sessionFileBackfillStopped) return;
-      await backend.applyHistoryAction({
-        kind: 'image-backfilled',
-        localImageId: block.localImageId,
-        machineId: this.machineId,
-        image: receipt,
-      });
-      await doc.promoteLocalImageReferences(receipt);
+      await this.promoteLocalImageReceipt(doc, receipt, backend);
     }
   }
 
@@ -9521,9 +9529,11 @@ export class MessageHandler {
     sessionId: SessionId,
     image: import('@lody/shared').SessionImagePayload
   ): void {
+    const signal = this.remoteBackfillAbort?.signal;
     if (
       this.sessionFileBackfillStopped ||
-      !this.remoteBackfillEnabled ||
+      !signal ||
+      signal.aborted ||
       !this.cloudPort.attachmentUpload ||
       this.encryptedAttachments ||
       !image.localImageId
@@ -9532,18 +9542,14 @@ export class MessageHandler {
     const key = `${sessionId}:${image.localImageId}`;
     if (this.localImageBackfills.has(key)) return;
     const generation = this.remoteBackfillGeneration;
-    const signal = this.remoteBackfillAbort?.signal;
-    if (!signal) return;
     const work = async () => {
-      for (let attempt = 1; !signal.aborted && !this.sessionFileBackfillStopped; attempt++) {
+      for (let attempt = 1; !signal.aborted; attempt++) {
         try {
           this.throwIfBackfillSuperseded(generation);
           const scope = this.localImageScope(sessionId);
-          const local = await readLocalSessionImage(scope, image);
-          const localImageId = local.image.localImageId;
-          if (!localImageId) throw new Error('Missing local image identity');
-          let receipt = await readLocalSessionImageReceipt(scope, localImageId);
+          let receipt = await readLocalSessionImageReceipt(scope, image.localImageId!);
           if (!receipt) {
+            const local = await readLocalSessionImage(scope, image);
             const uploaded = await this.uploadSessionImageFile({
               workspaceId: this.workspaceId,
               sessionId,
@@ -9570,18 +9576,12 @@ export class MessageHandler {
           const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
           const backend = await this.getSessionBackend(doc);
           this.throwIfBackfillSuperseded(generation);
-          await backend.applyHistoryAction({
-            kind: 'image-backfilled',
-            localImageId,
-            machineId: this.machineId,
-            image: receipt,
-          });
-          await doc.promoteLocalImageReferences(receipt);
+          await this.promoteLocalImageReceipt(doc, receipt, backend);
           // The durable receipt is also consumed by later history/queue change checks.
           void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
           return;
         } catch (error) {
-          if (signal.aborted || this.sessionFileBackfillStopped) return;
+          if (signal.aborted) return;
           this.logger.warn(`[${sessionId}] Image backfill deferred: ${formatErrorMessage(error)}`);
           // Pending image work does not expire after a fixed attempt count. The
           // owning bridge aborts both this wait and the actual network request.

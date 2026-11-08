@@ -1,4 +1,4 @@
-import type { SessionLocalAttachment, SessionInputBlock } from '@lody/shared';
+import type { SessionInputBlock } from '@lody/shared';
 import { getIpcServices } from './electron-ipc-client';
 import { throwIfSendAborted } from './session-send-resources';
 import type { SessionAttachmentDraft } from './session-attachment-draft';
@@ -12,32 +12,10 @@ type PrepareLocalAttachmentArgs = {
   signal: AbortSignal;
 };
 
-export async function prepareElectronLocalImage(
+/** Native images and files share source ownership and cancellation; the host owns registration. */
+export async function prepareElectronLocalAttachment(
   args: PrepareLocalAttachmentArgs
-): Promise<Extract<SessionInputBlock, { type: 'image' }>> {
-  throwIfSendAborted(args.signal);
-  const ipc = getIpcServices();
-  if (!ipc) throw new Error('Local image capability is unavailable');
-  const { attachment } = args;
-  const source = attachment.localSourcePath
-    ? { path: attachment.localSourcePath }
-    : { bytes: await attachment.source!.arrayBuffer() };
-  throwIfSendAborted(args.signal);
-  const result = await ipc.localProjects.prepareLocalImage({
-    workspaceId: args.workspaceId,
-    sessionId: args.sessionId,
-    machineId: args.machineId,
-    imageId: attachment.localReferenceId!,
-    fileName: attachment.name,
-    mimeType: attachment.mimeType,
-    source,
-  });
-  throwIfSendAborted(args.signal);
-  if (!result.ok) throw new Error(result.error);
-  return { type: 'image', ...result.image };
-}
-
-export async function prepareElectronLocalAttachment(args: PrepareLocalAttachmentArgs): Promise<SessionLocalAttachment> {
+): Promise<SessionInputBlock> {
   throwIfSendAborted(args.signal);
   const ipc = getIpcServices();
   if (!ipc) throw new Error('Local attachment capability is unavailable');
@@ -46,16 +24,28 @@ export async function prepareElectronLocalAttachment(args: PrepareLocalAttachmen
     ? { path: attachment.localSourcePath }
     : { bytes: await attachment.source!.arrayBuffer() };
   throwIfSendAborted(args.signal);
-  const result = await ipc.localProjects.prepareLocalAttachment({
+  const payload = {
     workspaceId: args.workspaceId,
     sessionId: args.sessionId,
     machineId: args.machineId,
-    turnId: args.turnId,
-    referenceId: attachment.localReferenceId!,
-    kind: attachment.kind,
     fileName: attachment.name,
     mimeType: attachment.mimeType || 'application/octet-stream',
     source,
+  };
+  if (attachment.kind === 'image') {
+    const result = await ipc.localProjects.prepareLocalImage({
+      ...payload,
+      imageId: attachment.localReferenceId!,
+    });
+    throwIfSendAborted(args.signal);
+    if (!result.ok) throw new Error(result.error);
+    return { type: 'image', ...result.image };
+  }
+  const result = await ipc.localProjects.prepareLocalAttachment({
+    ...payload,
+    turnId: args.turnId,
+    referenceId: attachment.localReferenceId!,
+    kind: attachment.kind,
   });
   throwIfSendAborted(args.signal);
   if (!result.ok) throw new Error(result.error);

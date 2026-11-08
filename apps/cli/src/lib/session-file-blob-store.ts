@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { SessionImagePayloadSchema } from '@lody/shared/message-schemas';
 import type { SessionImagePayload } from '@lody/shared';
@@ -257,6 +257,33 @@ export const copyIntoSessionFileBlobStore = (args: {
   return run;
 };
 
+// Both writers hold blobStoreWriteChain while checking quota and publishing bytes.
+const admitBlobWrite = async (destination: string, sourceSize: number, homeDir?: string) => {
+  let existingSize = 0;
+  try {
+    existingSize = (await fs.promises.stat(destination)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+  let usage = await getSessionFileBlobStoreUsage({ homeDir });
+  const projectedBytes = () => usage.usedBytes - existingSize + sourceSize;
+  if (projectedBytes() > usage.quotaBytes) {
+    await cleanupBackfilledSessionFileBlobs({ homeDir, retainMs: 0 }).catch(() => undefined);
+    usage = await getSessionFileBlobStoreUsage({ homeDir });
+    if (projectedBytes() > usage.quotaBytes) {
+      throw new SessionFileBlobQuotaError(usage.usedBytes, usage.quotaBytes);
+    }
+  }
+  const usedBytes = projectedBytes();
+  return {
+    usedBytes,
+    quotaBytes: usage.quotaBytes,
+    warn: usedBytes >= usage.quotaBytes * SESSION_FILE_BLOB_WARN_RATIO,
+  };
+};
+
 const copyIntoSessionFileBlobStoreUnlocked = async (args: {
   workspaceId: string;
   sessionId: string;
@@ -269,25 +296,7 @@ const copyIntoSessionFileBlobStoreUnlocked = async (args: {
   await mkdirPrivate(dir);
   const destPath = getSessionFileBlobPath(args);
   const sourceSize = (await fs.promises.stat(args.sourcePath)).size;
-  let existingSize = 0;
-  try {
-    existingSize = (await fs.promises.stat(destPath)).size;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-  }
-  let usage = await getSessionFileBlobStoreUsage({ homeDir: args.homeDir });
-  const projectedBytes = () => usage.usedBytes - existingSize + sourceSize;
-  if (projectedBytes() > usage.quotaBytes) {
-    await cleanupBackfilledSessionFileBlobs({ homeDir: args.homeDir, retainMs: 0 }).catch(
-      () => undefined
-    );
-    usage = await getSessionFileBlobStoreUsage({ homeDir: args.homeDir });
-    if (projectedBytes() > usage.quotaBytes) {
-      throw new SessionFileBlobQuotaError(usage.usedBytes, usage.quotaBytes);
-    }
-  }
+  const usage = await admitBlobWrite(destPath, sourceSize, args.homeDir);
   const tempPath = `${destPath}.${process.pid}.${getServerNow()}.part`;
   try {
     await fs.promises.copyFile(args.sourcePath, tempPath);
@@ -301,13 +310,7 @@ const copyIntoSessionFileBlobStoreUnlocked = async (args: {
     throw error;
   }
   await fs.promises.chmod(destPath, 0o600);
-  const usedBytes = projectedBytes();
-  return {
-    destPath,
-    usedBytes,
-    quotaBytes: usage.quotaBytes,
-    warn: usedBytes >= usage.quotaBytes * SESSION_FILE_BLOB_WARN_RATIO,
-  };
+  return { destPath, ...usage };
 };
 
 // Sidecar recording the relay fileId a blob was (about to be) flipped to. Written
@@ -506,49 +509,26 @@ type ImageScope = {
   accountId: string;
   homeDir?: string;
 };
-const ImageRecordSchema = z
-  .object({
-    version: z.literal(1),
-    accountId: z.string(),
-    sha256: z.string(),
-    image: SessionImagePayloadSchema,
-  })
-  .strict();
+const ImageRecordSchema = z.object({
+  version: z.literal(1),
+  accountId: z.string(),
+  image: SessionImagePayloadSchema,
+});
 const imageBlobArgs = (scope: ImageScope, localImageId: string) => ({
   ...scope,
   fileId: `image-${z.string().uuid().parse(localImageId)}`,
 });
 async function publishImageFile(destination: string, bytes: Uint8Array): Promise<void> {
   const temporary = `${destination}.${randomUUID()}.part`;
-  const handle = await fs.promises.open(temporary, 'wx', 0o600);
   try {
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
-      await fs.promises.link(temporary, destination);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (!(await fs.promises.readFile(destination)).equals(Buffer.from(bytes)))
-        throw new Error('Local image identity conflicts with accepted content');
-    }
-    // Directory fsync is supported on Unix. Windows rejects directory handles.
-    if (process.platform !== 'win32') {
-      const directory = await fs.promises.open(path.dirname(destination), 'r');
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
-    }
+    await fs.promises.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600, flush: true });
+    await fs.promises.rename(temporary, destination);
   } finally {
     await fs.promises.unlink(temporary).catch(() => undefined);
   }
 }
-export async function readLocalSessionImage(scope: ImageScope, image: SessionImagePayload) {
+
+async function readLocalImageRecord(scope: ImageScope, image: SessionImagePayload) {
   if (image.machineId !== scope.machineId || !image.localImageId || image.encryption)
     throw new Error('Local image is unavailable on this machine');
   const blobPath = getSessionFileBlobPath(imageBlobArgs(scope, image.localImageId));
@@ -558,17 +538,15 @@ export async function readLocalSessionImage(scope: ImageScope, image: SessionIma
   if (
     saved.accountId !== scope.accountId ||
     saved.image.machineId !== scope.machineId ||
-    saved.image.localImageId !== image.localImageId ||
-    saved.image.mimeType !== image.mimeType ||
-    saved.image.sizeBytes !== image.sizeBytes
+    saved.image.localImageId !== image.localImageId
   )
     throw new Error('Local image reference mismatch');
+  return { blobPath, saved };
+}
+
+export async function readLocalSessionImage(scope: ImageScope, image: SessionImagePayload) {
+  const { blobPath, saved } = await readLocalImageRecord(scope, image);
   const bytes = await fs.promises.readFile(blobPath);
-  if (
-    bytes.length !== saved.image.sizeBytes ||
-    createHash('sha256').update(bytes).digest('hex') !== saved.sha256
-  )
-    throw new Error('Local image snapshot changed');
   return { path: blobPath, bytes, image: saved.image };
 }
 export function storeLocalSessionImage(
@@ -577,47 +555,18 @@ export function storeLocalSessionImage(
   bytes: Buffer
 ): Promise<SessionImagePayload> {
   const work = async () => {
-    const parsed = SessionImagePayloadSchema.parse(image);
-    if (
-      parsed.transport !== 'local' ||
-      !parsed.localImageId ||
-      parsed.machineId !== scope.machineId ||
-      parsed.sizeBytes !== bytes.length
-    )
-      throw new Error('Invalid local image snapshot');
-    const args = imageBlobArgs(scope, parsed.localImageId);
-    const destination = getSessionFileBlobPath(args);
-    await mkdirPrivate(getSessionFilesRoot(scope.homeDir));
-    await mkdirPrivate(getSessionFileBlobDir(args));
-    let existingBytes = 0;
+    // A completed registration owns this identity. Retries use its accepted metadata.
     try {
-      existingBytes = (await fs.promises.stat(destination)).size;
+      return (await readLocalImageRecord(scope, image)).saved.image;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    let usage = await getSessionFileBlobStoreUsage(scope);
-    if (usage.usedBytes + bytes.length - existingBytes > usage.quotaBytes) {
-      await cleanupBackfilledSessionFileBlobs({ ...scope, retainMs: 0 });
-      usage = await getSessionFileBlobStoreUsage(scope);
-      if (usage.usedBytes + bytes.length - existingBytes > usage.quotaBytes)
-        throw new SessionFileBlobQuotaError(usage.usedBytes, usage.quotaBytes);
-    }
-    // Persist newly created path components as well as the file entries.
-    if (process.platform !== 'win32') {
-      for (const directoryPath of [
-        path.dirname(destination),
-        path.dirname(path.dirname(destination)),
-        getSessionFilesRoot(scope.homeDir),
-        path.dirname(getSessionFilesRoot(scope.homeDir)),
-      ]) {
-        const directory = await fs.promises.open(directoryPath, 'r');
-        try {
-          await directory.sync();
-        } finally {
-          await directory.close();
-        }
-      }
-    }
+    const args = imageBlobArgs(scope, image.localImageId!);
+    const destination = getSessionFileBlobPath(args);
+    await mkdirPrivate(getSessionFilesRoot(scope.homeDir));
+    await mkdirPrivate(getSessionFileBlobDir(args));
+    await admitBlobWrite(destination, bytes.length, scope.homeDir);
+    // Publish bytes before metadata. An interrupted, unaccepted write can be replaced.
     await publishImageFile(destination, bytes);
     await publishImageFile(
       `${destination}.imagemeta`,
@@ -625,12 +574,11 @@ export function storeLocalSessionImage(
         JSON.stringify({
           version: 1,
           accountId: scope.accountId,
-          sha256: createHash('sha256').update(bytes).digest('hex'),
-          image: parsed,
+          image,
         })
       )
     );
-    return parsed;
+    return image;
   };
   const run = blobStoreWriteChain.then(work, work);
   blobStoreWriteChain = run.catch(() => undefined);
@@ -640,39 +588,31 @@ export async function readLocalSessionImageReceipt(
   scope: ImageScope,
   localImageId: string
 ): Promise<SessionImagePayload | null> {
+  let raw: string;
   try {
-    const receipt = SessionImagePayloadSchema.parse(
-      JSON.parse(
-        await fs.promises.readFile(
-          `${getSessionFileBlobPath(imageBlobArgs(scope, localImageId))}.imagereceipt`,
-          'utf8'
-        )
-      )
+    raw = await fs.promises.readFile(
+      `${getSessionFileBlobPath(imageBlobArgs(scope, localImageId))}.imagereceipt`,
+      'utf8'
     );
-    if (
-      receipt.transport !== 'r2' ||
-      receipt.localImageId !== localImageId ||
-      receipt.machineId !== scope.machineId
-    )
-      throw new Error('Invalid image upload receipt');
-    await readLocalSessionImage(scope, receipt);
-    return receipt;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
+  const receipt = SessionImagePayloadSchema.parse(JSON.parse(raw));
+  if (receipt.transport !== 'r2' || receipt.localImageId !== localImageId)
+    throw new Error('Invalid image upload receipt');
+  await readLocalImageRecord(scope, receipt);
+  return receipt;
 }
+
 export async function writeLocalSessionImageReceipt(
   scope: ImageScope,
   image: SessionImagePayload
 ): Promise<void> {
-  const parsed = SessionImagePayloadSchema.parse(image);
-  if (!parsed.localImageId || parsed.transport !== 'r2')
-    throw new Error('Invalid image upload receipt');
-  await readLocalSessionImage(scope, parsed);
+  await readLocalImageRecord(scope, image);
   await publishImageFile(
-    `${getSessionFileBlobPath(imageBlobArgs(scope, parsed.localImageId))}.imagereceipt`,
-    Buffer.from(JSON.stringify(parsed))
+    `${getSessionFileBlobPath(imageBlobArgs(scope, image.localImageId!))}.imagereceipt`,
+    Buffer.from(JSON.stringify(image))
   );
 }
 export async function listLocalSessionImages(

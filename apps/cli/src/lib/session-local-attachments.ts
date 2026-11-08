@@ -6,7 +6,6 @@ import {
   type FileDownloadResponse,
 } from '@lody/shared';
 import * as fs from 'node:fs/promises';
-import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { SessionLocalAttachment } from '@lody/shared';
@@ -32,7 +31,6 @@ type Record = {
   originalPath: string;
   canonicalPath: string;
   managed: boolean;
-  sourceHash?: string;
   attachment: SessionLocalAttachment;
 };
 const key = (scope: LocalAttachmentScope, id: string) =>
@@ -42,12 +40,11 @@ const key = (scope: LocalAttachmentScope, id: string) =>
 function recordPath(root: string, scope: LocalAttachmentScope, id: string) {
   return path.join(root, key(scope, id) + '.json');
 }
-async function readableFile(file: string) {
+async function regularFile(file: string) {
   if (!path.isAbsolute(file)) throw new Error('Attachment requires an absolute path');
   const canonical = await fs.realpath(file);
   const stat = await fs.stat(canonical);
   if (!stat.isFile()) throw new Error('Attachment is not a regular file');
-  await fs.access(canonical, constants.R_OK);
   return { canonical, size: stat.size };
 }
 type Usage = Pick<LocalAttachmentScope, 'sessionId' | 'turnId'>;
@@ -56,6 +53,13 @@ type Environment = Pick<LocalAttachmentScope, 'workspaceId' | 'machineId'> & { a
 /** One account/workspace/machine attachment store. Callers authorize session operations. */
 export class LocalAttachmentStore {
   private readonly root: string;
+  private writeChain: Promise<unknown> = Promise.resolve();
+
+  private write<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(work, work);
+    this.writeChain = run.catch(() => undefined);
+    return run;
+  }
   constructor(
     private readonly environment: Environment,
     dataDir = getLodyDataDir()
@@ -79,9 +83,15 @@ export class LocalAttachmentStore {
   async register(
     input: Omit<Registration, 'workspaceId' | 'machineId'>
   ): Promise<SessionLocalAttachment> {
+    return this.write(() => this.registerNew(input));
+  }
+
+  private async registerNew(input: Omit<Registration, 'workspaceId' | 'machineId'>) {
     const root = this.root;
     const scope = this.scope(input);
-    const source = await readableFile(input.path);
+    const accepted = await this.readRecord(scope, input.referenceId);
+    if (accepted) return accepted.attachment;
+    const source = await regularFile(input.path);
     const attachment = SessionLocalAttachmentSchema.parse({
       type: 'local_attachment',
       referenceId: input.referenceId,
@@ -97,42 +107,11 @@ export class LocalAttachmentStore {
     const metadata = recordPath(root, scope, input.referenceId);
     if (input.managed && source.size > 100 * 1024 * 1024)
       throw new Error('Generated attachment exceeds local storage limit');
-    const sourceHash = input.managed
-      ? createHash('sha256')
-          .update(await fs.readFile(source.canonical))
-          .digest('hex')
-      : undefined;
-    try {
-      const saved = JSON.parse(await fs.readFile(metadata, 'utf8')) as Record;
-      if (
-        saved.sourceHash !== sourceHash ||
-        saved.managed !== input.managed ||
-        (!input.managed && saved.originalPath !== input.path) ||
-        saved.attachment.kind !== input.kind ||
-        saved.attachment.fileName !== input.fileName
-      )
-        throw new Error('Attachment registration conflicts with its original source');
-      await this.resolve(scope, saved.attachment);
-      return saved.attachment;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
     let canonicalPath = source.canonical;
     if (input.managed) {
       canonicalPath = path.join(root, key(scope, input.referenceId) + '.data');
-      // Each registration has an immutable destination. A retry never replaces accepted bytes.
-      try {
-        await fs.copyFile(source.canonical, canonicalPath, constants.COPYFILE_EXCL);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
+      await publishFile(canonicalPath, await fs.readFile(source.canonical));
       canonicalPath = await fs.realpath(canonicalPath);
-      if (
-        createHash('sha256')
-          .update(await fs.readFile(canonicalPath))
-          .digest('hex') !== sourceHash
-      )
-        throw new Error('Attachment registration conflicts with staged content');
     }
     const record: Record = {
       version: 1,
@@ -140,37 +119,50 @@ export class LocalAttachmentStore {
       originalPath: input.managed ? canonicalPath : input.path,
       canonicalPath,
       managed: input.managed,
-      sourceHash,
       attachment,
     };
-    await publishRecord(metadata, record);
-    await this.resolve(scope, attachment);
+    await publishFile(metadata, JSON.stringify(record));
     return attachment;
   }
   async resolve(usage: Usage, attachment: SessionLocalAttachment) {
-    const root = this.root;
+    return (await this.resolveRegistration(usage, attachment)).resolved;
+  }
+
+  private async resolveRegistration(usage: Usage, attachment: SessionLocalAttachment) {
     const scope = this.scope(usage);
-    const parsedAttachment = SessionLocalAttachmentSchema.parse(attachment);
     if (
       attachment.machineId !== scope.machineId ||
       attachment.sessionId !== scope.sessionId ||
       attachment.turnId !== scope.turnId
     )
       throw new Error('Local attachment belongs to another execution scope');
-    const saved = JSON.parse(
-      await fs.readFile(recordPath(root, scope, attachment.referenceId), 'utf8')
-    ) as Record;
-    if (
-      saved.version !== 1 ||
-      key(saved.scope, attachment.referenceId) !== key(scope, attachment.referenceId) ||
-      JSON.stringify(SessionLocalAttachmentSchema.parse(saved.attachment)) !==
-        JSON.stringify(parsedAttachment)
-    )
-      throw new Error('Invalid local attachment registration');
-    const current = await readableFile(saved.originalPath);
+    const saved = await this.readRecord(scope, attachment.referenceId);
+    if (!saved) throw Object.assign(new Error('Local attachment not found'), { code: 'ENOENT' });
+    const current = await regularFile(saved.originalPath);
     if (current.canonical !== saved.canonicalPath)
       throw new Error('Local attachment path changed; select the file again');
-    return { path: current.canonical, sizeBytes: current.size };
+    return { saved, resolved: { path: current.canonical, sizeBytes: current.size } };
+  }
+
+  private async readRecord(
+    scope: LocalAttachmentScope,
+    referenceId: string
+  ): Promise<Record | null> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(recordPath(this.root, scope, referenceId), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+    const saved = JSON.parse(raw) as Record;
+    if (
+      saved.version !== 1 ||
+      key(saved.scope, referenceId) !== key(scope, referenceId) ||
+      saved.attachment.referenceId !== referenceId
+    )
+      throw new Error('Invalid local attachment registration');
+    return saved;
   }
 
   /** Called only after a resend/fork operation has authorized its source history. */
@@ -178,25 +170,20 @@ export class LocalAttachmentStore {
     attachment: SessionLocalAttachment,
     targetUsage: Usage
   ): Promise<SessionLocalAttachment> {
-    const root = this.root;
-    const source = this.scope(attachment);
-    const target = this.scope(targetUsage);
-    await this.resolve(source, attachment);
-    const saved = JSON.parse(
-      await fs.readFile(recordPath(root, source, attachment.referenceId), 'utf8')
-    ) as Record;
-    const rebound: SessionLocalAttachment = {
-      ...attachment,
-      sessionId: target.sessionId,
-      turnId: target.turnId,
-    };
-    const record: Record = { ...saved, scope: target, attachment: rebound };
-    const destination = recordPath(root, target, rebound.referenceId);
-    await publishRecord(destination, record);
-    const resolved = await this.resolve(target, rebound);
-    if (resolved.path !== saved.canonicalPath)
-      throw new Error('Local attachment inheritance conflicts with an existing registration');
-    return rebound;
+    return this.write(async () => {
+      const target = this.scope(targetUsage);
+      const { saved } = await this.resolveRegistration(attachment, attachment);
+      const accepted = await this.readRecord(target, attachment.referenceId);
+      if (accepted) return accepted.attachment;
+      const rebound: SessionLocalAttachment = {
+        ...saved.attachment,
+        sessionId: target.sessionId,
+        turnId: target.turnId,
+      };
+      const record: Record = { ...saved, scope: target, attachment: rebound };
+      await publishFile(recordPath(this.root, target, rebound.referenceId), JSON.stringify(record));
+      return rebound;
+    });
   }
 
   /** Explicit downloads reuse the authenticated file RPC and its bounded chunk format. */
@@ -240,20 +227,12 @@ export class LocalAttachmentStore {
   }
 }
 
-async function publishRecord(destination: string, record: Record) {
+async function publishFile(destination: string, bytes: string | Uint8Array) {
   const temporary = destination + '.' + randomUUID();
-  const handle = await fs.open(temporary, 'wx', 0o600);
   try {
-    await handle.writeFile(JSON.stringify(record));
-    await handle.sync();
+    await fs.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600, flush: true });
+    await fs.rename(temporary, destination);
   } finally {
-    await handle.close();
-  }
-  try {
-    await fs.link(temporary, destination);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  } finally {
-    await fs.unlink(temporary);
+    await fs.unlink(temporary).catch(() => undefined);
   }
 }

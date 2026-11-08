@@ -41,32 +41,6 @@ const local = vi.hoisted(() => ({
   fail: false,
 }));
 vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => local.enabled }));
-vi.mock('../src/lib/electron-local-attachment', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/lib/electron-local-attachment')>()),
-  prepareElectronLocalAttachment: async ({
-    attachment,
-    sessionId,
-    turnId,
-  }: {
-    attachment: { source: Blob; name: string; kind: string; localReferenceId: string };
-    sessionId: string;
-    turnId: string;
-  }) => {
-    if (local.fail) throw new Error('Local handoff failed');
-    local.files.push(await attachment.source.text());
-    return {
-      type: 'local_attachment',
-      referenceId: attachment.localReferenceId,
-      machineId: 'machine',
-      sessionId,
-      turnId,
-      kind: attachment.kind,
-      fileName: attachment.name,
-      mimeType: 'image/png',
-      sizeBytes: attachment.source.size,
-    };
-  },
-}));
 
 const cleanup: Array<() => Promise<void>> = [];
 beforeEach(() => {
@@ -136,7 +110,7 @@ function fixture(encrypted = false, token: string | null = 'token') {
   };
   const metas = new Map<string, Record<string, unknown>>([
     [getSessionRoomId(SESSION), { id: SESSION, machineId: MACHINE }],
-    [getMachineRoomId(MACHINE), { protocolCapabilities: { localAttachments: 1, localImages: 1 } }],
+    [getMachineRoomId(MACHINE), { protocolCapabilities: {} }],
   ]);
   const resources = createSessionSendResources({
     acquire: async (sessionId) => {
@@ -454,16 +428,18 @@ it('retains a failed same-machine image without attempting cloud fallback', asyn
   expect(held.error).toBe('Local handoff failed');
   expect(await held.attachments[0]?.source?.text()).toBe('image.png');
 });
-it('uses transfer for a different machine even from a desktop', async () => {
-  Object.assign(local, { enabled: true, machineId: 'other' });
-  const f = fixture();
-  upload.run = async (file) => ready(file);
-  f.pending.enqueue(send('remote-image', ['remote.png']));
-  await f.delivered('remote-image');
-  expect(local.files).toEqual([]);
-  expect(f.turns()[0]?.items).toEqual(
-    expect.arrayContaining([expect.objectContaining({ type: 'image', imageId: 'remote.png' })])
-  );
+it('uses transfer for a different or unknown desktop local identity', async () => {
+  for (const machineId of ['other', null]) {
+    Object.assign(local, { enabled: true, machineId });
+    const f = fixture();
+    upload.run = async (file) => ready(file);
+    f.pending.enqueue(send('remote-image', ['remote.png']));
+    await f.delivered('remote-image');
+    expect(local.files).toEqual([]);
+    expect(f.turns()[0]?.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'image', imageId: 'remote.png' })])
+    );
+  }
 });
 
 it('admits an already prepared local file in an encrypted workspace without uploading it', async () => {
@@ -653,15 +629,18 @@ it('sends a same-machine image without cloud authentication or a cloud transfer'
   ).rejects.toThrow('Local image snapshot unavailable');
 });
 
-it('retains a same-machine draft when the daemon does not advertise local references', async () => {
+it('sends a same-machine image without daemon capability metadata', async () => {
   Object.assign(local, { enabled: true, machineId: 'machine' });
   const f = fixture(false, null);
   f.metas.set(getMachineRoomId(MACHINE), { protocolCapabilities: {} });
-  f.pending.enqueue(send('old-daemon', ['image.png']));
-  const held = await failed(f.pending, 'old-daemon');
-  expect(held.error).toContain('Update the local daemon');
-  expect(f.turns()).toEqual([]);
-  expect(await held.attachments[0]?.source?.text()).toBe('image.png');
+  f.pending.enqueue(send('no-capabilities', ['image.png']));
+  await f.delivered('no-capabilities');
+  expect(f.turns()[0]?.inputConfig?.inputBlocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'image', transport: 'local', machineId: MACHINE }),
+    ])
+  );
+  expect(local.files).toEqual(['image.png']);
 });
 
 it('passes an original path through the actual native bridge without reading file bytes', async () => {
