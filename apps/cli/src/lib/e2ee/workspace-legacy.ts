@@ -787,6 +787,8 @@ async function openWorkspaceOwned(
   const epochTransition = createWorkspaceEpochTransitionLegacy({
     ...initialStatus,
     epoch: initialStatus.writeEpoch ?? initialStatus.epoch,
+    // Select the epoch a slow key install finished, through a fresh verified read.
+    onLateInstallation: () => void refreshInBackground(false),
   });
   epochTransition.observe(initialStatus);
   let ledgerBlocked = false;
