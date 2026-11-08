@@ -104,10 +104,10 @@ Ownership: [README.md](README.md).
   hosts require CSS typed division. Stream engine: live turns only;
   remounts show existing text immediately and animate only additions.
 - Rendering and search share CJK emphasis rules.
-- A Mermaid diagram in a message is a still preview until a pointer click
-  activates it, and an unmodified wheel is NEVER taken — activated or not.
-  Deactivation preserves pan/zoom and activation adds no outline; see the
-  [inline view contract](../../../../../specs/mermaid-inline-view.md).
+- A Mermaid diagram in a message is drawn inline, not as a card, and is a still
+  preview until a pointer click activates it. An unmodified wheel is NEVER taken
+  — activated or not. Deactivation preserves pan/zoom and activation adds no
+  outline; see the [inline view contract](../../../../../specs/mermaid-inline-view.md).
   `mermaid-diagram-viewer.tsx` stays the only full-screen surface, reached from
   the block's action bar. Invariants:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).

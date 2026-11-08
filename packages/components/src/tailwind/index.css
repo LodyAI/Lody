@@ -404,20 +404,23 @@ pre,
     color: var(--markdown-code-block-language);
   }
 
+  /* A diagram is content, not a card: the block keeps no frame, fill, or
+     reserved height, so it sits in the prose the way an image does. Two
+     rectangles remain. This one positions the hover controls and carries the
+     palette; the frame inside `[data-streamdown='mermaid']` bounds a tall
+     diagram and is the area an activated canvas pans inside. */
   .markdown-renderer [data-streamdown='mermaid-block'] {
-    --markdown-mermaid-bg: hsl(var(--muted) / 0.32);
-    --markdown-mermaid-border: hsl(var(--border));
     --markdown-mermaid-foreground: hsl(var(--foreground));
     --markdown-mermaid-muted: hsl(var(--muted-foreground));
-    --markdown-mermaid-control-bg: hsl(var(--background) / 0.86);
-    --markdown-mermaid-control-border: hsl(var(--border) / 0.78);
+    --markdown-mermaid-control-bg: hsl(var(--background));
+    --markdown-mermaid-control-border: hsl(var(--border));
     /* Diagram colors come from the app palette's tokens (Lody Light or Vesper),
        so they match the surrounding chrome. Labels are content, so they use the
-       prose foreground. `--pele-bg` backs edge labels, so it is the block's own
-       fill made opaque. Chart series keep Pele's categorical palette: status
-       tokens carry meaning (a "danger" slice misreads) and are not built to be
-       told apart as categories. */
-    --pele-bg: color-mix(in srgb, hsl(var(--muted)) 32%, hsl(var(--background)));
+       prose foreground. `--pele-bg` backs edge labels, so it is the page
+       background the diagram is drawn on. Chart series keep Pele's categorical
+       palette: status tokens carry meaning (a "danger" slice misreads) and are
+       not built to be told apart as categories. */
+    --pele-bg: hsl(var(--background));
     --pele-fg: hsl(var(--reading-foreground));
     --pele-muted: hsl(var(--muted-foreground));
     --pele-line: hsl(var(--muted-foreground));
@@ -432,34 +435,35 @@ pre,
     width: 100%;
     max-width: 100%;
     margin-block: 1rem !important;
-    overflow: hidden;
+    overflow: visible;
     gap: 0 !important;
-    border: 0.5px solid var(--markdown-mermaid-border);
-    border-radius: 0.375rem;
-    background: var(--markdown-mermaid-bg);
     padding: 0 !important;
+    background: none;
     color: var(--markdown-mermaid-foreground);
   }
 
   .markdown-renderer [data-streamdown='mermaid-block-actions'] {
     position: absolute;
-    inset-block-start: 0.375rem;
-    inset-inline-end: 0.375rem;
+    inset-block-start: 0.125rem;
+    inset-inline-end: 0.25rem;
     z-index: 2;
     display: flex;
     align-items: center;
     gap: 0.125rem;
     padding: 0.125rem;
+    border-radius: 9999px;
+    /* Opaque: an edge of the diagram can still pass under the pill, and a
+       translucent fill would show it through the controls. */
     border: 1px solid var(--markdown-mermaid-control-border);
-    border-radius: 0.3125rem;
     background: var(--markdown-mermaid-control-bg);
     color: var(--markdown-mermaid-muted);
     opacity: 0;
-    backdrop-filter: blur(8px);
+    /* The scale's lightest tier: a control-sized lift, and a black shadow in both
+       themes (`--foreground` is near-white in Vesper, so tinting by it would glow). */
+    box-shadow: var(--shadow-xs);
     transition:
       opacity 120ms ease,
-      color 120ms ease,
-      border-color 120ms ease;
+      color 120ms ease;
   }
 
   .markdown-renderer
@@ -484,7 +488,7 @@ pre,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0.25rem;
+    border-radius: 9999px;
     padding: 0.25rem;
     cursor: pointer;
   }
@@ -494,25 +498,28 @@ pre,
     color: var(--markdown-mermaid-foreground);
   }
 
+  /* The control lane belongs to this box, not to the scrolling one inside it:
+     a tall diagram scrolls under the pill, and the pill must never sit on top of
+     what is scrolling past. */
   .markdown-renderer [data-streamdown='mermaid'] {
     width: 100%;
     height: auto !important;
-    min-height: 12rem;
+    padding-block-start: 2rem;
     color: var(--markdown-mermaid-foreground);
   }
 
   .markdown-renderer [data-streamdown='mermaid'] > div {
     width: 100% !important;
     height: auto !important;
-    min-height: 12rem !important;
-    /* Keep large diagrams in a bounded message region. Both axes must scroll:
-       Mermaid sequence diagrams are often taller than a phone viewport too. */
+    /* Only height is bounded. A tall diagram scrolls in place instead of running
+       for several screens of the conversation; width never scrolls, because the
+       diagram inside is scaled to the message. */
     max-height: min(70vh, 36rem) !important;
     overflow: auto !important;
     /* Let wheel/touch scrolling continue into the conversation at either edge,
        including when the diagram fits and has no vertical scroll range. */
     overscroll-behavior: auto;
-    padding: 1rem;
+    padding-block: 0.5rem;
     /* An inactive preview does not pan, it activates on click
        (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
     cursor: zoom-in !important;
@@ -525,10 +532,9 @@ pre,
     border-radius: 0.375rem;
   }
 
-  /* The activated canvas stops promising a zoom it has already performed. Its
-     ring cannot live here: activating focuses the diagram, and the global
-     `*:focus { outline: none !important }` below outranks any rule of ours, so
-     `use-mermaid-diagram-canvas.tsx` writes it inline with `important`. */
+  /* The activated canvas stops promising a zoom it has already performed.
+     Activation adds no ring: the grab cursor is the state, so a diagram that
+     carries no border does not grow one by being clicked. */
   .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div {
     cursor: grab !important;
   }
@@ -539,14 +545,16 @@ pre,
 
   .markdown-renderer [data-streamdown='mermaid-svg'] {
     min-width: 100%;
-    padding-block: 0.125rem;
   }
 
   .markdown-renderer [data-streamdown='mermaid-svg'] svg {
     display: block;
     margin-inline: auto;
+    /* Fit the message width and nothing wider: a diagram that already fits stays
+       at natural size, one that does not is scaled down rather than cut off at
+       the right edge, and neither axis is upscaled by the layout. */
     width: auto !important;
-    max-width: none !important;
+    max-width: 100% !important;
     height: auto !important;
     max-height: none !important;
     overflow: visible;
