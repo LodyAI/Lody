@@ -289,17 +289,9 @@ enum ChatNavigationTitle {
     }
     append(branch, symbol: "arrow.triangle.branch")
     append(project, symbol: "folder")
-    append(machine, symbol: "desktopcomputer")
-    if !machine.isEmpty && !machineState.isEmpty {
-      text.append(NSAttributedString(string: " ", attributes: attributes))
-      let symbol = machineState == "unknown" ? "circle" : "circle.fill"
-      let tint: UIColor = machineState == "online" ? .systemBlue : .secondaryLabel
-      if let dot = symbolAttachment(symbol, font: UIFont.systemFont(ofSize: 10), color: tint) {
-        text.append(NSAttributedString(attachment: dot))
-      }
-      if machineState == "offline" {
-        text.append(NSAttributedString(string: " · " + String(localized: "devices.offline", bundle: .lody), attributes: attributes))
-      }
+    if !machine.isEmpty {
+      let symbol = machineState == "online" ? "checkmark.circle" : machineState == "offline" ? "circle.slash" : "questionmark.circle"
+      append(machine, symbol: symbol)
     }
     return text.length == 0 ? nil : AttributedString(text)
   }

@@ -362,7 +362,12 @@ precondition(button.captionLabel.lineBreakMode == .byTruncatingMiddle,
   "A long branch still leaves the trailing device state visible")
 precondition(button.accessibilityLabel!.contains(String(localized: "devices.online", bundle: .lody)), "VoiceOver states device liveness")
 ChatNavigationTitle.configureButton(button, title: "Session", subtitle: "Project", machine: "Studio", branch: "feature/a-very-long-branch-name", machineState: "offline")
-precondition(subtitleText(button).contains(String(localized: "devices.offline", bundle: .lody)), "Offline is visible text, not color alone")
+precondition(button.accessibilityLabel!.contains(String(localized: "devices.offline", bundle: .lody)), "Offline state is accessible")
 precondition(!button.accessibilityLabel!.contains(String(localized: "devices.online", bundle: .lody)), "VoiceOver does not retain the previous state")
 precondition(button.sizeThatFits(CGSize(width: 220, height: 44)).height == 44, "Device status adds no navigation row")
 print("PASS: chat navigation subtitle shows project and computer names")
+
+ChatNavigationTitle.configureButton(button, title: "Conversation", subtitle: "", machine: "Studio", machineState: "online")
+let machineCaption = button.captionLabel.attributedText!
+precondition(machineCaption.attribute(.attachment, at: 0, effectiveRange: nil) != nil, "Presence icon precedes the machine name")
+precondition(subtitleText(button).contains("Studio"), "Header retains execution machine")

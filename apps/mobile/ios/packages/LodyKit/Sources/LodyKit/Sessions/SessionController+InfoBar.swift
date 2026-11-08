@@ -21,7 +21,7 @@ extension SessionController {
     let bar = SessionInfoBar(session: session, repository: repository, busy: busy)
     infoBar = bar
     var result: [String: Any] = [:]
-    result["items"] = [machineItem(session)].compactMap { $0 } + resourceItems
+    result["items"] = resourceItems
     if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
@@ -45,27 +45,6 @@ extension SessionController {
       ]
     }
     return result
-  }
-
-  private func machineItem(_ session: SessionItem) -> [String: Any]? {
-    let state = source.state
-    guard let name = state.catalog.machineNames[session.machineId], !name.isEmpty else { return nil }
-    let status = state.presence.status(of: session.machineId)
-    let statusText = String(localized: String.LocalizationValue("devices." + status), bundle: .lody)
-    return [
-      "id": "machine", "symbol": "desktopcomputer",
-      // Colour only for a confirmed problem; unknown presence stays neutral.
-      "tint": status == "offline" ? "warning" : "secondary",
-      "accessibilityLabel": "\(name), \(statusText)",
-      "menuTitle": name,
-      "machine": ["id": session.machineId, "workspaceId": state.workspaceId,
-        "status": status, "members": chat.members.values.sorted { $0.id < $1.id }.map { member -> [String: String] in
-          var value = ["id": member.id, "name": member.name]
-          if let image = member.image { value["image"] = image }
-          return value
-        }],
-      "actions": [["id": "status", "title": statusText, "symbol": status == "online" ? "checkmark.circle" : "circle.dashed", "disabled": true]],
-    ]
   }
 
   /// PR number, else branch, else the repository name without its owner (web truncated the

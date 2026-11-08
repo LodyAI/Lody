@@ -119,10 +119,14 @@ not render app pages.
 
 User messages offer Copy through a long-press menu, with Edit available only for
 the latest runtime-confirmed editable message. Conversation titles use the 16 sp
-body-emphasis style. The computer button always uses a monitor glyph; its panel
+body-emphasis style. The header shows the computer below the title in secondary text with a presence
+icon; tapping it opens the owner/visibility panel. There is no bottom computer capsule. The panel
 loads owner and private/shared display metadata from `machines:listVisibleMachines`
 through the verified native account and reads current runtime presence on opening.
 Missing or failed metadata stays explicitly unknown, never implicitly private.
+The conversations button appears only with open child Tabs. More contains New
+current working directory conversation and access to closed conversations, so
+creation and recovery remain available without the conversations button.
 
 ## Verification
 

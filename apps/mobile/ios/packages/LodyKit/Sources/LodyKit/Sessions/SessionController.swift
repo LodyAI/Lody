@@ -1,5 +1,6 @@
 import LodyCore
 import UIKit
+import SwiftUI
 
 @MainActor
 class SessionController: UIViewController {
@@ -210,6 +211,8 @@ class SessionController: UIViewController {
     chat.setNavigationTitle(session.title)
     let tabs = DirectoryTabs.sessions(current: session, all: state.catalog.sessions)
     chat.setDirectoryTabs("", symbol: "")
+    chat.setNavigationMachine(state.catalog.machineNames[session.machineId] ?? "")
+    chat.setNavigationMachineState(state.presence.status(of: session.machineId))
     let others = tabs.filter { $0.id != sessionId }.map { session in
       var viewed = session
       if let at = tabViews[session.id] { viewed.lastViewedMessageAt = max(viewed.lastViewedMessageAt ?? -.infinity, at) }
@@ -317,25 +320,23 @@ class SessionController: UIViewController {
   }
 
   /// The directory panel grows from its toolbar button; selection, creation and history stay together.
-  private func presentTabs() {
+  private func presentTabs(showClosed: Bool = false) {
     let host: UIViewController = parent ?? self
     if let shown = ChatTabsOverlay.shown(in: host.view) { return shown.close() }
     guard host.presentedViewController == nil else { return }
     let items = tabItems(directoryTabs)
     let state = ChatTabsState(tabs: items, closed: tabItems(closedDirectoryTabs))
+    state.showingClosed = showClosed
     weak var overlay: ChatTabsOverlay?
     let panel = ChatTabsPanel(
-      state: state, creating: creatingTab,
+      state: state,
       onSelect: { [weak self] id in
         overlay?.close { self?.titleMenuSelected("tab:" + id) }
-      },
-      onNew: { [weak self] in
-        overlay?.close { self?.titleMenuSelected("newTab") }
       },
       onClose: { [weak self] in self?.setTabClosed($0, closed: true) },
       onRestore: { [weak self] in self?.setTabClosed($0, closed: false) }
     )
-    overlay = ChatTabsOverlay.present(panel, tabs: items.count, in: host, source: tabsButton)
+    overlay = ChatTabsOverlay.present(panel, tabs: items.count, in: host, source: directoryTabs.count > 1 ? tabsButton : chat.tabsAnchorView)
   }
 
   private func createTab() {
@@ -385,6 +386,14 @@ class SessionController: UIViewController {
     children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
       self?.find(query: "", keyboard: true)
     })
+    children.append(UIAction(title: String(localized: "session.tabs.new", bundle: .lody), image: UIImage(systemName: "plus"), attributes: creatingTab ? [.disabled] : []) { [weak self] _ in
+      self?.createTab()
+    })
+    if !closedDirectoryTabs.isEmpty {
+      children.append(UIAction(title: String(localized: "session.tabs.closed", bundle: .lody), image: UIImage(systemName: "clock.arrow.circlepath")) { [weak self] _ in
+        self?.presentTabs(showClosed: true)
+      })
+    }
     children += sessionMenuItems(session)
     more.menu = UIMenu(children: children + [
       UIAction(title: String(localized: "session.action.share", bundle: .lody), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
@@ -405,18 +414,32 @@ class SessionController: UIViewController {
     let header = LodyNavigationHeader.of(navigationItem)
     more.sharesBackground = true
     tabsItem.sharesBackground = true
-    let items = [more, tabsItem]
+    let items = directoryTabs.count > 1 ? [more, tabsItem] : [more]
     if header.rightItems != items { header.rightItems = items }
   }
 
   private func wireEvents() {
     chat.onReconnect = { [weak self] _ in self?.feed?.reconnect() }
     chat.onTitleMenu = { [weak self] body in self?.titleMenuSelected(body["id"] as? String ?? "") }
-    chat.onTitlePress = { _ in }
+    chat.onTitlePress = { [weak self] _ in self?.presentMachine() }
+  }
+
+  private func presentMachine() {
+    let state = source.state
+    guard let session = state.catalog.session(sessionId),
+      let name = state.catalog.machineNames[session.machineId], !name.isEmpty,
+      (parent ?? self).presentedViewController == nil else { return }
+    let panel = UIHostingController(rootView: ChatMachinePanel(name: name, machine: .init(
+      id: session.machineId, workspaceId: state.workspaceId,
+      status: state.presence.status(of: session.machineId), members: Array(chat.members.values))))
+    panel.modalPresentationStyle = .popover
+    panel.preferredContentSize = CGSize(width: 320, height: 150)
+    panel.popoverPresentationController?.sourceView = chat.tabsAnchorView
+    panel.popoverPresentationController?.sourceRect = chat.tabsAnchorView.bounds
+    (parent ?? self).present(panel, animated: true)
   }
 
   private func titleMenuSelected(_ id: String) {
-    if id == "newTab" { createTab(); return }
     guard id.hasPrefix("tab:") else { return }
     let target = String(id.dropFirst(4))
     guard target != sessionId else { return }

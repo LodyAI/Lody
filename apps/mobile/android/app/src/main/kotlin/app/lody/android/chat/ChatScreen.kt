@@ -219,6 +219,12 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* The chip still shows the session's model; choices wait for the next load. */ }
     }
+    var machineOnline by remember(scope, session?.machineId) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(scope, session?.machineId) {
+        application.creation.observeOptions(scope).collect { available ->
+            machineOnline = available?.onlineMachineIds?.let { session?.machineId in it }
+        }
+    }
     val machineReader = remember(application) { MachineDetailsReader(application.account) }
     val loadMachine: suspend () -> MachinePanelData = {
         val details = try { session?.let { machineReader.read(scope, it.machineId) } }
@@ -501,7 +507,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
                     )
                 }
-                ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab)
+                ChatHeader(context.title, context.tabs, context.closedTabs, id, creatingTab, changingTab, onBack, onSelectTab, createTab, changeTab, context.machineName, machineOnline, loadMachine)
                 if (creationNotice != null) {
                     Text(creationNotice,
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = top).padding(horizontal = TranscriptMargin),
@@ -527,8 +533,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             }
             if (bar != null && context.session?.isTabClosed != true) {
                 ChatActionBar(
-                    bar, context.machineName, context.machineKind,
-                    loadMachine = loadMachine,
+                    bar,
                     writing = writing,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
@@ -649,10 +654,11 @@ private const val RUN_MODE = "mode"
 
 private val RunningStatuses = setOf("running", "initializing", "processing", "in_progress", "queued")
 
-/** Web's floating header: a round back button, then the title over the repository line. */
+/** Floating header: title over the tappable machine subtitle, with conditional Tabs and More. */
 @Composable
-internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit) {
+internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, closedTabs: List<CatalogSession>, currentId: String, creating: Boolean, busy: String?, onBack: () -> Unit, onSelectTab: (String) -> Unit, onNewTab: () -> Unit, onChangeTab: (String, Boolean) -> Unit, machine: String = "", machineOnline: Boolean? = null, loadMachine: suspend () -> MachinePanelData = { MachinePanelData() }) {
     var expanded by remember(currentId) { mutableStateOf(false) }
+    var history by remember(currentId) { mutableStateOf(false) }
     var restoringId by remember(currentId) { mutableStateOf<String?>(null) }
     LaunchedEffect(closedTabs, busy) {
         val target = restoringId
@@ -674,14 +680,17 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
     ) {
         RoundButton(LodyIcons.Back, stringResource(R.string.chat_back), visualSize = LodySize.controlMd, onClick = onBack)
-        Text(title, modifier = Modifier.weight(1f), style = LodyTheme.typography.bodyEmphasis, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = LodyTheme.typography.bodyEmphasis, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (machine.isNotBlank()) MachineItem(machine, machineOnline, loadMachine)
+        }
         Row(Modifier.clip(CircleShape).background(colors.bgOverlay).border(0.5.dp, colors.borderSubtle, CircleShape), verticalAlignment = Alignment.CenterVertically) {
             Box {
-                IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(LodySize.controlLg)
+                if (tabs.any { !it.parentSessionId.isNullOrBlank() }) IconButton(onClick = { history = false; expanded = !expanded }, modifier = Modifier.size(LodySize.controlLg)
                     .semantics { contentDescription = title }) {
                     Icon(LodyIcons.Sessions, contentDescription = androidx.compose.ui.res.pluralStringResource(R.plurals.chat_directory_tabs, tabs.size, tabs.size), tint = colors.iconPrimary, modifier = Modifier.size(LodyIconSize.md))
                 }
-                DirectoryTabs.attention(tabs.filter { it.id != currentId })?.let { attention ->
+                if (tabs.any { !it.parentSessionId.isNullOrBlank() }) DirectoryTabs.attention(tabs.filter { it.id != currentId })?.let { attention ->
                     Box(Modifier.align(Alignment.BottomEnd).padding(end = LodySpacing.xs, bottom = LodySpacing.xs).size(LodyIconSize.xs + LodySpacing.xxs)
                         .background(colors.bgOverlay, CircleShape), contentAlignment = Alignment.Center) { app.lody.android.home.AttentionGlyph(attention) }
                 }
@@ -690,7 +699,7 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                         onSelect = { expanded = false; if (it != currentId) onSelectTab(it) },
                         onNew = { expanded = false; onNewTab() },
                         onClose = { onChangeTab(it, true) },
-                        onRestore = { restoringId = it; onChangeTab(it, false) })
+                        onRestore = { restoringId = it; onChangeTab(it, false) }, initialHistory = history, showNew = false)
                 }
             }
             var more by remember { mutableStateOf(false) }
@@ -701,6 +710,8 @@ internal fun BoxScope.ChatHeader(title: String, tabs: List<CatalogSession>, clos
                 DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_tab)) }, enabled = !creating && busy == null,
                         leadingIcon = { Icon(LodyIcons.Plus, null) }, onClick = { more = false; onNewTab() })
+                    if (closedTabs.isNotEmpty()) DropdownMenuItem(text = { Text(stringResource(R.string.chat_closed_tabs)) },
+                        onClick = { more = false; history = true; expanded = true })
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_close_current)) }, enabled = busy == null && tabs.any { it.id == currentId },
                         onClick = { more = false; onChangeTab(currentId, true) })
                 }
@@ -1039,18 +1050,14 @@ internal fun ChatComposer(
 @Composable
 internal fun ChatActionBar(
     bar: SessionInfoBar,
-    machine: String,
-    machineKind: app.lody.android.create.CreateSessionModel.MachineKind,
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
-    loadMachine: suspend () -> MachinePanelData = { MachinePanelData() },
 ) {
     val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
-    if (machine.isEmpty() && !context && !diff && bar.actions.isEmpty()) return
+    if (!context && !diff && bar.actions.isEmpty()) return
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
-        if (machine.isNotEmpty()) MachineItem(machine, loadMachine)
         if (context || diff) ContextItem(bar, diffDot, onCopied, modifier)
     }
     @Composable fun Action() {
@@ -1133,16 +1140,19 @@ internal data class MachinePanelData(
 )
 
 @Composable
-private fun MachineItem(name: String, load: suspend () -> MachinePanelData) {
+private fun MachineItem(name: String, online: Boolean?, load: suspend () -> MachinePanelData) {
     val colors = LodyTheme.colors
     var open by remember { mutableStateOf(false) }
     var data by remember(name) { mutableStateOf(MachinePanelData()) }
     LaunchedEffect(open, name) {
         if (open) { data = MachinePanelData(); data = load() }
     }
-    Box(Modifier.barCapsule(colors)) {
-        BarCell("${stringResource(R.string.bar_machine)}, $name", onClick = { open = true }) {
-            Icon(LodyIcons.Desktop, contentDescription = null, tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.md))
+    Box {
+        Row(Modifier.clickable { open = true }.padding(vertical = LodySpacing.xxs), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+            Icon(when (online) { true -> LodyIcons.Check; false -> LodyIcons.Close; null -> LodyIcons.Cloud },
+                contentDescription = stringResource(when (online) { true -> R.string.machine_online; false -> R.string.home_offline; null -> R.string.machine_status_unknown }),
+                tint = colors.iconSecondary, modifier = Modifier.size(LodyIconSize.sm))
+            Text(name, style = LodyTheme.typography.footnote, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(open, onDismissRequest = { open = false }) {
             Column(Modifier.widthIn(max = LodyLayout.readableMaxWidth).padding(LodySpacing.lg), verticalArrangement = Arrangement.spacedBy(LodySpacing.md)) {

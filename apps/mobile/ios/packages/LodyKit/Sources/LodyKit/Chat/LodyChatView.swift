@@ -306,8 +306,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     super.init(frame: frame)
     titleButton.accessibilityIdentifier = "chat-navigation-title"
     titleButton.accessibilityHint = nil
-    titleButton.isUserInteractionEnabled = false
-    titleButton.accessibilityTraits = .header
+    titleButton.isUserInteractionEnabled = true
+    titleButton.addAction(UIAction { [weak self] _ in self?.onTitlePress([:]) }, for: .touchUpInside)
+    titleButton.accessibilityTraits = [.header, .button]
     navigation.view = UIView(frame: .zero)
     navigation.view.isUserInteractionEnabled = false
     navigation.updateTitle = { [weak self] in self?.attachTitle() }

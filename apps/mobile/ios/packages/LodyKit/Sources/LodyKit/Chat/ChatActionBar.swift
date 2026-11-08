@@ -40,9 +40,6 @@ struct ChatActionBarState: Decodable, Equatable {
     var tap: Bool?
     var menuTitle: String?
     var actions: [ChatMenuAction]?
-    #if !LODY_SHARE_EXTENSION
-    var machine: Machine?
-    #endif
   }
 
   struct Context: Decodable, Equatable {
@@ -93,7 +90,6 @@ struct ChatActionBarContent: View {
   var onAction: (String) -> Void = { _ in }
   var onPrimaryFrame: (CGRect) -> Void = { _ in }
   @Environment(\.dynamicTypeSize) private var typeSize
-  @State private var selectedMachine: ChatActionBarState.Item?
 
   var body: some View {
     GlassEffectContainer(spacing: 8) {
@@ -169,11 +165,7 @@ struct ChatActionBarContent: View {
     return Menu {
       ForEach(items) { item in
         Button {
-          #if !LODY_SHARE_EXTENSION
-          if item.machine != nil { selectedMachine = item } else { open(item) }
-          #else
           open(item)
-          #endif
         } label: { Label(item.accessibilityLabel, systemImage: item.symbol) }
       }
     } label: {
@@ -190,14 +182,6 @@ struct ChatActionBarContent: View {
     .fixedSize()
     .accessibilityLabel(items.map(\.accessibilityLabel).joined(separator: ", "))
     .accessibilityIdentifier("session-bar:environment")
-    .popover(item: $selectedMachine, arrowEdge: .bottom) { item in
-      #if !LODY_SHARE_EXTENSION
-      if let machine = item.machine {
-        ChatMachinePanel(name: item.menuTitle ?? item.accessibilityLabel, machine: machine)
-          .presentationCompactAdaptation(.popover)
-      }
-      #endif
-    }
   }
 
   private func open(_ item: ChatActionBarState.Item) {
@@ -205,17 +189,7 @@ struct ChatActionBarContent: View {
   }
 
   @ViewBuilder private func item(_ item: ChatActionBarState.Item) -> some View {
-    Group {
-      #if !LODY_SHARE_EXTENSION
-      if let machine = item.machine {
-        ChatMachineButton(name: item.menuTitle ?? item.accessibilityLabel, machine: machine) { glyph(item) }
-      } else {
-        resourceItem(item)
-      }
-      #else
-      resourceItem(item)
-      #endif
-    }
+    resourceItem(item)
     .buttonStyle(.plain)
     .accessibilityLabel(item.accessibilityLabel)
     .accessibilityIdentifier(Self.identifier(item.id))
@@ -639,22 +613,7 @@ struct MergeOptionsContent: View {
 #if !LODY_SHARE_EXTENSION
 // The Share extension reuses composer chrome but has no conversation machine panel.
 /// Read-only machine details, fetched on presentation from the public visibility endpoint.
-private struct ChatMachineButton<Glyph: View>: View {
-  let name: String
-  let machine: ChatActionBarState.Machine
-  @ViewBuilder var glyph: () -> Glyph
-  @State private var presented = false
-
-  var body: some View {
-    Button { presented = true } label: { glyph() }
-      .popover(isPresented: $presented, arrowEdge: .bottom) {
-        ChatMachinePanel(name: name, machine: machine)
-          .presentationCompactAdaptation(.popover)
-      }
-  }
-}
-
-private struct ChatMachinePanel: View {
+struct ChatMachinePanel: View {
   let name: String
   let machine: ChatActionBarState.Machine
   @State private var ownerID: String?

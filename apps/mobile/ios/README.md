@@ -77,10 +77,14 @@ as their duration. Normal replies use 16 pt body text and 18 pt semibold heading
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
 Conversation titles use 16 pt semibold system text. User bubbles fill the available
 reading width beside the avatar; long-press offers Copy, plus Edit for the last
-eligible user message, without inline action buttons. The computer capsule always
-uses a monitor; its panel groups name and presence, owner avatar and name, then
+eligible user message, without inline action buttons. Below the conversation title,
+secondary-gray machine text starts with a presence icon; tapping the header opens
+the panel with name and presence, owner avatar and name, then
 private/shared visibility. Visibility comes from the public machine-registration
 query on opening; unavailable data is shown as unknown, never inferred as private.
+The bottom machine capsule is omitted. The trailing Tabs button appears only with
+other open Tabs; More retains closed-Tab recovery and New current working directory
+conversation, using the existing create-Tab operation.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
 secondary-label grey (links retain link blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a

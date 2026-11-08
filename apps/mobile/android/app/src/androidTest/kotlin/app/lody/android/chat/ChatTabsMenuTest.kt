@@ -24,6 +24,52 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class ChatTabsMenuTest {
+    @Test fun singleConversationKeepsCreationAndClosedRecoveryInMore() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val ui = instrumentation.uiAutomation
+        val root = CatalogSession("root", "m", "p", "Current", "idle", false, false, "")
+        val child = root.copy(id = "child", title = "Closed child", parentSessionId = "root", isTabClosed = true)
+        val closed = mutableStateOf(listOf(child))
+        val title = mutableStateOf("Current")
+        fun nodes(): List<AccessibilityNodeInfo> {
+            val result = mutableListOf<AccessibilityNodeInfo>()
+            fun visit(node: AccessibilityNodeInfo) { result += node; for (i in 0 until node.childCount) node.getChild(i)?.let(::visit) }
+            ui.rootInActiveWindow?.let(::visit)
+            return result
+        }
+        fun find(label: String) = nodes().firstOrNull { it.text?.toString() == label || it.contentDescription?.toString() == label }
+        fun change(expected: String, action: () -> Unit) {
+            ui.executeAndWaitForEvent(action, { find(expected) != null }, 5000)
+            instrumentation.waitForIdleSync()
+        }
+        fun tap(label: String, expected: String) {
+            var node = requireNotNull(find(label))
+            while (!node.isClickable && node.parent != null) node = node.parent
+            change(expected) { assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) }
+        }
+        val context = instrumentation.targetContext
+        val more = context.getString(app.lody.android.R.string.bar_more)
+        val create = context.getString(app.lody.android.R.string.chat_new_tab)
+        val history = context.getString(app.lody.android.R.string.chat_closed_tabs)
+        ActivityScenario.launch(CreateSessionProbeActivity::class.java).use { scenario ->
+            change(more) {
+                scenario.onActivity { activity -> activity.setContent { LodyTheme { Box(Modifier.fillMaxSize()) {
+                    ChatHeader(title.value, listOf(root), closed.value, "root", false, null, {}, {},
+                        onNewTab = { title.value = "Created in current directory" },
+                        onChangeTab = { id, isClosed -> if (id == "child" && !isClosed) { closed.value = emptyList(); title.value = "Restored child" } })
+                } } } }
+            }
+            val tabsLabel = context.resources.getQuantityString(app.lody.android.R.plurals.chat_directory_tabs, 1, 1)
+            assertNull(find(tabsLabel))
+            tap(more, create)
+            tap(create, "Created in current directory")
+            tap(more, history)
+            tap(history, "Closed child")
+            tap("Closed child", "Restored child")
+            assertNotNull(find("Restored child"))
+        }
+    }
+
     @Test fun swipeCloseHistoryBackAndRestore() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val ui = instrumentation.uiAutomation
