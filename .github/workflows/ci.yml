@@ -259,7 +259,8 @@ jobs:
 
       - name: Install browser test dependencies
         if: steps.paths.outputs.run == 'true'
-        run: pnpm --filter @lody/e2ee-client... --filter acp-extension-core... --filter acp-extension-dsh... install --frozen-lockfile --ignore-scripts
+        # The logout and cache recovery case bundles the real component implementations.
+        run: pnpm --filter @lody/e2ee-client... --filter @lody/components... --filter acp-extension-core... --filter acp-extension-dsh... install --frozen-lockfile --ignore-scripts
 
       - name: Resolve Playwright cache
         id: playwright
