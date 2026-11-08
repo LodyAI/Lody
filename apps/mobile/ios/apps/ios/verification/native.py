@@ -54,7 +54,8 @@ checks = {
     'photo-cache': ['List/PhotoDiskCache.swift'],
     'file-link': ['Chat/ChatFileLink.swift', 'Sessions/SessionController+Files.swift', 'Shell/LodyPageController.swift', 'LodyLocalization.swift'],
     'strings': ['LodyLocalization.swift'],
-    'auth': ['LodyLocalization.swift', 'Auth/AuthAPI.swift'],
+    'auth': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/NativeAuthHandoff.swift'],
+    'auth-session': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/AuthSession.swift', 'Auth/NativeLoginMethod.swift', 'Onboarding/OnboardingService.swift', 'Onboarding/LoginAppearance.swift', 'Onboarding/LoginDitherView.swift', 'Onboarding/OnboardingController.swift', 'Onboarding/PasswordResetController.swift'],
     'session-permission': ['Sessions/PermissionProjection.swift', 'Sessions/SessionPermission.swift', 'Sessions/SessionEnvelope.swift'],
     'session-decisions': ['LodyLocalization.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift', 'Sessions/SessionDecisions.swift'],
     'outbox': ['LodyLocalization.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionSender.swift', 'Outbox/OutboxRecord.swift', 'Outbox/OutboxStore.swift', 'Outbox/OutboxDispatcher.swift', 'Outbox/OutboxForeground.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
@@ -128,6 +129,8 @@ for files in checks.values():
         files.append('Chat/ChatTurnMetadata.swift')
     if 'Chat/ChatSendHandoff.swift' in files or 'Chat/ChatMentionPanel.swift' in files:
         files.insert(0, 'LodyUIVerify.swift')
+    if 'Cloud/BackendEnvironment.swift' not in files:
+        files.append('Cloud/BackendEnvironment.swift')
 if 'markdown-repair' in checks:
     subprocess.run(['node', str(root / 'apps/ios/scripts/build-decoder.mjs')], cwd=root, check=True, timeout=120)
 with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
@@ -192,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['file-link', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files']
+        simulator = name in ['auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
         if name in ['message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows']:
@@ -217,7 +220,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 *map(str, sources), '-o', str(Path(output) / 'libAnchoredOverlayKit.a'),
             ], check=True, timeout=120)
             command += ['-I', output, '-L', output, '-lAnchoredOverlayKit']
-        if name in ['file-link', 'session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings']:
+        if name in ['auth-session', 'session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings', 'file-link']:
             command += ['-parse-as-library']
         if name == 'inline-diff':
             command += ['-framework', 'UIKit']
@@ -283,6 +286,20 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                                                                        'SIMCTL_CHILD_OS_ACTIVITY_DT_MODE': 'enable'})
                 finally:
                     server.terminate()
+        elif name == 'auth':
+            subprocess.run(command, check=True, timeout=60)
+            # Exercise the real build-owned Bundle configuration, not a policy stub.
+            import plistlib
+            import shutil
+            contents = Path(output) / 'LocalReset.app/Contents'
+            (contents / 'MacOS').mkdir(parents=True)
+            executable = contents / 'MacOS/auth'
+            shutil.copy2(binary, executable)
+            (contents / 'Info.plist').write_bytes(plistlib.dumps({
+                'CFBundleExecutable': 'auth', 'CFBundleIdentifier': 'ai.lody.verify.local-reset',
+                'LodyBackends': {'CONVEX_SITE_URL': 'https://local.example.test'},
+            }))
+            subprocess.run([str(executable)], check=True, timeout=60)
         elif name == 'strings':
             resources = Path(output) / 'Localization.bundle'
             resources.mkdir()

@@ -81,13 +81,6 @@
     <string name="home_sign_out">退出登录</string>
 
     <!-- Sign in -->
-    <string name="sign_in_title">登录 Lody</string>
-    <string name="sign_in_body">你的对话从 Lody Cloud 同步。请在浏览器中使用 Lody 账号登录。</string>
-    <string name="sign_in_action">登录</string>
-    <string name="sign_in_connecting">正在连接…</string>
-    <string name="sign_in_code">授权码</string>
-    <string name="sign_in_code_hint">请在浏览器中确认此授权码，%1$d 分钟后过期。</string>
-    <string name="sign_in_open">打开授权页面</string>
     <string name="sign_in_cancel">取消</string>
 
     <!-- Chat -->

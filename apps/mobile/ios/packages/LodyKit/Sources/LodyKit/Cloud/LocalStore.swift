@@ -12,7 +12,7 @@ final class LocalStore: @unchecked Sendable {
 
   var generation: Int { generationLock.withLock { currentGeneration } }
 
-  init(url: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Lody/catalog.sqlite")) {
+  init(url: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Lody\(BackendEnvironment.storageSuffix)/catalog.sqlite")) {
     self.url = url
   }
   deinit { sqlite3_close(db) }

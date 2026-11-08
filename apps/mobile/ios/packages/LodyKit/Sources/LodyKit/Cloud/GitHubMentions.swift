@@ -93,10 +93,10 @@ import Foundation
 
   static func call(_ kind: String, path: String, args: [String: Any]) async throws -> Any {
     guard let token = try AuthKeychain.read(), !token.isEmpty else { throw failure() }
-    let auth = try await request("https://backend.lody.ai/api/auth/convex/token", token: token) as? [String: Any]
+    let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", token: token) as? [String: Any]
     guard let jwt = auth?["token"] as? String, !jwt.isEmpty else { throw failure() }
     let response = try await request(
-      "https://convex.lody.ai/api/\(kind)", token: jwt,
+      "\(BackendEnvironment.convex)/api/\(kind)", token: jwt,
       body: ["path": path, "format": "convex_encoded_json", "args": [args]]
     ) as? [String: Any]
     guard try AuthKeychain.read() == token,

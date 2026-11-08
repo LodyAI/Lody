@@ -135,10 +135,9 @@ The host interface is replaceable and uses typed coroutine commands, status, eve
 
 Phase-1 reports are in [verification/results.json](verification/results.json). On the installed debug app, `python3 verification/phase1-device.py` verifies a real Home/background transition, navigation, workspace switching and force-stop/relaunch; set `ADB` and `ANDROID_SERIAL` for another caller-owned device. It saves screenshots and a short video under `verification/evidence/phase-1`.
 
-
 ## Phase 2 cloud probe
 
-Open **Open cloud connection** in the debug launcher, or launch `.diagnostics.CloudProbeActivity`. Sign in through official Device Flow, authorize this Android app independently in your browser, then choose a workspace. The screen distinguishes connecting, syncing, live, paused and unavailable states and offers disconnect/sign-out. No desktop token is required or accepted.
+Open **Open cloud connection** in the debug launcher, or launch `.diagnostics.CloudProbeActivity`. Open the native Home sign-in, authenticate with email/password, Google, or a provider-only browser OAuth flow, then choose a workspace. See [native authentication and provider configuration](docs/native-auth.md). The screen distinguishes connecting, syncing, live, paused and unavailable states and offers disconnect/sign-out. No desktop token is required or accepted.
 
 See [phase-2 architecture](docs/phase-2-architecture.md) for account, credential, network and grant ownership. The debug cloud probe is excluded from release; real-cloud acceptance is tracked separately from offline fixtures.
 
@@ -147,6 +146,11 @@ See [phase-2 architecture](docs/phase-2-architecture.md) for account, credential
 The debug cloud probe now restores the saved workspace and catalog projection before online synchronization. Cached account context is explicitly unverified and cannot request grants. A failed cloud connection retains cached display. Network validation while foregrounded retries an unavailable read lease. See [cache architecture](docs/catalog-cache.md) and [scope](docs/phase-3-cache.md). Native conversations build on this cached catalog projection.
 
 Local screenshots, recordings and raw verification reports are excluded from Git. Checked-in verification summaries distinguish deterministic tests from real-cloud acceptance and remaining checks.
+
+## Build-time backend configuration
+
+See [backend configuration](docs/backend-configuration.md) for the shared local env file,
+process overrides, mandatory TLS and endpoint-isolated storage.
 
 ### Conversation usage
 

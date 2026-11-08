@@ -13,7 +13,12 @@ export type ProjectMemberSource =
       baseBranch?: string;
       preferLocal?: true;
     }
-  | { kind: 'local'; machineId: string; localProjectId: string; baseBranch?: string };
+  | {
+      kind: 'local';
+      machineId: string;
+      localProjectId: string;
+      baseBranch?: string;
+    };
 export type ProjectMemberPlacement =
   | { kind: 'root'; dir: string }
   | { kind: 'submodule'; parent: string; path: string };
@@ -72,7 +77,9 @@ const segmentSchema = pathSchema.refine((value) => !value.includes('/'));
 const memberIdSchema = z
   .string()
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/)
-  .refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
+  .refine(
+    (value) => !['__proto__', 'constructor', 'prototype'].includes(value),
+  );
 const sourceSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('github'),
@@ -90,24 +97,39 @@ const sourceSchema = z.discriminatedUnion('kind', [
 ]);
 const placementSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('root'), dir: segmentSchema }),
-  z.object({ kind: z.literal('submodule'), parent: memberIdSchema, path: pathSchema }),
+  z.object({
+    kind: z.literal('submodule'),
+    parent: memberIdSchema,
+    path: pathSchema,
+  }),
 ]);
-const memberSchema = z.object({ id: memberIdSchema, source: sourceSchema, placement: placementSchema });
+const memberSchema = z.object({
+  id: memberIdSchema,
+  source: sourceSchema,
+  placement: placementSchema,
+});
 
 /** The frozen placement forest; rejects missing parents, cycles and overlapping siblings. */
-export function resolveProjectMemberPaths(members: readonly ProjectMember[]): Record<string, string> {
+export function resolveProjectMemberPaths(
+  members: readonly ProjectMember[],
+): Record<string, string> {
   const byId = new Map(members.map((member) => [member.id, member]));
-  if (byId.size !== members.length) throw new Error('Duplicate Project Member ID');
+  if (byId.size !== members.length)
+    throw new Error('Duplicate Project Member ID');
   const paths = Object.create(null) as Record<string, string>;
   const visiting = new Set<string>();
   const visit = (id: string): string => {
     if (paths[id]) return paths[id];
     const member = byId.get(id);
-    if (!member || visiting.has(id)) throw new Error('Invalid Project Member parent');
+    if (!member || visiting.has(id))
+      throw new Error('Invalid Project Member parent');
     visiting.add(id);
     const p = member.placement;
     const suffix = p.kind === 'root' ? p.dir : p.path;
-    if (!isSafeProjectPath(suffix) || (p.kind === 'root' && suffix.includes('/')))
+    if (
+      !isSafeProjectPath(suffix) ||
+      (p.kind === 'root' && suffix.includes('/'))
+    )
       throw new Error('Invalid Project Member path');
     const path = p.kind === 'root' ? suffix : `${visit(p.parent)}/${suffix}`;
     visiting.delete(id);
@@ -148,7 +170,11 @@ function uniqueMembers(members: readonly ProjectMember[]): boolean {
         ? member.source.repoId !== undefined
           ? `github-id:${member.source.repoId}`
           : `github:${member.source.repoFullName.toLowerCase()}`
-        : JSON.stringify(['local', member.source.machineId, member.source.localProjectId]);
+        : JSON.stringify([
+            'local',
+            member.source.machineId,
+            member.source.localProjectId,
+          ]);
     if (seen.has(key)) return false;
     seen.add(key);
   }
@@ -175,24 +201,34 @@ const workspaceProjectSchema = z.object({
   members: z.array(memberSchema).min(1).refine(validMembers),
 });
 
-export function normalizeWorkspaceProject(value: unknown, key?: unknown): WorkspaceProject | undefined {
+export function normalizeWorkspaceProject(
+  value: unknown,
+  key?: unknown,
+): WorkspaceProject | undefined {
   const result = workspaceProjectSchema.safeParse(value);
-  if (!result.success || (key !== undefined && result.data.id !== key)) return undefined;
+  if (!result.success || (key !== undefined && result.data.id !== key))
+    return undefined;
   return result.data as WorkspaceProject;
 }
 
 /** Every group in a workspace flock scan, by name then id (web `listWorkspaceProjects`). */
-export function listWorkspaceProjects(rows: { key: unknown[]; value?: unknown }[]): WorkspaceProject[] {
+export function listWorkspaceProjects(
+  rows: { key: unknown[]; value?: unknown }[],
+): WorkspaceProject[] {
   const projects: WorkspaceProject[] = [];
   for (const row of rows) {
     if (row.key.length !== 2 || row.key[0] !== 'project') continue;
     const project = normalizeWorkspaceProject(row.value, row.key[1]);
     if (project) projects.push(project);
   }
-  return projects.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  return projects.sort(
+    (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+  );
 }
 
-export function getProjectRunRoot(project: Pick<WorkspaceProject, 'id' | 'name'>): string {
+export function getProjectRunRoot(
+  project: Pick<WorkspaceProject, 'id' | 'name'>,
+): string {
   const slug =
     project.name
       .toLowerCase()
@@ -209,13 +245,17 @@ export const PROJECT_SUBMODULE_BASE = 'gitlink';
  * the group as configured, never a subset). Undefined with fewer than two members:
  * that is the single-repository flow.
  */
-export function buildSessionProjectRun(project: WorkspaceProject): SessionProjectRun | undefined {
+export function buildSessionProjectRun(
+  project: WorkspaceProject,
+): SessionProjectRun | undefined {
   if (project.members.length < 2) return undefined;
   const paths = resolveProjectMemberPaths(project.members);
   return {
     id: project.id,
     name: project.name,
-    ...(project.instructions !== undefined ? { instructions: project.instructions } : {}),
+    ...(project.instructions !== undefined
+      ? { instructions: project.instructions }
+      : {}),
     root: getProjectRunRoot(project),
     members: Object.fromEntries(
       project.members.map((member, o) => [
@@ -239,7 +279,9 @@ export function buildSessionProjectRun(project: WorkspaceProject): SessionProjec
  * The one machine a group must run on, from its local members. `null` when it has
  * none and may run anywhere; `conflict` when they are on different machines.
  */
-export function getProjectBoundMachineId(members: readonly Pick<ProjectMember, 'source'>[]): string | null | 'conflict' {
+export function getProjectBoundMachineId(
+  members: readonly Pick<ProjectMember, 'source'>[],
+): string | null | 'conflict' {
   let machineId: string | null = null;
   for (const { source } of members) {
     if (source.kind !== 'local') continue;
@@ -253,13 +295,21 @@ export function getProjectBoundMachineId(members: readonly Pick<ProjectMember, '
  * The legacy `project` field: the first member, so older clients still show a
  * repository, a branch and a PR. `HEAD` is the placeholder the snapshot uses.
  */
-export function buildProjectGroupProjectRef(member: ProjectMember): Record<string, string | boolean> {
+export function buildProjectGroupProjectRef(
+  member: ProjectMember,
+): Record<string, string | boolean> {
   return member.source.kind === 'github'
-    ? { kind: 'github', repoFullName: member.source.repoFullName, branch: member.source.baseBranch ?? 'HEAD' }
+    ? {
+        kind: 'github',
+        repoFullName: member.source.repoFullName,
+        branch: member.source.baseBranch ?? 'HEAD',
+      }
     : {
         kind: 'local',
         localProjectId: member.source.localProjectId,
-        ...(member.source.baseBranch ? { branch: member.source.baseBranch } : {}),
+        ...(member.source.baseBranch
+          ? { branch: member.source.baseBranch }
+          : {}),
         useWorktree: true,
       };
 }
@@ -306,10 +356,19 @@ export function projectGroupItems(
         label:
           member.source.kind === 'github'
             ? member.source.repoFullName
-            : (localName(member.source.machineId, member.source.localProjectId) ?? member.source.localProjectId),
+            : (localName(
+                member.source.machineId,
+                member.source.localProjectId,
+              ) ?? member.source.localProjectId),
         ...(member.source.kind === 'github'
-          ? { repoFullName: member.source.repoFullName, ...(member.source.preferLocal ? { preferLocal: true } : {}) }
-          : { machineId: member.source.machineId, localProjectId: member.source.localProjectId }),
+          ? {
+              repoFullName: member.source.repoFullName,
+              ...(member.source.preferLocal ? { preferLocal: true } : {}),
+            }
+          : {
+              machineId: member.source.machineId,
+              localProjectId: member.source.localProjectId,
+            }),
         path: paths[member.id] ?? '',
       })),
     };

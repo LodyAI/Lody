@@ -20,8 +20,7 @@ class AccountControllerTest {
   override suspend fun clear(){saved=null}
  }
  private open class Api:CloudAuthApi {
-  override suspend fun authorize()=DeviceAuthorization("device","CODE","https://lody.ai/device",60,1)
-  override suspend fun poll(code:DeviceAuthorization):TokenPoll=TokenPoll.Authorized(Credential("fixture-secret"))
+  override suspend fun email(email:String,password:String):Credential=Credential("fixture-secret")
   override suspend fun account(credential:Credential)=Account("user","Fixture",listOf(Workspace("workspace","Fixture")))
   override suspend fun grant(credential:Credential,workspaceId:String)=ShortLivedGrant("short","https://streams.lody.ai",60)
   override suspend fun signOut(credential:Credential)=Unit
@@ -29,20 +28,20 @@ class AccountControllerTest {
  @Test fun loginPersistsOnlyAfterAccountValidationAndLogoutClearsLocalState()=runTest {
   val store=Store();var cleared=0
   val controller=AccountController(Api(),store,backgroundScope){cleared++}
-  val login=controller.login();advanceTimeBy(1001);runCurrent();login.join()
+  val login=controller.login("a@example.com","password");advanceTimeBy(1001);runCurrent();login.join()
   assertEquals("user",controller.state.value.account?.id);assertNotNull(store.saved)
   assertFalse(controller.state.value.toString().contains("fixture-secret"))
   controller.logout().join();assertNull(store.saved);assertNull(controller.state.value.account);assertTrue(cleared>0)
  }
  @Test fun cancellationCannotPublishOrPersistLateAuthorization()=runTest {
-  val store=Store();val polled=CompletableDeferred<Unit>();val late=CompletableDeferred<TokenPoll>()
-  val api=object:Api(){override suspend fun poll(code:DeviceAuthorization):TokenPoll {
+  val store=Store();val polled=CompletableDeferred<Unit>();val late=CompletableDeferred<Credential>()
+  val api=object:Api(){override suspend fun email(email:String,password:String):Credential {
    polled.complete(Unit);return withContext(NonCancellable){late.await()}
   }}
   val controller=AccountController(api,store,backgroundScope)
-  controller.login();advanceTimeBy(1001);runCurrent();polled.await()
-  val cancellation=controller.cancel();runCurrent();late.complete(TokenPoll.Authorized(Credential("late")));cancellation.join()
-  assertNull(store.saved);assertNull(controller.state.value.account);assertNull(controller.state.value.verification)
+  controller.login("a@example.com","password");advanceTimeBy(1001);runCurrent();polled.await()
+  val cancellation=controller.cancel();runCurrent();late.complete(Credential("late"));cancellation.join()
+  assertNull(store.saved);assertNull(controller.state.value.account);assertNull(controller.state.value.notice)
  }
  @Test fun successorAccountSurvivesLogoutWhenAnIntermediateOperationIsCancelled()=runTest {
   for (startIntermediate in listOf(true,false)) {
@@ -161,5 +160,91 @@ class AccountControllerTest {
   val controller=AccountController(object:Api(){override suspend fun account(credential:Credential):Account=throw AuthFailure("auth_expired")},Store(Credential("expired")),backgroundScope,cache)
   controller.restore().join();assertNull(controller.state.value.account)
  }
+
+ @Test fun browserLoginRecoversPendingPkceAfterProcessRestartAndConsumesItOnce()=runTest {
+  val encrypted=Store();val credentials=Store();val pending=BrowserAuthStore(encrypted)
+  val first=AccountController(Api(),credentials,backgroundScope).also{it.browserStore=pending;it.now={1000}}
+  first.browser(BrowserProvider.GitHub){}.join()
+  val flow=pending.read()!!
+  assertTrue(first.state.value.browserPending)
+  val api=object:Api(){override suspend fun exchange(code:String,verifier:String):Credential {
+   assertEquals(flow.verifier,verifier);return Credential("native")
+  }}
+  val recovered=AccountController(api,credentials,backgroundScope).also{it.browserStore=BrowserAuthStore(encrypted);it.now={2000}}
+  recovered.restore().join();assertTrue(recovered.state.value.browserPending)
+  val url="lody://auth/mobile-callback?state=${flow.state}&code=${"c".repeat(43)}"
+  recovered.browserCallback(url).join()
+  assertEquals("user",recovered.state.value.account?.id);assertTrue(recovered.state.value.verified)
+  assertEquals("native",credentials.saved?.token);assertNull(pending.read())
+  recovered.logout().join();recovered.browserCallback(url).join()
+  assertNull(credentials.saved);assertNull(recovered.state.value.account)
+ }
+ @Test fun cancelledBrowserAttemptCannotReturnAfterRestart()=runTest {
+  for(logout in listOf(false,true)) {
+   val encrypted=Store();val pending=BrowserAuthStore(encrypted);val credentials=Store()
+   val c=AccountController(Api(),credentials,backgroundScope).also{it.browserStore=pending;it.now={1000}}
+   c.browser(BrowserProvider.Discord){}.join();val flow=pending.read()!!
+   if(logout)c.logout().join() else c.cancel().join()
+   val next=AccountController(Api(),credentials,backgroundScope).also{it.browserStore=BrowserAuthStore(encrypted);it.now={2000}}
+   next.browserCallback("lody://auth/mobile-callback?state=${flow.state}&code=${"c".repeat(43)}").join()
+   assertNull(next.state.value.account);assertNull(credentials.saved);assertNull(pending.read())
+  }
+ }
+ @Test fun staleOrMalformedCallbackDoesNotCancelTheCurrentEmailLogin()=runTest {
+  val response=CompletableDeferred<Credential>();val credentials=Store()
+  val c=AccountController(object:Api(){override suspend fun email(email:String,password:String)=response.await()},credentials,backgroundScope)
+  val login=c.login("a@example.com","password");runCurrent()
+  c.browserCallback("lody://auth/mobile-callback?token=secret").join()
+  val stale=c.browserCallback("lody://auth/mobile-callback?state=${"s".repeat(43)}&code=${"c".repeat(43)}")
+  runCurrent();assertTrue(login.isActive)
+  response.complete(Credential("new"));login.join();stale.join()
+  assertEquals("new",credentials.saved?.token);assertTrue(c.state.value.verified)
+ }
+ @Test fun mismatchedAndExpiredBrowserCallbacksCannotAuthorize()=runTest {
+  val pending=BrowserAuthStore(Store());val credentials=Store()
+  val c=AccountController(Api(),credentials,backgroundScope).also{it.browserStore=pending;it.now={1000}}
+  c.browser(BrowserProvider.Apple){}.join();val flow=pending.read()!!
+  c.browserCallback("lody://auth/mobile-callback?state=${"x".repeat(43)}&code=${"c".repeat(43)}").join()
+  assertNotNull(pending.read());assertTrue(c.state.value.browserPending)
+  c.now={601000}
+  c.browserCallback("lody://auth/mobile-callback?state=${flow.state}&code=${"c".repeat(43)}").join()
+  assertNull(pending.read());assertNull(credentials.saved);assertEquals("auth_expired",c.state.value.failure)
+ }
+ @Test fun logoutFencesAnUncooperativeBrowserExchange()=runTest {
+  val pending=BrowserAuthStore(Store());val credentials=Store();val response=CompletableDeferred<Credential>();val entered=CompletableDeferred<Unit>()
+  val c=AccountController(object:Api(){override suspend fun exchange(code:String,verifier:String):Credential {
+   entered.complete(Unit);return withContext(NonCancellable){response.await()}
+  }},credentials,backgroundScope).also{it.browserStore=pending;it.now={1000}}
+  c.browser(BrowserProvider.GitHub){}.join();val flow=pending.read()!!
+  val callback=c.browserCallback("lody://auth/mobile-callback?state=${flow.state}&code=${"c".repeat(43)}")
+  entered.await();val logout=c.logout();runCurrent();response.complete(Credential("late"));logout.join();callback.join()
+  assertNull(credentials.saved);assertNull(pending.read());assertNull(c.state.value.account)
+ }
+ @Test fun registrationWithoutSessionNeverPersistsOrVerifiesAnAccount()=runTest {
+  val credentials=Store();val c=AccountController(object:Api(){override suspend fun register(name:String,email:String,password:String):Credential?=null},credentials,backgroundScope)
+  c.register("Name","a@example.com","password").join()
+  assertNull(credentials.saved);assertNull(c.state.value.account);assertFalse(c.state.value.verified);assertEquals("verify_email",c.state.value.notice)
+ }
+
+ @Test fun replacingBrowserLoginRejectsOldStateWithoutConsumingNewAttempt()=runTest {
+  val pending=BrowserAuthStore(Store());val credentials=Store()
+  val c=AccountController(object:Api(){override suspend fun exchange(code:String,verifier:String)=Credential("new")},credentials,backgroundScope).also{it.browserStore=pending;it.now={1000}}
+  c.browser(BrowserProvider.GitHub){}.join();val old=pending.read()!!
+  c.browser(BrowserProvider.Discord){}.join();val fresh=pending.read()!!
+  c.browserCallback("lody://auth/mobile-callback?state=${old.state}&code=${"c".repeat(43)}").join()
+  assertEquals(fresh.state,pending.read()?.state);assertNull(credentials.saved)
+  c.browserCallback("lody://auth/mobile-callback?state=${fresh.state}&code=${"c".repeat(43)}").join()
+  assertEquals("new",credentials.saved?.token);assertNull(pending.read())
+ }
+ @Test fun cancelledGoogleSheetCannotExchangeALateSdkToken()=runTest {
+  val response=CompletableDeferred<String>();val entered=CompletableDeferred<Unit>();val credentials=Store()
+  val c=AccountController(object:Api(){override suspend fun google(idToken:String,nonce:String):Credential {
+   fail("cancelled SDK result reached backend exchange");return Credential("invalid")
+  }},credentials,backgroundScope)
+  c.google{entered.complete(Unit);withContext(NonCancellable){response.await()}}
+  entered.await();val cancel=c.cancel();runCurrent();response.complete("late-id-token");cancel.join()
+  assertNull(credentials.saved);assertNull(c.state.value.account)
+ }
+
 
 }

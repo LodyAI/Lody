@@ -7,6 +7,7 @@ let package = Package(
   platforms: [.iOS("26.0")],
   products: [.library(name: "LodyKit", targets: ["LodyKit"])],
   dependencies: [
+    .package(url: "https://github.com/google/GoogleSignIn-iOS.git", exact: "9.0.0"),
     .package(path: "../lody-core"),
     .package(path: "../chat-kit"),
     .package(path: "../lexical-swift"),
@@ -24,6 +25,7 @@ let package = Package(
     .target(
       name: "LodyKit",
       dependencies: [
+        .product(name: "GoogleSignIn", package: "GoogleSignIn-iOS"),
         .product(name: "LodyCore", package: "lody-core"),
         .product(name: "LodyRuntime", package: "lody-core"),
         .product(name: "ChatKit", package: "chat-kit"),

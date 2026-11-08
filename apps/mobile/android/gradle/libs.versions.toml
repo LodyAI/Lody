@@ -11,6 +11,10 @@ activity = "1.13.0"
 webkit = "1.18.0"
 
 [libraries]
+credentials = { module = "androidx.credentials:credentials", version = "1.5.0" }
+credentials-play = { module = "androidx.credentials:credentials-play-services-auth", version = "1.5.0" }
+googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version = "1.1.1" }
+browser = { module = "androidx.browser:browser", version = "1.9.0" }
 onesignal = { module = "com.onesignal:OneSignal", version = "5.7.6" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version = "25.0.1" }
 # AGP 9 ships Kotlin 2.2; this newer plugin on the build classpath drives built-in Kotlin.

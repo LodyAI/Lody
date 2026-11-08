@@ -652,7 +652,7 @@ private struct ChatRowContent: View {
     .frame(maxWidth: .infinity, minHeight: nested ? LodySize.controlMd : LodySize.listRow, alignment: .leading)
   }
 
-  /// "4 个子对话，已展开" for VoiceOver; the toggle itself is an accessibility action.
+  /// Child count and expanded state for VoiceOver; the toggle is an accessibility action.
   private var familyLabel: String {
     guard let expanded else { return "" }
     let count = String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount)

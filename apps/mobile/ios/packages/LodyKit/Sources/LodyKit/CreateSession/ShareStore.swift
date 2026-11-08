@@ -38,7 +38,7 @@ enum ShareStore {
 
   static var root: URL? {
     override ?? FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
-      .appendingPathComponent("Library/LodyShare", isDirectory: true)
+      .appendingPathComponent("Library/LodyShare\(BackendEnvironment.storageSuffix)", isDirectory: true)
   }
 
   static func useRoot(_ url: URL?) { override = url }

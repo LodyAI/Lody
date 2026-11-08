@@ -24,11 +24,11 @@ preserved; [ChatKit](https://github.com/Innei/ChatKit) remains a pinned submodul
 
 ## Repository layout
 
-| Directory | Purpose |
-| --- | --- |
-| [ios/](ios/README.md) | Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, and a separate pnpm workspace |
-| [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime |
-| `shared/markdown-repair/` | Markdown repair entry used by both clients |
+| Directory                     | Purpose                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| [ios/](ios/README.md)         | Swift/UIKit and SwiftUI client; XcodeGen, SwiftPM, and a separate pnpm workspace |
+| [android/](android/README.md) | Kotlin/Jetpack Compose client; Gradle and an npm-built protocol runtime          |
+| `shared/markdown-repair/`     | Markdown repair entry used by both clients                                       |
 
 Appearance code and icons are owned by each platform. iOS uses system fonts,
 including system monospaced fonts for code; Android bundles Inter and JetBrains Mono. The former shared
@@ -46,6 +46,37 @@ git submodule update --init --recursive apps/mobile/ios/packages/chat-kit
 
 Mobile has independent dependency locks and toolchains. The root `pnpm install`,
 `pnpm check`, and desktop build do not install or validate the native clients.
+
+### Backend configuration
+
+Both clients read the optional, Git-ignored `apps/mobile/.env.local` at build
+configuration time. Copy `.env.example` in this directory to `.env.local` and
+set client-facing HTTPS origins:
+
+```dotenv
+CONVEX_URL=https://rpc.example.com
+CONVEX_SITE_URL=https://auth.example.com
+CF_WORKER_URL=https://worker.example.com
+```
+
+These are illustrative overrides; production defaults are owned by `backend-config.mjs`.
+Missing or empty values use those defaults.
+Process environment variables take precedence over the file. Configure all three
+for a fully local stack: Convex RPC, Convex HTTP Actions/auth, and CF Worker are
+separate interfaces. Do not copy server-internal HTTP addresses or secrets into
+this file. Files are parsed as data, not sourced as shell scripts.
+
+Use your local stack's public TLS endpoints and configure device trust for its
+CA; certificate verification is not bypassed. The host must be reachable from
+the selected simulator/device. A limited Worker ingress relay does not replace
+Worker upload/R2 routes. Streams endpoints still come from backend grants.
+
+After changes, regenerate/build iOS (`pnpm prebuild` from `ios/`) or rebuild
+Android with Gradle. Endpoint tuples select separate credential/cache namespaces;
+the production tuple retains existing production data. These values are built
+into the app, not read from the developer machine when the app launches.
+Provider callback registrations must permit the selected auth origin; changing
+client endpoints does not configure OAuth providers or the backend itself.
 
 ### iOS
 

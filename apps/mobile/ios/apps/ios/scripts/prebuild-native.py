@@ -10,6 +10,8 @@ def generate(root, environment):
     generated = root / '.generated'
     (generated / 'Lody').mkdir(parents=True, exist_ok=True)
     info = plistlib.loads((root / 'App/Info.plist').read_bytes())
+    backends = json.loads(subprocess.check_output(['node', str(root.parents[2] / 'backend-config.mjs')], env=environment, text=True))
+    info['LodyBackends'] = backends
     version = json.loads((root / 'package.json').read_text())['version']
     build = environment.get('BUILD_NUMBER', info['CFBundleVersion'])
     info['CFBundleShortVersionString'] = version
@@ -21,6 +23,7 @@ def generate(root, environment):
         'include': ['project.yml'],
         'settings': {'base': {'MARKETING_VERSION': version, 'CURRENT_PROJECT_VERSION': build}},
     }
+    spec['targets'] = {name: {'info': {'properties': {'LodyBackends': backends}}} for name in ['LodyShare', 'LodyNotificationService']}
     profiles = json.loads(environment.get('IOS_PROFILE_MAP', '{}'))
     if profiles:
         # Release signing is another XcodeGen input, never a post-generation project edit.
@@ -28,10 +31,12 @@ def generate(root, environment):
                    'ai.lody.mobile.notification-service': 'LodyNotificationService'}
         if set(profiles) != set(targets):
             raise ValueError('Provisioning profiles must cover exactly the app and its two extensions')
-        spec['targets'] = {targets[bundle]: {'settings': {'configs': {'Release': {
+        signing = {targets[bundle]: {'settings': {'configs': {'Release': {
             'CODE_SIGN_STYLE': 'Manual', 'CODE_SIGN_IDENTITY': 'Apple Distribution',
             'DEVELOPMENT_TEAM': environment['APPLE_TEAM_ID'], 'PROVISIONING_PROFILE_SPECIFIER': profile,
         }}}} for bundle, profile in profiles.items()}
+        for name, config in signing.items():
+            spec['targets'].setdefault(name, {}).update(config)
     generated_spec = generated / 'project.json'
     generated_spec.write_text(json.dumps(spec, indent=2) + '\n')
     subprocess.run(['xcodegen', 'generate', '--spec', str(generated_spec), '--project-root', str(root), '--project', str(root)], check=True)

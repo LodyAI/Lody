@@ -101,7 +101,7 @@ fence keeps its original code colours throughout that block.
 
 ### Security First & Hardware Isolation
 
-- **Standard Device Flow Auth**: Authorizes via the official Better Auth Device Flow.
+- **Native Sign-in**: Email and password, Sign in with Apple, Google SDK, and GitHub/Discord system authorization with a PKCE handoff. No device codes or hosted login UI. See [configuration and verification](docs/native-auth.md).
 - **System Keychain Storage**: All authentication credentials and sensitive communication keys are strictly isolated in the iOS Keychain and never exposed in app-accessible shared storage.
 
 ---
@@ -249,6 +249,11 @@ Lody iOS is made possible thanks to these open-source projects and creators:
 - **[baguette](https://github.com/tddworks/baguette)**: Headless iOS Simulator control and streaming (Apache-2.0). The native simulator viewer is a client of its HTTP and WebSocket protocol; baguette itself runs on the Mac and is not bundled.
 - **[libdatachannel](https://github.com/paullouisageneau/libdatachannel)**: Native data-only Simulator transport (MPL-2.0), built from pinned source at `pnpm prebuild` with media and WebSocket disabled, over [libjuice](https://github.com/paullouisageneau/libjuice) (MPL-2.0), [usrsctp](https://github.com/sctplab/usrsctp) (BSD-3-Clause) and [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) (Apache-2.0). No camera, microphone or WebView is involved.
 - **[vphone-client](https://github.com/datdadev/vphone-client)**: Its native remote iPhone viewer (hardware decode into `AVSampleBufferDisplayLayer`, raw UIKit touch forwarding, never dropping input behind video) shaped the design of Lody's simulator viewer.
+
+## Backend configuration
+
+See [native backend configuration](docs/backend-configuration.md) for the optional
+`../.env.local`, production defaults, public TLS endpoints and isolated local stores.
 
 ### Native canvas appearance
 

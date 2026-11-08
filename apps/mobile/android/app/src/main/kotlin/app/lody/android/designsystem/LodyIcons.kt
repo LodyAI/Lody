@@ -326,6 +326,40 @@ object LodyIcons {
         )
     }
 
+    val Mail: ImageVector by lazy {
+        lodyIcon(
+            "Mail",
+            "m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7",
+            "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+        )
+    }
+
+    val ArrowLeft: ImageVector by lazy {
+        lodyIcon(
+            "ArrowLeft",
+            "m12 19-7-7 7-7",
+            "M19 12H5",
+        )
+    }
+
+    val ArrowRight: ImageVector by lazy {
+        lodyIcon(
+            "ArrowRight",
+            "M5 12h14",
+            "m12 5 7 7-7 7",
+        )
+    }
+
+    val EyeOff: ImageVector by lazy {
+        lodyIcon(
+            "EyeOff",
+            "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49",
+            "M14.084 14.158a3 3 0 0 1-4.242-4.242",
+            "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143",
+            "m2 2 20 20",
+        )
+    }
+
     val Eye: ImageVector by lazy {
         lodyIcon(
             "Eye",
@@ -669,6 +703,10 @@ object LodyIcons {
             "pin" to Pin,
             "bell" to Bell,
             "eye" to Eye,
+            "eyeOff" to EyeOff,
+            "mail" to Mail,
+            "arrowLeft" to ArrowLeft,
+            "arrowRight" to ArrowRight,
             "lock" to Lock,
             "user" to User,
             "agent" to Agent,

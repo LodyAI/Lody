@@ -1,3 +1,4 @@
+import GoogleSignIn
 import LodyCore
 import UIKit
 
@@ -50,6 +51,7 @@ public final class LodyApplication {
   }
 
   public func open(_ url: URL) {
+    if GIDSignIn.sharedInstance.handle(url) { return }
     guard let destination = AppLink.parse(url.absoluteString) else { return }
     switch destination {
     case .share: shares.wake()
@@ -80,7 +82,7 @@ public final class LodyApplication {
       guard onboarding == nil else { return }
       let regular = HomeController.current?.traitCollection.horizontalSizeClass == .regular
       let page = LodyShell.shared.presentNative(OnboardingController(), title: "", dismissible: false,
-        style: regular ? "formSheet" : "pageSheet", headerShown: false)
+        style: regular ? "formSheet" : "fullScreen", headerShown: false)
       onboarding = page
       page.onClose = { [weak self] in self?.onboarding = nil; self?.reconcile() }
       return

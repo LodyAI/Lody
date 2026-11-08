@@ -82,13 +82,6 @@
     <string name="home_sign_out">Sign out</string>
 
     <!-- Sign in -->
-    <string name="sign_in_title">Sign in to Lody</string>
-    <string name="sign_in_body">Your chats sync from Lody Cloud. Sign in with your Lody account in the browser.</string>
-    <string name="sign_in_action">Sign in</string>
-    <string name="sign_in_connecting">Connecting…</string>
-    <string name="sign_in_code">Authorization code</string>
-    <string name="sign_in_code_hint">Confirm this code in your browser. It expires in %1$d minutes.</string>
-    <string name="sign_in_open">Open authorization page</string>
     <string name="sign_in_cancel">Cancel</string>
 
     <!-- Chat -->

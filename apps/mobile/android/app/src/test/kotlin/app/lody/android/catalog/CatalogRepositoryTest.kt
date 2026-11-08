@@ -32,8 +32,6 @@ class CatalogRepositoryTest {
  }
  private fun account(tasks:CoroutineScope,store:Store,grant: suspend ()->ShortLivedGrant):AccountController {
   val api=object:CloudAuthApi {
-   override suspend fun authorize():DeviceAuthorization=error("unused")
-   override suspend fun poll(code:DeviceAuthorization):TokenPoll=error("unused")
    override suspend fun account(credential:Credential)=user
    override suspend fun grant(credential:Credential,workspaceId:String)=grant()
    override suspend fun signOut(credential:Credential)=Unit

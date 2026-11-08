@@ -51,14 +51,6 @@ struct AuthAccount: Codable, Equatable, Sendable {
   }
 }
 
-struct DeviceCode: Sendable {
-  let deviceCode: String
-  let userCode: String
-  let verificationURL: String
-  let expiresIn: Double
-  let interval: Double
-}
-
 struct WorkspaceIconFile: Sendable {
   let url: URL
   let name: String
@@ -76,83 +68,134 @@ struct AuthFailure: LocalizedError {
 struct AuthAPI: Sendable {
   typealias Transport = @Sendable (URLRequest) async throws -> (Data, Int)
 
-  static let authOrigin = "https://backend.lody.ai"
-  static let cloudOrigin = "https://api.lody.ai"
-  static let clientID = "lody-cli"
+  static let authOrigin = BackendEnvironment.site
+  static let cloudOrigin = BackendEnvironment.worker
   private static let iconTypes: Set<String> = ["image/png", "image/jpeg", "image/webp", "image/gif"]
   private static let iconMaxBytes = 1024 * 1024
   private static let componentCharacters = CharacterSet(
     charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
   )
+  // Never follow redirects carrying credentials or replay a password POST elsewhere.
+  private final class RedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+      completionHandler(nil)
+    }
+  }
   private static let session: URLSession = {
-    let configuration = URLSessionConfiguration.default
+    let configuration = URLSessionConfiguration.ephemeral
     configuration.httpShouldSetCookies = false
     configuration.httpCookieAcceptPolicy = .never
     configuration.httpCookieStorage = nil
-    return URLSession(configuration: configuration)
+    configuration.urlCache = nil
+    configuration.timeoutIntervalForRequest = 30
+    return URLSession(configuration: configuration, delegate: RedirectPolicy(), delegateQueue: nil)
   }()
 
   var transport: Transport = { request in
+    let reply = try await nativeTransport(request)
+    return (reply.data, reply.status)
+  }
+  struct Reply: Sendable {
+    let data: Data
+    let status: Int
+    var token: String? = nil
+  }
+  var loginTransport: @Sendable (URLRequest) async throws -> Reply = Self.nativeTransport
+
+  private static func nativeTransport(_ request: URLRequest) async throws -> Reply {
     do {
-      let (data, response) = try await AuthAPI.session.data(for: request)
-      return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+      let (data, response) = try await session.data(for: request)
+      guard let response = response as? HTTPURLResponse else { throw AuthFailure(message: String(localized: "auth.error.invalidResponse", bundle: .lody)) }
+      return Reply(data: data, status: response.statusCode, token: response.value(forHTTPHeaderField: "set-auth-token"))
     } catch let error as URLError where error.code != .cancelled {
-      throw AuthFailure(message: "Network request failed")
+      throw AuthFailure(message: String(localized: "auth.native.network", bundle: .lody))
     }
-  }
-  var sleep: @Sendable (Double) async throws -> Void = { milliseconds in
-    try await Task.sleep(nanoseconds: UInt64(max(0, milliseconds) * 1_000_000))
-  }
-  var now: @Sendable () -> Double = { Date().timeIntervalSince1970 * 1000 }
-
-  func deviceCode() async throws -> DeviceCode {
-    let data = try Self.record(await request("/device/code", body: ["client_id": Self.clientID]))
-    let address = try Self.requiredString(data["verification_uri_complete"])
-    guard var url = URLComponents(string: address), url.scheme?.lowercased() == "https",
-          let host = url.host?.lowercased(), ["lody.ai", "backend.lody.ai"].contains(host),
-          url.port == nil || url.port == 443, url.user == nil, url.password == nil else {
-      throw AuthFailure(message: String(localized: "auth.error.invalidAuthorizeUrl", bundle: .lody))
-    }
-    guard let expiresIn = Self.positive(data["expires_in"]), let interval = Self.positive(data["interval"]) else {
-      throw AuthFailure(message: String(localized: "auth.error.invalidExpiry", bundle: .lody))
-    }
-    // The auth site redirects to this official web UI; match the CLI's direct device-page link.
-    url.scheme = "https"
-    url.host = "lody.ai"
-    url.port = nil
-    if url.path.isEmpty { url.path = "/" }
-    guard let verification = url.url?.absoluteString else { throw AuthFailure(message: String(localized: "auth.error.invalidAuthorizeUrl", bundle: .lody)) }
-    return DeviceCode(
-      deviceCode: try Self.requiredString(data["device_code"]),
-      userCode: try Self.requiredString(data["user_code"]),
-      verificationURL: verification,
-      expiresIn: expiresIn,
-      interval: interval
-    )
   }
 
-  func pollToken(_ code: DeviceCode) async throws -> String {
-    var interval = code.interval * 1000
-    let deadline = now() + code.expiresIn * 1000
-    polling: while now() < deadline {
-      try await sleep(min(interval, deadline - now()))
-      try Task.checkCancellation()
-      if now() >= deadline { break }
-      let data = try Self.record(await request("/device/token", body: [
-        "client_id": Self.clientID,
-        "device_code": code.deviceCode,
-        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-      ]))
-      if let token = data["access_token"] as? String, !token.isEmpty { return token }
-      switch data["error"] as? String {
-      case "authorization_pending": continue
-      case "slow_down": interval += 5000
-      case "access_denied": throw AuthFailure(message: String(localized: "auth.error.accessDenied", bundle: .lody))
-      case "expired_token": break polling
-      default: throw AuthFailure(message: String(localized: "auth.error.deviceAuthFailed", bundle: .lody))
-      }
+  func email(email: String, password: String) async throws -> String {
+    try await authenticate("/sign-in/email", body: ["email": email, "password": password, "callbackURL": Self.authOrigin + "/api/auth/mobile/email-verified"])
+  }
+
+  func idToken(provider: String, token: String, nonce: String? = nil, name: [String: String]? = nil) async throws -> String {
+    guard ["apple", "google"].contains(provider) else { throw AuthFailure(message: String(localized: "auth.error.invalidResponse", bundle: .lody)) }
+    var identity: [String: Any] = ["token": token]
+    if let nonce { identity["nonce"] = nonce }
+    if provider == "apple", let name, !name.isEmpty { identity["user"] = ["name": name] }
+    return try await authenticate("/sign-in/social", body: ["provider": provider, "idToken": identity])
+  }
+
+  func authenticate(_ path: String, body: [String: Any], native: Bool = false) async throws -> String {
+    let reply = try await credentialReply(path, body: body, native: native)
+    return try Self.sessionToken(reply)
+  }
+
+  func register(name: String, email: String, password: String) async throws -> String? {
+    let reply = try await credentialReply("/sign-up/email", body: ["name": name, "email": email, "password": password,
+      "callbackURL": Self.authOrigin + "/api/auth/mobile/email-verified"])
+    let object = try Self.record(Self.json(reply.data))
+    if reply.token != nil || object["token"] is String { return try Self.sessionToken(reply) }
+    guard (object["token"] == nil || object["token"] is NSNull),
+          let user = object["user"] as? [String: Any], let id = user["id"] as? String, !id.isEmpty else {
+      throw AuthFailure(message: String(localized: "auth.error.invalidResponse", bundle: .lody))
     }
-    throw AuthFailure(message: String(localized: "auth.error.codeExpired", bundle: .lody))
+    try await resendVerification(email: email)
+    return nil
+  }
+
+  func resendVerification(email: String) async throws {
+    let reply = try await credentialReply("/send-verification-email", body: ["email": email,
+      "callbackURL": Self.authOrigin + "/api/auth/mobile/email-verified"])
+    let object = try Self.record(Self.json(reply.data))
+    guard object["status"] as? Bool == true else {
+      throw AuthFailure(message: String(localized: "auth.native.failed", bundle: .lody))
+    }
+  }
+
+  private func credentialReply(_ path: String, body: [String: Any], native: Bool = false) async throws -> Reply {
+    let endpoint = native ? path : "/api/auth" + path
+    var request = URLRequest(url: URL(string: Self.authOrigin + endpoint)!)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    let reply = try await loginTransport(request)
+    try Task.checkCancellation()
+    guard (200..<300).contains(reply.status) else {
+      throw AuthFailure(message: String(localized: "auth.native.failed", bundle: .lody))
+    }
+    return reply
+  }
+
+  private static func sessionToken(_ reply: Reply) throws -> String {
+    let object = try Self.record(Self.json(reply.data))
+    // Streams authorization looks up the raw session token. Better Auth's
+    // set-auth-token header is a signed cookie value, not that database token.
+    let token = try Self.requiredString(object["token"])
+    guard !token.contains(where: { $0.isWhitespace || $0.isNewline }) else {
+      throw AuthFailure(message: String(localized: "auth.error.invalidResponse", bundle: .lody))
+    }
+    return token
+  }
+
+  func requestPasswordReset(email: String) async throws {
+    guard Self.authOrigin == "https://backend.lody.ai" else {
+      throw AuthFailure(message: String(localized: "auth.reset.unsupportedLocal", bundle: .lody))
+    }
+    try await passwordAction("/request-password-reset", body: ["email": email, "redirectTo": "https://lody.ai/reset-password"])
+  }
+
+  private func passwordAction(_ path: String, body: [String: Any]) async throws {
+    var request = URLRequest(url: URL(string: Self.authOrigin + "/api/auth" + path)!)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    let reply = try await loginTransport(request)
+    try Task.checkCancellation()
+    guard (200..<300).contains(reply.status),
+          let value = try? Self.record(Self.json(reply.data)), value["status"] as? Bool == true else {
+      throw AuthFailure(message: String(localized: "auth.reset.failed", bundle: .lody))
+    }
   }
 
   func account(token: String) async throws -> AuthAccount {
@@ -246,7 +289,7 @@ struct AuthAPI: Sendable {
     let (data, status) = try await transport(request)
     let value = try Self.json(data)
     if status == 401 { throw Self.expired }
-    if !(200..<300).contains(status), path != "/device/token" {
+    if !(200..<300).contains(status) {
       throw AuthFailure(message: String.localizedStringWithFormat(String(localized: "auth.error.requestFailed", bundle: .lody), String(describing: status)))
     }
     return value
@@ -271,12 +314,6 @@ struct AuthAPI: Sendable {
       throw AuthFailure(message: String(localized: "auth.error.missingFields", bundle: .lody))
     }
     return value
-  }
-
-  private static func positive(_ value: Any?) -> Double? {
-    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-          number.doubleValue.isFinite, number.doubleValue > 0 else { return nil }
-    return number.doubleValue
   }
 
   static func optionalHTTPS(_ value: Any?) -> String? {

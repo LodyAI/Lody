@@ -53,7 +53,7 @@ internal class SessionAttachmentUploads(private val resolver: ContentResolver) {
         items.map { item ->
             coroutineContext.ensureActive()
             val kind = if (item.image) "image" else "file"
-            val base = "https://api.lody.ai/api/workspaces/${segment(workspace)}/session-${if (item.image) "images" else "files"}"
+            val base = "${app.lody.android.BackendEnvironment.worker}/api/workspaces/${segment(workspace)}/session-${if (item.image) "images" else "files"}"
             val result = if (item.image) uploadImage(token, base, session, item) else uploadFile(token, base, session, item)
             val block = result.optJSONObject(kind)
             val id = block?.optString(if (item.image) "imageId" else "fileId").orEmpty()

@@ -260,7 +260,7 @@ READY = {
     'composer-rich': 'create-session-input',
     'composer-fullscreen': 'session-input',
     'inbox': 'inbox-wait',
-    'onboarding': 'onboarding-connect',
+    'onboarding': 'auth.native.github',
     'community-notice': 'community-notice',
 }
 parser = argparse.ArgumentParser(description=__doc__)
