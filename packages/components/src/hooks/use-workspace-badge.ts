@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { useCallback, useEffect } from 'react';
 import { atom, useAtomValue, useStore } from 'jotai';
 import { allActiveSessionsAtom } from '@/atoms/doc-meta';
@@ -19,6 +21,7 @@ const ZERO: WindowBadge = { unread: 0, waiting: 0 };
 /** Absolute count of owned sidebar rows, including their child conversations. */
 export const workspaceBadgeAtom = atom<WindowBadge>((get) => {
   const userId = get(userAtom)?.id;
+  const ownedMachineIds = get(ownedMachineIdsAtom);
   if (!userId) return ZERO;
   const sessions = get(allActiveSessionsAtom);
   const children = buildChildSessionsByParent(sessions);
@@ -31,7 +34,7 @@ export const workspaceBadgeAtom = atom<WindowBadge>((get) => {
   let unread = 0;
   let waiting = 0;
   for (const session of sessions) {
-    if (session.parentSessionId || session.userId !== userId) continue;
+    if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds)) continue;
     const activity = getEffectiveSessionActivitySummary(session, children, statuses);
     if (activity.isWaitingPermission) waiting += 1;
     else if (activity.hasUnreadMessages) unread += 1;

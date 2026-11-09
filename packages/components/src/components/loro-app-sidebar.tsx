@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -2000,6 +2002,7 @@ export function LoroAppSidebar({
 
   // Shared by the task lists and the Workspace groups, which also render a
   // Local Project Session as a task row when it moves under its opener.
+  const ownedMachineIds = useAtomValue(ownedMachineIdsAtom);
   const buildSidebarTaskRows = useCallback(
     (sourceSessions: SessionMeta[]) =>
       buildSessionListRows(
@@ -2007,6 +2010,7 @@ export function LoroAppSidebar({
         {
           scope,
           currentUserId: userId,
+          ownedMachineIds,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
           members: activeOrganization?.members,
@@ -2024,6 +2028,7 @@ export function LoroAppSidebar({
       })),
     [
       activeOrganization?.members,
+      ownedMachineIds,
       allActiveSessions,
       onlineMachineIds,
       liveSessionStatuses,
@@ -2248,7 +2253,7 @@ export function LoroAppSidebar({
       if (session.projectRun) continue;
       if (scope === 'my') {
         if (!userId) continue;
-        if (session.userId !== userId) continue;
+        if (!isSessionInMyScope(session, userId, ownedMachineIds)) continue;
       }
 
       const key = `${session.machineId}:${project.localProjectId}`;
@@ -2269,7 +2274,7 @@ export function LoroAppSidebar({
     }
 
     return map;
-  }, [childSessionsByParent, scope, sessions, sessionsListLoading, userId]);
+  }, [childSessionsByParent, scope, sessions, sessionsListLoading, userId, ownedMachineIds]);
   // The ONE session-navigation callback for every sidebar surface (rows,
   // Updated items, keyboard nav). `tabSessionId` restores the precise child Tab
   // that "Go to Opener Session" points at.

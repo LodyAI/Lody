@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { getLatestPullRequestInfo } from '@/components/sessions/session-list-rows';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -1731,6 +1733,7 @@ export function ArchiveView() {
   const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('project');
   const { activeOrganization } = useOrganization();
   const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const ownedMachineIds = useAtomValue(ownedMachineIdsAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const archivedLocalSessionMachineIds = useMemo(
     () =>
@@ -1785,7 +1788,9 @@ export function ArchiveView() {
     const base =
       archiveScope === 'my'
         ? userId
-          ? archivedSessions.filter((session) => session.userId === userId)
+          ? archivedSessions.filter((session) =>
+              isSessionInMyScope(session, userId, ownedMachineIds)
+            )
           : []
         : archivedSessions;
 
@@ -1807,13 +1812,15 @@ export function ArchiveView() {
       if (machine?.ownerUserId === userId) return true;
 
       // My scope is already filtered by userId; keep local sessions visible even if owner meta hasn't updated yet.
-      if (archiveScope === 'my' && session.userId === userId) return true;
+      if (archiveScope === 'my' && isSessionInMyScope(session, userId, ownedMachineIds))
+        return true;
 
       return false;
     });
   }, [
     archivedSessions,
     archiveScope,
+    ownedMachineIds,
     localMachineId,
     machineMetaMap,
     user?.id,

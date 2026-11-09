@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import {
   useLegacyWorkspaceMutation,
@@ -712,6 +714,7 @@ function WorkspaceChatLanding({
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
+  const ownedMachineIds = useAtomValue(ownedMachineIdsAtom);
   const visibleMachineIndex = useVisibleMachineMetas({
     machineFlockFamilies: CHAT_LANDING_MACHINE_FLOCK_FAMILIES,
   });
@@ -4971,7 +4974,12 @@ function WorkspaceChatLanding({
     };
     return sourceSessions
       .filter((session) => {
-        if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+        if (
+          chatScope === 'my' &&
+          myUserId &&
+          !isSessionInMyScope(session, myUserId, ownedMachineIds)
+        )
+          return false;
         if (chatExcludedMachines.has(session.machineId)) return false;
         return true;
       })
@@ -5107,6 +5115,7 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    ownedMachineIds,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
@@ -5323,6 +5332,7 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    ownedMachineIds,
     chatViewMode,
     mobileHomeMachines,
     mobileSheetRecency,
@@ -5896,7 +5906,8 @@ function WorkspaceChatLanding({
       return activity;
     };
     const projectScopedSessions = sourceSessions.filter((session) => {
-      if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+      if (chatScope === 'my' && myUserId && !isSessionInMyScope(session, myUserId, ownedMachineIds))
+        return false;
       if (mobileProjectContext.kind === 'local') {
         if (session.machineId !== mobileProjectContext.machineId) return false;
         const key = getSessionLocalProjectKey(session);
@@ -5991,6 +6002,7 @@ function WorkspaceChatLanding({
       });
   }, [
     chatScope,
+    ownedMachineIds,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
@@ -6130,6 +6142,7 @@ function WorkspaceChatLanding({
     chatExcludedPr,
     chatExcludedRunning,
     chatScope,
+    ownedMachineIds,
     mobileHomeMachines,
     mobileProjectContext,
     setChatExcludedMachines,

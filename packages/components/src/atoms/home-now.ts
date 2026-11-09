@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { atom } from 'jotai';
 import {
   findFreshSessionPresenceState,
@@ -58,6 +60,7 @@ function latestPr(session: SessionMeta): HomeNowPr | null {
  */
 export const homeNowInputAtom = atom((get) => {
   const userId = get(userAtom)?.id;
+  const ownedMachineIds = get(ownedMachineIdsAtom);
   if (!userId || !get(docMetaCacheReadyAtom)) return EMPTY_HOME_NOW_INPUT;
 
   const presence = get(lodyPresenceStatesAtom);
@@ -78,7 +81,7 @@ export const homeNowInputAtom = atom((get) => {
   const horizon = nowMs - ROW_HORIZON_MS;
   const rows: HomeNowRow[] = [];
   for (const session of sessions) {
-    if (session.parentSessionId || session.userId !== userId) continue;
+    if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds)) continue;
     if (session.isArchived || session.isTabClosed) continue;
     const activity = getEffectiveSessionActivitySummary(session, children, live);
     const lastAt = activity.latestMessageAt || toMs(session.createdAt) || 0;

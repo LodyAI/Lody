@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { getSessionGroupTitle, machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -2387,6 +2389,7 @@ const SessionDetail = ({
   } = useSessionActions();
   const { members: workspaceMembers, isMultiMember: isMultiMemberWorkspace } =
     useWorkspaceMembers();
+  const getOwnerAccessReason = useSessionOwnerAccess();
   const handleTransferSessionOwner = useCallback(
     async (targetSessionId: SessionId, nextUserId: string) => {
       try {
@@ -5688,6 +5691,7 @@ const SessionDetail = ({
     ]
   );
 
+  const ownedMachineIds = useAtomValue(ownedMachineIdsAtom);
   const visibleMachineIds = useMemo(
     () => new Set(sharingMachineAccessById.keys()),
     [sharingMachineAccessById]
@@ -5714,6 +5718,7 @@ const SessionDetail = ({
       machineVisibilityLoading,
       localProjectVisibilityLoading,
       currentUserId: user?.id ?? null,
+      ownedMachineIds,
     });
   }, [
     activeSession,
@@ -5727,6 +5732,7 @@ const SessionDetail = ({
     user?.id,
     visibleLocalProjectKeys,
     visibleMachineIds,
+    ownedMachineIds,
   ]);
 
   /* One compact line per SessionDetail render into the crash-report ring
@@ -6465,6 +6471,7 @@ const SessionDetail = ({
             isMultiMemberWorkspace && !activeSession.isArchived
               ? {
                   members: workspaceMembers,
+                  getDisabledReason: (userId) => getOwnerAccessReason(activeSession, userId),
                   ownerUserId: activeSession.userId,
                   onSelect: (userId) => {
                     void handleTransferSessionOwner(activeSession.id, userId);

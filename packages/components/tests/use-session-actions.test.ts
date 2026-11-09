@@ -1,3 +1,4 @@
+import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
@@ -621,6 +622,113 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it('rejects a private-machine owner transfer without changing metadata or sharing', async () => {
+    const repo = await LoroRepo.create({});
+    const id = 'private-transfer' as SessionId;
+    const meta = {
+      id,
+      machineId: 'private-machine',
+      userId: 'synthetic-session-account',
+    } as SessionMeta;
+    await repo.upsertDocMeta(getSessionRoomId(id), meta);
+    const runtime = createRuntime({ repo, writer: createDirectWorkspaceWriter({ repo } as never) });
+    const store = createStore();
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(meta.machineId)]: { id: meta.machineId, ownerUserId: meta.userId } as never,
+    });
+    const actions = await renderActions(runtime, { store });
+    try {
+      await expect(actions.transferSessionOwner(id, 'colleague')).rejects.toThrow();
+      expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+      expect(store.get(machineMetaCacheAtom)[getMachineRoomId(meta.machineId)]).toEqual({
+        id: meta.machineId,
+        ownerUserId: meta.userId,
+      });
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it.each([false, true])(
+    'requires local-project sharing as well as machine sharing (%s)',
+    async (sharedWithTeam) => {
+      const repo = await LoroRepo.create({});
+      const id = 'shared-transfer' as SessionId;
+      const meta = {
+        id,
+        machineId: 'shared-machine',
+        userId: 'synthetic-session-account',
+        project: { kind: 'local', localProjectId: 'project' },
+      } as SessionMeta;
+      const machineAccess = {
+        machineId: meta.machineId,
+        ownerUserId: meta.userId,
+        sharedWithTeam: true,
+        updatedAt: 1,
+      };
+      const originalQuery = testCloudApi.useQuery;
+      vi.spyOn(testCloudApi, 'useQuery').mockImplementation(((operation, args) => {
+        if (args !== 'skip' && operation.name === 'machines:listVisibleMachines')
+          return [machineAccess];
+        if (args !== 'skip' && operation.name === 'localProjects:listVisibleLocalProjects')
+          return [{ ...machineAccess, localProjectId: 'project', sharedWithTeam }];
+        return originalQuery(operation, args);
+      }) as typeof testCloudApi.useQuery);
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      const actions = await renderActions(runtime);
+      try {
+        if (sharedWithTeam) {
+          await actions.transferSessionOwner(id, 'colleague');
+          expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+            ...meta,
+            userId: 'colleague',
+          });
+        } else {
+          await expect(actions.transferSessionOwner(id, 'colleague')).rejects.toThrow();
+          expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+        }
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each(['plaintext', 'e2ee'] as const)(
+    'lets the machine owner reclaim a transferred session without sharing its machine (%s)',
+    async (contentMode) => {
+      const repo = await LoroRepo.create({});
+      const id = 'reclaim-transfer' as SessionId;
+      const meta = { id, machineId: 'private-machine', userId: 'colleague' } as SessionMeta;
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      Object.assign(runtime, { contentMode, accountId: 'synthetic-session-account' });
+      const store = createStore();
+      store.set(machineMetaCacheAtom, {
+        [getMachineRoomId(meta.machineId)]: {
+          id: meta.machineId,
+          ownerUserId: 'synthetic-session-account',
+        } as never,
+      });
+      const actions = await renderActions(runtime, { store });
+      try {
+        await actions.transferSessionOwner(id, 'synthetic-session-account');
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+          ...meta,
+          userId: 'synthetic-session-account',
+        });
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
 
   it.each([
     'archive',

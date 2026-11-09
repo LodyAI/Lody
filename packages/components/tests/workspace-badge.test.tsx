@@ -41,7 +41,7 @@ vi.mock('../../../apps/electron/node_modules/electron', () => ({
   BrowserWindow: class {},
 }));
 
-import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import { machineMetaCacheAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '../src/atoms/presence';
 import { useWorkspaceBadge, workspaceBadgeAtom } from '../src/hooks/use-workspace-badge';
 import {
@@ -140,6 +140,17 @@ describe('workspace badge reconciliation', () => {
     expect(dock).toBe('1');
     await act(async () => setSessions(session('root', { isArchived: true })));
     expect(dock).toBe('');
+  });
+
+  it('keeps a transferred session on my machine in My badge counts', () => {
+    store.set(machineMetaCacheAtom, {
+      'machine-machine': { id: 'machine', ownerUserId: 'owner' } as never,
+    });
+    setSessions(
+      session('transferred', { userId: 'colleague' }),
+      session('foreign', { userId: 'colleague', machineId: 'other' as never })
+    );
+    expect(store.get(workspaceBadgeAtom)).toEqual({ unread: 1, waiting: 0 });
   });
 
   it('rolls child and side-chat unread/waiting into one closed parent row', async () => {

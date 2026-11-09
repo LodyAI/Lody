@@ -1,3 +1,5 @@
+import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { resolveSessionPullRequests } from '@lody/shared';
 import { atom } from 'jotai';
 import {
@@ -29,6 +31,7 @@ function toMs(value: string | number | undefined): number | null {
  */
 export const homeWeekInputAtom = atom((get) => {
   const userId = get(userAtom)?.id;
+  const ownedMachineIds = get(ownedMachineIdsAtom);
   // Until the session metadata has loaded, a partial cache would show half a week; the
   // tiles read zero instead, and roll up to the real numbers once they are in.
   if (!userId || !get(docMetaCacheReadyAtom)) return EMPTY;
@@ -39,7 +42,7 @@ export const homeWeekInputAtom = atom((get) => {
   const activity = new Map<string, number>();
 
   for (const session of Object.values(get(sessionMetaCacheAtom))) {
-    if (session.parentSessionId || session.userId !== userId) continue;
+    if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds)) continue;
     const createdAt = toMs(session.createdAt);
     if (createdAt == null) continue;
     const lastAt = toMs(session.lastMessageAt) ?? createdAt;

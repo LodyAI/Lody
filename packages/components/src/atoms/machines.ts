@@ -1,3 +1,4 @@
+import { userAtom } from './index';
 import { atom } from 'jotai';
 import {
   getMachineRoomId,
@@ -114,4 +115,14 @@ export const getMachineMetaMapAtom = atom((get) => {
 
   _prevMachineMetaMap = map;
   return map;
+});
+
+/** Machine ownership, not presence or sharing, defines the machine part of My scope. */
+export const ownedMachineIdsAtom = atom((get) => {
+  const userId = get(userAtom)?.id;
+  return new Set(
+    [...get(getMachineMetaMapAtom)]
+      .filter(([, meta]) => !!userId && meta.ownerUserId === userId)
+      .map(([id]) => id)
+  );
 });
