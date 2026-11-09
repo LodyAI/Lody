@@ -239,6 +239,7 @@ fun ChatListScreen(
         app.lody.android.schedules.ScheduleEditorScreen(
             scheduleList, editing.takeUnless { it == NEW_SCHEDULE }, state.snapshot, creation,
             onClose = { scheduleEditor = null }, onNotice = notice,
+            onOpenSession = { scheduleEditor = null; onOpenSession(it) },
         )
         return
     }

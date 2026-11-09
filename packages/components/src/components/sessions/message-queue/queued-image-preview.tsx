@@ -37,14 +37,17 @@ export function QueuedImagePreview({
   // The full-size image loads only once the preview opens (the row itself
   // needs just the thumbnail); the viewer shows its loading state until then.
   useEffect(() => {
-    if (!previewOpen || originalUrl || !workspaceId || !authToken) return undefined;
+    if (!previewOpen || originalUrl || !workspaceId || (!authToken && image.transport !== 'local' && !image.localImageId)) return undefined;
     let active = true;
     void getSessionImageBlobUrl({
+      ...image,
       workspaceId,
       sessionId: image.storageSessionId ?? sessionId,
       encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
-      token: authToken,
+      transport: image.transport,
+      machineId: image.machineId,
+      token: authToken ?? '',
       variant: 'original',
     })
       .then((url) => {
@@ -57,7 +60,7 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, runtime, image.storageSessionId, image.encryption, image.imageId, originalUrl, previewOpen, sessionId, thumbnailUrl, workspaceId]);
+  }, [authToken, runtime, image.localImageId, image.mimeType, image.sizeBytes, image.transport, image.machineId, image.storageSessionId, image.encryption, image.imageId, originalUrl, previewOpen, sessionId, thumbnailUrl, workspaceId]);
 
   const previewImages = useMemo(
     () => [{ key: image.imageId, src: originalUrl, fileName: image.fileName }],
@@ -69,7 +72,7 @@ export function QueuedImagePreview({
     setThumbnailUrl(null);
     setLoadFailed(false);
 
-    if (!workspaceId || !authToken) {
+    if (!workspaceId || (!authToken && image.transport !== 'local' && !image.localImageId)) {
       setLoadFailed(true);
       return () => {
         active = false;
@@ -77,11 +80,14 @@ export function QueuedImagePreview({
     }
 
     void getSessionImageBlobUrl({
+      ...image,
       workspaceId,
       sessionId: image.storageSessionId ?? sessionId,
       encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
-      token: authToken,
+      transport: image.transport,
+      machineId: image.machineId,
+      token: authToken ?? '',
       variant: 'thumbnail',
       thumbnailWidth: size * 2,
       thumbnailHeight: size * 2,
@@ -102,7 +108,7 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, runtime, image.storageSessionId, image.encryption, image.imageId, sessionId, workspaceId, size]);
+  }, [authToken, runtime, image.localImageId, image.mimeType, image.sizeBytes, image.transport, image.machineId, image.storageSessionId, image.encryption, image.imageId, sessionId, workspaceId, size]);
 
   return (
     <>

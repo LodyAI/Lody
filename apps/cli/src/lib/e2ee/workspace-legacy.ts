@@ -787,6 +787,8 @@ async function openWorkspaceOwned(
   const epochTransition = createWorkspaceEpochTransitionLegacy({
     ...initialStatus,
     epoch: initialStatus.writeEpoch ?? initialStatus.epoch,
+    // Select the epoch a slow key install finished, through a fresh verified read.
+    onLateInstallation: () => void refreshInBackground(false),
   });
   epochTransition.observe(initialStatus);
   let ledgerBlocked = false;
@@ -1270,8 +1272,14 @@ async function openWorkspaceOwned(
           if (epochTransition.needsUpdate()) {
             await epochTransition.transition({
               install: async () => {
-                await run(opened.runtime.receiveKeys());
-                const installed = await run(opened.runtime.status());
+                // The refresh above verified the ledger. If the key for its epoch is
+                // already installed, a slow earlier install finished: select it without
+                // waiting on the mailbox again, which on a slow link would time out again.
+                let installed = await run(opened.runtime.status());
+                if (!installed.hasCurrentKey) {
+                  await run(opened.runtime.receiveKeys());
+                  installed = await run(opened.runtime.status());
+                }
                 if (installed.hasCurrentKey && installed.epoch > epochTransition.epoch()) {
                   for (const token of tokensInUse) await run(token.invalidate());
                 }

@@ -680,6 +680,7 @@ export type SessionExecutionServiceDeps = {
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
   buildAcpPromptBlocks: (args: {
+    requesterUserId?: string;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     /** The input's history turn; an agent author adds a provenance header. */
@@ -2403,6 +2404,7 @@ export class SessionExecutionService {
       const inputBlocks = resolveSessionExecutionInputBlocks(options.inputConfig);
       const promptBlocks = await wait(
         this.deps.buildAcpPromptBlocks({
+          requesterUserId: options.userId,
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
           userTurnId: options.userTurnId,
@@ -7138,6 +7140,7 @@ export class SessionExecutionService {
           { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
           async () =>
             await self.deps.buildAcpPromptBlocks({
+              requesterUserId: message.userId,
               workspaceId: message.workspaceId,
               sessionId,
               userTurnId: message.userTurnId,
@@ -8023,6 +8026,7 @@ export class SessionExecutionService {
               { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
               async () =>
                 await self.deps.buildAcpPromptBlocks({
+                  requesterUserId: message.userId,
                   workspaceId,
                   sessionId,
                   userTurnId,

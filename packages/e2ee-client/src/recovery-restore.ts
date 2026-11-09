@@ -157,8 +157,13 @@ export interface RecoveryRestoreTarget {
   readonly id: string;
   readonly name: string;
   readonly genesisHash: string;
-  /** Whether this device already holds an identity for the workspace. */
-  readonly hasIdentity: () => boolean;
+  /**
+   * Whether this device already holds an identity for the workspace. `'unknown'` means the
+   * check itself failed (for example a busy lease): nothing is restored over it, and the
+   * workspace is reported `Failed` so the caller can retry, unless an earlier restore of
+   * it is still open, which resumes as usual.
+   */
+  readonly hasIdentity: () => boolean | 'unknown';
   /** Connect only once the authenticated package names the workspace. */
   readonly connect: (anchor: VaultRestoreAnchor) => Effect.Effect<
     VaultRestorePorts & {
@@ -193,7 +198,12 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     if (!target) continue;
     const key = restoreProgressKey(target.id);
     const progress = yield* input.local.read(key);
-    if (target.hasIdentity() && !isOpen(progress)) continue;
+    const identity = target.hasIdentity();
+    if (identity === 'unknown' && !isOpen(progress)) {
+      results.push({ name: target.name, outcome: 'Failed' });
+      continue;
+    }
+    if (identity === true && !isOpen(progress)) continue;
     const attempt = Effect.scoped(
       Effect.gen(function* () {
         // A finished marker from an earlier vault must not hide this attempt's failure.

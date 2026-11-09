@@ -171,7 +171,7 @@ const rowSchema = z
 const headerSchema = z
   .object({
     version: z.literal(2),
-    inspectionVersion: z.literal(1).optional(),
+    inspectionVersion: z.union([z.literal(1), z.literal(2)]).optional(),
     token: z.string().uuid(),
     cursor: z.string().regex(/^(0|[1-9][0-9]*)$/),
     count: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -496,7 +496,7 @@ export class RoostDispatchIndex {
     await verify();
     const header: Header = {
       version: 2,
-      ...(inspected ? { inspectionVersion: 1 as const } : {}),
+      ...(inspected ? { inspectionVersion: 2 as const } : {}),
       token: randomUUID(),
       cursor: cursor.toString(),
       count,

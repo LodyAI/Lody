@@ -5,7 +5,5 @@ export function resolveAttachmentRoute(args: {
   targetMachineId: string | null;
 }): 'local' | 'transfer' {
   if (!args.targetMachineId) throw new Error('Attachment execution target is unavailable');
-  if (!args.native) return 'transfer';
-  if (!args.localMachineId) throw new Error('Local execution identity is not ready');
-  return args.targetMachineId === args.localMachineId ? 'local' : 'transfer';
+  return args.native && args.targetMachineId === args.localMachineId ? 'local' : 'transfer';
 }

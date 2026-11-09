@@ -1,4 +1,5 @@
 import { assertEncryptedImageReference } from '@lody/shared';
+import { getIpcServices } from './electron-ipc-client';
 import { protectedAttachmentBlob } from './encrypted-session-attachment';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 import type { SessionImageResizeFit } from '@lody/shared';
@@ -13,8 +14,6 @@ type CacheEntry = {
   blob: Blob;
   blobUrl: string;
   dataUrl?: string;
-  sizeBytes: number;
-  lastAccessedAt: number;
 };
 
 const imageCache = new Map<string, CacheEntry>();
@@ -40,7 +39,6 @@ const getCacheKey = (
 ): string => `${workspaceId}:${sessionId}:${imageId}:${variant}:${requestUrl}`;
 
 const touchCacheEntry = (entry: CacheEntry): void => {
-  entry.lastAccessedAt = Date.now();
   imageCache.delete(entry.key);
   imageCache.set(entry.key, entry);
 };
@@ -53,7 +51,7 @@ const evictIfNeeded = (): void => {
   for (const [key, entry] of imageCache) {
     imageCache.delete(key);
     URL.revokeObjectURL(entry.blobUrl);
-    totalCachedBytes = Math.max(0, totalCachedBytes - entry.sizeBytes);
+    totalCachedBytes = Math.max(0, totalCachedBytes - entry.blob.size);
     if (totalCachedBytes <= MAX_CACHE_BYTES) {
       break;
     }
@@ -107,7 +105,7 @@ const writeBlobToMemoryCache = (key: string, blob: Blob, preparedUrl?: string): 
   const existingEntry = imageCache.get(key);
   if (existingEntry) {
     URL.revokeObjectURL(existingEntry.blobUrl);
-    totalCachedBytes = Math.max(0, totalCachedBytes - existingEntry.sizeBytes);
+    totalCachedBytes = Math.max(0, totalCachedBytes - existingEntry.blob.size);
     imageCache.delete(key);
   }
 
@@ -116,8 +114,6 @@ const writeBlobToMemoryCache = (key: string, blob: Blob, preparedUrl?: string): 
     key,
     blob,
     blobUrl,
-    sizeBytes: blob.size,
-    lastAccessedAt: Date.now(),
   };
 
   imageCache.set(key, entry);
@@ -140,8 +136,7 @@ const blobToDataUrl = (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
-type GetSessionImageCacheEntryArgs = {
-  encryption?: import('@lody/shared').EncryptedAttachment;
+type GetSessionImageCacheEntryArgs = Partial<import('@lody/shared').SessionImagePayload> & {
   attachmentToken?: () => Promise<string>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
@@ -156,19 +151,36 @@ type GetSessionImageCacheEntryArgs = {
 
 type SessionImageIdentity = Pick<
   GetSessionImageCacheEntryArgs,
-  'workspaceId' | 'sessionId' | 'imageId'
+  | 'workspaceId'
+  | 'sessionId'
+  | 'imageId'
+  | 'transport'
+  | 'machineId'
+  | 'localImageId'
+  | 'storageSessionId'
 >;
 
-const originalCacheKey = ({ workspaceId, sessionId, imageId }: SessionImageIdentity) =>
-  getCacheKey(
-    workspaceId,
-    sessionId,
-    imageId,
-    'original',
-    buildSessionImageDownloadUrl(workspaceId, sessionId, imageId)
-  );
+const localImageCacheKey = (identity: SessionImageIdentity) =>
+  JSON.stringify([
+    'local-image',
+    identity.workspaceId,
+    identity.storageSessionId ?? identity.sessionId,
+    identity.machineId,
+    identity.localImageId ?? identity.imageId,
+  ]);
 
-/** Keep uploaded bytes available before the pending preview releases its source. */
+const originalCacheKey = (identity: SessionImageIdentity) =>
+  identity.transport === 'local' || identity.localImageId
+    ? localImageCacheKey(identity)
+    : getCacheKey(
+        identity.workspaceId,
+        identity.sessionId,
+        identity.imageId,
+        'original',
+        buildSessionImageDownloadUrl(identity.workspaceId, identity.sessionId, identity.imageId)
+      );
+
+/** Keep prepared bytes available before the pending preview releases its source. */
 export async function seedSessionImageCache(
   identity: SessionImageIdentity,
   blob: Blob,
@@ -199,7 +211,7 @@ export async function seedSessionImageCache(
   }
 }
 
-/** Synchronous first paint for locally uploaded images; misses retain normal loading. */
+/** Synchronous first paint for prepared images; misses retain normal loading. */
 export function peekSessionImageUrl(
   identity: SessionImageIdentity,
   shareSafe = false
@@ -209,6 +221,62 @@ export function peekSessionImageUrl(
   touchCacheEntry(entry);
   return (shareSafe ? entry.dataUrl : entry.blobUrl) ?? null;
 }
+
+const getLocalSessionImageCacheEntry = async (
+  args: GetSessionImageCacheEntryArgs
+): Promise<CacheEntry> => {
+  if (!args.machineId || args.encryption) throw new Error('Invalid local image reference');
+  const key = localImageCacheKey(args);
+  const cached = imageCache.get(key);
+  if (cached) {
+    touchCacheEntry(cached);
+    return cached;
+  }
+  const pending = inFlightCache.get(key);
+  if (pending) return pending;
+  const ipc = getIpcServices();
+  if (!ipc) throw new Error('Image is awaiting upload from its original desktop');
+  const generation = cacheGeneration;
+  const request = (async () => {
+    if (!args.mimeType || args.sizeBytes === undefined)
+      throw new Error('Invalid local image metadata');
+    const path = await ipc.localProjects.resolveLocalImage({
+      workspaceId: args.workspaceId,
+      sessionId: args.sessionId,
+      machineId: args.machineId!,
+      image: {
+        imageId: args.imageId,
+        transport: args.transport,
+        localImageId: args.localImageId,
+        storageSessionId: args.storageSessionId,
+        fileName: args.fileName,
+        width: args.width,
+        height: args.height,
+        machineId: args.machineId,
+        mimeType: args.mimeType,
+        sizeBytes: args.sizeBytes,
+      },
+    });
+    const preview = await ipc.machineRpc.previewFile({
+      machineId: args.machineId!,
+      path,
+      workspaceRoot: null,
+    });
+    if (preview?.status !== 'resource' || preview.kind !== 'binary')
+      throw new Error('Local image preview unavailable');
+    const response = await fetch(preview.url);
+    if (!response.ok) throw new Error('Local image preview unavailable');
+    const blob = await response.blob();
+    if (generation !== cacheGeneration) throw new Error('Image request retired');
+    return writeBlobToMemoryCache(key, blob);
+  })();
+  inFlightCache.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (inFlightCache.get(key) === request) inFlightCache.delete(key);
+  }
+};
 
 const getSessionImageCacheEntry = async (
   args: GetSessionImageCacheEntryArgs
@@ -225,6 +293,19 @@ const getSessionImageCacheEntry = async (
     thumbnailQuality,
   } = args;
 
+  if (args.transport === 'local') {
+    return getLocalSessionImageCacheEntry(args);
+  }
+  if (args.transport === 'r2' && args.localImageId && !args.encryption) {
+    const generation = cacheGeneration;
+    try {
+      return await getLocalSessionImageCacheEntry(args);
+    } catch (error) {
+      // Published images remain readable when the scoped host snapshot is
+      // unavailable, including on another device. Pending images never get here.
+      if (generation !== cacheGeneration || !token) throw error;
+    }
+  }
   if (args.encryption) assertEncryptedImageReference(args.imageId, args.encryption);
   const originalUrl = buildSessionImageDownloadUrl(workspaceId, sessionId, imageId);
   const requestUrl =
@@ -236,7 +317,9 @@ const getSessionImageCacheEntry = async (
           quality: thumbnailQuality,
         })
       : originalUrl;
-  const key = getCacheKey(workspaceId, sessionId, imageId, variant, requestUrl) + (args.encryption ? `:encrypted:${args.encryption.resourceId}` : '');
+  const key =
+    getCacheKey(workspaceId, sessionId, imageId, variant, requestUrl) +
+    (args.encryption ? `:encrypted:${args.encryption.resourceId}` : '');
   const cached = imageCache.get(key);
   if (cached) {
     touchCacheEntry(cached);

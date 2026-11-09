@@ -556,4 +556,11 @@
     <string name="chat_operation_reply_truncated">This saved reply was truncated before delivery.</string>
     <string name="chat_relation_waiting">Needs input</string>
     <string name="chat_relation_unread">Unread</string>
+    <string name="schedules_overview_active">Active</string>
+    <string name="schedules_overview_attention">Attention</string>
+    <string name="schedules_overview_paused">Paused</string>
+    <string name="schedules_overview_ended">Ended</string>
+    <string name="schedules_section_task">Task</string>
+    <string name="schedules_section_when">When</string>
+    <string name="schedules_section_run_with">Run with</string>
 </resources>

@@ -3,8 +3,6 @@ import {
   ScheduleRepository,
   ScheduledMessageSchema,
   getServerNow,
-  getMachineRoomId,
-  type MachineMeta,
   type ScheduleDraft,
   type ScheduledMessage,
   type SessionId,
@@ -54,23 +52,17 @@ export async function prepareScheduledMessage(args: {
     args.inputBlocks.some((block) => block.type === 'file' || block.type === 'image')
   )
     requireWorkspaceFeature(content, 'attachments');
-  let attachments = args.attachments;
   const prepared = await prepareDraftAttachments({
     content,
     resources: args.runtime.sendResources,
     signal: args.signal,
     token: () => args.token,
     localMachineId: () => args.localMachineId,
-    validateLocalTarget: async () => {
-      const machine = await args.runtime.repo.getDocMeta(getMachineRoomId(args.machineId));
-      if (args.machineId !== args.localMachineId || (machine?.meta as MachineMeta | undefined)?.protocolCapabilities?.localAttachments !== 1)
-        throw new Error('Update the local daemon to send local attachments');
-    },
     record: {
       workspaceId: args.runtime.workspaceId,
       sessionId: args.sessionId,
       targetMachineId: args.machineId,
-      attachments,
+      attachments: args.attachments,
       entry: {
         id: 'schedule:' + args.scheduleId,
         role: 'user',
@@ -82,15 +74,9 @@ export async function prepareScheduledMessage(args: {
         inputConfig: { inputBlocks: args.inputBlocks },
       },
     },
-    update: (next) => {
-      attachments = next;
-      args.onAttachments(next);
-    },
-    report: (id, progress) =>
-      args.onAttachments(
-        attachments.map((item) => (item.id === id ? { ...item, progress } : item))
-      ),
+    update: args.onAttachments,
   });
+
   return ScheduledMessageSchema.parse({
     ...args.message,
     inputBlocks: prepared.entry.inputConfig?.inputBlocks,
@@ -111,6 +97,7 @@ export async function saveScheduledMessage(args: {
   const now = args.now ?? getServerNow();
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
+
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>

@@ -62,11 +62,6 @@ export class SessionEditAndResendService {
       workspaceId: string;
       machineId: string;
       enqueueDispatch(sessionId: SessionId): void;
-      rebindLocalAttachment?: (
-        attachment: import('@lody/shared').SessionLocalAttachment,
-        sessionId: SessionId,
-        turnId: string
-      ) => Promise<import('@lody/shared').SessionLocalAttachment>;
     }
   ) {}
 
@@ -346,25 +341,6 @@ export class SessionEditAndResendService {
           inputConfig.inputBlocks,
           inputConfig.prompt ?? ''
         );
-        for (let index = 0; index < inputBlocks.length; index++) {
-          const block = inputBlocks[index]!;
-          if (block.type !== 'local_attachment') continue;
-          if (
-            !this.deps.rebindLocalAttachment ||
-            block.sessionId !== spec.sessionId ||
-            block.turnId !== original.id ||
-            !(original.items ?? []).some(
-              (item) => item.type === 'local_attachment' && item.referenceId === block.referenceId
-            )
-          ) {
-            throw new Error('Local attachment must be selected again before resending');
-          }
-          inputBlocks[index] = await this.deps.rebindLocalAttachment(
-            block,
-            spec.sessionId,
-            spec.replacementUserTurnId
-          );
-        }
         inputConfig.inputBlocks = inputBlocks;
         const pending = buildPendingUserHistoryEntry({
           userId: spec.requestedByUserId,

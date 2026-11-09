@@ -75,6 +75,12 @@ export type HistoryAction =
   | { kind: 'remove-turn'; turnId: string }
   | { kind: 'agent-warning'; turn: SessionEntry; message: string }
   | {
+      kind: 'image-backfilled';
+      localImageId: string;
+      machineId: string;
+      image: import('../ai').SessionImagePayload;
+    }
+  | {
       kind: 'file-backfilled';
       fileId: string;
       relayFileId: string;
@@ -327,6 +333,23 @@ export function applyHistoryAction(
       )
         return { turns: history, matched: false };
       return { turns: [...history, action.turn], matched: true };
+    }
+    case 'image-backfilled': {
+      let matched = false;
+      for (const entry of history)
+        for (const item of [...(entry.items ?? []), ...(entry.inputConfig?.inputBlocks ?? [])]) {
+          if (
+            item.type === 'image' &&
+            item.localImageId === action.localImageId &&
+            item.machineId === action.machineId &&
+            item.storageSessionId === action.image.storageSessionId &&
+            item.transport === 'local'
+          ) {
+            Object.assign(item, action.image);
+            matched = true;
+          }
+        }
+      return { turns: history, matched };
     }
     case 'file-backfilled': {
       let matched = false;

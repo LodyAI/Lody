@@ -1,4 +1,3 @@
-import { LocalAttachmentStore } from '../session-local-attachments';
 import { notificationLabel } from '@lody/shared/notifications';
 import type { RepoRoomSubscription } from 'loro-repo';
 import {
@@ -87,11 +86,6 @@ export async function createScheduleWorkspace(args: {
 }): Promise<ScheduleWorkspaceHandle> {
   const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
-  const localAttachments = new LocalAttachmentStore({
-    accountId: auth.userId,
-    workspaceId,
-    machineId: auth.machineId,
-  });
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
   const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
@@ -228,22 +222,15 @@ export async function createScheduleWorkspace(args: {
         target
       );
       if (run.message) {
-        const inputBlocks = await Promise.all(
-          run.message.inputBlocks.map(async (block) => {
-            if (block.type !== 'local_attachment') return block;
-            if (
-              workspace.contentMode === 'e2ee' ||
-              block.sessionId !== run.sessionId ||
-              block.turnId !== 'schedule:' + run.scheduleId
-            )
-              throw new Error('Local attachment belongs to another scheduled message');
-
-            return localAttachments.inherit(block, {
-              sessionId: run.sessionId,
-              turnId: run.userTurnId,
-            });
-          })
-        );
+        const inputBlocks = run.message.inputBlocks;
+        if (
+          inputBlocks.some(
+            (block) =>
+              block.type === 'local_attachment' &&
+              (workspace.contentMode === 'e2ee' || block.machineId !== run.machineId)
+          )
+        )
+          throw new Error('Local attachment belongs to another machine');
         prepared = withScheduledMessageInput(
           prepared,
           ScheduledMessageSchema.parse({ ...run.message, inputBlocks })

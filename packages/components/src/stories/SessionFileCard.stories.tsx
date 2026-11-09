@@ -221,11 +221,9 @@ export const LocalOnlyAttachment: Story = {
           sessionId={'local-preview' as SessionId}
           attachment={{
             type: 'local_attachment',
-            referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
             machineId: 'original-computer',
-            sessionId: 'local-preview',
-            turnId: 'turn',
             kind: 'file',
+            path: '/demo/设计说明.pdf',
             fileName: '设计说明.pdf',
             mimeType: 'application/pdf',
             sizeBytes: 24000,
@@ -240,7 +238,7 @@ const localImageStore = createStore();
 localImageStore.set(currentWorkspaceIdAtom, 'attachment-demo' as never);
 localImageStore.set(localProbeResultAtom, { ok: true, machineId: 'original-computer' });
 
-/** The original desktop resolves the registered image without an upload or a click. */
+/** The original desktop previews the local image without an upload or a click. */
 export const LocalImageAttachment: Story = {
   args: { file: baseFile({ fileName: 'screenshot.png' }) },
   beforeEach: () => {
@@ -248,7 +246,6 @@ export const LocalImageAttachment: Story = {
     window.ipc = {
       ...previous,
       invoke: async (channel: string) => {
-        if (channel === 'localProjects.resolveLocalAttachment') return '/demo/screenshot.png';
         if (channel === 'machineRpc.previewFile')
           return {
             status: 'resource',
@@ -273,11 +270,9 @@ export const LocalImageAttachment: Story = {
           sessionId={'local-preview' as SessionId}
           attachment={{
             type: 'local_attachment',
-            referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
             machineId: 'original-computer',
-            sessionId: 'local-preview',
-            turnId: 'turn',
             kind: 'image',
+            path: '/demo/screenshot.png',
             fileName: 'screenshot.png',
             mimeType: 'image/png',
             sizeBytes: 24000,

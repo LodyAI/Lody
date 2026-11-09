@@ -368,12 +368,33 @@ it('accepts a 20 MB image and refuses one extra byte', async () => {
 });
 
 it('refuses to publish a local-only attachment without reading or changing its source', async () => {
-  const source = [{ id: 'turn', role: 'user', items: [{ type: 'local_attachment', referenceId: 'local-reference', fileName: 'private.txt' }] }];
+  const source = [
+    {
+      id: 'turn',
+      role: 'user',
+      items: [
+        {
+          type: 'local_attachment',
+          path: '/tmp/private.txt',
+          machineId: 'machine',
+          kind: 'file',
+          mimeType: 'text/plain',
+          sizeBytes: 5,
+          fileName: 'private.txt',
+        },
+      ],
+    },
+  ];
   const before = JSON.stringify(source);
-  await expect(captureSharePackage({
-    rootSourceId: 'root', capturedAt,
-    conversations: [{ sourceId: 'root', title: 'Root', history: source }],
-    readAttachment: async () => { throw new Error('Unexpected local attachment read'); },
-  })).rejects.toThrow('Local-only attachments cannot be included');
+  await expect(
+    captureSharePackage({
+      rootSourceId: 'root',
+      capturedAt,
+      conversations: [{ sourceId: 'root', title: 'Root', history: source }],
+      readAttachment: async () => {
+        throw new Error('Unexpected local attachment read');
+      },
+    })
+  ).rejects.toThrow('Local-only attachments cannot be included');
   expect(JSON.stringify(source)).toBe(before);
 });

@@ -200,6 +200,21 @@ TalkBack can activate named landmarks or adjust the index range one section at
 a time, including omitted sections; its state description names the current section. Other grouping/search views retain
 their ordinary list behavior.
 
+## Schedules
+
+The native Schedules tab shows search-scoped counts for Active, Attention, Paused
+and Ended. Tap a count to filter both task and message sections; tap it again to
+clear. Attention rows come first, with runtime order preserved within each state.
+Cards show the Agent mark and state badge, title, status, frequency and execution
+context. Existing row actions and delete confirmation remain available.
+
+The editor presents stored status and quick actions above Task, When and Run with
+cards. Save is in the app bar; Delete is a separate confirmed action. Day selectors
+adapt their column count to retain 48 dp touch targets. Run and resume retain the
+machine capability gate, writes remain owner-only, and read-only destinations and
+scheduled messages keep their existing restrictions. The original rule and unknown
+write retry identity handling are unchanged. Open last chat uses Home navigation.
+
 ## Verification
 
 With an emulator or device connected:

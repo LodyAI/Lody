@@ -281,10 +281,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
         offset: 0,
         attachment: {
           type: 'local_attachment',
-          referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
+          path: '/synthetic/input.txt',
           machineId: remoteMachineId,
-          sessionId,
-          turnId: 'turn',
           kind: 'file',
           fileName: 'input.txt',
           mimeType: 'text/plain',
