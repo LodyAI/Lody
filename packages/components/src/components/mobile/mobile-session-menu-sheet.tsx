@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Copy, UserRoundCog } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +52,7 @@ export type MobileSessionMenuOwner = {
   /** Current `SessionMeta.userId`; may name someone who already left. */
   ownerUserId: string;
   onSelect: (userId: string) => void;
+  getDisabledReason?: (userId: string) => string | null;
 };
 
 export type MobileSessionMenuSheetProps = {
@@ -169,15 +171,22 @@ export function MobileSessionMenuSheet({
                 <div className="flex max-h-64 flex-col overflow-y-auto border-t border-border/40">
                   {owner.members.map((member) => {
                     const isOwner = member.userId === owner.ownerUserId;
+                    const disabledReason = owner.getDisabledReason?.(member.userId);
                     return (
                       <button
                         key={member.userId}
                         type="button"
+                        disabled={!!disabledReason}
+                        title={disabledReason ?? undefined}
                         onClick={() => {
+                          if (disabledReason) return;
                           if (!isOwner) run(() => owner.onSelect(member.userId));
                           else onOpenChange(false);
                         }}
-                        className="flex w-full select-none items-center gap-2.5 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/60"
+                        className={cn(
+                          'flex w-full select-none items-center gap-2.5 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/60',
+                          stylex.props(!!disabledReason && ownerStyles.disabled).className
+                        )}
                       >
                         <UserAvatar
                           user={{ id: member.userId, name: member.name, image: member.image }}
@@ -186,6 +195,7 @@ export function MobileSessionMenuSheet({
                         />
                         <span className="min-w-0 flex-1 truncate text-foreground">
                           {member.name}
+                          {disabledReason ? <span> — {disabledReason}</span> : null}
                         </span>
                         {isOwner ? (
                           <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -227,3 +237,5 @@ export function MobileSessionMenuSheet({
     </Drawer>
   );
 }
+
+const ownerStyles = stylex.create({ disabled: { opacity: 0.5 } });
