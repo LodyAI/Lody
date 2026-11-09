@@ -20,8 +20,7 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.
-- `release.vite.config.mjs` is a separate release-CI entry. It requires a validated,
-  explicit non-secret request, never discovers deployment presets, and preserves
+- `release.vite.config.mjs` is a separate release-CI entry. It takes explicit non-secret build configuration, never discovers deployment presets, and preserves
   distinct embedded CLI, standalone CLI and Desktop provenance versions. Normal
   public commands keep the local-only configuration.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling

@@ -1,12 +1,11 @@
-import { readRequest } from '../../scripts/release-build/contract.mjs';
+import { readFileSync } from 'node:fs';
 import base from './vite.config.ts';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export default async function releaseConfig(context) {
-  const r = await readRequest(process.env.LODY_RELEASE_REQUEST);
+  const r = JSON.parse(readFileSync(process.env.LODY_RELEASE_CONFIG, 'utf8'));
   const target = process.env.LODY_RELEASE_TARGET;
-  if (!r.targets.includes(target)) throw new Error('Release target is not requested');
   const config = await base(context);
   const standalone = target === 'cli';
   const profile = !standalone && r.profile.channel === 'nightly' ? r.profile : null;

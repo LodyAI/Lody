@@ -111,7 +111,7 @@ their failures and perform expiry.
 
 ## Other automation
 
-- `macos-product-tests.yml` must preserve the binding [Darwin test contract](../scripts/release-build/README.md#darwin-test-contract).
+- `macos-product-tests.yml` follows the binding [Darwin coverage rules](workflow-security.md#darwin-coverage).
 
 - `notify-desktop-nightly.yml` sends accepted main SHA notifications to the
   designated release-PR maintenance workflow only. OSS pushes must not directly

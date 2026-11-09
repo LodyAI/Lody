@@ -1,19 +1,12 @@
 import base from './electron.vite.config.ts'
-import { readRequest } from '../../scripts/release-build/contract.mjs'
-import { releaseRendererPolicy } from '../../scripts/release-build/renderer-policy.mjs'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const at = (path) => resolve(root, path)
 
 export default async function releaseConfig() {
-  const r = await readRequest(process.env.LODY_RELEASE_REQUEST)
-  if (
-    !r.targets.includes(process.env.LODY_RELEASE_TARGET) ||
-    process.env.LODY_RELEASE_TARGET === 'cli'
-  )
-    throw new Error('Unexpected desktop target')
+  const r = JSON.parse(readFileSync(process.env.LODY_RELEASE_CONFIG, 'utf8'))
   const config = await base({ command: 'build', mode: 'oss' })
   const define = Object.fromEntries(
     Object.entries({
@@ -29,7 +22,7 @@ export default async function releaseConfig() {
     __LODY_DESKTOP_BUILD_JSON__: JSON.stringify(JSON.stringify(r.profile))
   })
   Object.assign(config.renderer.define, {
-    __BUILD_DATE__: JSON.stringify(r.builtAt),
+    __BUILD_DATE__: JSON.stringify(r.profile.builtAt),
     __GIT_COMMIT__: JSON.stringify(r.profile.privateSha ?? r.sourceSha.slice(0, 8)),
     __APP_VERSION__: JSON.stringify(r.profile.version),
     __DESKTOP_RELEASE_CHANNEL__: JSON.stringify(r.profile.channel),
@@ -76,4 +69,33 @@ export default async function releaseConfig() {
   config.renderer.plugins.unshift(releaseRendererPolicy(r.csp))
   config.renderer.build.minify = 'esbuild'
   return config
+}
+
+function releaseRendererPolicy(sources) {
+  return {
+    name: 'lody-release-renderer-policy',
+    enforce: 'pre',
+    transformIndexHtml(html, context) {
+      if (context.path.endsWith('/recovery.html') || context.path.endsWith('/pr-image.html'))
+        return html
+      if (!/<meta\b(?=[^>]*http-equiv="Content-Security-Policy")[^>]*\bcontent="[^"]*"/i.test(html))
+        throw new Error('Missing renderer policy')
+      return html.replace(
+        /(<meta\b(?=[^>]*http-equiv="Content-Security-Policy")[^>]*\bcontent=")([^"]*)(")/i,
+        (all, before, policy, after) => {
+          const directives = policy
+            .split(';')
+            .map((s) => s.trim().split(/\s+/))
+            .filter((s) => s[0])
+          for (const [name, additions] of Object.entries(sources)) {
+            const matches = directives.filter((d) => d[0] === name)
+            if (matches.length !== 1) throw new Error('Missing or duplicate renderer directive')
+            for (const source of additions)
+              if (!matches[0].includes(source)) matches[0].push(source)
+          }
+          return before + directives.map((d) => d.join(' ')).join('; ') + ';' + after
+        }
+      )
+    }
+  }
 }
