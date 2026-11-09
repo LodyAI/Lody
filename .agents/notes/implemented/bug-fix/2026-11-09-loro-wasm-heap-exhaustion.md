@@ -72,5 +72,16 @@ the only memory record, and it can be hours apart.
   guard.
 - A probe built through the production `vite.config.ts` read the shared memory
   growing from 1.2 MB to 102 MB.
-- Not verified: a full daemon OOM-to-restart run, and whether the 7-second
-  shutdown budget finishes when many Loro calls fail during teardown.
+- Daemon reproduction (isolated `LODY_DATA_DIR`/`HOME`, dev build, local
+  platform): four seeded Sessions with pending turns were dispatched to the
+  managed Claude runtime (nine child processes). A `--import` preload then
+  reserved the daemon's own Loro address space with untouched
+  `__wbindgen_malloc` blocks (little RSS) until an allocation failed, and
+  exported each daemon document so it trapped while holding its locks, as in
+  crash 3. With this change the daemon logged the fault, ran the SIGTERM
+  shutdown sequence, met `RuntimeError: unreachable` in ACP flushes and history
+  finalization, force-terminated the agents and exited with code 1 in 0.8
+  seconds with no surviving child. A build of `main` was still running 120
+  seconds after the same fault, with every agent process alive.
+- Not verified: a real 4 GiB heap filled by document data (this machine cannot
+  hold it), and the uncaught-exception exit that ended the reported crashes.

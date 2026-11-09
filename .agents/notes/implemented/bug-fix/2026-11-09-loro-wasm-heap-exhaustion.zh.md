@@ -32,4 +32,5 @@ PR poller 读取 presence 的地方加了保护，因为它由定时器触发，
 - `apps/cli/src/lib/loro/wasm-runtime-health.test.ts`：故障闩及其各个来源、安装前已记录故障的投递、真实 Loro 内存随文档数据增长，以及堆警告。
 - `apps/cli/src/lib/pr-poller/pr-poll-scheduler.test.ts`（"keeps polling when a trapped Loro instance…"）：去掉保护时会因未捕获的 `RuntimeError` 失败。
 - 用生产 `vite.config.ts` 构建的探针读到共享内存从 1.2 MB 增长到 102 MB。
-- 未验证：完整的 daemon 从 OOM 到重启的流程；以及关停期间大量 Loro 调用失败时，7 秒关停预算能否完成。
+- daemon 复现（独立的 `LODY_DATA_DIR`/`HOME`、dev 构建、本地模式）：预先写入 4 个带待执行消息的会话，daemon 把它们派发给托管的 Claude 运行时，共 9 个子进程。然后用 `--import` 预加载脚本，以不写入的 `__wbindgen_malloc` 大块占满 daemon 自己的 Loro 地址空间（RSS 几乎不涨），直到分配失败；再导出 daemon 的每个文档，让它们在持锁时 trap，和第 3 次崩溃一样。有这项修改时，daemon 记录故障，走 SIGTERM 的关停流程，在 ACP flush 和历史收尾时遇到 `RuntimeError: unreachable`，强制终止 agent，0.8 秒内以退出码 1 退出，没有子进程残留。同样的故障下，`main` 的构建 120 秒后仍在运行，所有 agent 进程都还活着。
+- 未验证：真正由文档数据写满 4 GiB 的堆（这台机器内存放不下），以及报告中那几次崩溃最终经由未捕获异常退出的路径。
