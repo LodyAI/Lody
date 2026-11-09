@@ -109,6 +109,7 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
   },
   footerIcon: { width: 14, height: 14, flexShrink: 0, color: colors.secondaryLabel },
+  buttonGlyph: { width: 14, height: 14, flexShrink: 0 },
   stream: { flexGrow: 1, minHeight: 0 },
 });
 const attachments = {
@@ -266,7 +267,7 @@ export function SessionHistoryView({
         </p>
         {onReference && (
           <Button variant="secondary" size="small" onClick={onReference}>
-            <AtSign aria-hidden="true" />
+            <AtSign {...stylex.props(styles.buttonGlyph)} aria-hidden="true" />
             {t('sessions.access.reference')}
           </Button>
         )}
