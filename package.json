@@ -18,7 +18,7 @@
     "format:check": "corepack pnpm -r --filter \"!{**/acp-extension-*}\" run format:check",
     "typecheck": "corepack pnpm --filter lody prepare:acp-adapters && corepack pnpm -r --filter \"!{**/acp-extension-*}\" --workspace-concurrency=1 run typecheck",
     "test": "corepack pnpm -r --filter \"!{**/acp-extension-*}\" --workspace-concurrency=1 run test",
-    "test:scripts": "node --test scripts/*.test.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs scripts/release-build/*.test.mjs",
     "docs": "node scripts/docs/main.mjs",
     "test:ci": "corepack pnpm test:scripts && corepack pnpm -r --filter \"!{**/acp-extension-*}\" --workspace-concurrency=2 --no-sort --filter \"!@lody/electron\" run test --maxWorkers=2 && corepack pnpm --filter @lody/electron run test",
     "test:watch": "corepack pnpm -r --filter \"!{**/acp-extension-*}\" run test:watch",

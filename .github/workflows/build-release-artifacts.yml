@@ -1,0 +1,87 @@
+name: Build release inputs
+run-name: release-inputs-${{ inputs.request-id || github.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request-id:
+        description: Unique approved build request ID
+        required: true
+        type: string
+      request-json:
+        description: Canonical non-secret build request JSON
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/build-release-artifacts.yml
+      - scripts/release-build/**
+      - apps/cli/release.vite.config.mjs
+      - apps/electron/release.vite.config.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    outputs:
+      source-sha: ${{ steps.request.outputs.source-sha }}
+      request-id: ${{ steps.request.outputs.request-id }}
+      matrix: ${{ steps.request.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - id: request
+        run: node scripts/release-build/prepare.mjs
+        env:
+          REQUEST_JSON: ${{ inputs.request-json }}
+          REQUEST_ID: ${{ inputs.request-id }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-request
+          path: release-request.json
+          if-no-files-found: error
+          retention-days: 14
+
+  build:
+    needs: request
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.request.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_USE_ENV_PROXY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.request.outputs.source-sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24.22.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-request
+          path: .
+      - run: pnpm install --frozen-lockfile
+      - run: node --test scripts/release-build/*.test.mjs
+      - name: Compile existing product inputs without publishing credentials
+        run: node scripts/release-build/build.mjs release-request.json "${{ matrix.target }}" release-output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-inputs-${{ needs.request.outputs.request-id }}-${{ matrix.target }}
+          path: release-output/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

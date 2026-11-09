@@ -6,6 +6,10 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 ## Local OSS composition
 
+- `release.vite.config.mjs` requires validated release-CI requests. It reuses the
+  default graph and emits cloud compiled inputs without signing/publication
+  credentials. It neither changes local-only commands nor discovers deployment presets.
+
 - The public desktop composition is local-only. It must not discover deployment env
   files, initialize authenticated product-cloud behavior, or enable telemetry.
 - The build-time `mainPlatformKind` is the source of truth for data directories,

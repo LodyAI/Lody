@@ -4,16 +4,16 @@
 
 ## Ownership
 
-| Area | Source of truth | Contract |
-| --- | --- | --- |
-| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms | Ask only for public, actionable contribution context. |
-| PR validation | `scripts/check-pr-body.mjs` | Validate the rendered template contract without GitHub mutations. |
-| PR reconciliation | `scripts/pr-policy.mjs` | Own disposition, findings, labels, comments, grace period, cleanup, and expiry. |
-| Issue linking | `scripts/pr-issue-link.mjs` | Parse and normalize only `## Related issue`. |
-| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
-| Scope labels | `labeler.yml`, `workflows/pr-scope.yml` | Derive configured `scope:*` labels from changed paths. |
-| Code checks | `workflows/ci.yml`, `scripts/select-ci-scope.mjs` | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. Only main writes the pnpm store cache. |
-| Codex review | root `AGENTS.md` `## Code Review Rules`, `codex-review.md` | Report only P0/P1, security first; 👍 when the linked Issue is solved. |
+| Area                | Source of truth                                                | Contract                                                                                                                    |
+| ------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms                        | Ask only for public, actionable contribution context.                                                                       |
+| PR validation       | `scripts/check-pr-body.mjs`                                    | Validate the rendered template contract without GitHub mutations.                                                           |
+| PR reconciliation   | `scripts/pr-policy.mjs`                                        | Own disposition, findings, labels, comments, grace period, cleanup, and expiry.                                             |
+| Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                                                                |
+| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler.                                            |
+| Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                                                                      |
+| Code checks         | `workflows/ci.yml`, `scripts/select-ci-scope.mjs`              | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. Only main writes the pnpm store cache. |
+| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.                                                      |
 
 Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
@@ -64,12 +64,12 @@ Workflow-file security constraints live in
 
 `pullRequestDisposition` classifies each current PR before any mutation:
 
-| Disposition | Condition | Behavior |
-| --- | --- | --- |
-| `bot` | Author login ends in `[bot]` | Do not normalize or enforce; clear prior managed state when present. |
-| `bypass` | `status:pr-policy-bypass` is present | Do not normalize or enforce; clear prior managed state when present. |
-| `internal` | Numeric `head.repo.id` equals `base.repo.id` | Normalize an explicit Issue reference; do not enforce the external template. |
-| `external` | Repository ids differ or either id is missing | Normalize an explicit Issue reference, then enforce the complete contribution contract. |
+| Disposition | Condition                                     | Behavior                                                                                |
+| ----------- | --------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `bot`       | Author login ends in `[bot]`                  | Do not normalize or enforce; clear prior managed state when present.                    |
+| `bypass`    | `status:pr-policy-bypass` is present          | Do not normalize or enforce; clear prior managed state when present.                    |
+| `internal`  | Numeric `head.repo.id` equals `base.repo.id`  | Normalize an explicit Issue reference; do not enforce the external template.            |
+| `external`  | Repository ids differ or either id is missing | Normalize an explicit Issue reference, then enforce the complete contribution contract. |
 
 `author_association` never classifies a PR. A fork remains external when its
 author is an owner or member. The bypass label is an explicit maintainer action
@@ -111,6 +111,8 @@ their failures and perform expiry.
 
 ## Other automation
 
+- `macos-product-tests.yml` must preserve the binding [Darwin test contract](../scripts/release-build/README.md#darwin-test-contract).
+
 - `notify-desktop-nightly.yml` sends accepted main SHA notifications to the
   designated release-PR maintenance workflow only. OSS pushes must not directly
   authorize a desktop release: the receiving repository requires a merged release PR. It checks
@@ -120,8 +122,7 @@ their failures and perform expiry.
   control other Actions in the destination, so the App installation itself must be
   limited to the intended repository. This does not publish the local-only desktop.
 
-- Issue Forms cover only components present in the public repository. Keep Bug
-  and Feature title prefixes, issue types, and existing labels aligned; route
+- Issue Forms cover only components present in the public repository. Keep Bug/Feature title prefixes, issue types, and existing labels aligned; route
   product support and security reports out of public issues, and request only
   diagnostics contributors have checked and redacted.
 - `scripts/check-issue-body.mjs` mirrors required rendered headings and
