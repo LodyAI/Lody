@@ -5,12 +5,30 @@ import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { Dialog } from '@lody/ui/dialog';
 import { Alert } from '@lody/ui/alert';
+import { Checkbox } from '@lody/ui/checkbox';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  effects: {
+    margin: 0,
+    paddingInlineStart: space[4],
+    color: colors.secondaryLabel,
+    fontSize: text.subheadlineSize,
+    lineHeight: 1.7,
+  },
+  rotate: { display: 'flex', alignItems: 'center', gap: space[2], fontSize: text.subheadlineSize },
+});
 import type { LedgerMemberOverview } from '@/lib/e2ee-ledger-overview';
 
 export interface E2eeMemberManagement {
   actorRole: 'owner' | 'admin';
   remove(membershipId: string): Promise<void>;
   setRole(membershipId: string, role: 'admin' | 'member'): Promise<void>;
+  /** Replaces the workspace key after a removal, when this device may sign it. Explicit
+   * only: the remove dialog offers it as a checked choice the person confirms. */
+  rotate?(): Promise<void>;
 }
 
 /** Display affordances only; native signing rechecks the current ledger and target. */
@@ -23,6 +41,8 @@ export function E2eeMemberActions(props: {
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [rotateAfter, setRotateAfter] = useState(true);
+  const [rotateFailed, setRotateFailed] = useState(false);
   const { member, management } = props;
   if (member.role === 'owner') return null;
   const mayRemove = management.actorRole === 'owner' || member.role !== 'admin';
@@ -76,6 +96,8 @@ export function E2eeMemberActions(props: {
               tone="destructive"
               onClick={() => {
                 setFailed(false);
+                // Each removal starts from the recommended choice.
+                setRotateAfter(true);
                 setConfirming(true);
               }}
             >
@@ -87,6 +109,11 @@ export function E2eeMemberActions(props: {
       {failed && !confirming && (
         <Alert.Root tone="warning">
           <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
+        </Alert.Root>
+      )}
+      {rotateFailed && (
+        <Alert.Root tone="warning">
+          <Alert.Description>{t('e2ee.members.rotateFailed')}</Alert.Description>
         </Alert.Root>
       )}
       <Dialog.Root
@@ -102,8 +129,24 @@ export function E2eeMemberActions(props: {
         >
           <Dialog.Header>
             <Dialog.Title>{t('e2ee.members.removeTitle', { name: props.name })}</Dialog.Title>
-            <Dialog.Description>{t('e2ee.members.removeDescription')}</Dialog.Description>
+            <Dialog.Description>{t('e2ee.members.removeLead')}</Dialog.Description>
           </Dialog.Header>
+          <ul {...stylex.props(styles.effects)}>
+            <li>{t('e2ee.members.removeEffectDevices', { name: props.name })}</li>
+            <li>{t('e2ee.members.removeEffectFuture', { name: props.name })}</li>
+            <li>{t('e2ee.members.removeEffectHistory', { name: props.name })}</li>
+          </ul>
+          {management.rotate && (
+            <label {...stylex.props(styles.rotate)}>
+              <Checkbox
+                checked={rotateAfter}
+                disabled={pending}
+                data-testid="e2ee-member-remove-rotate"
+                onCheckedChange={(checked) => setRotateAfter(checked === true)}
+              />
+              {t('e2ee.members.rotateWithRemoval')}
+            </label>
+          )}
           {failed && (
             <Alert.Root tone="warning">
               <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
@@ -118,7 +161,18 @@ export function E2eeMemberActions(props: {
               tone="destructive"
               disabled={pending}
               onClick={() => {
-                void run(() => management.remove(member.membershipId));
+                void run(async () => {
+                  await management.remove(member.membershipId);
+                  setRotateFailed(false);
+                  if (!rotateAfter || !management.rotate) return;
+                  // The removal already committed; a failed key update must not
+                  // read as a failed removal. It stays a retryable key update.
+                  try {
+                    await management.rotate();
+                  } catch {
+                    setRotateFailed(true);
+                  }
+                });
               }}
             >
               {t('e2ee.members.remove')}

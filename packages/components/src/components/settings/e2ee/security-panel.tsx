@@ -70,6 +70,83 @@ function errorMessageKey(error: string): string {
   return 'e2ee.security.retryHint';
 }
 
+interface PanelState {
+  state?: E2eeManagementState;
+  busy?: boolean;
+  error?: string;
+  /** A link join request waits for this manager's approval. */
+  joinRequests?: boolean;
+}
+
+/** What needs a decision now: key update and waiting join requests. */
+export function E2eeAttentionRows({
+  state,
+  busy,
+  joinRequests = false,
+  onUpdate,
+  onReview,
+}: PanelState & { onUpdate: () => void; onReview?: () => void }) {
+  const { t } = useTranslation();
+  const needsUpdate = state?.rotationRequired || state?.updatePending;
+  // Another window's command is running: show it busy, not a button that would refuse.
+  const updating = busy || !!state?.updateInProgress;
+  return (
+    <>
+      {needsUpdate && (
+        <CompactRow
+          leading={
+            <Glyph tone="attention">
+              <KeyRound size={16} />
+            </Glyph>
+          }
+          label={t('e2ee.security.attention')}
+          helper={t(state?.mayRotate ? 'e2ee.security.required' : 'e2ee.security.useManager')}
+        >
+          {state?.mayRotate && (
+            <Button variant="primary" disabled={updating} onClick={onUpdate}>
+              {t(updating ? 'e2ee.security.updating' : 'e2ee.security.complete')}
+            </Button>
+          )}
+        </CompactRow>
+      )}
+      {joinRequests && (
+        <CompactRow
+          leading={
+            <Glyph tone="attention">
+              <UserPlus size={16} />
+            </Glyph>
+          }
+          label={t('e2ee.security.joinRequests')}
+          helper={t('e2ee.security.joinRequestsHelp')}
+        >
+          {onReview && (
+            <Button variant="primary" disabled={busy} onClick={onReview}>
+              {t('e2ee.security.review')}
+            </Button>
+          )}
+        </CompactRow>
+      )}
+    </>
+  );
+}
+
+function ErrorRow(props: { error: string; busy?: boolean; onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div {...stylex.props(styles.error)}>
+      <Alert.Root>
+        <Alert.Description>{t(errorMessageKey(props.error))}</Alert.Description>
+      </Alert.Root>
+      <Button variant="secondary" disabled={props.busy} onClick={props.onRetry}>
+        {t('e2ee.security.refresh')}
+      </Button>
+    </div>
+  );
+}
+
+const effectiveError = (state: E2eeManagementState | undefined, error: string | undefined) =>
+  error ?? (state?.recoveryIssue ? 'e2ee_rotation_candidate_unavailable' : undefined);
+
 /** Settings entry for an encrypted workspace: one status line, the work that needs a
  * decision now, and the way into the encryption console. Native facts only. */
 export function E2eeSecurityPanel({
@@ -78,31 +155,16 @@ export function E2eeSecurityPanel({
   error: actionError,
   joinRequests = false,
   onUpdate,
-  onRevoke,
   onRetry,
   onOpenConsole,
-}: {
-  state?: E2eeManagementState;
-  busy?: boolean;
-  error?: string;
-  /** A link join request waits for this manager's approval. */
-  joinRequests?: boolean;
+}: PanelState & {
   onUpdate: () => void;
-  onRevoke: (key: string) => void;
   onRetry: () => void;
-  onOpenConsole?: () => void;
+  /** Opens the console, on a tab when the item names one. */
+  onOpenConsole?: (tab?: 'members') => void;
 }) {
   const { t } = useTranslation();
-  const error =
-    actionError ?? (state?.recoveryIssue ? 'e2ee_rotation_candidate_unavailable' : undefined);
-  const needsUpdate = state?.rotationRequired || state?.updatePending;
-  // Another window's command is running: show it busy, not a button that would refuse.
-  const updating = busy || !!state?.updateInProgress;
-  const openConsole = onOpenConsole && (
-    <Button disabled={busy} onClick={onOpenConsole}>
-      {t('e2ee.security.openConsole')}
-    </Button>
-  );
+  const error = effectiveError(state, actionError);
   return (
     <div {...stylex.props(styles.panel)}>
       <CompactSection title={t('e2ee.security.title')}>
@@ -117,53 +179,50 @@ export function E2eeSecurityPanel({
             state ? t('e2ee.security.deviceCount', { count: state.devices.length }) : undefined
           }
         >
-          {openConsole}
-        </CompactRow>
-        {needsUpdate && (
-          <CompactRow
-            leading={
-              <Glyph tone="attention">
-                <KeyRound size={16} />
-              </Glyph>
-            }
-            label={t('e2ee.security.attention')}
-            helper={t(state?.mayRotate ? 'e2ee.security.required' : 'e2ee.security.useManager')}
-          >
-            {state?.mayRotate && (
-              <Button variant="primary" disabled={updating} onClick={onUpdate}>
-                {t(updating ? 'e2ee.security.updating' : 'e2ee.security.complete')}
-              </Button>
-            )}
-          </CompactRow>
-        )}
-        {joinRequests && (
-          <CompactRow
-            leading={
-              <Glyph tone="attention">
-                <UserPlus size={16} />
-              </Glyph>
-            }
-            label={t('e2ee.security.joinRequests')}
-            helper={t('e2ee.security.joinRequestsHelp')}
-          >
-            {onOpenConsole && (
-              <Button variant="primary" disabled={busy} onClick={onOpenConsole}>
-                {t('e2ee.security.review')}
-              </Button>
-            )}
-          </CompactRow>
-        )}
-        {error && (
-          <div {...stylex.props(styles.error)}>
-            <Alert.Root>
-              <Alert.Description>{t(errorMessageKey(error))}</Alert.Description>
-            </Alert.Root>
-            <Button variant="secondary" disabled={busy} onClick={onRetry}>
-              {t('e2ee.security.refresh')}
+          {onOpenConsole && (
+            <Button disabled={busy} onClick={() => onOpenConsole()}>
+              {t('e2ee.security.openConsole')}
             </Button>
-          </div>
-        )}
+          )}
+        </CompactRow>
+        <E2eeAttentionRows
+          state={state}
+          busy={busy}
+          joinRequests={joinRequests}
+          onUpdate={onUpdate}
+          onReview={onOpenConsole && (() => onOpenConsole('members'))}
+        />
+        {error && <ErrorRow error={error} busy={busy} onRetry={onRetry} />}
       </CompactSection>
+    </div>
+  );
+}
+
+/** Console Devices tab: every authorized device and machine, with revoke and the
+ * key update a revoke leaves behind. Native facts only; main rechecks each action. */
+export function E2eeDevicesPanel({
+  state,
+  busy,
+  error: actionError,
+  onUpdate,
+  onRevoke,
+  onRetry,
+}: PanelState & {
+  onUpdate: () => void;
+  onRevoke: (key: string) => void;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  const error = effectiveError(state, actionError);
+  const updating = busy || !!state?.updateInProgress;
+  return (
+    <div {...stylex.props(styles.panel)}>
+      {(state?.rotationRequired || state?.updatePending || error) && (
+        <CompactSection>
+          <E2eeAttentionRows state={state} busy={busy} onUpdate={onUpdate} />
+          {error && <ErrorRow error={error} busy={busy} onRetry={onRetry} />}
+        </CompactSection>
+      )}
       {state && state.devices.length > 0 && (
         <CompactSection title={t('e2ee.security.devices')} boxed>
           {state.devices.map((device) => (

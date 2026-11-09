@@ -1,6 +1,6 @@
 import { E2eeSettingsGlyph } from '@/components/settings/e2ee/security-state';
 import type { Meta, StoryObj } from '@storybook/react';
-import { E2eeSecurityPanel } from '@/components/settings/e2ee/security-panel';
+import { E2eeDevicesPanel, E2eeSecurityPanel } from '@/components/settings/e2ee/security-panel';
 const state = {
   epoch: 3,
   rotationRequired: true,
@@ -29,7 +29,6 @@ const meta = {
   args: {
     state,
     onUpdate: () => {},
-    onRevoke: () => {},
     onRetry: () => {},
     onOpenConsole: () => {},
   },
@@ -52,6 +51,18 @@ export const CandidateRecovery: Story = {
     error: 'e2ee_rotation_candidate_unavailable',
     state: { ...state, rotationRequired: false, updatePending: true },
   },
+};
+
+/** The console's Devices tab: every device with revoke, and the key update it leaves. */
+export const ConsoleDevices: Story = {
+  render: (args) => (
+    <E2eeDevicesPanel
+      state={args.state}
+      onUpdate={() => {}}
+      onRetry={() => {}}
+      onRevoke={() => {}}
+    />
+  ),
 };
 
 export const SettingsEntryAttention: Story = {
