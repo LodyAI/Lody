@@ -193,9 +193,9 @@ The owner approved the R credential parameters with the Spec revision.
 
 ## Browser self-unlock trade-offs
 
-The [client custody increment](../../../../specs/e2ee/client-custody.md#browser-self-unlock-pending-owner-review)
+The [client custody increment](../../../../specs/e2ee/client-custody.md#browser-self-unlock-owner-approved-2026-11-09)
 proposes using the isolated unlock page for routine admission of new browsers,
-pending owner approval. It reuses R→C→ordinary Web pairing above, replacing manual
+approved by the owner on 2026-11-09. It reuses R→C→ordinary Web pairing above, replacing manual
 code copying with same-browser handoff and showing both device identities. Prefer
 PRF plus a recovery file without another encryption password. Selecting password
 plus Secret Key requires review of a complete KDF/wrapping protocol first.
@@ -223,8 +223,8 @@ for Lody are design judgments:
 recovery integration rationale, so it is updated instead of adding a parallel
 note. The [approval record](../../implemented/architecture/2026-10-28-e2ee-spec-approval.md)
 remains historical approval evidence, not replaced or rewritten by this proposal.
-Showing a pairing code remains the approved baseline; automatic handoff is proposed
-only in the draft increment. No implemented decision is fully superseded and no
+Showing a pairing code remains the approved baseline; automatic handoff is approved
+in the Spec increment but not implemented. No implemented decision is fully superseded and no
 other note is archived or rejected.
 
 **Evidence limits.** This work inspected public Specs,

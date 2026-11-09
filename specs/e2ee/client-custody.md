@@ -1,6 +1,6 @@
 # Web and mobile personal-device custody
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#browser-self-unlock)
 
 Previously approved baseline: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
 Translation: current
@@ -175,11 +175,10 @@ recovery devices may not. Every other row and rule is unchanged: residual, retir
 missing or uncertain state still reconciles from exact evidence and never generates an
 identity over it.
 
-## Browser self-unlock (pending owner review)
+## Browser self-unlock (owner approved 2026-11-09)
 
-Increment status: draft. This is a security and product proposal, not authorization
-inherited from earlier approvals. Approved persistent custody and pairing remain in
-force. If approved, this adds an admission source without changing ledger v1,
+Increment status: approved. On 2026-11-09 owner Zixuan Chen (zxch3n) approved recommendations in #2489 at `07e231ceb86e20c8c849458e187639b0fbca16b6`; see [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#browser-self-unlock). Approved persistent custody and pairing remain in
+force. This adds an admission source without changing ledger v1,
 content formats, membership roles or existing device keys. Research and alternatives
 are recorded in the [recovery integration note](../../.agents/notes/proposed/feature/2026-10-30-e2ee-recovery-vault-desktop.md#browser-self-unlock-trade-offs).
 
@@ -208,7 +207,19 @@ real decryption test for each workspace. Missing enrollment, absent entries or a
 inactive R require approval from another device; login cannot fabricate recovery
 identities. The first version opens existing workspaces, without adding Web creation.
 
-### Decision table
+### Can first sign-in create a recovery file?
+
+An explicit user action can create an **empty vault and recovery file**. The file contains random U, which opens random master V; V protects per-workspace recovery-device R packages. It does not directly wrap workspace content keys. Generating a file needs no workspace keys, but an empty vault cannot open or restore any workspace. Save and re-import the file to prove unlock; first sign-in never overwrites an existing vault automatically.
+
+| Browser state | Allowed | Still needed |
+| --- | --- | --- |
+| Signed in, not admitted | Create empty vault/file; enroll PRF passkey after opening V | Another device or existing vault must admit it; empty files grant no workspace authority. |
+| Admitted with usable keys | Create/open vault and enroll workspace recovery | Active personal-device R admission, durable package and real envelope decryption test establish recoverability. |
+| Browser is the first device | An empty vault may precede a workspace | First workspace creation requires separately enabled and qualified persistent Web custody and creation capability; this increment does not add Web creation. |
+
+Show “Recovery file saved; no workspaces backed up yet” for an empty vault. Adding a passkey cannot report workspace recoverability. Replacing a lost/exposed file still requires an active personal device, with uncovered workspaces reported individually. Recovery setup is independent of already usable content paths.
+
+### Approved decision table
 
 | Owner decision | Recommendation | Cost and alternative |
 | --- | --- | --- |
@@ -327,8 +338,7 @@ exposure; old R and admitted devices must also be handled.
 ### Replacement interaction and p6-web differences
 
 Ryugi `artboard/e2ee-settings-ux`, “Supplement P2 · Web / p6-web”, remains the
-original pairing direction. This is a proposed textual replacement, not a claim
-that the artboard was modified or tested:
+original pairing direction. This is the approved textual replacement; the artboard has not been modified or tested:
 
 | State | Existing direction | Proposed copy/action |
 | --- | --- | --- |
@@ -346,13 +356,7 @@ apply, but are not a security barrier: the service can suppress them.
 
 ### Approval and subsequent boundaries
 
-The owner must explicitly approve an exact revision of the decision table,
-particularly entry selection, two-origin device handoff, public-computer limits
-and recovery-dependent rollout. No implementation or approved status before that.
-After approval, align recovery Spec, whitepaper and runtime/host contracts first;
-then split public core/client/cloud-api protocol work from private Web/storage
-composition. No public dependency on `@lody/convex` or private packages and no
-OSS desktop product-cloud calls.
+The owner approved the recommendations, not password plus Secret Key. Approval does not establish implementation, deployment or product acceptance. Align recovery Spec, whitepaper and host contracts, then split public core/client/cloud-api and private Web/storage PRs. No public private-package dependency, `@lody/convex`, or OSS desktop product-cloud calls. Pre-production formats remain current-only, without compatibility migrations. Recovery setup failures do not gate content opening for admitted devices or independent pairing; authorization and data integrity checks remain mandatory.
 
 Product acceptance must cover real PRF/file interoperability, two-origin and
 multi-tab durable reopen, quota/storage loss, account/window changes, substituted
