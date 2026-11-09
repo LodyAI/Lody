@@ -75,6 +75,9 @@ jobs:
           echo "force_full=${force}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
+        env:
+          # Static checks do not launch Electron.
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
         run: pnpm install --frozen-lockfile
 
       - name: Test contribution policy
@@ -197,6 +200,9 @@ jobs:
 
       - name: Install dependencies
         if: steps.plan.outputs.run != 'false'
+        env:
+          # These suites run under Node/Vitest; desktop E2E installs Electron separately.
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare ACP adapters
