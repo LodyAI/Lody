@@ -12,9 +12,11 @@ export function MachineIdentityRestore({
   machine,
   candidates,
   onRestore,
+  encryptedWorkspace = false,
 }: {
   machine: MachineViewMeta;
   candidates: readonly MachineViewMeta[];
+  encryptedWorkspace?: boolean;
   onRestore: (source: MachineId, target: MachineId) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -28,8 +30,9 @@ export function MachineIdentityRestore({
     label: `${candidate.name} (${candidate.id})`,
   }));
   return (
-    <CollapsibleSection title={t('settings.identityRestore.advanced', 'Advanced recovery')}>
+    <CollapsibleSection title={t('settings.identityRestore.advanced', 'Advanced settings')}>
       <CompactRow
+        inset={false}
         label={t('settings.identityRestore.title', 'Restore old machine identity')}
         helper={t(
           'settings.identityRestore.help',
@@ -54,14 +57,24 @@ export function MachineIdentityRestore({
             <AlertDialog.Description>
               {t(
                 'settings.identityRestore.confirm',
-                'Only continue if the old installation is permanently stopped. Its dedicated machine credentials will be revoked. This daemon will restart; its newer conversations stay under the current identity. Encrypted workspaces require pairing again.'
+                'Only continue if no machine is running with the old identity. Its dedicated machine credentials will be revoked. This daemon will restart; its newer conversations stay under the current identity.'
               )}
+              {encryptedWorkspace ? (
+                <>
+                  {' '}
+                  {t(
+                    'settings.identityRestore.encryptedNotice',
+                    'Encrypted workspaces require pairing again.'
+                  )}
+                </>
+              ) : null}
             </AlertDialog.Description>
           </AlertDialog.Header>
-          <CompactRow label={t('settings.identityRestore.current', 'Current identity')}>
-            <span>
-              {machine.name} ({machine.id})
-            </span>
+          <CompactRow
+            inset={false}
+            label={t('settings.identityRestore.current', 'Current machine name')}
+          >
+            <span>{machine.name}</span>
           </CompactRow>
           <Select.Root
             items={options}
@@ -122,10 +135,7 @@ export function MachineIdentityRestore({
                   .finally(() => setPending(false));
               }}
             >
-              {t(
-                'settings.identityRestore.submit',
-                'Old installation stopped — restore and restart'
-              )}
+              {t('settings.identityRestore.submit', 'Old identity is unused — restore and restart')}
             </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>

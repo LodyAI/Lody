@@ -1006,6 +1006,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
           key={machine.id}
           machine={machine}
           candidates={props.restoreIdentityCandidates ?? []}
+          encryptedWorkspace={!ordinarySharing}
           onRestore={props.onRestoreIdentity}
         />
       ) : null}

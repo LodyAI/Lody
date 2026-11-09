@@ -53,13 +53,12 @@ uses the real machine card with a controlled online/offline value for inspection
 
 ## Restoring a daemon identity
 
-Machines > the selected owned daemon > Advanced recovery > Restore old machine
+Machines > the selected owned daemon > Advanced settings > Restore old machine
 identity selects another owned, offline registration in the current workspace.
 The source may be remote. The daemon advertises `machineIdentityRestore: 1` and
 must support supervised restart. The server authorizes both registrations and requires
 an active source-machine credential binding; unbound account API keys cannot recover
-an identity. Sharing access never grants recovery. The user must permanently stop the old installation
-before confirming. Revocation covers its dedicated machine credentials, not manually
+an identity. Sharing access never grants recovery. The user must confirm that no machine is running with the old identity. Revocation covers its dedicated machine credentials, not manually
 issued account API keys or already issued transport tokens.
 
 Recovery uses a target-bound restart proof and a retained server receipt. Verification
@@ -74,6 +73,7 @@ startup with the intent retained. An interrupted two-file publication is repaire
 after reconfirming the same operation, before a runtime can start. Original source registrations,
 conversations and project files are not migrated or removed. Changing an ID grants
 no encrypted device admission; encrypted workspaces need fresh approved pairing.
+The confirmation shows that pairing notice only in an encrypted workspace.
 
 Deployment requires the cloud `machine-lifecycle/restore-identity` endpoint and
 receipt schema before enabling recovery on clients. Unit fixtures do not establish
