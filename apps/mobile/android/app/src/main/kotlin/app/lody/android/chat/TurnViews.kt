@@ -75,8 +75,7 @@ internal fun LazyListScope.turnBlocks(
         when (block) {
             is TurnLayout.Content -> content(entry, block, open, toggle, details)
             is TurnLayout.Activity -> {
-                // Tool groups stay collapsed during streaming too; only an explicit toggle opens them.
-                val expanded = open[block.key] ?: block.opensByDefault
+                val expanded = open[block.key] ?: false
                 val running = block.key == active
                 item(key = block.key, contentType = "disclosure") {
                     Disclosure(activityLabel(block, running), expanded, Modifier.animateItem(), shimmer = running) { toggle(block.key, it) }

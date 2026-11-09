@@ -124,6 +124,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var expandedMessages = Set<String>()
   /// Finished turns whose "Worked for …" fold the reader opened in place.
   var expandedWork = Set<String>()
+  var expandedThoughts = Set<String>()
   /// A row the reader just toggled: the next layout keeps it where it was on screen.
   var toggleAnchor: String?
   var expandedAttachments = Set<String>()

@@ -1360,9 +1360,7 @@ export const buildChatVirtualRows = ({
         block.entries,
         selectionSearchBlockId
       );
-      const thoughtOnly =
-        showThoughts && block.entries.every((entry) => entry.content.type === 'thought');
-      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? thoughtOnly);
+      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? false);
       const isActive =
         isLastAssistantMessage && message.finished !== true && blockIndex === blocks.length - 1;
       const lastEntry = block.entries[block.entries.length - 1];
