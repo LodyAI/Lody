@@ -404,7 +404,7 @@ struct ChatTranscript {
       }
       var visible = entry
       if entry.holdOpen == true || entry.executionId != nil { visible.finished = false }
-      var result = ChatTranscript(entries: [visible], expandedWork: expandedWork, expandedThoughts: expandedThoughts).entryRows(now: now, turnStartedAt: turnStartedAt)
+      var result = ChatTranscript(entries: [visible], expandedThoughts: expandedThoughts).entryRows(now: now, turnStartedAt: turnStartedAt)
       if entry.finished && !visible.finished {
         result.removeAll { $0.kind == "duration" }
         for index in result.indices {
@@ -633,13 +633,12 @@ struct ChatTranscript {
             if !summary.isEmpty { title += " · " + summary }
           }
           let isThoughtGroup = process.allSatisfy { $0.type == "thought" } && !(folds && !expandedWork.contains(entry.id))
-          let thoughtKey = entry.id + ":thought:" + entry.items[index].itemId
           var groupRow = ChatRow(id: entry.id + ":process" + (firstGroup ? "" : ":" + entry.items[index].itemId), entryID: entry.id, kind: "summary",
             text: title,
             symbol: ChatProcessSummary.mark(attention: attention),
-            processStartID: isThoughtGroup ? "__thought__:" + thoughtKey : (folds && !expandedWork.contains(entry.id) ? "" : entry.items[index].itemId),
+            processStartID: isThoughtGroup ? "__thought__" : (folds && !expandedWork.contains(entry.id) ? "" : entry.items[index].itemId),
             actionable: true, running: running, attention: attention)
-          groupRow.disclosed = isThoughtGroup && expandedThoughts.contains(thoughtKey)
+          groupRow.disclosed = isThoughtGroup && expandedThoughts.contains(groupRow.id)
           result.append(groupRow)
           if groupRow.disclosed {
             for item in process {

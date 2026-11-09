@@ -19,10 +19,7 @@ object TurnLayout {
 
     data class Content(override val key: String, val item: TurnItem) : Block
 
-    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block {
-        /** Activity groups start closed until the reader opens them. */
-        val opensByDefault: Boolean get() = false
-    }
+    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block
 
     data class Summary(
         val thought: Boolean = false,

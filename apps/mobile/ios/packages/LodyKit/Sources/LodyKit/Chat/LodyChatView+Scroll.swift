@@ -57,9 +57,8 @@ extension LodyChatView {
       applyRows()
       return
     }
-    if row.kind == "summary", row.processStartID.hasPrefix("__thought__:") {
-      let key = String(row.processStartID.dropFirst("__thought__:".count))
-      if !expandedThoughts.insert(key).inserted { expandedThoughts.remove(key) }
+    if row.kind == "summary", row.processStartID == "__thought__" {
+      if !expandedThoughts.insert(row.id).inserted { expandedThoughts.remove(row.id) }
       UISelectionFeedbackGenerator().selectionChanged()
       toggleAnchor = row.id
       followsBottom = false

@@ -654,7 +654,11 @@ private func hint(for row: ChatRow) -> String? {
       return String(localized: String.LocalizationValue(row.disclosed ? "native.chat.message.collapse" : "native.chat.message.expand"), bundle: .lody)
     }
     return String(localized: "native.chat.row.openProcess", bundle: .lody)
-  case "summary": return String(localized: "native.chat.row.openProcess", bundle: .lody)
+  case "summary":
+    if row.processStartID == "__thought__" {
+      return String(localized: String.LocalizationValue(row.disclosed ? "native.chat.message.collapse" : "native.chat.message.expand"), bundle: .lody)
+    }
+    return String(localized: "native.chat.row.openProcess", bundle: .lody)
   case "changes": return String(localized: "native.chat.row.openChanges", bundle: .lody)
   default: return nil
   }
