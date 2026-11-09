@@ -233,7 +233,6 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   var onToggle: (() -> Void)?
   var onActivate: (() -> Void)?
   var expanded = false
-  var collapsedHeight: CGFloat = ChatMessageContent.maximumCollapsedHeight
   var expandable = false
   private var markReady = false
   /// The summary's text, to place its chevron right after it.
@@ -332,7 +331,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
 
   private func applyProcess(_ row: ChatRow) {
     let rail = row.kind == "duration"
-    processGlyph.isHidden = !rail || (!row.running && !row.attention)
+    processGlyph.isHidden = !rail || !row.attention
     processTitle.isHidden = !rail
     processDetail.isHidden = !rail || row.detail.isEmpty
     processChevron.isHidden = !(row.actionable && (rail || row.kind == "summary"))
@@ -560,7 +559,8 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
     }
     if row.kind == "user" {
       let size = label.sizeThatFits(CGSize(width: width - 26 - Self.avatarSlot, height: .greatestFiniteMagnitude))
-      expandable = size.height + 20 > ChatMessageContent.maximumCollapsedHeight
+      let collapsedHeight = ChatMessageContent.collapsedHeight(label: label, width: width - 26 - Self.avatarSlot)
+      expandable = label.lineAdvances(width: width - 26 - Self.avatarSlot).count > ChatMessageContent.collapsedLineCount
       messageContent.expandable = expandable
       messageContent.expanded = expanded
       isAccessibilityElement = true

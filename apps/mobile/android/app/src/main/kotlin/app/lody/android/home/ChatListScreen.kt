@@ -1049,7 +1049,7 @@ private fun ChatRow(
                 }
             }
         }
-        if (expanded != null) FamilyToggle(chat.childCount, expanded, chat.childAttention, onToggle, onOpen = onClick)
+        if (expanded != null) FamilyToggle(chat.childCount, expanded, chat.childAttention, onToggle)
     }
 }
 
@@ -1084,32 +1084,28 @@ private fun DrawScope.drawRail(color: Color, last: Boolean, turn: Float) {
 /**
  * The family's own line under the opener (Slack's "7 replies"): chevron + "7 opened chats",
  * aligned with the opener's title. Same place folded or open; the chevron turns down when the
- * family shows and the rail starts beneath it. Only the chevron and count toggle (spoken as
- * "7 opened chats, expanded"); the rest of the line opens the opener, so a tap meant for the
- * opener never folds its family. iOS: `ChatRowContent.familyToggle`.
+ * family shows and the rail starts beneath it. The whole line toggles the family and announces
+ * its count and expansion state; the separate opener row opens the conversation.
  */
 @Composable
-private fun FamilyToggle(count: Int, expanded: Boolean, childAttention: ChatAttention?, onToggle: () -> Unit, onOpen: () -> Unit) {
+private fun FamilyToggle(count: Int, expanded: Boolean, childAttention: ChatAttention?, onToggle: () -> Unit) {
     val colors = LodyTheme.colors
     val action = stringResource(if (expanded) R.string.home_tree_collapse else R.string.home_tree_expand)
     val label = pluralStringResource(R.plurals.home_tree_count, count, count)
     val description = label + ", " + stringResource(if (expanded) R.string.home_tree_expanded else R.string.home_tree_collapsed)
     val angle by animateFloatAsState(if (expanded) 90f else 0f, LodySpring.snappy(), label = "family")
-    // The line's spare width opens the opener (hidden from accessibility: the row above is it).
     Box(
         Modifier
             .fillMaxWidth()
             .heightIn(min = LodySize.controlSm)
-            .clickable(onClick = onOpen)
-            .clearAndSetSemantics {},
+            .clickable(role = Role.Button, onClickLabel = action, onClick = onToggle)
+            .clearAndSetSemantics { contentDescription = description; role = Role.Button; onClick(action) { onToggle(); true } },
     ) {
         Row(
             Modifier
                 .padding(start = LodyLayout.screenPaddingX - LodySpacing.xs)
                 .heightIn(min = LodySize.controlSm)
                 .clip(RoundedCornerShape(LodyRadius.sm))
-                .clickable(role = Role.Button, onClickLabel = action, onClick = onToggle)
-                .clearAndSetSemantics { contentDescription = description; role = Role.Button; onClick(action) { onToggle(); true } }
                 .padding(start = LodySpacing.xs, end = LodySpacing.md),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs),

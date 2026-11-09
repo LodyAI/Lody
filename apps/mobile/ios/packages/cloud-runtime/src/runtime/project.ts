@@ -1,4 +1,8 @@
 import {
+  operationPresentation,
+  type OperationPresentation,
+} from './operation-presentation.ts';
+import {
   type SessionUsage,
   projectSessionUsage,
 } from '../protocol/session-usage.ts';
@@ -24,6 +28,15 @@ export type SystemNoticeMeta = {
 };
 
 export type ItemSummary =
+  | {
+      itemId: string;
+      rev: number;
+      type:
+        | 'operation_progress'
+        | 'operation_completion'
+        | 'operation_completion_batch';
+      operation: OperationPresentation;
+    }
   | {
       itemId: string;
       rev: number;
@@ -195,6 +208,22 @@ function summarizeItem(
     ? JSON.stringify([parentItemId, localId])
     : localId;
   const key = `${entryId}/${itemId}`;
+
+  if (
+    [
+      'operation_progress',
+      'operation_completion',
+      'operation_completion_batch',
+    ].includes(type)
+  ) {
+    const operation = operationPresentation(raw);
+    return {
+      itemId,
+      rev: bump(projection, key, JSON.stringify(operation)),
+      type,
+      operation,
+    } as ItemSummary;
+  }
 
   if (type === 'system_notice') {
     const name = typeof raw.name === 'string' ? raw.name : '';

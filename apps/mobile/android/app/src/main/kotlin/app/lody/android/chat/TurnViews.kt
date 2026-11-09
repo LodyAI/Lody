@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,7 +55,6 @@ import app.lody.android.designsystem.LodyIconSize
 import app.lody.android.designsystem.LodyIcons
 import app.lody.android.designsystem.LodySpacing
 import app.lody.android.designsystem.LodyTheme
-import app.lody.android.designsystem.LodyWorkingGrid
 import app.lody.android.runtime.TurnItem
 
 /**
@@ -70,7 +70,7 @@ internal fun LazyListScope.turnBlocks(
     toggle: (String, Boolean) -> Unit,
     details: StepDetails,
 ) {
-    val active = if (entry.working) entry.layout.blocks.lastOrNull()?.key else null
+    val active = entry.layout.activeActivityKey(entry.working)
     for (block in blocks) {
         when (block) {
             is TurnLayout.Content -> content(entry, block, open, toggle, details)
@@ -190,7 +190,7 @@ internal fun Disclosure(label: String, expanded: Boolean, modifier: Modifier = M
     }
 }
 
-/** Web's live status at the end of a running turn: the working grid and what it is doing. */
+/** Text-only live status at the end of a running turn. */
 @Composable
 internal fun LiveStatus(thinking: Boolean, modifier: Modifier = Modifier) {
     val colors = LodyTheme.colors
@@ -199,7 +199,6 @@ internal fun LiveStatus(thinking: Boolean, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm),
     ) {
-        LodyWorkingGrid()
         Text(
             stringResource(if (thinking) R.string.chat_activity_thinking else R.string.chat_working),
             style = LodyTheme.typography.footnote,
@@ -539,7 +538,7 @@ internal fun LazyListScope.turnFooter(entry: ChatEntry.Assistant, actions: Messa
                 app.lody.android.home.AgentMark(entry.agentCliType, entry.agentType, LodyTheme.colors.iconTertiary, Modifier.size(LodyIconSize.sm))
                 Text(text, style = LodyTheme.typography.footnote, color = LodyTheme.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Row {
+            Row(Modifier.padding(top = LodySpacing.xs).offset(x = -(app.lody.android.designsystem.LodySize.controlLg - LodyIconSize.sm) / 2)) {
                 MessageCopyButton(entry.layout.visible.filterIsInstance<TurnLayout.Content>().mapNotNull { (it.item as? app.lody.android.runtime.TurnItem.Text)?.text }.joinToString("\n\n"))
                 MessageActionButton(LodyIcons.Info, stringResource(R.string.message_info)) { actions.info(entry.id) }
                 MessageActionButton(LodyIcons.Branch, stringResource(R.string.message_fork)) { actions.fork(entry.id) }

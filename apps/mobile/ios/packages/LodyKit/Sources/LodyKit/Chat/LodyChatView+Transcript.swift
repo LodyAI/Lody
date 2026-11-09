@@ -245,6 +245,15 @@ extension LodyChatView {
         return ChatStream.deferringMarkdown(byEntry[row.entryID] ?? [], previous: frozen)
       }
     }
+    projected = ChatOperationPresentation.visible(projected, expanded: expandedOperations, titles: operationTitles)
+    for index in projected.indices {
+      guard let card = projected[index].operation else { continue }
+      projected[index].operationCurrent = card.sessionId == operationCurrentID
+      projected[index].operationAgentType = operationAgentTypes[card.sessionId]
+      projected[index].operationCLIType = operationCLITypes[card.sessionId]
+
+    }
+    projected = ChatOperationGrouping.rows(projected, roots: operationRoots, opened: operationOpened)
     for index in projected.indices where projected[index].kind == "proposed_plan" {
       if let state = planDecisionState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
         projected[index].planDecision = state
@@ -320,12 +329,6 @@ extension LodyChatView {
     let entryIDsToRetain = Set(projected.map(\.entryID))
     expandedMessages.formIntersection(entryIDsToRetain)
     expandedAttachments.formIntersection(entryIDsToRetain)
-    collapsedMessageHeights = collapsedMessageHeights.filter { entryIDsToRetain.contains($0.key) }
-    for row in projected where row.kind == "user" && collapsedMessageHeights[row.entryID] == nil {
-      if let height = ChatSendHandoff.sourceHeight(id: row.entryID) {
-        collapsedMessageHeights[row.entryID] = min(ChatMessageContent.maximumCollapsedHeight, max(68, height))
-      }
-    }
     if tabClosed { projected = [] }
     let retainedIDs = Set(projected.map(\.id))
     expandedPlans.formIntersection(retainedIDs)

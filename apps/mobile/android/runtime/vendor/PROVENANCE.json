@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "e0e7ddc076b998e404f973b2990994e29e85c805",
+  "commit": "2f55abadada37d5bf2fd348f20e7b5dbe39b93fa",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive e0e7ddc076b998e404f973b2990994e29e85c805 apps/mobile/ios/packages/cloud-runtime",
-  "note": "Whole-package export of one reviewed commit; no local overlays. It supersedes the earlier 216d24ee base plus verbatim overlays (capability refresh, directory Tabs, Agent Roles, project groups, Tab visibility, session diagnostics, message references, session usage), all of which the shared runtime now carries. This commit adds the schedules contract (schedules, scheduleDetail, scheduleCommand) and its handler, which opens `<workspace>:sr` (Flock registry: bootstrap, create, append) and `<workspace>:schedule:<id>` (Loro document: create, bootstrap, append) and depends on loro-mirror 2.3.2."
+  "export": "git archive 2f55abadada37d5bf2fd348f20e7b5dbe39b93fa apps/mobile/ios/packages/cloud-runtime",
+  "note": "Whole-package export of reviewed immutable local source commit retained at refs/heads/snapshot/mobile-operation-runtime; no local overlays. Relative to e0e7ddc076b998e404f973b2990994e29e85c805, only session ItemSummary, session projection, and operation-presentation change. Adds read-only operation progress/completion/batch cards and notices, preserving duplicate suppression and failure details. Dependencies and licenses are unchanged."
 }

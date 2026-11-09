@@ -757,41 +757,31 @@ private struct ChatRowContent: View {
   /// One nesting level: how far a child's title steps in.
   static let childLevel = LodyLayout.childIndent - LodyLayout.screenPaddingX
 
-  /// The family's own line under the opener (Slack's "7 replies"): chevron + "7 opened chats",
-  /// aligned with the opener's title. Same place folded or open; the chevron turns down when the
-  /// family shows and the rail starts beneath it. Only the chevron and count are the target; the
-  /// rest of the line opens the parent.
+  /// The whole family line toggles its children; the opener above still opens the chat.
   private func familyToggle(_ expanded: Bool) -> some View {
-    HStack(spacing: 0) {
-      Button(action: onToggle) {
-        HStack(spacing: LodySpacing.xs) {
-          Image(systemName: "chevron.right")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(LodyColor.iconSecondary)
-            .frame(width: Self.chevronSize, height: Self.chevronSize)
-            .rotationEffect(.degrees(expanded ? 90 : 0))
-            .animation(LodySpring.snappy, value: expanded)
-          Text(String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount))
-            .lodyTextStyle(.footnote)
-            .foregroundStyle(LodyColor.textSecondary)
-            .monospacedDigit()
+    Button(action: onToggle) {
+      HStack(spacing: LodySpacing.xs) {
+        Image(systemName: "chevron.right")
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundStyle(LodyColor.iconSecondary)
+          .frame(width: Self.chevronSize, height: Self.chevronSize)
+          .rotationEffect(.degrees(expanded ? 90 : 0))
+          .animation(LodySpring.snappy, value: expanded)
+        Text(String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount))
+          .lodyTextStyle(.footnote)
+          .foregroundStyle(LodyColor.textSecondary)
+          .monospacedDigit()
+        Spacer(minLength: LodySpacing.sm)
+        if !expanded, let status = Attention(tint: row.collapsedImageTint, unread: false) {
+          AttentionGlyph(attention: status)
+            .frame(width: LodyIconSize.md, height: LodyIconSize.md)
         }
-        .padding(.leading, LodySpacing.xs)
-        .padding(.trailing, LodySpacing.md)
-        .frame(minHeight: LodySize.controlSm, alignment: .leading)
-        .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
-      Spacer(minLength: LodySpacing.sm)
-      if !expanded, let status = Attention(tint: row.collapsedImageTint, unread: false) {
-        AttentionGlyph(attention: status)
-          .frame(width: LodyIconSize.md, height: LodyIconSize.md)
-          .allowsHitTesting(false)
-      }
+      .padding(.horizontal, LodyLayout.screenPaddingX)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .contentShape(Rectangle())
     }
-    .padding(.leading, LodyLayout.screenPaddingX - LodySpacing.xs)
-    .padding(.trailing, LodyLayout.screenPaddingX)
-    .padding(.top, -LodySpacing.xs)
+    .buttonStyle(.plain)
     .accessibilityHidden(true)
   }
 

@@ -6,18 +6,23 @@ final class ChatMessageContent: UIView {
   let label = CKTextView()
   let numericText = ChatNumericTextHost()
   static let maximumCollapsedHeight: CGFloat = 140
+  static let collapsedLineCount = 6
+
+  static func collapsedHeight(label: CKTextView, width: CGFloat) -> CGFloat {
+    ceil(label.lineAdvances(width: width).prefix(collapsedLineCount).reduce(0, +)) + 20
+  }
+
   static let bubbleRadius: CGFloat = 19
   let bubble = UIView()
   let disclosure = UIButton(type: .system)
-  private let fade = CAGradientLayer()
   var folded: Bool { expandable && !expanded }
   var expandable = false
   var expanded = false
 
   static func height(textHeight: CGFloat, limit: CGFloat, expanded: Bool) -> CGFloat {
     let full = textHeight + 20
-    guard full > maximumCollapsedHeight else { return full }
-    return expanded ? full + 44 : limit
+    guard full > limit else { return full }
+    return (expanded ? full : limit) + 44
   }
 
   static func applyBubbleCorners(to layer: CALayer, size: CGSize) {
@@ -39,7 +44,6 @@ final class ChatMessageContent: UIView {
     disclosure.setTitleColor(.secondaryLabel, for: .normal)
     disclosure.contentHorizontalAlignment = .right
     addSubview(disclosure)
-    fade.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
   override func layoutSubviews() {
@@ -56,14 +60,11 @@ final class ChatMessageContent: UIView {
       disclosure.isHidden = !expandable
       disclosure.frame = CGRect(x: 13, y: bounds.height - 44, width: bounds.width - 26, height: 44)
       label.frame = bounds.insetBy(dx: 13, dy: 10)
-      if expanded && expandable { label.frame.size.height -= 44 }
+      if expandable { label.frame.size.height -= 44 }
       numericText.isHidden = true
       label.isHidden = false
-      label.layer.mask = folded ? fade : nil
-      label.linkHitHeight = folded ? max(0, label.bounds.height - 58) : label.bounds.height
-      fade.frame = label.bounds
-      let h = max(1, label.bounds.height)
-      fade.locations = [0, NSNumber(value: Double(max(0, h - 58) / h)), NSNumber(value: Double(max(0, h - 30) / h))]
+      label.layer.mask = nil
+      label.linkHitHeight = label.bounds.height
       label.layer.displayIfNeeded()
     }
   }

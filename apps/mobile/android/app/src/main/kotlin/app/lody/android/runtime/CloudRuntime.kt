@@ -150,6 +150,7 @@ data class SessionMessage(
     val files: List<FileChange> = emptyList(),
     /** A user turn's attachments (images and files), by display name, in order. */
     val attachments: List<MessageAttachment> = emptyList(),
+    val operations: List<OperationEvent> = emptyList(),
 )
 
 /**
