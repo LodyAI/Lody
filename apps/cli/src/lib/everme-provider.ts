@@ -249,15 +249,16 @@ export function createEverMeMemoryProvider(
 
   const apply = async (
     targets: readonly string[],
-    mode: 'install' | 'uninstall'
+    mode: 'install' | 'uninstall',
+    requestDeadline = Date.now() + EVERME_BATCH_BUDGET_MS - 1000
   ): Promise<MemoryAgent[]> => {
-    // Started before the first inventory, and holding back enough for the
-    // command that may already be running plus the inventory that closes the
-    // batch, so the whole reply still fits inside what the transport allows.
-    const deadline = Date.now() + EVERME_BATCH_BUDGET_MS - 2 * EVERME_CALL_BUDGET_MS;
+    // The caller starts the budget before its login probe. Reserve time for
+    // one command and the final inventory before starting another mutation.
+    const deadline = requestDeadline - 2 * EVERME_CALL_BUDGET_MS;
     const rows = await inventory();
     const notes = new Map<string, MemoryAgentNotice>();
     const handled = new Set<string>();
+    let attempted = false;
     for (const target of targets) {
       const entry = resolve(target);
       // Aliases share a platform; installing it twice would rotate its token.
@@ -281,12 +282,13 @@ export function createEverMeMemoryProvider(
       // EverCLI detects agents on PATH; Lody's managed binaries are not there.
       if (mode === 'install' && row.installed !== true) args.push('--force');
       // Serial on purpose: EverCLI rewrites one shared config file per agent.
+      attempted = true;
       const result = await run(args);
       if (result.code !== undefined)
         notes.set(entry.platform, mode === 'install' ? 'connect_failed' : 'disconnect_failed');
     }
     // Report the inventory EverMe now holds, not the one the UI started from.
-    return toAgents(await inventory(), notes, mode);
+    return toAgents(attempted ? await inventory() : rows, notes, mode);
   };
 
   /** Reads EverCLI's own cached login state; no network call of its own. */
@@ -327,8 +329,8 @@ export function createEverMeMemoryProvider(
     agents: async () => toAgents(await inventory(), new Map()),
     /** Set by the probe that runs ahead of every read, so never stale here. */
     account: () => account,
-    connect: (targets) => apply(targets, 'install'),
-    disconnect: (targets) => apply(targets, 'uninstall'),
+    connect: (targets, deadline) => apply(targets, 'install', deadline),
+    disconnect: (targets, deadline) => apply(targets, 'uninstall', deadline),
     /**
      * Device Flow, started but not awaited: approval happens in a browser, and
      * a request that blocked on it would outlive the transport long before the

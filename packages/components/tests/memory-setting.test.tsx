@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
       memories: [],
     } as MemoryProviderResponse,
     busy: false,
+    signIn: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
+    signInPoll: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     update: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     create: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
   },
@@ -146,6 +148,8 @@ beforeEach(async () => {
   };
   mocks.provider.busy = false;
   mocks.provider.create.mockReset();
+  mocks.provider.signIn.mockReset();
+  mocks.provider.signInPoll.mockReset();
   mocks.openExternalUrl.mockClear();
   stubResizeObserver();
   container = document.createElement('div');
@@ -157,6 +161,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function renderSetting() {
@@ -416,3 +421,47 @@ it('uses only associated identities in the Role picker and prevents selecting a 
   expect(container.textContent).toContain('Review lessons');
   expect(button('Link').disabled).toBe(true);
 });
+
+it.each(['approved', 'expired'] as const)(
+  'keeps polling through transient errors until sign-in is %s',
+  async (outcome) => {
+    mocks.provider.result = { type: 'machine/memory', status: 'not_running', memories: [] };
+    mocks.provider.signIn.mockResolvedValue({
+      type: 'machine/memory',
+      status: 'not_running',
+      memories: [],
+      signIn: {
+        status: 'pending',
+        verificationUrl: 'https://example.com/approve',
+        expiresInSec: 60,
+      },
+    });
+    mocks.provider.signInPoll.mockImplementation(async () => {
+      const result: MemoryProviderResponse = {
+        type: 'machine/memory',
+        status: outcome === 'approved' ? 'ready' : 'not_running',
+        memories: [],
+        signIn: { status: outcome },
+        agents: [],
+      };
+      mocks.provider.result = result;
+      return result;
+    });
+    await renderSetting();
+    vi.useFakeTimers();
+    await click('Sign in to EverMe');
+    expect(container.textContent).toContain('Waiting for your browser');
+    for (let i = 0; i < 3; i++) {
+      mocks.provider.result = { type: 'machine/memory', status: 'error', memories: [] };
+      await renderSetting();
+      expect(container.textContent).toContain('Waiting for your browser');
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    await renderSetting();
+    expect(mocks.provider.result.signIn?.status).toBe(outcome);
+    expect(container.textContent).not.toContain('Waiting for your browser');
+    if (outcome === 'expired') expect(container.textContent).toContain('This sign-in expired');
+  }
+);

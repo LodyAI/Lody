@@ -42,5 +42,7 @@ connection only after its agent process restarts.
 ## Verification
 
 `packages/components/tests/memory-setting.test.tsx` covers the Settings states that
-Nowledge Mem shares with the new layout. No automated test covers the EverMe adapter,
-the relay refusal or the sign-in flow; they remain unverified.
+Nowledge Mem shares with the new layout. It also covers preserving an active EverMe sign-in through transient errors until approval
+or expiry. `apps/cli/src/lib/memory-providers.test.ts` covers connection and disconnection
+budgets including the initial probe. Real EverCLI authentication and the relay refusal
+remain unverified by these tests.

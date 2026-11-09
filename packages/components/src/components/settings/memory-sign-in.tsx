@@ -89,6 +89,7 @@ export function MemorySignInCard({
   name,
   providerKey,
   autoStart,
+  onPendingChange,
   state,
 }: {
   logo?: ReactNode;
@@ -100,6 +101,7 @@ export function MemorySignInCard({
    * set it up, so finishing that promise is not a second decision to make.
    */
   autoStart?: boolean;
+  onPendingChange?: (pending: boolean) => void;
   state: ReturnType<typeof useMemoryProvider>;
 }) {
   const { t } = useTranslation();
@@ -115,6 +117,11 @@ export function MemorySignInCard({
   const poll = useRef(state.signInPoll);
   poll.current = state.signInPoll;
   const begun = useRef(false);
+
+  useEffect(() => {
+    onPendingChange?.(phase === 'starting' || phase === 'waiting');
+  }, [phase, onPendingChange]);
+  useEffect(() => () => onPendingChange?.(false), [onPendingChange]);
 
   useEffect(() => {
     if (phase !== 'waiting') return undefined;

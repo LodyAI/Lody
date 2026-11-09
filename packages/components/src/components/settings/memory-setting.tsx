@@ -670,6 +670,7 @@ function ProviderRecords({
   // would set the provider up, and stopping half-way would be a promise kept
   // only in part.
   const [justInstalled, setJustInstalled] = useState(false);
+  const [signInPending, setSignInPending] = useState(false);
   const ready = online && supported && state.result?.status === 'ready';
   const missing = state.result?.status === 'not_installed';
   // One failed reply is not evidence the provider broke: the runner times
@@ -690,11 +691,15 @@ function ProviderRecords({
   // Installed and reachable, with nobody signed in — the one unready state a
   // provider can settle itself, so it offers a sign-in, not a line of advice.
   const signedOut =
-    online && supported && state.result?.status === 'not_running' && providerSignsIn(provider.id);
+    !ready &&
+    !missing &&
+    providerSignsIn(provider.id) &&
+    (signInPending || (online && supported && state.result?.status === 'not_running'));
   // Something is installed but will not answer. For a provider Lody can fetch
   // this is actionable rather than just bad news, so it gets the same card the
   // missing case gets — pointed at repair instead of first install.
   const unreadable =
+    !signInPending &&
     online &&
     supported &&
     state.result?.status === 'error' &&
@@ -757,6 +762,7 @@ function ProviderRecords({
           name={provider.name}
           providerKey={provider.id}
           autoStart={justInstalled}
+          onPendingChange={setSignInPending}
           state={state}
         />
       ) : isAgentConnectProvider(provider.id) ? (

@@ -32,4 +32,6 @@ Lody 把 EverMe 作为“连接 Agent”而不是“由 Role 绑定”的 Provid
 ## 验证
 
 `packages/components/tests/memory-setting.test.tsx` 覆盖 Nowledge Mem 在新布局下的设置页
-状态。EverMe 适配器、中转拒绝和登录流程没有自动化测试，仍未验证。
+状态，以及 EverMe 登录在短暂错误后继续等待、最终批准或过期的行为。
+`apps/cli/src/lib/memory-providers.test.ts` 覆盖包含前置检查的连接和断开时间预算。
+这些测试没有验证真实 EverCLI 登录和中转拒绝。

@@ -97,8 +97,8 @@ export interface MemoryProvider {
   environment(memoryId: string): Record<string, string>;
   /** Agent-connect providers only; identity providers leave these undefined. */
   agents?(): Promise<MemoryAgent[]>;
-  connect?(targets: readonly string[]): Promise<MemoryAgent[]>;
-  disconnect?(targets: readonly string[]): Promise<MemoryAgent[]>;
+  connect?(targets: readonly string[], deadline?: number): Promise<MemoryAgent[]>;
+  disconnect?(targets: readonly string[], deadline?: number): Promise<MemoryAgent[]>;
   /** Providers Lody can sign in to; the rest send the user to their own app. */
   signIn?(): Promise<MemorySignIn>;
   signInPoll?(): Promise<MemorySignIn>;
@@ -260,6 +260,8 @@ export async function handleMemoryProviderRequest(
         ...(agents ? { agents } : {}),
       };
     }
+    // Leave one second for the reply inside the local RPC limit, including the probe.
+    const deadline = Date.now() + 59_000;
     const status = await provider.probe();
     if (status !== 'ready') return { type: 'machine/memory', status, memories: [] };
     if (request.action === 'connect' || request.action === 'disconnect') {
@@ -269,7 +271,7 @@ export async function handleMemoryProviderRequest(
         type: 'machine/memory',
         status: 'ready',
         memories: [],
-        agents: await apply.call(provider, request.targets),
+        agents: await apply.call(provider, request.targets, deadline),
       };
     }
     if (request.action === 'create') await provider.create(request.input);
