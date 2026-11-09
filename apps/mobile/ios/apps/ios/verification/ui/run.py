@@ -623,6 +623,10 @@ try:
                     # per-file upload states need multiple AXe round trips.
                     # Keep each gesture/animation assertion independently bounded.
                     check_timeout = 420
+                elif case == 'schedules':
+                    # List/editor rollback gates and cached-detail refreshes share this case.
+                    # Individual readiness assertions retain their own bounded deadlines.
+                    check_timeout = 600
                 elif case == 'mermaid':
                     # Six graph types, fallbacks, plan expansion and document copy.
                     check_timeout = 300

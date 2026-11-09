@@ -1,5 +1,6 @@
 import Foundation
 import LodyCore
+import UIKit
 
 /// Scripted schedules for the offline Home fixture (`--ui-verify-home`): every row state the list
 /// words, an unsupported rule, a teammate's schedule, an outdated computer and a scheduled message.
@@ -15,13 +16,57 @@ final class ScheduleFixture {
   private var drafts: [String: RuntimeContract.ScheduleDraft] = [:]
   private(set) var runs: [String] = []
 
+  // Explicit UI-verification gates: no timers, and no production cache logic in the fixture.
+  private var held: Set<String> = []
+  private var pending: [String: [CheckedContinuation<Void, Error>]] = [:]
+  private var signals: [String: UIView] = [:]
+
+  func control(_ action: String) {
+    guard LodyUIVerify.enabled, NativeHomeFixture.active else { return }
+    let parts = action.split(separator: "-", maxSplits: 1).map(String.init)
+    guard parts.count == 2, ["list", "detail", "options", "command"].contains(parts[1]) else { return }
+    let key = parts[1]
+    if parts[0] == "hold" {
+      held.insert(key)
+      signal(key, "armed")
+    } else if parts[0] == "fail" || parts[0] == "release" {
+      held.remove(key)
+      let requests = pending.removeValue(forKey: key) ?? []
+      for request in requests {
+        if parts[0] == "fail" { request.resume(throwing: Self.failure("schedule_conflict")) }
+        else { request.resume() }
+      }
+      signal(key, parts[0] == "fail" ? "failed" : "released")
+    }
+  }
+
+  private func signal(_ key: String, _ state: String) {
+    let view = signals[key] ?? UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+    view.isAccessibilityElement = true
+    view.accessibilityIdentifier = "schedule-fixture-" + key
+    view.accessibilityLabel = "Schedule fixture " + key
+    view.accessibilityValue = state
+    if view.superview == nil { LodyShell.shared.presenter?.view.window?.addSubview(view) }
+    signals[key] = view
+  }
+
+  private func gate(_ key: String) async throws {
+    guard held.contains(key) else { return }
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      pending[key, default: []].append(continuation)
+      signal(key, "pending")
+    }
+  }
+
   var service: ScheduleService {
     ScheduleService(
       list: { [unowned self] _ in
-        RuntimeContract.SchedulesResult(items: self.items, deviceTimeZone: "UTC", machineTimeZones: ["ui": "Asia/Shanghai", "mini": "UTC"],
+        try await self.gate("list")
+        return RuntimeContract.SchedulesResult(items: self.items, deviceTimeZone: "UTC", machineTimeZones: ["ui": "Asia/Shanghai", "mini": "UTC"],
           ownedMachineIds: ["mini", "ui"])
       },
       detail: { [unowned self] _, scheduleId in
+        try await self.gate("detail")
         guard let item = self.items.first(where: { $0.scheduleId == scheduleId }) else { throw Self.failure("schedule_not_found") }
         let draft = self.drafts[scheduleId]
         return RuntimeContract.ScheduleDetail(
@@ -29,8 +74,14 @@ final class ScheduleFixture {
           modelId: draft?.modelId, modeId: draft?.modeId, project: draft?.project
         )
       },
-      command: { [unowned self] params in try self.apply(params) },
-      options: { _ in Self.options }
+      command: { [unowned self] params in
+        try await self.gate("command")
+        return try self.apply(params)
+      },
+      options: { [unowned self] _ in
+        try await self.gate("options")
+        return Self.options
+      }
     )
   }
 
