@@ -159,16 +159,30 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     }
     loading = true
     let pulled = refresh.isRefreshing
+    let generation = LocalStore.shared.generation
+    let restore = result == nil
     render()
     Task { [weak self, service, workspaceId = state.workspaceId] in
+      if restore {
+        let saved = await service.cachedList(state.userId, workspaceId)
+        guard let self, self.version == id, self.source.state.key == state.key,
+              LocalStore.shared.generation == generation, self.cache.pending.isEmpty else { return }
+        if self.result == nil, let saved {
+          self.result = saved
+          self.render()
+        }
+      }
       var value: RuntimeContract.SchedulesResult?
       var failure: String?
       do { value = try await service.list(workspaceId) }
       catch { failure = ScheduleFailure.message(error, write: false) }
-      guard let self, self.version == id, self.source.state.key == state.key, self.cache.pending.isEmpty else { return }
+      guard let self, self.version == id, self.source.state.key == state.key,
+            LocalStore.shared.generation == generation, self.cache.pending.isEmpty else { return }
+      // Persist only accepted runtime reads, never a pending command's optimistic preview.
       // A failed refresh keeps the last list; the error shows only when there is nothing to show.
       if let value {
         self.result = value
+        service.persistList(state.userId, workspaceId, value, generation)
         let ids = Set(value.items.map(\.scheduleId))
         self.cache.details = self.cache.details.filter { ids.contains($0.key) }
       }

@@ -50,6 +50,7 @@ open class LodyApplication : Application() {
         app.lody.android.home.AvatarImages.initialize(this)
         runtimeOwner = RuntimeOwner(::createRuntime, Dispatchers.Main.immediate)
         val cache = AtomicCatalogStore(this)
+        val scheduleCache = app.lody.android.schedules.ScheduleDisplayCache(cache)
         val branches = app.lody.android.create.GitHubBranches()
         creation = app.lody.android.create.CreateSessionRepository(runtimeOwner, cache) { scope, repo, page ->
             account.withVerifiedAccount(scope) { token -> branches.load(token, scope.workspaceId, repo, page) }
@@ -67,6 +68,7 @@ open class LodyApplication : Application() {
         }
         account = AccountController(CloudAuthHttp(OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
             if (::notifications.isInitialized) notifications.clear()
+            scheduleCache.invalidate()
             prepared = null
             submissions.activate(null)
             cloud.disconnect()
@@ -74,7 +76,7 @@ open class LodyApplication : Application() {
         account.browserStore = BrowserAuthStore(KeystoreCredentialStore(this, "browser-auth"))
         members = WorkspaceMembers(cache, account::members)
         projectAdding = app.lody.android.home.LiveProjectAdding(runtimeOwner, account, app.lody.android.chat.GitHubHttpClient())
-        schedules = app.lody.android.schedules.RuntimeScheduleService(runtimeOwner)
+        schedules = app.lody.android.schedules.RuntimeScheduleService(runtimeOwner, scheduleCache)
         cloud = CatalogRepository(account, runtimeOwner, applicationScope, cache) { scope, grant -> prepared = scope to grant }
         notifications = app.lody.android.notifications.PushNotifications(this, account, applicationScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(notifications)

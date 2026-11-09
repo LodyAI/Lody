@@ -202,11 +202,17 @@ their ordinary list behavior.
 
 ## Schedules
 
-The native Schedules tab shows search-scoped counts for Active, Attention, Paused
-and Ended. Tap a count to filter both task and message sections; tap it again to
-clear. Attention rows come first, with runtime order preserved within each state.
-Cards show the Agent mark and state badge, title, status, frequency and execution
-context. Existing row actions and delete confirmation remain available.
+The native Schedules tab shows flat rows grouped by Attention, Active, Paused and
+Ended, filtered by search. It restores the last successful list from an atomic
+display cache scoped to the account and workspace before refreshing. Failed live
+reads retain that display. The cache retains at most eight 8 MiB snapshots, prunes
+removed workspace access and clears with account data at logout or account change.
+Cached rows do not grant write authority.
+
+Pause and resume update the row and its group immediately, suppress further row
+commands while pending, and restore the prior row on failure (including unknown
+write outcomes). Reads begun before a command cannot overwrite its result. A fresh
+read reconciles after completion; optimistic state is never persisted or replayed.
 
 The editor presents stored status and quick actions above Task, When and Run with
 cards. Save is in the app bar; Delete is a separate confirmed action. Day selectors

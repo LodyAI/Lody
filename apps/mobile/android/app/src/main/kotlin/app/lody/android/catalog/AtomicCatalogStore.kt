@@ -17,7 +17,7 @@ import java.io.File
 import java.security.MessageDigest
 
 /** Whole display snapshots, serialized on IO. No tokens, CRDT replicas or cursors. */
-internal class AtomicCatalogStore(context: Context, name: String = "catalog") : CatalogStore, CreationOptionsStore, WorkspaceMemberStore {
+internal class AtomicCatalogStore(context: Context, name: String = "catalog") : CatalogStore, CreationOptionsStore, WorkspaceMemberStore, app.lody.android.schedules.ScheduleStore {
     init { require(name.matches(Regex("[a-zA-Z0-9_-]+"))) }
     private val directory = File(context.noBackupFilesDir, name + app.lody.android.BackendEnvironment.storageSuffix)
     private val mutex = Mutex()
@@ -110,6 +110,23 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
             .put("repo", repo).put("names", JSONArray())
         save(file, data.put("selected", name), 1024 * 1024)
     }
+    private fun schedulesFile(scope: RuntimeScope) = File(directory, "schedules-" + catalogFile(scope).name)
+    override suspend fun readSchedules(scope: RuntimeScope): ScheduleList? = io {
+        if (!owns(scope)) return@io null
+        val data = load(schedulesFile(scope)) ?: return@io null
+        try {
+            require(data.getString("account") == scope.accountId && data.getString("workspace") == scope.workspaceId)
+            ScheduleJson.list(data.getJSONObject("schedules"))
+        } catch (_: Exception) { AtomicFile(schedulesFile(scope)).delete(); null }
+    }
+    override suspend fun writeSchedules(scope: RuntimeScope, value: ScheduleList) = io {
+        require(owns(scope)) { "cache_scope_changed" }
+        save(schedulesFile(scope), JSONObject().put("account", scope.accountId).put("workspace", scope.workspaceId)
+            .put("schedules", ScheduleJson.encodeList(value)))
+        directory.listFiles()?.filter { it.name.startsWith("schedules-") && it.name.endsWith(".json") }
+            ?.sortedByDescending { it.lastModified() }?.drop(8)?.forEach { AtomicFile(it).delete() }
+        Unit
+    }
     override suspend fun readContext(): AccountContext? = io { context() }
     private fun membersFile(scope: RuntimeScope) = File(directory, "members-" + catalogFile(scope).name)
     override suspend fun readMembers(scope: RuntimeScope): List<WorkspaceMember>? = io {
@@ -132,7 +149,7 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
         previous?.account?.workspaces?.filter { old -> account.id != previous.account.id || account.workspaces.none { it.id == old.id } }?.forEach {
             AtomicFile(catalogFile(RuntimeScope(previous.account.id, it.id))).delete()
         }
-        directory.listFiles()?.filter { (it.name.startsWith("options-") || it.name.startsWith("branches-") || it.name.startsWith("members-")) && it.name.endsWith(".json") }?.forEach { file ->
+        directory.listFiles()?.filter { (it.name.startsWith("options-") || it.name.startsWith("branches-") || it.name.startsWith("members-") || it.name.startsWith("schedules-")) && it.name.endsWith(".json") }?.forEach { file ->
             val cached = load(file)
             if (cached == null || cached.optString("account") != account.id || account.workspaces.none { it.id == cached.optString("workspace") }) AtomicFile(file).delete()
         }
@@ -167,7 +184,7 @@ internal class AtomicCatalogStore(context: Context, name: String = "catalog") : 
         val target = catalogFile(scope)
         save(target, data)
         // Bound disk use to eight recently updated workspace projections (<=64 MiB).
-        directory.listFiles()?.filter { it.name.endsWith(".json") && !it.name.startsWith("options-") && !it.name.startsWith("branches-") && it != accountFile && it != target }
+        directory.listFiles()?.filter { it.name.endsWith(".json") && !it.name.startsWith("options-") && !it.name.startsWith("branches-") && !it.name.startsWith("members-") && !it.name.startsWith("schedules-") && it != accountFile && it != target }
             ?.sortedByDescending { it.lastModified() }?.drop(7)?.forEach { AtomicFile(it).delete() }
         Unit
     }
