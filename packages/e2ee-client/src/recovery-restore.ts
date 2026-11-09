@@ -245,6 +245,8 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
 /** Restore transport for a personal host. The host owns identity and installation;
  * these ports relay only signed history, R envelopes and the exact admission. */
 export interface PersonalHostRecoveryInput {
+  /** Exact retained offer when repairing an already admitted installation. It cannot replace package pins. */
+  readonly offer?: import('./pairing').PersonalPairingOffer;
   readonly vault: RecoveryVault;
   readonly local: WorkspaceRecoveryInput['local'];
   readonly reference: RecoveryEntryReference;
@@ -257,3 +259,9 @@ export interface PersonalHostRecoveryInput {
     ]
   ) => ReturnType<WorkspaceRestorePlan['submitOriginalAsRecovery']>;
 }
+
+/** Vault setup transports; personal signing and installed keys remain in the admitted session. */
+export type PersonalRecoverySetupInput = Pick<
+  WorkspaceRecoveryInput,
+  'vault' | 'local' | 'submitOriginal' | 'fetchCurrentEnvelope'
+>;

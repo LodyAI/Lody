@@ -811,6 +811,9 @@ it.each(['chromium', 'webkit'] as const)(
 
 it.each([
   { options: {}, expected: { ok: true, outcome: 'Committed', sealed: true } },
+  { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
+  { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
+  { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
   { options: { wrongAccount: true }, expected: { ok: false, phase: null } },
   { options: { revokedRecovery: true }, expected: { ok: false } },
   { options: { tamperedPackage: true }, expected: { ok: false, phase: null } },

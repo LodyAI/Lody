@@ -546,9 +546,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     genesisRecordHex: string;
     membershipId: string;
     pages: unknown;
+    offer?: PersonalPairingOffer;
   }) =>
     Effect.gen(function* () {
-      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      const p = yield* prepare(input.offer ?? accountPairingOffer(platform.scope, input));
       if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
       const pages = yield* Effect.fromResult(captureHistoryPages(input.pages));
       const descriptor = { kind: 'history' as const };
@@ -590,7 +591,14 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         );
         if (pin.genesisHash !== toHex(platform.scope.genesis.toBytes()))
           return yield* fail('scope-mismatch');
-        const offer = accountPairingOffer(platform.scope, pin);
+        const offer = input.offer ? { ...input.offer } : accountPairingOffer(platform.scope, pin);
+        if (
+          offer.workspaceId !== platform.scope.workspaceId ||
+          offer.genesisHash !== pin.genesisHash ||
+          offer.genesisRecordHex !== pin.genesisRecordHex ||
+          offer.membershipId !== pin.membershipId
+        )
+          return yield* fail('scope-mismatch');
         const current = () =>
           Effect.flatMap(input.pages(), (pages) => verifyPersonalHistory(offer, pages));
         const initial = yield* current();
@@ -635,7 +643,11 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
               submitOriginalAsRecovery: plan.submitOriginalAsRecovery,
             });
             if (result.outcome !== 'Committed') return { outcome: result.outcome, offer };
-            const approval = yield* acceptAccountHistory({ ...pin, pages: yield* input.pages() });
+            const approval = yield* acceptAccountHistory({
+              ...pin,
+              offer,
+              pages: yield* input.pages(),
+            });
             // Only the admitted session installs recovered opaque keys, through the same
             // InstalledEpochKeys commitment/protection/readback boundary as normal reception.
             yield* openPersonalSession(p, approval, keys.entries()).pipe(Effect.provide(base));

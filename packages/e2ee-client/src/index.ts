@@ -34,5 +34,9 @@ export {
   type PersonalHostPorts,
 } from './owned-host';
 
-export { makePersonalWorkspaceRuntime, type PersonalRuntimeOptions } from './runtime';
+export {
+  makePersonalWorkspaceRuntime,
+  personalRuntimeAccountRequester,
+  type PersonalRuntimeOptions,
+} from './runtime';
 export { PersonalMachineSharing } from './platform';

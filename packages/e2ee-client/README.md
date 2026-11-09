@@ -330,3 +330,15 @@ commitment/protection/readback boundary. Failed installation remains retryable o
 the same identity. No signer, private key, R or V is returned. The application owns
 vault session lifetime, transports, account guards, entry pins and product rollout.
 Recovery remains opt-in; opening an existing identity does not trigger it.
+
+An admitted session exposes explicit `setupRecovery`: signing and installed keys
+stay inside its owned boundary, and the result is recoverable only after core's
+real recovery test. `restoreRecovery` accepts an exact retained offer for a device
+whose protected identity remains but workspace keys are missing; package pins still
+must match, and recovery never replaces the identity.
+
+`personalRuntimeAccountRequester` adapts the existing runtime owner for account
+pairing, without creating another host. Platforms may opt into the isolated Web
+unlock entry through `openBrowserUnlock`; the shared pairing page then requires
+explicit personal-computer consent before creating a request. The ordinary
+device-approval path remains available. The optional hook transfers no secrets.

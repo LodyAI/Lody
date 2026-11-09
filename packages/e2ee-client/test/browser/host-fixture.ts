@@ -1864,6 +1864,9 @@ export async function recoverBrowser(
     resume?: boolean;
     revokedRecovery?: boolean;
     tamperedPackage?: boolean;
+    repair?: boolean;
+    revokePersonal?: boolean;
+    setup?: boolean;
   } = {}
 ) {
   await boot('create-or-open', false, 'recovery', options.wrongAccount ? 'def' : 'abc', 'abc');
@@ -2027,6 +2030,88 @@ export async function recoverBrowser(
         offer = result.success.offer;
         localStorage.setItem('recovery-offer', JSON.stringify(offer));
         session = yield* host.open(offer, false, true);
+        let recoveryVerified = false;
+        if (options.setup) {
+          const setupResult = yield* session.setupRecovery({
+            vault,
+            local,
+            fetchCurrentEnvelope: envelope,
+            submitOriginal: (record) =>
+              Effect.sync(() => {
+                if (!records.some((old) => toHex(old) === toHex(record)))
+                  records.push(record.slice());
+                retain();
+                return { outcome: 'Committed' as const, record: record.slice() };
+              }),
+          });
+          recoveryVerified = setupResult.recoverable;
+        }
+        if (options.repair) {
+          // No prior restore intent: model an identity admitted through ordinary pairing.
+          for (const name of journal.keys()) if (name.endsWith('/restore')) journal.delete(name);
+          yield* session.close();
+          session = undefined;
+          yield* Effect.tryPromise({
+            try: () =>
+              new Promise<void>((resolve, reject) => {
+                const request = indexedDB.open(`${databasePrefix}-custody`);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                  const db = request.result,
+                    tx = db.transaction('data', 'readwrite');
+                  const cursor = tx.objectStore('data').openCursor();
+                  cursor.onsuccess = () => {
+                    const row = cursor.result;
+                    if (!row) return;
+                    if (row.value.namespace === 'installed') row.delete();
+                    row.continue();
+                  };
+                  tx.oncomplete = () => {
+                    db.close();
+                    resolve();
+                  };
+                  tx.onabort = () => {
+                    db.close();
+                    reject(tx.error);
+                  };
+                };
+              }),
+            catch: (cause) => cause,
+          });
+          if (options.revokePersonal) {
+            const installed = yield* Context.get(baseContext, ClientInstallationStore).read();
+            const command = yield* Effect.fromResult(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: installed!.binding.device,
+              })
+            );
+            records.push(yield* signLedgerRecord(command, owner));
+            retain();
+          }
+          const repaired = yield* Effect.result(
+            host.restoreRecovery({
+              offer,
+              vault,
+              local,
+              reference,
+              pages,
+              fetchCurrentEnvelope: envelope,
+              submitOriginalAsRecovery: (record, _identity, credential) =>
+                Effect.sync(() => {
+                  credential.fill(0);
+                  if (!records.some((old) => toHex(old) === toHex(record)))
+                    records.push(record.slice());
+                  retain();
+                  return { outcome: 'Committed' as const, record: record.slice() };
+                }),
+            })
+          );
+          if (Result.isFailure(repaired)) return { ok: false };
+          if (repaired.success.offer.pairingSessionId !== offer.pairingSessionId)
+            throw new Error('replaced offer');
+          session = yield* host.open(offer, false, true);
+        }
         const current = yield* session.ledgerState();
         const document = yield* session.document('document:recovered', 'loro');
         const frame = yield* document.seal({
@@ -2044,6 +2129,7 @@ export async function recoverBrowser(
           length: current.view.length,
           sealed: frame.sealed.length > 64,
           noDuplicateAdmission: records.length === admittedCount,
+          recoveryVerified,
         };
       }).pipe(Effect.provide(layers))
     )

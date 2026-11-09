@@ -163,6 +163,8 @@ export interface E2eeAccountApprovalSession {
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime
   extends E2eeAccountPairingRuntime, E2eeAutomaticPairingRuntime {
+  /** Explicit user gesture only: open the isolated browser unlock surface. Never sends pairing secrets or unlock material in a URL. */
+  openBrowserUnlock?(): void;
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
   /** Portable hosts that can sign an account-pairing admission from an already

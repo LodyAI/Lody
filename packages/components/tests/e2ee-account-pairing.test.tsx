@@ -737,3 +737,34 @@ describe('automatic pairing product flow', () => {
     }
   });
 });
+
+it('browser self-unlock requires consent before either entry creates an identity, then shows only its pairing code', async () => {
+  const host = requesterHost();
+  const opened: string[] = [];
+  const runtime = {
+    ...host.runtime,
+    openBrowserUnlock: () => {
+      opened.push('isolated-unlock');
+    },
+  };
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest runtime={runtime} autoStart={false} onJoined={() => {}} />
+    )
+  );
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(true);
+  expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
+  expect(host.state).toBeNull();
+  expect(opened).toEqual([]);
+  const consent = container.querySelector('[role="checkbox"]') as HTMLElement;
+  await act(async () => consent.click());
+  await click('e2ee.browserUnlock.open');
+  expect(text()).toContain('e2ee.browserUnlock.risk');
+  expect(text()).toContain('e2ee.browserUnlock.transfer');
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
+    CODE
+  );
+  expect(opened).toEqual(['isolated-unlock']);
+  await act(async () => consent.click());
+  expect((button('e2ee.accountPair.request.restart') as HTMLButtonElement).disabled).toBe(true);
+});

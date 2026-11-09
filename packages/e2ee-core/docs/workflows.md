@@ -320,3 +320,9 @@ does not need this proof. `test/foundation.test.ts` retains a fixed signing vect
 and checks substitution of every context field.
 
 Desktop error classification, independent paging and terminal acknowledgement are described in [key maintenance availability](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.md). `MailboxInstallError.cryptographicRejection` marks only a deterministic rejection at envelope verification; local writes, report signing and unknown native errors never authorize rejecting an envelope.
+
+A recovery restore may repair a currently admitted personal identity that has lost
+its installed keys. After verifying the recovery device, package checkpoint and
+current epoch envelope, it requires the exact current personal signing/encryption
+keys and membership. It installs through the caller's normal installed-key boundary
+without another admission; a revoked or mismatched identity gains no authority.

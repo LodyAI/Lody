@@ -9,14 +9,21 @@ import {
   type LedgerView,
 } from '@lody/e2ee-core/protocol';
 import {
-  personalHostAccountPairing,
   ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS,
+  personalHostAccountPairing,
+  type AccountPairingIdentityHost,
 } from './account-requester';
 import { makeOwnedPersonalDeviceHost, type PersonalHostPorts } from './owned-host';
 import { PersonalPairingOfferSchema, type PersonalPairingOffer } from './pairing';
 import { fail, PersonalRuntimeFailure } from './errors';
 import { fromHex, toHex } from './bytes';
 import { captureSeal, captureOpen, capturePage } from './runtime-input';
+
+const requesters = new WeakMap<E2eeWorkspaceRuntime, AccountPairingIdentityHost>();
+/** Purpose-bound account-pairing operations on this runtime's existing owned host.
+ * Returns null for foreign runtimes; never constructs another identity owner. */
+export const personalRuntimeAccountRequester = (runtime: E2eeWorkspaceRuntime) =>
+  requesters.get(runtime) ?? null;
 
 type Host = Effect.Success<ReturnType<typeof makeOwnedPersonalDeviceHost>>;
 type Session = Effect.Success<ReturnType<Host['open']>>;
@@ -793,5 +800,23 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         } satisfies Pick<E2eeWorkspaceRuntime, 'readMachineSharing' | 'updateMachineSharing'>)
       : {}),
   };
-  return Object.freeze({ ...runtime, accountRequester: personalHostAccountPairing(host) });
+  const requester = personalHostAccountPairing(host);
+  const checked = <A>(work: Effect.Effect<A, unknown>) =>
+    Effect.gen(function* () {
+      yield* guard(workspaceId);
+      const result = yield* work;
+      yield* guard(workspaceId);
+      return result;
+    });
+  const accountRequester: AccountPairingIdentityHost = {
+    workspaceId,
+    genesisHash,
+    prepareAccountIdentity: (pin) => checked(requester.prepareAccountIdentity(pin)),
+    pendingPersonalJoin: () => checked(requester.pendingPersonalJoin()),
+    acceptAccountInvitation: (input) => checked(requester.acceptAccountInvitation(input)),
+    acceptAccountHistory: (input) => checked(requester.acceptAccountHistory!(input)),
+  };
+  const exposed = Object.assign(runtime, { accountRequester });
+  requesters.set(exposed, accountRequester);
+  return Object.freeze(exposed);
 });
