@@ -67,3 +67,7 @@ round and a separate least-privilege workflow creates or updates one candidate
 Issue. The finding stays informational until it reproduces across independent
 rounds and retained-path evidence identifies a specific lifecycle defect. Add
 only that narrow deterministic reproduction to the blocking regression lane.
+
+The xterm 5.5.0 DPR monitor is registered for terminal disposal by a version-scoped
+patch; the [investigation and before/after listener measurements](../.agents/notes/implemented/bug-fix/2026-11-09-xterm-dpr-monitor-disposal.md)
+attribute this listener leak without claiming to resolve every renderer memory trend.

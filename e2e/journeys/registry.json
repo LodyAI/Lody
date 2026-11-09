@@ -752,11 +752,12 @@
       "owner": "local-project-lifecycle",
       "feature": "src/features/project-lifecycle.feature",
       "fixture": "synthetic-git-project",
-      "fingerprint": "33767160306fc2657e3d630e9fbc6aed5e91eb6c20b79a2f74b8f0f2f1dba6e4",
+      "fingerprint": "3274bf3b1871b35d0ad20252b76a51fe9d73273493b820e0849b9c80b795e2f6",
       "ownerPaths": [
         "apps/cli/src/lib/message-handler.ts",
         "packages/components/src/components/loro-app-sidebar.tsx",
-        "packages/components/src/hooks/use-remove-local-project.ts"
+        "packages/components/src/hooks/use-remove-local-project.ts",
+        "packages/components/src/components/settings/project-settings.tsx"
       ],
       "actions": [
         {
@@ -766,23 +767,23 @@
           "id": "project.addThroughPicker"
         },
         {
-          "id": "project.selectFromSidebar"
+          "id": "project.selectFromPicker"
         },
         {
-          "id": "project.confirmRemoval"
+          "id": "project.reviewSafetyAndRemoveFromSettings"
         },
         {
           "id": "project.verifyOriginalDirectory"
         }
       ],
       "checkpoints": [
-        "local project appears in the bundled CLI catalog and sidebar",
-        "removal confirmation states that the original directory is preserved",
+        "local project appears in the bundled CLI catalog and picker while its empty sidebar group stays hidden",
+        "project settings states that the original directory is preserved before deletion",
         "removed project disappears while its original files remain"
       ],
       "cleanup": ["synthetic project fixture directory is deleted after verification"],
       "coverage": {
-        "renderer": "Project picker, sidebar selection, and removal confirmation",
+        "renderer": "Project picker selection, Settings project deletion, and original-directory safety disclosure",
         "electronIpc": "Real window and local project control bridge",
         "bundledCli": "Project catalog add, list, and delete",
         "durableState": "Workspace project catalog lifecycle",
@@ -920,7 +921,7 @@
       "owner": "local-project-lifecycle",
       "feature": "src/features/project-reopen.feature",
       "fixture": "two-synthetic-git-projects",
-      "fingerprint": "227a906389724f0c960d29420bf5a5455a748e40e6c061775b4ee500c04509b4",
+      "fingerprint": "866cf3e614287ecf101633da6937f74de9b74acfcf9dda27db7c0a0bdde6cc96",
       "ownerPaths": [
         "apps/cli/src/lib/message-handler.ts",
         "packages/components/src/components/chat/unified-project-selector.tsx",
@@ -934,7 +935,7 @@
           "id": "project.addBothThroughPicker"
         },
         {
-          "id": "project.switchAcrossSidebarAndPicker"
+          "id": "project.switchAcrossPickerReopens"
         },
         {
           "id": "project.attemptDuplicateAdd"
@@ -946,11 +947,11 @@
       "checkpoints": [
         "both projects remain selectable across picker reopen",
         "duplicate add preserves each original local project id",
-        "sidebar and picker expose exactly one row per project"
+        "picker exposes exactly one option per project while empty projects stay out of the sidebar"
       ],
       "cleanup": ["synthetic Git fixture directories are deleted after verification"],
       "coverage": {
-        "renderer": "Project picker and sidebar switching",
+        "renderer": "Project picker switching and empty sidebar group visibility",
         "electronIpc": "Real window and local project control bridge",
         "bundledCli": "Project catalog identity and duplicate prevention",
         "durableState": "Two unique local project records",
