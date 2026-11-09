@@ -411,15 +411,12 @@
     <!-- Schedules tab -->
     <string name="home_tab_schedules">Schedules</string>
     <string name="schedules_new">New schedule</string>
-    <string name="schedules_section_tasks">Scheduled tasks</string>
-    <string name="schedules_section_messages">Scheduled messages</string>
     <string name="schedules_loading">Loading schedules…</string>
     <string name="schedules_load_error">Schedules could not be loaded.</string>
     <string name="schedules_retry">Retry</string>
     <string name="schedules_empty">No schedules yet</string>
     <string name="schedules_empty_help">Choose a prompt and a time. Your machine will start a new chat for each run.</string>
     <string name="schedules_search_empty">No schedules match “%1$s”</string>
-    <string name="schedules_more">More actions</string>
     <string name="schedules_pause">Pause</string>
     <string name="schedules_resume">Resume</string>
     <string name="schedules_run">Run</string>

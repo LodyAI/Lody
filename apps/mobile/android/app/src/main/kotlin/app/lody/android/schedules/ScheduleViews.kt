@@ -3,7 +3,6 @@ package app.lody.android.schedules
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -11,9 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import app.lody.android.R
 import app.lody.android.designsystem.*
 import app.lody.android.home.AgentMark
@@ -54,36 +51,6 @@ internal fun ScheduleMark(item: ScheduleItem) {
                 .border(LodyStroke.focus, LodyTheme.colors.bgRaised, CircleShape),
             contentAlignment = Alignment.Center,
         ) { Glyph(stateIcon(item.state.group), LodyTheme.colors.textOnAccent, LodyIconSize.xs) }
-    }
-}
-
-/** Counts reflect the search, before applying the selected state filter. */
-@Composable
-internal fun ScheduleOverview(counts: Map<String, Int>, selected: String?, pick: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.sm), horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
-        for ((group, label) in listOf(
-            "running" to R.string.schedules_overview_active,
-            "attention" to R.string.schedules_overview_attention,
-            "paused" to R.string.schedules_overview_paused,
-            "ended" to R.string.schedules_overview_ended,
-        )) {
-            val count = counts[group] ?: 0
-            val on = selected == group
-            val shape = RoundedCornerShape(LodyRadius.lg)
-            Column(
-                Modifier.weight(1f).clip(shape).background(LodyTheme.colors.bgRaised)
-                    .border(LodyStroke.strong, if (on) tone(group) else Color.Transparent, shape)
-                    .toggleable(on, enabled = count > 0 || on, role = Role.Checkbox) { pick(group) }
-                    .padding(LodySpacing.sm),
-                verticalArrangement = Arrangement.spacedBy(LodySpacing.xs),
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Glyph(stateIcon(group), tone(group), LodyIconSize.sm)
-                    Text(count.toString(), style = LodyTheme.typography.headline, color = LodyTheme.colors.textPrimary)
-                }
-                Text(stringResource(label), style = LodyTheme.typography.caption, color = LodyTheme.colors.textSecondary)
-            }
-        }
     }
 }
 
