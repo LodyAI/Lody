@@ -11,6 +11,28 @@ class TurnLayoutTest {
     private fun thought(id: String) = TurnItem.Thought(id, "thinking $id")
     private fun tool(id: String, kind: String = "execute", path: String? = null) = TurnItem.Tool(id, kind, "title $id", "completed", path)
 
+    @Test fun finalActivityIgnoresHiddenThinkTailAndTaskBookkeeping() {
+        val task = TurnItem.Task("task", "Explore", "map the repo", "running")
+        val layout = TurnLayout.build("t", listOf(tool("1"), tool("2"), thought("3"), tool("4", "think"), task), finished = false, showThoughts = false)
+        assertEquals(listOf("t:activity:1"), layout.visible.map { it.key })
+        assertEquals(2, (layout.visible.single() as TurnLayout.Activity).summary.commands)
+        assertEquals("t:activity:1", layout.activeActivityKey(working = true))
+        assertEquals(null, layout.activeActivityKey(working = false))
+        assertEquals(listOf(task), layout.tasks)
+    }
+
+    @Test fun laterVisibleContentStopsHistoricalActivityShimmer() {
+        val tails = listOf(text("3"), TurnItem.ProposedPlan("3", "plan"), tool("3", "switch_mode"))
+        for (tail in tails) {
+            val layout = TurnLayout.build("t", listOf(tool("1"), tool("2"), tail, tool("4", "think")), finished = false, showThoughts = false)
+            assertEquals(null, layout.activeActivityKey(working = true))
+        }
+        val next = TurnLayout.build("t", listOf(tool("1"), text("2"), tool("3")), finished = false, showThoughts = false)
+        assertEquals("t:activity:3", next.activeActivityKey(working = true))
+        val dsh = TurnLayout.build("t", listOf(tool("1"), thought("2"), tool("3", "think")), finished = false, showThoughts = true)
+        assertEquals("t:activity:2", dsh.activeActivityKey(working = true))
+    }
+
     @Test fun consecutiveStepsFormOneSummarizedGroup() {
         val layout = TurnLayout.build("t", listOf(tool("1"), tool("2", "read", "a.kt"), tool("3", "read", "a.kt"), text("4")), finished = false, showThoughts = false)
         assertEquals(2, layout.blocks.size)

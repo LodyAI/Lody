@@ -1,16 +1,21 @@
 import LodyCore
 import LodyDesignSystem
+import SwiftUI
 import UIKit
 
-/// iPhone Schedules tab (web mobile Home's Schedules dock tab): the Chats header without a title
-/// (workspace capsule, search filtering by name), then Scheduled tasks and Scheduled messages
-/// (hidden when empty) with counts. Rows: name (dimmed once ended); frequency · Agent · computer;
-/// status in words, tinted only when it needs a look. Trailing swipe and the context menu run,
-/// pause / resume and delete (always confirmed); the row opens `ScheduleEditorController`.
-/// Reloads on appear, pull to refresh, after every command and on workspace change.
+/// iPhone Schedules tab: the Chats header without a title (workspace capsule, search filtering by
+/// name), an overview of four state-group count tiles (Active, Needs attention, Paused, Ended; a
+/// tile filters both sections to its group), then inset-grouped Scheduled tasks and Scheduled
+/// messages (hidden when empty) with counts. Rows, needing a look first: an Agent tile badged with
+/// the state glyph; name (dimmed once ended) with the state in words (tinted only for attention);
+/// frequency; Agent · computer · project; the reason when it needs a look. Trailing swipe and the
+/// context menu run, pause / resume, open the last chat and delete (always confirmed); the row
+/// opens `ScheduleEditorController`. Reloads on appear, pull to refresh, after every command and on
+/// workspace change.
 @MainActor
 final class SchedulesController: UIViewController, UICollectionViewDelegate {
-  private enum Section: String { case tasks, messages }
+  private enum Section: String { case overview, tasks, messages }
+  private static let overviewId = "overview:groups"
 
   private let source: SessionSource
   private let service: ScheduleService
@@ -23,6 +28,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var loading = false
   private var failure: String?
   private var query = ""
+  private var filter: RuntimeContract.ScheduleStateGroup?
+  private var counts: [RuntimeContract.ScheduleStateGroup: Int] = [:]
   private var scope = ""
   private var version = 0
   private var busy = Set<String>()
@@ -46,14 +53,24 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   override func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = LodyUIColor.bgBase
-    var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-    configuration.backgroundColor = .clear
-    configuration.headerMode = .supplementary
-    configuration.headerTopPadding = LodySpacing.sm
-    configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
-      self?.swipeActions(at: indexPath)
+    let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
+      let section = self?.data?.sectionIdentifier(for: index)
+      var configuration = UICollectionLayoutListConfiguration(appearance: section == .overview ? .plain : .insetGrouped)
+      configuration.backgroundColor = .clear
+      if section == .overview {
+        configuration.showsSeparators = false
+        configuration.headerMode = .none
+      } else {
+        configuration.headerMode = .supplementary
+        configuration.headerTopPadding = LodySpacing.xs
+        configuration.separatorConfiguration.bottomSeparatorInsets.leading = 68
+        configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+          self?.swipeActions(at: indexPath)
+        }
+      }
+      return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
     }
-    list = UICollectionView(frame: view.bounds, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration))
+    list = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.backgroundColor = .clear
     list.alwaysBounceVertical = true
@@ -67,18 +84,32 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       guard let self, let item = self.items[id] else { return }
       self.configure(cell, item)
     }
+    let overview = UICollectionView.CellRegistration<UICollectionViewListCell, String> { [weak self] cell, _, _ in
+      guard let self else { return }
+      cell.contentConfiguration = UIHostingConfiguration {
+        ScheduleOverviewView(counts: self.counts, selected: self.filter) { [weak self] group in self?.pick(group) }
+      }
+      .margins(.horizontal, LodyLayout.screenPaddingX)
+      .margins(.vertical, LodySpacing.sm)
+      var background = UIBackgroundConfiguration.clear()
+      background.backgroundColor = .clear
+      cell.backgroundConfiguration = background
+      cell.accessibilityIdentifier = "schedules-overview"
+    }
     let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionHeader) {
       [weak self] header, _, indexPath in
       guard let self, let section = self.data.sectionIdentifier(for: indexPath.section) else { return }
       var content = UIListContentConfiguration.header()
-      content.text = ScheduleFormat.text(section == .tasks ? "section.tasks" : "section.messages")
+      content.text = ScheduleFormat.text(section == .messages ? "section.messages" : "section.tasks")
       content.secondaryText = String(self.data.snapshot().numberOfItems(inSection: section))
       content.prefersSideBySideTextAndSecondaryText = true
       header.contentConfiguration = content
       header.accessibilityIdentifier = "schedules-section:" + section.rawValue
     }
     data = UICollectionViewDiffableDataSource(collectionView: list) { collection, indexPath, id in
-      collection.dequeueConfiguredReusableCell(using: cell, for: indexPath, item: id)
+      id == Self.overviewId
+        ? collection.dequeueConfiguredReusableCell(using: overview, for: indexPath, item: id)
+        : collection.dequeueConfiguredReusableCell(using: cell, for: indexPath, item: id)
     }
     data.supplementaryViewProvider = { collection, _, indexPath in
       collection.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
@@ -207,10 +238,23 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     guard isViewLoaded else { return }
     let all = result?.items ?? []
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    let shown = term.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(term) }
+    let searched = term.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(term) }
+    counts = Dictionary(grouping: searched, by: \.state.group).mapValues(\.count)
+    // A filter whose group emptied (after a command or a search) falls away.
+    if let filter, (counts[filter] ?? 0) == 0 { self.filter = nil }
+    let rank = Dictionary(uniqueKeysWithValues: ScheduleTone.order.enumerated().map { ($1, $0) })
+    // Needing a look first, then active, paused and ended; the runtime's order within each group.
+    let shown = searched.enumerated()
+      .filter { filter == nil || $0.element.state.group == filter }
+      .sorted { (rank[$0.element.state.group] ?? 0, $0.offset) < (rank[$1.element.state.group] ?? 0, $1.offset) }
+      .map(\.element)
     let previous = items
     items = Dictionary(all.map { ($0.scheduleId, $0) }, uniquingKeysWith: { first, _ in first })
     var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
+    if !searched.isEmpty {
+      snapshot.appendSections([.overview])
+      snapshot.appendItems([Self.overviewId], toSection: .overview)
+    }
     let tasks = shown.filter { !$0.scheduledMessage }.map(\.scheduleId)
     let messages = shown.filter(\.scheduledMessage).map(\.scheduleId)
     if !tasks.isEmpty {
@@ -226,15 +270,18 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       return reconfigure || before != items[id]
     }
     snapshot.reconfigureItems(changed)
+    if data.snapshot().indexOfItem(Self.overviewId) != nil, snapshot.indexOfItem(Self.overviewId) != nil {
+      snapshot.reconfigureItems([Self.overviewId])
+    }
     // Counts live in the headers; rebuild them with the sections.
-    snapshot.reloadSections(snapshot.sectionIdentifiers)
+    snapshot.reloadSections(snapshot.sectionIdentifiers.filter { $0 != .overview })
     data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled)
     setNeedsUpdateContentUnavailableConfiguration()
   }
 
   override func updateContentUnavailableConfiguration(using state: UIContentUnavailableConfigurationState) {
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    let empty = (data?.snapshot().numberOfItems ?? 0) == 0
+    let empty = (data?.snapshot().itemIdentifiers.filter { $0 != Self.overviewId }.count ?? 0) == 0
     var configuration: UIContentUnavailableConfiguration?
     if !source.state.workspaceId.isEmpty, empty {
       if result == nil, loading {
@@ -249,7 +296,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
         error.button = retry
         error.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.reload() }
         configuration = error
-      } else if !term.isEmpty {
+      } else if !term.isEmpty || filter != nil {
         var none = UIContentUnavailableConfiguration.search()
         none.text = ScheduleFormat.text("noMatches")
         configuration = none
@@ -274,37 +321,25 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private func configure(_ cell: UICollectionViewListCell, _ item: ScheduleItem) {
     let zone = ScheduleFormat.zone(item, result: result)
     let status = ScheduleFormat.state(item.state, zone: zone)
-    let attention = item.state.group == .attention
-    let ended = item.state.group == .ended
-    var content = UIListContentConfiguration.subtitleCell()
-    content.text = item.title
-    content.textProperties.font = .preferredFont(forTextStyle: .body)
-    content.textProperties.color = ended ? LodyUIColor.textTertiary : LodyUIColor.textPrimary
-    content.textProperties.numberOfLines = 1
-    content.textToSecondaryTextVerticalPadding = LodySpacing.xxs
-    let detail = NSMutableAttributedString(string: ScheduleFormat.detail(item, zone: zone), attributes: [
-      .font: UIFont.preferredFont(forTextStyle: .footnote), .foregroundColor: LodyUIColor.textSecondary,
-    ])
-    let words = [status.label, status.detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-    detail.append(NSAttributedString(string: "\n" + words, attributes: [
-      .font: UIFont.preferredFont(forTextStyle: .footnote),
-      .foregroundColor: attention ? LodyUIColor.warningDefault : LodyUIColor.textSecondary,
-    ]))
-    content.secondaryAttributedText = detail
-    content.secondaryTextProperties.numberOfLines = 3
-    content.directionalLayoutMargins = NSDirectionalEdgeInsets(
-      top: LodyLayout.listRowPaddingY, leading: LodyLayout.screenPaddingX, bottom: LodyLayout.listRowPaddingY, trailing: LodyLayout.screenPaddingX)
-    if attention {
-      content.image = UIImage(systemName: "exclamationmark.triangle.fill")
-      content.imageProperties.tintColor = LodyUIColor.warningDefault
-      content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote)
-    }
-    cell.contentConfiguration = content
-    cell.accessories = [.disclosureIndicator()]
+    cell.contentConfiguration = UIHostingConfiguration { ScheduleRowView(item: item, zone: zone) }
+      .margins(.horizontal, LodyLayout.listRowPaddingX)
+      .margins(.vertical, LodySpacing.md)
+    cell.accessories = []
     var background = UIBackgroundConfiguration.listCell()
-    background.backgroundColor = .clear
+    background.backgroundColor = .lodyOpaqueCard
     cell.backgroundConfiguration = background
+    cell.isAccessibilityElement = true
+    cell.accessibilityTraits = .button
+    cell.accessibilityLabel = item.title
+    cell.accessibilityValue = [ScheduleFormat.detail(item, zone: zone), status.label, status.detail ?? ""]
+      .filter { !$0.isEmpty }.joined(separator: ", ")
     cell.accessibilityIdentifier = "schedule:" + item.scheduleId
+  }
+
+  private func pick(_ group: RuntimeContract.ScheduleStateGroup) {
+    filter = filter == group ? nil : group
+    UISelectionFeedbackGenerator().selectionChanged()
+    render()
   }
 
   // MARK: Actions
@@ -324,6 +359,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service
     )
     editor.changed = { [weak self] in self?.reload() }
+    editor.openChat = { [weak self] item in self?.openChat(item) }
     LodyShell.shared.pushNative(editor, title: item?.title ?? ScheduleFormat.text("new"), from: self)
   }
 
@@ -414,6 +450,10 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   // MARK: Collection view
+
+  func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+    data.itemIdentifier(for: indexPath) != Self.overviewId
+  }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
     collectionView.deselectItem(at: indexPath, animated: true)

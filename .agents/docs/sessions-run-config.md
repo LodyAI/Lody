@@ -44,6 +44,10 @@ this page is the full text of the rules summarised there.
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
+  For an explicitly scoped machine, Agent options come from its known config
+  catalog even while presence is offline or pending. A blank child tab can change
+  its draft Agent without waiting for online status; empty scopes stay empty,
+  and existing-conversation locks still apply.
   All side submenus, including Role, anchor to their own trigger rows.
   Option-only panels use top-edge alignment; searchable Model panels lift their
   search header above the row so the option area starts beside it when space permits.

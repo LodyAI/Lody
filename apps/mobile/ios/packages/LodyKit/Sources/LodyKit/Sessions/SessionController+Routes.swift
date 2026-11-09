@@ -7,11 +7,19 @@ extension SessionController {
       let page = MessageForkController(sessionId: self.sessionId, entryId: id)
       LodyShell.shared.presentNative(page, title: String(localized: "message.fork.title", bundle: .lody), detents: [0.5, 1], grabber: true)
     }
-    chat.turnInfoEnabled = true
-    chat.imageSharingEnabled = true
-    chat.onShareImage = { [weak self] body in
-      self?.open("message-share", ["contentJSON": body["contentJSON"] as? String ?? ""], present: true)
+    chat.onOperationOpen = { [weak self] id in self?.openRelatedSession(id) }
+    chat.onOperationReply = { [weak self] card, title in
+      guard self != nil, let reply = card.reply, !reply.isEmpty else { return }
+      var body = reply
+      if card.replyTruncated == true { body += "\n\n" + String(localized: "session.operation.truncated", bundle: .lody) }
+      let page = ProcessController(entryId: "operation-reply", startItemId: "__subagent__")
+      let entries: [[String: Any]] = [["id": "operation-reply", "role": "assistant", "status": "completed", "finished": true,
+        "items": [["itemId": "reply", "type": "text", "text": body]]]]
+      guard let data = try? JSONSerialization.data(withJSONObject: entries) else { return }
+      page.update(String(decoding: data, as: UTF8.self), animate: false)
+      LodyShell.shared.presentNative(page, title: title, detents: [0.75, 1], grabber: true)
     }
+    chat.turnInfoEnabled = true
     chat.onActivityPress = { [weak self] body in
       guard let self, let entryId = body["entryId"] as? String, let itemId = body["itemId"] as? String else { return }
       if body["processStartId"] as? String == "__taskSheet__" { openTasks(entryId: entryId) }
@@ -28,6 +36,21 @@ extension SessionController {
       self.open("file-diff", ["sessionId": self.sessionId, "entryId": body["entryId"] as? String ?? "", "path": path],
                 title: (path as NSString).lastPathComponent)
     }
+  }
+
+  func openRelatedSession(_ id: String) {
+    guard let target = SessionRelations.target(id, sessions: source.state.catalog.sessions) else { return }
+    LodyShell.shared.openSessionFromExternal(target)
+  }
+
+  func presentRelations() {
+    let scope = source.state.key
+    let page = SessionRelationsController(source: source, current: sessionId)
+    page.onOpen = { [weak self] id in
+      guard let self, source.state.key == scope else { return }
+      openRelatedSession(id)
+    }
+    LodyShell.shared.presentNative(page, title: page.title ?? "", detents: [0.6, 1], grabber: true)
   }
 
   var localProjectId: String? {

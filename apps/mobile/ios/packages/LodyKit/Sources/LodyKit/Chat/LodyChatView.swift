@@ -76,8 +76,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onTurnInfoPress: ([String: Any]) -> Void = { _ in }
   weak var messageDetailsPage: MessageDetailsController?
   var turnInfoEnabled = false
-  var onShareImage: ([String: Any]) -> Void = { _ in }
-  var imageSharingEnabled = false
   var onFilePress: ([String: Any]) -> Void = { _ in }
   var onTurnChangesPress: ([String: Any]) -> Void = { _ in }
   var onReconnect: ([String: Any]) -> Void = { _ in }
@@ -130,7 +128,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   /// A row the reader just toggled: the next layout keeps it where it was on screen.
   var toggleAnchor: String?
   var expandedAttachments = Set<String>()
-  var collapsedMessageHeights: [String: CGFloat] = [:]
   var imageWorkspace = ""
   var imageSession = ""
   weak var imagePreview: ChatImagePreview?
@@ -148,6 +145,15 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     didSet { if members != oldValue { applyRows() } }
   }
   var transcript = ChatTranscript()
+  var operationCurrentID = ""
+  var operationTitles: [String: String] = [:]
+  var operationRoots: [String: String] = [:]
+  var operationOpened = Set<String>()
+  var operationAgentTypes: [String: String] = [:]
+  var operationCLITypes: [String: String] = [:]
+  var expandedOperations = Set<String>()
+  var onOperationOpen: (String) -> Void = { _ in }
+  var onOperationReply: (ChatOperationCard, String) -> Void = { _, _ in }
   /// Builtin DSH only (web `showThoughts`): its thoughts stay in the transcript.
   var showsThoughts = false
   var processEntryID = ""
@@ -172,6 +178,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var displayError: String? { didSet { composer.displayError = displayError } }
   var applying = false
   var needsApply = false
+  var needsTextRefresh = false
   var historyPreparation: DispatchWorkItem?
   var historyStartID: String?
   var historyTargetID: String?
@@ -341,6 +348,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     collection.register(ChatImageCell.self, forCellWithReuseIdentifier: "image")
     collection.register(ChatHistoryHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "history")
     collection.register(ChatErrorCell.self, forCellWithReuseIdentifier: "error")
+    collection.register(ChatOperationCell.self, forCellWithReuseIdentifier: "operation")
     collection.register(ChatSubagentCell.self, forCellWithReuseIdentifier: "subagent")
     collection.register(ChatCell.self, forCellWithReuseIdentifier: "message")
     collection.register(ChatMessageActionsCell.self, forCellWithReuseIdentifier: "meta")
@@ -353,6 +361,29 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row)
         cell.onDetail = { [weak self] in self?.onActivityPress(["entryId": row.entryID, "itemId": row.itemID]) }
         cell.onRetry = { [weak self] in self?.onErrorRetry(["entryId": row.entryID, "itemId": row.itemID, "id": UUID().uuidString.lowercased()]) }
+        return cell
+      }
+      if row.kind.hasPrefix("operation") {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "operation", for: index) as! ChatOperationCell
+        cell.configure(row)
+        cell.onOpen = { [weak self] in
+          if row.actionable, let card = row.operation { self?.onOperationOpen(card.sessionId) }
+        }
+        cell.onReply = { [weak self] in
+          if let card = row.operation { self?.onOperationReply(card, row.text) }
+        }
+        cell.onPeerOpen = { [weak self] peer in
+          if peer.actionable { self?.onOperationOpen(peer.card.sessionId) }
+        }
+        cell.onPeerReply = { [weak self] peer in self?.onOperationReply(peer.card, peer.text) }
+        cell.onToggle = { [weak self] in
+          guard let self, row.actionable else { return }
+          let group = row.entryID + ":" + row.itemID
+          if !expandedOperations.insert(group).inserted { expandedOperations.remove(group) }
+          toggleAnchor = row.id
+          followsBottom = false
+          applyRows()
+        }
         return cell
       }
       if row.subagent != nil {
@@ -376,7 +407,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
           LodyShell.shared.presentNative(page, title: String(localized: "message.details.title", bundle: .lody), detents: [0.75, 1], grabber: true)
           self.onTurnInfoPress(["entryId": row.entryID])
         }, for: .touchUpInside)
-        cell.actionButton.menu = messageMenu(entryID: row.entryID, source: cell.actionButton)
         return cell
       }
       if row.kind == "changesHeader" {
@@ -440,7 +470,6 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         self.collectionView(self.collection, didSelectItemAt: index)
       }
       cell.expanded = self.expandedMessages.contains(row.entryID)
-      cell.collapsedHeight = self.collapsedMessageHeights[row.entryID] ?? ChatMessageContent.maximumCollapsedHeight
       cell.configure(row, text: self.text(for: row))
       return cell
     }
@@ -699,14 +728,32 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     measurements.removeAll()
     empty.font = .dynamic(of: 16, compatibleWith: traitCollection)
     guard dataSource != nil else { return }
+    guard !applying else { needsTextRefresh = true; return }
     var snapshot = dataSource.snapshot()
     let ids = snapshot.itemIdentifiers
     if !ids.isEmpty {
+      applying = true
       snapshot.reconfigureItems(ids)
       dataSource.apply(snapshot, animatingDifferences: false)
+      applying = false
+      if needsApply || needsTextRefresh {
+        DispatchQueue.main.async { [weak self] in self?.drainChatUpdates() }
+      }
     }
     collection.collectionViewLayout.invalidateLayout()
     setNeedsLayout()
+  }
+
+  func drainChatUpdates() {
+    guard !applying else { return }
+    if needsTextRefresh {
+      needsTextRefresh = false
+      refreshTextRendering()
+    }
+    if needsApply {
+      needsApply = false
+      applyRows()
+    }
   }
 
   override func didMoveToWindow() {

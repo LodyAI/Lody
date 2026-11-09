@@ -42,6 +42,10 @@ object TurnLayout {
         /** Background tasks and sub-agents: one panel after the turn, outside its blocks (web). */
         val tasks: List<TurnItem.Task> = emptyList(),
     ) {
+        /** Only a final visible activity is live; tasks/footer bookkeeping is outside these blocks. */
+        fun activeActivityKey(working: Boolean): String? =
+            if (working) (visible.lastOrNull() as? Activity)?.key else null
+
         val visible: List<Block> get() = if (folded) blocks.filter { it.key !in work } else blocks
         val folding: List<Block> get() = if (folded) blocks.filter { it.key in work } else emptyList()
     }
