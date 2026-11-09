@@ -14,7 +14,7 @@ lists the device's identities with checkboxes for batch import and copies each s
 identity's name and description. Already-linked identities remain visible but cannot be linked again.
 
 Providers own memory data. Lody stores association metadata in the selected
-machine's Loro/Flock document at `['memory', providerId, memoryId]`, with machine
+machine's Flock document at `['memory', providerId, memoryId]`, with machine
 ID, name and optional description. Writes use the existing workspace writer;
 local durability completes the action and remote upload is best-effort. Stable
 keys make linking idempotent without overwriting customized metadata. Editing updates the provider profile via its adapter and synchronizes the returned
@@ -126,8 +126,7 @@ machine-scoped behavior under "Integrated providers".
 
 The following requirements are established:
 
-- Store Markdown files in Lody-hosted Drive9. The unreleased Loro implementation
-  requires no data migration or backward compatibility.
+- Store Markdown files in Lody-hosted Drive9.
 - Support private and shared memories with mutable visibility. Private content is
   accessible only to its owner through the daemon and is never mounted. Shared
   content is read-write for all workspace members.
@@ -176,9 +175,8 @@ The daemon owns the Drive9 SDK and serves reads, searches and updates through th
 existing memory tool/RPC boundaries. Before modifying a file, it obtains the
 current revision and submits a conditional write; conflicts return to the Agent
 for rereading and deliberate reconciliation. Reads/searches stay under the bound
-memory prefix. `MemoryBackend` separates this storage from the existing consumers;
-history-related surfaces must be adjusted rather than pretending Drive9 supports
-old recovery contracts. Compatible daemons advertise `builtinMemory: 2`.
+memory prefix. `MemoryBackend` separates storage access from its consumers and
+supports current-content provenance. Compatible daemons advertise `builtinMemory: 2`.
 
 A hosted service holds tenant owner keys, verifies identity and current access,
 and issues short-lived filesystem tokens restricted to the memory path. Public
@@ -269,8 +267,7 @@ credential, scoped SSE/journals are unavailable, and journal entries alone do no
 restore old file contents. These are findings, not completed Lody integration.
 
 The [Drive9 proposal](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.md)
-contains pinned evidence and verification limits. The current
-[package](../packages/memory/README.md) still implements the
-[rejected Loro design](../.agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory.md).
+contains pinned evidence and verification limits. Drive9 product integration
+remains unimplemented.
 This specification remains draft; confirmed requirements do not imply approval of
 the proposed implementation or unresolved release scope.

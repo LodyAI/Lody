@@ -12,7 +12,7 @@ Agent Config 一致的双栏编辑器，左侧选择 Provider，右侧提供创�
 创建会在 Provider 中登记身份并自动关联；导入页展示设备上的身份，通过 checkbox 多选
 批量导入，并复制每个所选身份的名称和描述。已经关联的身份仍显示，但不能重复选择。
 
-记忆内容由 Provider 管理。Lody 在所选机器的 Loro/Flock 文档中以
+记忆内容由 Provider 管理。Lody 在所选机器的 Flock 文档中以
 `['memory', providerId, memoryId]` 保存机器 ID、名称和可选描述。写入使用现有
 workspace writer，本地持久化完成即成功，远程上传为尽力而为。稳定键保证重复关联
 不会覆盖已自定义的元数据。编辑通过适配器修改 Provider 档案，并将返回的名称和描述同步到 Lody；删除仅移除关联，不删除 Provider
@@ -97,7 +97,7 @@ Lody Memory 属于个人或工作区，位于机器标签页之上。上面的�
 
 已确定的需求：
 
-- 在 Lody 托管的 Drive9 中保存 Markdown 文件。Loro 版未发布，不迁移数据、不做向后兼容。
+- 在 Lody 托管的 Drive9 中保存 Markdown 文件。
 - 支持私有与共享记忆，创建后可修改可见性。私有记忆仅所有者通过 daemon 访问，绝不挂载；共享记忆对所有工作区成员开放读写。
 - 接受仅在线使用、托管明文存储和记忆不做 E2EE。仅本地运行的 OSS 桌面版没有 Lody Memory。
 - 优先保障 Agent 工具可靠读写。并发冲突必须明确返回，不得盲目覆盖较新版本。
@@ -132,8 +132,8 @@ Lody 托管服务：身份、成员关系、可见性、限定范围 token 签�
 
 Daemon 持有 Drive9 SDK，经现有记忆工具和 RPC 边界提供读取、搜索与更新。
 修改前取得当前 revision，再提交条件写入；发生冲突时返回 Agent，由其重新读取并明确处理冲突。
-读取和搜索限制在所绑定记忆的路径前缀内。通过 `MemoryBackend` 隔离存储与现有调用方；
-涉及历史的接口须调整，不能假装 Drive9 支持旧的恢复合同。兼容 daemon 声明 `builtinMemory: 2`。
+读取和搜索限制在所绑定记忆的路径前缀内。通过 `MemoryBackend` 隔离存储访问与调用方，
+支持当前内容溯源。兼容 daemon 声明 `builtinMemory: 2`。
 
 托管服务保管 tenant owner key，校验身份与当前访问权，签发限制记忆路径的短期文件系统 token。
 公共代码经 `packages/platform` 端口和 `packages/cloud-api` DTO 访问服务。Owner key 不下发到设备。
@@ -196,5 +196,5 @@ P1 已验证限定范围文件访问、基本中英文搜索、条件写入冲�
 限定范围 SSE／journal 不可用；journal 本身不能恢复旧文件内容。这些是验证发现，不代表 Lody 已完成集成。
 
 [Drive9 提案](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.zh.md)记录固定版本证据与验证限制。
-当前[包实现](../packages/memory/README.md)仍为[已否决的 Loro 设计](../.agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory.zh.md)。
+Drive9 产品集成尚未实施。
 本 Spec 保持 draft；已确认需求不代表当前实现方案及未决发布范围均已获批准。

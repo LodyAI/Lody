@@ -7,9 +7,8 @@ Translation: current
 
 ## Abstract
 
-The unreleased Loro-based Lody Memory stores each memory in a CRDT document. People
-cannot open, index or search that document with ordinary tools, and personal E2EE
-blocks cross-device use. This proposal stores each memory as Markdown files in a
+Lody Memory needs readable files, cross-device Agent access and per-entry
+provenance. This proposal stores each memory as Markdown files in a
 hosted [drive9](https://drive9.ai/) file service. A memory is **private** (reached
 only through the daemon's SDK) or **shared** (workspace members have read-write
 access, with a proposed mount); visibility can change after creation. The trade-offs are that
@@ -25,10 +24,6 @@ pending approval; the [P1 gates](#p1-verification-before-implementation) remain 
 
 The owner decided the following:
 
-- **No backward compatibility.** The Loro memory never shipped, so no data is
-  migrated and the
-  [Loro design](../../rejected/architecture/2026-10-26-builtin-personal-memory.md)
-  is rejected.
 - **No E2EE for memory.** Plaintext memory on the hosted service is accepted for
   both private and shared memories. Access control replaces cryptographic
   confidentiality.
@@ -55,7 +50,7 @@ Each workspace has one drive9 tenant. Each memory is a directory:
 ```
 
 The path carries no visibility, so switching visibility moves no files. Paths are
-document identity, as in the Loro design: renaming moves a file, and a visible
+document identity: renaming moves a file, and a visible
 destination is never implicitly overwritten. Search uses drive9 `grep`/`find`
 under the memory prefix rather than an in-process scan.
 
@@ -90,9 +85,7 @@ under the memory prefix rather than an in-process scan.
 
 This is a proposed architecture and high-level contract, not existing exports or
 verified implementation. The [memory Spec](../../../../specs/agent-role-memory.md)
-owns requirements. The current `packages/memory` still implements the rejected
-Loro design; synchronous interfaces, local-durability receipts and historical
-operations cannot be carried unchanged into network storage.
+owns requirements.
 
 ```mermaid
 flowchart TD
@@ -357,8 +350,8 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 ## Provenance and concurrency
 
 - **SDK writes.** Use `expectedRevision` and return conflicts without blind retries.
-  The proposed entry-level sources and prepare/finalize workflow above replace a
-  file-level actor record. Actor labels may aid diagnostics but do not authenticate
+  Use the entry-level sources and prepare/finalize workflow above.
+  Actor labels may aid diagnostics but do not authenticate
   provenance. Filesystem tokens cannot append journals; the separate source service
   still requires crash recovery and idempotent reconciliation, not an atomicity claim.
 - **Mount writes.** External/unknown attribution is accepted when a source cannot be
@@ -385,28 +378,12 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
   limits still preclude claiming recovery from last-write-wins overwrites. Journal hashes verify
   consistency, not authenticity against an administrator able to rewrite the chain.
 
-## Alternatives considered
-
-- **Keep Loro with E2EE sync.** Rejected. Memories stay opaque to ordinary tools,
-  search stays in-process, and release waits on personal E2EE.
-- **Mount every memory, including private ones.** Rejected. A mount bypasses Role
-  binding and exposes a private memory to every local process.
-- **Encode visibility in the path** (`/private/…`, `/shared/…`). Rejected. Changing
-  visibility would become a move and break open handles and mounts.
-- **One tenant per user.** Rejected. Shared memories would need cross-tenant
-  sharing, which drive9 V1 supports only as a snapshot copy.
-
 ## Consequences
 
-- The Loro-specific code in `packages/memory` is replaced:
-  - document layout, history and JSONPath search;
-  - SQLite/IndexedDB persistence;
-  - the Renderer replica and its local data channel.
-- `packages/memory` places storage behind a `MemoryBackend` interface with a
-  drive9 implementation; history-related contracts must be adjusted to the
-  current-content provenance scope.
-- Daemons advertise `builtinMemory: 2`. Clients reject `1`, so no Loro daemon
-  serves the new contract.
+- Storage uses a `MemoryBackend` interface with a daemon-owned Drive9
+  implementation and per-entry current-content provenance.
+- Compatible daemons advertise `builtinMemory: 2`; clients require this capability
+  before using Lody Memory.
 - If mounts ship, Lody packages the drive9 CLI as a managed runtime and owns the
   mount lifecycle, including uninterrupted credential renewal.
 - Hosting cost and quota are per tenant, so per workspace. Limits must be set
