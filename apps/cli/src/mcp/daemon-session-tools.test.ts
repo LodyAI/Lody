@@ -663,6 +663,9 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   it('returns local create options without starting Streams sync', async () => {
     const projectId = 'synthetic-project' as LocalProjectId;
     const agentConfigId = await seedCreateOptionsCatalog(projectId);
+    const agentRoleId = 'synthetic-role' as AgentRoleId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), { agentRoleId });
+    await manager.repo.flush();
     stubCreateOptionsReaders();
     const { metaSync, flockSync } = rejectStreamsSync();
 
@@ -677,6 +680,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       agentConfigs: [{ id: agentConfigId }],
       localProjects: [{ id: projectId, name: 'Synthetic project' }],
       current: {
+        agentRoleId,
         workContext: {
           kind: 'local',
           projectId,
@@ -723,12 +727,14 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     expect(metaSync).not.toHaveBeenCalled();
     expect(flockSync).not.toHaveBeenCalled();
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
-    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+    const options = JSON.parse(result.content[0]?.text ?? '{}');
+    expect(options).toMatchObject({
       ok: true,
       agentConfigs: [],
       localProjects: [],
       current: { workContext: { kind: 'chat' } },
     });
+    expect(options.current).not.toHaveProperty('agentRoleId');
   });
 
   it('keeps an unauthorized machine denied without starting create-option sync', async () => {
