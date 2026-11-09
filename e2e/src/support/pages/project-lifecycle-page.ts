@@ -57,44 +57,42 @@ export class ProjectLifecyclePage {
       .not.toBeNull();
     this.registeredProject = await this.findRegisteredProject();
     if (!this.registeredProject) throw new Error('Added project is missing from the local catalog');
-    await expect(this.projectRow()).toBeVisible();
+    await expect(this.projectRow()).toHaveCount(0);
   }
 
-  async selectProjectFromSidebar(): Promise<void> {
-    const row = this.projectRow();
-    await row.click();
-    await expect(row).toHaveAttribute('aria-current', 'page');
+  async selectProjectFromPicker(): Promise<void> {
+    await this.page.getByRole('button', { name: this.fixture.projectName, exact: true }).click();
+    await this.page
+      .getByRole('menuitemradio', { name: this.fixture.projectName, exact: true })
+      .click();
     await expect(
       this.page.getByRole('button', { name: this.fixture.projectName, exact: true })
     ).toBeVisible();
   }
 
-  async removeProjectAfterConfirmingDirectorySafety(): Promise<void> {
-    const row = this.projectRow();
-    await row.hover();
-    await row.getByRole('button', { name: /^(More actions|更多操作)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^(Remove project|移除项目)$/u }).click();
-
-    const dialog = this.page
-      .locator('[data-lody-dialog-content][role="dialog"]')
-      .filter({ hasText: this.fixture.projectName });
+  async removeProjectAfterReviewingDirectorySafety(): Promise<void> {
+    await this.page.getByRole('button', { name: /^(Settings|设置)$/u, exact: true }).click();
+    const settings = this.page.getByRole('dialog').filter({
+      has: this.page.getByRole('navigation', { name: /^(Settings|设置)$/u }),
+    });
+    await settings.getByRole('button', { name: /^(Projects|项目)$/u, exact: true }).click();
+    await settings
+      .getByRole('button')
+      .filter({ has: this.page.getByText(this.fixture.projectName, { exact: true }) })
+      .click();
+    const dialog = this.page.getByRole('dialog', { name: this.fixture.projectName, exact: true });
     await expect(dialog).toBeVisible();
     await expect(
       dialog.getByText(
         /^(Lody never deletes the original project folder or its files\.|Lody 永远不会删除原项目目录或其中的文件。)$/u
       )
     ).toBeVisible();
-    await expect(
-      dialog.getByText(this.requireRegisteredProject().rootPath, { exact: true })
-    ).toBeVisible();
-    const cleanupWorktrees = dialog.getByRole('checkbox', {
-      name: /^(Also delete session worktrees created by Lody|同时删除 Lody 创建的会话 worktree)/u,
-    });
-    await expect(cleanupWorktrees).toHaveCount(1);
-    await expect(cleanupWorktrees).not.toBeChecked();
-
-    await dialog.getByRole('button', { name: /^(Remove project|移除项目)$/u }).click();
-    await expect(dialog).toBeHidden();
+    const originalPath = this.requireRegisteredProject().rootPath;
+    await expect(dialog.getByTitle(originalPath, { exact: true })).toHaveText(originalPath);
+    await dialog.getByRole('button', { name: /^(Delete project|删除项目)$/u }).click();
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+    await this.page.keyboard.press('Escape');
+    await expect(settings).toBeHidden();
   }
 
   async expectProjectAbsentFromCatalogAndSelector(): Promise<void> {
@@ -111,7 +109,7 @@ export class ProjectLifecyclePage {
       .getByPlaceholder(/^(Search projects|搜索项目)$/u)
       .fill(this.fixture.projectName);
     await expect(
-      this.page.getByRole('menuitem', { name: this.fixture.projectName, exact: true })
+      this.page.getByRole('menuitemradio', { name: this.fixture.projectName, exact: true })
     ).toHaveCount(0);
     await expect(this.page.getByText(/^(No projects found|没有找到项目)$/u)).toBeVisible();
   }
