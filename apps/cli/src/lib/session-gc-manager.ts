@@ -796,7 +796,19 @@ export class SessionGCManager {
       return false;
     }
 
-    return !this.deps.hasActiveTurn(sessionId) && this.deps.getNativeWork(sessionId) !== 'running';
+    if (this.deps.hasActiveTurn(sessionId)) return false;
+    const currentWork = this.deps.getNativeWork(sessionId);
+    if (currentWork === 'running') return false;
+    if (purpose === 'idle') {
+      const lastActivity = this.deps.getSessionLastActivity(sessionId);
+      if (lastActivity === undefined) return false;
+      const currentIdleMs = Date.now() - lastActivity;
+      if (currentIdleMs < this.config.idleTimeoutMs) return false;
+      if (currentWork === 'background' && currentIdleMs < this.config.nativeBackgroundMaxIdleMs) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
