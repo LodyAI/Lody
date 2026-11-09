@@ -524,4 +524,11 @@
         <item quantity="other">每 %d 分钟</item>
     </plurals>
     <string name="home_project_index">项目索引</string>
+    <string name="schedules_overview_active">已启用</string>
+    <string name="schedules_overview_attention">需关注</string>
+    <string name="schedules_overview_paused">已暂停</string>
+    <string name="schedules_overview_ended">已结束</string>
+    <string name="schedules_section_task">任务</string>
+    <string name="schedules_section_when">时间</string>
+    <string name="schedules_section_run_with">运行配置</string>
 </resources>

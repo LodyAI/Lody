@@ -1,5 +1,4 @@
-// A schedule's page (web `ScheduleDetailPage` on mobile): name, prompt, where it runs, where its
-// results go and when. New schedules and owners' own schedules are editable; others are read only.
+// A schedule's page: stored status and quick actions, then Task, When and Run with cards. New schedules and owners' own schedules are editable; others are read only.
 package app.lody.android.schedules
 
 import androidx.activity.compose.BackHandler
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -22,6 +20,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -36,7 +37,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
@@ -63,7 +63,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import app.lody.android.R
 import app.lody.android.create.CreationService
-import app.lody.android.designsystem.LodyButton
 import app.lody.android.designsystem.LodyIconButton
 import app.lody.android.designsystem.LodyIconSize
 import app.lody.android.designsystem.LodyIcons
@@ -85,8 +84,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 /**
- * [scheduleId] null starts a new schedule. [summary] is the list's row, shown while the detail
- * loads; the live row (enabled, status) always comes from the refreshed list.
+ * [scheduleId] null starts a new schedule. The live row (enabled, status) comes from the
+ * refreshed list; editing the draft never changes the stored status card.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,6 +96,7 @@ fun ScheduleEditorScreen(
     creation: CreationService?,
     onClose: () -> Unit,
     onNotice: (String) -> Unit,
+    onOpenSession: (String) -> Unit,
 ) {
     BackHandler(onBack = onClose)
     val colors = LodyTheme.colors
@@ -169,7 +169,7 @@ fun ScheduleEditorScreen(
     }
 
     Scaffold(
-        containerColor = colors.bgBase,
+        containerColor = colors.bgGrouped,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
@@ -184,14 +184,12 @@ fun ScheduleEditorScreen(
                     LodyIconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = back }) { Glyph(LodyIcons.Back, colors.iconPrimary) }
                 },
                 actions = {
-                    if (current != null && owner) HeaderActions(
-                        current, supported, busy,
-                        onToggle = { on -> write(if (on) "resume" else "pause") },
-                        onRun = { write("run") { onNotice(runStarted.format(current.title.ifBlank { untitled })) } },
-                        onDelete = { deleting = true },
-                    )
+                    if (editable) LodyTextButton(
+                        onClick = { draft?.let { write(if (creating) "create" else "edit", it) { onClose() } } },
+                        enabled = draft != null && supported && !busy,
+                    ) { Text(stringResource(if (busy) R.string.schedules_saving else R.string.schedules_save)) }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bgBase, scrolledContainerColor = colors.bgBase),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bgGrouped, scrolledContainerColor = colors.bgGrouped),
             )
         },
     ) { padding ->
@@ -206,7 +204,7 @@ fun ScheduleEditorScreen(
             else -> Column(
                 Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState())
                     .padding(horizontal = LodyLayout.screenPaddingX).navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(LodySpacing.md),
+                verticalArrangement = Arrangement.spacedBy(LodySpacing.xxl),
             ) {
                 val fields = editable && !busy
                 val edit = { next: ScheduleForm -> form = next; error = null }
@@ -215,20 +213,31 @@ fun ScheduleEditorScreen(
                     current != null && !current.isOwner -> Note(stringResource(R.string.schedules_read_only))
                     current?.destination == ScheduleForm.EXISTING_SESSION -> Note(stringResource(R.string.schedules_existing_read_only))
                 }
-                Field(stringResource(R.string.schedules_name), value.title, stringResource(R.string.schedules_name_placeholder), fields, singleLine = true) { edit(value.copy(title = it)) }
-                Field(stringResource(R.string.schedules_prompt), value.prompt, stringResource(R.string.schedules_prompt_placeholder), fields, singleLine = false) { edit(value.copy(prompt = it)) }
-                Target(value, current, options, snapshot, state.list?.ownedMachineIds, fields, edit)
-                Destination(value, fields, edit)
-                Timing(value, zone, zoneId, fields, edit)
+                if (current != null) ScheduleHero(current, busy,
+                    onCommand = { action -> write(action) { if (action == "run") onNotice(runStarted.format(current.title.ifBlank { untitled })) } },
+                    onOpenSession = onOpenSession,
+                )
+                EditorSection(stringResource(R.string.schedules_section_task)) {
+                    Group {
+                        Field(stringResource(R.string.schedules_name), value.title, stringResource(R.string.schedules_name_placeholder), fields, singleLine = true) { edit(value.copy(title = it)) }
+                        Divider()
+                        Field(stringResource(R.string.schedules_prompt), value.prompt, stringResource(R.string.schedules_prompt_placeholder), fields, singleLine = false) { edit(value.copy(prompt = it)) }
+                    }
+                }
+                if (current?.scheduledMessage != true) {
+                    EditorSection(stringResource(R.string.schedules_section_when)) { Timing(value, zone, zoneId, fields, edit) }
+                    EditorSection(stringResource(R.string.schedules_section_run_with)) {
+                        Target(value, current, options, snapshot, state.list?.ownedMachineIds, fields, edit)
+                        Destination(value, fields, edit)
+                    }
+                }
                 if (!supported) Note(stringResource(R.string.schedules_upgrade))
                 if (editable && options != null && options?.agents.isNullOrEmpty() && creating) Note(stringResource(R.string.schedules_no_agents))
                 error?.let { Text(it, style = LodyTheme.typography.footnote, color = colors.dangerDefault) }
-                if (editable) {
-                    LodyButton(
-                        onClick = { draft?.let { write(if (creating) "create" else "edit", it) { onClose() } } },
-                        enabled = draft != null && supported && !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(stringResource(if (busy) R.string.schedules_saving else R.string.schedules_save)) }
+                if (current != null && owner) Group {
+                    LodyTextButton(onClick = { deleting = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.schedules_delete), color = colors.dangerDefault)
+                    }
                 }
                 Spacer(Modifier.height(LodySpacing.xxl))
             }
@@ -240,32 +249,11 @@ fun ScheduleEditorScreen(
     }
 }
 
-/** Enabled switch for a timed schedule, Run for a manual one; ⋯ holds Run now and Delete. */
 @Composable
-private fun HeaderActions(item: ScheduleItem, supported: Boolean, busy: Boolean, onToggle: (Boolean) -> Unit, onRun: () -> Unit, onDelete: () -> Unit) {
-    val colors = LodyTheme.colors
-    val manual = item.rule.kind == "manual"
-    var menu by remember { mutableStateOf(false) }
-    if (!item.scheduledMessage) {
-        if (manual) {
-            LodyTextButton(onClick = onRun, enabled = supported && !busy) { Text(stringResource(R.string.schedules_run)) }
-        } else if (item.state.group != "ended") {
-            val label = stringResource(R.string.schedules_enabled)
-            Switch(
-                checked = item.enabled,
-                onCheckedChange = onToggle,
-                enabled = !busy && (item.enabled || supported),
-                modifier = Modifier.semantics { contentDescription = label },
-            )
-        }
-    }
-    Box {
-        val more = stringResource(R.string.schedules_more)
-        LodyIconButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = more }) { Glyph(LodyIcons.More, colors.iconPrimary) }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.bgOverlay) {
-            if (!item.scheduledMessage && !manual && supported) MenuItem(stringResource(R.string.schedules_run_now), LodyIcons.Play) { menu = false; onRun() }
-            MenuItem(stringResource(R.string.schedules_delete), LodyIcons.Trash, colors.dangerDefault) { menu = false; onDelete() }
-        }
+private fun EditorSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+        Text(title, style = LodyTheme.typography.footnote, color = LodyTheme.colors.textTertiary, modifier = Modifier.semantics { heading() })
+        content()
     }
 }
 
@@ -448,7 +436,7 @@ private fun Timing(form: ScheduleForm, zone: java.time.ZoneId, zoneId: String, e
 @Composable
 private fun Group(content: @Composable () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(LodyRadius.lg)).background(LodyTheme.colors.bgSunken).padding(horizontal = LodySpacing.md),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(LodyRadius.lg)).background(LodyTheme.colors.bgRaised).padding(horizontal = LodySpacing.md),
     ) { content() }
 }
 
@@ -462,7 +450,7 @@ private fun <T> Choice(label: String, value: String, options: List<Pair<T, Strin
     var open by remember { mutableStateOf(false) }
     val active = enabled && options.isNotEmpty()
     Row(
-        Modifier.fillMaxWidth().heightIn(min = LodySize.listRow)
+        Modifier.fillMaxWidth().heightIn(min = LodySize.controlLg)
             .let { if (active) it.clickable(role = Role.DropdownList) { open = true } else it },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
@@ -491,7 +479,7 @@ private fun <T> Choice(label: String, value: String, options: List<Pair<T, Strin
 private fun Action(label: String, value: String, enabled: Boolean, onClick: () -> Unit) {
     val colors = LodyTheme.colors
     Row(
-        Modifier.fillMaxWidth().heightIn(min = LodySize.listRow).let { if (enabled) it.clickable(role = Role.Button, onClick = onClick) else it },
+        Modifier.fillMaxWidth().heightIn(min = LodySize.controlLg).let { if (enabled) it.clickable(role = Role.Button, onClick = onClick) else it },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = LodyTheme.typography.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
@@ -499,25 +487,34 @@ private fun Action(label: String, value: String, enabled: Boolean, onClick: () -
     }
 }
 
-/** Multi-select toggles (weekdays, month days) as round chips. */
+/** Adaptive day grid with separate, non-overlapping 48 dp touch targets. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun <T> Toggles(label: String, options: List<Pair<T, String>>, selected: Set<T>, enabled: Boolean, onToggle: (T) -> Unit) {
     val colors = LodyTheme.colors
     Column(Modifier.fillMaxWidth().padding(vertical = LodySpacing.md), verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
         Text(label, style = LodyTheme.typography.body, color = colors.textPrimary)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs), verticalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
-            options.forEach { (option, name) ->
-                val on = option in selected
-                Box(
-                    Modifier.size(LodySize.controlSm).clip(CircleShape)
-                        .background(if (on) colors.accentSolid else colors.fillSecondary)
-                        .toggleable(value = on, enabled = enabled, role = Role.Checkbox) { onToggle(option) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(name, style = LodyTheme.typography.footnote, color = if (on) colors.textOnAccent else colors.textPrimary, maxLines = 1)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val columns = ((maxWidth + LodySpacing.xs) / (LodySize.controlLg + LodySpacing.xs)).toInt().coerceIn(1, 7)
+            Column(verticalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+                options.chunked(columns).forEach { week ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+                        week.forEach { (option, name) ->
+                            val on = option in selected
+                            Box(
+                                Modifier.weight(1f).heightIn(min = LodySize.controlLg)
+                                    .toggleable(value = on, enabled = enabled, role = Role.Checkbox) { onToggle(option) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(Modifier.size(LodySize.controlSm).clip(CircleShape).background(if (on) colors.accentSolid else colors.fillSecondary), contentAlignment = Alignment.Center) {
+                                    Text(name, style = LodyTheme.typography.footnote, color = if (on) colors.textOnAccent else colors.textPrimary, maxLines = 1)
+                                }
+                            }
+                        }
+                        repeat(columns - week.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
-            }
+                }
         }
     }
 }
@@ -527,7 +524,7 @@ private fun <T> Toggles(label: String, options: List<Pair<T, String>>, selected:
 private fun Field(label: String, value: String, placeholder: String, enabled: Boolean, singleLine: Boolean, onChange: (String) -> Unit) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
-    Column(verticalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
+    Column(Modifier.padding(vertical = LodySpacing.md), verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
         Text(label, style = type.footnote, color = colors.textTertiary)
         BasicTextField(
             value = value, onValueChange = onChange, enabled = enabled, singleLine = singleLine,
@@ -537,8 +534,7 @@ private fun Field(label: String, value: String, placeholder: String, enabled: Bo
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
             decorationBox = { inner ->
                 Box(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(LodyRadius.lg)).background(colors.bgSunken)
-                        .padding(horizontal = LodySpacing.md, vertical = LodySpacing.md),
+                    Modifier.fillMaxWidth(),
                 ) {
                     if (value.isEmpty()) Text(placeholder, style = type.body, color = colors.textPlaceholder)
                     inner()
@@ -552,7 +548,7 @@ private fun Field(label: String, value: String, placeholder: String, enabled: Bo
 private fun InlineField(label: String, value: String, enabled: Boolean, onChange: (String) -> Unit) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
-    Row(Modifier.fillMaxWidth().heightIn(min = LodySize.listRow), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = LodySize.controlLg), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
         Text(label, style = type.body, color = colors.textPrimary)
         BasicTextField(
             value = value, onValueChange = onChange, enabled = enabled, singleLine = true,

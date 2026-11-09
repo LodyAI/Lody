@@ -1,5 +1,32 @@
 # Session UI
 
+## Conversation lists
+
+- `ChatListView` renders Home conversation lists (outside search, one tertiary-ink `groupLabel` header pins under the bar and yields to the next; sections remain separated by spacing; a shared native blur backdrop extends from that label to the window top; a blurred base and stronger upper layer avoid mixing sharp text back through the gradient, with a dark-mode page tint and no separate navigation edge or second label; Android pins the same label over a page-colour fade) (and project pages) from `InboxSections` projections and emits the same `rowPress` / `rowAction` events as `LodyGroupedList`. Rows lead directly with the title at the page margin. The trailing first-line slot shows the status mark (alert, hand, `LodyWorkingGrid`, unread dot) instead of the age whenever one is present; otherwise it shows the compact age and an inline PR when there is no detail line. An optional second line shows repo / folder + project and branch, keeping the PR at its trailing edge. Open / draft PRs carry the web CI verdict badge. Opened chats nest one level under their opener (`SessionRows.treeRows`; a child hides a project that repeats its opener's). The opener row stays like any other (its own project / branch line); below it the family line `⌄ 7 opened chats` (`ChatRowContent.familyToggle`, count from `LodyListRow.childCount`, chevron/count target, chevron at the opener's title edge, turning right when folded; `homeFoldedOpeners`, default unfolded) heads the family. Children read one size down (callout, 40 pt rows), keep status at the trailing edge, and connect to a thin branching line under the chevron (a smooth curve into each title; only intermediate children continue the trunk) with titles stepped in `childLevel`. An opener shows its own conversation status, including internal Tabs. When its children are folded, their most urgent status appears at the trailing edge of the child-count row; expanded children show their own marks. The view menu is a multi-select (`ChatRowDetails`, UserDefaults, default project + PR) of what line 2 shows; none leaves rows one line.
+
+- Home builds complete parent families before time/status/project bucketing. Tabs and side chats (`parentSessionId`) belong to their conversation and never list, as web `sessionListAtom` (iOS `SessionRows.isTab`, Android `ChatListModel.isTab`; Projects counts skip them too). Families come only from openedBySessionId, then openedByRootSessionId, against visible sessions, an opener that is a Tab resolving to its conversation; do not require matching projects. Only the parent determines the bucket; every descendant stays adjacent under that root. Missing/archived parents and cyclic references must not hide rows. My tasks preserves complete matching families; idle limits count roots and never split a family. Cross-project children keep their project label, and child urgency remains separate from the parent status.
+
+- Chat list backdrop geometry must use visible supplementary view frames, never query layout attributes using visible header index paths during diffable updates. UIKit may retain old headers while the new snapshot has fewer sections. Refresh the backdrop from the collection view's finished layout pass, never `scrollViewDidScroll`, which sees pinned header frames from the previous offset and flickers the label and blur; refresh it again after snapshot completion and preserve native sticky-header hand-off. Regression: [home-grouping-crash.py](../../../../../apps/ios/verification/ui/home-grouping-crash.py) with the sticky-groups fixture.
+
+- The family line under an opener (`⌄ N opened chats`) toggles only from its chevron and count (with a little padding); the rest of that line opens the opener, so a tap meant for the parent never folds its family.
+
+- Team conversation lists show a compact circular owner avatar after the trailing time/status (including children), resolved from the workspace member cache with a name-initial fallback. My tasks omit this avatar; special status stays trailing. Titles and project details share the leading edge.
+
+- Every Home grouping (time/project/status) starts with a separate Pinned group when nonempty, within the current owner/project scope. Partition whole visible families before bucketing, so pinned families appear once and retain child folding. Project conversation lists use the same projection; archived chats and hidden Tabs never enter Pinned.
+
+- Conversation list attention includes its non-archived internal Tabs on the same
+  machine, with failed, waiting, running, then unread priority. Side-panel sessions
+  and independently opened chats do not contribute. Closed Tabs still contribute
+  active status but not unread. Preserve Tab inputs through owner filters, keep
+  Tabs hidden as list entries, and apply the summary to status grouping as well as
+  row markers without rewriting catalog session state.
+
+- Conversation-list Mark Read availability respects the local viewed-message watermark, just like unread emphasis. Swipe actions require an explicit button tap, never a full-swipe commit. When a chat row’s swipe commands change, replace its cell to discard the previous swipe presentation.
+
+- The Chats view-menu toggles are built when the menu opens (uncached) and close it on tap; a kept-open menu (`keepsMenuPresented`) never redrew the checkmark.
+
+## Project index
+
 - The compact Chats project index appears while scrolling over the full-width list, accepts direct tap/scrub only inside its visible opaque rail, and resolves jumps against committed rendered sections. Never attach an index long-press recognizer to the list. Linger dismissal must be invalidated by renewed scrolling/touch, snapshot replacement, backgrounding and detachment; search and other groupings retain their existing behavior.
 
 - Project grouping may hide the repeated place label, but must retain raw repository identity for the index. Keep index artwork at 24 pt in targets with at least 48 pt pitch; overflow uses bounded landmarks instead of squeezing targets. Keep landmarks fixed during a gesture and retain every destination through scrubbing and accessibility. Anchor scrubbing to the tapped landmark so small finger movement cannot jump to an unrelated proportional destination. The rail background must remain opaque in both light and dark appearances.
