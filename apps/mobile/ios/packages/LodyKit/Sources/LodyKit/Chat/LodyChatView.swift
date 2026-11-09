@@ -185,6 +185,10 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var historyLayoutAnchor: (String, CGFloat)?
   var scrollingToTop = false
   var hasEarlierHistory = false
+  var remoteHasEarlierHistory = false
+  var remoteHistoryLoading = false
+  var historyFirstID: String?
+  var onLoadEarlierHistory: () -> Void = {}
   var hasPagedHistory = false
   var preparingHistory = false
   var preparedHistory: [String: ChatRow] = [:]
@@ -477,7 +481,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     dataSource.supplementaryViewProvider = { [weak self] collection, kind, index in
       let header = collection.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "history", for: index) as! ChatHistoryHeader
       if let self {
-        header.configure(loading: self.preparingHistory, hasEarlier: self.hasEarlierHistory)
+        header.configure(loading: self.preparingHistory || self.remoteHistoryLoading, hasEarlier: self.hasEarlierHistory)
         header.load = { [weak self] in self?.loadEarlierHistory() }
       }
       return header

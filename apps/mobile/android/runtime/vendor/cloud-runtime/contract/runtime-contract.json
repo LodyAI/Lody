@@ -66,6 +66,11 @@
       "result": "DiffResult",
       "timeoutMs": 45000
     },
+    "forgetPendingInput": {
+      "params": "ForgetPendingInputParams",
+      "result": "Empty",
+      "timeoutMs": 30000
+    },
     "forkSession": {
       "params": "ForkSessionParams",
       "result": "ForkSessionResult",
@@ -89,6 +94,11 @@
     "listDir": {
       "params": "ListDirParams",
       "result": "DirectoryListing",
+      "timeoutMs": 45000
+    },
+    "loadOlderSession": {
+      "params": "OpenSessionParams",
+      "result": "Empty",
       "timeoutMs": 45000
     },
     "localProjects": {
@@ -171,6 +181,11 @@
       "params": "RestoreSessionsParams",
       "result": "Empty",
       "timeoutMs": 10000
+    },
+    "retryPendingInput": {
+      "params": "ForgetPendingInputParams",
+      "result": "Empty",
+      "timeoutMs": 30000
     },
     "scheduleCommand": {
       "params": "ScheduleCommandParams",
@@ -779,6 +794,7 @@
         "machineId": { "type": "string" },
         "agentConfigId": { "type": "string" },
         "userId": { "type": "string" },
+        "preferRoost": { "type": "boolean" },
         "title": { "type": "string" },
         "branch": { "type": "string" },
         "agentRoleId": { "type": "string", "minLength": 1 },
@@ -844,6 +860,7 @@
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "parentSessionId": { "type": "string", "minLength": 1 },
+        "preferRoost": { "type": "boolean" },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 }
       },
       "required": ["workspaceId", "sessionId", "parentSessionId", "title"]
@@ -1166,6 +1183,14 @@
         "path": { "type": "string" }
       },
       "required": ["sessionId", "path"]
+    },
+    "ForgetPendingInputParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "inputId": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "required": ["sessionId", "inputId"]
     },
     "ForkSessionParams": {
       "type": "object",

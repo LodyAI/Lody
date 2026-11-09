@@ -755,5 +755,16 @@
     "payload": {
       "workspaceId": "workspace-1"
     }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "forget-input-1",
+    "method": "forgetPendingInput",
+    "payload": {
+      "sessionId": "session-1",
+      "inputId": "input-1"
+    }
   }
 ]

@@ -274,6 +274,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   private func renderFeed(_ session: SessionItem) {
     let state = feed?.state ?? SessionFeedState()
+    let pagingChanged = chat.remoteHasEarlierHistory != state.historyHasMore || chat.remoteHistoryLoading != state.historyLoading
+    chat.remoteHasEarlierHistory = state.historyHasMore
+    chat.remoteHistoryLoading = state.historyLoading
+    chat.updateHistoryHeader()
     if session.isTabClosed {
       chat.setEntries("[]")
       renderedEntries = nil
@@ -286,7 +290,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     renderComposer(session, state)
     renderPermission()
     chat.setEmptyText(String(localized: String.LocalizationValue(state.status == "live" ? "chat.empty.prompt" : "chat.empty.loading"), bundle: .lody))
-    guard state.entriesJSON != renderedEntries else { return }
+    guard state.entriesJSON != renderedEntries else {
+      if pagingChanged { chat.scheduleUpdate() }
+      return
+    }
     renderedEntries = state.entriesJSON
     processPage?.update(state.entriesJSON, animate: state.isLiveUpdate)
     tasksPage?.update(state.entriesJSON)
@@ -380,7 +387,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       defer { self.creatingTab = false; self.render() }
       do {
         let result = try await runtime.workspaceCall(RuntimeContract.Calls.CreateTab.self) { workspace, _ in
-          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, title: String(localized: "session.tabs.defaultTitle", bundle: .lody))
+          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, preferRoost: LodyPreferences.roostHistoryEnabled, title: String(localized: "session.tabs.defaultTitle", bundle: .lody))
         }
         switch result {
         case .created:
@@ -536,6 +543,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   private func wireEvents() {
     chat.onReconnect = { [weak self] _ in self?.feed?.reconnect() }
+    chat.onLoadEarlierHistory = { [weak self] in
+      guard let self else { return }
+      DataRuntime.current?.loadOlderSession(self.sessionId)
+    }
     chat.onTitleMenu = { [weak self] body in self?.titleMenuSelected(body["id"] as? String ?? "") }
     chat.onTitlePress = { [weak self] _ in self?.presentMachine() }
   }

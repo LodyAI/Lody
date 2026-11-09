@@ -15,8 +15,9 @@ it hides after scrolling and interaction stop. An opaque capsule keeps the icons
 legible over conversation rows. Time/status grouping, search, and conversation
 pages keep their existing scrolling.
 
-iOS keeps application icon selection under Settings → Preferences. Android
-currently offers account information, workspace switching, and sign out.
+iOS keeps application icon selection under Settings → Preferences. Both clients
+can opt into Roost for new conversations through Developer Mode when the
+selected machine supports it. Existing conversations retain their history backend.
 Neither native client exposes MCP server management, Memory, or a separate
 Appearance page in settings.
 
@@ -86,6 +87,8 @@ After changes, regenerate/build iOS (`pnpm prebuild` from `ios/`) or rebuild
 Android with Gradle. Endpoint tuples select separate credential/cache namespaces;
 the production tuple retains existing production data. These values are built
 into the app, not read from the developer machine when the app launches.
+Roost history caches and pending inputs use the same endpoint namespace in
+addition to the account and workspace.
 Provider callback registrations must permit the selected auth origin; changing
 client endpoints does not configure OAuth providers or the backend itself.
 

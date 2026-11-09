@@ -103,6 +103,7 @@ val generateRuntimeAssets = tasks.register<RuntimeAssets>("generateRuntimeAssets
     inputs.dir(rootProject.file("runtime/vendor"))
     inputs.dir(rootProject.file("runtime/src"))
     inputs.file(rootProject.file("runtime/build.mjs"))
+    inputs.property("backendStorageSuffix", backends["STORAGE_SUFFIX"].toString())
     inputs.file(rootProject.file("../shared/markdown-repair/entry.js"))
     inputs.file(rootProject.file("runtime/snapshot.mjs"))
     inputs.file(rootProject.file("runtime/package-lock.json"))

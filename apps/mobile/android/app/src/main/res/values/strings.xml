@@ -25,6 +25,7 @@
     <string name="home_bucket_week">This week</string>
     <string name="home_bucket_month">This month</string>
     <string name="home_bucket_older">Older</string>
+    <string name="chat_load_earlier">Load earlier messages</string>
 
     <!-- Home: grouping -->
     <string name="home_tree_expand">Show opened chats</string>
@@ -133,6 +134,7 @@
     <string name="chat_delivery_sent">Sent</string>
     <string name="chat_delivery_queued">Queued</string>
     <string name="chat_delivery_seen">Read</string>
+    <string name="chat_delivery_unknown">Delivery unconfirmed</string>
     <string name="chat_delivery_failed">Not sent</string>
     <string name="chat_send_failed">The message was not sent</string>
     <string name="chat_member">Member</string>
@@ -560,4 +562,12 @@
     <string name="schedules_section_task">Task</string>
     <string name="schedules_section_when">When</string>
     <string name="schedules_section_run_with">Run with</string>
+    <string name="settings_developer">Developer</string>
+    <string name="settings_developer_mode">Developer mode</string>
+    <string name="settings_roost_history">Roost history (beta)</string>
+    <string name="settings_roost_history_hint">New conversations use Roost when the selected computer supports it. Existing conversations keep their current history.</string>
+    <string name="chat_forget_title">Remove unconfirmed message?</string>
+    <string name="chat_forget_message">This removes the local pending message. The computer may still receive or process it.</string>
+    <string name="chat_forget_action">Remove locally</string>
+    <string name="chat_forget_failed">Could not remove the pending message. Try again.</string>
 </resources>

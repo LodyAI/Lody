@@ -15,18 +15,23 @@ export async function machineRpc(
   getGrant: Grant,
   signal: AbortSignal,
 ): Promise<RpcReply> {
+  const grant = async () => {
+    signal.throwIfAborted();
+    const value = await getGrant();
+    signal.throwIfAborted();
+    return value;
+  };
   const replyTo = `${workspaceId}:rpc:res:${machineId}:${crypto.randomUUID()}`;
-  const response = await clientFor(replyTo, getGrant);
+  const response = await clientFor(replyTo, grant);
+  signal.throwIfAborted();
   const created = await response.create({
     contentType: 'application/json',
     ttlSeconds: 300,
   });
   if (!created.ok) throw new Error(created.result.code);
   signal.throwIfAborted();
-  const client = await clientFor(
-    `${workspaceId}:rpc:req:${machineId}`,
-    getGrant,
-  );
+  const client = await clientFor(`${workspaceId}:rpc:req:${machineId}`, grant);
+  signal.throwIfAborted();
   const id = crypto.randomUUID(),
     now = Date.now();
   const sent = await client.append({

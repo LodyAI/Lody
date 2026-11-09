@@ -9,6 +9,12 @@ test('contract bridge translates requests, events and native grant replies',asyn
  assert.equal(await bridge.ping(),true);
  await bridge.start('workspace','user',true);
  assert.deepEqual(sent.find(e=>e.method==='start').payload,{workspaceId:'workspace',userId:'user',active:true});
+ await bridge.loadOlderSession({sessionId:'s'});
+ assert.deepEqual(sent.find(e=>e.method==='loadOlderSession').payload,{sessionId:'s'});
+ await bridge.retryPendingInput({sessionId:'s',inputId:'i'});
+ assert.deepEqual(sent.find(e=>e.method==='retryPendingInput').payload,{sessionId:'s',inputId:'i'});
+ await bridge.forgetPendingInput({sessionId:'s',inputId:'i'});
+ assert.deepEqual(sent.find(e=>e.method==='forgetPendingInput').payload,{sessionId:'s',inputId:'i'});
  const event={v:1,gen:1,kind:'event',method:'session',payload:{sessionId:'s',session:'{}',synced:true}};
  globalThis.androidRuntimeMessage({type:'envelope',envelope:JSON.stringify(event)});
  assert.equal(events.at(-1).sessionId,'s');

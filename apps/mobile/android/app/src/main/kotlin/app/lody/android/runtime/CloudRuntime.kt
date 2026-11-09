@@ -26,6 +26,9 @@ sealed interface RuntimeCommand {
     data class CreateAndSend(val request: CreateRequest) : RuntimeCommand
     data class SendText(val request: SendTextRequest) : RuntimeCommand
     data class WatchSession(val id: String) : RuntimeCommand
+    data class LoadOlderSession(val id: String) : RuntimeCommand
+    data class RetryPendingInput(val sessionId: String, val inputId: String) : RuntimeCommand
+    data class ForgetPendingInput(val sessionId: String, val inputId: String) : RuntimeCommand
     data class CloseSession(val id: String) : RuntimeCommand
     /** One step's detail from the watched session (command, output, diff). Read only. */
     data class ItemDetail(val sessionId: String, val entryId: String, val itemId: String) : RuntimeCommand
@@ -151,6 +154,7 @@ data class SessionMessage(
     /** A user turn's attachments (images and files), by display name, in order. */
     val attachments: List<MessageAttachment> = emptyList(),
     val operations: List<OperationEvent> = emptyList(),
+    val inputRetryable: Boolean = false,
 )
 
 /**
@@ -251,7 +255,7 @@ data class RunChoice(
     val configOptionValues: Map<String, Any> = emptyMap(),
     val agentRoleId: String? = null, val roleKnown: Boolean = false,
 )
-data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null)
+data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null, val historyHasMore: Boolean = false, val historyLoading: Boolean = false)
 sealed interface RuntimeEvent {
     data class CreationChanged(val key: String = "") : RuntimeEvent
     data class SessionUpdated(val snapshot: SessionSnapshot) : RuntimeEvent

@@ -88,6 +88,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     BackHandler(onBack = onBack)
     var retry by remember(id, scope) { mutableIntStateOf(0) }
     var status by remember(id, scope) { mutableStateOf("syncing") }
+    var historyHasMore by remember(id, scope) { mutableStateOf(false) }
+    var historyLoading by remember(id, scope) { mutableStateOf(false) }
     var messages by remember(id, scope) { mutableStateOf(emptyList<SessionMessage>()) }
     // The latest user turn's run config, from the session snapshot (iOS `composerJSON`).
     var usage by remember(id, scope) { mutableStateOf<app.lody.android.runtime.SessionUsage?>(null) }
@@ -95,6 +97,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     var entries by remember(id, scope) { mutableStateOf(emptyList<ChatEntry>()) }
     // Turns this page sent that the transcript has not shown yet (optimistic, never resent).
     var outgoing by remember(id, scope) { mutableStateOf(emptyList<Outgoing>()) }
+    var forgetId by remember(id, scope) { mutableStateOf<String?>(null) }
+    var forgotten by remember(id, scope) { mutableStateOf(emptySet<String>()) }
     var prompt by rememberSaveable(id) { mutableStateOf("") }
     // The field with its caret and IME composition; the @ panel reads the trigger at the caret.
     var field by remember(id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(prompt, androidx.compose.ui.text.TextRange(prompt.length))) }
@@ -178,6 +182,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 messages = snapshot.messages
                 snapshotChoice = snapshot.composer
                 usage = snapshot.usage
+                historyHasMore = snapshot.historyHasMore
+                historyLoading = snapshot.historyLoading
                 status = snapshot.status
                 if (snapshot.messages.any { it.streaming }) delay(33)
             }
@@ -185,11 +191,12 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     }
     // A sent turn leaves the optimistic list once the transcript carries its id.
     val authorsByMessage = remember(messages) { messages.associate { it.id to it.userId } }
-    val firstTurn = creation?.let {
+    val firstTurn = creation?.takeUnless { it.request.turnId in forgotten }?.let {
         Outgoing(it.request.turnId, it.request.text, it.at, when (it.state) {
             "sending" -> Delivery.Sending
             "accepted" -> Delivery.Sent
             "queued" -> Delivery.Queued
+            "unknown" -> Delivery.Unknown
             else -> Delivery.Failed
         }, it.request.attachments.map { block -> MessageAttachment(block.optString("fileName", block.optString("name", "attachment")), block.optString("type") == "image") })
     }
@@ -197,8 +204,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         (listOfNotNull(firstTurn) + outgoing).filter { it.turnId !in authorsByMessage }
     }
     // Composer focus / IME animation must not rebuild every sender row in a long chat.
-    val all = remember(entries, authorsByMessage, members, context.me, memberLabel, pending, mentions.catalogs) {
-        entries.map { entry ->
+    val all = remember(entries, authorsByMessage, members, context.me, memberLabel, pending, mentions.catalogs, forgotten) {
+        entries.filterNot { it is ChatEntry.User && it.delivery == Delivery.Unknown && it.id in forgotten }.map { entry ->
             if (entry is ChatEntry.User) {
                 val userId = authorsByMessage[entry.id]
                 entry.copy(who = senderIdentity(userId, context.me, members[userId ?: context.me?.id], memberLabel, entry.who.time))
@@ -207,7 +214,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             ChatEntry.User(it.turnId, mentions.presentation(androidx.compose.ui.graphics.Color.Unspecified).filter(androidx.compose.ui.text.AnnotatedString(it.text)).text.text, senderIdentity(null, context.me, members[context.me?.id], memberLabel, turnTime(it.at)), it.delivery, it.attachments)
         }
     }
-    val creationUnconfirmed = creation != null && creation.state !in setOf("accepted", "queued") && creation.request.turnId !in authorsByMessage
+    val creationUnconfirmed = creation != null && creation.request.turnId !in forgotten && creation.state !in setOf("accepted", "queued") && creation.request.turnId !in authorsByMessage
     val creationNotice = if (creationUnconfirmed && creation?.state != "sending") {
         stringResource(if (creation?.state == "rejected") R.string.create_result_rejected else R.string.create_result_unknown)
     } else null
@@ -293,6 +300,26 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     val attachLimit = stringResource(R.string.chat_attach_limit)
     val uploadFailed = stringResource(R.string.chat_attach_failed)
     val snackbar = remember { SnackbarHostState() }
+    val forgetFailure = stringResource(R.string.chat_forget_failed)
+    val retryablePendingIds = remember(messages) { messages.filter { it.inputRetryable }.map { it.id }.toSet() }
+    forgetId?.let { inputId ->
+        AlertDialog(onDismissRequest = { forgetId = null },
+            title = { Text(stringResource(R.string.chat_forget_title)) },
+            text = { Text(stringResource(R.string.chat_forget_message)) },
+            confirmButton = { TextButton(onClick = {
+                forgetId = null
+                coroutines.launch {
+                    try {
+                        repository.forgetPendingInput(scope, id, inputId)
+                        outgoing = outgoing.filterNot { it.turnId == inputId }
+                        forgotten = forgotten + inputId
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { snackbar.showSnackbar(forgetFailure) }
+                }
+            }) { Text(stringResource(R.string.chat_forget_action)) } },
+            dismissButton = { TextButton(onClick = { forgetId = null }) { Text(stringResource(R.string.sign_in_cancel)) } })
+    }
+
     var creatingTab by remember(id, scope) { mutableStateOf(false) }
     var attemptedTab by rememberSaveable(id, scope.workspaceId) { mutableStateOf<String?>(null) }
     // A new Tab starts as "New chat"; "New Tab conversation" is only the action's label.
@@ -377,6 +404,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
             val delivery = when (result) {
                 "queued" -> Delivery.Queued
                 "not_sent" -> Delivery.Failed
+                "unknown" -> Delivery.Unknown
+                "uploaded" -> Delivery.Sending
                 else -> Delivery.Sent
             }
             outgoing = outgoing.map { if (it.turnId == turnId) it.copy(delivery = delivery) else it }
@@ -512,6 +541,17 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     // The transcript scrolls under the floating header.
                     ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
+                        historyHasMore = historyHasMore, historyLoading = historyLoading,
+                        loadEarlier = { repository.loadOlder(scope, id) },
+                        onForgetPending = { forgetId = it },
+                        retryablePendingIds = retryablePendingIds,
+                        onRetryPending = { inputId ->
+                            coroutines.launch {
+                                try { repository.retryPendingInput(scope, id, inputId) }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { snackbar.showSnackbar(failedText) }
+                            }
+                        },
                         actions = messageActions,
                         relatedSessions = context.relatedSessions,
                         navigateSession = { target -> if (SessionRelations.target(target, context.relatedSessions) != null) onSelectTab(target) },
@@ -794,6 +834,8 @@ internal fun delivery(status: String) = when (status) {
     "seen", "processing", "handled", "failed", "canceled", "completed", "done" -> Delivery.Seen
     "queued" -> Delivery.Queued
     "not_sent" -> Delivery.Failed
+    "delivery_unknown" -> Delivery.Unknown
+    "sending" -> Delivery.Sending
     else -> Delivery.Sent
 }
 

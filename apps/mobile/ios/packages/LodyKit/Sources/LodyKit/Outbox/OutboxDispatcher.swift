@@ -213,6 +213,7 @@ final class OutboxDispatcher {
 
   func quotaError(_ reason: String?, fallback: String) -> String {
     let keys = [
+      "input_storage_unavailable": "send.error.draftSaveFailed",
       "shortcut_unavailable": "send.error.shortcut",
       "mcp_catalog_unavailable": "send.error.mcpCatalog",
       "mcp_connection_missing": "send.error.mcpConnection",

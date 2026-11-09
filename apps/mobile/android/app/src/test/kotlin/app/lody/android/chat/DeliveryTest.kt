@@ -11,9 +11,11 @@ class DeliveryTest {
     }
 
     @Test fun unconfirmedTurnsDoNotClaimDelivery() {
-        for (status in listOf("", "prepared", "pending", "pending_apply", "delivery_unknown")) {
+        for (status in listOf("", "prepared", "pending", "pending_apply")) {
             assertEquals(status, Delivery.Sent, delivery(status))
         }
+        assertEquals(Delivery.Unknown, delivery("delivery_unknown"))
+        assertEquals(Delivery.Sending, delivery("sending"))
         assertEquals(Delivery.Queued, delivery("queued"))
         assertEquals(Delivery.Failed, delivery("not_sent"))
     }

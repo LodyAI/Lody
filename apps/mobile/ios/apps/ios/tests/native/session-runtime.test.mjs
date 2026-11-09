@@ -2,7 +2,1634 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
+import { Flock } from '@loro-dev/flock-wasm/base64';
 import { openTestSession, loadRuntime, frame } from '../helpers.mjs';
+
+test('an existing legacy Loro history opens while session metadata is unavailable', async () => {
+  const resolveTarget = () => undefined;
+  resolveTarget.isCurrent = () => true;
+  resolveTarget.legacyFallbackAllowed = () => true;
+  const fixture = await openTestSession({
+    resolveTarget,
+    seedServer(doc) {
+      doc.getList('history').push({
+        id: 'legacy',
+        role: 'user',
+        timestamp: '2026-01-01',
+        items: [{ type: 'text', text: 'Earlier' }],
+      });
+      doc.commit();
+    },
+  });
+  try {
+    assert.equal(fixture.events.at(-1).entries[0].id, 'legacy');
+    assert.equal(
+      fixture.runtime.canUseLegacyHistory(fixture.server, false),
+      false,
+    );
+    fixture.server.getMap('roostHistoryCursor').set('cursor', 'retired');
+    fixture.server.commit();
+    assert.equal(
+      fixture.runtime.canUseLegacyHistory(fixture.server, true),
+      false,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test('control stream catchup happens before choosing a legacy history backend', async () => {
+  let caughtUp = false;
+  const reads = [];
+  const resolveTarget = () =>
+    caughtUp
+      ? {
+          backend: 'roost',
+          machineId: 'm1',
+          incremental: true,
+          watch: true,
+          acceptsInput: true,
+          dispatchesInput: true,
+        }
+      : undefined;
+  resolveTarget.isCurrent = () => true;
+  resolveTarget.legacyFallbackAllowed = () => true;
+  const fixture = await openTestSession({
+    resolveTarget,
+    seedServer(doc) {
+      doc.getList('history').push({
+        id: 'stale',
+        role: 'user',
+        timestamp: '2026-01-01',
+        items: [],
+      });
+      doc.commit();
+    },
+    catchupServer(doc) {
+      doc.getMap('roostHistoryCursor').set('cursor', 'retired');
+      doc.commit();
+      caughtUp = true;
+    },
+    async onRpc(request, runtime, signal) {
+      if (request.method === 'session/history-watch')
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      const params = await runtime.openPayload(request.params);
+      reads.push(params.query.kind);
+      return {
+        result: await runtime.sealPayload('s1', {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 0,
+          result: {
+            checkpoint: 'c1',
+            startPosition: 0,
+            totalCount: 0,
+            rows: [],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+          pageTurns: [],
+        }),
+      };
+    },
+  });
+  try {
+    assert.deepEqual(fixture.events.at(-1).entries, []);
+    assert.equal(reads.includes('readLatestPage'), true);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Roost sessions read, observe and send through the owning machine', async () => {
+  const turn = (text) => ({
+    id: 'old',
+    role: 'assistant',
+    timestamp: '2026-01-01',
+    finished: true,
+    items: [{ type: 'text', text }],
+  });
+  const requests = [];
+  let wakeWatch;
+  let receiptAtAcceptance;
+  let accepted;
+  const acceptance = new Promise((resolve) => {
+    accepted = resolve;
+  });
+  let changed;
+  const change = new Promise((resolve) => {
+    changed = resolve;
+  });
+  const fixture = await openTestSession({
+    onEvent(event) {
+      if (
+        event.session &&
+        JSON.parse(event.session).entries?.[0]?.items?.[0]?.text === 'after'
+      )
+        changed();
+    },
+    target: {
+      backend: 'roost',
+      machineId: 'm1',
+      acceptsInput: true,
+      dispatchesInput: true,
+    },
+    async onRpc(request, runtime, signal) {
+      const params = await runtime.openPayload(request.params);
+      requests.push({ method: request.method, params });
+      let response;
+      if (request.method === 'session/history-watch') {
+        response = await new Promise((resolve, reject) => {
+          wakeWatch = resolve;
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          );
+        });
+      } else if (request.method === 'session/history-read') {
+        response = {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 1,
+          result: {
+            checkpoint: 'c1',
+            startPosition: 0,
+            totalCount: 1,
+            rows: [{ position: 0, state: 'ready', turnId: 'old' }],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+          pageTurns: [turn('before')],
+        };
+      } else {
+        receiptAtAcceptance =
+          fixture.server.toJSON().humanInputReceipts?.[params.payload.entry.id];
+        accepted();
+        response = {
+          type: 'session/history-write_response',
+          sessionId: 's1',
+          success: true,
+          operation: params.operation,
+          result: {
+            status: 'accepted',
+            turnId: params.payload.entry.id,
+            active: true,
+          },
+        };
+      }
+      return { result: await runtime.sealPayload('s1', response) };
+    },
+  });
+  try {
+    assert.equal(fixture.events.at(-1).entries[0].items[0].text, 'before');
+    const result = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Continue',
+    });
+    assert.equal(result.state, 'uploaded');
+    await acceptance;
+    const write = requests.find(
+      (item) => item.method === 'session/history-write',
+    );
+    assert.equal(write.params.operation, 'accept_input_and_dispatch');
+    assert.deepEqual(receiptAtAcceptance, { userId: 'u1' });
+    assert.deepEqual(write.params.payload.entry.author, {
+      v: 1,
+      kind: 'human',
+      userId: 'u1',
+    });
+    const invalid = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: '',
+      attachmentBlocks: [
+        {
+          type: 'image',
+          imageId: 'image',
+          mimeType: 'image/invalid',
+          sizeBytes: 1,
+        },
+      ],
+    });
+    assert.equal(invalid.state, 'not_sent');
+    assert.equal(
+      requests.filter((item) => item.method === 'session/history-write').length,
+      1,
+    );
+    assert.equal(
+      Object.keys(fixture.server.toJSON().humanInputReceipts).length,
+      1,
+    );
+    assert.deepEqual(fixture.server.toJSON().history ?? [], []);
+    wakeWatch({
+      type: 'session/history-read_response',
+      sessionId: 's1',
+      success: true,
+      historyRevision: 2,
+      historyCount: 1,
+      result: {
+        state: 'ready',
+        checkpoint: 'c2',
+        ids: ['old'],
+        bodies: { changed: [turn('after')], suffix: [] },
+      },
+    });
+    await change;
+    assert.equal(fixture.events.at(-1).entries[0].items[0].text, 'after');
+  } finally {
+    fixture.close();
+  }
+});
+
+for (const [indexedDBAvailable, incremental] of [
+  [true, false],
+  [false, false],
+  [false, true],
+])
+  test(
+    `Roost refreshes after a control update with cache ${indexedDBAvailable} and incremental ${incremental}`,
+    { timeout: 5000 },
+    async () => {
+      let revision = 1;
+      let finish;
+      const updated = new Promise((resolve) => {
+        finish = resolve;
+      });
+      const requests = [];
+      const fixture = await openTestSession({
+        indexedDBAvailable,
+        target: {
+          backend: 'roost',
+          machineId: 'm1',
+          incremental,
+          watch: false,
+          acceptsInput: true,
+          dispatchesInput: true,
+        },
+        onEvent(event) {
+          if (!event.session) return;
+          const value = JSON.parse(event.session);
+          if (value.entries?.[0]?.items?.[0]?.text === 'after') finish();
+        },
+        async onRpc(request, runtime) {
+          const params = await runtime.openPayload(request.params);
+          requests.push(params.query.kind);
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: 'session/history-read_response',
+              sessionId: 's1',
+              success: true,
+              historyRevision: revision,
+              historyCount: 1,
+              result: {
+                checkpoint: `c${revision}`,
+                startPosition: 0,
+                totalCount: 1,
+                rows: [{ position: 0, state: 'ready', turnId: 'turn' }],
+                hasMoreOlder: false,
+                cursor: null,
+              },
+              pageTurns: [
+                {
+                  id: 'turn',
+                  role: 'assistant',
+                  timestamp: '2026-01-01',
+                  finished: true,
+                  items: [
+                    { type: 'text', text: revision === 1 ? 'before' : 'after' },
+                  ],
+                },
+              ],
+            }),
+          };
+        },
+      });
+      try {
+        revision = 2;
+        fixture.server.getMap('session').set('historyHint', 2);
+        fixture.server.commit();
+        await fixture.pushUpdate();
+        await updated;
+        assert.equal(requests.includes('watchChanges'), false);
+      } finally {
+        fixture.close();
+      }
+    },
+  );
+
+test('Roost retries the failed receipt upload before handing the same input to its owner', async () => {
+  const writes = [];
+  let failed, handedOff, canRetry;
+  const retryable = new Promise((resolve) => {
+    canRetry = resolve;
+  });
+  let rejectReceipt = true;
+  const handoff = new Promise((resolve) => {
+    handedOff = resolve;
+  });
+  const failure = new Promise((resolve) => {
+    failed = resolve;
+  });
+  const fixture = await openTestSession({
+    target: {
+      backend: 'roost',
+      machineId: 'm1',
+      acceptsInput: true,
+      dispatchesInput: true,
+    },
+    onEvent(event) {
+      if (!event.session) return;
+      if (
+        JSON.parse(event.session).pendingRoostInputs?.some(
+          (input) => input.inputRetryable,
+        )
+      )
+        canRetry();
+    },
+    failAppend: (url) => {
+      if (rejectReceipt && url.includes(':s:s1')) {
+        failed();
+        return true;
+      }
+      return false;
+    },
+    async onRpc(request, runtime, signal) {
+      if (request.method === 'session/history-watch')
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      const params = await runtime.openPayload(request.params);
+      if (request.method === 'session/history-write') {
+        writes.push({
+          id: params.payload.entry.id,
+          receipt:
+            fixture.server.toJSON().humanInputReceipts?.[
+              params.payload.entry.id
+            ],
+        });
+        handedOff();
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-write_response',
+            sessionId: 's1',
+            success: true,
+            operation: params.operation,
+            result: {
+              status: 'accepted',
+              turnId: params.payload.entry.id,
+              active: true,
+            },
+          }),
+        };
+      }
+      return {
+        result: await runtime.sealPayload('s1', {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 0,
+          result:
+            params.query.kind === 'inputAcceptance'
+              ? { status: 'unobserved' }
+              : {
+                  checkpoint: 'c1',
+                  startPosition: 0,
+                  totalCount: 0,
+                  rows: [],
+                  hasMoreOlder: false,
+                  cursor: null,
+                },
+          pageTurns: [],
+        }),
+      };
+    },
+  });
+  try {
+    const result = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Continue',
+    });
+    assert.equal(result.state, 'uploaded');
+    await failure;
+    assert.equal(writes.length, 0);
+    assert.deepEqual(fixture.server.toJSON().humanInputReceipts ?? {}, {});
+    rejectReceipt = false;
+    await retryable;
+    await assert.rejects(
+      fixture.runtime.actOnPendingInput('other-session', result.id, 'retry'),
+      /session_not_ready/,
+    );
+    await fixture.runtime.actOnPendingInput('s1', result.id, 'retry');
+    await handoff;
+    assert.deepEqual(writes, [{ id: result.id, receipt: { userId: 'u1' } }]);
+  } finally {
+    fixture.close();
+  }
+});
+
+test(
+  'Roost can cancel a saved input while its reopened session is still syncing',
+  { timeout: 5000 },
+  async () => {
+    let handoffStarted, bootstrapStarted;
+    const handoff = new Promise((resolve) => {
+      handoffStarted = resolve;
+    });
+    const bootstrap = new Promise((resolve) => {
+      bootstrapStarted = resolve;
+    });
+    const fixture = await openTestSession({
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        acceptsInput: true,
+        dispatchesInput: true,
+      },
+      async onRpc(request, runtime, signal) {
+        if (request.method === 'session/history-watch')
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            }),
+          );
+        if (request.method === 'session/history-write') {
+          handoffStarted();
+          throw new Error('lost_ack');
+        }
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: 1,
+            historyCount: 0,
+            result: {
+              checkpoint: 'c1',
+              startPosition: 0,
+              totalCount: 0,
+              rows: [],
+              hasMoreOlder: false,
+              cursor: null,
+            },
+            pageTurns: [],
+          }),
+        };
+      },
+    });
+    try {
+      const send = await fixture.runtime.sendTurn({
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        text: 'Cancel this input',
+      });
+      await handoff;
+      fixture.runtime.stopSessions();
+      globalThis.__sessionClient.prototype.bootstrap = async ({ signal }) => {
+        bootstrapStarted();
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          }),
+        );
+      };
+      fixture.runtime.resumeAcceptedInputs();
+      await bootstrap;
+      await fixture.runtime.actOnPendingInput('s1', send.id, 'forget');
+      await assert.rejects(
+        fixture.runtime.actOnPendingInput('s1', send.id, 'forget'),
+        /session_not_ready/,
+      );
+      assert.deepEqual(fixture.runtime.reservedSessionIds(), []);
+    } finally {
+      fixture.close();
+    }
+  },
+);
+
+for (const steerResult of [
+  { applied: true },
+  { applied: false, disposition: 'no-active-turn' },
+  { inactive: true },
+]) {
+  test(
+    `Roost guide follows the owner ${Object.keys(steerResult).join('-')} path`,
+    { timeout: 5000 },
+    async () => {
+      const calls = [];
+      let acceptedEntry;
+      let finish;
+      const completed = new Promise((resolve) => {
+        finish = resolve;
+      });
+      const fixture = await openTestSession({
+        target: {
+          backend: 'roost',
+          machineId: 'm1',
+          acceptsInput: true,
+          dispatchesInput: false,
+        },
+        markDispatch: async (...args) => {
+          calls.push({ kind: 'activate', args });
+          finish();
+        },
+        async onRpc(request, runtime, signal) {
+          if (request.method === 'session/history-watch')
+            return new Promise((_resolve, reject) =>
+              signal.addEventListener(
+                'abort',
+                () => reject(new Error('cancelled')),
+                { once: true },
+              ),
+            );
+          if (request.method === 'session/steer') {
+            calls.push({ kind: 'steer', params: request.params });
+            return { result: steerResult };
+          }
+          const params = await runtime.openPayload(request.params);
+          if (request.method === 'session/history-read')
+            return {
+              result: await runtime.sealPayload('s1', {
+                type: 'session/history-read_response',
+                sessionId: 's1',
+                success: true,
+                historyRevision: 1,
+                historyCount: 1,
+                result:
+                  params.query.kind === 'readTurn' &&
+                  params.query.turnId !== 'running'
+                    ? { state: 'ready', turn: acceptedEntry }
+                    : {
+                        checkpoint: 'c1',
+                        startPosition: 0,
+                        totalCount: 1,
+                        rows: [
+                          { position: 0, state: 'ready', turnId: 'running' },
+                        ],
+                        hasMoreOlder: false,
+                        cursor: null,
+                      },
+                pageTurns: [
+                  {
+                    id: 'running',
+                    role: 'assistant',
+                    timestamp: '2026-01-01',
+                    finished: false,
+                    items: [],
+                  },
+                ],
+              }),
+            };
+          if (params.operation === 'accept_input')
+            acceptedEntry = params.payload.entry;
+          calls.push({
+            kind: params.operation,
+            payload: params.payload,
+            receipt:
+              fixture.server.toJSON().humanInputReceipts?.[
+                params.payload.entry?.id
+              ],
+          });
+          if (params.operation === 'apply_action' && steerResult.applied)
+            finish();
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: 'session/history-write_response',
+              sessionId: 's1',
+              success: true,
+              operation: params.operation,
+              result:
+                params.operation === 'accept_input'
+                  ? {
+                      status: 'accepted',
+                      turnId: params.payload.entry.id,
+                      active: !steerResult.inactive,
+                    }
+                  : { matched: true },
+            }),
+          };
+        },
+      });
+      try {
+        const sent = await fixture.runtime.sendTurn({
+          sessionId: 's1',
+          machineId: 'm1',
+          userId: 'u1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          text: 'Guide',
+          guide: true,
+        });
+        if (steerResult.inactive) {
+          assert.equal(sent.state, 'uploaded');
+          return;
+        }
+        assert.equal(sent.state, 'uploaded');
+        assert.equal(sent.awaitingGuide, true);
+        await completed;
+        assert.deepEqual(
+          calls.map((call) => call.kind),
+          steerResult.applied
+            ? ['accept_input', 'steer', 'apply_action']
+            : ['accept_input', 'steer', 'apply_action', 'activate'],
+        );
+        assert.deepEqual(calls[0].receipt, { userId: 'u1' });
+        assert.equal(calls[0].payload.entry.status, 'pending_apply');
+        assert.equal(calls[1].params.expectedTurnId, 'running');
+        assert.deepEqual(calls[2].payload.action, {
+          kind: 'user-status',
+          turnId: sent.id,
+          status: steerResult.applied ? 'processing' : 'pending',
+          ...(steerResult.applied ? { deliveredSteer: true } : {}),
+          onlyPendingApply: true,
+        });
+      } finally {
+        fixture.close();
+      }
+    },
+  );
+}
+
+test(
+  'an uncertain Roost guide stays in history without promotion or replay',
+  { timeout: 5000 },
+  async () => {
+    const calls = [];
+    let acceptedEntry;
+    let finish;
+    const completed = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const fixture = await openTestSession({
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        acceptsInput: true,
+        dispatchesInput: true,
+      },
+      onEvent: (event) => {
+        if (event.backgroundWork?.id === 'guide-work')
+          finish(event.backgroundWork);
+      },
+      markDispatch: async () => {
+        calls.push('activate');
+      },
+      async onRpc(request, runtime, signal) {
+        if (request.method === 'session/history-watch')
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener(
+              'abort',
+              () => reject(new Error('cancelled')),
+              { once: true },
+            ),
+          );
+        if (request.method === 'session/steer') {
+          calls.push('steer');
+          return { error: { code: 'timeout' } };
+        }
+        const params = await runtime.openPayload(request.params);
+        if (request.method === 'session/history-read')
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: 'session/history-read_response',
+              sessionId: 's1',
+              success: true,
+              historyRevision: 1,
+              historyCount: 1,
+              result:
+                params.query.kind === 'readTurn' &&
+                params.query.turnId !== 'running'
+                  ? { state: 'ready', turn: acceptedEntry }
+                  : {
+                      checkpoint: 'c1',
+                      startPosition: 0,
+                      totalCount: 1,
+                      rows: [
+                        { position: 0, state: 'ready', turnId: 'running' },
+                      ],
+                      hasMoreOlder: false,
+                      cursor: null,
+                    },
+              pageTurns: [
+                {
+                  id: 'running',
+                  role: 'assistant',
+                  timestamp: '2026-01-01',
+                  finished: false,
+                  items: [],
+                },
+              ],
+            }),
+          };
+        if (params.operation === 'accept_input')
+          acceptedEntry = params.payload.entry;
+        calls.push(params.operation);
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-write_response',
+            sessionId: 's1',
+            success: true,
+            operation: params.operation,
+            result: {
+              status: 'accepted',
+              turnId: params.payload.entry.id,
+              active: true,
+            },
+          }),
+        };
+      },
+    });
+    try {
+      const sent = await fixture.runtime.sendTurn({
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        text: 'Guide',
+        guide: true,
+        backgroundTaskId: 'guide-work',
+      });
+      assert.equal(sent.state, 'uploaded');
+      assert.equal((await completed).state, 'waiting');
+      assert.deepEqual(calls, ['accept_input', 'steer']);
+    } finally {
+      fixture.close();
+    }
+  },
+);
+
+test('Roost permission decisions use the owner, and a lost send acknowledgement stays unknown', async () => {
+  const requests = [];
+  let handedOff;
+  const handoff = new Promise((resolve) => {
+    handedOff = resolve;
+  });
+  const fixture = await openTestSession({
+    target: {
+      backend: 'roost',
+      machineId: 'm1',
+      acceptsInput: true,
+      dispatchesInput: true,
+    },
+    async onRpc(request, runtime, signal) {
+      const params = await runtime.openPayload(request.params);
+      requests.push({ method: request.method, params });
+      if (request.method === 'session/history-watch')
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      if (params.operation === 'accept_input_and_dispatch') {
+        handedOff();
+        throw new Error('lost_ack');
+      }
+      const response =
+        request.method === 'session/history-read'
+          ? {
+              type: 'session/history-read_response',
+              sessionId: 's1',
+              success: true,
+              historyRevision: 1,
+              historyCount: 1,
+              result: {
+                checkpoint: 'c1',
+                startPosition: 0,
+                totalCount: 1,
+                rows: [{ position: 0, state: 'ready', turnId: 'assistant' }],
+                hasMoreOlder: false,
+                cursor: null,
+              },
+              pageTurns: [
+                {
+                  id: 'assistant',
+                  role: 'assistant',
+                  timestamp: '2026-01-01',
+                  finished: true,
+                  items: [
+                    {
+                      type: 'tool_call',
+                      toolCallId: 'tool',
+                      permissionRequest: {
+                        requestId: 'request',
+                        options: [{ optionId: 'yes', kind: 'allow_once' }],
+                      },
+                    },
+                  ],
+                },
+              ],
+            }
+          : {
+              type: 'session/history-write_response',
+              sessionId: 's1',
+              success: true,
+              operation: params.operation,
+              result: true,
+            };
+      return { result: await runtime.sealPayload('s1', response) };
+    },
+  });
+  try {
+    assert.deepEqual(
+      await fixture.runtime.respondPermission({
+        sessionId: 's1',
+        entryId: 'assistant',
+        itemId: 'tool',
+        requestId: 'request',
+        optionId: 'yes',
+      }),
+      { state: 'accepted' },
+    );
+    const permission = requests.find(
+      (item) => item.params.operation === 'respond_permission',
+    );
+    assert.deepEqual(permission.params.payload, {
+      requestId: 'request',
+      outcome: { outcome: 'selected', optionId: 'yes' },
+      options: { turnId: 'assistant' },
+    });
+    const result = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Continue',
+    });
+    assert.equal(result.state, 'uploaded');
+    await handoff;
+    assert.equal(
+      requests.filter(
+        (item) => item.params.operation === 'accept_input_and_dispatch',
+      ).length,
+      1,
+    );
+    assert.deepEqual(fixture.server.toJSON().history ?? [], []);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Roost exports the full history before paging and leaves the shared queue on the control document', async () => {
+  const requests = [];
+  const dispatches = [];
+  const first = {
+    id: 'first',
+    role: 'user',
+    timestamp: '2026-01-01',
+    finished: true,
+    items: [],
+  };
+  const running = {
+    id: 'running',
+    role: 'assistant',
+    timestamp: '2026-01-02',
+    finished: false,
+    items: [{ type: 'text', text: 'Still running' }],
+  };
+  const fixture = await openTestSession({
+    target: {
+      backend: 'roost',
+      machineId: 'm1',
+      acceptsInput: true,
+      dispatchesInput: true,
+    },
+    markDispatch: async (...args) => dispatches.push(args),
+    async onRpc(request, runtime, signal) {
+      const params = await runtime.openPayload(request.params);
+      requests.push({ method: request.method, params });
+      if (request.method === 'session/history-watch')
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      const latest = params.query.kind === 'readLatestPage';
+      const position = latest ? 1 : 0;
+      const turn = latest ? running : first;
+      return {
+        result: await runtime.sealPayload('s1', {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 2,
+          result:
+            params.query.kind === 'readAll'
+              ? [first, running]
+              : params.query.kind === 'readRange'
+                ? [first, running]
+                    .slice(params.query.from, params.query.to)
+                    .map((turn) => ({ state: 'ready', turn }))
+                : {
+                    checkpoint: 'c1',
+                    startPosition: position,
+                    totalCount: 2,
+                    rows: [{ position, state: 'ready', turnId: turn.id }],
+                    hasMoreOlder: latest,
+                    cursor: latest ? 'older' : null,
+                  },
+          pageTurns: [turn],
+        }),
+      };
+    },
+  });
+  try {
+    assert.deepEqual(
+      fixture.events.at(-1).entries.map((entry) => entry.id),
+      ['running'],
+    );
+    assert.equal(fixture.events.at(-1).historyHasMore, true);
+    assert.deepEqual(await fixture.runtime.readyHistory('s1'), [
+      first,
+      running,
+    ]);
+    const itemId = fixture.events.at(-1).entries[0].items[0].itemId;
+    assert.equal(
+      requests.some((item) => item.params.query?.kind === 'readOlderPage'),
+      false,
+    );
+    const updated = fixture.nextEmit();
+    await fixture.runtime.loadOlderSession('s1');
+    const page = await updated;
+    assert.deepEqual(
+      page.entries.map((entry) => entry.id),
+      ['first', 'running'],
+    );
+    assert.equal(page.entries[1].items[0].itemId, itemId);
+    const sent = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Queue',
+    });
+    assert.equal(sent.state, 'queued');
+    assert.equal(fixture.server.toJSON().mq[0].userTurnId, sent.id);
+    assert.deepEqual(fixture.server.toJSON().history ?? [], []);
+    assert.deepEqual(dispatches, [['s1', sent.id, true]]);
+    assert.equal(
+      requests.some((item) => item.method === 'session/history-write'),
+      false,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+for (const invalidPatch of [false, true]) {
+  test(
+    `upstream Roost reader ${invalidPatch ? 'repairs an invalid patch at the owner checkpoint' : 'applies a Unicode patch at its base checkpoint'}`,
+    { timeout: 5000 },
+    async () => {
+      const reads = [];
+      let watchReady, resolveWatch;
+      const watching = new Promise((resolve) => {
+        watchReady = resolve;
+      });
+      const turn = (text) => ({
+        id: 'turn',
+        role: 'assistant',
+        timestamp: '2026-01-01',
+        items: [{ type: 'text', text }],
+      });
+      const fixture = await openTestSession({
+        target: {
+          backend: 'roost',
+          machineId: 'm1',
+          acceptsInput: true,
+          dispatchesInput: true,
+          patches: true,
+        },
+        async onRpc(request, runtime, signal) {
+          const params = await runtime.openPayload(request.params);
+          const query = params.query;
+          reads.push(query);
+          if (request.method === 'session/history-watch') {
+            const response = await new Promise((resolve, reject) => {
+              resolveWatch = resolve;
+              watchReady();
+              signal.addEventListener(
+                'abort',
+                () => reject(new Error('cancelled')),
+                { once: true },
+              );
+            });
+            return { result: await runtime.sealPayload('s1', response) };
+          }
+          const response =
+            query.kind === 'readTurn'
+              ? {
+                  historyRevision: 2,
+                  historyCount: 1,
+                  result: { state: 'ready', turn: turn('ACB') },
+                }
+              : {
+                  historyRevision: 1,
+                  historyCount: 1,
+                  result: {
+                    checkpoint: 'c1',
+                    startPosition: 0,
+                    totalCount: 1,
+                    rows: [{ position: 0, state: 'ready', turnId: 'turn' }],
+                    hasMoreOlder: false,
+                    cursor: null,
+                  },
+                  pageTurns: [turn('A😀B')],
+                };
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: 'session/history-read_response',
+              sessionId: 's1',
+              success: true,
+              ...response,
+            }),
+          };
+        },
+      });
+      try {
+        await watching;
+        const updated = fixture.nextEmit();
+        resolveWatch({
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 2,
+          historyCount: 1,
+          result: {
+            state: 'ready',
+            checkpoint: 'c2',
+            ids: ['turn'],
+            bodies: { changed: [], suffix: [] },
+            patches: {
+              baseCheckpoint: 'c1',
+              turns: [
+                {
+                  turnId: 'turn',
+                  operations: [
+                    {
+                      kind: 'spliceText',
+                      path: [
+                        { key: 'items' },
+                        { index: invalidPatch ? 9 : 0 },
+                        { key: 'text' },
+                      ],
+                      index: 1,
+                      delete: 1,
+                      text: 'C',
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        });
+        const event = await updated;
+        assert.equal(event.entries[0].items[0].text, 'ACB');
+        assert.equal(
+          reads.find((query) => query.kind === 'watchChanges').withPatches,
+          true,
+        );
+        const repair = reads.find((query) => query.kind === 'readTurn');
+        if (invalidPatch) assert.equal(repair.atCheckpoint, 'c2');
+        else assert.equal(repair, undefined);
+      } finally {
+        fixture.close();
+      }
+    },
+  );
+}
+
+test(
+  'Roost reads the latest page first and uses the complete directory for send state',
+  { timeout: 5000 },
+  async () => {
+    const requests = [];
+    let handedOff;
+    const handoff = new Promise((resolve) => {
+      handedOff = resolve;
+    });
+    let allowDirectory;
+    let directoryRequested;
+    const directoryReady = new Promise((resolve) => {
+      directoryRequested = resolve;
+    });
+    const directoryGate = new Promise((resolve) => {
+      allowDirectory = resolve;
+    });
+    const turns = Array.from({ length: 80 }, (_, index) => ({
+      id: `turn-${index}`,
+      role: index < 40 ? 'user' : 'assistant',
+      timestamp: '2026-01-01',
+      finished: true,
+      ...(index === 39 ? { inputConfig: { modelId: 'earlier-model' } } : {}),
+      items: [],
+    }));
+    const fixture = await openTestSession({
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        acceptsInput: true,
+        dispatchesInput: true,
+      },
+      async onRpc(request, runtime, signal) {
+        const params = await runtime.openPayload(request.params);
+        requests.push({ method: request.method, params });
+        if (request.method === 'session/history-watch')
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener(
+              'abort',
+              () => reject(new Error('cancelled')),
+              { once: true },
+            ),
+          );
+        let result, pageTurns;
+        if (params.operation) {
+          handedOff();
+          result = {
+            status: 'accepted',
+            turnId: params.payload.entry.id,
+            active: true,
+          };
+        } else if (params.query.kind === 'count') result = turns.length;
+        else if (params.query.kind === 'readDirectory') {
+          directoryRequested();
+          await directoryGate;
+          result = turns
+            .slice(params.query.from, params.query.to)
+            .map((turn, offset) => ({
+              position: params.query.from + offset,
+              state: 'ready',
+              turnId: turn.id,
+              scalars: {
+                id: turn.id,
+                role: turn.role,
+                timestamp: turn.timestamp,
+                finished: true,
+              },
+              inputConfig: turn.inputConfig,
+            }));
+        } else {
+          pageTurns = turns.slice(40);
+          result = {
+            checkpoint: 'c1',
+            startPosition: 40,
+            totalCount: 80,
+            rows: pageTurns.map((turn, index) => ({
+              position: index + 40,
+              state: 'ready',
+              turnId: turn.id,
+            })),
+            hasMoreOlder: true,
+            cursor: 'older',
+          };
+        }
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: params.operation
+              ? 'session/history-write_response'
+              : 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: 1,
+            historyCount: turns.length,
+            ...(params.operation ? { operation: params.operation } : {}),
+            result,
+            ...(pageTurns ? { pageTurns } : {}),
+          }),
+        };
+      },
+    });
+    try {
+      assert.equal(fixture.events.at(-1).entries.length, 40);
+      assert.equal(fixture.events.at(-1).billableTurnCount, undefined);
+      await directoryReady;
+      const args = {
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        text: 'Continue',
+      };
+      assert.equal(
+        (await fixture.runtime.sendTurn(args)).reason,
+        'session_not_ready',
+      );
+      const updated = fixture.nextEmit(
+        (event) => event.billableTurnCount !== undefined,
+      );
+      allowDirectory();
+      const event = await updated;
+      assert.equal(event.billableTurnCount, 40);
+      assert.equal(event.composer.modelId, 'earlier-model');
+      assert.equal((await fixture.runtime.sendTurn(args)).state, 'uploaded');
+      await handoff;
+      const write = requests.find(
+        (request) => request.params.operation === 'accept_input_and_dispatch',
+      );
+      assert.equal(
+        write.params.payload.entry.inputConfig.modelId,
+        'earlier-model',
+      );
+      assert.equal(
+        requests.some(
+          (request) =>
+            request.params.query?.kind === 'readOlderPage' ||
+            request.params.query?.kind === 'readAll',
+        ),
+        false,
+      );
+    } finally {
+      allowDirectory();
+      fixture.close();
+    }
+  },
+);
+
+for (const accepted of [true, false, 'inactive', 'storage-failed']) {
+  test(
+    `Roost queued guide handles owner acceptance ${accepted}`,
+    { timeout: 5000 },
+    async () => {
+      const calls = [];
+      let acceptedEntry, acceptedWrite, applied;
+      const acceptance = new Promise((resolve) => {
+        acceptedWrite = resolve;
+      });
+      const application = new Promise((resolve) => {
+        applied = resolve;
+      });
+      const fixture = await openTestSession({
+        target: {
+          backend: 'roost',
+          machineId: 'm1',
+          acceptsInput: true,
+          dispatchesInput: true,
+        },
+        async onRpc(request, runtime, signal) {
+          if (request.method === 'session/history-watch')
+            return new Promise((_resolve, reject) =>
+              signal.addEventListener(
+                'abort',
+                () => reject(new Error('cancelled')),
+                { once: true },
+              ),
+            );
+          if (request.method === 'session/steer') {
+            calls.push({ kind: 'steer', queue: fixture.server.toJSON().mq });
+            return { result: { applied: true } };
+          }
+          const params = await runtime.openPayload(request.params);
+          if (params.operation)
+            calls.push({
+              kind: params.operation,
+              queue: fixture.server.toJSON().mq,
+              entry: params.payload.entry,
+            });
+          if (params.operation === 'accept_input') {
+            acceptedEntry = params.payload.entry;
+            acceptedWrite();
+            if (accepted === false) throw new Error('lost_ack');
+          }
+          if (params.operation === 'apply_action') applied();
+          let result;
+          if (params.query?.kind === 'inputAcceptance')
+            result = { status: 'unobserved' };
+          else if (params.operation === 'accept_input')
+            result = {
+              status: 'accepted',
+              turnId: params.payload.entry.id,
+              active: accepted !== 'inactive',
+            };
+          else if (params.operation === 'apply_action')
+            result = { matched: true };
+          else if (
+            params.query?.kind === 'readTurn' &&
+            params.query.turnId !== 'running'
+          )
+            result = { state: 'ready', turn: acceptedEntry };
+          else
+            result = {
+              checkpoint: 'c1',
+              startPosition: 0,
+              totalCount: 1,
+              rows: [{ position: 0, state: 'ready', turnId: 'running' }],
+              hasMoreOlder: false,
+              cursor: null,
+            };
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: params.operation
+                ? 'session/history-write_response'
+                : 'session/history-read_response',
+              sessionId: 's1',
+              success: true,
+              historyRevision: 1,
+              historyCount: 1,
+              ...(params.operation ? { operation: params.operation } : {}),
+              result,
+              ...(!params.operation && params.query?.kind !== 'inputAcceptance'
+                ? {
+                    pageTurns: [
+                      {
+                        id: 'running',
+                        role: 'assistant',
+                        timestamp: '2026-01-01',
+                        finished: false,
+                        items: [],
+                      },
+                    ],
+                  }
+                : {}),
+            }),
+          };
+        },
+      });
+      try {
+        const sent = await fixture.runtime.sendTurn({
+          sessionId: 's1',
+          machineId: 'm1',
+          userId: 'u1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          text: 'Queued',
+        });
+        assert.equal(sent.state, 'queued');
+        if (accepted === 'storage-failed') {
+          const { IDBObjectStore } = await import('fake-indexeddb');
+          const add = IDBObjectStore.prototype.add;
+          IDBObjectStore.prototype.add = function (...args) {
+            if (this.name === 'inputs')
+              throw new DOMException(
+                'Input storage unavailable',
+                'QuotaExceededError',
+              );
+            return add.apply(this, args);
+          };
+          try {
+            await assert.rejects(
+              fixture.runtime.controlTurn({
+                action: 'steer',
+                sessionId: 's1',
+                machineId: 'm1',
+                turnId: 'running',
+                messageId: sent.id,
+              }),
+              /input_storage_unavailable/,
+            );
+            assert.equal(fixture.server.toJSON().mq[0].userTurnId, sent.id);
+            assert.deepEqual(calls, []);
+          } finally {
+            IDBObjectStore.prototype.add = add;
+          }
+          return;
+        }
+        const control = fixture.runtime.controlTurn({
+          action: 'steer',
+          sessionId: 's1',
+          machineId: 'm1',
+          turnId: 'running',
+          messageId: sent.id,
+        });
+        assert.equal((await control).state, 'not_applied');
+        await acceptance;
+        assert.equal(calls[0].kind, 'accept_input');
+        assert.equal(calls[0].entry.status, 'pending_apply');
+        if (accepted === true) {
+          await application;
+          assert.deepEqual(
+            calls.map((call) => call.kind),
+            ['accept_input', 'steer', 'apply_action'],
+          );
+        } else {
+          assert.deepEqual(
+            calls.map((call) => call.kind),
+            ['accept_input'],
+          );
+        }
+        assert.deepEqual(fixture.server.toJSON().mq, []);
+      } finally {
+        fixture.close();
+      }
+    },
+  );
+}
+
+test('Roost input is refused before writes when the owner lacks dispatch capability', async () => {
+  const requests = [];
+  let current = true;
+  const fixture = await openTestSession({
+    target: {
+      backend: 'roost',
+      machineId: 'm1',
+      acceptsInput: true,
+      dispatchesInput: false,
+      isCurrent: () => current,
+    },
+    async onRpc(request, runtime, signal) {
+      requests.push(request.method);
+      if (request.method === 'session/history-watch')
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          ),
+        );
+      return {
+        result: await runtime.sealPayload('s1', {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 0,
+          result: {
+            checkpoint: 'c1',
+            startPosition: 0,
+            totalCount: 0,
+            rows: [],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+          pageTurns: [],
+        }),
+      };
+    },
+  });
+  try {
+    const result = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Blocked',
+    });
+    assert.equal(result.state, 'not_sent');
+    assert.equal(result.reason, 'roost_input_unsupported');
+    assert.equal(requests.includes('session/history-write'), false);
+    assert.deepEqual(fixture.server.toJSON().history ?? [], []);
+    current = false;
+    assert.equal(fixture.runtime.docSnapshot(), undefined);
+    assert.equal(fixture.runtime.sessionHistory('s1'), undefined);
+    assert.equal(
+      (
+        await fixture.runtime.sendTurn({
+          sessionId: 's1',
+          machineId: 'm1',
+          userId: 'u1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          text: 'Blocked',
+        })
+      ).reason,
+      'workspace_changed',
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+for (const observed of [true, false]) {
+  test(`Roost resolves a lost acknowledgement by querying the immutable receipt: ${observed ? 'accepted' : 'unobserved'}`, async () => {
+    const calls = [];
+    let firstWrite, secondWrite;
+    const firstHandoff = new Promise((resolve) => {
+      firstWrite = resolve;
+    });
+    const recoveredHandoff = new Promise((resolve) => {
+      secondWrite = resolve;
+    });
+    const fixture = await openTestSession({
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        acceptsInput: true,
+        dispatchesInput: true,
+      },
+      async onRpc(request, runtime, signal) {
+        const params = await runtime.openPayload(request.params);
+        calls.push({ method: request.method, params });
+        if (request.method === 'session/history-watch')
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener(
+              'abort',
+              () => reject(new Error('cancelled')),
+              { once: true },
+            ),
+          );
+        if (request.method === 'session/history-write') {
+          if (
+            calls.filter((call) => call.method === 'session/history-write')
+              .length === 1
+          )
+            firstWrite();
+          else secondWrite();
+          throw new Error('lost_ack');
+        }
+        const response =
+          params.query.kind === 'inputAcceptance'
+            ? {
+                type: 'session/history-read_response',
+                sessionId: 's1',
+                success: true,
+                historyRevision: 1,
+                historyCount: 0,
+                result: observed
+                  ? {
+                      status: 'accepted',
+                      turnId: params.query.entry.id,
+                      active: true,
+                    }
+                  : { status: 'unobserved' },
+              }
+            : {
+                type: 'session/history-read_response',
+                sessionId: 's1',
+                success: true,
+                historyRevision: 1,
+                historyCount: 0,
+                result: {
+                  checkpoint: 'c1',
+                  startPosition: 0,
+                  totalCount: 0,
+                  rows: [],
+                  hasMoreOlder: false,
+                  cursor: null,
+                },
+                pageTurns: [],
+              };
+        return { result: await runtime.sealPayload('s1', response) };
+      },
+    });
+    try {
+      const result = await fixture.runtime.sendTurn({
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        text: 'Continue',
+      });
+      assert.equal(result.state, 'uploaded');
+      await firstHandoff;
+      fixture.runtime.resumeAcceptedInputs();
+      await recoveredHandoff;
+      const writes = calls.filter(
+        (call) => call.method === 'session/history-write',
+      );
+      const lookup = calls.find(
+        (call) => call.params.query?.kind === 'inputAcceptance',
+      );
+      assert.deepEqual(
+        lookup.params.query.entry,
+        writes[0].params.payload.entry,
+      );
+      assert.deepEqual(
+        writes[1].params.payload.entry,
+        writes[0].params.payload.entry,
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+}
 
 test('continuing a Role session preserves its frozen identity through dispatch and queue', async () => {
   const calls = [];
@@ -2297,3 +3924,297 @@ test('operation receipts project creation progress, replies, problems and uncert
     projectSession(doc, 'live').entries[0].items.map((i) => i.operation),
   );
 });
+
+test(
+  'Roost resumes the original durable input only on the original backend',
+  { timeout: 5000 },
+  async () => {
+    const { IDBFactory } = await import('fake-indexeddb');
+    const indexedDBFactory = new IDBFactory();
+    const writes = [];
+    let phase = 'first';
+    let firstWrite, recoveredWrite, projected;
+    const pendingProjection = new Promise((resolve) => {
+      projected = resolve;
+    });
+    const firstHandoff = new Promise((resolve) => {
+      firstWrite = resolve;
+    });
+    const recovered = new Promise((resolve) => {
+      recoveredWrite = resolve;
+    });
+    const options = {
+      indexedDBFactory,
+      onEvent(event) {
+        if (!event.session) return;
+        const pending = JSON.parse(event.session).pendingRoostInputs?.find(
+          (item) => item.inputState === 'unknown',
+        );
+        if (pending) projected(pending);
+      },
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        acceptsInput: true,
+        dispatchesInput: true,
+      },
+      async onRpc(request, runtime, signal) {
+        if (request.method === 'session/history-watch')
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener(
+              'abort',
+              () => reject(new Error('cancelled')),
+              { once: true },
+            ),
+          );
+        const params = await runtime.openPayload(request.params);
+        if (params.operation === 'accept_input_and_dispatch') {
+          writes.push(structuredClone(params.payload.entry));
+          if (phase === 'first') {
+            firstWrite();
+            throw new Error('lost_ack');
+          }
+          recoveredWrite();
+        }
+        const result = params.operation
+          ? {
+              status: 'accepted',
+              turnId: params.payload.entry.id,
+              active: false,
+            }
+          : params.query.kind === 'inputAcceptance'
+            ? { status: 'unobserved' }
+            : {
+                checkpoint: 'c1',
+                startPosition: 0,
+                totalCount: 0,
+                rows: [],
+                hasMoreOlder: false,
+                cursor: null,
+              };
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: params.operation
+              ? 'session/history-write_response'
+              : 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: 1,
+            historyCount: 0,
+            ...(params.operation
+              ? { operation: params.operation }
+              : { pageTurns: [] }),
+            result,
+          }),
+        };
+      },
+    };
+    const first = await openTestSession(options);
+    const send = await first.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Preserve this input',
+    });
+    assert.equal(send.state, 'uploaded');
+    await firstHandoff;
+    const pending = await pendingProjection;
+    assert.equal(pending.id, send.id);
+    assert.equal(pending.items[0].text, 'Preserve this input');
+    assert.ok(pending.items[0].itemId);
+    first.runtime.stopSessions();
+    await first.runtime.stopAcceptedInputs();
+    first.close();
+    const otherBackend = await openTestSession({
+      ...options,
+      storageSuffix: '-test-backend',
+    });
+    try {
+      await assert.rejects(
+        otherBackend.runtime.actOnPendingInput('s1', send.id, 'retry'),
+        /session_not_ready/,
+      );
+      assert.equal(writes.length, 1);
+    } finally {
+      otherBackend.runtime.stopSessions();
+      await otherBackend.runtime.stopAcceptedInputs();
+      otherBackend.close();
+    }
+    phase = 'restart';
+    const second = await openTestSession(options);
+    try {
+      await recovered;
+      assert.equal(writes.length, 2);
+      assert.deepEqual(writes[1], writes[0]);
+      assert.equal(writes[1].id, send.id);
+    } finally {
+      second.runtime.stopSessions();
+      await second.runtime.stopAcceptedInputs();
+      second.close();
+    }
+  },
+);
+
+for (const lifecycle of ['archive', 'delete']) {
+  test(
+    `${lifecycle} cancels a durable Roost input`,
+    { timeout: 6000 },
+    async () => {
+      const flock = new Flock('archive-test');
+      flock.set(['e', 'session-s1'], true);
+      flock.set(['m', 'session-s1'], {
+        id: 's1',
+        machineId: 'm1',
+        historyBackend: 'roost',
+        status: { type: 'completed' },
+      });
+      flock.commit();
+      let firstFailure, secondHandoff;
+      const failure = new Promise((resolve) => {
+        firstFailure = resolve;
+      });
+      const retried = new Promise((resolve) => {
+        secondHandoff = resolve;
+      });
+      const writes = [];
+      const fixture = await openTestSession({
+        resolveTarget: () => ({
+          backend: 'roost',
+          machineId: 'm1',
+          acceptsInput: true,
+          dispatchesInput: true,
+          isArchived: flock.get(['m', 'session-s1', 'isArchived']) === true,
+        }),
+        onEvent(event) {
+          if (
+            event.session &&
+            JSON.parse(event.session).pendingRoostInputs?.some(
+              (input) => input.inputRetryable,
+            )
+          )
+            firstFailure();
+        },
+        async onRpc(request, runtime) {
+          const params = await runtime.openPayload(request.params);
+          if (request.method === 'session/history-write') {
+            writes.push(params.payload.entry.id);
+            if (writes.length === 1)
+              throw new Error(
+                'synthetic lost acknowledgment before the owner accepted',
+              );
+            secondHandoff();
+            return {
+              result: await runtime.sealPayload('s1', {
+                type: 'session/history-write_response',
+                sessionId: 's1',
+                success: true,
+                operation: params.operation,
+                result: {
+                  status: 'accepted',
+                  turnId: params.payload.entry.id,
+                  active: true,
+                },
+              }),
+            };
+          }
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: 'session/history-read_response',
+              sessionId: 's1',
+              success: true,
+              historyRevision: 1,
+              historyCount: 0,
+              result:
+                params.query.kind === 'inputAcceptance'
+                  ? { status: 'unobserved' }
+                  : {
+                      checkpoint: 'c1',
+                      startPosition: 0,
+                      totalCount: 0,
+                      rows: [],
+                      hasMoreOlder: false,
+                      cursor: null,
+                    },
+              pageTurns: [],
+            }),
+          };
+        },
+      });
+      const handlers = new Map();
+      fixture.runtime.registerSessions({
+        state: {
+          workspace: 'w1',
+          userId: 'u1',
+          unhealthy: new Set(),
+          catalogs: new Map(),
+          machineReplicas: new Map(),
+          metaReplica: {
+            flock,
+            client: { append: async () => ({ ok: true }) },
+          },
+        },
+        getGrant: async () => {
+          throw new Error('unexpected_grant');
+        },
+        publish() {},
+        channel: { handle: (name, handler) => handlers.set(name, handler) },
+      });
+      const archive = (archived) =>
+        handlers.get('archiveSession')({
+          workspaceId: 'w1',
+          sessionId: 's1',
+          archived,
+        });
+      try {
+        const sent = await fixture.runtime.sendTurn({
+          sessionId: 's1',
+          machineId: 'm1',
+          userId: 'u1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          text: 'Synthetic pending input',
+        });
+        assert.equal(sent.state, 'uploaded');
+        await failure;
+        if (lifecycle === 'delete') {
+          await handlers.get('deleteSession')({
+            workspaceId: 'w1',
+            sessionId: 's1',
+            sessionIds: ['s1'],
+          });
+          assert.equal(flock.get(['e', 'session-s1']), false);
+          await assert.rejects(
+            fixture.runtime.actOnPendingInput('s1', sent.id, 'retry'),
+            /session_not_ready/,
+          );
+          assert.deepEqual(writes, [sent.id]);
+          return;
+        }
+        await archive(true);
+        assert.equal(flock.get(['m', 'session-s1', 'isArchived']), true);
+        await assert.rejects(
+          fixture.runtime.actOnPendingInput('s1', sent.id, 'retry'),
+          /session_not_ready/,
+        );
+        await archive(false);
+        assert.equal(flock.get(['m', 'session-s1', 'isArchived']), false);
+        fixture.runtime.resumeAcceptedInputs();
+        const next = await fixture.runtime.sendTurn({
+          sessionId: 's1',
+          machineId: 'm1',
+          userId: 'u1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          text: 'New input',
+        });
+        assert.equal(next.state, 'uploaded');
+        await retried;
+        assert.deepEqual(writes, [sent.id, next.id]);
+      } finally {
+        fixture.close();
+      }
+    },
+  );
+}

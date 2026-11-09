@@ -2,15 +2,20 @@ import { build } from 'esbuild';
 import { LoroDoc } from 'loro-crdt/base64';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 
-export async function loadRuntime() {
+export async function loadRuntime(storageSuffix = '') {
   const bundle = await build({
-    entryPoints: [
-      new URL(
-        '../../../packages/cloud-runtime/src/runtime/session.ts',
+    define: { LODY_MOBILE_STORAGE_SUFFIX: JSON.stringify(storageSuffix) },
+    stdin: {
+      contents:
+        "export * from './session.ts'; export { sealPayload, openPayload } from './machine-rpc.ts'; export { registerSessions } from './handlers/sessions.ts';",
+      resolveDir: new URL(
+        '../../../packages/cloud-runtime/src/runtime/',
         import.meta.url,
       ).pathname,
-    ],
+      loader: 'ts',
+    },
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -55,12 +60,57 @@ export async function openTestSession({
   failAppend = () => false,
   markDispatch = async () => {},
   onRpc,
+  onEvent = () => {},
+  target,
+  resolveTarget,
+  indexedDBAvailable = true,
+  indexedDBFactory,
+  storageSuffix,
+  seedServer = () => {},
+  catchupServer,
   /** Bytes of the workspace settings Flock (`w1:wf:workspace`), e.g. Agent Role rows. */
   settings,
 } = {}) {
+  const previousIndexedDB = globalThis.indexedDB;
+  const previousIDBKeyRange = globalThis.IDBKeyRange;
+  const previousNavigator = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'navigator',
+  );
+  const locks = new Map();
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      locks: {
+        request(name, { signal }, work) {
+          const previous = locks.get(name) ?? Promise.resolve();
+          const current = previous
+            .catch(() => {})
+            .then(() => {
+              signal.throwIfAborted();
+              return work();
+            });
+          locks.set(name, current);
+          return current;
+        },
+      },
+    },
+  });
+  globalThis.indexedDB = indexedDBAvailable
+    ? (indexedDBFactory ?? new IDBFactory())
+    : {
+        open() {
+          const error = new Error('IndexedDB unavailable');
+          error.stack = undefined;
+          throw error;
+        },
+      };
+  globalThis.IDBKeyRange = IDBKeyRange;
   const server = new LoroDoc();
+  seedServer(server);
   const ok = (result) => ({ ok: true, result });
   let sessionRead;
+  let catchupUpdate;
   let offset = 1;
   const appends = [];
   const replies = new Map();
@@ -77,18 +127,24 @@ export async function openTestSession({
           snapshot: { body: settings() },
           updates: [],
         });
+      const snapshot = server.export({ mode: 'snapshot' });
+      if (catchupServer) {
+        const version = server.version();
+        catchupServer(server);
+        catchupUpdate = server.export({ mode: 'update', from: version });
+      }
       return ok({
         snapshotOffset: '1',
         nextOffset: '1',
-        upToDate: true,
-        snapshot: { body: server.export({ mode: 'snapshot' }) },
+        upToDate: !catchupUpdate,
+        snapshot: { body: snapshot },
         updates: [],
       });
     }
-    async readOnce() {
+    async readOnce({ signal } = {}) {
       if (this.url.includes(':rpc:res:') && onRpc) {
         const request = replies.get(this.url.split('/ds/lody/')[1]);
-        const result = await onRpc(request);
+        const result = await onRpc(request, runtime, signal);
         return ok({
           nextOffset: '1',
           upToDate: true,
@@ -98,6 +154,16 @@ export async function openTestSession({
               JSON.stringify({ id: request.id, ...result }),
             ),
           },
+        });
+      }
+      if (catchupUpdate) {
+        const bytes = catchupUpdate;
+        catchupUpdate = undefined;
+        return ok({
+          nextOffset: '2',
+          upToDate: true,
+          closed: false,
+          payload: { body: frame(bytes) },
         });
       }
       return new Promise((resolve) => {
@@ -119,29 +185,80 @@ export async function openTestSession({
       return ok({ nextOffset: String(++offset) });
     }
   };
-  const runtime = await loadRuntime();
+  const runtime = await loadRuntime(storageSuffix);
   let resolveEmit;
   const events = [];
   const background = [];
-  const nextEmit = () =>
+  const nextEmit = (matches = () => true) =>
     new Promise((resolve) => {
-      resolveEmit = resolve;
+      resolveEmit = (value) => {
+        if (!matches(value)) return;
+        resolveEmit = undefined;
+        resolve(value);
+      };
     });
   const ready = nextEmit();
+  const emit = (e) => {
+    onEvent(e);
+    if (e.backgroundWork) background.push(e.backgroundWork);
+    if (!e.session) return;
+    const value = JSON.parse(e.session);
+    events.push(value);
+    if (value.status === 'live') resolveEmit?.(value);
+  };
+  const resolver =
+    resolveTarget ??
+    (target
+      ? () => ({ incremental: true, watch: true, ...target })
+      : undefined);
   await runtime.openSession(
     's1',
     'w1',
     async () => ({ token: 'synthetic', gatewayBaseUrl: 'https://x.invalid' }),
-    (e) => {
-      if (e.backgroundWork) background.push(e.backgroundWork);
-      if (!e.session) return;
-      const value = JSON.parse(e.session);
-      events.push(value);
-      if (value.status === 'live') resolveEmit?.(value);
-    },
+    emit,
     markDispatch,
+    true,
+    resolver,
   );
   await ready;
+  if (target?.backend === 'roost' || resolveTarget?.()?.backend === 'roost') {
+    runtime.startAcceptedInputs({
+      accountId: 'u1',
+      workspaceId: 'w1',
+      getGrant: async () => ({
+        token: 'synthetic',
+        gatewayBaseUrl: 'https://x.invalid',
+      }),
+      emit,
+      markDispatch,
+      async getDocMeta(room) {
+        const current = resolver();
+        if (current?.backend !== 'roost') return undefined;
+        if (room === 'session-s1')
+          return {
+            exists: true,
+            meta: {
+              id: 's1',
+              machineId: current.machineId,
+              historyBackend: 'roost',
+              latestUserMsgId: current.latestUserMsgId,
+              isArchived: current.isArchived,
+            },
+          };
+        if (room === 'machine-' + current.machineId)
+          return {
+            exists: true,
+            meta: {
+              protocolCapabilities: {
+                sessionInputAcceptance: current.acceptsInput ? 1 : 0,
+                sessionInputDispatch: current.dispatchesInput ? 1 : 0,
+              },
+            },
+          };
+      },
+      resolveTarget: () => resolver,
+    });
+  }
   let version = server.version();
   const pushUpdate = async () => {
     const update = server.export({ mode: 'update', from: version });
@@ -159,7 +276,22 @@ export async function openTestSession({
   };
   const close = () => {
     runtime.stopSessions();
+    void runtime.stopAcceptedInputs();
+    if (previousNavigator)
+      Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    else delete globalThis.navigator;
     delete globalThis.__sessionClient;
+    globalThis.indexedDB = previousIndexedDB;
+    globalThis.IDBKeyRange = previousIDBKeyRange;
   };
-  return { runtime, server, pushUpdate, events, background, appends, close };
+  return {
+    runtime,
+    server,
+    pushUpdate,
+    nextEmit,
+    events,
+    background,
+    appends,
+    close,
+  };
 }

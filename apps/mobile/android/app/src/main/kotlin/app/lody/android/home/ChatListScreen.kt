@@ -69,6 +69,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -918,6 +919,9 @@ private val ProjectSource.label: Int
 @Composable
 private fun SettingsList(state: ChatListUiState, padding: PaddingValues, onSelectWorkspace: (Workspace) -> Unit, onSignOut: () -> Unit) {
     val colors = LodyTheme.colors
+    val context = LocalContext.current
+    var developer by remember { mutableStateOf(app.lody.android.runtime.RoostPreferences.developer(context)) }
+    var roost by remember { mutableStateOf(app.lody.android.runtime.RoostPreferences.experiment(context)) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item { SectionTitle(stringResource(R.string.home_settings_account)) }
         item {
@@ -933,6 +937,24 @@ private fun SettingsList(state: ChatListUiState, padding: PaddingValues, onSelec
                 tint = colors.textPrimary,
                 onClick = { if (workspace.id != state.workspaceId) onSelectWorkspace(workspace) },
             ) { Avatar(workspace.image, workspace.name, LodyIconSize.lg) }
+        }
+        item { SectionTitle(stringResource(R.string.settings_developer)) }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.settings_developer_mode), Modifier.weight(1f), style = LodyTheme.typography.body, color = colors.textPrimary)
+                Switch(checked = developer, onCheckedChange = { developer = it; app.lody.android.runtime.RoostPreferences.setDeveloper(context, it) })
+            }
+        }
+        if (developer) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.settings_roost_history), Modifier.weight(1f), style = LodyTheme.typography.body, color = colors.textPrimary)
+                        Switch(checked = roost, onCheckedChange = { roost = it; app.lody.android.runtime.RoostPreferences.setExperiment(context, it) })
+                    }
+                    Text(stringResource(R.string.settings_roost_history_hint), style = LodyTheme.typography.footnote, color = colors.textTertiary)
+                }
+            }
         }
         item { Spacer(Modifier.height(LodySpacing.xxl)) }
         item { SettingsRow(stringResource(R.string.home_sign_out), LodyIcons.LogOut, colors.dangerDefault, onClick = onSignOut) }

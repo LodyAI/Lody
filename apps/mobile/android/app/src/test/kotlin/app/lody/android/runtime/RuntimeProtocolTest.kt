@@ -85,6 +85,15 @@ class RuntimeProtocolTest {
   assertEquals("live",snapshot.status)
   assertEquals(listOf(SessionMessage("u","user","hello",false),SessionMessage("a","assistant","First\n\nSecond",true)),snapshot.messages.map { it.copy(items = emptyList()) })
  }
+ @Test fun recoveredInputsStayUnconfirmedAndDoNotDuplicateOwnerHistory() {
+  val body = """{"v":1,"status":"live","entries":[{"id":"owner","role":"user","finished":true,"items":[{"type":"text","text":"confirmed"}]}],"pendingRoostInputs":[{"id":"owner","items":[{"type":"text","text":"duplicate"}]},{"id":"pending","timestamp":"2026-01-01","userId":"u","inputState":"unknown","items":[{"type":"text","text":"kept"},{"type":"file","file":{"fileName":"proof.txt"}}]}]}"""
+  val frame = JSONObject().put("type", "session").put("sessionId", "s").put("session", body)
+  val messages = (RuntimeProtocol.event(frame) as RuntimeEvent.SessionUpdated).snapshot.messages
+  assertEquals(listOf("owner", "pending"), messages.map { it.id })
+  assertEquals("delivery_unknown", messages.last().status)
+  assertEquals("proof.txt", messages.last().attachments.single().name)
+  assertEquals("kept", messages.last().text)
+ }
  @Test fun fileOnlyTurnsRetainAllFilesAndStats() {
   val files = org.json.JSONArray()
   repeat(9) { files.put(JSONObject().put("path", "src/file$it.kt").put("add", it).put("del", 2)) }
@@ -114,6 +123,12 @@ class RuntimeProtocolTest {
  @Test fun sessionProjectionIsNotDropped() {
   val frame=JSONObject().put("type","session").put("sessionId","s").put("session", """{"v":1,"status":"live","entries":[]}""")
   assertNotNull(RuntimeProtocol.event(frame))
+ }
+ @Test fun sessionHistoryPageStateIsProjected() {
+  val frame=JSONObject().put("type","session").put("sessionId","s").put("session", """{"v":1,"status":"live","entries":[],"historyHasMore":true,"historyLoading":true}""")
+  val snapshot=(RuntimeProtocol.event(frame) as RuntimeEvent.SessionUpdated).snapshot
+  assertTrue(snapshot.historyHasMore)
+  assertTrue(snapshot.historyLoading)
  }
  @Test fun sharedFixturesDecodeToTypedResults() {
   assertEquals(setOf("ping","setActive","probeSchema"),RuntimeProtocol.capabilities(fixtures.getJSONObject("hostReady")))

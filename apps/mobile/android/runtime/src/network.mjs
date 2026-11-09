@@ -26,7 +26,7 @@ const detail={
   const args={...input,workspaceId:identity.workspaceId,userId:identity.userId};
   return kind==='edit' ? runtime.editSession(args) : runtime.forkSession(args);
  },
- createTab:(parentSessionId,sessionId,title)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title});},itemDetail:(sessionId,entryId,itemId)=>itemDetail({sessionId,entryId,itemId}),turnDiff:(sessionId,entryId,path)=>runtime.turnDiff({sessionId,entryId,path}),
+ createTab:(parentSessionId,sessionId,title,preferRoost)=>{const scope=identity;if(!scope)throw Error('not_connected');return runtime.createTab({workspaceId:scope.workspaceId,parentSessionId,sessionId,title,preferRoost:preferRoost===true});},loadOlderSession:sessionId=>runtime.loadOlderSession({sessionId}),retryPendingInput:(sessionId,inputId)=>runtime.retryPendingInput({sessionId,inputId}),forgetPendingInput:(sessionId,inputId)=>runtime.forgetPendingInput({sessionId,inputId}),itemDetail:(sessionId,entryId,itemId)=>itemDetail({sessionId,entryId,itemId}),turnDiff:(sessionId,entryId,path)=>runtime.turnDiff({sessionId,entryId,path}),
  // Stops the watched session's running turn; a write, never retried.
  controlTurn:async(sessionId,machineId,turnId)=>{const result=await controlTurn({action:'stop',sessionId,machineId,turnId});return {state:result?.state??'unknown'};}};
 const sendWithReferences = args => sendTurn(args, async text => {
@@ -39,4 +39,4 @@ const sendWithReferences = args => sendTurn(args, async text => {
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
 globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand']});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','loadOlderSession','forgetPendingInput','retryPendingInput','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand']});

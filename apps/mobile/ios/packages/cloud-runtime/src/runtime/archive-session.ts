@@ -106,6 +106,7 @@ async function appendJson(client: StreamsClient, update: unknown) {
 export async function deleteSession(
   args: { sessionId: string; sessionIds: string[] },
   meta: { flock: Flock; client: StreamsClient },
+  beforeDelete?: (roostSessionIds: string[]) => Promise<void>,
 ) {
   if (
     typeof args.sessionId !== 'string' ||
@@ -114,16 +115,29 @@ export async function deleteSession(
     !args.sessionIds.every((id) => typeof id === 'string')
   )
     throw new Error('invalid_session');
-  const sessions = projectRows(meta.flock.scan(), 'meta').sessions;
-  if (!sessions.some((session) => session.id === args.sessionId))
-    throw new Error('session_not_found');
-  const targets = sessionDeletionTargets(sessions, args.sessionId);
-  if (sessionDeletionBlocked(targets)) throw new Error('session_busy');
-  if (
-    targets.length !== args.sessionIds.length ||
-    targets.some((session) => !args.sessionIds.includes(session.id))
-  )
-    throw new Error('session_delete_targets_changed');
+  const resolveTargets = () => {
+    const sessions = projectRows(meta.flock.scan(), 'meta').sessions;
+    if (!sessions.some((session) => session.id === args.sessionId))
+      throw new Error('session_not_found');
+    const targets = sessionDeletionTargets(sessions, args.sessionId);
+    if (sessionDeletionBlocked(targets)) throw new Error('session_busy');
+    if (
+      targets.length !== args.sessionIds.length ||
+      targets.some((session) => !args.sessionIds.includes(session.id))
+    )
+      throw new Error('session_delete_targets_changed');
+    return targets;
+  };
+  let targets = resolveTargets();
+  const roostIds = targets
+    .map((session) => session.id)
+    .filter(
+      (id) => docFields(meta.flock, `session-${id}`).historyBackend === 'roost',
+    );
+  if (roostIds.length && beforeDelete) {
+    await beforeDelete(roostIds);
+    targets = resolveTargets();
+  }
 
   // Stage separately: a failed append must not hide sessions in the live replica.
   const staged = new Flock(`lody-ios-delete-${crypto.randomUUID()}`);
@@ -207,12 +221,28 @@ export async function archiveSession(
   meta: { flock: Flock; client: StreamsClient },
   machines: Map<string, Flock>,
   getGrant: Grant,
+  beforeArchive?: (roostSessionIds: string[]) => Promise<void>,
 ) {
   if (typeof args.sessionId !== 'string' || typeof args.archived !== 'boolean')
     throw new Error('invalid_session');
   const room = `session-${args.sessionId}`;
   if (!sessionPresent(meta.flock, room)) throw new Error('session_not_found');
   const ids = lifecycleSessionIds(meta.flock, args.sessionId);
+  if (args.archived && beforeArchive) {
+    const roostIds = ids.filter(
+      (id) => docFields(meta.flock, `session-${id}`).historyBackend === 'roost',
+    );
+    if (roostIds.length) {
+      await beforeArchive(roostIds);
+      const current = lifecycleSessionIds(meta.flock, args.sessionId);
+      if (
+        !sessionPresent(meta.flock, room) ||
+        current.length !== ids.length ||
+        current.some((id) => !ids.includes(id))
+      )
+        throw new Error('session_archive_targets_changed');
+    }
+  }
   const version = meta.flock.version();
   const roots: { id: string; machineId: string }[] = [];
   for (const id of ids) {

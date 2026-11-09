@@ -95,6 +95,7 @@ import {
   CreateTabParams,
   ForkSessionParams,
   ForkSessionResult,
+  ForgetPendingInputParams,
   CreateSessionResult,
   DeleteSessionParams,
   DeleteSessionResult,
@@ -151,6 +152,11 @@ export const runtimeCalls = {
     params: OpenSessionParams,
     result: Empty,
     timeoutMs: 10_000,
+  },
+  loadOlderSession: {
+    params: OpenSessionParams,
+    result: Empty,
+    timeoutMs: 45_000,
   },
   closeSession: { params: Empty, result: Empty, timeoutMs: 10_000 },
   releaseReserve: {
@@ -317,6 +323,16 @@ export const runtimeCalls = {
     params: EditSessionParams,
     result: EditSessionResult,
     timeoutMs: 130_000,
+  },
+  retryPendingInput: {
+    params: ForgetPendingInputParams,
+    result: Empty,
+    timeoutMs: 30_000,
+  },
+  forgetPendingInput: {
+    params: ForgetPendingInputParams,
+    result: Empty,
+    timeoutMs: 30_000,
   },
   controlTurn: {
     params: ControlTurnParams,

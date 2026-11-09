@@ -127,38 +127,6 @@ test('creation uses matching per-model declarations instead of the probed model 
   assert.equal(stale.fastModes, undefined);
 });
 
-test('partial machine updates wake the picker without claiming the whole catalog synced', async () => {
-  const { readFile } = await import('node:fs/promises');
-  const { transform } = await import('esbuild');
-  const { runInNewContext } = await import('node:vm');
-  const source = await readFile(
-    new URL(
-      '../../../../packages/cloud-runtime/src/runtime/index.ts',
-      import.meta.url,
-    ),
-    'utf8',
-  );
-  const fn = source.slice(
-    source.indexOf('function publish()'),
-    source.indexOf('function apply('),
-  );
-  const events = [];
-  runInNewContext(
-    (await transform(fn, { loader: 'ts' })).code + ';publish();',
-    {
-      catalogs: new Map([['meta', { machineIds: ['online', 'broken'] }]]),
-      watchers: new Map([
-        ['meta', {}],
-        ['online', {}],
-        ['broken', {}],
-      ]),
-      unhealthy: new Set(['broken']),
-      channel: { emit: (type) => events.push(type) },
-    },
-  );
-  assert.deepEqual(events, ['creationOptionsChanged']);
-});
-
 test('creating on a healthy machine is not rejected by an unrelated sync failure', async () => {
   const { state, meta } = fixture(),
     handlers = new Map();

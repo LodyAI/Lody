@@ -230,6 +230,10 @@ precondition(files[0]["add"] as? Int == 2 && files[0]["status"] as? String == "M
 precondition(files[1]["add"] as? Int == 5 && files[1]["del"] as? Int == 2 && files[1]["status"] as? String == "D")
 let envelope = SessionEnvelope.prepare(#"{"v":1,"status":"live","revision":4,"preview":{"label":"localhost:5173","active":true},"entries":[{"id":"e","items":[]}]}"#)!
 precondition(envelope.revision == 4 && envelope.entriesJSON.contains(#""fileDiffs":[]"#))
+let pendingEnvelope = SessionEnvelope.prepare(#"{"v":1,"status":"live","revision":5,"entries":[{"id":"server","role":"user","status":"pending","items":[]}],"pendingRoostInputs":[{"id":"server","role":"user","status":"pending","items":[],"inputState":"unknown"},{"id":"local","role":"user","status":"pending","items":[],"inputState":"unknown"}]}"#)!
+let pendingEntries = try JSONSerialization.jsonObject(with: Data(pendingEnvelope.entriesJSON.utf8)) as! [[String: Any]]
+precondition(pendingEntries.compactMap { $0["id"] as? String } == ["server", "local"])
+precondition(pendingEnvelope.transcript.entryIds == ["server"], "A local input must not be treated as owner history")
 precondition(SessionEnvelope.prepare("not json") == nil && SessionEnvelope.prepare(#"{"v":1,"overflow":true}"#)!.overflow)
 precondition(envelope.accepted(generation: 0, after: (-1, -1)), "A newer runtime generation resets the cursor")
 precondition(!envelope.accepted(generation: 0, after: (1, -1)), "Older generations drop")

@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
+  const previousBroadcastChannel = globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel = undefined;
   const flock = new Flock('synthetic');
   flock.set(['e', 'session-s1'], true, 1);
   flock.set(['e', 'machine-m1'], true, 1);
@@ -32,11 +35,14 @@ test('persistent runtime applies live increments to the existing replica and adv
   const envelopes = [];
   const replies = new Map();
   let respond;
+  const machineBootstrap = Promise.withResolvers();
+  const pickerReady = Promise.withResolvers();
   globalThis.__runtimeTestClient = class {
     constructor({ url }) {
       this.isMeta = decodeURIComponent(url).endsWith(':meta');
     }
     async bootstrap() {
+      if (!this.isMeta) await machineBootstrap.promise;
       return {
         ok: true,
         result: {
@@ -81,6 +87,11 @@ test('persistent runtime applies live increments to the existing replica and adv
                 }),
               ),
             );
+          if (
+            message.kind === 'event' &&
+            message.method === 'creationOptionsChanged'
+          )
+            pickerReady.resolve();
           if (message.kind === 'event' && message.method === 'catalog')
             nextEvent?.(message.payload);
         },
@@ -97,6 +108,12 @@ test('persistent runtime applies live increments to the existing replica and adv
       {
         name: 'synthetic-stream',
         setup(build) {
+          build.onResolve({ filter: /^loro-crdt$/ }, () =>
+            build.resolve('loro-crdt/base64', {
+              kind: 'import-statement',
+              resolveDir: process.cwd(),
+            }),
+          );
           build.onResolve(
             { filter: /^@loro-dev\/streams-crdt\/loro$/ },
             () => ({ path: 'presence', namespace: 'presence-test' }),
@@ -160,70 +177,22 @@ test('persistent runtime applies live increments to the existing replica and adv
   await import(
     `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
   );
-  globalThis.dataRuntime.receive(
-    JSON.stringify({
-      v: 1,
-      gen: 1,
-      kind: 'request',
-      id: 'hello',
-      method: 'hello',
-      payload: { protocol: 1, gen: 1 },
-    }),
+  const contract = JSON.parse(
+    await readFile(
+      new URL(
+        '../../../../packages/cloud-runtime/contract/runtime-contract.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
   );
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(envelopes.shift(), {
-    v: 1,
-    gen: 1,
-    kind: 'result',
-    id: 'hello',
-    method: 'hello',
-    payload: {
-      protocol: 1,
-      methods: [
-        'hello',
-        'ensureSession',
-        'start',
-        'setActive',
-        'ping',
-        'openSession',
-        'closeSession',
-        'releaseReserve',
-        'restoreSessions',
-        'publishedShares',
-        'promptShortcuts',
-        'remoteSettings',
-        'agentRoles',
-        'mentionCatalog',
-        'creationOptions',
-        'projectGroups',
-        'localProjects',
-        'sessionSharing',
-        'sessionPreview',
-        'iosSimulatorControl',
-        'itemDetail',
-        'turnDiff',
-        'workspaceChanges',
-        'fileDiff',
-        'readFile',
-        'listDir',
-        'forkSession',
-        'createTab',
-        'createSession',
-        'deleteSession',
-        'archiveSession',
-        'setTabClosed',
-        'pinSession',
-        'markSessionRead',
-        'renameSession',
-        'respondPermission',
-        'controlTurn',
-        'checkTurnQuota',
-        'editSession',
-        'sendTurn',
-        'probeSchema',
-      ],
-    },
-  });
+  const hello = await call('hello', { protocol: 1, gen: 1 });
+  assert.equal(hello.kind, 'result');
+  assert.equal(hello.payload.protocol, 1);
+  assert.deepEqual(
+    hello.payload.methods.toSorted(),
+    Object.keys(contract.runtimeCalls).sort(),
+  );
   const turn = {
     sessionId: 's1',
     machineId: 'm1',
@@ -255,6 +224,15 @@ test('persistent runtime applies live increments to the existing replica and adv
     knownRepos: { 'm1:local:p1': 'Afilmory/afilmory' },
   });
   assert.equal(started.kind, 'result');
+  await pickerReady.promise;
+  assert.equal(
+    envelopes.some(
+      (event) =>
+        event.kind === 'event' && ['catalog', 'synced'].includes(event.method),
+    ),
+    false,
+  );
+  machineBootstrap.resolve();
   const initial = JSON.parse((await first).catalog);
   assert.equal(initial.sessions[0].title, 'Before');
   assert.equal(
@@ -452,4 +430,5 @@ test('persistent runtime applies live increments to the existing replica and adv
   delete globalThis.webkit;
   delete globalThis.__runtimeTestClient;
   delete globalThis.dataRuntime;
+  globalThis.BroadcastChannel = previousBroadcastChannel;
 });

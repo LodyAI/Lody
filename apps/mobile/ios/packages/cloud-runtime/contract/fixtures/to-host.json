@@ -1367,5 +1367,13 @@
       "code": "metadata_not_ready",
       "retryable": false
     }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "forget-input-1",
+    "method": "forgetPendingInput",
+    "payload": {}
   }
 ]

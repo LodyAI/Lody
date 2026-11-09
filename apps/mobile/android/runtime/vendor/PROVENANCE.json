@@ -4,5 +4,55 @@
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
   "export": "git archive 2f55abadada37d5bf2fd348f20e7b5dbe39b93fa apps/mobile/ios/packages/cloud-runtime",
-  "note": "Whole-package export of reviewed immutable local source commit retained at refs/heads/snapshot/mobile-operation-runtime; no local overlays. Relative to e0e7ddc076b998e404f973b2990994e29e85c805, only session ItemSummary, session projection, and operation-presentation change. Adds read-only operation progress/completion/batch cards and notices, preserving duplicate suppression and failure details. Dependencies and licenses are unchanged."
+  "note": "Whole-package export of reviewed immutable local source commit retained at refs/heads/snapshot/mobile-operation-runtime; no local overlays. Relative to e0e7ddc076b998e404f973b2990994e29e85c805, only session ItemSummary, session projection, and operation-presentation change. Adds read-only operation progress/completion/batch cards and notices, preserving duplicate suppression and failure details. Dependencies and licenses are unchanged.",
+  "roostHistory": {
+    "files": [
+      "README.md",
+      "src/runtime/handlers/lifecycle.ts",
+      "src/runtime/archive-session.ts",
+      "src/runtime/handlers/sessions.ts",
+      "src/runtime/handlers/sharing.ts",
+      "src/runtime/project.ts",
+      "src/runtime/session.ts",
+      "src/runtime/roost-history.ts",
+      "package.json",
+      "contract/runtime-contract.json",
+      "src/contract/methods.ts",
+      "src/runtime/upstream-roost-history.ts",
+      "src/runtime/upstream-roost.d.ts",
+      "src/runtime/upstream-roost.js",
+      "licenses/acp-extension-dsh-LICENSE.txt",
+      "src/contract/sessions.ts",
+      "src/runtime/create-session.ts",
+      "contract/fixtures/to-host.json",
+      "contract/fixtures/to-runtime.json"
+    ],
+    "note": "The iOS asset build verifies the Roost browser module against the pinned source and shared input refactor. Android snapshots the generated module and licenses verbatim. The authoring source and generator stay in iOS.",
+    "upstream": {
+      "repository": "https://github.com/LodyAI/Lody",
+      "commit": "8c27d5a2a5fdfb722ef84bf719dd889f5e5c79c7",
+      "sources": [
+        "packages/shared/src/session-data/history-patches.ts",
+        "packages/shared/src/message-schemas.ts",
+        "packages/components/src/lib/roost-session-bridge.ts",
+        "packages/components/src/lib/roost-history-cache.ts",
+        "packages/shared/src/history-write-schema.ts",
+        "packages/shared/src/session-input.ts",
+        "packages/shared/src/machine-protocol-capabilities.ts",
+        "packages/components/src/lib/session-accepted-inputs.ts",
+        "packages/components/src/lib/session-input-storage.ts",
+        "packages/components/src/lib/e2ee-local-data.ts",
+        "packages/components/src/lib/session-send-delivery.ts",
+        "packages/components/src/lib/session-send-resources.ts",
+        "packages/components/src/lib/encrypted-dispatch-outcome.ts",
+        "packages/shared/src/repo-doc-meta.ts",
+        "packages/shared/src/time-sync.ts"
+      ],
+      "sharedSourceChanges": [
+        "packages/components/src/lib/workspace-accepted-inputs.ts",
+        "packages/components/src/lib/session-send-delivery.ts",
+        "packages/components/src/lib/session-send-resources.ts"
+      ]
+    }
+  }
 }

@@ -1,15 +1,40 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 111-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `2f55abadada37d5bf2fd348f20e7b5dbe39b93fa` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` snapshots this monorepo's `apps/mobile/ios/packages/cloud-runtime`
+verbatim. `vendor/PROVENANCE.json` records the base commit and reviewed updates.
+`vendor/SHA256.json` records every mirrored file. Each asset build checks the
+snapshot for changed, added or missing files and symlinks.
+
+For Roost, snapshot the generated `src/runtime/upstream-roost.js` and the runtime
+licenses. Keep `vendor/upstream-roost/` and `scripts/build-upstream-roost.mjs` in
+the iOS package, where the iOS asset build verifies the generated module.
 
 For an intentional update:
 
-1. Select and record a reviewed upstream commit. Export only `apps/mobile/ios/packages/cloud-runtime` into a temporary directory using `git archive <commit> apps/mobile/ios/packages/cloud-runtime`; do not copy a live checkout wholesale.
+1. Select and record a reviewed upstream commit. Export `apps/mobile/ios/packages/cloud-runtime` into a temporary directory using `git archive <commit> apps/mobile/ios/packages/cloud-runtime` and omit the two Roost authoring paths above.
 2. Compare that export against the current snapshot. Review protocol changes, licensing and browser dependencies. Preserve Android adaptation in `runtime/src`, outside the snapshot.
 3. Replace the snapshot only after reviewing the diff; update PROVENANCE and SHA256 together. Generate hashes with the exported `hashes()` function in `runtime/snapshot.mjs`, directed at the reviewed source directory. No build regenerates the manifest automatically.
 4. Run snapshot verification, `npm ci`, JS tests, asset build, JVM and Android bridge tests. Update `runtime/contract/fixtures.json` only for an intentional contract change. Capture actual WebView/WASM results and verify release assets contain no diagnostics.
 
 The production lockfile remains pinned. Phase 1 reported Zod advisory **GHSA-mrhx-c7xc-m3w5** against 3.25.76. Phase 2 pins **4.6.7** and verifies real shared schemas: accepted identities, strict extra-field rejection, shortcut variants, share object validation, and oversized constrained collections failing before per-item error allocation. The oversized-input test failed on v3 and passes on the patched version. `npm audit --omit=dev` reports zero known vulnerabilities for this lockfile. No source snapshot changes or v3 compatibility shim were needed.
+
+The Roost update in `PROVENANCE.json` records the upstream bridge, input
+coordinator and storage packaged in the browser module. With Developer Mode and
+the Roost History beta preference enabled, new conversations and Tabs use Roost
+on compatible owners and Loro on other owners. Session metadata stores the choice.
+
+Roost sessions use the owner machine's encrypted v3 history RPC while Loro carries
+the control document and queue. The upstream coordinator persists pending inputs
+in IndexedDB under the account and workspace, recovers the original input after
+restart, and serializes inputs for a session. Sign-out does not clear the pending
+input database. Queue-to-guide conversion preserves the queue item when local input
+saving fails. Archiving or deleting a Roost session cancels its pending inputs before changing metadata.
+A user can retry the original input after a failure, or cancel a pending
+input while its session is syncing,
+although an owner may already
+have accepted it. The native transcript opens at the latest page and requests
+older pages when needed. The Android runtime test exercises the bundled production
+session module with a synthetic Streams peer.
 
 References: https://github.com/advisories/GHSA-mrhx-c7xc-m3w5 and https://zod.dev/v4/changelog. Audit evidence is retained separately for each phase.
 
