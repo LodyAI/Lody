@@ -431,6 +431,144 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it('selects the new epoch when every key install outlasts its deadline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-slow-key-install-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    let slow = false;
+    // Each slow mailbox page waits for the test, which first lets the 10 s deadline pass.
+    const pages: { entered: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> }[] =
+      [];
+    let slowFetches = 0;
+    const nextPage = () => {
+      const signals = {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      };
+      pages.push(signals);
+      return signals;
+    };
+    try {
+      const accountId = 'synthetic-slow-key-account';
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+      const stagedGroup = fixture.stagedGroup;
+      if (!stagedGroup) throw new Error('missing synthetic epoch publication');
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      });
+      const devicePublicKey = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.toBytes()),
+          signingPublicKey: devicePublicKey,
+        })
+      );
+      let history = page(fixture.records);
+      vi.stubGlobal('fetch', async () =>
+        Response.json({ status: 'success', value: encodeEpochStagedGroup(stagedGroup) })
+      );
+      const stagingPort = createCloudE2eePort({
+        authBaseUrl: 'https://synthetic-staging.convex.cloud',
+      });
+      const cloud = {
+        getHistory: async () => history,
+        readEpochGroup: stagingPort.readEpochGroup,
+        mailboxCall: async (
+          method: keyof E2eeMailboxRequests,
+          input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+        ) => {
+          if (method === 'fetch') {
+            // A slow link: every mailbox page takes longer than the install deadline.
+            if (slow) {
+              const page = pages[slowFetches++] ?? nextPage();
+              page.entered.resolve();
+              await page.release.promise;
+            }
+            return {
+              items:
+                (input as E2eeMailboxRequests['fetch']).epoch === 0
+                  ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                  : [],
+              next: null,
+            };
+          }
+          if (method === 'status')
+            return {
+              ...(input as E2eeMailboxRequests['status']).slot,
+              revision: 0,
+              status: 'EnvelopeStored',
+            };
+          if (method === 'report') return null;
+          throw new Error('unexpected mailbox operation');
+        },
+      } as CloudE2eePort;
+      host = await openCliE2eeWorkspaceLegacy({
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => {},
+      });
+      await host.refresh();
+      expect(await host.status()).toMatchObject({ epoch: 0, epochPhase: 'ready' });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      slow = true;
+      const first = nextPage();
+      const second = nextPage();
+      history = page([...fixture.records, ...fixture.rotationSuffix]);
+      void host.refresh();
+      await first.entered.promise;
+      // The install outlasts its deadline, and the 1 s retry finds it still running.
+      await vi.advanceTimersByTimeAsync(11_000);
+      first.release.resolve();
+      // A finished slow install must select the epoch, not fetch the mailbox again.
+      const selected = async () => {
+        for (let turn = 0; turn < 500; turn++) {
+          if ((await host!.status()).epochPhase === 'ready') return 'selected';
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        return 'still installing';
+      };
+      const outcome = await Promise.race([
+        second.entered.promise.then(() => 'fetched again'),
+        selected(),
+      ]);
+      second.release.resolve();
+      expect(outcome).toBe('selected');
+      expect(await host.status()).toMatchObject({
+        epoch: 1,
+        hasCurrentKey: true,
+        epochPhase: 'ready',
+      });
+    } finally {
+      for (const page of pages) page.release.resolve();
+      vi.useRealTimers();
+      await host?.close();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
     'receives the current RPC key through the real workspace with %s',
     async (mode) => {
