@@ -610,8 +610,11 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       // The collection owns the ground; the layout must not repaint it at full detent.
       configuration.backgroundColor = .clear
       if flat {
-        configuration.headerTopPadding = flatSystem && index > 0 && !(self?.chatStyle ?? false)
-          ? LodyDesign.Rail.groupGap - Self.flatHeaderTop : 0
+        configuration.headerTopPadding = 0
+        if flatSystem, index > 0 {
+          configuration.headerTopPadding = self?.chatStyle == true
+            ? LodySpacing.lg : LodyDesign.Rail.groupGap - Self.flatHeaderTop
+        }
         configuration.showsSeparators = flatSystem && !(self?.chatStyle ?? false)
       }
       // `.firstItemInSection` splits the inset card into a header card and an
@@ -654,9 +657,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
       // Plain lists pin headers by default; a clear header would float over rows.
       for item in section.boundarySupplementaryItems { item.pinToVisibleBounds = false }
-      if flatSystem, self?.chatStyle == true, index > 0 {
-        section.contentInsets.top = LodySpacing.lg
-      } else if flat, !flatSystem, index > 0, outline {
+      if flat, !flatSystem, index > 0, outline {
         section.contentInsets.top = LodyDesign.Rail.bandGap
       } else if flat, !flatSystem, index > 0 {
         section.contentInsets.top = model?.gap == .group ? LodyDesign.Rail.groupGap : LodyDesign.Rail.sectionGap
@@ -1444,10 +1445,9 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       view.accessibilityLabel = nil
     }
     if flatSystem, chatStyle {
-      // The group label sits at the list edge, clear of the previous group and with
-      // room before its own rows so the label reads as a heading, not a row.
+      // Group spacing belongs above the header; keep the label close to its rows.
       content.directionalLayoutMargins = header
-        ? .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: LodySpacing.sm, trailing: LodyLayout.listEdgeX)
+        ? .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: LodySpacing.xs, trailing: LodyLayout.listEdgeX)
         : .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: 0, trailing: LodyLayout.listEdgeX)
     } else if flatSystem {
       let footerLeading = LodyFlatRows.textLeading(sectionHasIcons: LodyFlatRows.sectionHasIcons(section.rows))
