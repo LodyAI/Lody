@@ -145,7 +145,9 @@ turn-frozen binding's token. The OSS local-only desktop has no Lody Memory.
 
 Writes record provenance: Agent writes carry user, session and turn and use
 revision checks; writes through a mount are attributed to user and machine only,
-and concurrent mount writes are last-write-wins with the journal as recovery.
+and concurrent mount writes require recoverable history. P1 found that Drive9
+journals alone do not restore overwritten files; trusted mount attribution and
+recoverable history remain implementation gates.
 Unlinking or deleting a Role revokes later Agent access without destroying
 content; deleting a memory removes its files. Previously disclosed conversation
 context is not erased. Linking requires a daemon advertising `builtinMemory: 2`.

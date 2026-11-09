@@ -14,8 +14,10 @@ hosted [drive9](https://drive9.ai/) file service. A memory is **private** (reach
 only through the daemon's SDK) or **shared** (mounted read-write on workspace
 members' devices); visibility can change after creation. The trade-offs are that
 memory content becomes plaintext on the hosted service, memory works only online,
-and the OSS desktop build has no Lody Memory. Nothing here is verified yet; the
-[P1 checks](#p1-verification-before-implementation) gate implementation.
+and the OSS desktop build has no Lody Memory. P1 establishes basic scoped file
+access, but the pinned Drive9 cannot supply scoped events, mount credential hot
+rotation, or recoverable file history. The [P1 gates](#p1-verification-before-implementation)
+remain open; these gaps prevent implementing the original integration unchanged.
 
 ## Decision
 
@@ -81,9 +83,18 @@ A hosted credential service holds each tenant's owner key and issues short-lived
 tokens scoped to a path prefix (`POST /v1/tokens`, `{prefix, ops}`). Tokens are
 issued per memory and per user, and can be revoked.
 
-- The daemon keeps tokens in memory and passes a mount's token through the
-  environment (`DRIVE9_VAULT_TOKEN`).
-- Tokens are never written to `~/.drive9/config`.
+- The daemon keeps filesystem tokens in memory and passes a mount's token through
+  `DRIVE9_API_KEY`, with `DRIVE9_VAULT_TOKEN` removed from the child environment.
+  Vault tokens authorize secret reads; they are not filesystem-scoped API tokens.
+- Lody must avoid writing tokens to `~/.drive9/config`. This alone does not prevent
+  credential persistence: default FUSE mount state stores the bearer in a `0600`
+  JSON file. Its `--no-persist-credentials` option requires foreground or
+  unsupervised operation and is unavailable for WebDAV. WebDAV state omits the
+  bearer, but its in-memory client retains the original token.
+- Mount credentials are snapshots. Renewal currently requires unmount/remount;
+  changing configuration or restarting a supervisor with saved credentials does
+  not provide hot rotation. Safe draining, open handles and failed flushes remain
+  integration gates.
 - Members of a shared memory get `read, list, search, write, delete`.
 
 In this repository the service is an injected `packages/platform` cloud port, and
@@ -100,16 +111,31 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 
 ## Provenance and concurrency
 
-- **SDK writes.** Each write sets the actor and sends `expectedRevision`. A
-  revision conflict is returned to the agent as a conflict, not retried blindly.
-  Each successful write appends a drive9 journal entry:
+- **SDK writes.** The intended contract sets actor and `expectedRevision`, returning
+  conflicts without blind retries. Provenance needs
   `{path, changeId, actor, userId, sessionId, turnId, before/after revision}`.
-- **Mount writes.** The mount uses actor `lody:<userId>:<machineId>`. The daemon
-  observes these writes through the SSE event stream and records them, attributed
-  to user and machine but not to a turn.
-- **Concurrent mount writes.** The last write wins; the journal supports recovery.
-- **History.** drive9 has no per-file version history, so the journal, together
-  with whatever content or revision references it holds, is the history.
+  The filesystem token cannot append journals. A file write followed by a separate
+  append is not atomic; crash recovery and idempotent reconciliation need a design.
+- **Mount writes.** Attribution to user and machine remains required. The pinned
+  WebDAV mount never configures `SetActor`, and `X-Dat9-Actor` is caller-supplied,
+  not authenticated identity. FUSE generates a mount actor, not the proposed
+  `lody:<userId>:<machineId>` identity. Neither establishes trusted provenance.
+- **Events.** Filesystem tokens receive 403 from `/v1/events` and `/v1/journals`.
+  Owner SSE is tenant-wide; the inspected stream loop does not revalidate expiry
+  or revocation. Do not distribute owner keys to daemons to bypass this gap.
+  Candidate fixes are upstream scoped events with stream revocation, or a hosted
+  relay enforcing current membership and path scope on replay and live delivery.
+  Neither candidate is implemented or approved here.
+- **Concurrent mount writes.** WebDAV buffers whole files and commits unconditional
+  writes on close. Its locks are local to each handler, so another mount or SDK
+  writer can be overwritten. SDK revision checks protect conditional SDK writes
+  only; they do not make subsequent WebDAV writes conditional.
+- **History.** Journal append/read/verify works, but does not capture file versions
+  or restore them. Revision numbers alone cannot recover overwritten bytes; this
+  pin rejects journal artifact references and has no implemented seal operation.
+  Recoverable immutable content and its atomic association with each mutation
+  remain required before claiming last-write-wins recovery. Journal hashes verify
+  consistency, not authenticity against an administrator able to rewrite the chain.
 
 ## Alternatives considered
 
@@ -138,30 +164,63 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 
 ## P1 verification before implementation
 
-1. **SSE scope.** Does a prefix-scoped token's `/v1/events` stream exclude events
-   for other paths? If not, the daemon must use a separate credential to watch
-   events. This is the largest risk.
-2. **Token renewal.** How does a running mount pick up a renewed token without a
-   remount or lost writes?
-3. **macOS WebDAV.** What are the latency and editor behavior (atomic saves,
-   temporary files) on a mounted memory?
-4. **Search and concurrency.** How good is `grep` recall on Markdown? Do
-   `expectedRevision` conflicts behave as expected between the SDK and the mount?
-5. **Hosting.** What do per-tenant cost, quota and provisioning latency look like
-   for a new workspace?
+P1 is not an implementation approval. The pinned integration needs the following
+work before it can meet the proposed contract:
+
+| Area | Evidence and remaining gate |
+| --- | --- |
+| Scoped access | Allowed file reads succeed; sibling reads and root listing are denied. SSE and journals are denied entirely. Design scoped event delivery without sending tenant owner keys to devices. |
+| Renewal | Mount clients retain their initial credentials. Establish a tested drain/remount protocol or add upstream rotation; no-loss renewal is unverified. |
+| macOS WebDAV | Scoped macOS mounts read/write successfully, but replacing an existing file with `os.replace(tmp, target)` fails with `EINVAL`. Previously read contents remain readable from cache after expiry/revocation; uncached reads and new writes fail. Atomic saves and safe renewal remain blocked. |
+| Search and concurrency | Literal English and Chinese Markdown searches return the fixture; stale conditional writes return 409. This is not a recall benchmark or protection against unconditional mount writes. |
+| Provenance and recovery | Journal permissions and append/verify work; authenticated mount attribution, atomic provenance and restoration of overwritten bytes remain unresolved. |
+| Hosting | Local tenant readiness took approximately 6.6–9.7 seconds in two successful samples on TiDB v8.5.1. This is not hosted provisioning latency. Hosted price, quotas and provisioning SLA remain unverified; no cloud tenant was provisioned. |
 
 Pending question: should members get a read-only role later? The current decision
 is read-write for all members.
 
 ## Verification
 
-Nothing is verified yet. The drive9 facts above come from reading the
-`mem9-ai/drive9` source at commit `b866b426` (2026-11-07):
+Evidence is pinned to [`mem9-ai/drive9` commit
+`b866b426ff4ab8d8409c95e77ad0cc946908bcca`](https://github.com/mem9-ai/drive9/tree/b866b426ff4ab8d8409c95e77ad0cc946908bcca).
+Executed local HTTP probes used a synthetic tenant and a token restricted to
+`/memories/a/`, with a second memory at `/memories/b/`. They established allowed
+read 200, sibling/root denial 403, events/journals denial 403, successful
+conditional write followed by stale-revision 409, and new-request rejection 401
+after revocation. Search ran before overwriting the fixture and returned its path
+for both `pnpm` and `中文`. These observations do not establish live stream
+revocation, broad search recall, or application recovery.
 
-- `cmd/drive9/cli/mount_webdav.go` (`ResolveMountMode`);
-- `pkg/server/tokens.go` (scoped tokens);
-- `pkg/server/auth.go` (journal permissions);
-- `clients/drive9-js/src/client.ts` (`expectedRevision`, `setActor`,
-  `watchEvents`, `grep`).
+Reproducible upstream test boundaries:
 
-The [memory Spec](../../../../specs/agent-role-memory.md) remains draft.
+- `pkg/server/tokens_test.go`: `TestScopedTokenRevokeInvalidatesToken`.
+- `pkg/server/server_test.go`: `TestWriteWithExpectedRevisionConflict`.
+- `pkg/server`: `TestScopedBusinessEndpointGuardDeniesEndpointsOutOfWorkspaceZonesScope`,
+  `TestJournalPermissionsFromClaimsFailsClosedForScopedKeys`,
+  `TestParseFSScopeOpsRejectsSearchWithoutRead`, `TestJournalHTTPCreateAppendSearchVerify`,
+  `TestJournalHTTPFullEntriesRequireReadPermission`,
+  `TestJournalHTTPAppendSourcePermissions`, and
+  `TestJournalHTTPSearchOmitsZeroTimesAndSupportsRepeatedLabels`.
+
+These tests executed with a local TiDB database using `go test ./pkg/server
+-run '<test-name-regexp>' -count=1 -v -timeout=180s`. The isolated database required
+`tidb_ddl_enable_fast_reorg=OFF` and `tidb_enable_dist_task=OFF` to avoid the local
+DDL ingest free-space precheck; that setup is not a production recommendation.
+
+A live macOS WebDAV probe confirmed scoped mounts in the OS mount table. API
+write → mounted read and mounted write → API read returned matching contents;
+API rename → mounted read also worked. Atomic replacement over an existing file
+failed with errno 22, leaving the temporary source present. After revocation and
+a separate 20-second token expiry, new API requests returned 401, cached mounted
+contents remained readable, uncached reads returned ENOENT, and attempted new
+writes returned EIO without creating a server file. This does not establish
+revocation of dirty/open handles or lossless renewal. Probe mounts were unmounted.
+Single local observations were about 59 ms API-to-mount and 183 ms mount-to-API,
+including subprocess and verification overhead; they are not latency percentiles
+or hosted-service predictions.
+
+Source-only findings additionally rely on `pkg/server/auth.go`,
+`pkg/server/sse.go`, `pkg/server/tokens.go`, `pkg/webdav`,
+`cmd/drive9/cli/mount_webdav.go`, the CLI mount credential/state code, and
+`clients/drive9-js/src/client.ts`. Source inspection is not a live mount or recovery
+test. The [memory Spec](../../../../specs/agent-role-memory.md) remains draft.
