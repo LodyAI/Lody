@@ -49,20 +49,20 @@ class SettingsController: UIViewController {
   private func open(_ id: String) {
     let workspace = state.account == nil ? nil : state.workspace
     let native = [
-      "preferences": "preferences", "appearance": "appearance-settings", "about": "about",
+      "preferences": "preferences", "about": "about",
     ]
     let workspacePages = [
       "agent-roles": "agent-roles", "prompt-shortcuts": "prompt-shortcuts", "project-visibility": "project-visibility",
-      "github-settings": "github-settings", "ai-usage": "ai-usage", "memory-settings": "memory-settings",
+      "github-settings": "github-settings", "ai-usage": "ai-usage",
       "published-shares": "published-shares",
     ]
-    let remote = ["remote-machine": "machine", "remote-agent": "agent", "remote-mcp": "mcp"]
+    let remote = ["remote-machine": "machine", "remote-agent": "agent"]
     if let page = native[id] {
       push(page, title: title(id))
     } else if let page = workspacePages[id], workspace != nil {
       push(page, title: title(id), params: state.scope)
     } else if let kind = remote[id], workspace != nil {
-      push("remote-settings", title: text("remote.\(kind)"), params: state.scope.merging(["kind": kind]) { _, new in new })
+      push("\(kind)-settings", title: text("remote.\(kind)"), params: state.scope)
     } else if id == "workspace-general", let workspace {
       var params: [String: Any] = [
         "workspaceId": workspace.id, "name": workspace.name, "color": LodyAccent.hex(.lodyAccent.resolvedColor(with: traitCollection)),
@@ -95,9 +95,9 @@ class SettingsController: UIViewController {
 
   private func title(_ id: String) -> String {
     let keys = [
-      "preferences": "preferences.title", "appearance": "appearance.title", "about": "section.about",
+      "preferences": "preferences.title", "about": "section.about",
       "agent-roles": "roles.title", "prompt-shortcuts": "shortcuts.title", "project-visibility": "projects.title",
-      "github-settings": "github.title", "ai-usage": "aiUsage.title", "memory-settings": "memory.title",
+      "github-settings": "github.title", "ai-usage": "aiUsage.title",
       "published-shares": "shares.title",
     ]
     return keys[id].map(text) ?? ""

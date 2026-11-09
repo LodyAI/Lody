@@ -323,47 +323,12 @@
     "payload": {
       "settings": [
         {
-          "kind": "mcp",
-          "id": "mcp-2",
-          "name": "Search",
-          "readOnly": false,
-          "detail": "stdio",
-          "enabledByDefault": true,
-          "configured": true
+          "kind": "machine",
+          "id": "machine-1",
+          "name": "Studio",
+          "readOnly": false
         }
       ]
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
-    "id": "req-memory",
-    "method": "memorySettings",
-    "payload": {
-      "machines": [
-        {
-          "id": "machine-1",
-          "name": "Studio"
-        }
-      ],
-      "machineId": "machine-1",
-      "entries": [
-        {
-          "machineId": "machine-1",
-          "providerId": "nowledge-mem",
-          "memoryId": "memory-1",
-          "name": "Work"
-        }
-      ],
-      "identities": [
-        {
-          "id": "memory-1",
-          "name": "Work"
-        }
-      ],
-      "status": "ready",
-      "cached": false
     }
   },
   {
@@ -516,17 +481,6 @@
     "method": "remoteSettings",
     "error": {
       "code": "setting_read_only",
-      "retryable": false
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "error",
-    "id": "req-memory",
-    "method": "memorySettings",
-    "error": {
-      "code": "memory_forbidden",
       "retryable": false
     }
   },

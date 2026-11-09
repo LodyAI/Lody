@@ -41,6 +41,8 @@ These rules also bind callers outside the owning directory.
 
 - Navigating native list rows retain selection until the owning controller returns. Deselect alongside the navigation transition and restore selection when an interactive return is cancelled; ordinary action rows deselect immediately. Diffable snapshots preserve selection themselves; never reselect a captured row in snapshot completion, which can run after return-time deselection.
 
+- Settings offers the app icon under Preferences. Do not restore Appearance, MCP-server management or Memory management pages; conversation MCP selection and Role memory bindings remain independent.
+
 ## Pages and native APIs
 
 - `LodyShell` owns the root navigation controller and sheet navigation controllers. `LodyPageController` hosts native content, carries results and clears callbacks on close. Reuse `pushNative`, `presentNative`, `finish` and `close`; do not add a second presentation manager. Conversation file routes retain per-path ownership until the preview closes (including interactive dismissal), not merely until presentation returns; different file paths remain independent.

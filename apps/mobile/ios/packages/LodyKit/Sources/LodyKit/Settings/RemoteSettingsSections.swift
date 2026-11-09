@@ -9,8 +9,6 @@ struct RemoteSetting: Codable, Equatable, Sendable {
   var readOnly: Bool?
   var detail: String?
   var prompt: String?
-  var enabledByDefault: Bool?
-  var configured: Bool?
   var updatedAt: Double?
 
   var settingId: String { "setting:\(kind):\(machineId ?? ""):\(id)" }
@@ -21,14 +19,12 @@ struct RemoteSettingEdit: Encodable, Equatable, Sendable {
   var item: RemoteSetting
   var name: String
   var prompt: String?
-  var enabledByDefault: Bool?
 }
 
 struct RemoteSettingsRequest: Encodable, Equatable, Sendable {
   var workspaceId: String
   var kind: String
   var edit: RemoteSettingEdit?
-  var remove: RemoteSetting?
 }
 
 typealias RemoteSettingsService = @MainActor (RemoteSettingsRequest) async throws -> [RemoteSetting]
@@ -84,14 +80,12 @@ enum RemoteSettingsFailure {
   static func message(_ error: Error, request: RemoteSettingsRequest) -> String {
     let described = "\(error) \((error as NSError).localizedDescription)"
     let mapping: [(String, String)] = [
-      ("setting_read_only", request.kind == "mcp" ? "settings.mcp.readOnly" : "settings.remote.readOnly"),
+      ("setting_read_only", "settings.remote.readOnly"),
       ("setting_conflict", "settings.remote.conflict"),
       ("setting_duplicate", "settings.remote.duplicate"),
-      ("mcp_connection_missing", "settings.mcp.missingConnection"),
-      ("setting_write_unknown", "settings.mcp.writeUnknown"),
     ]
     if let key = mapping.first(where: { described.contains($0.0) })?.1 { return String(localized: String.LocalizationValue(key), bundle: .lody) }
-    let writing = request.edit != nil || request.remove != nil
+    let writing = request.edit != nil
     return String(localized: String.LocalizationValue(writing ? "settings.remote.saveFailed" : "settings.remote.loadFailed"), bundle: .lody)
   }
 }
@@ -188,13 +182,9 @@ enum RemoteSettingsSections {
     guard !items.isEmpty else { return [] }
     var section = LodyListSection()
     section.id = "settings"
-    if kind == "machine" {
-      section.footer = remote("machineFooter")
-      section.rows = machineRows(items, presence: shown)
-    } else {
-      section.footer = remote("mcpHint")
-      section.rows = items.map(mcpRow)
-    }
+    guard kind == "machine" else { return [] }
+    section.footer = remote("machineFooter")
+    section.rows = machineRows(items, presence: shown)
     return [section]
   }
 
@@ -223,15 +213,6 @@ enum RemoteSettingsSections {
       row.image = "desktopcomputer"
       return row
     }
-  }
-
-  private static func mcpRow(_ item: RemoteSetting) -> LodyListRow {
-    var row = base(item)
-    row.subtitle = [item.detail ?? "", item.machineName ?? "", item.configured == false ? String(localized: "settings.mcp.notConfigured", bundle: .lody) : ""]
-      .filter { !$0.isEmpty }.joined(separator: " · ")
-    row.wrapSubtitle = true
-    row.value = String(localized: String.LocalizationValue(item.enabledByDefault == true ? "settings.mcp.defaultOn" : "settings.mcp.defaultOff"), bundle: .lody)
-    return row
   }
 
   private static func agentFooter(_ state: String, rings: Bool) -> String {

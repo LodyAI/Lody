@@ -71,8 +71,8 @@ What that week actually looked like:
 - **Native Input (`ChatComposerView`)**: Pixel-perfect keyboard avoidance matching system input methods, local draft persistence with automatic restoration, and real-time model thinking effort controls.
 
 The iOS app uses fixed Ink accents in both light and dark appearances, including
-Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
-without an accent-color picker. Process status labels use the same regular type
+Send and Stop; conversation activity/status colors remain unchanged. Preferences contains the app-icon picker. Settings has no Appearance, MCP servers,
+or Memory pages; dark canvases use fixed soft backgrounds. Process status labels use the same regular type
 as their duration, without a leading loading icon. The final visible command group
 shimmers while its turn runs, even after its tools complete or record a duration,
 and when hidden thinking calls follow it.
@@ -360,8 +360,8 @@ App-owned dark backgrounds are fixed soft `#111113`. `LodyTint` provides plain,
 grouped and opaque canvases, while `LodyAppearance` uses the same dark base for
 `bgBase` and `bgGrouped`. Light backgrounds retain their existing semantics.
 Camera and simulator media surfaces use the fixed dark color in both themes;
-launch uses the matching dynamic `CanvasBackground` asset. Appearance settings
-only offer the app icon: legacy `darkBackground` values are ignored, not migrated.
+launch uses the matching dynamic `CanvasBackground` asset. The app icon is available under Settings → Preferences. There is no Appearance
+page; legacy `darkBackground` values are ignored, not migrated.
 This supersedes the optional pure-black background described in the historical
 Home design and settings migration documents. Masks, scrims, shadows, media
 content and foreground colors remain unchanged. The native `design` check tests

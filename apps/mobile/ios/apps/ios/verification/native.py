@@ -45,7 +45,7 @@ checks = {
     'session-sharing': ['Cloud/SessionSharing.swift'],
     'settings': ['Cloud/WorkspaceSettingsCloud.swift', 'Cloud/WorkspaceUsage.swift'],
     'workspace-settings-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/SettingsWorkspace.swift', 'Settings/ProjectVisibilitySections.swift', 'Settings/GitHubSettingsSections.swift'],
-    'settings-runtime-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/MemorySettingsSections.swift', 'Settings/PublishedSharesSections.swift'],
+    'settings-runtime-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/PublishedSharesSections.swift'],
     'remote-settings': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/SettingsWorkspace.swift', 'Settings/RemoteSettingsSections.swift', 'Sessions/SessionUsageSelection.swift', 'Chat/LodyAgentIcon.swift'],
     'session-rows': ['Sessions/SessionRelations.swift', 'LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift', 'Sessions/SessionTabSelection.swift', 'Sessions/HomeGrouping.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
     'ai-usage': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/AIUsageModels.swift', 'Settings/AIUsageSections.swift'],
