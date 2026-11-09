@@ -7,7 +7,7 @@ Translation: current
 
 ## Behavior
 
-Builtin DeepSeek Harness conversations show thoughts in independent default-open
+Builtin DeepSeek Harness and builtin Pi conversations show thoughts in independent default-open
 disclosures and tools in separate default-closed groups, preserving their order.
 Explicit toggles remain respected and search can reveal matching thoughts. Tool
 arrival must not collapse preceding thoughts. During streaming, prose stays
@@ -18,8 +18,10 @@ Interrupted turns without a final answer remain expanded. These rules apply to i
 
 Thoughts retain their label and stored type; rendering does not turn them into
 ordinary assistant text or rewrite history. Provider identity comes from Session
-metadata, not the model name. Other providers retain their existing visibility
-and folding, including when using a DeepSeek model.
+metadata, not the model name: builtin Pi shows the thoughts its ACP adapter
+forwards for any routed model, such as DeepSeek. Custom or registry launches of
+these agent types and all other providers retain their existing visibility and
+folding, including when using a DeepSeek model.
 
 ## Evidence
 
