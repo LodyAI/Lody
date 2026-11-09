@@ -3716,6 +3716,136 @@ void test(
     assert.deepEqual(clock.pending, [])
   }
 )
+/** A personal device approval on the same main-owned delivery: synthetic relay and host. */
+const personalSession = '66'.repeat(16)
+const personalRequest = `personal-${randomUUID()}`
+async function personalApprovalFixture(keyRound) {
+  let committed = false
+  let ingested = false
+  return memberIpcFixture({
+    realRefresh: true,
+    projectFailure: projectNativeFailure,
+    client: {
+      joinReadRequest: () =>
+        Effect.succeed({
+          workspaceId: 'team',
+          pairingSessionId: personalSession,
+          status: 'pending',
+          requestHex: 'cd',
+          signingPublicKey: approvalDevice
+        }),
+      appendRecord: () =>
+        Effect.sync(() => {
+          committed = true
+        }),
+      joinPublish: () => Effect.void,
+      history: () => Effect.succeed({ checkpoint: {}, nextCursor: null, admission: committed })
+    },
+    host: {
+      previewPersonalAdmission: () =>
+        Effect.succeed({
+          pairingSessionId: personalSession,
+          signingPublicKey: approvalDevice,
+          encryptionPublicKey: '88'.repeat(32),
+          credentialHash: '99'.repeat(32),
+          protection: 'os-keystore'
+        }),
+      preparePersonalAdmission: () =>
+        Effect.succeed({
+          workspaceId: 'team',
+          pairingSessionId: personalSession,
+          requestId: personalRequest,
+          recordHex: 'ab',
+          credentialHash: '99'.repeat(32)
+        }),
+      personalInvitation: () => Effect.succeed({ invitationHex: 'ef' }),
+      ingestLedgerRecords: (_workspace, page) =>
+        Effect.sync(() => {
+          if (page.admission) ingested = true
+        }),
+      keyDeliveryTarget: (_workspace, device) =>
+        Effect.sync(() => ingested && device === approvalDevice),
+      keyDeliveryEvidence: (_workspace, device) =>
+        Effect.sync(() =>
+          ingested && device === approvalDevice ? 'delivered' : 'e2ee_admission_not_ingested'
+        ),
+      keyRound
+    }
+  })
+}
+void test(
+  'a personal device approval retries its failed key delivery on a bounded backoff until the key arrives',
+  { timeout: 5000 },
+  async () => {
+    let rounds = 0
+    let outage = true
+    const f = await personalApprovalFixture(() =>
+      Effect.suspend(() => {
+        rounds += 1
+        return outage ? Effect.fail(new Error('e2ee_management_retry')) : Effect.void
+      })
+    )
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    const approved = plain(await f.ipc.approvePersonalJoin('team', personalSession))
+    assert.equal(approved.admitted, true)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    // The first round failed: the new device must not wait for another device's round.
+    assert.equal(keyDeliveryState(f, personalRequest)?.state, 'failed')
+    assert.deepEqual(
+      clock.pending.map((timer) => timer.ms),
+      [10_000]
+    )
+    // Retries stay bounded while the outage lasts.
+    for (let retry = 0; retry < 3; retry++) {
+      now += 5 * 60_000
+      clock.pending.shift().run()
+      await f.ipc.keyDeliveryIdle('A', 'team')
+    }
+    assert.equal(keyDeliveryState(f, personalRequest).state, 'failed')
+    // Once the outage clears, the next scheduled retry delivers the key.
+    outage = false
+    now += 5 * 60_000
+    clock.pending.shift().run()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, personalRequest).state, 'delivered')
+    assert.deepEqual(clock.pending, [])
+    assert.equal(rounds, 5)
+    // The admission result is not undone by any delivery failure.
+    assert.equal(approved.admitted, true)
+  }
+)
+void test(
+  'a personal device approval stops retrying a failing key delivery after its bound and keeps the admission',
+  { timeout: 5000 },
+  async () => {
+    let rounds = 0
+    const f = await personalApprovalFixture(() =>
+      Effect.suspend(() => {
+        rounds += 1
+        return Effect.fail(new Error('e2ee_management_retry'))
+      })
+    )
+    let now = 1_000
+    f.ipc.keyDeliveryNow = () => now
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    const approved = plain(await f.ipc.approvePersonalJoin('team', personalSession))
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    for (let step = 0; step < 50 && clock.pending.length > 0; step++) {
+      now += 5 * 60_000
+      clock.pending.shift().run()
+      await f.ipc.keyDeliveryIdle('A', 'team')
+    }
+    // The first round plus a fixed number of timer retries, then no more backend calls.
+    assert.deepEqual(clock.pending, [])
+    assert.equal(rounds, 9)
+    assert.equal(keyDeliveryState(f, personalRequest).state, 'failed')
+    assert.equal(approved.admitted, true)
+  }
+)
 void test(
   'the main-owned key delivery timer is bounded and ends when the signed-in account changes',
   { timeout: 5000 },

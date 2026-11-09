@@ -1709,8 +1709,9 @@ export class E2eeIpc extends IpcService {
     } catch (error) {
       appendFailure = error
     }
+    // Ledger ingest only, as for a member: key delivery must not hold the admission.
     try {
-      await this.refresh(workspaceId)
+      await this.refresh(workspaceId, { installKeys: false })
     } catch (error) {
       this.pairingFailure = error
     }
@@ -1733,6 +1734,9 @@ export class E2eeIpc extends IpcService {
       // eslint-disable-next-line preserve-caught-error
       throw new Error('e2ee_append_unconfirmed')
     }
+    // The new device gets the current key from main's delivery, which retries a failed
+    // round on its bounded backoff; a delivery failure never undoes the admission.
+    this.trackKeyDelivery(cloud.accountId, workspaceId, pending.requestId, preview.signingPublicKey)
     if (invitation === null) return { admitted: true as const, invitationPublished: false }
     try {
       await Effect.runPromise(
