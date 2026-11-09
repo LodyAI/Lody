@@ -178,6 +178,7 @@ private final class SessionPreviewFixture {
       ],
       machineIds: ["preview-mac"], machineNames: ["preview-mac": "Preview Mac"], machineSimulators: ["preview-mac": "available"]
     )
+    if bar == "archived" { catalog.sessions[0].archived = true }
     if bar == "bar-tabs", let root = catalog.sessions.first {
       var tab = root
       tab.id = "preview-second-tab"
@@ -225,6 +226,7 @@ private final class SessionPreviewFixture {
       catalog.sessions[index].isTabClosed = closed
       record(closed ? "close-tab" : "restore-tab")
     case .archive(let archived):
+      if bar == "archive-error" { throw NSError(domain: "SessionPreview", code: 1) }
       catalog.sessions[index].archived = archived
       record(archived ? "archive" : "unarchive")
     case .owner(let userId):
