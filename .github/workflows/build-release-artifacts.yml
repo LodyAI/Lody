@@ -109,6 +109,25 @@ jobs:
       - name: Compile Electron
         if: matrix.target != 'cli'
         run: pnpm --dir apps/electron exec electron-vite build --config release.vite.config.mjs
+      - name: Stage native dependencies and package without release credentials
+        if: matrix.target != 'cli'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          pnpm --dir apps/electron sync:cli
+          case "$LODY_RELEASE_TARGET" in
+            mac)
+              pnpm --dir apps/electron exec electron-sparkle-updater rebuild --arch universal
+              pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --mac --arm64 --x64 --dir --publish never
+              tar -cf unsigned-mac.tar -C apps/electron/dist mac mac-arm64
+              ;;
+            win) pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --win --x64 --publish never ;;
+            linux)
+              pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --linux snap --x64 --publish never
+              pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --linux AppImage deb --x64 --publish never
+              ;;
+            linux-arm64) pnpm --dir apps/electron exec electron-builder --config release-builder.config.mjs --linux AppImage deb --arm64 --publish never ;;
+          esac
       - name: Record build identity
         env:
           TARGET: ${{ matrix.target }}
@@ -133,6 +152,13 @@ jobs:
             packages/code-review-viewer/dist/
             packages/code-review-viewer/standalone.html
             apps/electron/out/
+            unsigned-mac.tar
+            apps/electron/dist/*.exe
+            apps/electron/dist/*.blockmap
+            apps/electron/dist/*.AppImage
+            apps/electron/dist/*.deb
+            apps/electron/dist/*.snap
+            apps/electron/dist/nightly*.yml
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
