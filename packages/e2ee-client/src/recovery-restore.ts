@@ -1,5 +1,5 @@
-/** Restore from an unlocked vault with nothing known about the workspace. No
- * product flow calls this yet, so it changes no create, join or pairing path. */
+/** Authenticated recovery helpers for personal-device hosts. Explicit recovery
+ * preserves admission and custody checks; product rollout belongs to the host. */
 import { Effect, Exit, Result, type Scope } from 'effect';
 import {
   Bytes,
