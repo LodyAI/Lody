@@ -33,6 +33,14 @@ The parent id follows the existing workspace configuration. This avoids separate
 copies at every configuration constructor. Desktop manual PTYs use
 `terminal-pty-service`, outside this agent environment contract.
 
+## Manual terminals
+
+Desktop terminals stay alive when a conversation is stopped or its idle agent
+runtime is reclaimed, including under memory pressure. Fleet owns these PTYs
+independently of the agent process, so running shell commands survive until the
+terminal is explicitly closed, the conversation is archived/deleted, or the app
+shuts down or restarts. Shell exit still ends its terminal normally.
+
 ## Automations
 
 `lody automation` registers durable JavaScript conditions that return results to
