@@ -1,0 +1,327 @@
+{
+  "sourceCommit": "886ad65f0c80635063eade5add93171440af8647",
+  "window": {
+    "startInclusive": "2026-08-09T00:00:00+08:00",
+    "endExclusive": "2026-11-10T00:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "dateField": "committer date"
+  },
+  "localHistory": {
+    "shallow": true,
+    "oldestFirstParent": "2fe304c38041a5ee8739e12d7a6ad749280d7a66 2026-08-07T02:29:41Z",
+    "windowCovered": "Local first-parent chain starts before the requested window; this is not a claim about all remote branch history."
+  },
+  "method": "Reachable first-parent commits; fix: or fix(scope): subject prefix; first-party production source extensions; tests/stories/generated/vendor/adapters excluded. A commit counts once per owner. Added+deleted is churn. Fix titles and folder size are selection signals, not measured defect rates.",
+  "publicSourceCommits": 1449,
+  "topOwnerGroups": [
+    {
+      "name": "packages/components/src/components",
+      "commits": 874,
+      "fixCommits": 546,
+      "changedLines": 296361,
+      "sourceFiles": 748
+    },
+    {
+      "name": "packages/components/src/lib",
+      "commits": 321,
+      "fixCommits": 170,
+      "changedLines": 58773,
+      "sourceFiles": 317
+    },
+    {
+      "name": "packages/shared",
+      "commits": 313,
+      "fixCommits": 152,
+      "changedLines": 62024,
+      "sourceFiles": 211
+    },
+    {
+      "name": "apps/cli/src/lib (root)",
+      "commits": 240,
+      "fixCommits": 139,
+      "changedLines": 28669,
+      "sourceFiles": 78
+    },
+    {
+      "name": "apps/cli/src/session",
+      "commits": 210,
+      "fixCommits": 139,
+      "changedLines": 51953,
+      "sourceFiles": 80
+    },
+    {
+      "name": "packages/components/src/hooks",
+      "commits": 195,
+      "fixCommits": 108,
+      "changedLines": 24992,
+      "sourceFiles": 121
+    },
+    {
+      "name": "packages/components/src/providers",
+      "commits": 160,
+      "fixCommits": 79,
+      "changedLines": 17434,
+      "sourceFiles": 52
+    },
+    {
+      "name": "apps/electron/src/main",
+      "commits": 163,
+      "fixCommits": 78,
+      "changedLines": 34862,
+      "sourceFiles": 142
+    },
+    {
+      "name": "apps/cli/src/agent",
+      "commits": 104,
+      "fixCommits": 64,
+      "changedLines": 12799,
+      "sourceFiles": 38
+    },
+    {
+      "name": "packages/components/src/atoms",
+      "commits": 120,
+      "fixCommits": 52,
+      "changedLines": 3502,
+      "sourceFiles": 34
+    },
+    {
+      "name": "apps/cli/src/lib/loro",
+      "commits": 93,
+      "fixCommits": 49,
+      "changedLines": 12980,
+      "sourceFiles": 29
+    },
+    {
+      "name": "apps/cli/src/commands",
+      "commits": 102,
+      "fixCommits": 48,
+      "changedLines": 9758,
+      "sourceFiles": 41
+    },
+    {
+      "name": "packages/components/src/routes",
+      "commits": 92,
+      "fixCommits": 42,
+      "changedLines": 3936,
+      "sourceFiles": 39
+    },
+    {
+      "name": "packages/components/src/ui",
+      "commits": 71,
+      "fixCommits": 37,
+      "changedLines": 11570,
+      "sourceFiles": 77
+    },
+    {
+      "name": "apps/cli/src/mcp",
+      "commits": 75,
+      "fixCommits": 28,
+      "changedLines": 9723,
+      "sourceFiles": 27
+    },
+    {
+      "name": "apps/cli/src/lib/e2ee",
+      "commits": 49,
+      "fixCommits": 28,
+      "changedLines": 8970,
+      "sourceFiles": 20
+    },
+    {
+      "name": "packages/loro-streams-rpc",
+      "commits": 50,
+      "fixCommits": 23,
+      "changedLines": 8568,
+      "sourceFiles": 18
+    },
+    {
+      "name": "apps/cli/src/orchestration",
+      "commits": 45,
+      "fixCommits": 23,
+      "changedLines": 11762,
+      "sourceFiles": 32
+    }
+  ],
+  "topFiles": [
+    {
+      "name": "packages/components/src/components/ai-gui/view.tsx",
+      "commits": 130,
+      "fixCommits": 84,
+      "changedLines": 10245,
+      "sourceFiles": 1
+    },
+    {
+      "name": "apps/cli/src/lib/message-handler.ts",
+      "commits": 148,
+      "fixCommits": 81,
+      "changedLines": 10218,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/components/src/components/sessions/session-chat-interface.tsx",
+      "commits": 145,
+      "fixCommits": 72,
+      "changedLines": 8517,
+      "sourceFiles": 1
+    },
+    {
+      "name": "apps/cli/src/session/session-execution-service.ts",
+      "commits": 111,
+      "fixCommits": 68,
+      "changedLines": 10955,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/components/src/components/sessions/session-detail.tsx",
+      "commits": 90,
+      "fixCommits": 54,
+      "changedLines": 5687,
+      "sourceFiles": 1
+    },
+    {
+      "name": "apps/cli/src/lib/loro/doc.ts",
+      "commits": 76,
+      "fixCommits": 38,
+      "changedLines": 6054,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/components/src/components/loro-app-sidebar.tsx",
+      "commits": 72,
+      "fixCommits": 37,
+      "changedLines": 5186,
+      "sourceFiles": 1
+    },
+    {
+      "name": "apps/cli/src/session/session-manager.ts",
+      "commits": 57,
+      "fixCommits": 36,
+      "changedLines": 3717,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/components/src/providers/create-workspace-runtime.ts",
+      "commits": 85,
+      "fixCommits": 35,
+      "changedLines": 4965,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/components/src/components/ai-gui/markdown-renderer.tsx",
+      "commits": 57,
+      "fixCommits": 35,
+      "changedLines": 3320,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/components/src/components/chat/chat-landing.tsx",
+      "commits": 74,
+      "fixCommits": 34,
+      "changedLines": 4238,
+      "sourceFiles": 1
+    },
+    {
+      "name": "packages/shared/src/message-schemas.ts",
+      "commits": 69,
+      "fixCommits": 33,
+      "changedLines": 3150,
+      "sourceFiles": 1
+    }
+  ],
+  "selectedSystem": "Session Inbox admission, submission and continuation scheduling",
+  "selectedCore": {
+    "name": "apps/cli/src/session/session-execution-service.ts",
+    "commits": 111,
+    "fixCommits": 68,
+    "changedLines": 10955,
+    "sourceFiles": 1
+  },
+  "selectedSupporting": [
+    {
+      "name": "apps/cli/src/session",
+      "commits": 210,
+      "fixCommits": 139,
+      "changedLines": 51953,
+      "sourceFiles": 80
+    },
+    {
+      "name": "apps/cli/src/orchestration",
+      "commits": 45,
+      "fixCommits": 23,
+      "changedLines": 11762,
+      "sourceFiles": 32
+    }
+  ],
+  "recurringFixExamples": [
+    {
+      "sha": "f8c8f4e3605a4ab5993891bb3c9fbff648b528e1",
+      "date": "2026-11-06T12:45:10+08:00",
+      "subject": "fix(e2ee): carry signed originals with queued input [risk:high] (#2345)"
+    },
+    {
+      "sha": "1a5f1061ff0ba4beaac1603f0dd2a656c9372bcb",
+      "date": "2026-10-31T23:13:33+08:00",
+      "subject": "fix(cli): restore Loro restart and derived input admission (#2168)"
+    },
+    {
+      "sha": "5d8ef3c69e26c5a62a50928c73aa890d5af16dd7",
+      "date": "2026-10-31T20:38:06+08:00",
+      "subject": "fix(cli): validate configuration at first Loro input acceptance (#2161)"
+    },
+    {
+      "sha": "bed29d5fb5ff915cd12544df690e1c25666e7841",
+      "date": "2026-10-30T08:22:12+08:00",
+      "subject": "fix: bound workspace finalization before turn release (#2083)"
+    },
+    {
+      "sha": "438eab3b85680d61be7cabd75e27e520e4478ce3",
+      "date": "2026-10-30T01:37:21+08:00",
+      "subject": "fix: keep Inbox usable after unconfirmed resource release (#2067)"
+    },
+    {
+      "sha": "80268b862813059442c7047295cef9c88a1ff675",
+      "date": "2026-10-29T18:21:12+08:00",
+      "subject": "fix: surface Stop failures in conversation history (#2052)"
+    },
+    {
+      "sha": "1a1699bb6c87059b524df21780f542dff5f09d2b",
+      "date": "2026-10-27T11:15:25+08:00",
+      "subject": "fix: distinguish silent agent turns from ACP replay evidence (#1913)"
+    },
+    {
+      "sha": "0b4cb500c8d4b4f713becf6e7cfcfd6c7d2e9c7e",
+      "date": "2026-10-22T12:07:36+08:00",
+      "subject": "fix(cli): add controlled manual inbox recovery (#1778)"
+    },
+    {
+      "sha": "cda5c5ff1f0a83a8d62596db922059c44337913c",
+      "date": "2026-10-21T17:55:36Z",
+      "subject": "fix: stop MCP create retries from duplicating sessions (#1793)"
+    },
+    {
+      "sha": "9205aa14dcd6e6e9cceddeeab618e3dc13388291",
+      "date": "2026-10-18T03:00:40Z",
+      "subject": "fix(cli): release a turn even when its failure handling fails (#1652)"
+    },
+    {
+      "sha": "4d13206dd50509d67754a0929241636dd494e4fa",
+      "date": "2026-10-16T02:01:57Z",
+      "subject": "fix(cli): stop transient access failures from wedging Session dispatch (#1602)"
+    },
+    {
+      "sha": "8d5423c6af7d22feb726fa7b37ecf2de7c76976f",
+      "date": "2026-10-14T08:38:40+08:00",
+      "subject": "fix: silence receipts for manually stopped delegated turns (#1553)"
+    },
+    {
+      "sha": "5f13f917bc8013f534d89982aae53a21956c58f6",
+      "date": "2026-10-12T23:07:47+08:00",
+      "subject": "fix: retain session presence through cancelled turn drain (#1518)"
+    },
+    {
+      "sha": "d79b00166cc55124c558233fc4bb564af27b3529",
+      "date": "2026-09-18T23:19:13-07:00",
+      "subject": "fix(session): wait for a handoff steer verdict instead of draining the steered prompt (#817)"
+    }
+  ],
+  "selectionReason": "Choose a frequently repaired execution system whose failures can duplicate input, lose queued work or block unrelated conversations. The modeled boundary is the Inbox service/owner/SQLite scheduler, not the whole UI or every Session feature."
+}

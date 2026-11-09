@@ -1,0 +1,192 @@
+{
+  "system": "Session Inbox admission, submission and continuation scheduling",
+  "syncCommit": "727cdfc3c9269d283c997de5e5e258dd0bdefa88",
+  "sources": [
+    {
+      "path": "apps/cli/src/orchestration/inbox/service.ts",
+      "sha256": "45121d5a1286c811eedce8bf7f018893f41882e82516fd880b4e82527a43ee04"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/sqlite.ts",
+      "sha256": "d3e86bbbdc8ddec51cd1b0e94870a2c48665f8dfe48f345248080d4719577ff0"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/execution-owner.ts",
+      "sha256": "3cde37a98d40980efd96eec652c44d4ba7c18544842edff9e632016217ce767f"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/model.ts",
+      "sha256": "e4fa92ac7a1dc39ec93a6680e50d51e719bdf5cc6f0d59d117577c0d4fd2e719"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/rules.ts",
+      "sha256": "94f9808eb526a78720eb599bca5148e86ed3555307fea8af0d85a7fbdf10164d"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/admission-failure.ts",
+      "sha256": "24c654d09c99d5dcfedb1e2aaa64d5a026f2d23783034b0b57aaf71632e98904"
+    },
+    {
+      "path": "apps/cli/src/orchestration/platform/inbox-repository.ts",
+      "sha256": "9ac2c43ce4b0bc60cd0b87f029544c241a164c71f12f599043fc07dcc4d9c327"
+    },
+    {
+      "path": "apps/cli/src/orchestration/storage-error.ts",
+      "sha256": "a0b1dc72d96a2530f67b25d3baaac670f5642a59a7fdc263940a2ebe5da6cbe8"
+    },
+    {
+      "path": "specs/session-orchestration.md",
+      "sha256": "f04df7f36be6c62bf8552f1f0b4fd1dc06d89be382f6b5467f68c870ec79a0ae"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sha256": "d2a5e46040383bc0e67063b5091e01d1109491942465abca5ca476609db0e03a"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "492cd8b9dfc5c4a22c9dd458ebc11d332399f7d2e54970754495108302792a53"
+    }
+  ],
+  "bounds": "Two sessions in one workspace/account; one already-submitted A batch with a retained settlement; one B automatic batch/result; one Stop of B; at most two B starts to detect replay. One scanner fiber, a coalesced wake bit, a running-worker latch and per-session admission. No quiesce, host owner handoff, fresh-input replacement or native Agent process.",
+  "limits": "Original scheduling slice is finite: two sessions, one retained A settlement, one B batch/input/Stop and at most two B starts; weak fairness and repeated wake opportunities, B never stopped in progress profile. Expanded slices and exact source limits are in expanded-coverage.json. Real replay uses production service/owner/repository/native SQLite, injected provider start and logger port. Native capacity fixture is not OS disk exhaustion. No full app/replication/authorization/native provider/device acceptance, unbounded refinement or whole-database-outage availability is proved. The sync commit contains every hash-verified product source; the separate verification commit follows it.",
+  "finding": {
+    "id": "INBOX_RETRY_BLOCKS_OTHER_SESSION",
+    "severity": "P1",
+    "status": "fixed-at-verified-product-commit",
+    "path": "apps/cli/src/orchestration/inbox/service.ts",
+    "line": 257,
+    "property": "HealthySessionProgress",
+    "cause": "An unresolved A settlement aborts retrySettlements before scan reaches repo.pending; outer catch reports and returns to Queue.take. Every further wake retries A first and can abort again.",
+    "originalLine": 224
+  },
+  "modelProfiles": {
+    "safety": {
+      "result": "PASS",
+      "distinctStates": 1112,
+      "exit": 0
+    },
+    "progress": {
+      "result": "PASS",
+      "distinctStates": 459,
+      "exit": 0
+    },
+    "control": {
+      "result": "PASS",
+      "distinctStates": 459,
+      "exit": 0
+    },
+    "legacyProgressMutation": {
+      "result": "CAUGHT",
+      "distinctStates": 375
+    },
+    "modelMutations": [
+      {
+        "property": "AtMostOnce",
+        "result": "CAUGHT"
+      },
+      {
+        "property": "NoStartAfterStop",
+        "result": "CAUGHT"
+      },
+      {
+        "property": "RetryEvidenceRetained",
+        "result": "CAUGHT"
+      },
+      {
+        "property": "OldReleaseCannotFreeSuccessor",
+        "result": "CAUGHT"
+      },
+      {
+        "property": "ConsumedOnlyAfterStart",
+        "result": "CAUGHT"
+      }
+    ]
+  },
+  "sourceProof": {
+    "currentProgress": "PASS",
+    "legacyScanMutation": "FAIL (caught)",
+    "sourceSafetyTraces": 9,
+    "nativeSQLiteFull": {
+      "currentProgress": "PASS",
+      "legacyScanMutation": "FAIL (caught)",
+      "retainedAAfterCapacityRepair": "unknown"
+    },
+    "negativeAckSelection": "PASS; actual Agent re-execution not run",
+    "outputGateAndLateWriter": "PASS; synthetic history port, not full HistoryWriter",
+    "sameSessionFreshInputDuringPersistentFault": "PASS in trigger and native capacity fixtures",
+    "originalModelMutationsCaught": 5,
+    "legacyProgressMutationCaught": true,
+    "expandedSourceMutationsCaught": 4
+  },
+  "actions": {
+    "RecordASettlement": "service.ts settle: retain Map receipt before repository.settle; failed write stays retained and wakes scanner; execution-owner.ts finishWork observes the latest outcome",
+    "ReleaseA": "execution-owner.ts finishWork then sqlite.ts release transaction; storage retry evidence survives slot release",
+    "BResultArrives": "sqlite.ts indexCompletion/requestAutomatic in caller completion transaction; workspace/session/user queue and no active B input",
+    "Wake/TakeWake": "service.ts Queue.dropping(1), wake, Queue.take in one scanner fiber",
+    "RetryReceipts/EndFailedScan": "service retrySettlements attempts independent receipts, retains failed entries and combines causes; scan reports failure and continues to pending work. Legacy config restores the former scan-wide abort.",
+    "ReadPending/PrepareBatch": "service.ts scan running.has check and repo.prepare; sqlite.ts prepare atomically fixes membership and intent",
+    "LaunchWorker/BeginB": "service.ts running.add then forkIn; execution-owner.ts makeExecutionOwner and sqlite.ts begin",
+    "RejectWorker/EndWorker": "execution failure reporting and service.ts launch ensuring running.delete; native process life is outside this worker latch",
+    "SubmitB": "service.ts submit per-session/global admission, canSubmit/fence then synchronous start callback; sqlite.ts fence CAS prepared->submitting",
+    "SettleB/UnknownB": "execution-owner.ts finishWork observation plus sqlite.ts settle transaction; failed/ambiguous transport is not replay permission",
+    "ReleaseB/ReleaseStoppedB": "sqlite.ts release transaction; no submission means no result consumption; service wakes after durable slot release",
+    "StopB": "service.ts pause under same admission; sqlite.ts pause cancels prior input and supersedes prepared batch without deleting results"
+  },
+  "abstractionNotes": "Original scheduling slice only. A is initialized in an already-submitted batch context. Repeated failed updates for the same A batch are represented by the latest retained Map entry, not one indivisible pair of writes. One B input/result only; admission and SQL fences are exact boundaries, not a claim that the whole surrounding async method is atomic. The worker latch is separate from durable active execution. No fresh-input/steer/config/host-handoff/native-process/whole-database-outage model.",
+  "artifactHashes": {
+    "Model.tla": "c7b3f7ed545ffa374ff53148b149e8b5c3dd014405da781dc2e25cb7ad46d4d6",
+    "safety.cfg": "02c5d829bcd1b8bcbbf2bd7ea56ba08a876244679fe339f1e780a19a2f9b4cc3",
+    "progress.cfg": "c44093eb799740b7928e4caabc408513940188c077575389f9385effd1bb9053",
+    "control.cfg": "c44093eb799740b7928e4caabc408513940188c077575389f9385effd1bb9053",
+    "chart.cfg": "6969ad5b9b1764f5d132a9318dd1b599d549d1acdaf32b1567996506422bd740",
+    "control-chart.cfg": "6969ad5b9b1764f5d132a9318dd1b599d549d1acdaf32b1567996506422bd740",
+    "view.mjs": "fb0af75d278415172511b1e1ff350eee4e53e768cba9497ba5354c723f3dcfb7",
+    "diagnostic-view.mjs": "4bb7985fab9e653a954c547b27c92979527692eb7196274808d194fb4f7d0416",
+    "chart.mmd": "c1351a0069a8ab6afbe00495e2060d80f0ae3712089b9d55c27ece9e44beacec",
+    "chart-report.md": "c9b6575ad5347fc3ed26ab02e12c1fc3ba55bc43a04d720c1445e8743a71a3bb",
+    "control-chart.mmd": "c1351a0069a8ab6afbe00495e2060d80f0ae3712089b9d55c27ece9e44beacec",
+    "control-chart-report.md": "c9b6575ad5347fc3ed26ab02e12c1fc3ba55bc43a04d720c1445e8743a71a3bb",
+    "mutation-reports.md": "285ff0257c28ecbaa6fd7e70d43b677b4b65f50223f9160e80d19ccb44e2eab2",
+    "full-reports.md": "d51612dc18e55188cc4d45f06c3d52f09d300af311f7b5eb12d213f3b404d19b",
+    "toolchain.package.json": "65ccca68894db6b7212b7695a08ccf0dae4d9dddd7bfc87cc7e68185a14ae86c",
+    "toolchain.lock.json": "0c57d17f74da6f06925e5cf4651f6ac0e00fa5829be4c66c59264888520b40f1",
+    "Delivery.tla": "1d7b5cc557c0956f975fad958d4dd5cc8fabf37cf039df046e3eb6b2e5d7b771",
+    "OutputGate.tla": "bca835636b6bfdb92c7175c60b314f84a40d0b47757304b116c4afdfe6d0b307",
+    "expanded-view.mjs": "1636533193d8f7cd3d248436995f47bfe3e8d373662b73bcb3e9f11ab2f62476",
+    "expanded-coverage.json": "dc8b62aaf6537a20dbe94ce1f2bdcecbd4541ee830b8c1cb0eac0a6a53eb1088",
+    "expanded-results.json": "a4718c16063c6ca0bef811849794e9eb2e8af49873e10d912800f33f17c40dc3",
+    "requirements.md": "6f95602b0f5088d3e08d03e1b74b864916944ef20c1aed2d0de604cd26fd777e",
+    "delivery-negative-ack.cfg": "3cc93494a78ee68c97ad92f0962da8699940d57066c608c494ff76ef6e851c6f",
+    "gate-deadlock.cfg": "b5242530f1957c6044ed2a4c846d0f3688c3c414c4555864418b213f9560b2f6",
+    "delivery-progress.cfg": "3049bf9974dca919fe862a1d27f97279620b5f2c933003051c8942b9e2325cc7",
+    "gate-cancel-control.cfg": "cc34d89b24f50976fa81b553c94fcec1a8ba7e58989ea3e51db799751c13e25f",
+    "gate-current.cfg": "cc34d89b24f50976fa81b553c94fcec1a8ba7e58989ea3e51db799751c13e25f",
+    "delivery-durable-control.cfg": "617aef2939ca89f4f05b6e0f325e20a578393d010cf99c37332e929b6d685223",
+    "gate-completing.cfg": "17e92bd331952a02cdb3c193c197a18d6c06a8a5f61ef5779e5933c7945cc4ab",
+    "delivery-safety.cfg": "34c12f2ae9f6da1b4134a069b9797e6e1188f6d24119f99045ad51b6cf8643ee",
+    "delivery-partition.cfg": "456560ab47b99b3badc12a02abf08963930d326cdc7dff9a11fea6e84494cf41",
+    "SKILL.md": "0b3ad7defe43b75a3110433888568ac70ebf6f54b13a8f2dd6a2e0444babaf4d",
+    "gate-view.mjs": "c6d9e9cf74f1f7515381d36be9a0ab1995eaf8313073ba3ab21ae9e4a9f2761e",
+    "gate-chart.mmd": "a5c6a626860917761bbabff0a9aa4d6983839553ea7c6ad62aa1ee78660ce1ab",
+    "gate-chart-report.md": "1990770f081fafdf90f86c23ef0eccd2191643be61a185493f12b4ebbcea0685",
+    "delivery-legacy-negative-ack.cfg": "d9e1b1f75ff7e259c6e1687c08ce0d1faaa3dda38fca498f5bb215a43266dca7",
+    "legacy-progress.cfg": "238da307766c40081928b4d89dd0affb68b6ca628e6464ed9bceea6a2c152e07",
+    "gate-late-write-mutant.cfg": "a8ce496beed9458918f4e2a5c6262437909bdbb5b4b077da65c27f32c91322cf",
+    "gate-legacy.cfg": "9db75adbeab4e6c24543cdd21f7f1d85ee1f4505ffcf11ab69468e5b2b5ebc2e"
+  },
+  "verifierHashes": {
+    ".agents/verification/state-machines/check.py": "aa67959ee6307d660cccdc4ad280412a34cee66825e868facb1da80fb17f0503",
+    ".agents/verification/state-machines/history.py": "0411c15da79ab94ebfc34aefcc2b0e7c9925e6b42dc38c32dba8b1d5bf22055c",
+    ".agents/verification/state-machines/replay.mjs": "a2e4f2ac86114b33554bdddcd7053cc60e8e593cc217d5bc94162920cf771461",
+    ".agents/verification/state-machines/expanded.py": "e4a840c9d76c0f2e34dd74ac2cf414cfaeaa823294917c993747260e7a7cc077",
+    ".agents/verification/state-machines/sync-replay.mjs": "f4d1151619b7d9fefdd380087fa45f49634ac503065cb819e08d1063b984af15",
+    ".agents/verification/state-machines/decision-replay.mjs": "007aae393de985ba157c9d6782d7cd5a6a63e715ebc76ec6c8aa7f3cb5f13a48"
+  },
+  "expanded": {
+    "coverage": "expanded-coverage.json",
+    "requirements": "requirements.md",
+    "results": "expanded-results.json",
+    "status": "Current finite temporal profiles and source replays pass; no full implementation/device proof."
+  },
+  "syncWorkingTree": false
+}
