@@ -103,7 +103,6 @@ export class MachineRuntime {
   // interleave. Attach bodies are short (no meta catch-up wait), so a queued
   // detach/revoke stays prompt without any preemption machinery.
   private bridgeTransitionQueue: Promise<unknown> = Promise.resolve();
-  private readonly sessionTerminatedHandlers = new Set<(sessionId: SessionId) => void>();
 
   constructor(private readonly options: MachineRuntimeOptions) {
     this.messageProcessor = new MessageProcessor(
@@ -128,11 +127,6 @@ export class MachineRuntime {
     await traceAsync(this.options.logger, 'startup.session_manager', undefined, async () =>
       this.sessionManager!.initialize()
     );
-    this.sessionManager.on('terminated', (event) => {
-      for (const handler of this.sessionTerminatedHandlers) {
-        handler(event.sessionId);
-      }
-    });
     this.options.logger.debug('Session manager initialized');
 
     this.handler = new MessageHandler(
@@ -195,13 +189,6 @@ export class MachineRuntime {
       return session.getWorkdir();
     }
     return sessionManager.getSession(sessionId)?.getWorkdir() ?? null;
-  }
-
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    this.sessionTerminatedHandlers.add(handler);
-    return () => {
-      this.sessionTerminatedHandlers.delete(handler);
-    };
   }
 
   getActiveSessionCount(): number {

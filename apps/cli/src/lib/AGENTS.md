@@ -83,6 +83,11 @@ never pushed to renderers as local room health.
 
 ## Sessions and turns
 
+- Manual terminal PTYs belong to Fleet, not the agent runtime. Agent termination,
+  cancellation, and idle or memory-pressure GC must preserve them. Close them on
+  explicit terminal close, conversation archive/delete, or Fleet shutdown. ACP
+  agent-owned terminals retain their separate execution lifecycle.
+
 - `session-gc-manager.ts`: `evaluateMemoryPressure` returns TWO verdicts, `evict` and
   `block`, sharing no threshold. Probes fail OPEN; `null` Windows commit growth
   never becomes `0`. Sweeps never force the cached commit probe; never act on a
