@@ -86,6 +86,241 @@ under the memory prefix rather than an in-process scan.
   memory. A mount is outside Role authorization: anything running as the user can
   read it. This is why it is limited to shared memories.
 
+## Component architecture and ownership
+
+This is a proposed architecture and high-level contract, not existing exports or
+verified implementation. The [memory Spec](../../../../specs/agent-role-memory.md)
+owns requirements. The current `packages/memory` still implements the rejected
+Loro design; synchronous interfaces, local-durability receipts and historical
+operations cannot be carried unchanged into network storage.
+
+```mermaid
+flowchart TD
+  Agent[Agent memory tools] --> Host[Daemon MemoryService]
+  UI[Desktop / Web / mobile] --> RPC[Authenticated daemon RPC]
+  RPC --> Host
+  Host --> Core[Platform-neutral entry model and validation]
+  Host --> Backend[Drive9MemoryBackend / Node SDK]
+  Backend --> Files[Drive9 Markdown files]
+  Host --> Port[MemoryCloudPort]
+  Port --> Control[Hosted control and provenance service]
+  Control --> Catalog[Catalog / access / credentials / current sources]
+  Control --> Files
+  Mount[Optional shared mount] --> Files
+  Host -. Lifecycle and credential hot rotation .-> Mount
+```
+
+| Component | Owns | Boundary |
+| --- | --- | --- |
+| Clients and Agent tools | Display, queries, content edits and entry sources | No owner key; model-provided identity, memory IDs or credentials cannot widen access. |
+| Daemon `MemoryService` | Frozen-turn binding, current authorization, operation IDs, source context and write coordination | User/machine come from authenticated execution; session/turn/tool call come from runtime, not model arguments. Management RPC separately authorizes the selected memory. |
+| New entry core in `packages/memory` | Markdown/entry mapping, path/size validation, edit planning and source matching | Platform-neutral; no Node SDK, filesystem or private cloud imports. |
+| CLI `Drive9MemoryBackend` | SDK requests, conditional writes, prefix-scoped search and error mapping | Ordinary tools need no mount; no second writable local Markdown truth source. |
+| `MemoryCloudPort` | Public control/provenance service contract | DTOs in `packages/cloud-api`, injected port in `packages/platform`; hosted implementation stays outside the public repository. |
+| Hosted control/provenance service | Catalog, current access, credential issuance/revocation, operation receipts and current entry sources | Owner keys remain server-side. Source records are access-controlled sensitive metadata, never workspace repo meta. |
+| Mount manager | Shared mount startup/status, hot rotation and explicit revocation | Outside the Agent tool path; unverified hot rotation is not supported behavior. |
+
+The catalog addresses `(workspaceId, memoryId)` and stores owner, visibility and
+lifecycle state. Name/description remain authoritative in `MEMORY.md`; the catalog
+is not a second editable profile. Creation writes the entry file before publishing
+the catalog item; partial creation stays unavailable and retries the same operation
+ID. Deletion first blocks new grants and revokes tokens, then removes files/source
+records; it cannot report complete deletion before cleanup. Visibility transitions
+and member removal need explicit revocation completion: unmounting locally or
+changing catalog metadata does not prove old tokens invalid.
+
+## High-level data and interfaces
+
+### Entry identity and file representation
+
+Paths identify documents; `entryId` identifies a fact/entry within a memory. The
+proposal generates stable IDs in tools and associates entries through ignorable
+Markdown markers while keeping prose readable. Marker syntax and parsing format
+must be fixed before implementation; arbitrary paragraph boundaries are not an
+already-selected definition of facts. An entry may contain several sentences;
+Agents organize independent memories into entries.
+
+Editing an entry preserves its ID; new entries receive new IDs. Reordering preserves
+sources; cross-file moves explicitly retain IDs without promising a multi-file
+transaction. Split/merge should allocate new IDs with `derivedFrom` references,
+without attributing original content to its organizer. Identical text or a copied
+old ID alone cannot inherit provenance. Duplicate IDs, missing markers or ambiguous
+external content produce unknown attribution.
+
+The source service associates entry ID, content hash and confirmed document commits
+with current content. File revisions guard writes; entry hashes match sources.
+Hashes or embedded source labels do not prove identity or detect unobserved edits
+that restore the original bytes. `verified` means current content matches a source
+record confirmed through the authenticated workflow, not factual correctness, a
+complete audit trail or independent proof against a malicious device. Keep current
+entries' original source and latest content-update references, not every old body.
+Reconciliation receipts require a separately bounded retention policy.
+
+### Bound tool/RPC interface
+
+```ts
+// Proposed contracts, not existing exports; IDs and revisions are opaque strings.
+type Entry = {
+  entryId: string;
+  text: string;
+  contentHash: string;
+  provenance: "verified" | "pending" | "external_unknown";
+};
+type DocumentView = {
+  path: string;
+  revision: string;
+  markdown: string;
+  entries: Entry[];
+};
+type EntryEdit =
+  | { kind: "insert"; afterEntryId: string | null; text: string }
+  | { kind: "replace"; entryId: string; text: string }
+  | { kind: "remove"; entryId: string };
+type MutationResult =
+  | { kind: "committed"; operationId: string; revision: string }
+  | { kind: "conflict"; currentRevision: string }
+  | { kind: "incomplete"; operationId: string;
+      content: "applied" | "unknown"; provenance: "pending" }
+  | { kind: "rejected"; code: "forbidden" | "not_found" |
+      "invalid_input" | "quota_exceeded" | "unsupported" };
+
+// Bound by the daemon, never selected by model-supplied identity fields.
+interface BoundMemory {
+  startup(): Promise<{ instructions: string; entry: DocumentView }>;
+  list(input: { cursor?: string; limit: number }): Promise<{
+    items: { path: string }[]; nextCursor?: string;
+  }>;
+  read(input: { path: string }): Promise<DocumentView>;
+  search(input: { query: string; limit: number }): Promise<{
+    hits: { path: string; excerpt?: string }[];
+  }>;
+  sources(input: { path: string; entryIds: string[] }): Promise<EntrySource[]>;
+  create(input: { path: string; entries: { text: string }[] }): Promise<MutationResult>;
+  edit(input: { path: string; expectedRevision: string;
+    changes: EntryEdit[] }): Promise<MutationResult>;
+  status(input: { operationId: string }): Promise<MutationResult>;
+}
+type EntrySource = {
+  entryId: string;
+  contentHash: string;
+  status: "verified" | "pending" | "external_unknown";
+  origin?: SourceRef;
+  lastContentUpdate?: SourceRef;
+  derivedFrom?: string[];
+};
+type SourceRef = {
+  changeId: string;
+  userId: string;
+  machineId: string;
+  sessionRef?: string;
+  turnRef?: string;
+  toolCallRef?: string;
+  observedAt: string;
+};
+```
+
+These sketches show contract shape. Network failures not shown above return distinct
+`unavailable`/timeout results rather than empty content. Concrete APIs must bound
+reads, searches, source queries and edit batches; oversize inputs fail explicitly,
+never silently truncate before writing. List cursors are backend-opaque and do not
+promise a snapshot across edits. Search identifies candidate documents before
+reading the needed entries and sources.
+
+Tool inputs contain only paths, entries and expected revisions. The daemon assigns
+one operation ID per logical tool call and reuses it on retries; the same ID with a
+different payload is rejected. Status queries require access through the current
+binding and identity. Startup separates fixed tool instructions from entry content
+returned as untrusted reference data. Create must enforce absence, never default to
+unconditional overwrite; safe create-if-absent support still requires verification.
+Edit updates one document, validates the entire batch before conditional submission,
+and never applies only its valid subset.
+
+Management operations `listMemories/createMemory/setVisibility/deleteMemory` are
+separate from Agent tools. They accept memory IDs only with user management
+authorization; Agents cannot use them to expand their binding. Document rename/delete
+need independent destination-absence/expected-revision contracts. If Drive9 cannot
+perform the required atomic conditional operation, return `unsupported`; a read
+followed by unconditional deletion is not conflict protection. `MEMORY.md` may be
+edited/cleared, never renamed/deleted.
+
+### Hosted control and provenance port
+
+| Operation | Main inputs | Result and guarantee |
+| --- | --- | --- |
+| `describeMemory` | Workspace, memory | Currently accessible catalog and capabilities; identity comes from the authenticated channel. |
+| `issueCredential` | Memory, purpose `tools/mount`, requested operations | `{credentialId, token, endpoint, prefix, expiresAt, generation}`; server narrows access and does not accept arbitrary caller-selected endpoints. |
+| `renewCredential` | Credential ID, expected generation | Recheck current access and return a new generation; removed members are not entitled to renewal. |
+| `prepareChange` | Operation ID, path, expected revision, entry change summaries/hashes, runtime source references | Idempotent preparation receipt; server binds authenticated user/machine and validates session references and visibility. |
+| `finalizeChange` | Operation ID, SDK-returned revision | Independently read and compare actual content to the prepared summary before confirming sources; a client-reported revision alone is not proof. |
+| `changeStatus` | Operation ID | Unknown/applied content, pending/complete provenance and retry status. |
+| `readSources` | Memory, path, current revision, entry IDs | Sources matching current content, or pending/unknown; hide inaccessible session references. |
+
+The proposed source port uses hosted metadata storage, not Drive9 journals.
+Prepare/finalize is not a distributed transaction: background reconciliation,
+conditional state transitions and duplicate handling are required responsibilities.
+Late completion of an old operation cannot replace newer entry sources. If the
+service cannot confirm an intermediate version, retain uncertainty rather than
+promoting client assertions to verified. Shared readers may see source summaries,
+but source links grant no session access; return a restricted source when necessary
+without exposing private reference identifiers or text.
+
+## Main interactions and failure handling
+
+### Agent update without a mount
+
+1. Resolve the frozen binding and current access, obtain a prefix-scoped token,
+   and read the file/revision through the SDK.
+2. The Agent submits edits using returned entry IDs. The daemon validates path,
+   full batch and access, preserving untouched entries' sources.
+3. Persist a preparation receipt, then conditionally write Markdown using
+   `expectedRevision`. Return conflicts to the Agent without blind retries.
+4. The source service verifies the actual write and completes attribution. Return
+   committed only after both complete, then refresh the local view.
+5. Content saved without source completion returns `incomplete(applied, pending)`;
+   a timed-out write with uncertain outcome returns `incomplete(unknown, pending)`.
+   Retry queries the same operation first, rather than issuing a new write ID.
+   Do not start the write if preparation is unavailable.
+
+This path needs neither mounts nor SSE and does not claim atomic content/provenance
+commit. Timeouts, daemon restarts and subsequent external overwrites must preserve
+or recover the correct uncertain state. Verification of Drive9 revisions against
+actual bytes and recovery of operation IDs after restart remain implementation work.
+
+### Reads and external edits
+
+Read current files on open/use, parse entries, then query matching sources; never
+apply cached sources to new content without validation. If the source service is
+unavailable, return content with pending status rather than cached verified
+attribution. External marker/content mismatches yield external_unknown for affected
+entries; reliably proven unchanged entries retain sources. A subsequent Lody edit
+does not convert an external entry's origin into that Agent: it establishes update
+references only for content the Agent actually adds or changes.
+
+### Mount credential hot rotation
+
+The high-level lifecycle is `start(lease)`, `status()`,
+`rotateCredential(nextLease)`, `revoke()` and `stop()`. These are proposed new mount
+contracts; the current Drive9 CLI has no verified hot rotation implementation.
+After rotation acknowledgement, new requests use the new generation, mount/open
+handles remain valid and in-flight writes are preserved. Renew before expiry,
+handle bounded overlap and revocation of old/new credentials, and never hide auth
+failures by replaying non-idempotent writes. Noninterrupting normal renewal is not
+permanent network availability: renewal failure degrades explicitly without lost
+writes or continued use of revoked credentials. Explicit revocation may stop
+subsequent access and is distinct from normal renewal.
+
+## Implementation order and contract verification
+
+Define entry encoding and source-verification contracts first, then implement the
+authenticated control port, SDK backend, entry tools and source UI. Add shared
+mounts as a separate path. Mount launch timing remains open; engineering stages do
+not decide release scope. Protect scope denial, two-writer conflicts, preservation
+of untouched sources, unknown external ambiguity, idempotent operations,
+reconciliation after a crash between write and source confirmation, private session
+references and hot rotation with open handles/in-flight writes. These are future
+acceptance targets; P1 did not validate these new interfaces. Multi-file atomic
+changes, full history, live SSE and universal editor compatibility are not implied.
+
 ## Credentials
 
 A hosted credential service holds each tenant's owner key and issues short-lived
@@ -121,12 +356,11 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 
 ## Provenance and concurrency
 
-- **SDK writes.** The intended contract sets actor and `expectedRevision`, returning
-  conflicts without blind retries. Proposed provenance fields are
-  `{path, changeId, actor, userId, sessionId, turnId, before/after revision}`
-  to explain the current memory, not to require recoverable versions.
-  The filesystem token cannot append journals. A file write followed by a separate
-  append is not atomic; crash recovery and idempotent reconciliation need a design.
+- **SDK writes.** Use `expectedRevision` and return conflicts without blind retries.
+  The proposed entry-level sources and prepare/finalize workflow above replace a
+  file-level actor record. Actor labels may aid diagnostics but do not authenticate
+  provenance. Filesystem tokens cannot append journals; the separate source service
+  still requires crash recovery and idempotent reconciliation, not an atomicity claim.
 - **Mount writes.** External/unknown attribution is accepted when a source cannot be
   reliably established; changed entries must not retain stale Agent attribution. The pinned
   WebDAV mount never configures `SetActor`, and `X-Dat9-Actor` is caller-supplied,
