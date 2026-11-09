@@ -180,6 +180,22 @@ describe('encrypted workspace control page reading', () => {
     expect(ledgerVerificationCode(verified).stateDigest).toBe(before);
   });
 
+  it('lets two people compare by eye when scanning is not possible, with only equal or different', async () => {
+    render({ history: history(vector.anchor) });
+    const button = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((node) => node.textContent === label);
+    await act(async () => button('e2ee.verify.scan')!.click());
+    expect(document.body.textContent).toContain('e2ee.verify.showMine');
+    // The dialog never asks anyone to type a code back in.
+    expect(document.body.querySelector('textarea')).toBeNull();
+    await act(async () => button('e2ee.verify.manualSame')!.click());
+    expect(document.body.textContent).toContain('e2ee.verify.result.matchTitle');
+    await act(async () => button('e2ee.verify.manualDiffer')!.click());
+    expect(document.body.textContent).not.toContain('e2ee.verify.result.matchTitle');
+    // By eye nobody can tell which side is older: refresh first, then stop if it persists.
+    expect(document.body.textContent).toContain('e2ee.verify.result.unknownTitle');
+  });
+
   it('reads independent removal while preserving the published epoch', () => {
     const count = vector.records.length - 1;
     const verified = appendLedgerHistory(

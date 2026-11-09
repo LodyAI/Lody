@@ -25,7 +25,12 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/settings/account-setting', () => ({
-  AccountSettingsComponent: () => <p>ordinary settings</p>,
+  AccountSettingsComponent: (props: { encryptedTeamManagement?: boolean }) => (
+    <p>
+      ordinary settings
+      {props.encryptedTeamManagement === false ? ' without team management' : ''}
+    </p>
+  ),
 }));
 describe('recovery vault settings', () => {
   it('asks the desktop for its recovery state once, not on every render', async () => {
@@ -632,8 +637,31 @@ describe('encrypted workspace settings', () => {
     expect(update?.disabled).toBe(true);
     const revoke = buttons.find((button) => button.textContent === 'e2ee.security.revoke');
     expect(revoke?.disabled).toBe(true);
-    const refresh = buttons.find((button) => button.textContent === 'e2ee.security.refresh');
-    expect(refresh?.disabled).toBe(false);
+  });
+  it('keeps the ordinary General page and leaves encrypted team management to the console', async () => {
+    state = { ...state, rotationRequired: false };
+    await render();
+    expect(container.textContent).toContain('ordinary settings without team management');
+    expect(container.textContent).toContain('e2ee.security.current');
+    expect(container.textContent).not.toContain('e2ee.security.attention');
+    await click('e2ee.security.openConsole');
+    expect(navigation.target).toEqual({
+      to: '/workspace/e2ee/$workspaceId',
+      params: { workspaceId: 'workspace' },
+    });
+  });
+  it('turns a waiting link request into a review item that opens the console', async () => {
+    state = { ...state, rotationRequired: false };
+    platform.e2eeWorkspaces!.runtime!.memberJoinRequests = async () =>
+      ({ items: [{ source: 'link', state: 'pending' }] }) as never;
+    await render();
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.textContent).toContain('e2ee.security.joinRequests');
+    await click('e2ee.security.review');
+    expect(navigation.target).toEqual({
+      to: '/workspace/e2ee/$workspaceId',
+      params: { workspaceId: 'workspace' },
+    });
   });
   it('reuses the settings badge for a pending link request and clears it after approval', async () => {
     vi.useFakeTimers();

@@ -26,12 +26,22 @@ const state = {
 const meta = {
   title: 'Settings/Encrypted workspace security',
   component: E2eeSecurityPanel,
-  args: { state, onUpdate: () => {}, onRevoke: () => {}, onRetry: () => {}, onAuthorize: () => {} },
+  args: {
+    state,
+    onUpdate: () => {},
+    onRevoke: () => {},
+    onRetry: () => {},
+    onOpenConsole: () => {},
+  },
   parameters: { layout: 'padded' },
 } satisfies Meta<typeof E2eeSecurityPanel>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+export const Current: Story = { args: { state: { ...state, rotationRequired: false } } };
 export const KeyUpdateNeeded: Story = {};
+export const JoinRequestWaiting: Story = {
+  args: { state: { ...state, rotationRequired: false }, joinRequests: true },
+};
 export const StagingRetry: Story = {
   args: { error: 'e2ee_management_retry', state: { ...state, updatePending: true } },
 };

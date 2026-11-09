@@ -1,3 +1,4 @@
+import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
@@ -3349,6 +3350,7 @@ export function LoroAppSidebar({
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
         memberCount:
           org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
+        encrypted: isListedEncryptedWorkspace(org),
       }));
   }, [
     activeOrganization,

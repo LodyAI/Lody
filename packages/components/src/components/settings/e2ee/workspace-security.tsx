@@ -3,12 +3,18 @@ import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notific
 import { useState } from 'react';
 import { RecoveryVaultSection } from './recovery-vault-section';
 import { E2eeSecurityPanel } from './security-panel';
-import { useSecurityState } from './security-state';
+import { useMemberJoinAttention, useSecurityState } from './security-state';
 import { AccountSettingsComponent } from '../account-setting';
 function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState> }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const joinRequests = useMemberJoinAttention(
+    scope.native,
+    scope.workspaceId,
+    scope.accountId,
+    !!scope.state.data?.mayRotate
+  );
   const perform = async (work: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true);
@@ -47,7 +53,8 @@ function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState
       state={scope.state.data}
       busy={busy}
       error={error ?? (scope.state.isError ? 'e2ee_management_retry' : undefined)}
-      onAuthorize={
+      joinRequests={joinRequests}
+      onOpenConsole={
         scope.workspaceId
           ? () => {
               void navigate({
@@ -80,9 +87,12 @@ function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState
 
 export function WorkspaceSettings() {
   const scope = useSecurityState();
+  // An encrypted workspace keeps the ordinary General page (name, icon, members,
+  // danger zone). Encryption management lives in the console the entry card opens.
   return scope.encrypted ? (
     <>
       <SecuritySettings key={`${scope.accountId}:${scope.workspaceId}`} scope={scope} />
+      <AccountSettingsComponent surface="workspace" encryptedTeamManagement={false} />
       {/* Remount per account: no plan, failure, retry or dialog state crosses accounts. */}
       <RecoveryVaultSection key={scope.accountId ?? ''} />
     </>
