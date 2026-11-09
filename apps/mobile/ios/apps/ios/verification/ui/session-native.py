@@ -126,12 +126,29 @@ wait_clipboard('feature/native-session')
 
 tap_label(more)
 tap_label(catalog.text('session.action.archive'))
-wait_probe('archive', 'Archive did not reach the session service')
+ui.wait(lambda items: not any(i.get('AXUniqueId') == 'session-preview-probe' for i in items),
+        'Archived session page did not return', timeout=10)
+ui.capture('archive-return')
+
+ui.open_case('session-preview-archive-error')
+wait_probe('live', 'Archive failure scenario did not start')
+tap_label(more)
+tap_label(catalog.text('session.action.archive'))
+ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.toast.archiveFailed') for i in items),
+        'Missing archive failure')
+ui.element('session-preview-probe')
+ui.element('chat-navigation-title')
+ui.capture('archive-failure-stays')
+
+ui.open_case('session-preview-archived')
+wait_probe('live', 'Archived scenario did not start')
 tap_label(more)
 ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('session.action.unarchive') for i in items), 'Archive state did not refresh the menu')
 ui.capture('archived-menu')
 tap_label(catalog.text('session.action.unarchive'))
 wait_probe('unarchive', 'Unarchive did not reach the session service')
+ui.element('chat-navigation-title')
+ui.capture('unarchive-stays')
 
 # Web SessionHeaderMenu's Copy submenu: every option reaches the clipboard.
 copy_menu = catalog.text('session.copy.title')

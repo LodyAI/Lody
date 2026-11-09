@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { useSessionActions } from '@/hooks/use-session-actions';
@@ -25,6 +26,7 @@ import {
   type SessionRelationTreeNode,
 } from '@/lib/session-relation-tree';
 import { cn } from '@/lib/utils';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
 
@@ -44,6 +46,15 @@ const styles = stylex.create({
   status: { padding: space[2], fontSize: text.footnoteSize, color: colors.secondaryLabel },
   error: { padding: space[2], fontSize: text.footnoteSize, color: colors.destructive },
   tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
+  scroll: { minWidth: 0, width: '100%' },
+  hiddenTrack: { display: 'none' },
+  row: { display: 'flex', gap: space[1], width: 'max-content', padding: `calc(${space[1]} / 2)` },
+  pill: { flex: '0 0 auto', maxWidth: '24ch' },
+  title: { maxWidth: '16ch' },
+  current: { backgroundColor: colors.selectedFill },
+  fade: (left: string, right: string) => ({
+    maskImage: `linear-gradient(to right, transparent, black ${left}, black calc(100% - ${right}), transparent)`,
+  }),
 });
 
 /**
@@ -254,25 +265,67 @@ function RelationTreeRow({
   onOpenSession: (target: SessionNavigationTarget) => void;
 }) {
   const rootId = node.session.id;
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    const update = () => {
+      const offset = Math.abs(viewport.scrollLeft);
+      const remaining = viewport.scrollWidth - viewport.clientWidth - offset;
+      const rtl = getComputedStyle(viewport).direction === 'rtl';
+      const next = {
+        left: rtl ? remaining > 1 : offset > 1,
+        right: rtl ? offset > 1 : remaining > 1,
+      };
+      setEdges((previous) =>
+        previous.left === next.left && previous.right === next.right ? previous : next
+      );
+    };
+    update();
+    const stopViewportResize = observeResizeOnAnimationFrame(viewport, update);
+    const stopContentResize = observeResizeOnAnimationFrame(content, update);
+    viewport.addEventListener('scroll', update, { passive: true });
+    return () => {
+      stopViewportResize();
+      stopContentResize();
+      viewport.removeEventListener('scroll', update);
+    };
+  }, []);
+  const fadeProps = stylex.props(
+    (edges.left || edges.right) &&
+      styles.fade(edges.left ? '12px' : '0px', edges.right ? '12px' : '0px')
+  );
   return (
     <div>
-      <div className="flex min-w-0 gap-1">
-        <RelationPill
-          session={node.session}
-          target={{ sessionId: rootId }}
-          isCurrent={rootId === currentSessionId}
-          onOpenSession={onOpenSession}
-        />
-        {node.tabs.map((tab) => (
+      <ScrollArea
+        axis="horizontal"
+        viewportRef={viewportRef}
+        className={stylex.props(styles.scroll).className}
+        viewportClassName={fadeProps.className}
+        viewportStyle={fadeProps.style}
+        scrollbarClassName={stylex.props(styles.hiddenTrack).className}
+      >
+        <div ref={contentRef} {...stylex.props(styles.row)}>
           <RelationPill
-            key={tab.id}
-            session={tab}
-            target={{ sessionId: rootId, tabSessionId: tab.id }}
-            isCurrent={tab.id === currentSessionId}
+            session={node.session}
+            target={{ sessionId: rootId }}
+            isCurrent={rootId === currentSessionId}
             onOpenSession={onOpenSession}
           />
-        ))}
-      </div>
+          {node.tabs.map((tab) => (
+            <RelationPill
+              key={tab.id}
+              session={tab}
+              target={{ sessionId: rootId, tabSessionId: tab.id }}
+              isCurrent={tab.id === currentSessionId}
+              onOpenSession={onOpenSession}
+            />
+          ))}
+        </div>
+      </ScrollArea>
       {node.children.length > 0 ? (
         // The trunk sits under the parent row's agent icon.
         <div className="ml-[14px]">
@@ -325,10 +378,9 @@ function RelationPill({
       data-session-relation-row={session.id}
       onClick={() => onOpenSession(target)}
       className={cn(
-        'flex h-7 min-w-0 flex-1 basis-0 items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors',
-        isCurrent
-          ? 'border-foreground/15 bg-muted-foreground/10 font-medium'
-          : 'border-border/60 hover:bg-muted-foreground/10'
+        'flex h-7 min-w-0 items-center gap-2 rounded-md border border-border/60 px-2 text-left text-xs transition-colors',
+        stylex.props(styles.pill, isCurrent && styles.current).className,
+        !isCurrent && 'hover:bg-muted-foreground/10'
       )}
     >
       <AgentIcon
@@ -337,7 +389,14 @@ function RelationPill({
         env={agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env}
         className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
       />
-      <span className="min-w-0 flex-1 truncate text-foreground">{title}</span>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-foreground',
+          stylex.props(styles.title).className
+        )}
+      >
+        {title}
+      </span>
       {/* `waiting > working > unread`, tested in that order. */}
       <SessionRowStatusIndicator
         isWaitingPermission={liveStatus?.type === 'requestPermission'}

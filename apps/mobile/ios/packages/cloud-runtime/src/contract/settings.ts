@@ -8,7 +8,7 @@ const visibility = z.enum(['private', 'workspace']);
 
 export const RemoteSetting = z
   .object({
-    kind: z.enum(['machine', 'agent', 'mcp']),
+    kind: z.enum(['machine', 'agent']),
     id: z.string(),
     name: z.string(),
     machineId: z.string().optional(),
@@ -16,89 +16,26 @@ export const RemoteSetting = z
     readOnly: z.boolean().optional(),
     detail: z.string().optional(),
     prompt: z.string().optional(),
-    enabledByDefault: z.boolean().optional(),
-    configured: z.boolean().optional(),
-    updatedAt: z.number().optional(),
   })
   .meta({ id: 'RemoteSetting' });
 
 export const RemoteSettingsParams = z
   .object({
     ...settingsScope,
-    kind: z.enum(['machine', 'agent', 'mcp']),
+    kind: z.enum(['machine', 'agent']),
     edit: z
       .object({
         item: RemoteSetting,
         name: z.string(),
         prompt: z.string().optional(),
-        enabledByDefault: z.boolean().optional(),
       })
       .optional(),
-    remove: RemoteSetting.optional(),
   })
   .meta({ id: 'RemoteSettingsParams' });
 
 export const RemoteSettingsResult = z
   .object({ settings: z.array(RemoteSetting) })
   .meta({ id: 'RemoteSettingsResult' });
-
-export const MemoryAssociation = z
-  .object({
-    machineId: z.string().min(1),
-    providerId: z.string().min(1),
-    memoryId: z.string().min(1),
-    name: z.string().min(1),
-    description: z.string().optional(),
-  })
-  .meta({ id: 'MemoryAssociation' });
-
-const memoryScope = {
-  ...settingsScope,
-  machineId: z.string().min(1).optional(),
-};
-
-export const MemorySettingsParams = z
-  .discriminatedUnion('action', [
-    z.object({ ...memoryScope, action: z.literal('list') }),
-    z.object({
-      ...memoryScope,
-      action: z.literal('import'),
-      memoryId: z.string().min(1),
-    }),
-    z.object({
-      ...memoryScope,
-      action: z.literal('remove'),
-      base: MemoryAssociation,
-    }),
-  ])
-  .meta({ id: 'MemorySettingsParams' });
-
-export const MemorySnapshot = z
-  .object({
-    machines: z.array(z.object({ id: z.string(), name: z.string() })),
-    machineId: z.string().optional(),
-    entries: z.array(MemoryAssociation),
-    identities: z.array(
-      z.object({
-        id: z.string().min(1),
-        name: z.string(),
-        description: z.string().optional(),
-        role: z.string().optional(),
-      }),
-    ),
-    status: z.enum([
-      'ready',
-      'not_installed',
-      'not_running',
-      'error',
-      'offline',
-      'unknown',
-      'unsupported',
-      'forbidden',
-    ]),
-    cached: z.boolean(),
-  })
-  .meta({ id: 'MemorySnapshot' });
 
 export const AgentRoleItem = z
   .object({

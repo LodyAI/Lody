@@ -42,8 +42,6 @@ import {
 import {
   AgentRoleSnapshot,
   AgentRolesParams,
-  MemorySettingsParams,
-  MemorySnapshot,
   RemoteSettingsParams,
   RemoteSettingsResult,
 } from './settings.ts';
@@ -169,11 +167,6 @@ export const runtimeCalls = {
   remoteSettings: {
     params: RemoteSettingsParams,
     result: RemoteSettingsResult,
-    timeoutMs: 45_000,
-  },
-  memorySettings: {
-    params: MemorySettingsParams,
-    result: MemorySnapshot,
     timeoutMs: 45_000,
   },
   agentRoles: {

@@ -404,15 +404,12 @@
     <!-- Schedules tab -->
     <string name="home_tab_schedules">定时任务</string>
     <string name="schedules_new">新建定时任务</string>
-    <string name="schedules_section_tasks">定时任务</string>
-    <string name="schedules_section_messages">定时消息</string>
     <string name="schedules_loading">正在加载定时任务…</string>
     <string name="schedules_load_error">无法加载定时任务。</string>
     <string name="schedules_retry">重试</string>
     <string name="schedules_empty">还没有定时任务</string>
     <string name="schedules_empty_help">设置要做的事和运行时间，你的机器会在每次运行时创建新会话。</string>
     <string name="schedules_search_empty">没有匹配“%1$s”的定时任务</string>
-    <string name="schedules_more">更多操作</string>
     <string name="schedules_pause">暂停</string>
     <string name="schedules_resume">恢复</string>
     <string name="schedules_run">运行</string>
@@ -524,4 +521,34 @@
         <item quantity="other">每 %d 分钟</item>
     </plurals>
     <string name="home_project_index">项目索引</string>
+    <string name="message_show_more">展开</string>
+    <string name="message_show_less">收起</string>
+    <string name="chat_relations">关联对话</string>
+    <string name="chat_relation_tab">标签页</string>
+    <string name="chat_relation_current">当前对话</string>
+    <string name="chat_operation_conversation">对话</string>
+    <string name="chat_operation_created">已开启 %1$d 个对话</string>
+    <string name="chat_operation_replies">%1$d 个对话回复</string>
+    <string name="chat_operation_batch">%1$d 个任务结果</string>
+    <string name="chat_operation_batch_unknown">已保存 %1$d 个任务结果；尚无法确认模型是否收到</string>
+    <string name="chat_operation_failed">失败</string>
+    <string name="chat_operation_cancelled">已取消</string>
+    <string name="chat_operation_partial">部分任务未完成</string>
+    <string name="chat_operation_ready">已创建</string>
+    <string name="chat_operation_running">运行中</string>
+    <string name="chat_operation_succeeded">已完成</string>
+    <string name="chat_operation_unavailable">对话不可用</string>
+    <string name="chat_operation_more">显示全部</string>
+    <string name="chat_operation_less">收起</string>
+    <string name="chat_operation_full_reply">查看完整回复</string>
+    <string name="chat_operation_reply_truncated">此保存的回复在传递前已被截断。</string>
+    <string name="chat_relation_waiting">需要输入</string>
+    <string name="chat_relation_unread">未读</string>
+    <string name="schedules_overview_active">已启用</string>
+    <string name="schedules_overview_attention">需关注</string>
+    <string name="schedules_overview_paused">已暂停</string>
+    <string name="schedules_overview_ended">已结束</string>
+    <string name="schedules_section_task">任务</string>
+    <string name="schedules_section_when">时间</string>
+    <string name="schedules_section_run_with">运行配置</string>
 </resources>

@@ -725,10 +725,6 @@ export class Lody {
     return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
   }
 
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    return this.runtime.onSessionTerminated(handler);
-  }
-
   getConnectedRoomCount(): number {
     return this.documentManager.getConnectedRoomCount();
   }

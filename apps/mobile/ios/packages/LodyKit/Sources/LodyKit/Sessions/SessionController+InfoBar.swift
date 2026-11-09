@@ -21,7 +21,13 @@ extension SessionController {
     let bar = SessionInfoBar(session: session, repository: repository, busy: busy)
     infoBar = bar
     var result: [String: Any] = [:]
-    result["items"] = resourceItems
+    var items = resourceItems
+    let relations = SessionRelations.tree(sessions: state.catalog.sessions, current: sessionId)
+    if relations.hasRelations {
+      items.append(["id": "relations", "symbol": "bubble.left.and.bubble.right", "tap": true,
+        "accessibilityLabel": String(localized: "session.relations.title", bundle: .lody)])
+    }
+    result["items"] = items
     if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
@@ -96,6 +102,7 @@ extension SessionController {
 
   /// `item` or `item:menuAction`, from the action bar.
   func infoBarAction(_ id: String) {
+    if id == "relations" { presentRelations(); return }
     if githubOperation != nil && (id == "act" || id.hasPrefix("more:")) { return }
     let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
     if ["browser", "simulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }
@@ -152,8 +159,9 @@ extension SessionController {
     renderComposer()
     var payload: [String: Any] = ["workspaceId": state.workspaceId, "repository": pr.repository, "number": pr.number, "operation": operation]
     if let method { payload["method"] = method }
-    let pending = operation == "merge" ? "bar.merge.pending" : "bar.ready.pending"
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(pending), bundle: .lody), kind: .neutral)
+    if operation == "merge" {
+      LodyToastOverlay.shared.show(message: String(localized: "bar.merge.pending", bundle: .lody), kind: .neutral)
+    }
     Task { @MainActor [weak self] in
       defer {
         if let self, self.source.state.key == state.key {
@@ -167,8 +175,9 @@ extension SessionController {
         guard let self, self.source.state.key == state.key else { return }
         self.githubUpdates.finish(success: true)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        let done = operation == "merge" ? "bar.merge.done" : "bar.ready.done"
-        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(done), bundle: .lody), kind: .neutral)
+        if operation == "merge" {
+          LodyToastOverlay.shared.show(message: String(localized: "bar.merge.done", bundle: .lody), kind: .neutral)
+        }
       } catch {
         guard let self, self.source.state.key == state.key else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)

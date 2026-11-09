@@ -15,6 +15,11 @@ it hides after scrolling and interaction stop. An opaque capsule keeps the icons
 legible over conversation rows. Time/status grouping, search, and conversation
 pages keep their existing scrolling.
 
+iOS keeps application icon selection under Settings → Preferences. Android
+currently offers account information, workspace switching, and sign out.
+Neither native client exposes MCP server management, Memory, or a separate
+Appearance page in settings.
+
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile
 clients currently use Lody Cloud; they are not a mobile frontend for the OSS

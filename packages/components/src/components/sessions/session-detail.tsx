@@ -1,3 +1,5 @@
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { getSessionGroupTitle, machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -1999,7 +2001,8 @@ const SessionDetail = ({
     () => {
       activateSidebarTab('android-emulator');
       revealRightSidebar();
-    }
+    },
+    'device'
   );
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
@@ -2386,6 +2389,7 @@ const SessionDetail = ({
   } = useSessionActions();
   const { members: workspaceMembers, isMultiMember: isMultiMemberWorkspace } =
     useWorkspaceMembers();
+  const getOwnerAccessReason = useSessionOwnerAccess();
   const handleTransferSessionOwner = useCallback(
     async (targetSessionId: SessionId, nextUserId: string) => {
       try {
@@ -5687,6 +5691,7 @@ const SessionDetail = ({
     ]
   );
 
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const visibleMachineIds = useMemo(
     () => new Set(sharingMachineAccessById.keys()),
     [sharingMachineAccessById]
@@ -5712,7 +5717,8 @@ const SessionDetail = ({
       visibleLocalProjectKeys,
       machineVisibilityLoading,
       localProjectVisibilityLoading,
-      currentUserId: user?.id ?? null,
+      currentUserId: myAccountId,
+      ownedMachineIds,
     });
   }, [
     activeSession,
@@ -5726,6 +5732,8 @@ const SessionDetail = ({
     user?.id,
     visibleLocalProjectKeys,
     visibleMachineIds,
+    ownedMachineIds,
+    myAccountId,
   ]);
 
   /* One compact line per SessionDetail render into the crash-report ring
@@ -6464,6 +6472,7 @@ const SessionDetail = ({
             isMultiMemberWorkspace && !activeSession.isArchived
               ? {
                   members: workspaceMembers,
+                  getDisabledReason: (userId) => getOwnerAccessReason(activeSession, userId),
                   ownerUserId: activeSession.userId,
                   onSelect: (userId) => {
                     void handleTransferSessionOwner(activeSession.id, userId);

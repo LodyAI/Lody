@@ -10,6 +10,7 @@ import {
 } from '@lody/shared';
 import { Effect } from 'effect';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import fs, { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -963,7 +964,6 @@ describe('LodyFleet encrypted access loss', () => {
         stub.cleanups += 1;
       },
       documentManager: { repo: {} },
-      onSessionTerminated: () => () => {},
       isControlPlaneReady: () => true,
       isControlPlaneRecovering: () => false,
       isRemoteBridgeAttached: () => false,
@@ -1204,7 +1204,6 @@ describe('LodyFleet shutdown ordering', () => {
           await writer.executeEffect(writer.writer.closeOwner(owner));
         },
       },
-      unsubscribeTerminalCleanup: () => {},
       schedules: { dispose: async () => {} },
       prPollerWorkspace: null,
     });
@@ -1245,7 +1244,6 @@ describe('LodyFleet shutdown ordering', () => {
           await writer.executeEffect(writer.writer.closeOwner(owner));
         },
       },
-      unsubscribeTerminalCleanup: () => {},
       schedules: { dispose: async () => {} },
       prPollerWorkspace: null,
     });
@@ -1358,7 +1356,6 @@ it('retains the failed workspace owner and retries only its unresolved cleanup p
         steps.push('resource released');
       },
     },
-    unsubscribeTerminalCleanup: () => {},
     prPollerWorkspace: {
       dispose: async () => {
         steps.push('poller released');
@@ -1584,7 +1581,6 @@ it.each(['EMFILE', 'EACCES'])(
       start: async () => {},
       cleanup: async () => {},
       documentManager: { repo: {} },
-      onSessionTerminated: () => () => {},
       isControlPlaneReady: () => true,
       isControlPlaneRecovering: () => false,
       isRemoteBridgeAttached: () => false,
@@ -1681,7 +1677,6 @@ describe('Fleet PR observation composition', () => {
         start: async () => {},
         cleanup: async () => {},
         documentManager: { repo: {} },
-        onSessionTerminated: () => () => {},
         isControlPlaneReady: () => true,
         isControlPlaneRecovering: () => false,
         isRemoteBridgeAttached: () => false,
@@ -1813,7 +1808,6 @@ it('joins background project observation before closing its workspace document',
         steps.push('document');
       },
     },
-    unsubscribeTerminalCleanup: () => {},
     prPollerWorkspace: {
       dispose: async () => {
         steps.push('poller');
@@ -2010,4 +2004,97 @@ describe('local DSH Provider discovery', () => {
       },
     ]);
   });
+});
+
+it('keeps manual terminals through agent termination and workspace cleanup until archive or shutdown', async () => {
+  const events = new EventEmitter();
+  const sessionId = 'terminal-session' as SessionId;
+  const otherSessionId = 'other-terminal-session' as SessionId;
+  const terminals = new Set([sessionId, otherSessionId]);
+  let archiveTerminals: ((id: SessionId) => void) | undefined;
+  const create = vi.spyOn(Lody, 'create').mockImplementation(async (options) => {
+    archiveTerminals = options.closeSessionTerminals;
+    return {
+      start: async () => {},
+      cleanup: async () => {
+        events.emit('terminated', sessionId);
+      },
+      // Model the agent lifecycle boundary that used to own manual terminals.
+      onSessionTerminated: (handler: (id: SessionId) => void) => {
+        events.on('terminated', handler);
+        return () => {
+          events.off('terminated', handler);
+        };
+      },
+      documentManager: { repo: {} },
+      isControlPlaneReady: () => true,
+      isControlPlaneRecovering: () => false,
+      isRemoteBridgeAttached: () => false,
+      getActiveSessionCount: () => 0,
+      getConnectedRoomCount: () => 0,
+    } as never;
+  });
+  const reconcile = vi
+    .spyOn(projectMeta, 'reconcileMachineLocalProjectRootPaths')
+    .mockResolvedValue(undefined);
+  const schedules = vi.spyOn(scheduleWorkspace, 'createScheduleWorkspace').mockResolvedValue({
+    evaluate: async () => {},
+    dispose: async () => {},
+  });
+  const fleet = createFleetHarness(createCatalogStub(() => Effect.succeed(catalogSnapshot({}))))
+    .fleet as unknown as {
+    desiredWorkspaces: Map<string, unknown>;
+    runtimes: Map<string, unknown>;
+    retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+    terminalPtyService: {
+      closeSession(id: SessionId): void;
+      closeAll(): void;
+    };
+    startWorkspace(workspace: never): Promise<void>;
+    stopWorkspace(id: string): Promise<void>;
+    finishGlobalShutdown(): Promise<void>;
+    stopped: boolean;
+  };
+  fleet.terminalPtyService = {
+    closeSession: (id) => {
+      terminals.delete(id);
+    },
+    closeAll: () => {
+      terminals.clear();
+    },
+  };
+  delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+  const workspace = {
+    id: 'manual-terminals',
+    name: 'Synthetic',
+    slug: null,
+    role: 'owner',
+    contentMode: 'e2ee',
+  };
+  fleet.desiredWorkspaces.set(workspace.id, workspace);
+  try {
+    await fleet.startWorkspace(workspace as never);
+    expect(fleet.runtimes.has(workspace.id)).toBe(true);
+    // Stop and GC both publish the same agent termination event.
+    events.emit('terminated', sessionId);
+    expect([...terminals]).toEqual([sessionId, otherSessionId]);
+
+    await fleet.stopWorkspace(workspace.id);
+    expect(fleet.runtimes.has(workspace.id)).toBe(false);
+    expect([...terminals]).toEqual([sessionId, otherSessionId]);
+
+    expect(archiveTerminals).toBeDefined();
+    if (!archiveTerminals) throw new Error('Archive cleanup was not wired');
+    archiveTerminals(sessionId);
+    expect([...terminals]).toEqual([otherSessionId]);
+
+    await fleet.finishGlobalShutdown();
+    expect(terminals.size).toBe(0);
+  } finally {
+    fleet.stopped = true;
+    for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
+    create.mockRestore();
+    reconcile.mockRestore();
+    schedules.mockRestore();
+  }
 });

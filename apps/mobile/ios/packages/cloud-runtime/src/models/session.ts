@@ -1,3 +1,4 @@
+import type { OperationPresentation } from '../runtime/operation-presentation.ts';
 import { type SessionUsage } from '../protocol/session-usage.ts';
 import { type TurnMetadata } from '../protocol/turnMetadata.ts';
 export type SystemNoticeMeta = {
@@ -7,6 +8,15 @@ export type SystemNoticeMeta = {
 };
 
 export type ItemSummary =
+  | {
+      itemId: string;
+      rev: number;
+      type:
+        | 'operation_progress'
+        | 'operation_completion'
+        | 'operation_completion_batch';
+      operation: OperationPresentation;
+    }
   | {
       itemId: string;
       rev: number;

@@ -20,6 +20,14 @@ Translation: current
 - 机器自己记录过：该条目正是由当前这组启动输入产生的，**包括 config 的环境变量**。source
   version 承载不了这一点：对 custom 与 registry config，以及除 DeepSeek endpoint 之外的所有
   builtin，它根本不依赖环境变量，而 token 或 endpoint 的变化却可能改变 Agent 声明的能力。
+- 该条目不是一次降级探测的结果。一个声明了 model 类型 select configOption、却给出零个选项的
+  Agent，是在模型目录不可用时被探测的——上游缓存冷、启动竞态、凭据尚未就绪——而不是一个合法地
+  没有任何模型的 Agent。这里不持久化任何 flag：`hasEmptyModelSelectOption` 直接读持久化的
+  `configOptions`，因此 `getAcpCapabilityCacheStaleReason` 会对这类条目 miss
+  （`empty-model-catalog`），包括该规则出现之前写下的旧行。同一个谓词也驱动 capability
+  authority：此类条目是 `degraded` 而非 `authoritative`，使验证流程（onboarding、provider
+  test、agent config 验证）不会把不可用的 provider 报告为已验证，同时让模型选择器回退到当前
+  已选模型，而不是渲染一个空列表。
 
 任何启动输入的变化——二进制、override、命令或任一环境变量值——都会 miss。
 

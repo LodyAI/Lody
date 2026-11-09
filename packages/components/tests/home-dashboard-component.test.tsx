@@ -306,7 +306,7 @@ describe('HomeDashboard', () => {
       });
       expect(byTestId('home-now')).toBeNull();
       expect(byTestId('home-dashboard')?.hasAttribute('data-auto-folded')).toBe(true);
-      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you9Running6Just finished0');
+      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you9Running6Unread0');
       expect(boards).toEqual([]);
 
       // Asked for from the line, it shows anyway.
@@ -398,7 +398,7 @@ describe('HomeDashboard', () => {
       expect(byTestId('home-now')).toBeNull();
       expect(byTestId('home-week')).not.toBeNull();
       // Now's summary: one thing needs you, one agent runs, nothing just finished.
-      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you1Running1Just finished0');
+      expect(byTestId('home-now-summary')?.textContent).toBe('Needs you1Running1Unread0');
 
       click(segment('week'));
       expect(byTestId('home-week')).toBeNull();

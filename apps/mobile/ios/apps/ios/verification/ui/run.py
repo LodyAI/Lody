@@ -20,9 +20,9 @@ from simulator import DEVICE_TYPES, run_with_simulator, SimulatorPool
 CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
-    'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'appearance', 'queued-message-behavior'],
+    'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
     'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
-    'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
+    'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
 }
 SUITES = {
     'settings-workspace': BATCHES['settings'],
@@ -51,9 +51,6 @@ PREVIEW = {
     'native-file-content': 'file-content-preview',
     'published-shares': 'published-shares-preview',
     'published-share-states': 'published-shares-readonly',
-    'memory-settings': 'memory-preview',
-    'memory-states': 'memory-states-preview',
-    'mcp-settings': 'mcp-settings-preview',
     'ai-usage': 'ai-usage-preview',
     'github-settings': 'github-settings-preview',
     'project-visibility': 'project-visibility-preview',
@@ -113,7 +110,7 @@ PREVIEW = {
     'project-picker': 'project-picker-preview',
     'branch-picker': 'create-parity',
     'settings': 'settings-preview',
-    'appearance': 'appearance-preview',
+    'preferences': 'preferences-preview',
     'queued-message-behavior': 'queued-message-behavior-preview',
     'model-memory': 'model-memory',
     'create-parity': 'create-parity',
@@ -170,9 +167,6 @@ READY = {
     'native-file-content': 'file:report.md',
     'published-shares': 'list-unavailable-action',
     'published-share-states': 'share:own',
-    'memory-settings': 'list-unavailable-action',
-    'memory-states': 'machine:not_installed',
-    'mcp-settings': 'setting:mcp::docs',
     'ai-usage': 'list-unavailable-action',
     'github-settings': 'list-unavailable-action',
     'project-visibility': 'visibility:m1:same',
@@ -227,7 +221,7 @@ READY = {
     'project-picker': 'create-session-input',
     'branch-picker': 'create-session-input',
     'settings': 'settings-machine',
-    'appearance': 'appearance',
+    'preferences': 'app-icon',
     'queued-message-behavior': 'queued-message-behavior',
     'model-memory': 'create-session-input',
     'create-parity': 'create-session-input',
@@ -519,12 +513,12 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:
                     script = Path(__file__).with_name('devices.py')
-                if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles'):
+                if case in ('diagnostics', 'directory', 'project', 'activity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles'):
                     script = Path(__file__).with_name(f'{case}.py')
                 if case in ('archived-sessions', 'session-native', 'session-simulator', 'permission-native', 'native-diff', 'native-workspace-changes', 'native-file-content'):
                     script = Path(__file__).with_name(f'{case}.py')
@@ -591,12 +585,10 @@ try:
                 if case == 'morph':
                     # Send, open and dismiss loops; ~175s alone with the driver's HID padding.
                     check_timeout = 300
-                if case == 'mcp-settings':
-                    check_timeout = 300
                 if case == 'native-file-content':
                     # Source, links, HTML navigation and three feedback outcomes share this case.
                     check_timeout = 300
-                if case in ('agent-roles', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states'):
+                if case in ('agent-roles', 'published-shares', 'published-share-states'):
                     check_timeout = 420
                 if case in ('settings', 'agents-settings'):
                     # These cases visit several Settings contexts or editors; settings reaches ~300s under load.
@@ -631,6 +623,10 @@ try:
                     # per-file upload states need multiple AXe round trips.
                     # Keep each gesture/animation assertion independently bounded.
                     check_timeout = 420
+                elif case == 'schedules':
+                    # List/editor rollback gates and cached-detail refreshes share this case.
+                    # Individual readiness assertions retain their own bounded deadlines.
+                    check_timeout = 600
                 elif case == 'mermaid':
                     # Six graph types, fallbacks, plan expansion and document copy.
                     check_timeout = 300
@@ -670,7 +666,7 @@ try:
                 elif case in ('send-queue', 'send-guide'):
                     # Queue/steer/stop and guide rounds reach ~185s on the native fixtures.
                     check_timeout = 300
-                elif case in ('branch-picker', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'appearance'):
+                elif case in ('branch-picker', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'preferences'):
                     check_timeout = 300
                 check_started = time.monotonic()
                 with (output / 'check.log').open('w') as log:
@@ -680,7 +676,7 @@ try:
                 result['checkSeconds'] = round(time.monotonic() - check_started, 2)
                 ui.capture('after')
                 result['status'] = 'passed'
-                if case in ('appearance', 'queued-message-behavior'):
+                if case in ('preferences', 'queued-message-behavior'):
                     # These checks cold-launch the App; the next case needs a fresh process baseline.
                     launch_mode = None
             except Exception as error:

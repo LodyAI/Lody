@@ -92,6 +92,32 @@ record showing this process wrote the entry from the current inputs (see below),
 `ACP_CAPABILITY_REFRESH_CACHE_TTL_MS`. `decideAcpCapabilityRefreshCache` in `@lody/shared` owns
 that decision and names each miss reason, which the machine logs.
 
+### Follow-up: degraded entries never hit (2026-11-08, #2441)
+
+The cache trusted any persisted entry whose versions, provenance, launch inputs and age checked
+out — including the pathological one where the probe itself succeeded but the agent advertised a
+model-typed select option with zero choices (Devin 3000.11.3 serving `options: []` from a cold
+`model_configs_v6` cache, #2440). Once persisted, that empty model list answered every refresh
+for the entry's full lifetime, and `getAcpCapabilityCacheEntryAuthority` called it authoritative,
+so onboarding and Provider Settings could report a verified provider whose picker was empty.
+
+`getAcpCapabilityCacheStaleReason` now misses with `empty-model-catalog` when the persisted
+`configOptions` show an empty model select — read directly off the row, no persisted flag — which
+covers rows written before the rule existed. The same predicate feeds
+`getAcpCapabilityCacheEntryAuthority`, which now returns a new `degraded` tier for such entries:
+every `=== 'authoritative'` verification check (onboarding status, provider test, session fork,
+steer) stops accepting them, while selector building treats `degraded` like `provisional` and
+keeps the currently selected model visible instead of an empty list. The agent-config dialog and
+onboarding provider test additionally surface the empty catalog as a verification failure with a
+dedicated reason instead of "passed". An earlier revision of this fix persisted a `modelsDegraded`
+flag and excluded entries whose `models` list was populated; review dropped both — the flag is
+fully derivable and the picker renders the select directly, so a covered `models` array does not
+make an empty select usable.
+
+Cost analysis: a degraded entry re-probes on each non-forced refresh until it heals. Forced
+requests already re-probed; automatic startup refresh is latched per config per runtime pass, so
+a stuck-degraded config costs at most one probe per renderer start.
+
 Resolving "the version a probe would stamp" is the non-obvious part. The stored version is the one
 the *launcher* produced, and for managed builtins that includes the installed runtime version
 (`builtin-kimi:0.36.0`), which `getAcpCapabilitySourceVersion(input)` alone cannot reproduce.

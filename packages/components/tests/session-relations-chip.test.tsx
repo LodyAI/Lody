@@ -91,3 +91,64 @@ it('requires confirmation, disables duplicate submits, and exposes restore only 
   expect(accepted).toEqual([true, false]);
   expect(button('Stop all conversation collaboration')).toBeDefined();
 });
+
+it('keeps contained Tabs on the root scroll row and navigates to the exact Tab', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  cleanup = async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  };
+  const session = {
+    id: 'root',
+    machineId: 'machine',
+    userId: 'user',
+    cliType: 'builtin',
+    agentType: 'codex',
+    title: 'Root conversation with a long title',
+    createdAt: '2026-10-11T00:00:00Z',
+  } as SessionMeta;
+  const tab = {
+    ...session,
+    id: 'tab',
+    parentSessionId: session.id,
+    title: 'Contained Tab with a long title',
+  } as SessionMeta;
+  const child = {
+    ...session,
+    id: 'child',
+    openedBySessionId: session.id,
+    title: 'Opened conversation',
+  } as SessionMeta;
+  let destination: unknown;
+  await act(async () =>
+    root.render(
+      <Provider>
+        <SessionRelationsChip
+          tree={{ session, tabs: [tab], children: [{ session: child, tabs: [], children: [] }] }}
+          currentSessionId={tab.id}
+          onOpenSession={(target) => {
+            destination = target;
+          }}
+          defaultOpen
+        />
+      </Provider>
+    )
+  );
+  const pill = (id: string) => {
+    const element = document.querySelector<HTMLButtonElement>(
+      `[data-session-relation-row="${id}"]`
+    );
+    if (!element) throw new Error(`Missing relation pill: ${id}`);
+    return element;
+  };
+  const row = pill('root').closest('[data-scroll-area-viewport]');
+  expect(row).not.toBeNull();
+  expect(pill('tab').closest('[data-scroll-area-viewport]')).toBe(row);
+  expect(pill('child').closest('[data-scroll-area-viewport]')).not.toBe(row);
+  expect(pill('tab').title).toBe(tab.title);
+  expect(pill('tab').getAttribute('aria-current')).toBe('page');
+  await act(async () => pill('tab').click());
+  expect(destination).toEqual({ sessionId: 'root', tabSessionId: 'tab' });
+});

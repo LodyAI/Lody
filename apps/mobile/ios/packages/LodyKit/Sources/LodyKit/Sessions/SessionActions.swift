@@ -31,7 +31,7 @@ final class SessionActions {
     LodyShell.shared.sessionIntent("create", fields)
   }
 
-  func perform(_ actionId: String, row id: String, from controller: UIViewController) {
+  func perform(_ actionId: String, row id: String, from controller: UIViewController, onArchived: (@MainActor () -> Void)? = nil) {
     let state = source.state
     guard !state.workspaceId.isEmpty else { return }
     switch actionId {
@@ -54,11 +54,11 @@ final class SessionActions {
       LodyShell.shared.sessionIntent("share", ["workspaceId": state.workspaceId, "sessionId": id])
     default:
       guard let session = state.catalog.session(id) else { return }
-      sessionAction(actionId, session, in: state, from: controller)
+      sessionAction(actionId, session, in: state, from: controller, onArchived: onArchived)
     }
   }
 
-  private func sessionAction(_ actionId: String, _ session: SessionItem, in state: SessionListState, from controller: UIViewController) {
+  private func sessionAction(_ actionId: String, _ session: SessionItem, in state: SessionListState, from controller: UIViewController, onArchived: (@MainActor () -> Void)?) {
     let workspace = state.workspaceId
     switch actionId {
     case "delete":
@@ -68,6 +68,7 @@ final class SessionActions {
       write(workspace, session.id, .archive(archived)) { failed in
         let key = archived ? "archive" : "unarchive"
         Self.toast(failed ? "\(key)Failed" : "\(key)d", kind: failed ? .error : .neutral)
+        if archived && !failed { onArchived?() }
       }
     case "pin":
       let pinned = !session.pinned

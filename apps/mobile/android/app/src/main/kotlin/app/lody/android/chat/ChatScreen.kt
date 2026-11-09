@@ -76,6 +76,7 @@ data class ChatContext(
     /** The GitHub repository (`owner/name`) the session works in; empty without one. */
     val tabs: List<CatalogSession> = emptyList(),
     val closedTabs: List<CatalogSession> = emptyList(),
+    val relatedSessions: List<CatalogSession> = emptyList(),
     val repository: String = "",
     val machineName: String = "",
     val machineKind: app.lody.android.create.CreateSessionModel.MachineKind = app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
@@ -132,6 +133,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 entries = withContext(Dispatchers.Default) {
                     val next = snapshot.messages.map { message ->
                         rendered[message.id]?.takeIf { it.first == message }?.second ?: when (message.role) {
+                            "system" -> ChatEntry.Operations(message.id, message.operations)
                             "user" -> ChatEntry.User(
                                 message.id, message.text,
                                 TurnIdentity("", time = turnTime(message.timestamp)),
@@ -430,6 +432,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         Unit
     }
     val prUpdates = remember(scope, id) { SessionPullRequestUpdates() }
+    val hasRelations = remember(id, context.relatedSessions) { SessionRelations.rows(id, context.relatedSessions).isNotEmpty() }
     val bar = session?.let { SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend) }
     // Merge / Ready for review go straight to GitHub, one at a time, never retried.
     var merging by remember(id) { mutableStateOf(false) }
@@ -437,7 +440,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
     val prefs = remember { appContext.getSharedPreferences("lody.chat", android.content.Context.MODE_PRIVATE) }
     val writeTexts = WriteTexts(
         stringResource(R.string.bar_merge_pending), stringResource(R.string.bar_merge_done), stringResource(R.string.bar_merge_error),
-        stringResource(R.string.bar_ready_pending), stringResource(R.string.bar_ready_done), stringResource(R.string.bar_ready_error),
+        stringResource(R.string.bar_ready_error),
         WriteErrors.associateWith { code -> stringResource(writeErrorText(code)) },
     )
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -446,8 +449,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         if (writing != null) return@write
         prUpdates.begin(pr, merged = method != null)
         writing = if (method != null) SessionInfoBar.Action.Merge else SessionInfoBar.Action.ReadyForReview
-        coroutines.launch {
-            snackbar.showSnackbar(if (method != null) writeTexts.mergePending else writeTexts.readyPending)
+        if (method != null) coroutines.launch {
+            snackbar.showSnackbar(writeTexts.mergePending)
         }
         coroutines.launch {
             val message = try {
@@ -455,7 +458,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 else repository.markReady(scope, pr.repository, pr.number)
                 prUpdates.finish(success = true)
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
-                if (method != null) writeTexts.mergeDone else writeTexts.readyDone
+                if (method != null) writeTexts.mergeDone else null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Reject)
@@ -465,8 +468,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 prUpdates.finish(success = false)
                 writing = null
             }
-            snackbar.currentSnackbarData?.dismiss()
-            snackbar.showSnackbar(message)
+            if (message != null) {
+                snackbar.currentSnackbarData?.dismiss()
+                snackbar.showSnackbar(message)
+            }
         }
     }
     if (merging && bar?.pullRequest != null) {
@@ -510,6 +515,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
                         actions = messageActions,
+                        relatedSessions = context.relatedSessions,
+                        navigateSession = { target -> if (SessionRelations.target(target, context.relatedSessions) != null) onSelectTab(target) },
                         loadDetail = { entryId, itemId -> repository.detail(scope, id, entryId, itemId) },
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
                     )
@@ -542,6 +549,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 ChatActionBar(
                     bar,
                     writing = writing,
+                    relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
                         when {
@@ -1092,12 +1100,16 @@ internal fun ChatActionBar(
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
+    relations: (@Composable () -> Unit)? = null,
 ) {
     val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
-    if (!context && !diff && bar.actions.isEmpty()) return
+    if (!context && !diff && bar.actions.isEmpty() && relations == null) return
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
-        if (context || diff) ContextItem(bar, diffDot, onCopied, modifier)
+        Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+            relations?.invoke()
+            if (context || diff) ContextItem(bar, diffDot, onCopied)
+        }
     }
     @Composable fun Action() {
         if (writing != null) ActionSplit(listOf(writing), onAction, pending = true)
@@ -1412,7 +1424,7 @@ private fun actionIcon(action: SessionInfoBar.Action): ImageVector = when (actio
 
 private class WriteTexts(
     val mergePending: String, val mergeDone: String, val mergeError: String,
-    val readyPending: String, val readyDone: String, val readyError: String,
+    val readyError: String,
     val errors: Map<String, String>,
 )
 

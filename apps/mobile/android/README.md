@@ -125,7 +125,48 @@ raised surfaces, translucent scrims/shadows and artwork retain their own colors.
 There is no separate pure-black mode. The protocol WebView is offscreen and does
 not render app pages.
 
-User messages offer Copy through a long-press menu, with Edit available only for
+The composer action bar includes a related-conversations capsule when the current
+conversation belongs to an opened-by tree. Its native sheet shows ancestors,
+descendants and contained Tabs; ordinary Tabs alone do not enable the capsule.
+Archived and side-panel entries are excluded, closed Tabs are hidden except for
+the current one, and cycles terminate. Navigation requires the exact target and
+its containing root in the current catalog; an opener id is never substituted
+with a surviving root id.
+
+System operation receipts decode the shared runtime’s `OperationPresentation`
+(`OperationEvents`)
+and transcript rows (`OperationCards`) for creation progress, create/reply
+completion, and completion batches. The shared projection suppresses duplicate
+successful creation completion cards while failures, cancellation, missing batch members
+and uncertain model delivery remain visible. Rows reuse the conversation list’s agent marks, animated running indicator,
+title typography without raised card backgrounds. Receipt targets belonging to
+the same conversation share a horizontal row. They show localized states and
+bounded reply previews, with catalog-backed titles and disabled navigation for
+unavailable targets. A separate View full reply action opens the complete saved
+Markdown in a scrollable, selectable bottom sheet, even when its target is gone.
+Reply text stays separate from failure detail; upstream truncation is identified
+in both the preview and sheet. Lists over five entries can expand.
+The relation sheet groups each root and its contained Tabs on one horizontal row.
+Overflow scrolls horizontally without a scrollbar; edge fades appear only in
+directions with more content. Only opened-by conversations increase hierarchy
+depth and receive curved rails, with trunks ending at the last sibling. Each
+Tab retains its exact navigation target, agent mark and title. Running, failure,
+input-needed and unread states use glyphs with accessible state descriptions,
+without duplicate status text or Tab/directory labels. Only the current exact
+conversation or Tab receives a subtle selected background and selected semantics. The pinned runtime snapshot emits these operation items through the shared
+projection; see [runtime snapshot maintenance](docs/runtime-snapshot.md).
+Synthetic Loro history tests cover the bundled projection and JVM protocol tests
+cover native consumption. Device rendering and authenticated live delivery have
+not been exercised.
+
+Chat links use Web Markdown’s subdued cyan palette. Live work status is text-only,
+and an activity summary shimmers only when it is the final visible content of a
+working turn. Hidden thoughts/think tools and task/footer bookkeeping do not
+displace it; later visible prose does. Finished turn actions align with message
+text: Copy, Info and Fork, with 48 dp touch targets. The entire opened-chats family line toggles
+its children; the opener row opens the conversation.
+
+User messages collapse to six lines with Show more / Show less and offer Copy through a long-press menu, with Edit available only for
 the latest runtime-confirmed editable message. Conversation titles use the 16 sp
 body-emphasis style, clipping overflow with a soft trailing-edge fade rather than
 an ellipsis (mirrored in RTL, absent when the title fits). Accessibility retains
@@ -158,6 +199,27 @@ projects. The index highlights the current section and carries status dots.
 TalkBack can activate named landmarks or adjust the index range one section at
 a time, including omitted sections; its state description names the current section. Other grouping/search views retain
 their ordinary list behavior.
+
+## Schedules
+
+The native Schedules tab shows flat rows grouped by Attention, Active, Paused and
+Ended, filtered by search. It restores the last successful list from an atomic
+display cache scoped to the account and workspace before refreshing. Failed live
+reads retain that display. The cache retains at most eight 8 MiB snapshots, prunes
+removed workspace access and clears with account data at logout or account change.
+Cached rows do not grant write authority.
+
+Pause and resume update the row and its group immediately, suppress further row
+commands while pending, and restore the prior row on failure (including unknown
+write outcomes). Reads begun before a command cannot overwrite its result. A fresh
+read reconciles after completion; optimistic state is never persisted or replayed.
+
+The editor presents stored status and quick actions above Task, When and Run with
+cards. Save is in the app bar; Delete is a separate confirmed action. Day selectors
+adapt their column count to retain 48 dp touch targets. Run and resume retain the
+machine capability gate, writes remain owner-only, and read-only destinations and
+scheduled messages keep their existing restrictions. The original rule and unknown
+write retry identity handling are unchanged. Open last chat uses Home navigation.
 
 ## Verification
 

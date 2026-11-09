@@ -11,7 +11,7 @@ PR: [#1862](https://github.com/LodyAI/Lody/pull/1862)
 DSH showed each thought independently but had no way to collapse completed work
 as a whole. It now uses the shared finished-work disclosure: streaming prose stays
 visible, completion folds earlier work, and the final answer remains visible.
-Expanding the process restores its ordered thought, prose and tool rows. Turns
+Expanding the process restores ordered thought and tool disclosures and prose; each thought disclosure opens separately. Turns
 without a visible answer retain the shared interruption safeguard.
 
 ## Decision and scope

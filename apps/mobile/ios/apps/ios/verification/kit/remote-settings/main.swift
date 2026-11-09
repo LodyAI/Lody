@@ -35,14 +35,6 @@ for (failed, connected) in [(true, true), (false, false)] {
   precondition(rows.allSatisfy { $0.status == "unknown" && $0.subtitle.hasPrefix("devices.unknown") }, "Stale presence is never live")
 }
 
-let mcp = RemoteSettingsSections.make(kind: "mcp", items: [
-  RemoteSetting(kind: "mcp", id: "a", name: "github", machineName: "Studio", enabledByDefault: true),
-  RemoteSetting(kind: "mcp", id: "b", name: "sentry", machineName: "Studio", readOnly: true, configured: false),
-], failed: false, connected: true)[0]
-precondition(mcp.rows[0].value == "settings.mcp.defaultOn" && mcp.rows[1].value == "settings.mcp.defaultOff")
-precondition(mcp.rows[1].trailingSymbol == "lock" && mcp.rows[1].subtitle == "Studio · settings.mcp.notConfigured")
-precondition(mcp.footer == "settings.remote.mcpHint")
-
 let subscription = AgentUsage(
   configs: [AgentUsageConfig(id: "codex-one", name: "", provider: "codex", eligible: true),
             AgentUsageConfig(id: "codex-two", name: "", provider: "codex", eligible: true),
@@ -112,12 +104,11 @@ precondition(SavedRemoteSettings.parse(#"{"configs":[]}"#, kind: "agent") == nil
 precondition(SavedRemoteSettings.parse(nil, kind: "agent") == nil)
 
 struct Failure: Error, CustomStringConvertible { let description: String }
-let list = RemoteSettingsRequest(workspaceId: "w", kind: "mcp")
+let list = RemoteSettingsRequest(workspaceId: "w", kind: "agent")
 var edit = list
-edit.edit = RemoteSettingEdit(item: mcp.rows.isEmpty ? saved.items[0] : saved.items[0], name: "x")
-precondition(RemoteSettingsFailure.message(Failure(description: "setting_read_only"), request: list) == "settings.mcp.readOnly")
+edit.edit = RemoteSettingEdit(item: saved.items[0], name: "x")
+precondition(RemoteSettingsFailure.message(Failure(description: "setting_read_only"), request: list) == "settings.remote.readOnly")
 precondition(RemoteSettingsFailure.message(Failure(description: "setting_conflict"), request: edit) == "settings.remote.conflict")
-precondition(RemoteSettingsFailure.message(Failure(description: "mcp_connection_missing"), request: edit) == "settings.mcp.missingConnection")
 precondition(RemoteSettingsFailure.message(Failure(description: "offline"), request: list) == "settings.remote.loadFailed")
 precondition(RemoteSettingsFailure.message(Failure(description: "offline"), request: edit) == "settings.remote.saveFailed")
 let body = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteSettingsRequest(

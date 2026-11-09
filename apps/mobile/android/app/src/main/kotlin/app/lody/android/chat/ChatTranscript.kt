@@ -84,6 +84,8 @@ enum class Delivery { Sending, Sent, Queued, Seen, Failed }
 sealed interface ChatEntry {
     val id: String
 
+    data class Operations(override val id: String, val events: List<app.lody.android.runtime.OperationEvent>) : ChatEntry
+
     data class User(
         override val id: String, val text: String, val who: TurnIdentity, val delivery: Delivery = Delivery.Sent,
         val attachments: List<app.lody.android.runtime.MessageAttachment> = emptyList(),
@@ -131,6 +133,8 @@ fun ChatTranscript(
     state: LazyListState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE),
     scrollToLatest: Int = 0,
     actions: MessageActionState = MessageActionState(),
+    relatedSessions: List<app.lody.android.runtime.CatalogSession> = emptyList(),
+    navigateSession: (String) -> Unit = {},
     /** Opens a step's detail; null where there is no runtime (previews, the stream probe). */
     loadDetail: (suspend (entryId: String, itemId: String) -> StepDetail)? = null,
     /** Opens a changed file's diff for a turn; null where there is no runtime. */
@@ -216,7 +220,7 @@ fun ChatTranscript(
     }
     LazyColumn(modifier, state = state, contentPadding = contentPadding) content@{
         keys.reset()
-        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions) }
+        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions, relatedSessions, navigateSession) }
         // A small stable end anchor avoids enormous scroll offsets and measuring the
         // whole final Markdown block merely to discover its bottom.
         item(key = "transcript-end", contentType = "end") { Spacer(Modifier.height(LodySpacing.xxs)) }
@@ -266,9 +270,12 @@ private fun LazyListScope.transcriptRows(
     onOpenTasks: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
     actions: MessageActionState,
+    relatedSessions: List<app.lody.android.runtime.CatalogSession>,
+    navigateSession: (String) -> Unit,
 ) {
         entries.forEach { entry ->
             when (entry) {
+                is ChatEntry.Operations -> item(key = entry.id, contentType = "operations") { OperationCards(entry.events, relatedSessions, navigateSession) }
                 is ChatEntry.User -> item(key = entry.id, contentType = "user") { UserTurn(entry, actions) }
                 is ChatEntry.Assistant -> {
                     val layout = entry.layout
@@ -309,6 +316,8 @@ val TranscriptMargin = LodySpacing.lg
 @Composable
 private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
     val colors = LodyTheme.colors
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(entry.id) { mutableStateOf(false) }
+    var overflowing by remember(entry.text) { mutableStateOf(false) }
     var menu by remember(entry.id) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     Row(
@@ -345,16 +354,22 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
                     append(entry.text)
                     entry.references.forEach { reference ->
                         if (reference.start >= 0 && reference.end <= length && reference.end > reference.start)
-                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.accentDefault), reference.start, reference.end)
+                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.textLink), reference.start, reference.end)
                     }
                 },
                 style = LodyTheme.typography.reading,
                 color = colors.textPrimary,
+                maxLines = if (expanded) Int.MAX_VALUE else 6,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { if (!expanded) overflowing = it.hasVisualOverflow },
                 modifier = Modifier
                     .widthIn(max = LodyLayout.readableMaxWidth)
                     .background(colors.fillSecondary, RoundedCornerShape(UserBubbleRadius))
                     .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg),
             )
+            if (overflowing || expanded) app.lody.android.designsystem.LodyTextButton(onClick = { expanded = !expanded }) {
+                Text(stringResource(if (expanded) R.string.message_show_less else R.string.message_show_more), color = colors.textSecondary)
+            }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.message_copy)) },

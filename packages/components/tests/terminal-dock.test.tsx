@@ -238,6 +238,7 @@ describe('TerminalDockHost workspace readiness', () => {
   let listeners: Set<(payload: unknown) => void>;
   let openedSessions: string[];
   let sequence = 0;
+  let initialStateRead: Promise<ElectronCliState> | undefined;
 
   function mixedState(): ElectronCliState & { runtime: CliRuntimeState } {
     return {
@@ -290,12 +291,13 @@ describe('TerminalDockHost workspace readiness', () => {
   beforeEach(() => {
     route.sessionId = `host-readiness-${++sequence}`;
     state = mixedState();
+    initialStateRead = undefined;
     listeners = new Set();
     openedSessions = [];
     window.__LODY_ELECTRON__ = true;
     window.ipc = {
       invoke: async (channel, ...args) => {
-        if (channel === 'cli.getState') return state;
+        if (channel === 'cli.getState') return initialStateRead ?? state;
         if (channel === 'terminal.list') return [];
         if (channel === 'terminal.open') {
           const request = args[0] as { sessionId: string };
@@ -348,6 +350,36 @@ describe('TerminalDockHost workspace readiness', () => {
     await click(add);
     expect(openedSessions).toEqual([route.sessionId, route.sessionId]);
     expect(state.connectivity).toBe('reconnecting');
+  });
+
+  it('keeps terminal creation ready when an old daemon snapshot arrives after a ready push', async () => {
+    let resolveSnapshot!: (value: ElectronCliState) => void;
+    initialStateRead = new Promise((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const old = { ...mixedState(), phase: 'starting' as const };
+    await mount();
+    expect(store.get(terminalDockCanCreateAtom)).toBe(false);
+    await publish(mixedState());
+    expect(store.get(terminalDockCanCreateAtom)).toBe(true);
+    await act(async () => resolveSnapshot(old));
+    expect(store.get(terminalDockCanCreateAtom)).toBe(true);
+    await toggleDock();
+    expect(openedSessions).toEqual([route.sessionId]);
+  });
+
+  it('does not re-enable terminal creation from a snapshot taken before a stopped push', async () => {
+    let resolveSnapshot!: (value: ElectronCliState) => void;
+    initialStateRead = new Promise((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const old = mixedState();
+    await mount();
+    await publish({ ...old, phase: 'stopped', desiredState: 'stopped' });
+    await act(async () => resolveSnapshot(old));
+    expect(store.get(terminalDockCanCreateAtom)).toBe(false);
+    await toggleDock();
+    expect(openedSessions).toEqual([]);
   });
 
   it('keeps the failed workspace blocked and recovers on its next ready snapshot', async () => {

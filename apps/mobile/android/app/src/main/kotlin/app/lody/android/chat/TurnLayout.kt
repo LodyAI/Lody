@@ -7,7 +7,7 @@ import app.lody.android.runtime.TurnItem
  *
  * - Consecutive thought / tool steps form one activity group; its header summarizes it ("Ran 3
  *   commands · Read 2 files"). Only builtin DSH shows thoughts ([showThoughts]); then thought runs
- *   and tool runs are separate groups, thoughts open by default and tools closed. Other providers
+ *   and tool runs are separate groups, both closed by default. Other providers
  *   hide thoughts, and `think` tool steps are never shown.
  * - A streaming turn stays expanded. A finished turn keeps its answer — the final contiguous text
  *   run before the never-folded tail (plans, checklists, notices) — and folds the earlier work
@@ -19,10 +19,7 @@ object TurnLayout {
 
     data class Content(override val key: String, val item: TurnItem) : Block
 
-    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block {
-        /** DSH thought-only groups open by default; tool groups start closed. */
-        val opensByDefault: Boolean get() = items.all { it is TurnItem.Thought }
-    }
+    data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block
 
     data class Summary(
         val thought: Boolean = false,
@@ -45,6 +42,10 @@ object TurnLayout {
         /** Background tasks and sub-agents: one panel after the turn, outside its blocks (web). */
         val tasks: List<TurnItem.Task> = emptyList(),
     ) {
+        /** Only a final visible activity is live; tasks/footer bookkeeping is outside these blocks. */
+        fun activeActivityKey(working: Boolean): String? =
+            if (working) (visible.lastOrNull() as? Activity)?.key else null
+
         val visible: List<Block> get() = if (folded) blocks.filter { it.key !in work } else blocks
         val folding: List<Block> get() = if (folded) blocks.filter { it.key in work } else emptyList()
     }

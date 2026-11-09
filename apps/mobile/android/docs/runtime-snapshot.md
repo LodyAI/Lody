@@ -1,6 +1,6 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 110-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `e0e7ddc076b998e404f973b2990994e29e85c805` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 111-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `2f55abadada37d5bf2fd348f20e7b5dbe39b93fa` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
@@ -46,3 +46,17 @@ fields reach native UI, never launch environments or credentials.
 ## Schedules
 
 `schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the `loro-crdt/base64` alias. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
+
+## Operation receipts
+
+The snapshot projects `operation_progress`, `operation_completion`, and
+`operation_completion_batch` history items into `ItemSummary.operation` cards
+and notices. Native `OperationEvents` consumes this display contract without
+reinterpreting the durable receipt. Creation progress owns successful targets;
+failure, cancellation, partial results and uncertain batch delivery remain visible.
+The source commit is retained at `refs/heads/snapshot/mobile-operation-runtime`.
+Its whole-package delta changes only `src/models/session.ts`,
+`src/runtime/project.ts`, and `src/runtime/operation-presentation.ts`; dependency
+versions and license files are unchanged. Android's bundled projection test uses
+synthetic Loro history through `projectSession`, including reply text and a batch
+with suppressed success plus an error.

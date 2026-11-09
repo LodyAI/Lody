@@ -29,7 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, ubuntu-latest, windows-latest]
+        # Playwright 1.58's FFmpeg downloads support Ubuntu 24.04, not 26.04.
+        os: [macos-15, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 45 }}
     steps:
@@ -54,7 +55,7 @@ jobs:
         run: pnpm --dir apps/electron build
 
       - name: Run desktop journeys (Linux under Xvfb)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         shell: bash
         env:
           SUITE: ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}
@@ -64,7 +65,7 @@ jobs:
           xvfb-run -a pnpm --filter @lody/e2e "$SUITE" 2>&1 | tee e2e/artifacts/cucumber-output.log
 
       - name: Run desktop journeys
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         shell: bash
         env:
           SUITE: ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}

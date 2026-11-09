@@ -5,6 +5,41 @@ typealias ScheduleItem = RuntimeContract.ScheduleItem
 typealias ScheduleRule = RuntimeContract.ScheduleRule
 typealias ScheduleAction = RuntimeContract.ScheduleCommandParamsAction
 
+/// Display snapshots owned by the Schedules page, shared with its pushed editors.
+/// Account/workspace changes invalidate the owner and every outstanding response.
+@MainActor
+final class ScheduleCache {
+  var valid = true
+  var pending = Set<String>()
+  var result: RuntimeContract.SchedulesResult?
+  var details: [String: RuntimeContract.ScheduleDetail] = [:]
+  var options: CreationOptions?
+
+  func update(_ item: ScheduleItem) {
+    guard valid else { return }
+    if let index = result?.items.firstIndex(where: { $0.scheduleId == item.scheduleId }) {
+      result?.items[index] = item
+    }
+    details[item.scheduleId]?.item = item
+  }
+
+  func remove(_ id: String) {
+    result?.items.removeAll { $0.scheduleId == id }
+    details[id] = nil
+  }
+
+  static func optimistic(_ item: ScheduleItem, action: ScheduleAction) -> ScheduleItem? {
+    guard action == .pause || action == .resume else { return nil }
+    var value = item
+    value.enabled = action == .resume
+    // The next execution time comes only from the runtime's reconciliation.
+    value.state = action == .pause
+      ? .init(group: .paused, kind: .paused)
+      : .init(group: .running, kind: .notScheduled)
+    return value
+  }
+}
+
 /// Schedule I/O through the runtime's `schedules` / `scheduleDetail` / `scheduleCommand` calls, plus
 /// the creation options the editor picks computers, agents, models and modes from. Injected so the
 /// offline Home fixture scripts every outcome.
@@ -14,6 +49,12 @@ struct ScheduleService {
   var detail: (_ workspaceId: String, _ scheduleId: String) async throws -> RuntimeContract.ScheduleDetail
   var command: (_ params: RuntimeContract.ScheduleCommandParams) async throws -> RuntimeContract.ScheduleCommandResult
   var options: (_ workspaceId: String) async throws -> CreationOptions
+  var cachedList: (_ userId: String, _ workspaceId: String) async -> RuntimeContract.SchedulesResult? = { _, _ in nil }
+  var persistList: (_ userId: String, _ workspaceId: String, _ result: RuntimeContract.SchedulesResult, _ generation: Int) -> Void = { _, _, _, _ in }
+
+  static func cacheKey(userId: String, workspaceId: String) -> String {
+    "schedules:v1:" + CreateJSON.encode([userId, workspaceId])
+  }
 
   /// The offline Home fixture scripts schedules; everything else reads the live runtime.
   static var live: ScheduleService { NativeHomeFixture.active ? ScheduleFixture.shared.service : cloud }
@@ -37,7 +78,21 @@ struct ScheduleService {
           return scoped
         }
       },
-      options: { workspaceId in try await CreateSessionService.live.options(workspaceId, nil) }
+      options: { workspaceId in try await CreateSessionService.live.options(workspaceId, nil) },
+      cachedList: { userId, workspaceId in
+        guard !userId.isEmpty, !workspaceId.isEmpty else { return nil }
+        let key = cacheKey(userId: userId, workspaceId: workspaceId)
+        let raw: String? = await withCheckedContinuation { continuation in
+          LocalStore.queue.async { continuation.resume(returning: (try? LocalStore.shared.read(key)) ?? nil) }
+        }
+        return raw.flatMap { CreateJSON.decode(RuntimeContract.SchedulesResult.self, $0) }
+      },
+      persistList: { userId, workspaceId, result, generation in
+        guard !userId.isEmpty, !workspaceId.isEmpty else { return }
+        let key = cacheKey(userId: userId, workspaceId: workspaceId)
+        let raw = CreateJSON.encode(result)
+        LocalStore.queue.async { try? LocalStore.shared.write(key, raw, generation: generation) }
+      }
     )
   }
 

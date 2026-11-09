@@ -13,7 +13,7 @@ final class SettingsPreviewController: UIViewController {
     }
     var section = LodyListSection()
     section.id = "remote"
-    section.rows = ["machine", "agent", "mcp"].map { kind in
+    section.rows = ["machine", "agent"].map { kind in
       var row = LodyListRow()
       row.id = "settings-\(kind)"
       row.title = RemoteSettingsSections.remote(kind)
@@ -26,7 +26,7 @@ final class SettingsPreviewController: UIViewController {
   }
 
   private func open(_ kind: String) {
-    guard ["machine", "agent", "mcp"].contains(kind) else { return }
+    guard ["machine", "agent"].contains(kind) else { return }
     final class State {
       var offline = false
       var percent = 32.0
@@ -68,7 +68,6 @@ private final class SettingsPreviewFixture {
     RemoteSetting(kind: "agent", id: "a3", name: "Kimi", machineId: "m1", machineName: "Studio Mac", detail: "kimi"),
     RemoteSetting(kind: "agent", id: "a4", name: "Custom API", machineId: "m1", machineName: "Studio Mac", detail: "codex"),
     RemoteSetting(kind: "agent", id: "a5", name: "Codex Work", machineId: "m1", machineName: "Studio Mac", detail: "codex"),
-    RemoteSetting(kind: "mcp", id: "c1", name: "Documentation", detail: "http", enabledByDefault: false),
     RemoteSetting(kind: "agent", id: "a1", name: "Codex", machineId: "m2", machineName: "Studio Mac", detail: "codex",
                   prompt: "Laptop instructions."),
   ]
@@ -88,7 +87,6 @@ private final class SettingsPreviewFixture {
         var next = row
         next.name = edit.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if request.kind == "agent" { next.prompt = edit.prompt }
-        if request.kind == "mcp" { next.enabledByDefault = edit.enabledByDefault }
         return next
       }
     }

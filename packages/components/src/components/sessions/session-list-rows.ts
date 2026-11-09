@@ -1,3 +1,4 @@
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { getSessionGroupTitle, resolveSessionPrimaryPullRequest } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
@@ -45,6 +46,7 @@ export type BuildSessionListRowsOptions = {
   defaultTitle: string;
   /** Set of online machine IDs - sessions with machines not in this set are considered offline */
   onlineMachineIds?: ReadonlySet<MachineId>;
+  ownedMachineIds?: ReadonlySet<MachineId>;
   /** Workspace members for resolving owner info (used in team scope) */
   members?: WorkspaceMember[];
   lineChangeScope?: LineChangeScope;
@@ -461,7 +463,9 @@ export function buildSessionListRows(
       return [];
     }
     return sessions
-      .filter((session) => session.userId === currentUserId)
+      .filter((session) =>
+        isSessionInMyScope(session, currentUserId, options.ownedMachineIds ?? new Set<MachineId>())
+      )
       .map((session) => mapAndAggregate(session));
   }
 

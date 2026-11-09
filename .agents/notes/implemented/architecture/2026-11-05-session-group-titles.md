@@ -18,7 +18,7 @@ migration runs and older clients that write only `title` still display.
 ## Decision
 
 - `SessionMeta.groupTitle` exists only on root Sessions. Readers that name a whole
-  conversation group (sidebar rows, command palette, Home, mobile lists, window
+  conversation group (sidebar rows, Archive rows and their search/sort, command palette, Home, mobile lists, window
   title) use `getSessionGroupTitle`, which falls back to the root `title`. Tab
   strips, mentions and per-conversation surfaces keep reading `title`.
 - Generated titles reach the group through `SessionDocument.setTitleIfSourceIn`
@@ -59,6 +59,11 @@ migration runs and older clients that write only `title` still display.
   tab rename, legacy user titles, child Sessions.
 - `packages/components/tests/use-session-actions.test.ts`: tab and group renames
   stay independent on a real Loro repo.
+- The November 8 [Desktop Daily run](https://github.com/LodyAI/Lody/actions/runs/42463860106)
+  exposed Archive still displaying the root tab title after sidebar rename. Archive
+  now uses the same group-title resolver for display, search and alphabetical sort;
+  the existing Session management journey retains its renamed-title assertion.
 - `apps/cli/src/mcp/lody-mcp-server.test.ts`: MCP tab and group scopes and the
   child rejection.
-- Not verified: the desktop UI in a running app, and mixed-version replicas.
+- November 9: the built Linux Electron Session-management journey passes sidebar rename, navigation, archive, restore and permanent deletion with the group title.
+- Not verified: mixed-version replicas and this repair on macOS/Windows.

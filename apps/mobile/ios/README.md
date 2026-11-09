@@ -71,10 +71,37 @@ What that week actually looked like:
 - **Native Input (`ChatComposerView`)**: Pixel-perfect keyboard avoidance matching system input methods, local draft persistence with automatic restoration, and real-time model thinking effort controls.
 
 The iOS app uses fixed Ink accents in both light and dark appearances, including
-Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
-without an accent-color picker. Process status labels use the same regular type
-as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
+Send and Stop; conversation activity/status colors remain unchanged. Preferences contains the app-icon picker. Settings has no Appearance, MCP servers,
+or Memory pages; dark canvases use fixed soft backgrounds. Process status labels use the same regular type
+as their duration, without a leading loading icon. The final visible command group
+shimmers while its turn runs, even after its tools complete or record a duration,
+and when hidden thinking calls follow it.
+User bubbles collapse to six measured lines. Agent footer icons align with the
+message edge: Copy, Info and Fork, 32 pt apart, followed by time 12 pt after
+the last glyph. The whole opened-chats count row toggles
+its children, while the opener above opens the conversation. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+MCP creation and reply receipts use compact conversation-list rows from the public
+operation payloads: provider marks, single-line titles, trailing status and curved
+child connectors, without filled card backgrounds. Consecutive creation receipts share a five-row expandable group; cards
+retain the creating turn's status and refresh titles and provider marks from the live catalog.
+Progress-linked successes are hidden, while errors, cancellations and uncertain or
+incomplete result batches remain visible. Reply cards open the saved Markdown reply;
+shortened receipts say so, and a separate button opens the exact conversation or Tab.
+The related-conversations icon above the composer opens a live native tree, with
+each conversation and its contained Tabs sharing one horizontally scrolling row.
+Scrollbars stay hidden; edge fades indicate more targets in either direction.
+Only opened-by descendants receive indentation and curved rails. Adjacent operation
+receipts for the same conversation also share a horizontal row, retaining each
+target’s independent full-reply and navigation actions. The current exact target
+uses a subtle background and accessibility selection; layout conveys containment
+without Tab/current/directory labels. Status icons replace redundant visible status
+words while keeping accessible descriptions, reply excerpts and error notices.
+Running rows use the Home working-grid indicator. Missing
+precise openers never fall back to provenance-only root IDs. Archived and side-panel
+sessions are excluded; closed Tabs appear only when current. The tree does not
+change archive ownership or read additional transcripts.
+
 The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
 conversation More. UIKit owns presentation, width, height, scrolling and title
 truncation; there is no six-row limit or custom fade. Actions retain full names,
@@ -109,7 +136,7 @@ The bottom machine capsule is omitted. The trailing Tabs button appears only wit
 other open Tabs; More retains closed-Tab recovery and New current working directory
 conversation, using the existing create-Tab operation.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
-secondary-label grey (links retain link blue); fenced code retains its own sizing
+secondary-label grey (links use web’s muted light/dark blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
 
@@ -138,6 +165,34 @@ Reduce Motion uses immediate visibility changes.
 `verify:native --case chat-list-scroll` covers hit bounds, direct navigation,
 48 pt target spacing, stable dense landmark taps, complete scrub/VoiceOver reach,
 deterministic linger cancellation and cached artwork.
+
+### Native Schedules
+
+Schedules uses the Chats list layout, with task and scheduled-message rows grouped
+by Needs attention, Active, Paused and Ended. Each row separates its title and
+status from the recurrence and execution context; search filters by title.
+
+The editor places current status and quick actions above separate Task, When and
+Run with cards. Weekdays and month days are directly selectable; date and time
+use native pickers in the computer's time zone. Owners can run, pause or resume
+supported tasks and open the last conversation. Teammates' tasks and scheduled
+messages retain their existing read-only rules, and deletion requires confirmation.
+
+Successful list reads persist as bounded SQLite display snapshots per account and
+workspace. Cold starts restore the saved list before refreshing from the runtime;
+failed reads retain it. Logout clears these snapshots and fences late writes.
+Optimistic states are never persisted, and cached rows do not authorize mutations.
+Opened details and editor choices stay in memory within the current Home page.
+Returning to a loaded editor
+shows its snapshot immediately while detail and choices refresh independently;
+failed refreshes retain existing content, and refreshes preserve unsaved edits.
+Cached details can be edited immediately; Save waits for fresh detail validation
+and blocks when the refresh detects changed remote content.
+Pause/resume preview their state immediately and roll back on failure, with the
+existing unknown-outcome warning when a reply is lost. Pending commands fence
+older reads; account/workspace changes discard snapshots and late responses.
+The runtime still re-reads current data before mutations. A workspace without a
+saved list shows the loading state until its first successful read.
 
 ### Code Diffs & Workspace File Browsing
 
@@ -320,8 +375,8 @@ App-owned dark backgrounds are fixed soft `#111113`. `LodyTint` provides plain,
 grouped and opaque canvases, while `LodyAppearance` uses the same dark base for
 `bgBase` and `bgGrouped`. Light backgrounds retain their existing semantics.
 Camera and simulator media surfaces use the fixed dark color in both themes;
-launch uses the matching dynamic `CanvasBackground` asset. Appearance settings
-only offer the app icon: legacy `darkBackground` values are ignored, not migrated.
+launch uses the matching dynamic `CanvasBackground` asset. The app icon is available under Settings → Preferences. There is no Appearance
+page; legacy `darkBackground` values are ignored, not migrated.
 This supersedes the optional pure-black background described in the historical
 Home design and settings migration documents. Masks, scrims, shadows, media
 content and foreground colors remain unchanged. The native `design` check tests

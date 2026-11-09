@@ -35,6 +35,10 @@ enum NativeDebug {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
       return
     }
+    if scenario.hasPrefix("schedule-fixture-") {
+      ScheduleFixture.shared.control(String(scenario.dropFirst("schedule-fixture-".count)))
+      return
+    }
     if scenario.hasPrefix("toast-") {
       guard LodyUIVerify.enabled, let presenter = LodyShell.shared.presenter else { return }
       LodyToastOverlay.shared.dismiss()
@@ -96,7 +100,7 @@ enum NativeDebug {
       fields["queuedMessageBehavior"] = scenario.hasSuffix("guide") ? "guide" : "queue"
     }
     let aliases = ["pull-request-preview": "pull-request-native-preview", "permission-native-waiting": "permission-native-preview",
-      "appearance-preview": "settings", "diagnostics-settings-preview": "settings",
+      "diagnostics-settings-preview": "settings",
       "preferences-preview": "preferences", "queued-message-behavior-preview": "preferences",
       "project-preview-empty": "project-preview", "project-preview-offline": "project-preview"]
     id = aliases[id] ?? id
@@ -144,17 +148,13 @@ final class NativeDebugController: UIViewController {
       ("settings-preview", String(localized: "debug.native.remote.settings.verification", bundle: .lody), "gear"),
       ("settings-baseline-live", "Settings baseline", "gearshape.2"),
       ("ai-usage-preview", "AI usage", "chart.bar"),
-      ("mcp-settings-preview", String(localized: "debug.native.mcp.settings.verification", bundle: .lody), "server.rack"),
-      ("memory-preview", "Memory acceptance", "brain"),
       ("published-shares-preview", "Published shares acceptance", "link"),
-      ("memory-states-preview", "Memory states", "brain"),
       ("agent-roles-preview", String(localized: "debug.native.agent.role.verification", bundle: .lody), "person.crop.square"),
       ("archived-sessions-preview", "Archived sessions", "archivebox"),
       ("session-preview-live", "Native session", "bubble.left"),
       ("machine-settings-preview", String(localized: "debug.native.machine.settings.verification", bundle: .lody), "desktopcomputer"),
       ("preferences-preview", String(localized: "debug.native.preferences.verification", bundle: .lody), "slider.horizontal.3"),
       ("diagnostics-preview", "Diagnostics", "waveform.path.ecg"),
-      ("appearance-preview", String(localized: "debug.native.appearance.verification", bundle: .lody), "circle.lefthalf.filled"),
       ("queued-message-behavior-preview", String(localized: "debug.native.queued.message.behavior.verification", bundle: .lody), "arrow.uturn.forward"),
       ("model-memory", "Model memory verification", "brain"),
       ("create-parity", "Create parity verification", "square.on.square"),

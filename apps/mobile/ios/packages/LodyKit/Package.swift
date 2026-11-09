@@ -21,6 +21,7 @@ let package = Package(
     .package(url: "https://github.com/OneSignal/OneSignal-XCFramework.git", exact: "5.5.1"),
   ],
   targets: [
+    .testTarget(name: "LodyKitTests", dependencies: ["LodyKit"]),
     .binaryTarget(name: "LodyDataChannel", path: "Vendor/LodyDataChannel.xcframework"),
     .target(
       name: "LodyKit",

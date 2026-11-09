@@ -1,16 +1,20 @@
 import LodyCore
 import LodyDesignSystem
+import SwiftUI
 import UIKit
 
-/// iPhone Schedules tab (web mobile Home's Schedules dock tab): the Chats header without a title
-/// (workspace capsule, search filtering by name), then Scheduled tasks and Scheduled messages
-/// (hidden when empty) with counts. Rows: name (dimmed once ended); frequency · Agent · computer;
-/// status in words, tinted only when it needs a look. Trailing swipe and the context menu run,
-/// pause / resume and delete (always confirmed); the row opens `ScheduleEditorController`.
-/// Reloads on appear, pull to refresh, after every command and on workspace change.
+/// iPhone Schedules tab, in the Chats list's design language: the Chats header without a title
+/// (workspace capsule, search filtering by name), then a plain list without separators grouped by
+/// state like Chats' status grouping (Needs attention, Active, Paused, Ended; empty groups hidden)
+/// under the same group labels. Rows match chat rows: name (dimmed once ended) with the state in
+/// words trailing (tinted only for attention); a footnote line with the kind glyph, frequency and
+/// computer; the reason when it needs a look. Trailing swipe and the context menu run, pause /
+/// resume, open the last chat and delete (always confirmed); the row opens
+/// `ScheduleEditorController`. Reloads on appear, pull to refresh, after every command and on
+/// workspace change.
 @MainActor
 final class SchedulesController: UIViewController, UICollectionViewDelegate {
-  private enum Section: String { case tasks, messages }
+  private typealias Section = RuntimeContract.ScheduleStateGroup
 
   private let source: SessionSource
   private let service: ScheduleService
@@ -18,14 +22,17 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var list: UICollectionView!
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
-  private var result: RuntimeContract.SchedulesResult?
+  private var cache = ScheduleCache()
+  private var result: RuntimeContract.SchedulesResult? {
+    get { cache.result }
+    set { cache.result = newValue }
+  }
   private var items: [String: ScheduleItem] = [:]
   private var loading = false
   private var failure: String?
   private var query = ""
   private var scope = ""
   private var version = 0
-  private var busy = Set<String>()
   private var observers: [NSObjectProtocol] = []
   private var clock: Timer?
 
@@ -47,13 +54,19 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     super.viewDidLoad()
     view.backgroundColor = LodyUIColor.bgBase
     var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+    configuration.showsSeparators = false
     configuration.backgroundColor = .clear
     configuration.headerMode = .supplementary
-    configuration.headerTopPadding = LodySpacing.sm
+    configuration.headerTopPadding = 0
     configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
       self?.swipeActions(at: indexPath)
     }
-    list = UICollectionView(frame: view.bounds, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration))
+    let layout = UICollectionViewCompositionalLayout.list(using: configuration)
+    // Group spacing belongs between sections, as in Chats.
+    let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
+    layoutConfiguration.interSectionSpacing = LodySpacing.md
+    layout.configuration = layoutConfiguration
+    list = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.backgroundColor = .clear
     list.alwaysBounceVertical = true
@@ -70,11 +83,9 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionHeader) {
       [weak self] header, _, indexPath in
       guard let self, let section = self.data.sectionIdentifier(for: indexPath.section) else { return }
-      var content = UIListContentConfiguration.header()
-      content.text = ScheduleFormat.text(section == .tasks ? "section.tasks" : "section.messages")
-      content.secondaryText = String(self.data.snapshot().numberOfItems(inSection: section))
-      content.prefersSideBySideTextAndSecondaryText = true
-      header.contentConfiguration = content
+      header.contentConfiguration = UIHostingConfiguration { ScheduleSectionTitle(text: ScheduleTone.label(section)) }
+        .margins(.all, 0)
+      header.backgroundConfiguration = .clear()
       header.accessibilityIdentifier = "schedules-section:" + section.rawValue
     }
     data = UICollectionViewDiffableDataSource(collectionView: list) { collection, indexPath, id in
@@ -125,6 +136,9 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let next = source.state.key
     guard next != scope else { return }
     scope = next
+    cache.valid = false
+    cache = ScheduleCache()
+    failure = nil
     result = nil
     items = [:]
     reload()
@@ -133,6 +147,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private func reload() {
     guard isViewLoaded else { return }
     let state = source.state
+    guard cache.pending.isEmpty else { refresh.endRefreshing(); return }
     version += 1
     let id = version
     guard !state.workspaceId.isEmpty else {
@@ -144,15 +159,33 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     }
     loading = true
     let pulled = refresh.isRefreshing
+    let generation = LocalStore.shared.generation
+    let restore = result == nil
     render()
     Task { [weak self, service, workspaceId = state.workspaceId] in
+      if restore {
+        let saved = await service.cachedList(state.userId, workspaceId)
+        guard let self, self.version == id, self.source.state.key == state.key,
+              LocalStore.shared.generation == generation, self.cache.pending.isEmpty else { return }
+        if self.result == nil, let saved {
+          self.result = saved
+          self.render()
+        }
+      }
       var value: RuntimeContract.SchedulesResult?
       var failure: String?
       do { value = try await service.list(workspaceId) }
       catch { failure = ScheduleFailure.message(error, write: false) }
-      guard let self, self.version == id else { return }
+      guard let self, self.version == id, self.source.state.key == state.key,
+            LocalStore.shared.generation == generation, self.cache.pending.isEmpty else { return }
+      // Persist only accepted runtime reads, never a pending command's optimistic preview.
       // A failed refresh keeps the last list; the error shows only when there is nothing to show.
-      if let value { self.result = value }
+      if let value {
+        self.result = value
+        service.persistList(state.userId, workspaceId, value, generation)
+        let ids = Set(value.items.map(\.scheduleId))
+        self.cache.details = self.cache.details.filter { ids.contains($0.key) }
+      }
       if pulled, self.result != nil, let failure { LodyToastOverlay.shared.show(message: failure, kind: .error) }
       self.failure = failure
       self.loading = false
@@ -207,27 +240,22 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     guard isViewLoaded else { return }
     let all = result?.items ?? []
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    let shown = term.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(term) }
+    let searched = term.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(term) }
     let previous = items
     items = Dictionary(all.map { ($0.scheduleId, $0) }, uniquingKeysWith: { first, _ in first })
+    // Needing a look first, then active, paused and ended; the runtime's order within each group.
     var snapshot = NSDiffableDataSourceSnapshot<Section, String>()
-    let tasks = shown.filter { !$0.scheduledMessage }.map(\.scheduleId)
-    let messages = shown.filter(\.scheduledMessage).map(\.scheduleId)
-    if !tasks.isEmpty {
-      snapshot.appendSections([.tasks])
-      snapshot.appendItems(tasks, toSection: .tasks)
-    }
-    if !messages.isEmpty {
-      snapshot.appendSections([.messages])
-      snapshot.appendItems(messages, toSection: .messages)
+    for group in ScheduleTone.order {
+      let ids = searched.filter { $0.state.group == group }.map(\.scheduleId)
+      guard !ids.isEmpty else { continue }
+      snapshot.appendSections([group])
+      snapshot.appendItems(ids, toSection: group)
     }
     let changed = snapshot.itemIdentifiers.filter { id in
       guard let before = previous[id] else { return false }
       return reconfigure || before != items[id]
     }
     snapshot.reconfigureItems(changed)
-    // Counts live in the headers; rebuild them with the sections.
-    snapshot.reloadSections(snapshot.sectionIdentifiers)
     data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled)
     setNeedsUpdateContentUnavailableConfiguration()
   }
@@ -274,36 +302,21 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private func configure(_ cell: UICollectionViewListCell, _ item: ScheduleItem) {
     let zone = ScheduleFormat.zone(item, result: result)
     let status = ScheduleFormat.state(item.state, zone: zone)
-    let attention = item.state.group == .attention
-    let ended = item.state.group == .ended
-    var content = UIListContentConfiguration.subtitleCell()
-    content.text = item.title
-    content.textProperties.font = .preferredFont(forTextStyle: .body)
-    content.textProperties.color = ended ? LodyUIColor.textTertiary : LodyUIColor.textPrimary
-    content.textProperties.numberOfLines = 1
-    content.textToSecondaryTextVerticalPadding = LodySpacing.xxs
-    let detail = NSMutableAttributedString(string: ScheduleFormat.detail(item, zone: zone), attributes: [
-      .font: UIFont.preferredFont(forTextStyle: .footnote), .foregroundColor: LodyUIColor.textSecondary,
-    ])
-    let words = [status.label, status.detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-    detail.append(NSAttributedString(string: "\n" + words, attributes: [
-      .font: UIFont.preferredFont(forTextStyle: .footnote),
-      .foregroundColor: attention ? LodyUIColor.warningDefault : LodyUIColor.textSecondary,
-    ]))
-    content.secondaryAttributedText = detail
-    content.secondaryTextProperties.numberOfLines = 3
-    content.directionalLayoutMargins = NSDirectionalEdgeInsets(
-      top: LodyLayout.listRowPaddingY, leading: LodyLayout.screenPaddingX, bottom: LodyLayout.listRowPaddingY, trailing: LodyLayout.screenPaddingX)
-    if attention {
-      content.image = UIImage(systemName: "exclamationmark.triangle.fill")
-      content.imageProperties.tintColor = LodyUIColor.warningDefault
-      content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .footnote)
+    cell.contentConfiguration = UIHostingConfiguration { ScheduleRowView(item: item, zone: zone) }
+      .margins(.all, 0)
+      .minSize(height: LodySize.listRow)
+    cell.accessories = []
+    // Pressed rows tint like chat rows.
+    cell.configurationUpdateHandler = { cell, state in
+      var background = UIBackgroundConfiguration.clear()
+      background.backgroundColor = state.isHighlighted || state.isSelected ? LodyUIColor.fillPressed : .clear
+      cell.backgroundConfiguration = background
     }
-    cell.contentConfiguration = content
-    cell.accessories = [.disclosureIndicator()]
-    var background = UIBackgroundConfiguration.listCell()
-    background.backgroundColor = .clear
-    cell.backgroundConfiguration = background
+    cell.isAccessibilityElement = true
+    cell.accessibilityTraits = .button
+    cell.accessibilityLabel = item.title
+    cell.accessibilityValue = [ScheduleFormat.detail(item, zone: zone), status.label, status.detail ?? ""]
+      .filter { !$0.isEmpty }.joined(separator: ", ")
     cell.accessibilityIdentifier = "schedule:" + item.scheduleId
   }
 
@@ -320,16 +333,24 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   private func open(_ item: ScheduleItem?) {
+    if let item, cache.pending.contains(item.scheduleId) { return }
     let editor = ScheduleEditorController(
-      workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service
+      workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service, cache: cache
     )
-    editor.changed = { [weak self] in self?.reload() }
+    let owner = cache
+    editor.changed = { [weak self] in
+      guard let self, self.cache === owner, owner.valid else { return }
+      self.version += 1
+      self.render(reconfigure: true)
+      self.reload()
+    }
+    editor.openChat = { [weak self] item in self?.openChat(item) }
     LodyShell.shared.pushNative(editor, title: item?.title ?? ScheduleFormat.text("new"), from: self)
   }
 
   /// Owner-only commands; resume and run also need a computer whose CLI runs schedules.
   private func actions(_ item: ScheduleItem) -> [ScheduleAction] {
-    guard item.isOwner, !busy.contains(item.scheduleId) else { return [] }
+    guard item.isOwner, !cache.pending.contains(item.scheduleId) else { return [] }
     var result: [ScheduleAction] = []
     if !item.scheduledMessage, item.machineSupported { result.append(.run) }
     if !item.scheduledMessage, item.rule.kind != .manual {
@@ -386,21 +407,32 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   private func perform(_ action: ScheduleAction, _ item: ScheduleItem) {
     let workspaceId = source.state.workspaceId
-    guard !workspaceId.isEmpty, busy.insert(item.scheduleId).inserted else { return }
+    guard !workspaceId.isEmpty, actions(item).contains(action), cache.pending.insert(item.scheduleId).inserted else { return }
+    let owner = cache
+    let original = items[item.scheduleId] ?? item
+    version += 1 // A read started before this intent must not undo its preview.
+    if let optimistic = ScheduleCache.optimistic(original, action: action) { cache.update(optimistic) }
+    render(reconfigure: true)
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: action, scheduleId: item.scheduleId, requestId: ScheduleService.requestId()
     )
     Task { [weak self, service] in
       do {
         _ = try await service.command(params)
+        guard let self, self.cache === owner, owner.valid else { return }
+        if action == .delete { owner.remove(item.scheduleId) }
+        owner.details[item.scheduleId] = nil
         if action == .run {
           LodyToastOverlay.shared.show(message: String(format: ScheduleFormat.text("runStarted"), item.title), kind: .neutral)
         }
       } catch {
+        guard let self, self.cache === owner, owner.valid else { return }
+        owner.update(original)
         LodyToastOverlay.shared.show(message: ScheduleFailure.message(error, write: true), kind: .error)
       }
-      guard let self else { return }
-      self.busy.remove(item.scheduleId)
+      guard let self, self.cache === owner, owner.valid else { return }
+      self.cache.pending.remove(item.scheduleId)
+      self.render(reconfigure: true)
       self.reload()
     }
   }

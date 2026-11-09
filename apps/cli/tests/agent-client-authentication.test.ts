@@ -49,13 +49,17 @@ const createSilentLogger = (): Logger => ({
   close: async () => {},
 });
 
-function createClient(agentType = 'kimi'): AgentClient {
+function createClient(
+  agentType = 'kimi',
+  onNativeWorkChanged?: (work: 'running' | 'background' | null) => void
+): AgentClient {
   return new AgentClient({
     sessionId: 'agent-client-auth-test' as SessionId,
     logger: createSilentLogger(),
     terminalManager: {} as never,
     agentConfig: { cliType: 'builtin', agentType },
     onUpdateMessage: vi.fn(),
+    onNativeWorkChanged,
     onRequestPermission: vi.fn(async () => ({
       outcome: { outcome: 'cancelled' as const },
     })),
@@ -234,7 +238,8 @@ describe('AgentClient Kimi authentication and resume', () => {
         state,
         backgroundTaskCount,
       });
-    const client = createClient('claude');
+    const observed: Array<'running' | 'background' | null> = [];
+    const client = createClient('claude', (work) => observed.push(work));
     connectionMocks.initialize.mockResolvedValue({
       ...initializeResponse(),
       agentCapabilities: { _meta: { lody: { sessionActivity: { version: 1 } } } },
@@ -253,6 +258,35 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(client.getNativeWork()).toBe('running');
     await activity('idle', 0);
     expect(client.getNativeWork()).toBeNull();
+    expect(observed).toEqual(['background', 'running', null]);
+  });
+
+  it('clears old native work when adopting a replacement ACP session', async () => {
+    const observed: Array<'running' | 'background' | null> = [];
+    const client = createClient('claude', (work) => observed.push(work));
+    connectionMocks.initialize.mockResolvedValue({
+      ...initializeResponse(),
+      agentCapabilities: { _meta: { lody: { sessionActivity: { version: 1 } } } },
+    });
+    await client.startSession({} as never, '/tmp');
+    await client.extNotification?.('_lody/session/activity_update', {
+      version: 1,
+      sessionId: 'new-session',
+      state: 'idle',
+      backgroundTaskCount: 1,
+    });
+
+    client.adoptPreparedSession({ sessionId: 'replacement' });
+    expect(client.getNativeWork()).toBeNull();
+    expect(observed).toEqual(['background', null]);
+
+    await client.extNotification?.('_lody/session/activity_update', {
+      version: 1,
+      sessionId: 'replacement',
+      state: 'running',
+      backgroundTaskCount: 0,
+    });
+    expect(observed).toEqual(['background', null, 'running']);
   });
 
   it('ignores activity levels from an agent that did not advertise them', async () => {

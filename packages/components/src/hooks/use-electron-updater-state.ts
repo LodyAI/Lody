@@ -11,16 +11,19 @@ export function useElectronUpdaterState(): ElectronUpdaterState | null {
     if (!getIpcServices()) return undefined;
 
     let active = true;
+    let receivedPush = false;
+    const unsubscribe = onIpcEvent('updater.state', (s) => {
+      receivedPush = true;
+      if (active) setState(s);
+    });
+
     void getIpcServices()!
       .updater.getState()
       .then((s) => {
-        if (active) setState(s);
+        // The initial read only seeds state until the live stream takes over.
+        if (active && !receivedPush) setState(s);
       })
       .catch(() => undefined);
-
-    const unsubscribe = onIpcEvent('updater.state', (s) => {
-      if (active) setState(s);
-    });
 
     return () => {
       active = false;

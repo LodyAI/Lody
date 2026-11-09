@@ -1,3 +1,4 @@
+import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
@@ -393,6 +394,7 @@ export async function touchSessionActivityMeta(
 }
 
 export function useSessionActions(): SessionActions {
+  const getOwnerAccessReason = useSessionOwnerAccess();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const assertCanManageSessions = useSessionManagementGuard(runtime);
   const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
@@ -673,8 +675,7 @@ export function useSessionActions(): SessionActions {
   /**
    * Hand a session to another workspace member. `SessionMeta.userId` is the
    * owner: it drives the My/Team scope split, the sidebar author avatar, and
-   * CLI-side owner checks (Code Collab writes, usage attribution). Anyone in
-   * the workspace may transfer, mirroring task owner assignment.
+   * CLI-side owner checks (Code Collab writes, usage attribution). Assignment never changes machine/project sharing.
    */
   const transferSessionOwner = useCallback(
     async (sessionId: SessionId, nextUserId: string) => {
@@ -688,11 +689,15 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
+      if (!existing) throw new Error('Session not found');
+      await assertCanManageSessions([sessionId]);
+      const reason = getOwnerAccessReason(existing?.meta as SessionMeta, userId);
+      if (reason) throw new Error(reason);
       await updateSessionMetadata(sessionId, {
         userId,
       } as Partial<SessionMeta>);
     },
-    [runtime, updateSessionMetadata]
+    [runtime, updateSessionMetadata, assertCanManageSessions, getOwnerAccessReason]
   );
 
   const markSessionRead = useCallback(

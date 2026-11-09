@@ -20,8 +20,14 @@ internal object RuntimeProtocol {
             require(envelope.getInt("v") == 1)
             val entries = envelope.getJSONArray("entries").objects().mapNotNull { entry ->
                 val role = entry.text("role")
-                if (role !in setOf("user", "assistant")) return@mapNotNull null
+                if (role !in setOf("user", "assistant", "system")) return@mapNotNull null
                 val rawItems = entry.getJSONArray("items").objects()
+                if (role == "system") {
+                    val operations = rawItems.flatMap(OperationEvents::parse)
+                    return@mapNotNull if (operations.isEmpty()) null else SessionMessage(
+                        id = entry.text("id"), role = role, text = "", streaming = false, operations = operations,
+                    )
+                }
                 val text = rawItems.mapNotNull { item ->
                     when (item.optString("type")) {
                         "text" -> item.optString("text")

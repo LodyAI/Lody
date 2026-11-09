@@ -11,6 +11,9 @@ const __dirname = path.dirname(__filename);
 const inlineEnv = {
   // Public production builds cannot opt into the E2E clock at runtime.
   __LODY_E2E_CLOCK_BUILD__: 'false',
+  // The bundle uses loro-crdt's `bundler` entry, whose wasm memory is read
+  // through the shared wasm module (see lib/loro/wasm-runtime-health.ts).
+  __LODY_BUNDLED_LORO_WASM__: 'true',
   __LODY_E2E_DAEMON_LOSS__: JSON.stringify(
     process.env.LODY_E2E_DAEMON_LOSS_BUILD === '1' &&
       !process.env.LODY_ENV &&
@@ -81,17 +84,18 @@ export default defineConfig(({ mode }) => ({
   plugins: [wasm(), devinRuntimeContractPlugin()],
   define: inlineEnv,
   resolve: {
-    alias: {
+    alias: [
       // loro-crdt >=1.13 routes the `node` condition to its CJS nodejs entry,
       // which locates loro_wasm_bg.wasm via __dirname + fs and cannot be inlined
       // into this ESM bundle (rejected: externalizing — the electron-embedded CLI
       // ships dist/ only, with no node_modules to resolve loro-crdt from).
       // Pin the ESM bundler entry so vite-plugin-wasm embeds the wasm like 1.12.x.
-      'loro-crdt': 'loro-crdt/bundler',
-      '@/pkg': path.resolve(__dirname, 'package.json'),
-      '@': path.resolve(__dirname, 'src'),
-      src: path.resolve(__dirname, 'src'),
-    },
+      // Exact match: `loro-crdt/bundler/*` subpaths must resolve unchanged.
+      { find: /^loro-crdt$/, replacement: 'loro-crdt/bundler' },
+      { find: '@/pkg', replacement: path.resolve(__dirname, 'package.json') },
+      { find: '@', replacement: path.resolve(__dirname, 'src') },
+      { find: 'src', replacement: path.resolve(__dirname, 'src') },
+    ],
   },
   ssr: {
     external: ['bufferutil', 'utf-8-validate', 'typescript', '@loro-dev/roost-node'],

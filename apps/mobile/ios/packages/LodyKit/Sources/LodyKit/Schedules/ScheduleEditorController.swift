@@ -1,17 +1,28 @@
 import LodyCore
+import LodyDesignSystem
+import SwiftUI
 import UIKit
 
 /// A schedule's page, pushed from the Schedules list (web `ScheduleDetailPage`): a new schedule, or
-/// an existing one with its enable switch (Run for a manual task) and a More menu (Run now / Delete).
-/// Fields: name, prompt, computer, Agent, model, mode, project, destination and the frequency menu
-/// (never cron). Wall-clock rules use the computer's zone. A rule the menu cannot name stays read
+/// an existing one under a header card (state, frequency, computer, last run) whose quick actions run
+/// it now, pause / resume a timed one and open its last chat. Rounded cards follow: Task (name,
+/// prompt), When (frequency menu, never cron; weekday circles, a 1–31 day grid), Run with (computer,
+/// Agent, model, mode, project, destination), then Delete. Wall-clock rules use the computer's zone. A rule the menu cannot name stays read
 /// only with Replace, and an untouched rule is sent back exactly as received so the runtime keeps
 /// the stored trigger. Read only for teammates' schedules and scheduled messages (delete only);
 /// an outdated computer allows only pause and delete.
 @MainActor
 final class ScheduleEditorController: LodyFormController {
   var changed: (() -> Void)?
+  /// Opens the schedule's last chat (the list owns the session source).
+  var openChat: ((ScheduleItem) -> Void)?
 
+  private var stateRevision = 0
+  private var draftRevision = 0
+  private var draftConflict = false
+  private var detailValidated = false
+  private var loadRevision = 0
+  private let cache: ScheduleCache
   private let workspaceId: String
   private var item: ScheduleItem?
   private let zones: RuntimeContract.SchedulesResult?
@@ -48,13 +59,12 @@ final class ScheduleEditorController: LodyFormController {
   private lazy var destinationButton = picker("schedule-destination")
   private lazy var frequencyButton = picker("schedule-frequency")
   private lazy var everyButton = picker("schedule-every")
-  private lazy var daysButton = picker("schedule-days")
   private lazy var branchField = LodyFormField(id: "schedule-branch", label: text("branch"), text: nil, limit: 200)
   private let timePicker = UIDatePicker()
   private let oncePicker = UIDatePicker()
   private var weekdayButtons: [UIButton] = []
-  private lazy var enabledToggle = LodyFormToggle(id: "schedule-enabled", title: text("enabled"), isOn: item?.enabled ?? true)
-  private lazy var runButton = LodyFormButton.make(id: "schedule-run", title: text("runNow")) { [weak self] in self?.command(.run) }
+  private lazy var hero = Self.host(EmptyView())
+  private lazy var monthDays = Self.host(EmptyView())
   private lazy var replaceButton = LodyFormButton.make(id: "schedule-replace", title: text("repeat.replace")) { [weak self] in
     self?.replaceRule()
   }
@@ -64,14 +74,14 @@ final class ScheduleEditorController: LodyFormController {
   private let errorLabel = LodyFormGroup.caption(color: .systemRed, size: 15)
   private let spinner = UIActivityIndicatorView(style: .medium)
   private lazy var saveItem = Self.barButton(symbol: "checkmark", label: text("save"), prominent: true) { [weak self] in self?.save() }
-  private lazy var moreItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: nil)
 
-  init(workspaceId: String, item: ScheduleItem?, zones: RuntimeContract.SchedulesResult?, catalog: SessionCatalog, service: ScheduleService) {
+  init(workspaceId: String, item: ScheduleItem?, zones: RuntimeContract.SchedulesResult?, catalog: SessionCatalog, service: ScheduleService, cache: ScheduleCache = ScheduleCache()) {
     self.workspaceId = workspaceId
     self.item = item
     self.zones = zones
     self.catalog = catalog
     self.service = service
+    self.cache = cache
     scheduleId = item?.scheduleId ?? UUID().uuidString.lowercased()
     super.init(nibName: nil, bundle: nil)
     title = item?.title ?? text("new")
@@ -102,6 +112,12 @@ final class ScheduleEditorController: LodyFormController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    view.backgroundColor = .lodyGroupedBackground
+    stack.spacing = LodySpacing.xxl
+    for host in [hero, monthDays] {
+      addChild(host)
+      host.didMove(toParent: self)
+    }
     nameField.clearButtonMode = .whileEditing
     nameField.placeholder = text("namePlaceholder")
     nameField.changed = { [weak self] in self?.edited() }
@@ -113,7 +129,6 @@ final class ScheduleEditorController: LodyFormController {
     }
     promptLabel.accessibilityIdentifier = "schedule-prompt-text"
     errorLabel.accessibilityIdentifier = "schedule-error"
-    enabledToggle.toggle.addAction(UIAction { [weak self] _ in self?.toggled() }, for: .valueChanged)
     for picker in [timePicker, oncePicker] {
       picker.preferredDatePickerStyle = .compact
       picker.addAction(UIAction { [weak self, weak picker] _ in
@@ -132,7 +147,7 @@ final class ScheduleEditorController: LodyFormController {
       button.configuration?.cornerStyle = .capsule
       button.accessibilityIdentifier = "schedule-weekday-\(day)"
       button.accessibilityLabel = names.indices.contains(day) ? names[day] : initial
-      NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 40), button.heightAnchor.constraint(equalToConstant: 44)])
+      NSLayoutConstraint.activate([button.heightAnchor.constraint(equalToConstant: 44)])
       return button
     }
     spinner.hidesWhenStopped = true
@@ -145,37 +160,77 @@ final class ScheduleEditorController: LodyFormController {
   }
 
   private func load() {
+    guard cache.valid, !cache.pending.contains(scheduleId) else { return }
+    loadRevision += 1
+    let generation = loadRevision
+    let revision = stateRevision
+    detailValidated = false
     loadFailure = nil
-    spinner.startAnimating()
+    options = options ?? cache.options
+    if !loaded {
+      if !isNew, let cached = cache.details[scheduleId] {
+        apply(cached)
+      } else if isNew, options != nil {
+        apply(nil)
+      }
+    }
+    if !loaded { spinner.startAnimating() }
     rebuild()
-    Task { [weak self, service = service, workspaceId = workspaceId, scheduleId = scheduleId, isNew = isNew] in
-      var options: CreationOptions?
-      var detail: RuntimeContract.ScheduleDetail?
-      var failure: String?
+    // Each read publishes independently, so slow choices cannot hide the schedule.
+    if !isNew {
+      Task { [weak self, service = service, workspaceId = workspaceId, scheduleId = scheduleId] in
+        do {
+          let fresh = try await service.detail(workspaceId, scheduleId)
+          guard let self, self.cache.valid, !self.cache.pending.contains(scheduleId), self.loadRevision == generation, self.stateRevision == revision else { return }
+          self.detailValidated = true
+          self.cache.details[scheduleId] = fresh
+          self.cache.update(fresh.item)
+          self.spinner.stopAnimating()
+          if self.draftRevision == 0 {
+            self.apply(fresh)
+          } else {
+            self.observe(fresh)
+            self.rebuild()
+          }
+        } catch {
+          guard let self, self.cache.valid, !self.cache.pending.contains(scheduleId), self.loadRevision == generation, self.stateRevision == revision else { return }
+          self.spinner.stopAnimating()
+          self.loadFailure = ScheduleFailure.message(error, write: false)
+          self.rebuild()
+        }
+      }
+    }
+    Task { [weak self, service = service, workspaceId = workspaceId] in
       do {
-        if !isNew { detail = try await service.detail(workspaceId, scheduleId) }
+        let fresh = try await service.options(workspaceId)
+        guard let self, self.cache.valid, self.loadRevision == generation else { return }
+        self.cache.options = fresh
+        self.options = fresh
+        if self.isNew, !self.loaded {
+          self.spinner.stopAnimating()
+          self.apply(nil)
+        } else {
+          // Refresh labels and menus without resetting any selected value.
+          self.render()
+        }
       } catch {
-        failure = ScheduleFailure.message(error, write: false)
+        guard let self, self.cache.valid, self.loadRevision == generation else { return }
+        if self.isNew {
+          self.spinner.stopAnimating()
+          self.loadFailure = self.text("loadOptionsError")
+          self.rebuild()
+        }
       }
-      // Choices are optional for a read-only page; the item still names its computer and Agent.
-      options = try? await service.options(workspaceId)
-      if isNew, options == nil, failure == nil { failure = self?.text("loadOptionsError") }
-      guard let self else { return }
-      self.spinner.stopAnimating()
-      if let failure {
-        self.loadFailure = failure
-        self.rebuild()
-        return
-      }
-      self.options = options
-      self.apply(detail)
     }
   }
 
   private func apply(_ detail: RuntimeContract.ScheduleDetail?) {
     self.detail = detail
+    draftConflict = false
     if let detail {
       item = detail.item
+      nameField.text = detail.item.title
+      destination = detail.item.destination == .ownSession ? .ownSession : .newSession
       machineId = detail.item.machineId
       agentId = detail.item.agentConfigId
       rule = detail.item.rule
@@ -185,7 +240,6 @@ final class ScheduleEditorController: LodyFormController {
       project = detail.project
       promptView.text = detail.prompt
       promptLabel.text = detail.prompt
-      enabledToggle.toggle.isOn = detail.item.enabled
     } else if isNew {
       machineId = machines.first?.id ?? ""
       agentId = agents.first?.id ?? ""
@@ -282,8 +336,10 @@ final class ScheduleEditorController: LodyFormController {
       errorLabel.text = loadFailure
       let retry = LodyFormButton.make(id: "schedule-retry", title: text("retry")) { [weak self] in self?.load() }
       stack.addArrangedSubview(LodyFormGroup(retry))
-      render()
-      return
+      if !loaded {
+        render()
+        return
+      }
     }
     if !loaded {
       spinner.translatesAutoresizingMaskIntoConstraints = false
@@ -291,30 +347,94 @@ final class ScheduleEditorController: LodyFormController {
       render()
       return
     }
-    if let item, !isNew { stack.addArrangedSubview(statusGroup(item)) }
-    stack.addArrangedSubview(LodyFormGroup(rows: [nameField]))
+    if !isNew { stack.addArrangedSubview(hero.view) }
+    let prompt: UIView
     if item?.scheduledMessage == true || readOnly {
       promptLabel.text = promptView.text
-      stack.addArrangedSubview(LodyFormGroup(header: text("prompt"), rows: [LodyFormGroup.inset(promptLabel, top: 12, bottom: 12)]))
+      prompt = LodyFormGroup.inset(promptLabel, top: 12, bottom: 12)
     } else {
-      stack.addArrangedSubview(LodyFormGroup(header: text("prompt"), rows: [promptView]))
+      prompt = promptView
     }
+    stack.addArrangedSubview(card(header: text("section.task"), rows: [nameField, prompt]))
     if item?.scheduledMessage != true {
-      stack.addArrangedSubview(LodyFormGroup(header: text("runWith"), footer: runFooter(), rows: runRows()))
-      stack.addArrangedSubview(LodyFormGroup(header: text("repeat.label"), footer: frequencyFooter(), rows: frequencyRows()))
+      stack.addArrangedSubview(card(header: text("section.when"), footer: frequencyFooter(), rows: frequencyRows()))
+      stack.addArrangedSubview(card(header: text("runWith"), footer: runFooter(), rows: runRows()))
     }
-    if let item, item.isOwner { stack.addArrangedSubview(LodyFormGroup(deleteButton)) }
+    if let item, item.isOwner { stack.addArrangedSubview(card(rows: [deleteButton])) }
     render()
   }
 
-  private func statusGroup(_ item: ScheduleItem) -> UIView {
-    let status = ScheduleFormat.state(item.state, zone: ScheduleFormat.zone(item, result: zones))
-    let words = [status.label, status.detail].compactMap { $0 }.joined(separator: " · ")
-    var rows: [UIView] = []
-    if item.isOwner, !item.scheduledMessage {
-      if item.rule.kind == .manual { rows.append(runButton) } else { rows.append(enabledToggle) }
+  private static func host(_ view: some View) -> UIHostingController<AnyView> {
+    let host = UIHostingController(rootView: AnyView(view))
+    host.sizingOptions = .intrinsicContentSize
+    host.view.backgroundColor = .clear
+    host.view.translatesAutoresizingMaskIntoConstraints = false
+    return host
+  }
+
+  /// A `LodyFormGroup` set in an inset rounded card, its header and footer outside the card.
+  private func card(header: String? = nil, footer: String? = nil, rows: [UIView]) -> UIView {
+    let group = LodyFormGroup(rows: rows)
+    // The group's outer hairlines and empty footer belong to the flat settings style.
+    let parts = group.arrangedSubviews
+    parts.first?.isHidden = true
+    if parts.count >= 2 { parts[parts.count - 2].isHidden = true }
+    parts.last?.isHidden = true
+    let surface = UIView()
+    surface.backgroundColor = .lodyOpaqueCard
+    surface.layer.cornerRadius = LodyRadius.lg + 2
+    surface.layer.cornerCurve = .continuous
+    surface.clipsToBounds = true
+    group.translatesAutoresizingMaskIntoConstraints = false
+    surface.addSubview(group)
+    NSLayoutConstraint.activate([
+      group.topAnchor.constraint(equalTo: surface.topAnchor),
+      group.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
+      group.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+      group.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+    ])
+    let column = UIStackView()
+    column.axis = .vertical
+    column.spacing = 6
+    column.isLayoutMarginsRelativeArrangement = true
+    column.directionalLayoutMargins = .init(top: 0, leading: LodyLayout.screenPaddingX, bottom: 0, trailing: LodyLayout.screenPaddingX)
+    if let header {
+      let title = LodyFormGroup.caption(size: 13)
+      title.text = header.uppercased(with: .current)
+      title.font = .dynamic(of: 13, weight: .medium)
+      title.accessibilityTraits = .header
+      column.addArrangedSubview(LodyFormGroup.inset(title))
     }
-    return LodyFormGroup(footer: words, rows: rows)
+    column.addArrangedSubview(surface)
+    if let footer, !footer.isEmpty {
+      let note = LodyFormGroup.caption(size: 12.5)
+      note.text = footer
+      column.addArrangedSubview(LodyFormGroup.inset(note))
+    }
+    return column
+  }
+
+  private func renderHero() {
+    guard let item, !isNew else { return }
+    var actions: [ScheduleHeroView.Action] = []
+    if item.isOwner, !item.scheduledMessage {
+      actions.append(.init(id: "schedule-run", title: text("runNow"), symbol: "play.fill", enabled: supported && !busy) { [weak self] in
+        self?.command(.run)
+      })
+      if item.rule.kind != .manual {
+        let resume = !item.enabled
+        actions.append(.init(
+          id: "schedule-pause-toggle", title: text(resume ? "resume" : "pause"), symbol: resume ? "play.circle" : "pause.fill",
+          enabled: !busy && (!resume || supported)
+        ) { [weak self] in self?.command(resume ? .resume : .pause) })
+      }
+    }
+    if item.lastSessionId != nil, let openChat {
+      actions.append(.init(id: "schedule-last-chat", title: text("lastChat"), symbol: "bubble.left.and.text.bubble.right", enabled: true) {
+        openChat(item)
+      })
+    }
+    hero.rootView = AnyView(ScheduleHeroView(item: item, zone: ScheduleFormat.zone(item, result: zones), actions: actions))
   }
 
   private func runRows() -> [UIView] {
@@ -348,13 +468,16 @@ final class ScheduleEditorController: LodyFormController {
       rows.append(LodyFormRow(label: text("repeat.at"), content: timePicker))
     case .weekly:
       let days = UIStackView(arrangedSubviews: weekdayButtons)
-      days.distribution = .equalSpacing
+      days.distribution = .fillEqually
       days.alignment = .center
       days.accessibilityLabel = text("repeat.on")
-      rows.append(LodyFormGroup.inset(days, top: 4, bottom: 4))
+      rows.append(LodyFormGroup.inset(days, top: 10, bottom: 10))
       rows.append(LodyFormRow(label: text("repeat.at"), content: timePicker))
     case .monthly:
-      rows.append(LodyFormRow(label: text("repeat.onDays"), content: daysButton, picker: true))
+      let title = LodyFormGroup.caption(size: 15)
+      title.text = text("repeat.onDays")
+      rows.append(LodyFormGroup.inset(title, top: 12))
+      rows.append(monthDays.view)
       rows.append(LodyFormRow(label: text("repeat.at"), content: timePicker))
     case .minutes, .hours:
       rows.append(LodyFormRow(label: text("repeat.every"), content: everyButton, picker: true))
@@ -381,7 +504,7 @@ final class ScheduleEditorController: LodyFormController {
   /// Refreshes titles, menus and enablement without rebuilding rows.
   private func render() {
     guard isViewLoaded else { return }
-    errorLabel.text = loadFailure ?? failure
+    errorLabel.text = loadFailure ?? (draftConflict ? text("error.schedule_conflict") : failure)
     errorLabel.superview?.isHidden = errorLabel.text?.isEmpty ?? true
     let editable = !locked
     nameField.isEnabled = editable
@@ -389,7 +512,7 @@ final class ScheduleEditorController: LodyFormController {
     branchField.isEnabled = editable
     timePicker.isEnabled = editable
     oncePicker.isEnabled = editable
-    for button in [machineButton, agentButton, modelButton, modeButton, projectButton, destinationButton, frequencyButton, everyButton, daysButton] {
+    for button in [machineButton, agentButton, modelButton, modeButton, projectButton, destinationButton, frequencyButton, everyButton] {
       button.isEnabled = editable
     }
     machineButton.configuration?.title = machineName
@@ -429,6 +552,7 @@ final class ScheduleEditorController: LodyFormController {
     }
     if chatBound { destinationButton.isEnabled = false }
     renderFrequency()
+    renderHero()
     renderHeader()
   }
 
@@ -465,11 +589,12 @@ final class ScheduleEditorController: LodyFormController {
     let selectedDays = Set(rule.weekdays ?? [])
     for (day, button) in weekdayButtons.enumerated() {
       let on = selectedDays.contains(day)
-      var configuration = on ? UIButton.Configuration.filled() : UIButton.Configuration.plain()
+      var configuration = UIButton.Configuration.filled()
       configuration.title = button.configuration?.title
       configuration.cornerStyle = .capsule
-      configuration.baseBackgroundColor = .lodyInk
-      configuration.baseForegroundColor = on ? .lodyGround : .lodyInk
+      configuration.contentInsets = .zero
+      configuration.baseBackgroundColor = on ? .lodyAccent : .lodyInset
+      configuration.baseForegroundColor = on ? .white : .lodyInk
       button.configuration = configuration
       button.accessibilityTraits = on ? [.button, .selected] : [.button]
       button.isEnabled = !locked
@@ -486,17 +611,9 @@ final class ScheduleEditorController: LodyFormController {
       self.rule.every = step
       self.touchedRule()
     }
-    let days = (rule.days ?? []).sorted()
-    daysButton.configuration?.title = days.isEmpty ? text("requireMonthDay") : ScheduleFormat.list(days.map(String.init))
-    // Built when opened and closed on tap, so each pick shows its checkmark next time.
-    daysButton.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
-      let current = Set(self?.rule.days ?? [])
-      completion((1...31).map { day in
-        UIAction(title: String(format: ScheduleFormat.text("repeat.dayOfMonthN"), String(day)), state: current.contains(day) ? .on : .off) {
-          [weak self] _ in self?.toggleMonthDay(day)
-        }
-      })
-    }])
+    monthDays.rootView = AnyView(ScheduleMonthDaysView(selected: Set(rule.days ?? []), enabled: !locked) { [weak self] day in
+      self?.toggleMonthDay(day)
+    })
   }
 
   private static func frequencyTitle(_ kind: RuntimeContract.ScheduleRuleKind) -> String {
@@ -516,29 +633,16 @@ final class ScheduleEditorController: LodyFormController {
   private func barItems() -> [UIBarButtonItem] {
     var items: [UIBarButtonItem] = []
     if !readOnly, !chatBound {
-      saveItem.isEnabled = loaded && !busy && supported && draft() != nil
+      saveItem.isEnabled = loaded && !busy && canSaveDraft && supported && draft() != nil
       items.append(saveItem)
     }
-    guard let item, item.isOwner else { return items }
-    var actions: [UIMenuElement] = []
-    if !item.scheduledMessage {
-      let run = UIAction(title: text("runNow"), image: UIImage(systemName: "play")) { [weak self] _ in self?.command(.run) }
-      if !supported || busy { run.attributes = .disabled }
-      actions.append(run)
-    }
-    actions.append(UIAction(title: text("delete"), image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
-      self?.confirmDelete()
-    })
-    moreItem.menu = UIMenu(children: actions)
-    moreItem.accessibilityLabel = text("more")
-    moreItem.accessibilityIdentifier = "schedule-more"
-    items.append(moreItem)
     return items
   }
 
   // MARK: Edits
 
   private func edited(rebuild structural: Bool = false) {
+    draftRevision += 1
     failure = ""
     if structural { rebuild() } else { render() }
   }
@@ -663,40 +767,60 @@ final class ScheduleEditorController: LodyFormController {
     )
   }
 
+  private var canSaveDraft: Bool {
+    (isNew || detailValidated) && (!draftConflict || pendingSave.map { $0.draft == draft() } == true)
+  }
+
   private func save() {
-    guard !busy, !locked, supported, let draft = draft() else { return }
+    guard cache.valid, !cache.pending.contains(scheduleId), canSaveDraft, !busy, !locked, supported, let draft = draft() else { return }
     let requestId = pendingSave.flatMap { $0.draft == draft ? $0.requestId : nil } ?? ScheduleService.requestId()
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: isNew ? .create : .edit, scheduleId: scheduleId, requestId: requestId, draft: draft
     )
+    stateRevision += 1
+    cache.pending.insert(scheduleId)
+    cache.details[scheduleId] = nil
     busy = true
     failure = ""
     render()
     view.endEditing(true)
-    Task { [weak self, service = service] in
+    Task { [weak self, service = service, cache = cache] in
+      guard cache.valid else { return }
       do {
         _ = try await service.command(params)
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        // The command returns only an id. Read the saved item before publishing the list.
+        let fresh = try? await service.detail(params.workspaceId, params.scheduleId)
+        guard cache.valid else { return }
+        if let fresh {
+          cache.details[params.scheduleId] = fresh
+          cache.update(fresh.item)
+        } else {
+          cache.result = nil
+        }
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
-        self.busy = false
         self.pendingSave = nil
+        self.busy = false
         self.changed?()
         LodyShell.shared.close(from: self)
       } catch {
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
         self.busy = false
         self.pendingSave = ScheduleFailure.unknown(error) ? (requestId, draft) : nil
+        self.changed?()
         self.failure = ScheduleFailure.message(error, write: true)
         self.render()
       }
     }
   }
 
-  private func toggled() {
-    command(enabledToggle.toggle.isOn ? .resume : .pause)
-  }
-
   private func confirmDelete() {
-    guard let item else { return }
+    guard cache.valid, let item else { return }
     let alert = UIAlertController(
       title: String(format: text("deleteTitle"), item.title),
       message: text(item.scheduledMessage ? "deleteMessageHelp" : "deleteHelp"), preferredStyle: .alert
@@ -708,20 +832,30 @@ final class ScheduleEditorController: LodyFormController {
 
   /// Pause, resume, run and delete act on the stored schedule at once, each with a fresh key.
   private func command(_ action: ScheduleAction) {
-    guard let item, item.isOwner, !busy else { return }
-    if action == .resume || action == .run, !supported {
-      enabledToggle.toggle.isOn = item.enabled
-      return
-    }
+    guard cache.valid, !cache.pending.contains(scheduleId), let item, item.isOwner, !busy else { return }
+    if action == .resume || action == .run, !supported { return }
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: action, scheduleId: item.scheduleId, requestId: ScheduleService.requestId()
     )
+    stateRevision += 1
+    cache.pending.insert(scheduleId)
+    cache.details[scheduleId] = nil
     busy = true
     failure = ""
+    if let optimistic = ScheduleCache.optimistic(item, action: action) {
+      self.item = optimistic
+      cache.update(optimistic)
+      changed?()
+    }
     render()
-    Task { [weak self, service = service] in
+    Task { [weak self, service = service, cache = cache] in
+      guard cache.valid else { return }
       do {
         _ = try await service.command(params)
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        if action == .delete { cache.remove(params.scheduleId) }
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
         self.busy = false
         self.changed?()
@@ -732,17 +866,52 @@ final class ScheduleEditorController: LodyFormController {
           LodyToastOverlay.shared.show(message: String(format: self.text("runStarted"), item.title), kind: .neutral)
           self.render()
         default:
-          self.item?.enabled = action == .resume
           self.render()
+          await self.refreshState()
         }
       } catch {
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        cache.update(item)
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
         self.busy = false
-        self.enabledToggle.toggle.isOn = self.item?.enabled ?? true
+        self.item = item
+        self.changed?()
         self.failure = ScheduleFailure.message(error, write: true)
         self.render()
       }
     }
+  }
+
+  /// After a command, the stored state (next run, paused) for the header; edits in progress stay.
+  private func refreshState() async {
+    guard cache.valid else { return }
+    let revision = stateRevision
+    guard let fresh = try? await service.detail(workspaceId, scheduleId), cache.valid, !cache.pending.contains(scheduleId), revision == stateRevision else { return }
+    detailValidated = true
+    cache.details[scheduleId] = fresh
+    cache.update(fresh.item)
+    changed?()
+    observe(fresh)
+    render()
+  }
+
+  /// Keep the detail that seeded the form as its baseline. Header refreshes must not silently
+  /// rebase old fields onto a remote edit. Status-only changes (including pause) are harmless.
+  private func observe(_ fresh: RuntimeContract.ScheduleDetail) {
+    if let baseline = detail {
+      draftConflict = baseline.item.title != fresh.item.title
+        || baseline.item.machineId != fresh.item.machineId
+        || baseline.item.agentConfigId != fresh.item.agentConfigId
+        || baseline.item.rule != fresh.item.rule
+        || baseline.item.destination != fresh.item.destination
+        || baseline.prompt != fresh.prompt
+        || baseline.modelId != fresh.modelId
+        || baseline.modeId != fresh.modeId
+        || baseline.project != fresh.project
+    }
+    item = fresh.item
   }
 
   private func text(_ key: String) -> String { ScheduleFormat.text(key) }

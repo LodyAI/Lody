@@ -61,6 +61,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
   private var browsingVisible = false
+  private var navigationVisit = UUID()
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
@@ -127,7 +128,6 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     view.backgroundColor = .lodyBackground
     view.addSubview(chat)
     installPageHeader()
-    chat.imageSharingEnabled = false
     wireEvents()
     find(query: findQuery, keyboard: false)
     wireSendEvents()
@@ -177,6 +177,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     #endif
     browsingVisible = false
+    navigationVisit = UUID()
     PushNotifications.shared.visibleRoute = ""
     if SettingsPage.leaving(self) {
       permissionPage?.update(nil, ready: true)
@@ -242,6 +243,20 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     chat.setTitleMenu("[]")
     chat.mentionRepository = session.projectId.hasPrefix("github:") ? String(session.projectId.dropFirst(7)) : ""
+    let operationTitles = SessionRelations.titles(sessions: state.catalog.sessions)
+    let operationAgentTypes = Dictionary(state.catalog.sessions.map { ($0.id, $0.agentType) }, uniquingKeysWith: { first, _ in first })
+    let operationCLITypes = Dictionary(state.catalog.sessions.map { ($0.id, $0.cliType) }, uniquingKeysWith: { first, _ in first })
+    let operationRoots = Dictionary(state.catalog.sessions.filter { operationTitles[$0.id] != nil }.map { ($0.id, $0.parentSessionId ?? $0.id) }, uniquingKeysWith: { first, _ in first })
+    let operationOpened = Set(state.catalog.sessions.filter { $0.parentSessionId == nil && $0.openedBySessionId != nil }.map(\.id))
+    if chat.operationCurrentID != sessionId || chat.operationTitles != operationTitles || chat.operationAgentTypes != operationAgentTypes || chat.operationCLITypes != operationCLITypes || chat.operationRoots != operationRoots || chat.operationOpened != operationOpened {
+      chat.operationCurrentID = sessionId
+      chat.operationRoots = operationRoots
+      chat.operationOpened = operationOpened
+      chat.operationAgentTypes = operationAgentTypes
+      chat.operationCLITypes = operationCLITypes
+      chat.operationTitles = operationTitles
+      chat.applyRows()
+    }
     renderMentions(state, session)
     renderFeed(session)
     updateMoreMenu(session)
@@ -557,7 +572,21 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   }
 
   func perform(_ action: String) {
-    actions.perform(action, row: sessionId, from: self)
+    let scope = source.state.key
+    let visit = navigationVisit
+    actions.perform(action, row: sessionId, from: self) { [weak self] in
+      guard let self, self.source.state.key == scope, self.navigationVisit == visit,
+        self.browsingVisible, self.viewIfLoaded?.window != nil,
+        let navigation = self.navigationController,
+        navigation.topViewController === (self.parent ?? self),
+        navigation.transitionCoordinator == nil,
+        (self.parent ?? self).presentedViewController == nil else { return }
+      if let home = HomeController.current, home.contains(self) {
+        home.returnToList(from: self)
+      } else {
+        LodyShell.shared.popToRoot()
+      }
+    }
   }
 
   func find(query: String, keyboard: Bool) {

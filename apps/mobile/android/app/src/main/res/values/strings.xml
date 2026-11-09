@@ -411,15 +411,12 @@
     <!-- Schedules tab -->
     <string name="home_tab_schedules">Schedules</string>
     <string name="schedules_new">New schedule</string>
-    <string name="schedules_section_tasks">Scheduled tasks</string>
-    <string name="schedules_section_messages">Scheduled messages</string>
     <string name="schedules_loading">Loading schedules…</string>
     <string name="schedules_load_error">Schedules could not be loaded.</string>
     <string name="schedules_retry">Retry</string>
     <string name="schedules_empty">No schedules yet</string>
     <string name="schedules_empty_help">Choose a prompt and a time. Your machine will start a new chat for each run.</string>
     <string name="schedules_search_empty">No schedules match “%1$s”</string>
-    <string name="schedules_more">More actions</string>
     <string name="schedules_pause">Pause</string>
     <string name="schedules_resume">Resume</string>
     <string name="schedules_run">Run</string>
@@ -533,4 +530,34 @@
         <item quantity="other">Every %d minutes</item>
     </plurals>
     <string name="home_project_index">Project index</string>
+    <string name="message_show_more">Show more</string>
+    <string name="message_show_less">Show less</string>
+    <string name="chat_relations">Related conversations</string>
+    <string name="chat_relation_tab">Tab</string>
+    <string name="chat_relation_current">Current conversation</string>
+    <string name="chat_operation_conversation">Conversation</string>
+    <string name="chat_operation_created">%1$d opened conversations</string>
+    <string name="chat_operation_replies">%1$d conversation replies</string>
+    <string name="chat_operation_batch">%1$d completed task results</string>
+    <string name="chat_operation_batch_unknown">%1$d task results saved; model delivery is uncertain</string>
+    <string name="chat_operation_failed">Failed</string>
+    <string name="chat_operation_cancelled">Cancelled</string>
+    <string name="chat_operation_partial">Some tasks did not complete</string>
+    <string name="chat_operation_ready">Created</string>
+    <string name="chat_operation_running">Running</string>
+    <string name="chat_operation_succeeded">Completed</string>
+    <string name="chat_operation_unavailable">Conversation unavailable</string>
+    <string name="chat_operation_more">Show all</string>
+    <string name="chat_operation_less">Show less</string>
+    <string name="chat_operation_full_reply">View full reply</string>
+    <string name="chat_operation_reply_truncated">This saved reply was truncated before delivery.</string>
+    <string name="chat_relation_waiting">Needs input</string>
+    <string name="chat_relation_unread">Unread</string>
+    <string name="schedules_overview_active">Active</string>
+    <string name="schedules_overview_attention">Attention</string>
+    <string name="schedules_overview_paused">Paused</string>
+    <string name="schedules_overview_ended">Ended</string>
+    <string name="schedules_section_task">Task</string>
+    <string name="schedules_section_when">When</string>
+    <string name="schedules_section_run_with">Run with</string>
 </resources>
