@@ -8,10 +8,11 @@ The public `acp-extension-core` dependency is pinned to 0.3.0, whose source
 matches the Lody submodule commit `ea90d0b23d4f850c66c0f542f53cbc596ef2c62f`.
 
 The browser entry selects the remote history bridge, input schemas, and workspace
-input coordinator. The following three files include the shared workspace input
-refactor from the accompanying Lody change. They are copied verbatim from Lody:
+input coordinator. The following files include the shared workspace input
+refactor and durable input writes. They are copied verbatim from Lody:
 
 - `packages/components/src/lib/workspace-accepted-inputs.ts`
+- `packages/components/src/lib/session-input-storage.ts`
 - `packages/components/src/lib/session-send-delivery.ts`
 - `packages/components/src/lib/session-send-resources.ts`
 

@@ -49,6 +49,7 @@
         "packages/shared/src/time-sync.ts"
       ],
       "sharedSourceChanges": [
+        "packages/components/src/lib/session-input-storage.ts",
         "packages/components/src/lib/workspace-accepted-inputs.ts",
         "packages/components/src/lib/session-send-delivery.ts",
         "packages/components/src/lib/session-send-resources.ts"
