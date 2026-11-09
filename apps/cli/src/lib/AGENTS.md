@@ -97,6 +97,9 @@ never pushed to renderers as local room health.
   native work: never clean `running`, cap background waits. Post-turn output resets
   it only for `sessionActivity` agents.
   Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
+  Candidates include every cached Session doc (`combineGCSessionSources`): an untracked
+  doc idles from its last hand-out, unloads with status preserved, and GC checks peek
+  rather than open it. A Loro heap past 3 GiB shortens the idle timeout until restart.
 - **Session attachments**: before changing preparation, transfer, materialization,
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen

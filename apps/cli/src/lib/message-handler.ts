@@ -441,7 +441,11 @@ import { resolveSessionLiveStatus } from './session-live-status';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import { truncateToolTitleForHistory } from '@lody/shared';
 import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
-import type { MemoryPressureEvictionResult } from './session-gc-manager';
+import {
+  combineGCSessionSources,
+  type MemoryPressureEvictionResult,
+  type SessionGCDeps,
+} from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import { precheckLocalProjectHistoryRequest } from '@/lib/local-project-history-precheck';
@@ -11956,7 +11960,10 @@ export class MessageHandler {
    * ACP process would discard that resumable session state.
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
-    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    // Peek first: GC asks this of cached docs, and an open would count as an access.
+    const sessionDoc =
+      this.workspaceDocument.peekSessionDoc(sessionId) ??
+      (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
@@ -12015,6 +12022,22 @@ export class MessageHandler {
    */
   getTrackedSessionIds(): SessionId[] {
     return this.store.sessionIds();
+  }
+
+  /** GC candidates and idle clocks: tracked sessions plus every cached Session doc. */
+  getGCSessionSources(): Pick<SessionGCDeps, 'getSessionIds' | 'getSessionLastActivity'> {
+    return combineGCSessionSources(
+      {
+        sessionIds: () => this.store.sessionIds(),
+        has: (sessionId) => this.store.has(sessionId),
+        lastActivityMs: (sessionId) => this.getLastActivity(sessionId),
+      },
+      {
+        sessionIds: () => this.workspaceDocument.cachedSessionDocIds(),
+        lastActivityMs: (sessionId) =>
+          this.workspaceDocument.cachedSessionDocLastAccessMs(sessionId),
+      }
+    );
   }
 
   /** Host-local admission snapshot; durable pending input is checked by its caller. */
@@ -12096,6 +12119,8 @@ export class MessageHandler {
    */
   async cleanSessionForGC(sessionId: SessionId): Promise<void> {
     this.logger.debug(`[GC] Cleaning session ${sessionId}`);
+    // Read before cleanup: later steps may create tracking state lazily.
+    const tracked = this.store.has(sessionId);
 
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
@@ -12112,8 +12137,11 @@ export class MessageHandler {
       await this.sessionManager.terminateSession(sessionId, true);
     }
 
-    // 3. Clean Loro documents (main memory savings)
-    await this.workspaceDocument.cleanSessionDoc(sessionId);
+    // 3. Clean Loro documents (main memory savings). A doc that is only cached
+    //    never ran a turn here, so its synced status is not this machine's to reset.
+    await this.workspaceDocument.cleanSessionDoc(sessionId, {
+      preserveStatus: !tracked,
+    });
 
     // 4. Drop transient tracking last — only after all cleanup succeeded,
     //    so getTrackedSessionIds() can still see it for retry if steps above throw.
