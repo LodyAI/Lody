@@ -110,6 +110,7 @@ import {
   getServerNow,
   getSessionRoomId,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   hasRecentResumeNotice,
   isReplayEntryExcluded,
   isSessionCollaborationStopped,
@@ -8964,6 +8965,17 @@ export class SessionExecutionService {
             error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
           };
         }
+        if (hasEmptyModelSelectOption(refresh.capability?.configOptions)) {
+          // Auth worked, but the agent's catalog is still degraded: that is not
+          // a successful verification, and the caller must not mark the provider
+          // verified on the strength of the authentication alone.
+          return {
+            ...resolvedBase,
+            ...result,
+            capabilitiesRefreshed: false,
+            error: 'Authentication succeeded, but the provider reported no usable models',
+          };
+        }
         return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
       }
 
@@ -9297,6 +9309,12 @@ export class SessionExecutionService {
         message.configId,
         fingerprintAcpLaunchInputs(message)
       );
+      if (hasEmptyModelSelectOption(configOptions)) {
+        this.deps.logger.warn(
+          `[acp-refresh] ${message.cliType}/${message.agentType} advertised a model select with zero options; the persisted entry stays degraded and will be re-probed on the next refresh`,
+          { configId: message.configId }
+        );
+      }
 
       return {
         type: 'machine/acp-capabilities-refresh_response',

@@ -8,6 +8,7 @@ import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
+  hasEmptyModelSelectOption,
   isManagedBuiltinAgentType,
   type AgentBrandId,
   type BuiltinAgentType,
@@ -1060,11 +1061,29 @@ export function ProvidersScreen({
           if (!testRunsRef.current.finish(config.id, run)) return;
           clearTestActivity(config.id);
           clearFailureReason(config.id);
-          setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
+          const emptyModelCatalog =
+            !response.authRequired && hasEmptyModelSelectOption(response.capability?.configOptions);
+          setStatus(
+            config.id,
+            response.authRequired ? 'needs-auth' : emptyModelCatalog ? 'failed' : 'passed'
+          );
+          if (emptyModelCatalog) {
+            setFailureReasons((prev) => ({
+              ...prev,
+              [config.id]: t(
+                'settings.agent.provider.emptyModelCatalog',
+                'Provider responded but reported no usable models — try testing again'
+              ),
+            }));
+          }
           analytics.capture('onboarding/operation_succeeded', {
             step: 'providers',
             operation: 'agent_test',
-            result: response.authRequired ? 'needs_auth' : 'passed',
+            result: response.authRequired
+              ? 'needs_auth'
+              : emptyModelCatalog
+                ? 'degraded_empty_model_catalog'
+                : 'passed',
             duration_ms: analytics.durationSince(startedAtMs),
           });
         } catch (error) {
