@@ -1,4 +1,4 @@
-import { ownedMachineIdsAtom } from '@/atoms/machines';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { getSessionGroupTitle, machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
@@ -5691,7 +5691,7 @@ const SessionDetail = ({
     ]
   );
 
-  const ownedMachineIds = useAtomValue(ownedMachineIdsAtom);
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const visibleMachineIds = useMemo(
     () => new Set(sharingMachineAccessById.keys()),
     [sharingMachineAccessById]
@@ -5717,7 +5717,7 @@ const SessionDetail = ({
       visibleLocalProjectKeys,
       machineVisibilityLoading,
       localProjectVisibilityLoading,
-      currentUserId: user?.id ?? null,
+      currentUserId: myAccountId,
       ownedMachineIds,
     });
   }, [
@@ -5733,6 +5733,7 @@ const SessionDetail = ({
     visibleLocalProjectKeys,
     visibleMachineIds,
     ownedMachineIds,
+    myAccountId,
   ]);
 
   /* One compact line per SessionDetail render into the crash-report ring

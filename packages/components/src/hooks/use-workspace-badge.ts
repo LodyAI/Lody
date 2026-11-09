@@ -1,9 +1,9 @@
-import { ownedMachineIdsAtom } from '@/atoms/machines';
+import type { MachineId } from '@lody/shared';
+import { useMySessionScope } from './use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { atom, useAtomValue, useStore } from 'jotai';
 import { allActiveSessionsAtom } from '@/atoms/doc-meta';
-import { userAtom } from '@/atoms';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -19,28 +19,31 @@ const RECONCILE_MS = 30_000;
 const ZERO: WindowBadge = { unread: 0, waiting: 0 };
 
 /** Absolute count of owned sidebar rows, including their child conversations. */
-export const workspaceBadgeAtom = atom<WindowBadge>((get) => {
-  const userId = get(userAtom)?.id;
-  const ownedMachineIds = get(ownedMachineIdsAtom);
-  if (!userId) return ZERO;
-  const sessions = get(allActiveSessionsAtom);
-  const children = buildChildSessionsByParent(sessions);
-  const statuses = new Map(
-    sessions.flatMap((session) => {
-      const status = get(sessionLiveStatusAtomFamily(session.id));
-      return status ? [[session.id, status] as const] : [];
-    })
-  );
-  let unread = 0;
-  let waiting = 0;
-  for (const session of sessions) {
-    if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds)) continue;
-    const activity = getEffectiveSessionActivitySummary(session, children, statuses);
-    if (activity.isWaitingPermission) waiting += 1;
-    else if (activity.hasUnreadMessages) unread += 1;
-  }
-  return { unread, waiting };
-});
+export const createWorkspaceBadgeAtom = (
+  userId: string | null,
+  ownedMachineIds: ReadonlySet<MachineId>
+) =>
+  atom<WindowBadge>((get) => {
+    if (!userId) return ZERO;
+    const sessions = get(allActiveSessionsAtom);
+    const children = buildChildSessionsByParent(sessions);
+    const statuses = new Map(
+      sessions.flatMap((session) => {
+        const status = get(sessionLiveStatusAtomFamily(session.id));
+        return status ? [[session.id, status] as const] : [];
+      })
+    );
+    let unread = 0;
+    let waiting = 0;
+    for (const session of sessions) {
+      if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds))
+        continue;
+      const activity = getEffectiveSessionActivitySummary(session, children, statuses);
+      if (activity.isWaitingPermission) waiting += 1;
+      else if (activity.hasUnreadMessages) unread += 1;
+    }
+    return { unread, waiting };
+  });
 
 function publishBadge(badge: WindowBadge): void {
   const services = getIpcServices();
@@ -67,11 +70,16 @@ function publishBadge(badge: WindowBadge): void {
  */
 export function useWorkspaceBadge(): void {
   const store = useStore();
+  const { currentUserId, ownedMachineIds } = useMySessionScope();
+  const workspaceBadgeAtom = useMemo(
+    () => createWorkspaceBadgeAtom(currentUserId, ownedMachineIds),
+    [currentUserId, ownedMachineIds]
+  );
   const { unread, waiting } = useAtomValue(workspaceBadgeAtom);
   const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
   const publishCurrent = useCallback(() => {
     publishBadge(currentWorkspaceId ? store.get(workspaceBadgeAtom) : ZERO);
-  }, [store, currentWorkspaceId]);
+  }, [store, currentWorkspaceId, workspaceBadgeAtom]);
 
   // Changes publish immediately, including the transition to zero.
   useEffect(() => {

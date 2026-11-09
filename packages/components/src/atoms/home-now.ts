@@ -1,4 +1,4 @@
-import { ownedMachineIdsAtom } from '@/atoms/machines';
+import type { MachineId } from '@lody/shared';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { atom } from 'jotai';
 import {
@@ -18,7 +18,6 @@ import {
   type HomeNowPr,
   type HomeNowRow,
 } from '@/lib/home-now';
-import { userAtom } from './index';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from './doc-meta';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from './presence';
 
@@ -58,51 +57,54 @@ function latestPr(session: SessionMeta): HomeNowPr | null {
  * keeps its previous reference until a row the page shows changes, so the tiles re-render only
  * then.
  */
-export const homeNowInputAtom = atom((get) => {
-  const userId = get(userAtom)?.id;
-  const ownedMachineIds = get(ownedMachineIdsAtom);
-  if (!userId || !get(docMetaCacheReadyAtom)) return EMPTY_HOME_NOW_INPUT;
+export const createHomeNowInputAtom = (
+  userId: string | null,
+  ownedMachineIds: ReadonlySet<MachineId>
+) =>
+  atom((get) => {
+    if (!userId || !get(docMetaCacheReadyAtom)) return EMPTY_HOME_NOW_INPUT;
 
-  const presence = get(lodyPresenceStatesAtom);
-  const nowMs = get(lodyPresenceNowMsAtom);
-  const sessions = Object.values(get(sessionMetaCacheAtom));
-  const children = new Map<string, SessionMeta[]>();
-  const live = new Map<string, SessionStatus>();
-  for (const session of sessions) {
-    if (session.parentSessionId) {
-      const siblings = children.get(session.parentSessionId) ?? [];
-      siblings.push(session);
-      children.set(session.parentSessionId, siblings);
+    const presence = get(lodyPresenceStatesAtom);
+    const nowMs = get(lodyPresenceNowMsAtom);
+    const sessions = Object.values(get(sessionMetaCacheAtom));
+    const children = new Map<string, SessionMeta[]>();
+    const live = new Map<string, SessionStatus>();
+    for (const session of sessions) {
+      if (session.parentSessionId) {
+        const siblings = children.get(session.parentSessionId) ?? [];
+        siblings.push(session);
+        children.set(session.parentSessionId, siblings);
+      }
+      const status = findFreshSessionPresenceState(presence, session.id, nowMs)?.status;
+      if (status) live.set(session.id, status);
     }
-    const status = findFreshSessionPresenceState(presence, session.id, nowMs)?.status;
-    if (status) live.set(session.id, status);
-  }
 
-  const horizon = nowMs - ROW_HORIZON_MS;
-  const rows: HomeNowRow[] = [];
-  for (const session of sessions) {
-    if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds)) continue;
-    if (session.isArchived || session.isTabClosed) continue;
-    const activity = getEffectiveSessionActivitySummary(session, children, live);
-    const lastAt = activity.latestMessageAt || toMs(session.createdAt) || 0;
-    if (!activity.isWorking && !activity.isWaitingPermission && lastAt < horizon) continue;
-    rows.push({
-      id: session.id,
-      title: getSessionGroupTitle(session) || null,
-      cliType: session.cliType,
-      agentType: session.agentType,
-      lastAt,
-      working: activity.isWorking,
-      waiting: activity.isWaitingPermission,
-      unread: activity.hasUnreadMessages,
-      pr: latestPr(session),
-    });
-  }
+    const horizon = nowMs - ROW_HORIZON_MS;
+    const rows: HomeNowRow[] = [];
+    for (const session of sessions) {
+      if (session.parentSessionId || !isSessionInMyScope(session, userId, ownedMachineIds))
+        continue;
+      if (session.isArchived || session.isTabClosed) continue;
+      const activity = getEffectiveSessionActivitySummary(session, children, live);
+      const lastAt = activity.latestMessageAt || toMs(session.createdAt) || 0;
+      if (!activity.isWorking && !activity.isWaitingPermission && lastAt < horizon) continue;
+      rows.push({
+        id: session.id,
+        title: getSessionGroupTitle(session) || null,
+        cliType: session.cliType,
+        agentType: session.agentType,
+        lastAt,
+        working: activity.isWorking,
+        waiting: activity.isWaitingPermission,
+        unread: activity.hasUnreadMessages,
+        pr: latestPr(session),
+      });
+    }
 
-  const next: HomeNowInput = {
-    rows: rows.sort((left, right) => right.lastAt - left.lastAt || (left.id < right.id ? -1 : 1)),
-  };
-  if (homeNowInputEqual(previous, next)) return previous;
-  previous = next;
-  return next;
-});
+    const next: HomeNowInput = {
+      rows: rows.sort((left, right) => right.lastAt - left.lastAt || (left.id < right.id ? -1 : 1)),
+    };
+    if (homeNowInputEqual(previous, next)) return previous;
+    previous = next;
+    return next;
+  });

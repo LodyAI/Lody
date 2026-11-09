@@ -1,3 +1,5 @@
+import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
+import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
@@ -55,6 +57,25 @@ import {
   type PlatformProvider,
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
+
+const visibilityIndexOverride = vi.hoisted(() => ({ current: null as unknown }));
+vi.mock('../src/hooks/use-visible-machine-metas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/hooks/use-visible-machine-metas')>();
+  return {
+    ...actual,
+    useVisibleMachineMetas: (...args: Parameters<typeof actual.useVisibleMachineMetas>) =>
+      visibilityIndexOverride.current ?? actual.useVisibleMachineMetas(...args),
+  };
+});
+function VisibilityProbe({
+  onReady,
+}: {
+  onReady: (value: ReturnType<typeof useVisibleSessionMetas>) => void;
+}) {
+  const value = useVisibleSessionMetas();
+  useEffect(() => onReady(value), [onReady, value]);
+  return null;
+}
 
 const { sendIpcMock } = vi.hoisted(() => ({ sendIpcMock: vi.fn() }));
 
@@ -523,6 +544,7 @@ describe('useSessionActions', () => {
   let container: HTMLDivElement | undefined;
 
   beforeEach(() => {
+    visibilityIndexOverride.current = null;
     heldPreparations.length = 0;
     preparationsIgnoringAbort.clear();
     recordMyWorkspaceDailyActiveUser.mockClear();
@@ -559,6 +581,7 @@ describe('useSessionActions', () => {
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
       identitySession?: PlatformProvider['identity']['session'];
+      onVisibility?: (value: ReturnType<typeof useVisibleSessionMetas>) => void;
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -611,7 +634,10 @@ describe('useSessionActions', () => {
               onReady: (nextActions) => {
                 actions = nextActions;
               },
-            })
+            }),
+            options.onVisibility
+              ? createElement(VisibilityProbe, { onReady: options.onVisibility })
+              : null
           )
         )
       );
@@ -622,6 +648,69 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it.each(['plaintext', 'e2ee'] as const)(
+    'does not trust a conflicting Loro machine owner (%s)',
+    async (contentMode) => {
+      const repo = await LoroRepo.create({});
+      const id = 'conflicting-owner' as SessionId;
+      const meta = {
+        id,
+        machineId: 'conflicting-machine',
+        userId: 'other-member',
+        project: { kind: 'local', localProjectId: 'private-project' },
+      } as SessionMeta;
+      const raw = { id: meta.machineId, ownerUserId: 'synthetic-session-account' } as never;
+      const index = buildVisibleMachineIndex({
+        rawMachines: new Map([[meta.machineId, raw]]),
+        convexAccessRows: [
+          {
+            machineId: meta.machineId,
+            ownerUserId: 'other-member',
+            sharedWithTeam: false,
+            updatedAt: 1,
+          },
+        ],
+        currentUserId: 'synthetic-session-account',
+        isLoading: false,
+      });
+      visibilityIndexOverride.current = {
+        ...index,
+        convexAuthorizedMachineIds: new Set([meta.machineId]),
+        machineFlockRemoteSyncedMachineIds: new Set(),
+      };
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      Object.assign(runtime, { contentMode, accountId: 'synthetic-session-account' });
+      const store = createStore();
+      store.set(machineMetaCacheAtom, { [getMachineRoomId(meta.machineId)]: raw });
+      let visibility: ReturnType<typeof useVisibleSessionMetas> | undefined;
+      const actions = await renderActions(runtime, {
+        store,
+        sessionMetaCache: { [getSessionRoomId(id)]: meta },
+        onVisibility: (value) => {
+          visibility = value;
+        },
+      });
+      try {
+        if (contentMode === 'plaintext') {
+          expect(visibility?.sessions).toEqual([]);
+        } else {
+          // E2EE workspace history intentionally remains readable, but grants no management.
+          expect(visibility?.historyOnlySessionIds.has(id)).toBe(true);
+          await expect(actions.updateSessionTitle(id, 'Unauthorized')).rejects.toMatchObject({
+            code: 'session_management_denied',
+          });
+          expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+        }
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
 
   it('rejects a private-machine owner transfer without changing metadata or sharing', async () => {
     const repo = await LoroRepo.create({});
@@ -718,6 +807,7 @@ describe('useSessionActions', () => {
         } as never,
       });
       const actions = await renderActions(runtime, { store });
+      if (contentMode === 'e2ee') await act(async () => store.set(userAtom, null));
       try {
         await actions.transferSessionOwner(id, 'synthetic-session-account');
         expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({

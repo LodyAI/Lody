@@ -1,4 +1,3 @@
-import { ownedMachineIdsAtom } from '@/atoms/machines';
 import { useCallback, useRef } from 'react';
 import { useStore } from 'jotai';
 import { usePlatform } from '@lody/platform/react';
@@ -69,7 +68,7 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
             access.machines.visibleMachineIds,
             access.projects.visibleLocalProjectKeys,
             runtime.accountId,
-            store.get(ownedMachineIdsAtom)
+            access.machines.ownedMachineIds
           )
         )
           deny();
