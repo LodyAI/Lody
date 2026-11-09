@@ -241,3 +241,19 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
   }
   return results;
 });
+
+/** Restore transport for a personal host. The host owns identity and installation;
+ * these ports relay only signed history, R envelopes and the exact admission. */
+export interface PersonalHostRecoveryInput {
+  readonly vault: RecoveryVault;
+  readonly local: WorkspaceRecoveryInput['local'];
+  readonly reference: RecoveryEntryReference;
+  readonly pages: () => Effect.Effect<import('./admission').PersonalHistoryPages, unknown>;
+  readonly fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'];
+  readonly submitOriginalAsRecovery: (
+    ...args: [
+      ...Parameters<WorkspaceRestorePlan['submitOriginalAsRecovery']>,
+      deviceCredentialHash: string,
+    ]
+  ) => ReturnType<WorkspaceRestorePlan['submitOriginalAsRecovery']>;
+}

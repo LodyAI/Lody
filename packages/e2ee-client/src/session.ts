@@ -77,7 +77,8 @@ import { encodePersonalInvitation } from './pairing';
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
-  approval: PersonalApproval
+  approval: PersonalApproval,
+  recovered: readonly (readonly [number, Bytes.EpochKey])[] = []
 ) {
   const platform = yield* PersonalHostPlatform,
     installation = yield* ClientInstallationStore;
@@ -667,6 +668,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           )
         ),
     };
+    if (recovered.length) {
+      yield* withKeys((ctx) =>
+        Effect.forEach(
+          recovered,
+          ([epoch, key]) => Context.get(ctx, InstalledEpochKeys).saveAndReload(epoch, key),
+          { discard: true }
+        )
+      );
+    }
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       accountApproval: Object.freeze(accountApproval),

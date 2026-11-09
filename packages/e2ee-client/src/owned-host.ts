@@ -300,6 +300,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
     begin: (...args: Parameters<RawHost['begin']>) => run(host!.begin(...args)),
     claim: (...args: Parameters<RawHost['claim']>) => run(host!.claim(...args)),
     cancel: (...args: Parameters<RawHost['cancel']>) => run(host!.cancel(...args)),
+    restoreRecovery: (...args: Parameters<RawHost['restoreRecovery']>) =>
+      run(host!.restoreRecovery(...args)),
     prepareAccount: (...args: Parameters<RawHost['prepareAccount']>) =>
       run(host!.prepareAccount(...args)),
     acceptAccount: (...args: Parameters<RawHost['acceptAccount']>) =>
