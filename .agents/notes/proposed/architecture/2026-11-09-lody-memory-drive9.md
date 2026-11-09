@@ -11,13 +11,15 @@ The unreleased Loro-based Lody Memory stores each memory in a CRDT document. Peo
 cannot open, index or search that document with ordinary tools, and personal E2EE
 blocks cross-device use. This proposal stores each memory as Markdown files in a
 hosted [drive9](https://drive9.ai/) file service. A memory is **private** (reached
-only through the daemon's SDK) or **shared** (mounted read-write on workspace
-members' devices); visibility can change after creation. The trade-offs are that
+only through the daemon's SDK) or **shared** (workspace members have read-write
+access, with a proposed mount); visibility can change after creation. The trade-offs are that
 memory content becomes plaintext on the hosted service, memory works only online,
 and the OSS desktop build has no Lody Memory. P1 establishes basic scoped file
-access, but the pinned Drive9 cannot supply scoped events, mount credential hot
-rotation, or recoverable file history. The [P1 gates](#p1-verification-before-implementation)
-remain open; these gaps prevent implementing the original integration unchanged.
+access, but the pinned Drive9 lacks mount credential hot rotation. Lody Agent tool
+writes take priority; current-memory provenance is required, recoverable history
+is not. Mounts must renew without interruption if shipped; their launch timing
+remains open. Fresh reads and local refresh instead of SSE are a recommendation
+pending approval; the [P1 gates](#p1-verification-before-implementation) remain open.
 
 ## Decision
 
@@ -34,7 +36,10 @@ The owner decided the following:
   read-write access. Read-only membership is not offered initially.
 - **Lody hosts the drive9 tenants.**
 - **Online-only is accepted.**
-- **Provenance is required.**
+- **Prioritize Agent tool writes in Lody** over arbitrary editor saves.
+- **Current-memory provenance is required; recoverable history is not.**
+- **Credential renewal must not interrupt mounts.** Unmount/remount is not an
+  acceptable renewal strategy.
 - **Visibility is mutable** and stored as catalog metadata.
 
 ## Layout and identity
@@ -68,10 +73,11 @@ under the memory prefix rather than an in-process scan.
   drive9 JS SDK. The SDK needs Node `fs`, so it runs only in the CLI daemon.
   Renderer, Web and mobile clients go through daemon RPC. A private memory is never
   mounted.
-- **Shared memories.** These use the same SDK path, plus a mount at
+- **Shared memories.** These use the same SDK path, with a proposed mount at
   `~/Lody/Memory/<name>`. The mount uses WebDAV on macOS and Windows, and FUSE on
   Linux; drive9's automatic mode selects this. Any member's tools, editors and
-  agents can then use ordinary file operations.
+  agents can then use ordinary file operations. Whether mounts must ship at launch
+  or may follow a tool-only milestone remains open.
 - **Role binding.** A Role still binds `{providerId: "lody", memoryId}`, and that
   binding is frozen into each turn. MCP tools receive only the token for the bound
   memory. A mount is outside Role authorization: anything running as the user can
@@ -91,10 +97,11 @@ issued per memory and per user, and can be revoked.
   JSON file. Its `--no-persist-credentials` option requires foreground or
   unsupervised operation and is unavailable for WebDAV. WebDAV state omits the
   bearer, but its in-memory client retains the original token.
-- Mount credentials are snapshots. Renewal currently requires unmount/remount;
-  changing configuration or restarting a supervisor with saved credentials does
-  not provide hot rotation. Safe draining, open handles and failed flushes remain
-  integration gates.
+- Mount credentials are snapshots. The pinned implementation requires
+  unmount/remount for renewal, which violates the required uninterrupted mount
+  contract. Changing configuration or restarting a supervisor with saved
+  credentials does not provide hot rotation. If mounts ship, tested hot rotation
+  preserving open handles and pending writes is a release gate.
 - Members of a shared memory get `read, list, search, write, delete`.
 
 In this repository the service is an injected `packages/platform` cloud port, and
@@ -104,7 +111,7 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 
 ## Changing visibility
 
-- **Private → shared.** Issue member tokens, then mount on members' devices.
+- **Private → shared.** Issue member tokens; mount on members' devices if mounts ship.
 - **Shared → private.** Revoke member tokens, then ask online daemons to unmount.
   Copies that other members already read, or cached on their disks, cannot be
   recalled. The UI must say so before confirming.
@@ -112,20 +119,24 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 ## Provenance and concurrency
 
 - **SDK writes.** The intended contract sets actor and `expectedRevision`, returning
-  conflicts without blind retries. Provenance needs
-  `{path, changeId, actor, userId, sessionId, turnId, before/after revision}`.
+  conflicts without blind retries. Proposed provenance fields are
+  `{path, changeId, actor, userId, sessionId, turnId, before/after revision}`
+  to explain the current memory, not to require recoverable versions.
   The filesystem token cannot append journals. A file write followed by a separate
   append is not atomic; crash recovery and idempotent reconciliation need a design.
-- **Mount writes.** Attribution to user and machine remains required. The pinned
+- **Mount writes.** External-write attribution policy remains open, including
+  whether explicit unknown attribution is acceptable. The pinned
   WebDAV mount never configures `SetActor`, and `X-Dat9-Actor` is caller-supplied,
   not authenticated identity. FUSE generates a mount actor, not the proposed
   `lody:<userId>:<machineId>` identity. Neither establishes trusted provenance.
 - **Events.** Filesystem tokens receive 403 from `/v1/events` and `/v1/journals`.
   Owner SSE is tenant-wide; the inspected stream loop does not revalidate expiry
   or revocation. Do not distribute owner keys to daemons to bypass this gap.
-  Candidate fixes are upstream scoped events with stream revocation, or a hosted
-  relay enforcing current membership and path scope on replay and live delivery.
-  Neither candidate is implemented or approved here.
+  The current recommendation for the Spec is fresh reads on open/use and local
+  refresh after writes, deferring live notifications and requiring no SSE. This
+  is proposed, not user-approved. If live notifications are later needed, scoped
+  events with stream revocation or a membership/path-scoped hosted relay remain
+  candidates; neither is implemented or approved here.
 - **Concurrent mount writes.** WebDAV buffers whole files and commits unconditional
   writes on close. Its locks are local to each handler, so another mount or SDK
   writer can be overwritten. SDK revision checks protect conditional SDK writes
@@ -133,8 +144,8 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
 - **History.** Journal append/read/verify works, but does not capture file versions
   or restore them. Revision numbers alone cannot recover overwritten bytes; this
   pin rejects journal artifact references and has no implemented seal operation.
-  Recoverable immutable content and its atomic association with each mutation
-  remain required before claiming last-write-wins recovery. Journal hashes verify
+  Recoverable history is not a product requirement or implementation gate. These
+  limits still preclude claiming recovery from last-write-wins overwrites. Journal hashes verify
   consistency, not authenticity against an administrator able to rewrite the chain.
 
 ## Alternatives considered
@@ -154,11 +165,13 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
   - document layout, history and JSONPath search;
   - SQLite/IndexedDB persistence;
   - the Renderer replica and its local data channel.
-- `packages/memory` keeps its contracts behind a `MemoryBackend` interface, with a
-  drive9 implementation.
+- `packages/memory` places storage behind a `MemoryBackend` interface with a
+  drive9 implementation; history-related contracts must be adjusted to the
+  current-content provenance scope.
 - Daemons advertise `builtinMemory: 2`. Clients reject `1`, so no Loro daemon
   serves the new contract.
-- Lody packages the drive9 CLI as a managed runtime and owns the mount lifecycle.
+- If mounts ship, Lody packages the drive9 CLI as a managed runtime and owns the
+  mount lifecycle, including uninterrupted credential renewal.
 - Hosting cost and quota are per tenant, so per workspace. Limits must be set
   before release.
 
@@ -169,15 +182,23 @@ work before it can meet the proposed contract:
 
 | Area | Evidence and remaining gate |
 | --- | --- |
-| Scoped access | Allowed file reads succeed; sibling reads and root listing are denied. SSE and journals are denied entirely. Design scoped event delivery without sending tenant owner keys to devices. |
-| Renewal | Mount clients retain their initial credentials. Establish a tested drain/remount protocol or add upstream rotation; no-loss renewal is unverified. |
-| macOS WebDAV | Scoped macOS mounts read/write successfully, but replacing an existing file with `os.replace(tmp, target)` fails with `EINVAL`. Previously read contents remain readable from cache after expiry/revocation; uncached reads and new writes fail. Atomic saves and safe renewal remain blocked. |
+| Scoped access | Allowed file reads succeed; sibling reads and root listing are denied. SSE and journals are denied entirely. Fresh reads on open/use and local refresh after writes are proposed instead of live notifications, pending approval; never send tenant owner keys to devices. |
+| Renewal | Mount clients retain their initial credentials. If mounts ship, tested hot rotation without interruption or unmount/remount is required; uninterrupted, no-loss renewal is unverified. |
+| macOS WebDAV | Scoped macOS mounts read/write successfully, but replacing an existing file with `os.replace(tmp, target)` fails with `EINVAL`. Previously read contents remain readable from cache after expiry/revocation; uncached reads and new writes fail. Arbitrary editor saves are lower priority than Agent tool writes; this limitation remains. Uninterrupted renewal is a gate if mounts ship. |
 | Search and concurrency | Literal English and Chinese Markdown searches return the fixture; stale conditional writes return 409. This is not a recall benchmark or protection against unconditional mount writes. |
-| Provenance and recovery | Journal permissions and append/verify work; authenticated mount attribution, atomic provenance and restoration of overwritten bytes remain unresolved. |
+| Current-memory provenance | Journal permissions and append/verify work; reliable association of current content with provenance remains unresolved. External-write attribution policy and file versus per-fact granularity are open. Recoverable history is not a gate. |
 | Hosting | Local tenant readiness took approximately 6.6–9.7 seconds in two successful samples on TiDB v8.5.1. This is not hosted provisioning latency. Hosted price, quotas and provisioning SLA remain unverified; no cloud tenant was provisioned. |
 
-Pending question: should members get a read-only role later? The current decision
-is read-write for all members.
+## Open questions
+
+- May a tool-only milestone ship first, or must launch include mounts?
+- How should external writes be attributed; is explicit unknown attribution acceptable?
+- Is provenance required per file or per fact within a file?
+- Should members get a read-only role later? The current decision is read-write
+  for all members.
+
+The fresh-read/local-refresh recommendation and deferred live notifications remain
+proposed pending approval.
 
 ## Verification
 

@@ -115,45 +115,160 @@ Assignments match any of a Role's machine targets by machine, provider and memor
 
 ## Proposed built-in memory (Lody Memory)
 
-The machine-scoped association/environment behavior above continues to describe
-external providers such as Nowledge, grouped as "Integrated providers". The proposed
-Lody Memory provider sits above the machine tabs because it belongs to a person or
-workspace, not a machine. A workspace member creates named memories; name and
-description are the front matter of that memory's `MEMORY.md`. A Role links one
-memory by `{providerId: "lody", memoryId}`; several Roles may share it.
+### Requirements and scope
 
-Each memory is a directory of Markdown files in the workspace's hosted
-[drive9](https://drive9.ai/) tenant, at `/memories/<memoryId>/`. Relative paths are
-document identity. A memory is **private** or **shared**, and the owner may change
-this after creation:
+A user creates a named memory, links it to a Role, and lets the Agent read and
+update it through Lody tools across turns and devices. Reliable Agent tool updates
+are the first priority; compatibility with every external editor's save strategy
+is not a prerequisite for that tool path. Lody Memory belongs to a person or
+workspace and appears above machine tabs. External providers above retain their
+machine-scoped behavior under "Integrated providers".
 
-- **Private:** only the owner's daemon reads and writes it through the drive9 SDK,
-  for MCP tools, prompt injection and daemon RPC (Renderer, Web, mobile). It is
-  never mounted on disk.
-- **Shared:** every workspace member gets read-write access. Their daemons also
-  mount it at `~/Lody/Memory/<name>` for ordinary file tools. A mount is outside
-  Role authorization, which is why private memories are not mounted.
+The following requirements are established:
 
-Switching shared → private revokes member access and unmounts on online devices;
-content members already read or cached cannot be recalled, and the UI says so first.
+- Store Markdown files in Lody-hosted Drive9. The unreleased Loro implementation
+  requires no data migration or backward compatibility.
+- Support private and shared memories with mutable visibility. Private content is
+  accessible only to its owner through the daemon and is never mounted. Shared
+  content is read-write for all workspace members.
+- Accept online-only operation and plaintext hosted content without memory E2EE.
+  The local-only OSS desktop has no Lody Memory.
+- Prioritize reliable Agent tool reads and updates. Conflicting writes must be
+  reported rather than blindly overwriting a newer revision.
+- Provide provenance for current memory content. Restorable old versions, undo,
+  and a complete historical audit trail are not required.
+- Normal credential renewal must not interrupt a mounted memory, invalidate open
+  handles, or lose in-flight writes. Unmount/remount is not an acceptable renewal
+  strategy. Explicit access revocation must still stop subsequent access.
 
-Memory content is plaintext on the hosted service; no E2EE applies, and Lody Memory
-requires a connection. Credentials are short-lived tokens scoped to one memory's
-path, issued by a hosted service through an injected platform port and held only in
-daemon memory. Model inputs cannot choose another memory: tools receive only the
-turn-frozen binding's token. The OSS local-only desktop has no Lody Memory.
+Shared mounting remains the target. Whether its delivery must coincide with the
+first usable Agent-tool milestone is an open release-scope decision. Real-time
+cross-device refresh is proposed for deferral, not yet an approved requirement.
 
-Writes record provenance: Agent writes carry user, session and turn and use
-revision checks; writes through a mount are attributed to user and machine only,
-and concurrent mount writes require recoverable history. P1 found that Drive9
-journals alone do not restore overwritten files; trusted mount attribution and
-recoverable history remain implementation gates.
-Unlinking or deleting a Role revokes later Agent access without destroying
-content; deleting a memory removes its files. Previously disclosed conversation
-context is not erased. Linking requires a daemon advertising `builtinMemory: 2`.
+### Current proposed design
 
-Rationale, alternatives, open questions and the verification required before
-implementation are in the [drive9 proposal](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.md).
-The current [package](../packages/memory/README.md) still implements the
+Each workspace has one Drive9 tenant; each memory occupies
+`/memories/<memoryId>/`. Relative paths identify documents. `MEMORY.md` contains
+name and description in front matter and serves as the entry document; further
+Markdown files contain topics. Visibility is catalog metadata, so changing it does
+not move files. Rename does not silently overwrite an existing destination.
+
+A Role binds `{providerId: "lody", memoryId}`; multiple Roles can share a memory.
+The binding is frozen for each turn. Model input cannot select a different memory
+or supply credentials. A frozen binding does not preserve revoked authorization.
+Unlinking a Role affects future turns without deleting content; deleting a memory
+removes its files. Previously disclosed conversation context cannot be erased.
+
+```text
+Lody clients (desktop / Web / mobile)
+              | daemon RPC
+              v
+Daemon: turn-bound tools, prompt context, MemoryBackend
+              | memory-scoped filesystem token
+              v
+Drive9: /memories/<memoryId>/ Markdown files
+
+Hosted Lody service: identity, membership, visibility, scoped token issuance
+Shared mount: additional access path; noninterrupting renewal required
+```
+
+The daemon owns the Drive9 SDK and serves reads, searches and updates through the
+existing memory tool/RPC boundaries. Before modifying a file, it obtains the
+current revision and submits a conditional write; conflicts return to the Agent
+for rereading and deliberate reconciliation. Reads/searches stay under the bound
+memory prefix. `MemoryBackend` separates this storage from the existing consumers;
+history-related surfaces must be adjusted rather than pretending Drive9 supports
+old recovery contracts. Compatible daemons advertise `builtinMemory: 2`.
+
+A hosted service holds tenant owner keys, verifies identity and current access,
+and issues short-lived filesystem tokens restricted to the memory path. Public
+code accesses it through `packages/platform` ports and `packages/cloud-api` DTOs.
+Owner keys never reach devices. Filesystem tokens use `DRIVE9_API_KEY`, not
+`DRIVE9_VAULT_TOKEN`; credentials must not be persisted in CLI config or mount
+state. Tokens may live in the daemon and mount process memory.
+
+Shared mounts target `~/Lody/Memory/<name>`. They are outside Role authorization:
+other programs running as that user can access them. Private-to-shared grants
+members access; shared-to-private revokes member tokens and unmounts on online
+devices. Already disclosed or cached copies cannot be recalled; the UI explains
+this before confirmation. This intentional revocation is distinct from renewal.
+
+The proposed initial freshness model reads current content when opening or using
+memory, and refreshes the local view after a successful tool update. Other devices
+refresh on their next read or explicit refresh; no immediate notification is
+promised. This avoids an SSE dependency: at the tested pin, filesystem tokens
+cannot subscribe to events, while owner SSE covers the whole tenant. A scoped
+relay or upstream event authorization is only needed if live refresh becomes a
+requirement; neither is selected for the initial implementation.
+
+### Current-content provenance
+
+The proposed first unit of provenance is a file's current revision, not each
+sentence or fact. A Lody Agent update associates memory ID, path, revision (or
+content hash), user ID, machine ID, session ID, turn ID, tool-call/change ID, and
+service-confirmed time. Identity comes from authenticated context; a caller's
+arbitrary actor label is not proof of identity. Session links remain subject to
+session access control and must not expose private conversation content to shared
+memory readers.
+
+The source record must match the content being displayed. A stale record must
+never attribute new content to a previous writer. A file update followed by a
+separate provenance append can fail between steps; the implementation design must
+specify idempotent reconciliation, retry behavior and an explicit incomplete
+result. It must not report both content and provenance complete when only the
+content was saved. The storage/commit mechanism is still unresolved; no journal
+atomicity is assumed, and filesystem tokens cannot append Drive9 journals.
+
+For external mounted edits, Lody cannot infer an Agent session or turn. The
+proposal is to show only authenticated user/device information when available,
+and otherwise mark the current version as external/unknown. Whether that fallback
+is acceptable requires confirmation. A later external edit must invalidate an old
+Agent attribution when the current content is next read. No old document bodies
+need be retained solely to provide this current-version attribution.
+
+### Implementation plan and acceptance
+
+| Stage | Deliverable | Acceptance boundary |
+| --- | --- | --- |
+| 1. Contracts | Resolve the scope questions below; define backend DTOs, current-version provenance states, access checks and credential lifecycle. | No owner-key distribution, no implicit history promises, explicit incomplete-write and conflict results. |
+| 2. Agent tool path | Implement hosted credential port and Drive9 backend for create, list, read, search, update, rename and delete; connect Role-bound tools and client RPC. | Agent updates are visible on subsequent reads; sibling-memory access is denied; stale revisions conflict; revoked access fails. |
+| 3. Provenance and UI | Implement current-content source records and reconciliation; expose memory management, visibility and source viewing. | The displayed source matches current content; interrupted provenance writes cannot show stale attribution or false success; private sessions remain protected. |
+| 4. Shared mounts | Package/manage Drive9 and implement credential hot rotation without unmounting. Investigate external-editor atomic replacement separately from tool writes. | Normal renewal preserves mount, open handles and in-flight operations; revocation blocks new server access; credentials stay out of persistent state. |
+| 5. Release verification | Validate supported platforms, private/shared access transitions, multi-device reads, tool conflicts and hosted limits. | The chosen release scope passes its behavioral checks; quotas and failure behavior are defined. No offline, history-recovery or universal editor-compatibility claims. |
+
+Stages 2 and 3 can be developed before mount compatibility is complete. Shipping
+without stage 4 requires the release-scope decision below; incomplete mount renewal
+must not be presented as supported. Hosted price, quota and provisioning behavior
+still require investigation, not assumptions from local TiDB measurements.
+
+### Questions requiring product decisions
+
+1. May the first release provide Agent tools while shared mounting follows later,
+   or must the first release include both? Tool-first priority alone does not
+   settle mount delivery timing.
+2. Does provenance mean the last update of each current Markdown file, with a link
+   to its session/turn, or the source of each fact/passage? The latter needs
+   finer-grained content/source associations and is outside the current proposal.
+3. For external mounted changes, is external/unknown provenance acceptable when
+   authenticated user/device attribution cannot be established?
+
+Unless changed during review, the proposed design defers live SSE refresh,
+recoverable history, read-only member roles and user-supplied Drive9 endpoints.
+Only the absence of a historical recovery requirement is already established;
+the other deferrals are proposed scope choices.
+
+### Evidence and implementation status
+
+P1 verified scoped file access, basic English/Chinese search, conditional-write
+conflicts, rejection of new requests after revocation, and basic macOS mounted
+read/write. Atomic replacement over an existing mounted file returned `EINVAL`;
+its exact failing layer is not established. Mount clients retain their initial
+credential, scoped SSE/journals are unavailable, and journal entries alone do not
+restore old file contents. These are findings, not completed Lody integration.
+
+The [Drive9 proposal](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.md)
+contains pinned evidence and verification limits. The current
+[package](../packages/memory/README.md) still implements the
 [rejected Loro design](../.agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory.md).
-This contract remains draft.
+This specification remains draft; confirmed requirements do not imply approval of
+the proposed implementation or unresolved release scope.
