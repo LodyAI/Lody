@@ -4,6 +4,15 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Electron state snapshots
+
+`use-electron-updater-state.ts` and `use-electron-cli-daemon.ts` subscribe before
+requesting their initial IPC snapshot. The snapshot seeds a subscription only
+until its first push: a late initial response cannot replace live update progress
+or daemon readiness. Cleanup retires that subscription's response and listener;
+a later mount starts its own initial read. The main process remains the state
+owner; renderer observation neither restarts a process nor retries an update.
+
 ## Explicit plaintext copies
 
 `use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
