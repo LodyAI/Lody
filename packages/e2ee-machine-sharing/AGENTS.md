@@ -23,3 +23,7 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 
 - Preserve RAM policy freshness on unchanged verified ledger heads/counts. Invalidation
   fences both issued grants and in-flight reads; late results never refill a retired cache.
+
+- Reuse fresh cached grants. Before a cached machine/project sharing refusal, refresh
+  the authenticated policy with per-binding concurrent sharing and a five-second
+  read-start cooldown. Failed attempts never supply policy evidence or advance pins.

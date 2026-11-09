@@ -50,6 +50,24 @@ A2 owns private storage, device admission, generation-aware CAS, receipts and cl
 
 Observed withdrawal invalidates permission immediately. A strictly less than 15-minute memory cache bounds the age of the client's authenticated read, measured before I/O and intersected with ledger/request deadlines. It does not bound unknown withdrawal against a server repeatedly withholding newer control state: signatures/chains detect known rollback and forks but cannot prove a globally latest head. On 2026-10-28, the owner confirmed acceptance of trusting the server not to continuously withhold newer heads; no new cryptographic freshness witness is introduced. Restart/clock uncertainty requires revalidation. Failures remain scoped to dependent authorization, preserving offline content and unrelated work.
 
+A cached grant retains that window. A cached `machine-not-shared` or
+`project-not-shared` denial instead triggers an authenticated latest-head read before
+refusal, and a newly verified grant admits the request immediately. One binding,
+including generation, shares concurrent refreshes and allows one attempt per five
+seconds from read start. The short cooldown limits request traffic while bounding
+local delay for newly granted access; it does not shorten revocation freshness.
+
+The workspace Scope owns this native Effect producer, so cancellation of one waiter
+does not cancel another waiter's read. Coordination holds a permit only while
+selecting a producer, never over network or crypto work; independent bindings and
+same-member execution remain available. A failed attempt retains only a retry stamp,
+not a failed fiber or policy result. It falls back to the accepted pinned denial or
+the existing unavailable outcome, never advances a pin or publishes a grant. After
+the cooldown, the next request retries. Invalidation retires coordination and the
+existing read-publication fence still rejects late grants; Scope close interrupts
+and joins the producer before storage closes. The host suite exercises grant
+refresh, concurrent refusal, cooldown expiry and failed-read denial retention.
+
 ## Verification
 
 [Behavioral coverage](../../../../packages/e2ee-core/test/machine-sharing.test.ts) uses deterministic synthetic identities/nonces and explicit signing barriers. It covers same-member removal/readmission, old prepared writes and cached execution evidence, fresh revision-one bootstrap without old policy bytes, private defaults, explicit re-sharing, atomic replacement continuity, ledger-position/proof substitution, compact-view qualification, owner-personal historical body recovery and full-project preservation on re-sign. Existing ledger/crypto vectors remain unchanged. No deployed CAS, real-machine freshness or two-member product acceptance is claimed.
@@ -171,9 +189,9 @@ best effort, not proof of a global withdrawal; the machine's owner-approved wind
 still bounds that case. Queued rows have no history turn to settle and rely on the
 same window.
 
-The receiving machine was not changed. Policies live in the server's sharing store,
-not in workspace data the machine syncs, and its execution check reuses an
-authenticated read younger than 15 minutes. A withdrawal that the machine has not yet
+Policies live in the server's sharing store, not in workspace data the machine
+syncs. Its execution check reuses an authenticated grant younger than 15 minutes;
+cached denials use the five-second refresh rule above. A withdrawal that the machine has not yet
 observed is the owner-approved unknown window. The host test pins both halves: the
 fresh grant survives an unobserved withdrawal, and the host's own verified read denies
 at once. A send that a sender knew was withdrawn is refused before any write; a sender
