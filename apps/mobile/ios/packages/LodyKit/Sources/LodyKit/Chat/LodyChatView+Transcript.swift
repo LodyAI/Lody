@@ -450,27 +450,29 @@ extension LodyChatView {
       self.deliverPendingContent()
     }
     let finish = { [weak self] in
-      guard let self else { return }
-      if folding { ChatContextViewProbe.checkHitTesting() }
-      self.recordHistoryCommit()
-      self.streamPerformanceProbe?.commit(milliseconds: (CACurrentMediaTime() - commitStart) * 1000)
-      self.applying = false
-      self.scrollToEditedMessage()
-      self.catchingUpEntries.removeAll()
-      self.store.nonAnimatedRows.removeAll()
-      self.updateDeferredStreams()
-      self.refreshFind()
-      self.updateHistoryHeader()
-      self.prefetchHistoryIfNeeded()
-      self.deliverPendingContent()
-      if let tail = projected.last(where: { $0.streaming }) {
-        self.renderTailLength = self.store.tailLength(id: tail.id)
-      }
-      if self.needsApply {
-        self.needsApply = false
-        self.applyRows()
-      } else {
-        self.imagePreview?.updateItems(ChatImageGallery.items(from: projected))
+      // UIKit may invoke snapshot completion before its apply call returns.
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if folding { ChatContextViewProbe.checkHitTesting() }
+        self.recordHistoryCommit()
+        self.streamPerformanceProbe?.commit(milliseconds: (CACurrentMediaTime() - commitStart) * 1000)
+        self.applying = false
+        self.scrollToEditedMessage()
+        self.catchingUpEntries.removeAll()
+        self.store.nonAnimatedRows.removeAll()
+        self.updateDeferredStreams()
+        self.refreshFind()
+        self.updateHistoryHeader()
+        self.prefetchHistoryIfNeeded()
+        self.deliverPendingContent()
+        if let tail = projected.last(where: { $0.streaming }) {
+          self.renderTailLength = self.store.tailLength(id: tail.id)
+        }
+        if self.needsApply || self.needsTextRefresh {
+          self.drainChatUpdates()
+        } else {
+          self.imagePreview?.updateItems(ChatImageGallery.items(from: projected))
+        }
       }
     }
     if folding && !UIAccessibility.isReduceMotionEnabled {
