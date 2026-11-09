@@ -192,7 +192,6 @@ test('persistent runtime applies live increments to the existing replica and adv
         'publishedShares',
         'promptShortcuts',
         'remoteSettings',
-        'memorySettings',
         'agentRoles',
         'mentionCatalog',
         'creationOptions',

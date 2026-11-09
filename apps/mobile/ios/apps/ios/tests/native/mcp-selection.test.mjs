@@ -6,8 +6,7 @@ import { openTestSession } from '../helpers.mjs';
 
 const bundle = await build({
   stdin: {
-    contents: `export {sessionMcpSelection} from './packages/cloud-runtime/src/runtime/mcp.ts';
-      export {remoteSettings, settingsRows, editSetting} from './packages/cloud-runtime/src/runtime/settings.ts';`,
+    contents: `export {sessionMcpSelection} from './packages/cloud-runtime/src/runtime/mcp.ts';`,
     resolveDir: process.cwd(),
   },
   bundle: true,
@@ -30,10 +29,9 @@ const bundle = await build({
     },
   ],
 });
-const { sessionMcpSelection, remoteSettings, settingsRows, editSetting } =
-  await import(
-    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
-  );
+const { sessionMcpSelection } = await import(
+  `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+);
 const grant = async () => ({
   token: 'fixture',
   gatewayBaseUrl: 'https://example.invalid',
@@ -68,10 +66,7 @@ function catalog() {
       },
       futureField: { keep: true },
     });
-  let failure,
-    denied = false,
-    loseAck = false,
-    writes = 0;
+  let failure;
   globalThis.__mcpClient = class {
     constructor({ url }) {
       assert.equal(
@@ -92,47 +87,18 @@ function catalog() {
         },
       };
     }
-    async append({ part }) {
-      writes++;
-      if (denied) return { ok: false, result: { code: 'forbidden' } };
-      assert.equal(
-        new DataView(part.body.buffer, part.body.byteOffset).getUint32(0),
-        part.body.length - 4,
-      );
-      remote.importJson(
-        JSON.parse(new TextDecoder().decode(part.body.subarray(4))),
-      );
-      if (loseAck) return { ok: false, result: { code: 'network' } };
-      return { ok: true, result: {} };
-    }
   };
   return {
     remote,
     fail(code) {
       failure = code;
     },
-    loseAck() {
-      loseAck = true;
-    },
-    denyWrites() {
-      denied = true;
-    },
-    writes: () => writes,
     select: (persisted) =>
       sessionMcpSelection('w1', grant, persisted, signal()),
-    read: () =>
-      remoteSettings({ workspaceId: 'w1', kind: 'mcp' }, 'u1', grant, signal()),
-    save: (request) =>
-      remoteSettings(
-        { workspaceId: 'w1', kind: 'mcp', ...request },
-        'u1',
-        grant,
-        signal(),
-      ),
   };
 }
 
-test('a saved MCP default reaches durable first-turn history and the machine RPC without credentials', async () => {
+test('a workspace MCP default reaches durable first-turn history and the machine RPC without credentials', async () => {
   const c = catalog(),
     calls = [];
   const f = await openTestSession({
@@ -146,10 +112,9 @@ test('a saved MCP default reaches durable first-turn history and the machine RPC
     },
   });
   try {
-    const item = (await c.read()).find((item) => item.id === 'docs');
-    assert.equal(JSON.stringify(item).includes('fixture-secret'), false);
-    await c.save({
-      edit: { item, name: 'Documentation', enabledByDefault: true },
+    c.remote.set(['mcpServer', 'docs'], {
+      ...c.remote.get(['mcpServer', 'docs']),
+      enabledByDefault: true,
     });
     assert.equal(
       (await f.runtime.sendTurn(turn, undefined, c.select)).state,
@@ -172,9 +137,9 @@ test('a saved MCP default reaches durable first-turn history and the machine RPC
     assert.deepEqual(c.remote.get(['mcpServer', 'docs']).futureField, {
       keep: true,
     });
-    const latest = (await c.read()).find((item) => item.id === 'docs');
-    await c.save({
-      edit: { item: latest, name: 'Documentation', enabledByDefault: false },
+    c.remote.set(['mcpServer', 'docs'], {
+      ...c.remote.get(['mcpServer', 'docs']),
+      enabledByDefault: false,
     });
     f.server.getList('history').get(0).set('status', 'handled');
     f.server.commit();
@@ -237,29 +202,6 @@ test('queued turns keep their first selection and an explicit empty selection ne
   }
 });
 
-test('deletion checks the displayed revision and filters removed IDs from subsequent dispatch', async () => {
-  const c = catalog();
-  const item = (await c.read()).find((item) => item.id === 'docs');
-  c.remote.set(['mcpServer', 'docs'], {
-    ...c.remote.get(['mcpServer', 'docs']),
-    updatedAt: 2,
-  });
-  await assert.rejects(c.save({ remove: item }), /setting_conflict/);
-  assert.equal(c.writes(), 0);
-  const latest = (await c.read()).find((item) => item.id === 'docs');
-  await c.save({ remove: latest });
-  assert.equal(c.remote.get(['mcpServer', 'docs']), undefined);
-  assert.deepEqual(await c.select(['docs', 'search', 'search']), ['search']);
-  assert.equal(
-    c.remote.get(['mcpServer', 'search']).connection.bearerToken,
-    'fixture-secret',
-  );
-  assert.equal(
-    (await c.read()).some((item) => item.id === 'docs'),
-    false,
-  );
-});
-
 test('catalog failure or a missing connection stops sending before any history, queue or RPC write', async () => {
   const c = catalog(),
     f = await openTestSession();
@@ -288,17 +230,6 @@ test('catalog failure or a missing connection stops sending before any history, 
       'mcp_connection_missing',
     );
     assert.deepEqual(f.appends, []);
-    const item = settingsRows('mcp', c.remote).find(
-      (item) => item.id === 'docs',
-    );
-    assert.throws(
-      () =>
-        editSetting(c.remote, {
-          kind: 'mcp',
-          edit: { item, name: 'docs', enabledByDefault: true },
-        }),
-      /mcp_connection_missing/,
-    );
   } finally {
     f.close();
   }
@@ -385,20 +316,6 @@ test('replacing the session during MCP lookup cannot write a late turn', async (
   }
 });
 
-test('a lost deletion ACK is uncertain, never replayed, and a refresh reads the persisted deletion', async () => {
-  const c = catalog();
-  const item = (await c.read()).find((item) => item.id === 'docs');
-  c.loseAck();
-  await assert.rejects(c.save({ remove: item }), /setting_write_unknown/);
-  assert.equal(c.writes(), 1);
-  assert.equal(
-    (await c.read()).some((row) => row.id === 'docs'),
-    false,
-  );
-  await assert.rejects(c.save({ remove: item }), /setting_not_found/);
-  assert.equal(c.writes(), 1);
-});
-
 test('daemon environment references remain valid configured connections without exposing values', async () => {
   const c = catalog();
   c.remote.set(['mcpServer', 'docs'], {
@@ -407,19 +324,4 @@ test('daemon environment references remain valid configured connections without 
     enabledByDefault: true,
   });
   assert.deepEqual(await c.select(undefined), ['docs']);
-  const item = (await c.read()).find((item) => item.id === 'docs');
-  assert.equal(item.configured, true);
-  assert.equal(JSON.stringify(item).includes('MCP_URL'), false);
-});
-
-test('a denied workspace write is read-only and does not delete or replay', async () => {
-  const c = catalog();
-  const item = (await c.read()).find((item) => item.id === 'docs');
-  c.denyWrites();
-  await assert.rejects(c.save({ remove: item }), /setting_read_only/);
-  assert.equal(c.writes(), 1);
-  assert.equal(
-    (await c.read()).some((row) => row.id === 'docs'),
-    true,
-  );
 });

@@ -86,7 +86,7 @@ try:
             heading = labeled('.diff-check.md')['frame']
             assert heading['y'] > 40, ('File stack did not become a sheet', heading)
             ui.capture('file-stack-in-portrait-sheet')
-            ui.open_case('appearance-preview')
+            ui.open_case('settings-baseline-live')
             ui.element('account')
             rotate(ui, 'landscape')
             ui.element('account')

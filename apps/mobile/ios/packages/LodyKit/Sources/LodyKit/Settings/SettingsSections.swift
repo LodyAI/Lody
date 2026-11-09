@@ -8,7 +8,6 @@ enum SettingsSections {
       section("account", rows: [accountRow(account)]),
       section("personal", header: text("section.personal"), rows: [
         row("preferences", text("preferences.title"), subtitle: text("preferences.subtitle"), image: "slider.horizontal.3"),
-        row("appearance", text("appearance.title"), subtitle: text("appearance.subtitle"), image: "paintpalette"),
       ]),
     ]
     if account != nil {
@@ -50,8 +49,6 @@ enum SettingsSections {
       row("remote-machine", text("remote.machine"), image: "desktopcomputer"),
       row("remote-agent", text("remote.agent"), image: "sparkles"),
       row("agent-roles", text("roles.title"), image: "person.crop.square"),
-      row("remote-mcp", text("remote.mcp"), image: "puzzlepiece.extension"),
-      row("memory-settings", text("memory.title"), image: "brain"),
       row("prompt-shortcuts", text("shortcuts.title"), image: "doc.text"),
       row("project-visibility", text("projects.title"), image: "folder"),
     ]

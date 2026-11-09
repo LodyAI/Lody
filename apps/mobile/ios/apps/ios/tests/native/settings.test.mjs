@@ -89,53 +89,10 @@ test('agent edits preserve secrets and unknown fields without projecting them to
   );
 });
 
-test('MCP rejects duplicate names and preserves connection when changing defaults', () => {
-  const flock = new Flock('mcp-settings');
-  const connection = {
-    transport: 'http',
-    url: 'https://example.com/mcp',
-    bearerToken: 'fixture-only',
-  };
-  flock.set(['mcpServer', 'one'], {
-    id: 'one',
-    name: 'Docs',
-    transport: 'http',
-    connection,
-    createdAt: 10,
-  });
-  flock.set(['mcpServer', 'two'], {
-    id: 'two',
-    name: 'Search',
-    transport: 'stdio',
-  });
-  const item = settingsRows('mcp', flock).find((row) => row.id === 'one');
-  assert.equal(item.connection, undefined);
-  assert.throws(
-    () =>
-      editSetting(flock, {
-        kind: 'mcp',
-        edit: { item, name: 'search', enabledByDefault: true },
-      }),
-    /setting_duplicate/,
-  );
-  editSetting(flock, {
-    kind: 'mcp',
-    edit: { item, name: 'Docs', enabledByDefault: true },
-  });
-  const saved = flock.get(['mcpServer', 'one']);
-  assert.equal(saved.enabledByDefault, true);
-  assert.deepEqual(saved.connection, connection);
-  assert.equal(saved.createdAt, 10);
-});
-
 test('remote save reaches the correct stream using framed updates; failures are not reported as success', async () => {
   const remote = new Flock('server');
-  remote.set(['mcpServer', 'one'], {
-    id: 'one',
-    name: 'Docs',
-    transport: 'http',
-    connection: { transport: 'http', url: 'https://example.com/mcp' },
-  });
+  remote.set(['e', 'machine-one'], true);
+  remote.set(['m', 'machine-one'], { name: 'Old', ownerUserId: 'owner' });
   let fail = false,
     writes = 0;
   const urls = [];
@@ -172,7 +129,7 @@ test('remote save reaches the correct stream using framed updates; failures are 
     token: 'fixture',
     gatewayBaseUrl: 'https://example.com',
   });
-  const request = { workspaceId: 'w1', kind: 'mcp' };
+  const request = { workspaceId: 'w1', kind: 'machine' };
   const [item] = await remoteSettings(
     request,
     'owner',
@@ -180,22 +137,20 @@ test('remote save reaches the correct stream using framed updates; failures are 
     AbortSignal.timeout(5000),
   );
   await remoteSettings(
-    { ...request, edit: { item, name: 'Docs', enabledByDefault: true } },
+    { ...request, edit: { item, name: 'Docs' } },
     'owner',
     grant,
     AbortSignal.timeout(5000),
   );
-  assert.equal(remote.get(['mcpServer', 'one']).enabledByDefault, true);
-  assert.ok(
-    urls.every((url) => url === 'https://example.com/ds/lody/w1:wf:workspace'),
-  );
+  assert.equal(remote.get(['m', 'machine-one', 'name']), 'Docs');
+  assert.ok(urls.every((url) => url === 'https://example.com/ds/lody/w1:meta'));
   fail = true;
-  const [latest] = settingsRows('mcp', remote);
+  const [latest] = settingsRows('machine', remote);
   await assert.rejects(
     remoteSettings(
       {
         ...request,
-        edit: { item: latest, name: 'Failed', enabledByDefault: false },
+        edit: { item: latest, name: 'Failed' },
       },
       'owner',
       grant,
@@ -203,9 +158,8 @@ test('remote save reaches the correct stream using framed updates; failures are 
     ),
     /setting_write_unknown/,
   );
-  assert.equal(remote.get(['mcpServer', 'one']).name, 'Docs');
+  assert.equal(remote.get(['m', 'machine-one', 'name']), 'Docs');
   assert.equal(writes, 2, 'a failed write must not be replayed');
-  assert.equal(item.enabledByDefault, false);
 });
 
 test('remote machine and agent writes require the authenticated machine owner', async () => {
