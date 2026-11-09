@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Queue, Semaphore } from 'effect';
+import { Cause, Context, Effect, Layer, Queue, Semaphore } from 'effect';
 import {
   InboxAdmissionRejected,
   inboxScopeKey,
@@ -127,6 +127,9 @@ export class OperationInbox extends Context.Service<
       Effect.gen(function* () {
         const repo = yield* InboxRepository;
         const execution = yield* InboxExecution;
+        // Diagnostics must not kill the scanner. Scope interruption still propagates.
+        const report = (cause: unknown) =>
+          Effect.suspend(() => execution.report(cause)).pipe(Effect.catchDefect(() => Effect.void));
         const scope = yield* Effect.scope;
         const submissionGate = Semaphore.makeUnsafe(1);
         let quiesced = false;
@@ -152,21 +155,52 @@ export class OperationInbox extends Context.Service<
           release: Repository['release'] = repo.release,
           pause: Repository['pause'] = repo.pause
         ) {
-          for (const [key, receipt] of pauses) {
-            yield* withGate(
-              receipt.scope,
-              pause(receipt.scope, receipt.id, receipt.ids, receipt.cancelId)
+          let failures: Cause.Cause<unknown> = Cause.empty;
+          const attempt = <A>(effect: () => Effect.Effect<A, unknown>) =>
+            Effect.suspend(effect).pipe(
+              Effect.catchCause((cause) => {
+                if (Cause.hasInterrupts(cause)) return Effect.failCause(cause);
+                failures = Cause.combine(failures, cause);
+                return Effect.void;
+              })
             );
-            if (pauses.get(key) === receipt) pauses.delete(key);
+          for (const [key, receipt] of pauses) {
+            yield* attempt(() =>
+              withGate(
+                receipt.scope,
+                pause(receipt.scope, receipt.id, receipt.ids, receipt.cancelId)
+              ).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (pauses.get(key) === receipt) pauses.delete(key);
+                  })
+                )
+              )
+            );
           }
           for (const [id, receipt] of releases) {
-            yield* release(receipt);
-            if (releases.get(id) === receipt) releases.delete(id);
+            yield* attempt(() =>
+              release(receipt).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (releases.get(id) === receipt) releases.delete(id);
+                  })
+                )
+              )
+            );
           }
           for (const [id, receipt] of settlements) {
-            yield* settle(receipt.batch, receipt.outcome, receipt.cause);
-            if (settlements.get(id) === receipt) settlements.delete(id);
+            yield* attempt(() =>
+              settle(receipt.batch, receipt.outcome, receipt.cause).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (settlements.get(id) === receipt) settlements.delete(id);
+                  })
+                )
+              )
+            );
           }
+          if (failures.reasons.length) return yield* Effect.failCause(failures);
         });
         yield* Effect.addFinalizer(() => retrySettlements().pipe(Effect.orDie));
         // Count waiters as well as holders: never replace a lock while anyone owns a reference.
@@ -221,43 +255,45 @@ export class OperationInbox extends Context.Service<
             )
           );
         const scan = Effect.fn('OperationInbox.scan')(function* () {
-          yield* retrySettlements();
+          yield* retrySettlements().pipe(Effect.catchCause(report));
           if (quiesced) return;
           const pending = yield* repo.pending(workspaceId);
           for (const item of pending) {
-            const key = inboxScopeKey(item.input);
-            if (running.has(key)) continue;
-            const batch = yield* withGate(
-              item.input,
-              repo.prepare(item.input, owner, item.intentId)
-            );
-            if (!batch || !execution.ready(batch)) continue;
-            running.add(key);
-            yield* execution.launch(batch).pipe(
-              Effect.catchCause((cause) => execution.report(cause)),
-              Effect.ensuring(
-                Effect.sync(() => running.delete(key)).pipe(
-                  Effect.andThen(repo.pending(workspaceId)),
-                  Effect.flatMap((items) =>
-                    items.some(
-                      (candidate) =>
-                        inboxScopeKey(candidate.input) === key &&
-                        candidate.input.inputId !== batch.inputId
-                    )
-                      ? wake
-                      : Effect.void
-                  ),
-                  Effect.catchCause((cause) => execution.report(cause))
-                )
-              ),
-              Effect.forkIn(scope)
-            );
+            yield* Effect.gen(function* () {
+              const key = inboxScopeKey(item.input);
+              if (running.has(key)) return;
+              const batch = yield* withGate(
+                item.input,
+                repo.prepare(item.input, owner, item.intentId)
+              );
+              if (!batch || !execution.ready(batch)) return;
+              running.add(key);
+              yield* Effect.suspend(() => execution.launch(batch)).pipe(
+                Effect.catchCause(report),
+                Effect.ensuring(
+                  Effect.sync(() => running.delete(key)).pipe(
+                    Effect.andThen(repo.pending(workspaceId)),
+                    Effect.flatMap((items) =>
+                      items.some(
+                        (candidate) =>
+                          inboxScopeKey(candidate.input) === key &&
+                          candidate.input.inputId !== batch.inputId
+                      )
+                        ? wake
+                        : Effect.void
+                    ),
+                    Effect.catchCause(report)
+                  )
+                ),
+                Effect.forkIn(scope)
+              );
+            }).pipe(Effect.catchCause(report));
           }
         });
         yield* Effect.forever(
           Queue.take(signal).pipe(
             Effect.flatMap(() => scan()),
-            Effect.catchCause((cause) => execution.report(cause))
+            Effect.catchCause(report)
           )
         ).pipe(Effect.forkScoped);
         yield* wake;
@@ -349,9 +385,9 @@ export class OperationInbox extends Context.Service<
                 const key = JSON.stringify([inboxScopeKey(s), cancelId ?? `legacy:${id}`]);
                 const receipt = { scope: s, id, ids, cancelId };
                 pauses.set(key, receipt);
-                const paused = yield* repo
-                  .pause(s, id, ids, cancelId)
-                  .pipe(Effect.tapError(() => Effect.sync(() => vetoed.add(inboxScopeKey(s)))));
+                const paused = yield* Effect.suspend(() => repo.pause(s, id, ids, cancelId)).pipe(
+                  Effect.tapCause(() => Effect.sync(() => vetoed.add(inboxScopeKey(s))))
+                );
                 if (pauses.get(key) === receipt) pauses.delete(key);
                 return paused;
               }).pipe(Effect.uninterruptible)
@@ -364,13 +400,13 @@ export class OperationInbox extends Context.Service<
             releases.set(key, e);
             yield* withGate(
               e,
-              repo.release(e).pipe(
+              Effect.suspend(() => repo.release(e)).pipe(
                 Effect.tap(() =>
                   Effect.sync(() => {
                     if (releases.get(key) === e) releases.delete(key);
                   })
                 ),
-                Effect.tapError(() =>
+                Effect.tapCause(() =>
                   Effect.sync(() => {
                     if (e.releaseWatermark === undefined) e.outcome = 'failed';
                   })
@@ -389,13 +425,13 @@ export class OperationInbox extends Context.Service<
             settlements.set(batch.batchId, receipt);
             // A failed local write must not abandon the actual provider request.
             // Retry only the observed settlement, never transport submission.
-            yield* repo.settle(batch, outcome, cause).pipe(
+            yield* Effect.suspend(() => repo.settle(batch, outcome, cause)).pipe(
               Effect.tap(() =>
                 Effect.sync(() => {
                   if (settlements.get(batch.batchId) === receipt) settlements.delete(batch.batchId);
                 })
               ),
-              Effect.catchCause((failure) => execution.report(failure).pipe(Effect.andThen(wake)))
+              Effect.catchCause((failure) => report(failure).pipe(Effect.andThen(wake)))
             );
           }),
         });

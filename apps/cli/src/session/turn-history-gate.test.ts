@@ -205,6 +205,92 @@ describe('TurnHistoryGate', () => {
     expect(reasons).toEqual([]);
   });
 
+  it.each(['dispose', 'deadline'] as const)(
+    'releases a stalled pre-open write on %s and fences its late continuation',
+    async (release) => {
+      const doc = createFakeDoc([userEntry(userTurnId)]);
+      let enter: () => void = () => {};
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      let complete: () => void = () => {};
+      const pending = new Promise<void>((resolve) => {
+        complete = resolve;
+      });
+      const writes: string[] = [];
+      const gate = TurnHistoryGate.waitForUserTurn({
+        logger,
+        sessionId,
+        userTurnId,
+        readHistory: doc.readHistory,
+        subscribeHistory: doc.subscribeHistory,
+        onBeforeOpen: async (_reason, signal) => {
+          enter();
+          await pending;
+          if (!signal.aborted) writes.push('old-turn');
+        },
+      });
+      await entered;
+      expect(gate.isOpen).toBe(false);
+      if (release === 'dispose') gate.dispose();
+      else await vi.advanceTimersByTimeAsync(DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS);
+      await gate.waitUntilOpen();
+      expect(gate.isOpen).toBe(true);
+      expect(doc.subscriberCount).toBe(0);
+      // The next gate is independent while the old write is still unresolved.
+      const nextDoc = createFakeDoc([]);
+      const next = TurnHistoryGate.waitForUserTurn({
+        logger,
+        sessionId,
+        userTurnId: 'next',
+        readHistory: nextDoc.readHistory,
+        subscribeHistory: nextDoc.subscribeHistory,
+      });
+      complete();
+      await flushMicrotasks();
+      expect(writes).toEqual([]);
+      expect(next.isOpen).toBe(false);
+      nextDoc.setHistory([userEntry('next')]);
+      await next.waitUntilOpen();
+    }
+  );
+
+  it('the deadline releases even when the timeout callback itself never returns', async () => {
+    const doc = createFakeDoc([]);
+    let complete: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    const gate = TurnHistoryGate.waitForUserTurn({
+      logger,
+      sessionId,
+      userTurnId,
+      readHistory: doc.readHistory,
+      subscribeHistory: doc.subscribeHistory,
+      onBeforeOpen: () => pending,
+    });
+    await vi.advanceTimersByTimeAsync(DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS);
+    await gate.waitUntilOpen();
+    expect(gate.isOpen).toBe(true);
+    complete();
+  });
+
+  it('broken subscription cleanup and diagnostics cannot prevent release', async () => {
+    const unavailable = () => {
+      throw new Error('closed document or diagnostic sink');
+    };
+    const gate = TurnHistoryGate.waitForUserTurn({
+      logger: { ...logger, debug: unavailable, warn: unavailable, error: unavailable },
+      sessionId,
+      userTurnId,
+      hasUserTurn: async () => false,
+      subscribeHistory: () => unavailable,
+    });
+    gate.dispose();
+    await gate.waitUntilOpen();
+    expect(gate.isOpen).toBe(true);
+  });
+
   it('still opens when onBeforeOpen throws (fail open)', async () => {
     const doc = createFakeDoc([userEntry(userTurnId)]);
     const gate = TurnHistoryGate.waitForUserTurn({

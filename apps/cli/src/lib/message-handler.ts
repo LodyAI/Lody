@@ -1072,8 +1072,10 @@ export class MessageHandler {
     sessionDoc: SessionDocument,
     turnId: string,
     modelInfo: ModelInfo | undefined,
-    userTurnId?: string
+    userTurnId?: string,
+    signal?: AbortSignal
   ): Promise<void> {
+    if (signal?.aborted) return;
     const span = startTraceSpan(this.logger, 'history.write_assistant_entry', {
       sessionId,
       turnId,
@@ -1097,6 +1099,10 @@ export class MessageHandler {
       let author = existing.state === 'ready' ? readMessageAuthor(existing.turn.author) : undefined;
       if (!author && userTurnId) {
         const input = await backend.history.readTurn(userTurnId);
+        if (signal?.aborted) {
+          span.end();
+          return;
+        }
         if (input.state === 'ready' && input.turn.role === 'user') {
           this.executionService.setTurnNotificationAudience(
             sessionId,
@@ -1116,6 +1122,10 @@ export class MessageHandler {
             modelInfo,
             this.workspaceId
           );
+      }
+      if (signal?.aborted) {
+        span.end();
+        return;
       }
       await backend.openAssistantTurn({
         turnId,
@@ -6530,13 +6540,14 @@ export class MessageHandler {
         );
       },
       subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
-      onBeforeOpen: async () => {
+      onBeforeOpen: async (_reason, signal) => {
         await this.writeAssistantEntryForTurn(
           sessionId,
           sessionDoc,
           turnId,
           this.sessionManager.getSession(sessionId)?.agentClient?.currentModel,
-          userTurnId
+          userTurnId,
+          signal
         );
       },
     });

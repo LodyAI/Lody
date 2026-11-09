@@ -35,8 +35,8 @@
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
   handler; history sync is the durable fallback.
-- Missing-history recovery never advances `lastHandledUserMsgId`: set that turn's permanent
-  one-shot `lastMissingHistoryUserMsgId` ack and surface `chat_failed`.
+- Missing-history recovery never advances `lastHandledUserMsgId`: retain failed IDs in
+  `missingHistoryUserMsgIds`, read legacy acknowledgements, and surface `chat_failed`.
 - Retire a terminal stale activation into `settledActivationUserMsgId`; never claim the
   marker or rewrite `latestUserMsgId`, and report settled only if none survives.
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
@@ -49,7 +49,8 @@
 
 ## Turn execution
 
-- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), including pre-open
+  writes, never status/meta. Disposal releases waiters immediately.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
   reusing an Agent. If release fails, detach that Agent, return the turn slot and report

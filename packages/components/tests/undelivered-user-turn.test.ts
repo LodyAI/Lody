@@ -46,6 +46,17 @@ describe('isUndeliveredUserTurnEntry', () => {
     ).toBe(false);
   });
 
+  it('keeps older failed messages visible after a later timeout replaces the legacy marker', () => {
+    expect(isUndeliveredUserTurnEntry('new-failure', userTurn(), { 'turn-1': true })).toBe(true);
+    expect(isUndeliveredUserTurnEntry(undefined, userTurn(), { 'turn-1': true })).toBe(true);
+    expect(
+      isUndeliveredUserTurnEntry('new-failure', userTurn({ status: 'handled' }), { 'turn-1': true })
+    ).toBe(false);
+    expect(
+      isUndeliveredUserTurnEntry('new-failure', userTurn({ id: 'fresh' }), { 'turn-1': true })
+    ).toBe(false);
+  });
+
   it('treats a legacy read=false entry without a status field as pending', () => {
     expect(
       isUndeliveredUserTurnEntry('turn-1', { id: 'turn-1', role: 'user' as const, read: false })

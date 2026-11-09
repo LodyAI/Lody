@@ -175,8 +175,13 @@ would let a send published between the read and the write lose its activation an
 and unrun. The `settledActivationUserMsgId` slot may be replaced freely because the turn it
 names is terminal.
 
-The renderer derives a visible "not delivered" label for a marked entry from the marker plus
-its non-terminal status — no CLI repair write, no schema change. Recovery is a fresh send: the
+The host retains every negatively acknowledged input in `missingHistoryUserMsgIds`, alongside the
+legacy `lastMissingHistoryUserMsgId` scalar. Only its serialized watcher appends entries; producers
+publish fresh activation IDs without clearing these receipts. A timeout cannot mark a newer
+activation that arrived during recovery. [The storage decision](../../../../.agents/notes/implemented/bug-fix/2026-11-10-missing-history-acknowledgements.md) explains compatibility, retention and the single-host assumption.
+
+The renderer derives a visible "not delivered" label for a marked entry from these receipts plus
+its non-terminal status, without a CLI history-repair write or history-schema migration. Recovery is a fresh send: the
 label opens a confirmation dialog that re-sends the SAME content as a brand-new message
 through the ordinary producer path. The renderer retains the marker as a tombstone and
 supersedes the abandoned entry to `canceled`; it must never revive the old turn.
@@ -209,7 +214,10 @@ that follows another one in the chain yields one macrotask first
 Turn-scoped history LIST writes (assistant entry, ACP flushes, finalization, failure notices)
 wait until the user turn entry has synced into the CLI-local doc, because concurrent Loro list
 inserts can otherwise permanently order the reply before the user message. Status and meta map
-writes are never gated; some sit on the prompt critical path.
+writes are never gated; some sit on the prompt critical path. The original 20-second gate deadline
+also bounds its pre-open assistant-entry callback. Disposal releases existing waiters immediately.
+Deadline/disposal signals stop late callbacks before their next write; already-issued writes remain
+owned and observed, and a late completion cannot release a successor gate.
 
 ### Why the pointer write is bundled with the history append
 

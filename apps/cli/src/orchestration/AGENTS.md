@@ -60,6 +60,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - `inbox/service.ts` is native Effect v4. Scope owns its signal/fibers and repository connection;
   one per-Session admission covers Stop, fresh input acceptance and actual transport start.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.
+  Retry independent receipts and prepare independent batches even after another fails; retain failed
+  receipts and report the combined Cause without making it a prerequisite for workspace scanning.
 - Stop pauses queues; legacy Stop cancels execution. Fresh human/
   Agent-chat clears pause; Host `automation` cannot and yields to humans. Never
   revive canceled execution or discard prepared input. Automation release proof

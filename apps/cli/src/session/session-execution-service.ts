@@ -1,3 +1,4 @@
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -1207,7 +1208,7 @@ export class SessionExecutionService {
       const read = await (await createSessionBackend(doc)).readTurn(args.inputId);
       if (
         meta?.lastHandledUserMsgId === args.inputId ||
-        meta?.lastMissingHistoryUserMsgId === args.inputId ||
+        isMissingHistoryUserTurn(meta, args.inputId) ||
         (read.state === 'ready' &&
           (read.turn.role !== 'user' ||
             ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')))

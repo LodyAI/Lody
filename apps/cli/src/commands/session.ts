@@ -2713,7 +2713,6 @@ async function writeDispatchPointer(args: {
 }): Promise<void> {
   await args.manager.repo.upsertDocMeta(getSessionRoomId(args.sessionId), {
     latestUserMsgId: args.userTurnId,
-    lastMissingHistoryUserMsgId: undefined,
   } satisfies Partial<SessionMeta>);
 }
 
@@ -4500,7 +4499,6 @@ export async function sendSessionChatResult(
       await manager.repo
         .upsertDocMeta(getSessionRoomId(sessionId), {
           latestUserMsgId: undefined,
-          lastMissingHistoryUserMsgId: undefined,
         } satisfies Partial<SessionMeta>)
         .catch(() => undefined);
     }
