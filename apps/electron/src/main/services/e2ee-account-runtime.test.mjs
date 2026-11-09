@@ -3718,8 +3718,8 @@ void test(
 )
 /** A personal device approval on the same main-owned delivery: synthetic relay and host. */
 const personalSession = '66'.repeat(16)
-const personalRequest = `personal-${randomUUID()}`
-async function personalApprovalFixture(keyRound) {
+const personalRequest = `personal-device-${randomUUID()}`
+async function personalApprovalFixture(keyRound, local = { hasCurrentKey: true }) {
   let committed = false
   let ingested = false
   return memberIpcFixture({
@@ -3759,6 +3759,12 @@ async function personalApprovalFixture(keyRound) {
           credentialHash: '99'.repeat(32)
         }),
       personalInvitation: () => Effect.succeed({ invitationHex: 'ef' }),
+      status: () => Effect.sync(() => ({ hasCurrentKey: local.hasCurrentKey })),
+      receiveKeys: () =>
+        Effect.sync(() => {
+          local.received = (local.received ?? 0) + 1
+          local.hasCurrentKey = true
+        }),
       ingestLedgerRecords: (_workspace, page) =>
         Effect.sync(() => {
           if (page.admission) ingested = true
@@ -3815,6 +3821,50 @@ void test(
     assert.equal(rounds, 5)
     // The admission result is not undone by any delivery failure.
     assert.equal(approved.admitted, true)
+  }
+)
+void test(
+  'a personal device approval receives the missing local key before delivering it',
+  { timeout: 5000 },
+  async () => {
+    // No other page will install the key: the control page approves on its own.
+    const local = { hasCurrentKey: false }
+    let distributed = 0
+    const f = await personalApprovalFixture(
+      () =>
+        Effect.sync(() => {
+          distributed += 1
+        }),
+      local
+    )
+    const approved = plain(await f.ipc.approvePersonalJoin('team', personalSession))
+    assert.equal(approved.admitted, true)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(local.hasCurrentKey, true)
+    assert.equal(local.received, 1)
+    assert.equal(distributed, 1)
+    assert.equal(keyDeliveryState(f, personalRequest).state, 'delivered')
+  }
+)
+void test(
+  'a failed personal device key delivery can be retried explicitly',
+  { timeout: 5000 },
+  async () => {
+    let outage = true
+    const f = await personalApprovalFixture(() =>
+      outage ? Effect.fail(new Error('e2ee_management_retry')) : Effect.void
+    )
+    f.ipc.keyDeliveryTimers = fakeKeyDeliveryTimers().timers
+    await f.ipc.approvePersonalJoin('team', personalSession)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, personalRequest).state, 'failed')
+    outage = false
+    const retried = await f.ipc
+      .retryMemberKeyDelivery('team', personalRequest)
+      .then(plain, (error) => error.message)
+    assert.equal(retried.requestId, personalRequest)
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, personalRequest).state, 'delivered')
   }
 )
 void test(

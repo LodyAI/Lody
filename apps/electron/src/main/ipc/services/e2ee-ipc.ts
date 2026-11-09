@@ -667,7 +667,21 @@ export class E2eeIpc extends IpcService {
       const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
       const mailbox = (signal: AbortSignal) =>
         cloud.client.mailbox({ workspaceId, credential }, signal)
-      // Distribution only: this device's own receive and repair run in full rounds.
+      // A device approved from the control page may have no content page to install this
+      // device's own current key, and it cannot deliver a key it does not hold: receive first.
+      if (!(await scope((owner) => owner.host.status(workspaceId))).hasCurrentKey) {
+        const receive = await scope((owner) =>
+          Effect.succeed(
+            owner.host
+              .receiveKeys(workspaceId, mailbox, (signal) =>
+                cloud.client.staging({ workspaceId, credential }, signal)
+              )
+              .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
+          )
+        )
+        await runDesktopE2eeOperation(accountId, receive)
+      }
+      // Distribution: this device's report flush and repair run in full rounds.
       const work = await scope((owner) =>
         Effect.succeed(
           owner.host
@@ -1175,10 +1189,11 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async retryMemberKeyDelivery(workspaceId: string, requestId: string) {
-    // Member admissions use 32-hex ids; account pairing keeps its journaled admission id.
+    // Member admissions use 32-hex ids; account pairing and personal device approval keep
+    // their journaled admission ids.
     if (
       typeof requestId !== 'string' ||
-      !/^(?:[0-9a-f]{32}|account-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
+      !/^(?:[0-9a-f]{32}|(?:account|personal)-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
         requestId
       )
     )
