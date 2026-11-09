@@ -38,3 +38,5 @@
 - The composer relations capsule opens a catalog-backed tree. Containment owns Tabs: keep them in their conversation’s horizontal row, with hidden scrollbars and directional overflow fades. Only precise opened-by links add depth and curved rails between conversations. Require the precise opener and its root to exist, never route through `openedByRootSessionId` alone, exclude archived and side-panel targets, and guard cycles. Scope changes clear the tree and disable old navigation.
 
 - Relation and receipt rows express containment through layout, without auxiliary Tab/current/directory labels. Mark only the current exact target with a subtle background and accessible selection. Keep status descriptions accessible, use icons instead of redundant visible status words, and preserve reply text, truncation/error notices and action labels.
+
+- Archiving from conversation More returns to the conversation list only after a successful write. Failure and unarchive keep the page open. A late completion must not navigate after the user leaves the initiating page or changes account/workspace; Home clears only that conversation’s detail.
