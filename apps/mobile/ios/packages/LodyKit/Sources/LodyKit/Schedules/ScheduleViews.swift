@@ -124,7 +124,7 @@ struct ScheduleRowView: View {
           .lineLimit(2)
       }
     }
-    .padding(.horizontal, LodyLayout.screenPaddingX)
+    .padding(.horizontal, LodyLayout.listEdgeX)
     .padding(.vertical, LodySpacing.sm)
     .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .leading)
     .accessibilityHidden(true)
@@ -160,7 +160,7 @@ struct ScheduleSectionTitle: View {
     Text(text)
       .lodyTextStyle(.groupLabel)
       .foregroundStyle(LodyColor.textTertiary)
-      .padding(.horizontal, LodyLayout.screenPaddingX)
+      .padding(.horizontal, LodyLayout.listEdgeX)
       .padding(.vertical, LodySpacing.xs)
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityAddTraits(.isHeader)
@@ -256,7 +256,7 @@ struct ScheduleHeroView: View {
     }
     .padding(LodySpacing.lg)
     .background(Color(uiColor: .lodyOpaqueCard), in: RoundedRectangle(cornerRadius: LodyRadius.xl, style: .continuous))
-    .padding(.horizontal, LodyLayout.screenPaddingX)
+    .padding(.horizontal, LodyLayout.listEdgeX)
   }
 
   private var facts: [(symbol: String, text: String)] {

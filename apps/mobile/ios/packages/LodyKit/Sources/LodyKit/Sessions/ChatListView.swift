@@ -165,7 +165,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     projectIndex.frame = bounds
     refreshProjectIndex()
     updateBackdrop()
-    let inset = LodyLayout.screenPaddingX * 2
+    let inset = LodyLayout.listEdgeX * 2
     placeholder.frame = CGRect(x: inset, y: bounds.midY - 60, width: max(0, bounds.width - inset * 2), height: 120)
   }
 
@@ -594,7 +594,7 @@ private struct GroupHeader: View {
         Color.clear.frame(width: LodySpacing.xs, height: 1)
       }
     }
-    .padding(.leading, LodyLayout.screenPaddingX)
+    .padding(.leading, LodyLayout.listEdgeX)
     .padding(.trailing, LodySpacing.xs)
     .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .leading)
     .accessibilityElement(children: .contain)
@@ -675,7 +675,7 @@ private struct ChatRowContent: View {
             let fork = max(0, turn - LodySpacing.md)
             path.move(to: CGPoint(x: Self.railX, y: 0))
             path.addLine(to: CGPoint(x: Self.railX, y: fork))
-            path.addCurve(to: CGPoint(x: LodyLayout.childIndent - LodySpacing.sm, y: turn),
+            path.addCurve(to: CGPoint(x: ChatRowContent.childIndent - LodySpacing.sm, y: turn),
               control1: CGPoint(x: Self.railX, y: turn - LodyRadius.sm),
               control2: CGPoint(x: Self.railX + LodySpacing.xs, y: turn))
             if !row.lastChild {
@@ -737,7 +737,7 @@ private struct ChatRowContent: View {
         }
       }
     }
-    .padding(.horizontal, LodyLayout.screenPaddingX)
+    .padding(.horizontal, LodyLayout.listEdgeX)
     .padding(.vertical, snippet != nil || hasDetailLine ? LodySpacing.sm : 0)
     .frame(maxWidth: .infinity, minHeight: nested ? LodySize.controlMd : LodySize.listRow, alignment: .leading)
   }
@@ -753,9 +753,11 @@ private struct ChatRowContent: View {
   /// The family chevron sits at the opener's title edge; the rail runs down its centre.
   private static let chevronSize = LodyIconSize.xs
   private static let railWidth = LodySpacing.xxs / 2
-  private static let railX = LodyLayout.screenPaddingX + chevronSize / 2
+  private static let railX = LodyLayout.listEdgeX + chevronSize / 2
   /// One nesting level: how far a child's title steps in.
   static let childLevel = LodyLayout.childIndent - LodyLayout.screenPaddingX
+  /// A nested title's leading edge: the list edge plus one level.
+  static let childIndent = LodyLayout.listEdgeX + childLevel
 
   /// The whole family line toggles its children; the opener above still opens the chat.
   private func familyToggle(_ expanded: Bool) -> some View {
@@ -777,7 +779,7 @@ private struct ChatRowContent: View {
             .frame(width: LodyIconSize.md, height: LodyIconSize.md)
         }
       }
-      .padding(.horizontal, LodyLayout.screenPaddingX)
+      .padding(.horizontal, LodyLayout.listEdgeX)
       .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
       .contentShape(Rectangle())
     }
@@ -838,7 +840,7 @@ private struct MoreRowContent: View {
     Text(title)
       .lodyTextStyle(.body)
       .foregroundStyle(LodyColor.textTertiary)
-      .padding(.leading, LodyLayout.childIndent)
+      .padding(.leading, ChatRowContent.childIndent)
       .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .leading)
       .accessibilityAddTraits(.isButton)
   }
@@ -854,7 +856,7 @@ private struct SectionTitle: View {
       Text(text)
         .lodyTextStyle(.groupLabel)
         .foregroundStyle(LodyColor.textTertiary)
-        .padding(.horizontal, LodyLayout.screenPaddingX)
+        .padding(.horizontal, LodyLayout.listEdgeX)
         .padding(.top, LodySpacing.xs)
         .padding(.bottom, LodySpacing.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
