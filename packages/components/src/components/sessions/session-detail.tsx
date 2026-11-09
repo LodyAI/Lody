@@ -1999,7 +1999,8 @@ const SessionDetail = ({
     () => {
       activateSidebarTab('android-emulator');
       revealRightSidebar();
-    }
+    },
+    'device'
   );
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
