@@ -4,6 +4,8 @@
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
+import { getDefaultStore } from 'jotai';
+import { agentConfigMetaCacheAtom } from '../src/atoms/doc-meta';
 import {
   AGENT_ROLE_VERSION,
   type AgentConfigId,
@@ -13,10 +15,8 @@ import {
   type MachineId,
 } from '@lody/shared';
 
-// The menu resolves its default agent pool from machine presence; this surface
-// passes `availableAgentConfigs` instead, so the pool is not what is under test.
+// Simulate missing/offline presence independently of the known Agent catalog.
 vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => [] }));
-
 import {
   DesktopMachineMenu,
   DesktopRunConfigMenu,
@@ -94,6 +94,7 @@ describe('DesktopRunConfigMenu role face', () => {
   });
 
   afterEach(async () => {
+    getDefaultStore().set(agentConfigMetaCacheAtom, {});
     if (root) {
       await act(async () => {
         root?.unmount();
@@ -233,6 +234,90 @@ describe('DesktopRunConfigMenu role face', () => {
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
+
+  it('lets a blank tab switch Agents without online presence and keeps its machine scope', async () => {
+    const second: AgentConfigMeta = {
+      ...agentConfig,
+      id: 'config-2' as AgentConfigId,
+      name: 'Claude Secondary',
+      agentType: 'claude',
+    };
+    const otherMachine: AgentConfigMeta = {
+      ...agentConfig,
+      id: 'config-other' as AgentConfigId,
+      machineId: 'machine-other' as MachineId,
+    };
+    getDefaultStore().set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries([agentConfig, second, otherMachine].map((config) => [config.id, config]))
+    );
+    let chosen: MenuProps['agentSelection'] = baseProps.agentSelection;
+    const view = await render({
+      availableAgentConfigs: undefined,
+      allowedMachineIds: [machineId],
+      onAgentConfigChange: (selection) => {
+        chosen = selection;
+      },
+    });
+    await act(async () => {
+      view
+        .querySelector('button[aria-label="Run configuration"]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+    await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+    const agent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
+      element.textContent?.startsWith('Agent')
+    );
+    expect(agent?.getAttribute('aria-disabled')).not.toBe('true');
+    await act(async () => {
+      agent!.focus();
+      agent!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowRight',
+          code: 'ArrowRight',
+          bubbles: true,
+        })
+      );
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll('[data-testid="chat-agent-option"]')).toHaveLength(2)
+    );
+    const target = document.querySelector<HTMLElement>(
+      `[data-agent-config-id="${second.id}"][data-testid="chat-agent-option"]`
+    );
+    await act(async () => target!.click());
+    expect(chosen).toEqual({ agentId: second.id, machineId });
+    await render({
+      availableAgentConfigs: undefined,
+      allowedMachineIds: [machineId],
+      agentSelection: chosen,
+    });
+    expect(
+      view.querySelector<HTMLElement>('[data-run-config-trigger]')?.dataset.agentConfigId
+    ).toBe(second.id);
+  });
+
+  it.each([
+    { allowedMachineIds: [] as MachineId[], agentLocked: false },
+    { allowedMachineIds: [machineId], agentLocked: true },
+  ])(
+    'keeps Agent selection locked for scope/lock $agentLocked $allowedMachineIds',
+    async (props) => {
+      getDefaultStore().set(agentConfigMetaCacheAtom, { [agentConfig.id]: agentConfig });
+      const view = await render({ ...props, availableAgentConfigs: undefined });
+      await act(async () => {
+        view
+          .querySelector('button[aria-label="Run configuration"]')
+          ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      });
+      await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+      const agent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (element) => element.textContent?.startsWith('Agent')
+      );
+      expect(agent?.getAttribute('aria-disabled')).toBe('true');
+      expect(document.querySelector('[data-testid="chat-agent-option"]')).toBeNull();
+    }
+  );
 
   it('binds same-name Agent options to the IDs used by their selection action', async () => {
     const second: AgentConfigMeta = {
