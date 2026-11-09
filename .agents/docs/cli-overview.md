@@ -87,6 +87,10 @@ Builtin Claude, Codex, and Grok use bundled adapters plus managed native runtime
 launches its managed Node package directly. `src/agent/setting.ts` resolves those four through
 `src/agent/managed-agent-runtime.ts`.
 
+The bundled Codex adapter uses its ACP v1 entry, which avoids loading the v2 protocol definitions
+in each session process. The [memory decision](../notes/implemented/architecture/2026-11-03-codex-v1-adapter-memory.md)
+records the measurement and process boundary.
+
 Builtin DeepSeek Harness is deliberately not a managed runtime: `src/agent/deepseek-harness-runtime.ts`
 consumes the pinned profile from the `packages/acp-extension-dsh` submodule, launches it through
 Lody's isolated npx cache, and loads the bundled `deepseek-acp.js` adapter. The extension owns the
