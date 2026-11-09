@@ -1523,6 +1523,10 @@ function resolveInitialTestedCustomKey(
   if (entry.sourceVersion !== `custom:${serializeCustomAcpLaunchSpec(config.customAcp)}`) {
     return null;
   }
+  // A degraded persisted entry (e.g. an empty model catalog) never proves a
+  // working provider — the config needs a fresh test instead of inheriting the
+  // degraded verification.
+  if (hasEmptyModelSelectOption(entry.configOptions)) return null;
   return formatCustomAcpCommandLine(config.customAcp);
 }
 
@@ -2239,6 +2243,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       setAuthRequired(false);
       setTestedCustomKey(probedKey);
     } catch (error) {
+      // Any failed verification invalidates the prior tested key for the same
+      // command — the provider may have degraded since then.
+      setTestedCustomKey(null);
       setProbeError(error instanceof Error ? error.message : String(error));
     } finally {
       setProbing(false);

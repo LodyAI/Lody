@@ -8965,6 +8965,17 @@ export class SessionExecutionService {
             error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
           };
         }
+        if (hasEmptyModelSelectOption(refresh.capability?.configOptions)) {
+          // Auth worked, but the agent's catalog is still degraded: that is not
+          // a successful verification, and the caller must not mark the provider
+          // verified on the strength of the authentication alone.
+          return {
+            ...resolvedBase,
+            ...result,
+            capabilitiesRefreshed: false,
+            error: 'Authentication succeeded, but the provider reported no usable models',
+          };
+        }
         return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
       }
 
