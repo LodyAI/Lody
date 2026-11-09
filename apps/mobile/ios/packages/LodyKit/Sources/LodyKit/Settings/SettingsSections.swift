@@ -59,16 +59,14 @@ enum SettingsSections {
       row("ai-usage", text("aiUsage.title"), image: "chart.bar.xaxis"),
       row("published-shares", text("shares.title"), image: "link"),
     ]
-    var footer = [
-      text("connection.\(connection.state)"),
-      String.localizedStringWithFormat(String(localized: "settings.machineCount", bundle: .lody), connection.machines),
-      connection.syncedAt.map { String.localizedStringWithFormat(String(localized: "settings.connection.syncedAt", bundle: .lody), String(describing: LodyRelativeTime.text($0, now: now))) } ?? "",
-    ].filter { !$0.isEmpty }.joined(separator: " · ")
+    // Only trouble needs a footer; a live workspace stays quiet.
+    var footer = ""
     if connection.state == "offline" {
       var resync = row("connection", text("connection.resync"), image: "arrow.clockwise")
       resync.disclosure = false
       resync.navigates = false
       rows.append(resync)
+      footer = text("connection.offline")
       if connection.syncedAt != nil { footer += "\n\(text("connection.cached"))" }
     }
     return section(

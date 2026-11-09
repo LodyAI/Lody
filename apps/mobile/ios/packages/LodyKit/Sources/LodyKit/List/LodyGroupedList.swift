@@ -233,7 +233,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     cell.contentConfiguration = content
   }
 
-  /// A chat row's metrics: `screenPaddingX` edges, a `md` glyph then `listRowGap` before the title,
+  /// A chat row's metrics: `listEdgeX` edges, a `md` glyph then `listRowGap` before the title,
   /// `body` / `footnote` text and at least `LodySize.listRow` tall.
   private func chatFlatten(_ cell: SettingsListCell, _ row: LodyListRow, _ base: UIListContentConfiguration) {
     var content = base
@@ -269,10 +269,10 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     let lines = max(text, content.image == nil ? 0 : content.imageProperties.reservedLayoutSize.height)
     let vertical = max(LodySpacing.sm, ceil((LodySize.listRow - lines) / 2))
     content.directionalLayoutMargins = .init(
-      top: vertical, leading: LodyLayout.screenPaddingX, bottom: vertical, trailing: LodyLayout.screenPaddingX
+      top: vertical, leading: LodyLayout.listEdgeX, bottom: vertical, trailing: LodyLayout.listEdgeX
     )
     cell.preservesSuperviewLayoutMargins = false
-    cell.directionalLayoutMargins = .init(top: 0, leading: 0, bottom: 0, trailing: LodyLayout.screenPaddingX)
+    cell.directionalLayoutMargins = .init(top: 0, leading: 0, bottom: 0, trailing: LodyLayout.listEdgeX)
     cell.contentConfiguration = content
   }
 
@@ -655,7 +655,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       // Plain lists pin headers by default; a clear header would float over rows.
       for item in section.boundarySupplementaryItems { item.pinToVisibleBounds = false }
       if flatSystem, self?.chatStyle == true, index > 0 {
-        section.contentInsets.top = LodySpacing.md
+        section.contentInsets.top = LodySpacing.lg
       } else if flat, !flatSystem, index > 0, outline {
         section.contentInsets.top = LodyDesign.Rail.bandGap
       } else if flat, !flatSystem, index > 0 {
@@ -1444,10 +1444,11 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       view.accessibilityLabel = nil
     }
     if flatSystem, chatStyle {
-      // The Chats group label: `xs` above and below at the screen edge.
+      // The group label sits at the list edge, clear of the previous group and with
+      // room before its own rows so the label reads as a heading, not a row.
       content.directionalLayoutMargins = header
-        ? .init(top: LodySpacing.xs, leading: LodyLayout.screenPaddingX, bottom: LodySpacing.xs, trailing: LodyLayout.screenPaddingX)
-        : .init(top: LodySpacing.sm, leading: LodyLayout.screenPaddingX, bottom: 0, trailing: LodyLayout.screenPaddingX)
+        ? .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: LodySpacing.sm, trailing: LodyLayout.listEdgeX)
+        : .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: 0, trailing: LodyLayout.listEdgeX)
     } else if flatSystem {
       let footerLeading = LodyFlatRows.textLeading(sectionHasIcons: LodyFlatRows.sectionHasIcons(section.rows))
       content.directionalLayoutMargins = header
