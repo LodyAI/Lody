@@ -27,6 +27,7 @@ import {
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   machineSupportsProviderSetupProtocol,
   machineSupportsProtocolCapability,
   getDeepSeekHarnessProviderConfigPath,
@@ -2153,6 +2154,20 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           );
           return;
         }
+        if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+          // The probe succeeded but the agent advertised an empty model
+          // catalog: unusable for real sessions and never a verified state.
+          setAuthRequired(false);
+          setManuallyTested(false);
+          setVerifiedBuiltinContext(null);
+          setProbeError(
+            t(
+              'settings.agent.dialog.emptyModelCatalog',
+              'Provider responded but reported no usable models — try verifying again.'
+            )
+          );
+          return;
+        }
         setAuthRequired(false);
         setManuallyTested(true);
         if (requiresBuiltinVerification) {
@@ -2211,6 +2226,14 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       if (!response.success) {
         throw new Error(
           response.error ?? t('settings.agent.dialog.probeFailed', 'Provider verification failed.')
+        );
+      }
+      if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+        throw new Error(
+          t(
+            'settings.agent.dialog.emptyModelCatalog',
+            'Provider responded but reported no usable models — try verifying again.'
+          )
         );
       }
       setAuthRequired(false);

@@ -75,6 +75,7 @@ export interface DesktopOnboardingTraceProperties {
   result?:
     | 'cancelled'
     | 'current_window'
+    | 'degraded_empty_model_catalog'
     | 'external_browser'
     | 'imported'
     | 'needs_auth'

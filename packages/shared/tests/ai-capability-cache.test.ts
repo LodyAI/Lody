@@ -6,6 +6,7 @@ import {
   getAcpCapabilityCacheStaleReason,
   getReadableAcpCapabilityCacheEntry,
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
+  hasEmptyModelSelectOption,
   isAcpCapabilityCacheEntryCurrent,
   type AcpCapabilityCacheEntry,
 } from '../src/ai';
@@ -186,6 +187,62 @@ describe('ACP capability refresh cache decision', () => {
         ...args,
       })
     ).toEqual({ hit: false, reason });
+  });
+
+  it('misses with empty-model-catalog when the persisted select has no options', () => {
+    const degraded = currentEntry({
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [],
+        },
+      ],
+    });
+    expect(getAcpCapabilityCacheStaleReason(degraded, expectedSourceVersion!)).toBe(
+      'empty-model-catalog'
+    );
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: degraded,
+        expectedSourceVersion,
+        launchInputs: 'matching',
+        nowMs: degraded.fetchedAt + 1000,
+      })
+    ).toEqual({ hit: false, reason: 'empty-model-catalog' });
+    expect(getAcpCapabilityCacheEntryAuthority(degraded, undefined)).toBe('degraded');
+  });
+
+  it('does not flag empty non-model selects or non-empty model selects', () => {
+    expect(
+      hasEmptyModelSelectOption([
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'agent',
+          options: [],
+        },
+      ])
+    ).toBe(false);
+    expect(
+      hasEmptyModelSelectOption([
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [{ value: 'model-a', name: 'Model A' }],
+        },
+      ])
+    ).toBe(false);
+    expect(hasEmptyModelSelectOption(undefined)).toBe(false);
   });
 
   it('never answers a refresh with an entry no probe produced', () => {

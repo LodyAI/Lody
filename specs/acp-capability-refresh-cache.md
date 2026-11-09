@@ -23,6 +23,15 @@ these hold:
   **including the config's environment**. The source version cannot carry this: for custom and
   registry configs, and for every builtin except DeepSeek's endpoint, it does not depend on the
   environment at all, yet a token or endpoint change can change what the agent advertises.
+- The entry is not a degraded result. An agent that advertises a model-typed select option with
+  zero choices was probed while its model catalog was unavailable — a cold upstream cache, a
+  startup race, auth that had not settled — not an agent that legitimately has no models. No flag
+  is persisted: `hasEmptyModelSelectOption` reads the persisted `configOptions` themselves, so
+  `getAcpCapabilityCacheStaleReason` misses on such an entry (`empty-model-catalog`) even when it
+  was written before this rule existed. The same predicate drives the capability authority: the
+  entry is `degraded` rather than `authoritative`, which keeps verification flows (onboarding,
+  provider test, agent config verification) from reporting a usable provider, and makes the model
+  selector fall back to the currently selected model instead of rendering an empty picker.
 
 Changing any launch input — binary, override, command, or any environment value — is a miss.
 

@@ -110,6 +110,7 @@ import {
   getServerNow,
   getSessionRoomId,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   hasRecentResumeNotice,
   isReplayEntryExcluded,
   isSessionCollaborationStopped,
@@ -9297,6 +9298,12 @@ export class SessionExecutionService {
         message.configId,
         fingerprintAcpLaunchInputs(message)
       );
+      if (hasEmptyModelSelectOption(configOptions)) {
+        this.deps.logger.warn(
+          `[acp-refresh] ${message.cliType}/${message.agentType} advertised a model select with zero options; the persisted entry stays degraded and will be re-probed on the next refresh`,
+          { configId: message.configId }
+        );
+      }
 
       return {
         type: 'machine/acp-capabilities-refresh_response',

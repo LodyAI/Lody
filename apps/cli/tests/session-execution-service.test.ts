@@ -75,6 +75,8 @@ import {
   inputBlocksToHistoryItems,
   SessionStatusFactory,
   type AcpCapabilityCacheEntry,
+  type AcpConfigOptionSummary,
+  getAcpCapabilityCacheEntryAuthority,
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -11466,6 +11468,7 @@ describe('SessionExecutionService', () => {
         env?: Record<string, string>;
         expectedSourceVersion?: () => string | undefined;
         getAcpCapabilities?: () => Promise<AcpCapabilityCacheEntry | undefined>;
+        probeConfigOptions?: () => AcpConfigOptionSummary[] | undefined;
       } = {}
     ) => {
       const flock = new InMemoryMachineFlock();
@@ -11513,6 +11516,7 @@ describe('SessionExecutionService', () => {
           return {
             modes: [{ id: 'default', name: 'Default' }],
             models: [{ modelId: 'model-a', name: 'Model A' }],
+            configOptions: options.probeConfigOptions?.(),
             availableCommands: probeCommands,
             sessionFork: false,
             acknowledgedSteer: true,
@@ -11751,6 +11755,55 @@ describe('SessionExecutionService', () => {
           })
         );
         expect(harness.probes()).toBe(0);
+      }));
+
+    it('re-probes a persisted entry whose model select advertised zero choices, then caches the healed result', () =>
+      withClock(async () => {
+        let catalog: AcpConfigOptionSummary[] | undefined = [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [],
+          },
+        ];
+        const harness = createHarness({ probeConfigOptions: () => catalog });
+
+        // The degraded probe persists like any other result...
+        const degraded = await harness.service.refreshMachineAcpCapabilities(request);
+        expect(degraded.success).toBe(true);
+        expect(harness.storedEntry()?.configOptions?.[0]?.options).toEqual([]);
+        expect(getAcpCapabilityCacheEntryAuthority(harness.storedEntry(), undefined)).toBe(
+          'degraded'
+        );
+
+        // ...but it never answers a refresh: the cache misses and probes again.
+        await harness.service.refreshMachineAcpCapabilities(request);
+        expect(harness.probes()).toBe(2);
+
+        // Once a real catalog lands, the entry is authoritative again and the
+        // next refresh is served from it without another probe.
+        catalog = [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [{ value: 'model-a', name: 'Model A' }],
+          },
+        ];
+        await harness.service.refreshMachineAcpCapabilities(request);
+        expect(harness.probes()).toBe(3);
+        expect(getAcpCapabilityCacheEntryAuthority(harness.storedEntry(), undefined)).toBe(
+          'authoritative'
+        );
+
+        const cached = await harness.service.refreshMachineAcpCapabilities(request);
+        expect(harness.probes()).toBe(3);
+        expect(cached.success).toBe(true);
       }));
   });
 
