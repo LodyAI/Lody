@@ -533,4 +533,11 @@
         <item quantity="other">Every %d minutes</item>
     </plurals>
     <string name="home_project_index">Project index</string>
+    <string name="schedules_overview_active">Active</string>
+    <string name="schedules_overview_attention">Attention</string>
+    <string name="schedules_overview_paused">Paused</string>
+    <string name="schedules_overview_ended">Ended</string>
+    <string name="schedules_section_task">Task</string>
+    <string name="schedules_section_when">When</string>
+    <string name="schedules_section_run_with">Run with</string>
 </resources>

@@ -4,6 +4,11 @@ package app.lody.android.schedules
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.LaunchedEffect
+import app.lody.android.designsystem.LodyRadius
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -124,6 +129,7 @@ fun SchedulesList(
     }
     val list = state.list
     val failure = state.failure
+    var selectedGroup by remember(state) { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf<ScheduleItem?>(null) }
     val runStarted = stringResource(R.string.schedules_run_started)
     val untitled = stringResource(R.string.schedules_untitled)
@@ -160,12 +166,19 @@ fun SchedulesList(
             )
             else -> {
                 val needle = query.trim()
-                val shown = list.items.filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
-                    .sortedWith(compareBy<ScheduleItem> { it.state.group == "ended" }.thenByDescending { it.updatedAt })
+                val searched = list.items.filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
+                val counts = searched.groupingBy { it.state.group }.eachCount()
+                val activeGroup = selectedGroup?.takeIf { (counts[it] ?: 0) > 0 }
+                LaunchedEffect(activeGroup) { selectedGroup = activeGroup }
+                val shown = searched.filter { activeGroup == null || it.state.group == activeGroup }
+                    .sortedBy { scheduleGroupOrder.indexOf(it.state.group) }
                 val taskRows = shown.filterNot { it.scheduledMessage }
                 val messageRows = shown.filter { it.scheduledMessage }
                 if (shown.isEmpty()) Message(stringResource(R.string.schedules_search_empty, needle), bottom)
                 else LazyColumn(Modifier.fillMaxSize(), contentPadding = bottom) {
+                    item(key = "overview") {
+                        ScheduleOverview(counts, activeGroup) { selectedGroup = it.takeUnless { it == activeGroup } }
+                    }
                     if (failure != null) item(key = "failure") {
                         Text(
                             failures(failure),
@@ -254,26 +267,31 @@ private fun ScheduleRow(
     val attention = item.state.group == "attention"
     val status = statusText(item.state)
     val separator = stringResource(R.string.schedules_detail_separator)
-    val summary = listOfNotNull(ruleSummary(item.rule), item.agentName, item.machineName ?: item.machineId).joinToString(separator)
+    val summary = listOfNotNull(item.agentName, item.machineName ?: item.machineId, item.projectName).filter { it.isNotBlank() }.joinToString(separator)
     val actions = rowActions(item)
     Row(
-        Modifier.fillMaxWidth().heightIn(min = LodySize.listRow)
+        Modifier.fillMaxWidth().padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.xxs)
+            .clip(RoundedCornerShape(LodyRadius.lg)).background(colors.bgRaised).heightIn(min = LodySize.listRow)
             .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
             .padding(start = LodyLayout.screenPaddingX, top = LodySpacing.sm, bottom = LodySpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(LodySpacing.md),
     ) {
+        ScheduleMark(item)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(LodySpacing.xxs)) {
-            Text(
-                item.title.ifBlank { stringResource(R.string.schedules_untitled) }, style = type.body,
-                color = if (ended) colors.textTertiary else colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Text(summary, style = type.footnote, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.xs)) {
-                if (attention) Glyph(LodyIcons.Alert, colors.warningDefault, LodyIconSize.xs)
+            Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm), verticalAlignment = Alignment.Top) {
                 Text(
-                    listOfNotNull(status.label, status.detail).joinToString(separator), style = type.footnote,
-                    color = if (attention) colors.warningDefault else colors.textTertiary, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    item.title.ifBlank { stringResource(R.string.schedules_untitled) }, style = type.headline,
+                    color = if (ended) colors.textTertiary else colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                Text(status.label, style = type.footnote, color = if (attention) colors.warningDefault else colors.textSecondary,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = LodyLayout.trailingMetaMaxWidth))
+            }
+            Text(ruleSummary(item.rule), style = type.footnote, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(summary, style = type.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if ((attention || item.state.kind == "blocked") && !status.detail.isNullOrBlank()) {
+                Text(status.detail, style = type.caption, color = colors.warningDefault, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         Box {
