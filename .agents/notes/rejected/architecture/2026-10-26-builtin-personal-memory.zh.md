@@ -1,11 +1,16 @@
 # 内置个人记忆：独立包架构
 
-Status: proposed
+Status: rejected
 Translation: current
 
 [English](2026-10-26-builtin-personal-memory.md)
 
 ## 摘要
+
+2026-11-09 在发布前否决，由[基于 drive9 的设计](../../proposed/architecture/2026-11-09-lody-memory-drive9.zh.md)取代。
+以 Loro 为唯一权威，使记忆难以在 Lody 之外打开、索引和搜索，跨设备使用也被个人 E2EE 阻塞。
+所有者决定记忆不再要求 E2EE，改用托管文件服务。
+下文保留 Loro 搜索与 Doc 拆分的测量，用于防止在没有新证据时重新为记忆引入 CRDT 存储；它不再描述当前或计划中的代码。
 
 Lody 现有 Provider 只绑定外部身份，不存储个人 Role 知识。
 独立的 `@lody/memory` 包在单份个人 LoroDoc 上实现同步文档服务，宿主保留授权、持久化和传输所有权。
@@ -160,7 +165,7 @@ Linux x64、Intel Xeon 2.20 GHz。
 `loro-crdt@1.17.0/nodejs` 绝对路径：
 
 ```sh
-node .agents/notes/proposed/architecture/2026-10-26-builtin-personal-memory-bench.cjs /absolute/path/to/loro-crdt/nodejs
+node .agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory-bench.cjs /absolute/path/to/loro-crdt/nodejs
 ```
 
 脚本生成独立、启用 GC 的子进程，并清理合成快照临时目录。

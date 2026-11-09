@@ -113,48 +113,45 @@ Assigned memories show “Linked:” followed by the accessible bound Roles’ e
 Desktop hover/focus reveals the Role name; mobile tapping opens a name popover.
 Assignments match any of a Role's machine targets by machine, provider and memory ID, and update with the Role catalog.
 
-## Proposed built-in personal memory (Lody Memory)
+## Proposed built-in memory (Lody Memory)
 
 The machine-scoped association/environment behavior above continues to describe
-external providers such as Nowledge, now grouped as "Integrated providers". The
-proposed Lody Memory provider uses `@lody/memory` and sits above the machine tabs,
-because it belongs to the person rather than a machine. Within a workspace, a trusted
-user creates named memories; the name and description are the front matter of that
-memory's `MEMORY.md`. A Role links one memory by `{providerId: "lody", memoryId}`;
-several Roles may share it, and machines, models and Role names do not partition it.
-Only personal mode is supported initially; shared ownership is not an implicit
-fallback or conversion of personal data.
+external providers such as Nowledge, grouped as "Integrated providers". The proposed
+Lody Memory provider sits above the machine tabs because it belongs to a person or
+workspace, not a machine. A workspace member creates named memories; name and
+description are the front matter of that memory's `MEMORY.md`. A Role links one
+memory by `{providerId: "lody", memoryId}`; several Roles may share it.
 
-Loro is the sole authority. A memory uses root `meta` and `documents` Maps; `meta`
-holds format version and identity. Relative Markdown paths are document Map keys,
-with mergeable Map/Text containers for metadata, body and source records.
-Same-path concurrent creation addresses one document without a separate uniqueness
-index. Paths are identities: rename migrates visible content and sources to another
-path, not the old CRDT identity. A visible destination is not implicitly overwritten.
-`MEMORY.md` is the short entry; wiki links resolve within this memory. Descriptions
-improve navigation and ranking without excluding body-only matches.
-Deletion removes the parent key; reads/updates never reactivate missing paths.
-Explicit creation may reuse a deleted path and its retained history. No extra
-business tombstones are maintained.
+Each memory is a directory of Markdown files in the workspace's hosted
+[drive9](https://drive9.ai/) tenant, at `/memories/<memoryId>/`. Relative paths are
+document identity. A memory is **private** or **shared**, and the owner may change
+this after creation:
 
-Hosts authorize the current execution and pass a bound Doc; model inputs cannot
-choose another principal, Role or memory, and only a memory listed in the owner's
-catalog is opened. Existing renderer/CLI authorship and local
-durability remain host responsibilities. In-memory commit is not a save receipt.
-Production sync remains unavailable until the personal resource authorization and
-existing E2EE adapters protect the complete data boundary. No plaintext fallback
-or independent encryption scheme is permitted. Nowledge data is neither migrated
-nor altered by adding this provider.
+- **Private:** only the owner's daemon reads and writes it through the drive9 SDK,
+  for MCP tools, prompt injection and daemon RPC (Renderer, Web, mobile). It is
+  never mounted on disk.
+- **Shared:** every workspace member gets read-write access. Their daemons also
+  mount it at `~/Lody/Memory/<name>` for ordinary file tools. A mount is outside
+  Role authorization, which is why private memories are not mounted.
 
-The [package document service](../packages/memory/README.md), including CRUD,
-paged reading, search, provenance and startup-context assembly, is implemented;
-local Agent prompt injection, MCP tools, Settings management, the Role picker and
-separate SQLite/IndexedDB persistence are wired. The local data plane replicates Renderer
-edits to CLI without proxy authoring. Production cross-device sync remains disabled.
-Unlinking/Role deletion revokes later Agent access without destroying stored content;
-deleting a memory unlists it and removes its documents. Previously disclosed
-conversation context is not erased. Linking requires this device's daemon advertising
-`builtinMemory: 1`; until production sync exists, "not machine-bound" means
-unpartitioned by machine, not replicated between machines. Ordinary cache clearing retains personal
-memory; explicit full reset may delete the local replica. This proposed ownership
-and storage contract remains draft, not human-approved by test results.
+Switching shared → private revokes member access and unmounts on online devices;
+content members already read or cached cannot be recalled, and the UI says so first.
+
+Memory content is plaintext on the hosted service; no E2EE applies, and Lody Memory
+requires a connection. Credentials are short-lived tokens scoped to one memory's
+path, issued by a hosted service through an injected platform port and held only in
+daemon memory. Model inputs cannot choose another memory: tools receive only the
+turn-frozen binding's token. The OSS local-only desktop has no Lody Memory.
+
+Writes record provenance: Agent writes carry user, session and turn and use
+revision checks; writes through a mount are attributed to user and machine only,
+and concurrent mount writes are last-write-wins with the journal as recovery.
+Unlinking or deleting a Role revokes later Agent access without destroying
+content; deleting a memory removes its files. Previously disclosed conversation
+context is not erased. Linking requires a daemon advertising `builtinMemory: 2`.
+
+Rationale, alternatives, open questions and the verification required before
+implementation are in the [drive9 proposal](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.md).
+The current [package](../packages/memory/README.md) still implements the
+[rejected Loro design](../.agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory.md).
+This contract remains draft.

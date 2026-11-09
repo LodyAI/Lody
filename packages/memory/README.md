@@ -3,7 +3,10 @@
 Platform-neutral personal Role memory over one LoroDoc. The document core and local
 CLI/Renderer integration are implemented; production cross-device sync and personal
 E2EE authorization remain unavailable. The [memory Spec](../../specs/agent-role-memory.md)
-remains draft.
+remains draft. This Loro design is
+[rejected](../../.agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory.md);
+the [drive9 proposal](../../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.md)
+will replace it, so do not extend the Loro layout.
 
 ## Ownership and integration
 

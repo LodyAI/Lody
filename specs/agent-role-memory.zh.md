@@ -87,33 +87,30 @@ Provider 侧栏使用与 Agent Config 一致的平面选中列表行，只有一
 角色名称，移动端点击显示名称浮层。关联按 Role 任一机器配置的机器、Provider 和记忆 ID 精确匹配，并随
 角色目录更新。
 
-## 内置个人记忆提案（Lody Memory）
+## 内置记忆提案（Lody Memory）
 
-上面的机器作用域关联和环境映射继续描述 Nowledge 等外部 Provider，现归入“集成 Provider”。
-拟新增的 Lody Memory Provider 使用 `@lody/memory`，位于机器标签页之上，因为它属于个人而非机器。
-同一工作区内的可信用户创建具名记忆体，名称和描述写入该记忆体 `MEMORY.md` 的 front matter。
-Role 通过 `{providerId: "lody", memoryId}` 关联一个记忆体，多个 Role 可共用；
-机器、模型和 Role 名称不参与分区。
-首版仅支持个人模式，不把共享归属作为隐式回退，也不自动转换个人内容。
+上面的机器作用域关联和环境映射继续描述 Nowledge 等外部 Provider，归入“集成 Provider”。
+拟新增的 Lody Memory Provider 位于机器标签页之上，因为它属于个人或工作区，而非机器。
+工作区成员创建具名记忆体，名称和描述写入该记忆体 `MEMORY.md` 的 front matter。
+Role 通过 `{providerId: "lody", memoryId}` 关联一个记忆体，多个 Role 可共用。
 
-Loro 是唯一权威来源。记忆使用根级 `meta` 和 `documents` Map：`meta` 保存格式版本及身份；
-相对 Markdown 路径直接作为文档 Map 的 key，文档、正文及来源采用 mergeable Map/Text 容器。
-同路径并发创建对应同一文档，无需额外唯一性索引。路径就是身份：
-改名迁移可见内容与来源到新路径，不保留旧 CRDT 容器身份，也不隐式覆盖已存在的目标。
-`MEMORY.md` 是简短入口，Wiki 链接仅在本记忆中解析。
-描述改善导航和排序，但不排除仅正文命中的结果。
-删除移除父键；读取和编辑不恢复缺失路径，显式创建允许复用已删除路径及其保留历史。
-不维护额外业务墓碑。
+每个记忆体是工作区托管 [drive9](https://drive9.ai/) tenant 中 `/memories/<memoryId>/` 下的一组 Markdown 文件，
+相对路径即文档身份。记忆体分为**私有**或**共享**，所有者可在创建后修改：
 
-宿主授权当前执行并传入已绑定 Doc，模型输入不能选择其他个人主体、Role 或记忆，且只打开所有者目录中列出的记忆体。
-Renderer/CLI 保留现有写入所有权，本地持久化仍由宿主负责，内存 commit 不等于保存回执。
-个人资源授权和现有 E2EE 适配器保护完整数据边界前，生产同步保持不可用，
-不得回退到明文或另建密码方案。新增 Provider 不迁移或修改 Nowledge 数据。
+- **私有：** 只有所有者的 daemon 通过 drive9 SDK 读写，供 MCP 工具、提示注入及 daemon RPC（Renderer、Web、移动端）使用；从不挂载到磁盘。
+- **共享：** 所有工作区成员均可读写。成员的 daemon 还会把它挂载到 `~/Lody/Memory/<name>`，供普通文件工具使用。挂载不受 Role 授权约束，因此私有记忆不挂载。
 
-目前已实现[包内文档服务](../packages/memory/README.md)，包含增删改查、分页读取、搜索、来源及启动上下文组装；
-已接入本地 Agent 提示注入、MCP 工具、设置页管理、Role 选择器及独立 SQLite/IndexedDB 持久化。
-Renderer 自行编辑，通过现有本地数据通道传给 CLI，不使用代写 RPC；生产跨设备同步仍关闭。
-停用或删除 Role 会撤销后续 Agent 访问，但不销毁内容；删除记忆体会将其移出目录并移除其文档。
-不抹除已披露的对话上下文。关联要求本设备 daemon 声明 `builtinMemory: 1`；
-生产同步落地前，“不绑定机器”指不按机器分区，而非在机器间复制。普通清理缓存保留个人记忆，显式完整重置可删除本地副本。
-归属与存储合同继续保持 draft，测试结果不代表人工批准。
+共享改为私有时，撤销成员访问权并在在线设备上卸载；成员已读取或已缓存的内容无法收回，界面须事先说明。
+
+记忆内容在托管服务上为明文，不使用 E2EE，Lody Memory 需要联网。
+凭据是限定单个记忆体路径的短期 token，由托管服务经注入的 platform 端口签发，仅保存在 daemon 内存中。
+模型输入不能选择其他记忆体：工具只拿到 turn 冻结绑定所对应的 token。仅本地运行的 OSS 桌面版没有 Lody Memory。
+
+写入记录来源：Agent 写入带有用户、会话和 turn 并做版本检查；
+经挂载的写入只能归属到用户和机器，挂载并发写入后写者胜，可借助 journal 恢复。
+停用或删除 Role 会撤销后续 Agent 访问，但不销毁内容；删除记忆体会删除其文件。
+不抹除已披露的对话上下文。关联要求 daemon 声明 `builtinMemory: 2`。
+
+设计理由、备选方案、未决问题和实施前须完成的验证见 [drive9 提案](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-drive9.zh.md)。
+当前[包实现](../packages/memory/README.md)仍是[已否决的 Loro 设计](../.agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory.zh.md)。
+本合同继续保持 draft。

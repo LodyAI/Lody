@@ -1,11 +1,20 @@
 # Built-in personal memory: independent package architecture
 
-Status: proposed
+Status: rejected
 Translation: current
 
 [中文](2026-10-26-builtin-personal-memory.zh.md)
 
 ## Abstract
+
+Rejected on 2026-11-09 before release, superseded by the
+[drive9-backed design](../../proposed/architecture/2026-11-09-lody-memory-drive9.md).
+Loro as sole authority made memories hard to open, index and search outside
+Lody, and blocked cross-device use behind personal E2EE. The owner dropped E2EE
+for memory and chose a hosted file service instead. The body below is kept for
+its Loro search and Doc-partitioning measurements, which guard against
+reintroducing a CRDT store for memory without new evidence; it no longer
+describes current or planned code.
 
 Lody's existing provider binds external identities without storing personal Role
 knowledge. The independent `@lody/memory` package implements a synchronous document
@@ -205,7 +214,7 @@ Reproduce with the [benchmark script](2026-10-26-builtin-personal-memory-bench.c
 passing an absolute path to an unpacked `loro-crdt@1.17.0/nodejs` directory:
 
 ```sh
-node .agents/notes/proposed/architecture/2026-10-26-builtin-personal-memory-bench.cjs /absolute/path/to/loro-crdt/nodejs
+node .agents/notes/rejected/architecture/2026-10-26-builtin-personal-memory-bench.cjs /absolute/path/to/loro-crdt/nodejs
 ```
 
 The script spawns GC-enabled isolated children and removes its synthetic temporary
