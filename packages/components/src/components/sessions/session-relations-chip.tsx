@@ -26,6 +26,7 @@ import {
   type SessionRelationTreeNode,
 } from '@/lib/session-relation-tree';
 import { cn } from '@/lib/utils';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
 
@@ -47,7 +48,7 @@ const styles = stylex.create({
   tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
   scroll: { minWidth: 0, width: '100%' },
   hiddenTrack: { display: 'none' },
-  row: { display: 'flex', gap: space[1], width: 'max-content', padding: space[0.5] },
+  row: { display: 'flex', gap: space[1], width: 'max-content', padding: `calc(${space[1]} / 2)` },
   pill: { flex: '0 0 auto', maxWidth: '24ch' },
   title: { maxWidth: '16ch' },
   current: { backgroundColor: colors.selectedFill },
@@ -284,12 +285,12 @@ function RelationTreeRow({
       );
     };
     update();
-    const observer = new ResizeObserver(update);
-    observer.observe(viewport);
-    observer.observe(content);
+    const stopViewportResize = observeResizeOnAnimationFrame(viewport, update);
+    const stopContentResize = observeResizeOnAnimationFrame(content, update);
     viewport.addEventListener('scroll', update, { passive: true });
     return () => {
-      observer.disconnect();
+      stopViewportResize();
+      stopContentResize();
       viewport.removeEventListener('scroll', update);
     };
   }, []);
