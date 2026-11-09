@@ -28,21 +28,25 @@ All DTO scopes, signed bodies, resources, local journals, cache keys and policy 
 
 ## Format and responsibilities
 
-Canonical bounded CBOR is current-only v2:
+Canonical bounded CBOR is current-only v3:
 
 ```text
-[format=2, purpose=1, workspaceIdUtf8, genesis32, machineIdUtf8,
+[format=3, purpose=1, workspaceIdUtf8, genesis32, machineIdUtf8,
  ownerMembership16, revision, previousFrameDigest32OrNull, sharedWithTeam,
- sortedProjectIdUtf8s, signer32, issuedAt, requestId16, generation32]
+ sortedProjectIdUtf8s, signer32, issuedAt, requestId16, generation32, sortedSessionGrants[[sessionIdUtf8, read=1]]]
 ```
 
 Identity strings are strict UTF-8, 1..256 bytes, with no normalization/BOM stripping. Projects are a duplicate-free bytewise sorted set, at most 4096; expanded body is at most 256 KiB. Public keys retain strict Ed25519 validation. issuedAt is a nonnegative safe Unix-millisecond integer, descriptive only. Revision is a positive safe integer; only revision one has a null parent. Public DTO hex is lowercase.
 
-Existing content-v0 document-update crypto fixes resource `machine-access:<unpadded-base64url(machineIdUtf8)>:<ownerMembershipIdHex>:<generationHex>`, docEpoch zero and signature/AAD binding `lody-e2ee/machine-sharing/v2\0`. Hash the complete original encrypted frame with SHA-256, not decoded state; the frame maximum remains 262287 bytes. Retain originals for uncertain retries, never re-encrypt or automatically rebase them. No v1 policy reader, fallback or silent conversion exists.
+Existing content-v0 document-update crypto fixes resource `machine-access:<unpadded-base64url(machineIdUtf8)>:<ownerMembershipIdHex>:<generationHex>`, docEpoch zero and signature/AAD binding `lody-e2ee/machine-sharing/v3\0`. Hash the complete original encrypted frame with SHA-256, not decoded state; the frame maximum remains 262287 bytes. Retain originals for uncertain retries, never re-encrypt or automatically rebase them. No v1 policy reader, fallback or silent conversion exists.
 
 The backend uses credential-derived identity, current ledger-qualified generation and `admitMachineSharingFrame`. In the same atomic mutation it rechecks current personal/member/machine eligibility and generation, compares full scope/status/revision/digest, deduplicates request intent and inserts original plus head. An old-generation pending request conflicts even if its revision/digest equals a fresh resource's values. Exact committed retries return their receipt, or removed after purge; changed intent under a requestId fails. Minimal request intent receipts and removal cutoff survive cleanup. Cleanup is bound to the old generation and cannot delete new-generation commits. Purged version reads may return null; readHead retains the old removed high water, never promoting it to a trusted pin.
 
-`readMachineSharingHistoryStep` returns authenticated same-generation full state from a historically admitted owner-personal device, including after signer revocation. It creates no execution credential and proves neither publication time nor then-current permission. Only fresh explicit owner intent may preserve that state at n+1 within the same generation through the currently valid personal signer. Machine/recovery signatures fail as recovery input. `openMachineSharingPolicy` and `authorizeMachineExecution` still require current owner-personal authority; Guest/recovery never execute and all-team includes future qualified members. History readers do not skip missing history within a live generation.
+The owner confirmed on 2026-11-09 that E2EE has no production data: only v3 is supported, without older-format reading, migration or reset scripts. Each read and pre-write verifies only the latest original, its current active owner-personal signature, resource/binding/generation and local high-water pin. Lower revisions and differing digests at equal revisions fail. Cold clients can accept any positive revision and skip purged intermediate policies. `previousDigest` remains server CAS ordering, not client chain evidence. The machine-generation admission chain is still ledger-verified and is separate from policy history.
+
+Independent `sessions: [{sessionId, level: 'read'}]` grants do not enable the machine or any project. Identities are bounded and canonical like project IDs. Older clients reject v3 and v3 rejects older policies. Deploy compatible server admission before clients; no ledger format changes.
+
+Issuer revocation invalidates every grant in that policy. The view exposes private defaults and `needsResign`; a current owner-personal device can publish explicit new intent under the current head CAS. This starts with empty project/session grants instead of copying revoked state. It supersedes historical-body recovery and project preservation on re-sign. A locally retained ineligible issuer yields only a denial; no historical policy API remains.
 
 ## Integration and trust limits
 
@@ -70,7 +74,7 @@ refresh, concurrent refusal, cooldown expiry and failed-read denial retention.
 
 ## Verification
 
-[Behavioral coverage](../../../../packages/e2ee-core/test/machine-sharing.test.ts) uses deterministic synthetic identities/nonces and explicit signing barriers. It covers same-member removal/readmission, old prepared writes and cached execution evidence, fresh revision-one bootstrap without old policy bytes, private defaults, explicit re-sharing, atomic replacement continuity, ledger-position/proof substitution, compact-view qualification, owner-personal historical body recovery and full-project preservation on re-sign. Existing ledger/crypto vectors remain unchanged. No deployed CAS, real-machine freshness or two-member product acceptance is claimed.
+[Behavioral coverage](../../../../packages/e2ee-core/test/machine-sharing.test.ts) uses deterministic synthetic identities/nonces and explicit signing barriers. It covers same-member removal/readmission, old prepared writes and cached execution evidence, fresh revision-one bootstrap without old policy bytes, private defaults, explicit re-sharing, atomic replacement continuity, ledger-position/proof substitution, compact-view qualification, latest-only cold reads across purged revisions and private-default re-sign after revocation. Existing ledger/crypto vectors remain unchanged. No deployed CAS, real-machine freshness or two-member product acceptance is claimed.
 
 ## Native host ownership
 
@@ -80,7 +84,7 @@ Policy storage opens only for policy-dependent work; corruption cannot block con
 
 The workspace Scope owns admitted operations, including writes whose callers stop waiting, and joins them before closing storage. Stop fences publication and preserves pending originals. Latest-read failure clears only dependent policy grants; failed storage opens remain retryable. Wall and monotonic clocks charge all latest-read I/O to the strictly shorter than 15-minute budget. The existing actual-start journal checks a synchronous policy/ledger-generation fence without an intervening await. Withdrawal leaves already-started tasks running.
 
-Explicit re-signing uses authenticated historical complete state after issuer revocation, preserving projects with another current personal device. Historical state never supplies execution evidence or advances an accepted pin alone. A read traverses at most 4096 consecutive versions within its freshness interval; purged gaps without retained originals remain unavailable. Signatures cannot reveal withdrawals never delivered by the service.
+Latest-only reads remove the former 4096-policy traversal and dependence on purged originals. Active signatures and local pins still protect authority, known rollback and forks, but cannot reveal a newer head withheld by the service.
 
 Desktop personal signing stays behind `readMachineSharing` / `updateMachineSharing` host and IPC methods, forwarded by the real preload policy and CloudPlatformProvider. CLI machine custody consumes policies and exposes the same workflow but cannot sign owner changes; writing with that identity returns an ownership refusal. Delegated dispatch retains the two-actor permission intersection; display account IDs never become signed delegation evidence.
 
@@ -92,9 +96,8 @@ The encrypted machine settings surface renders native `canManage`, verified sign
 revision and re-sign status. Account/machine/generation fences discard stale UI
 results. Ordinary workspaces never open these policy ports. Current owners alone
 can change machine/project switches; other members see read-only policy and a
-friendly refusal. Revoked signer state remains historical display/re-sign input,
-not execution evidence. Re-signing first refreshes complete state and keeps every
-project, including projects absent from the current inventory.
+friendly refusal. Revoked state grants nothing. Re-signing starts with private defaults and
+explicit new choices signed by a currently active owner device.
 
 An uncertain write retains its exact generation, requestId and narrow change;
 refresh or window remount discovers the native durable pending intent. Explicit
@@ -132,34 +135,11 @@ on another member's machine. `withoutEncryptedSharedMachines` also keeps them ou
 automatic agent-config migration, bug-report log collection and memory-provider
 settings, which use fenced machine RPC or write a machine's catalog.
 
-The owner-confirmed MVP lets new members read all workspace history. Session and
-archive lists therefore use the account/workspace-bound encrypted runtime's document
-access independently of the usable-machine/project indexes. Hiding a private machine
-must not hide its encrypted conversations. Adding those machine IDs to the usable index
-was rejected: it would also enable selection and automatic machine reads. An unavailable
-target instead mounts a document-only history reader, without the interactive subtree's
-machine catalogs, probes or RPC. Attachments keep their existing document capabilities;
-Markdown copy keeps the explicit, source-bound decrypted-copy confirmation. Ordinary
-workspace filtering is unchanged. The receiving machine still authorizes every execution.
-The document reader opens workspace-synced Loro history only; machine-owned formats
-remain explicitly unavailable without starting their RPC reader. An empty cold replica
-is not ready until its first remote sync completes.
-Hook and store tests use deterministic fixtures and deferred reads; no two-member product
-run is claimed.
+On 2026-11-09 the owner superseded the former A4 all-history visibility decision and the header audience-strip rule in the 2026-09-14 session-header-share-control note. Both workspace modes now default to private. Machine owners always see and manage their machine's conversations; usable shared machines and local projects retain editing; independent authoritative session grants expose only read-only history. Session author (`SessionMeta.userId`) grants no management authority. A grant applies only on its bound machine, and contained children follow their root; opened-by provenance grants nothing.
 
+The common platform `sessionAccess` port uses ordinary owner-controlled machine rows or E2EE v3 signed session grants. Convex subscriptions invalidate ordinary views; E2EE subscribes to machine/generation/revision hints and reloads verified policy. Deep links force a machine policy read. None of these grants expands machine execution indexes. Private history is hidden by the interface only: workspace members still hold content keys, so this is not cryptographic privacy.
 
-The new history-read permission does not grant rename, archive, restore or deletion; existing author management is unchanged. Automatic archive Machine Flock readers remain limited to available machines and projects, never inferred from newly visible history.
-
-Management admission belongs to `useSessionActions`, not list callbacks. The shared
-guard re-reads each affected session from Repo and uses the pre-history visibility
-predicate (author fallback or usable machine/project), never `historyOnlySessionIds`
-as authorization. It fences account/runtime changes across reads. Tree archive,
-restore, collaboration changes and deletion preflight their entire discovered target
-set before cancellation, catalog cleanup or writes, then recheck at each write.
-Newly readable history cannot rename, pin, change owner/project or close tabs via a
-retained callback. Activity receipts also preflight their affected parent. Ordinary
-management behavior is unchanged; signed-policy visibility retains its existing
-refresh contract. Purely local sidebar drag ordering never writes session metadata.
+The independent history reader has no composer, execution controls or management writes. It retains pin/unread, Markdown copy and a reference in a new conversation. `useSessionActions` re-reads actual Repo targets and current authority for management; retained callbacks cannot bypass revocation or metadata machine changes. Pin/unread use a narrow preference path. Machine-owned history still needs a separately authorized reader; no machine execution permission can be inferred from a session grant. The draft [session access Spec](../../../../specs/session-access.md) records the full contract and later phases. Deterministic suites are implementation evidence, not a two-member product acceptance run.
 
 ## Sender withdrawal gate
 
@@ -172,10 +152,8 @@ check runs before the write, not as a repair afterwards.
 A verified withdrawal must stay known. The host derives it from the resource's
 accepted pin, which is bound to workspace, genesis, machine, owner and generation, and
 advances only on a newer verified head. A failed, rolled-back or expired refresh never
-rewrites that pin. `knownDenial` re-opens the pinned policy locally. A denial needs only
-historical authority: its owner-personal issuer had to be admitted when it signed.
-Revoking that device later invalidates grants, which then need re-signing, but never a
-retained denial. `authorize`
+rewrites that pin. `knownDenial` re-opens the pinned policy locally. A denial uses the pinned current policy. An issuer that is now ineligible
+also yields denial, without restoring historical grants. `authorize`
 returns that denial instead of an unknown failure, and the desktop prepare checks it
 before any network read. Only a newer verified read, such as the visible-index refresh
 or the settings view, releases it. The renderer also remembers each verified

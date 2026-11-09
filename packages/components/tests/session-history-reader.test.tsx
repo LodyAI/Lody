@@ -1,3 +1,5 @@
+import { chatLandingSessionStateAtomFamily } from '../src/atoms/local-storage-cache';
+import { buildChatLandingDraftKey } from '../src/atoms/chat-landing-draft';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -207,7 +209,7 @@ async function selectCopy() {
 it('reads history without a composer or machine operation and requires explicit consent for copying', async () => {
   await render();
   expect(container.textContent).toContain('Prior conversation');
-  expect(container.querySelector('[role="status"]')?.textContent).toContain('Read-only history');
+  expect(container.querySelector('[role="status"]')?.textContent).toContain('Read-only · Runs on');
   expect(container.querySelector('textarea, input, [contenteditable="true"]')).toBeNull();
   expect(
     container
@@ -306,3 +308,50 @@ it('never opens a machine-owned history backend on an unavailable target', async
   expect(machineOperations).toBe(0);
   expect(writes).toEqual([]);
 });
+
+it.each([false, true])(
+  'references a read-shared session while preserving the draft; machine moved=%s',
+  async (moved) => {
+    const runtime = store.get(runtimeAtom)!;
+    let machineId = 'unshared-owner-machine';
+    const grant = { machineId, canManage: false, readSharedSessionIds: [sessionId] };
+    const meta = store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)];
+    Object.assign(runtime, {
+      repo: { getDocMeta: async () => ({ meta: { ...meta, machineId } }) },
+    });
+    platform.sessionAccess = {
+      list: async () => [grant],
+      read: async () => {
+        if (moved) machineId = 'different-machine';
+        return grant;
+      },
+      set: async () => {
+        throw new Error('not-owner');
+      },
+      subscribe: () => () => {},
+    };
+    const draftAtom = chatLandingSessionStateAtomFamily(
+      buildChatLandingDraftKey('member', 'encrypted-team')
+    );
+    store.set(draftAtom, { ...store.get(draftAtom), prompt: 'Keep my draft', mentionRanges: [] });
+    try {
+      await render();
+      await act(async () =>
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === 'Reference in a new session')!
+          .click()
+      );
+      const draft = store.get(draftAtom);
+      if (moved) expect(draft.prompt).toBe('Keep my draft');
+      else {
+        expect(draft.prompt).toMatch(/^Keep my draft @/);
+        expect(draft.mentionRanges).toEqual([
+          expect.objectContaining({ value: sessionId, kind: 'session' }),
+        ]);
+      }
+      expect(machineOperations).toBe(0);
+    } finally {
+      delete platform.sessionAccess;
+    }
+  }
+);

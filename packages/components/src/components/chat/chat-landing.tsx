@@ -734,14 +734,18 @@ function WorkspaceChatLanding({
     isLoading: visibleLocalProjectsLoading,
   } = visibleLocalProjects;
   const getProjectShareErrorMessage = useConvexErrorMessage();
-  const { sessions: visibleActiveSessions, allActiveSessions: visibleAllActiveSessions } =
-    useVisibleSessionMetas();
+  const {
+    sessions: visibleActiveSessions,
+    allActiveSessions: visibleAllActiveSessions,
+    historyOnlySessionIds: activeReadOnlyIds,
+  } = useVisibleSessionMetas();
   useReportVisibleSessionsForEagerSync(
     'chat-landing',
     visibleActiveSessions,
     visibleAllActiveSessions
   );
-  const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
+  const { archivedSessions: visibleArchivedSessions, historyOnlySessionIds: archivedReadOnlyIds } =
+    useVisibleArchivedSessionMetas();
   const showProjectSharing =
     legacyQueriesEnabled &&
     shouldShowSessionSharing({
@@ -5054,6 +5058,7 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
              merged: the precise opener drives navigation, the row id drives
@@ -5116,6 +5121,8 @@ function WorkspaceChatLanding({
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileHomeShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     showProjectSharing,
     t,
@@ -5976,6 +5983,7 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
              id for nesting. An opener outside this project simply leaves the
@@ -6005,6 +6013,8 @@ function WorkspaceChatLanding({
     liveSessionStatuses,
     mobileProjectContext,
     mobileProjectShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     t,
     teamMembersByUserId,

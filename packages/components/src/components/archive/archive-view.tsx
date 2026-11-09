@@ -1717,8 +1717,7 @@ export function ArchiveView() {
   } = useVisibleArchivedSessionMetas();
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
-      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
-        return false;
+      if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
       toast.info(t('sessions.historyMachineUnavailable'));
       return true;
     },
@@ -1875,7 +1874,7 @@ export function ArchiveView() {
 
   const canRestoreArchivedSession = useCallback(
     (session: SessionMeta): boolean => {
-      if (workspaceHistoryReadable && historyOnlySessionIds.has(session.id)) return false;
+      if (historyOnlySessionIds.has(session.id)) return false;
       const project = session.project;
       if (project?.kind !== 'local') return true;
       const key = `local:${session.machineId}:${project.localProjectId}`;

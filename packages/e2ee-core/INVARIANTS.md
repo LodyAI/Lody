@@ -44,8 +44,8 @@
   authority. Keep application body codecs, target binding and send/rotation gates
   in the authorized integration; never expand `sealDocument` for these purposes.
 - Machine-sharing policies remain independent of ledger records. Execution requires
-  the current machine owner's active personal-device policy signature; historical
-  chain verification grants no execution authority. Generation evidence must qualify
+  the current machine owner's active personal-device policy signature; only the latest v3 original is verified. Local high-water pins reject rollback and
+  same-revision forks; parent digests order server CAS writes, not client history proofs. Generation evidence must qualify
   the current machine through ledger-included initial/replacement admissions; removal
   starts a new signed resource, while atomic replacement preserves its root.
   Hosts own latest-head freshness,

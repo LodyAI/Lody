@@ -42,6 +42,8 @@ mobile surfaces. Background for the rules below:
   sharing view (`useEncryptedSharedMachines`), never server machine tables. Keep them out
   of Convex-authorized probes; automatic writers and machine-RPC surfaces use
   `withoutEncryptedSharedMachines`. [Decision](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
+- Session read grants never expand execution indexes. Both modes default to
+  private; E2EE hides only the interface, retaining content keys.
 - A descriptor marked `public` can run before authentication and must expose only an
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use

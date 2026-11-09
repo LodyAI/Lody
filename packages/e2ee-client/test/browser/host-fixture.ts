@@ -1350,7 +1350,11 @@ export async function bootRuntime(withSharing = false) {
                               .credentialHash
                         )
                           return yield* Effect.fail(new Error('wrong sharing assembly binding'));
-                        let state = { sharedWithTeam: false, projects: [] as readonly string[] };
+                        let state: import('@lody/e2ee-core/protocol').MachineSharingState = {
+                          sharedWithTeam: false,
+                          projects: [],
+                          sessions: [],
+                        };
                         const read = Effect.fnUntraced(function* (machineId: string) {
                           const policyLedger = yield* ledger.current(),
                             machines = [...policyLedger.inspectState().devices].filter(

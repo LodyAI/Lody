@@ -438,6 +438,16 @@ export type SeatInvitePreview =
 
 export type CloudApi = {
   e2eeMachineSharing: {
+    /** Untrusted invalidation hints, never policy authority or content. */
+    listVersions: Query<
+      { workspaceId: string },
+      Array<{
+        machineId: string;
+        generation: string;
+        revision: number;
+      }>
+    >;
+
     readHead: Action<E2eeMachineSharingRequests['readHead'], E2eeMachineSharingReplies['readHead']>;
     readVersion: Action<
       E2eeMachineSharingRequests['readVersion'],
@@ -970,6 +980,25 @@ export type CloudApi = {
     getRequest: Query<{ requestId: string }, MachinePairingView | null>;
   };
   machines: {
+    /** Account-member directory of grants only; this never grants machine execution. */
+    listSessionAccess: Query<
+      { workspaceId: string },
+      Array<{
+        machineId: string;
+        readSharedSessionIds: string[];
+        canManage: boolean;
+      }>
+    >;
+    setSessionReadSharedWithTeam: Mutation<
+      {
+        workspaceId: string;
+        machineId: string;
+        sessionId: string;
+        sharedWithTeam: boolean;
+      },
+      { success: true }
+    >;
+
     listVisibleMachines: Query<
       { workspaceId: string },
       Array<{

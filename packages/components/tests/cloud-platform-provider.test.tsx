@@ -1,3 +1,5 @@
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { createCloudSessionAccess } from '@/providers/cloud-session-access';
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
@@ -64,7 +66,11 @@ vi.mock('@/atoms', async () => {
     currentWorkspaceSlugAtom: atom(null),
   };
 });
-vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
+vi.mock('@/atoms/runtime', async () => {
+  const { atom } = await import('jotai');
+  const runtime = atom(null);
+  return { activeWorkspaceRuntimeAtom: runtime, runtimeAtom: runtime };
+});
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
 vi.mock('@/lib/electron-ipc-client', async (importOriginal) => {
@@ -218,6 +224,54 @@ describe('CloudPlatformProvider', () => {
     ).toEqual(binding);
   });
 
+  it('admits ordinary session access only after the shared live mode verdict, and fences account switches', async () => {
+    refetch('A');
+    const atoms = getDefaultStore();
+    const previous = {
+      runtime: atoms.get(runtimeAtom),
+      mode: atoms.get(workspaceContentModeAtom),
+      user: atoms.get(userAtom),
+      workspace: atoms.get(currentWorkspaceIdAtom),
+      slug: atoms.get(currentWorkspaceSlugAtom),
+    };
+    const rows = [{ machineId: 'private', canManage: true, readSharedSessionIds: ['root'] }];
+    fixture.cloudClient.query = async () => rows;
+    try {
+      atoms.set(userAtom, { id: 'user-a' } as never);
+      atoms.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+      atoms.set(currentWorkspaceSlugAtom, 'a');
+      atoms.set(runtimeAtom, {
+        workspaceId: 'workspace-a',
+        workspaceSlug: 'a',
+        accountId: 'user-a',
+        contentMode: 'plaintext',
+      } as WorkspaceRuntime);
+      atoms.set(workspaceContentModeAtom, null);
+      await render();
+      const access = seen.at(-1)!.sessionAccess!;
+      await expect(access.list('workspace-a')).rejects.toMatchObject({
+        code: 'legacy_workspace_admission_pending',
+      });
+      atoms.set(workspaceContentModeAtom, {
+        accountId: 'user-a',
+        workspaceId: 'workspace-a',
+        workspaceSlug: 'a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      });
+      await expect(access.list('workspace-a')).resolves.toEqual(rows);
+      atoms.set(userAtom, { id: 'different-account' } as never);
+      await expect(access.read('workspace-a', 'private')).rejects.toThrow(
+        'session_access_scope_changed'
+      );
+    } finally {
+      atoms.set(runtimeAtom, previous.runtime);
+      atoms.set(workspaceContentModeAtom, previous.mode);
+      atoms.set(userAtom, previous.user);
+      atoms.set(currentWorkspaceIdAtom, previous.workspace);
+      atoms.set(currentWorkspaceSlugAtom, previous.slug);
+    }
+  });
+
   it('keeps cloud mode control available when the injected factory reports no runtime', async () => {
     refetch('A');
     fixture.cloudClient.query = async () => ({
@@ -357,6 +411,7 @@ describe('CloudPlatformProvider', () => {
     head: { revision: 1, digest: '33'.repeat(32) },
     sharedWithTeam: false,
     projects: [],
+    sessions: [],
     signer: '44'.repeat(32),
     canManage: true,
     needsResign: false,
@@ -968,4 +1023,76 @@ describe('cloud E2EE display directory ownership', () => {
       'e2ee_account_unavailable'
     );
   });
+});
+
+describe('authoritative session access cloud port', () => {
+  it('updates ordinary owner grants without changing machine sharing and rejects nonowners', async () => {
+    let canManage = true;
+    let shared = false;
+    const port = createCloudSessionAccess({
+      assertScope: () => ({ encrypted: false, accountId: 'owner', token }),
+      client: {
+        query: async () =>
+          [
+            { machineId: 'private', canManage, readSharedSessionIds: shared ? ['root'] : [] },
+          ] as never,
+        mutation: async (_operation, args) => {
+          shared = (args as { sharedWithTeam: boolean }).sharedWithTeam;
+          return { success: true } as never;
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const intent = {
+      workspaceId: 'workspace',
+      machineId: 'private',
+      sessionId: 'root',
+      level: 'read' as const,
+      requestId: 'request',
+    };
+    await port.set(intent);
+    expect(await port.read('workspace', 'private')).toEqual({
+      machineId: 'private',
+      canManage: true,
+      readSharedSessionIds: ['root'],
+    });
+    canManage = false;
+    await expect(port.set({ ...intent, level: null })).rejects.toThrow('session_access_not_owned');
+    expect((await port.list('workspace'))[0].readSharedSessionIds).toEqual(['root']);
+    canManage = true;
+    await port.set({ ...intent, level: null });
+    expect((await port.read('workspace', 'private')).readSharedSessionIds).toEqual([]);
+  });
+
+  it('treats E2EE versions only as hints and fences a changed account during policy reads', async () => {
+    let current = token;
+    let complete!: (value: import('@lody/platform').E2eeMachineSharingView) => void;
+    const runtime = {
+      readMachineSharing: () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const port = createCloudSessionAccess({
+      runtime,
+      assertScope: () => ({ encrypted: true, accountId: 'owner', token: current }),
+      client: {
+        query: async () =>
+          [{ machineId: 'private', generation: 'generation', revision: 42 }] as never,
+        mutation: async () => {
+          throw new Error('ordinary writes forbidden');
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const read = port.read('workspace', 'private');
+    current = {};
+    complete({
+      machineId: 'private',
+      sessions: [{ sessionId: 'root', level: 'read' }],
+      canManage: false,
+    } as import('@lody/platform').E2eeMachineSharingView);
+    await expect(read).rejects.toThrow('session_access_scope_changed');
+  });
+  const token = {};
 });

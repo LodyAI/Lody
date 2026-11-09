@@ -1,21 +1,17 @@
-import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
-import { useWorkspaceFeature } from './use-workspace-feature';
-import { useCallback } from 'react';
-import { useAtomValue } from 'jotai';
-import { cloudOperations } from '@/lib/cloud-api-operations';
+import { useCallback, useRef } from 'react';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
-import { userAtom } from '@/atoms';
-import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
-import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
+import { useVisibleLocalProjects } from './use-visible-local-projects';
+import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import {
   getSessionSharingProjectKey,
   resolveSessionSharingState,
-  shouldShowSessionSharing,
   type SessionSharingState,
 } from '@/lib/session-sharing';
-import { useAuthClient } from '../providers/convex-provider';
 import { useAppCapability } from '@/lib/app-platform';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
+import { useOpenSettings } from './use-open-settings';
+import { useSessionAccess } from './use-session-access';
 
 type UseSessionSharingOptions = {
   includeLocalProjectDetails?: boolean;
@@ -23,65 +19,61 @@ type UseSessionSharingOptions = {
   enabled?: boolean;
 };
 
-/**
- * Team sharing is a cloud surface. On the local (open-source) platform there is
- * no team and no Better Auth backend, so return `null` without ever invoking
- * the Better Auth hook — `shouldShowSessionSharing` then hides every sharing
- * affordance. Capabilities are immutable for a mounted PlatformProvider, so
- * hook order stays stable across renders.
- */
-function useSessionSharingActiveOrganization(teamSharingAvailable: boolean) {
-  if (!teamSharingAvailable) {
-    return null;
-  }
-  // oxlint-disable-next-line rules-of-hooks
-  const authClient = useAuthClient();
-  // oxlint-disable-next-line rules-of-hooks
-  const { data } = authClient.useActiveOrganization();
-  return data ?? null;
-}
-
+/** Team read grants use the same owner-only port in ordinary and encrypted workspaces. */
 export function useSessionSharing(options: UseSessionSharingOptions = {}) {
-  const sharingAllowed = useWorkspaceFeature('sharing');
-  const teamSharingAvailable = useAppCapability('teamSharing');
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+  const { openSettings } = useOpenSettings();
+  const currentUserId = useWorkspaceLocalAccountId();
   const scope = useResolvedWorkspaceScope(options);
-  const workspaceId = scope.workspaceId;
-  const enabled = scope.enabled;
-  const activeOrganization = useSessionSharingActiveOrganization(teamSharingAvailable);
-  const machineIndex = useVisibleMachineMetas({
-    includeMachineFlock: false,
-    workspaceId,
-    enabled,
-  });
+  const teamSharingAvailable = useAppCapability('teamSharing');
+  const access = useSessionAccess(scope);
+  const machineIndex = useVisibleMachineMetas({ includeMachineFlock: false, ...scope });
   const projectIndex = useVisibleLocalProjects({
     includeMemberOnly: true,
     includeMachineFlock: options.includeLocalProjectDetails ?? false,
     syncMachineFlock: false,
-    workspaceId,
-    enabled,
+    ...scope,
   });
   const { machines, accessByMachineId, isLoading: machineVisibilityLoading } = machineIndex;
   const { projects, accessByProjectKey, isLoading: localProjectVisibilityLoading } = projectIndex;
-  const setMachineSharedWithTeam = useLegacyWorkspaceMutation(
-    cloudOperations.machines.setMachineSharedWithTeam
+  const isLoading = machineVisibilityLoading || localProjectVisibilityLoading || access.loading;
+  const pending = useRef(new Map<string, { requestId: string; level: 'read' | null }>());
+  const setReadAccess = useCallback(
+    async (machineId: string, sessionId: string, level: 'read' | null) => {
+      if (!access.port || !access.workspaceId || !access.enabled)
+        throw new Error('session_access_unavailable');
+      const latest = await access.port.read(access.workspaceId, machineId);
+      if (!latest.canManage) throw new Error('session_access_not_owned');
+      const key = JSON.stringify([
+        currentUserId,
+        access.workspaceId,
+        machineId,
+        latest.generation,
+        sessionId,
+      ]);
+      const retained = pending.current.get(key);
+      const interrupted = latest.pendingRequest;
+      if (
+        (retained && retained.level !== level) ||
+        (interrupted && (interrupted.sessionId !== sessionId || interrupted.level !== level))
+      )
+        throw new Error('sharing_conflict');
+      const requestId =
+        interrupted?.requestId ?? retained?.requestId ?? crypto.randomUUID().replaceAll('-', '');
+      pending.current.set(key, { requestId, level });
+      const result = await access.port.set({
+        workspaceId: access.workspaceId,
+        machineId,
+        sessionId,
+        level,
+        generation: latest.generation,
+        requestId,
+      });
+      if (result.status !== 'pending') pending.current.delete(key);
+      await access.store?.refresh();
+      if (result.status !== 'saved') throw new Error(`sharing_${result.status}`);
+    },
+    [access.port, access.workspaceId, access.enabled, access.store, currentUserId]
   );
-  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
-    cloudOperations.localProjects.setLocalProjectSharedWithTeam
-  );
-  const isLoading = machineVisibilityLoading || localProjectVisibilityLoading;
-  const showSessionSharing =
-    enabled &&
-    sharingAllowed &&
-    teamSharingAvailable &&
-    shouldShowSessionSharing({
-      workspaceId,
-      activeWorkspaceId: activeOrganization?.id ?? null,
-      memberCount: Array.isArray(activeOrganization?.members)
-        ? activeOrganization.members.length
-        : null,
-    });
-
   const resolve = useCallback(
     (session: SessionMeta): SessionSharingState => {
       const machine = machines.get(session.machineId);
@@ -90,8 +82,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
       const project = localProjectId
         ? projects.get(getSessionSharingProjectKey(session.machineId, localProjectId))?.project
         : null;
-
-      return resolveSessionSharingState({
+      const base = resolveSessionSharingState({
         session,
         currentUserId,
         machineAccessByMachineId: accessByMachineId,
@@ -100,48 +91,37 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         projectName: project?.name,
         isLoading,
       });
+      const grant = access.views.get(session.machineId);
+      const rootId = session.parentSessionId ?? session.id;
+      const readShared =
+        grant?.machineId === session.machineId && grant.readSharedSessionIds.includes(rootId);
+      const effective = base.visibility === 'team' ? 'edit' : readShared ? 'read' : 'private';
+      return {
+        ...base,
+        access: effective,
+        sessionId: rootId,
+        openMachineSettings: () => openSettings('machines', { machineId: session.machineId }),
+        visibility: effective === 'private' ? base.visibility : 'team',
+        canManage: grant?.canManage ?? base.canManage,
+        setReadAccess: (level) => setReadAccess(session.machineId, rootId, level),
+      };
     },
-    [accessByMachineId, accessByProjectKey, currentUserId, isLoading, machines, projects]
+    [
+      machines,
+      projects,
+      currentUserId,
+      accessByMachineId,
+      accessByProjectKey,
+      isLoading,
+      access.views,
+      setReadAccess,
+      openSettings,
+    ]
   );
-
-  const shareWithTeam = useCallback(
-    async (state: SessionSharingState): Promise<void> => {
-      if (!sharingAllowed) throw new Error('e2ee_sharing_unavailable');
-      if (!workspaceId) {
-        throw new Error('Workspace is not ready');
-      }
-      if (!state.machineId) {
-        throw new Error('Session machine is unavailable');
-      }
-      if (state.privateReason === 'machine-not-registered') {
-        throw new Error('Register this device before sharing');
-      }
-      if (!state.canManage) {
-        throw new Error('Only the device owner can change sharing');
-      }
-
-      if (state.localProjectId) {
-        // This mutation also shares the machine in the same backend
-        // transaction. A local project needs both grants before teammates can
-        // open or continue its conversations.
-        await setLocalProjectSharedWithTeam({
-          workspaceId,
-          machineId: state.machineId,
-          localProjectId: state.localProjectId,
-          sharedWithTeam: true,
-        });
-        return;
-      }
-
-      await setMachineSharedWithTeam({
-        workspaceId,
-        machineId: state.machineId,
-        sharedWithTeam: true,
-      });
-    },
-    [sharingAllowed, setLocalProjectSharedWithTeam, setMachineSharedWithTeam, workspaceId]
-  );
-
+  const shareWithTeam = useCallback(async (state: SessionSharingState) => {
+    if (!state.canManage || !state.setReadAccess) throw new Error('session_access_not_owned');
+    await state.setReadAccess('read');
+  }, []);
   return {
     machines,
     accessByMachineId,
@@ -150,7 +130,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
     machineVisibilityLoading,
     localProjectVisibilityLoading,
     isLoading,
-    showSessionSharing,
+    showSessionSharing: scope.enabled && teamSharingAvailable,
     resolve,
     shareWithTeam,
   };

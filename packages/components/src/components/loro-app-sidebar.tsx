@@ -1807,8 +1807,7 @@ export function LoroAppSidebar({
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
-      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
-        return false;
+      if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
       toast.info(t('sessions.historyMachineUnavailable'));
       return true;
     },

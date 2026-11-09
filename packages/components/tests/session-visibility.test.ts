@@ -4,6 +4,8 @@ import {
   filterSessionsByVisibility,
   isSessionVisibleToUser,
   getSessionOwnerAccessReason,
+  isSessionReadShared,
+  resolveSessionVisibilityState,
 } from '../src/lib/session-visibility';
 import { getLocalProjectVisibilityKey } from '../src/lib/visible-local-project-index';
 
@@ -12,7 +14,7 @@ const m2 = 'machine-2' as MachineId;
 const p1 = 'project-1' as LocalProjectId;
 
 describe('session visibility', () => {
-  it('keeps the current user local-project session visible without project access rows', () => {
+  it('does not grant access from the mutable conversation owner without machine access', () => {
     expect(
       isSessionVisibleToUser(
         {
@@ -25,7 +27,7 @@ describe('session visibility', () => {
         new Set<string>(),
         'user-1'
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('still hides another user local-project session when the project is not visible', () => {
@@ -70,10 +72,10 @@ describe('session visibility', () => {
         false,
         'user-1'
       ).map((item) => item.id)
-    ).toEqual(['s-owner', 's-shared-machine', 's-visible-local']);
+    ).toEqual(['s-shared-machine', 's-visible-local']);
   });
 
-  it('keeps local-project sessions when the project is visible but the machine is not', () => {
+  it('hides a local-project session when machine access is revoked before its project index refreshes', () => {
     const sessions = [
       { id: 's1', machineId: m1, project: { kind: 'local' as const, localProjectId: p1 } },
       { id: 's2', machineId: m2, project: { kind: 'local' as const, localProjectId: p1 } },
@@ -85,7 +87,7 @@ describe('session visibility', () => {
         new Set(),
         new Set([getLocalProjectVisibilityKey(m1, p1)])
       )
-    ).toEqual([{ id: 's1', machineId: m1, project: { kind: 'local', localProjectId: p1 } }]);
+    ).toEqual([]);
   });
 
   it('fails closed for unconfirmed sessions during machine visibility loading', () => {
@@ -97,7 +99,7 @@ describe('session visibility', () => {
     expect(filterSessionsByVisibility(sessions, new Set(), new Set(), true)).toEqual([]);
   });
 
-  it('keeps local-project sessions during loading when the project key is already visible', () => {
+  it('keeps local-project sessions during loading when both access indexes already admit it', () => {
     const sessions = [
       { id: 's1', machineId: m1, project: { kind: 'local' as const, localProjectId: p1 } },
       { id: 's2', machineId: m2 },
@@ -106,14 +108,14 @@ describe('session visibility', () => {
     expect(
       filterSessionsByVisibility(
         sessions,
-        new Set(),
+        new Set([m1]),
         new Set([getLocalProjectVisibilityKey(m1, p1)]),
         true
       )
     ).toEqual([{ id: 's1', machineId: m1, project: { kind: 'local', localProjectId: p1 } }]);
   });
 
-  it('keeps the current user session visible during machine visibility loading', () => {
+  it('hides a metadata owner session during machine visibility loading', () => {
     const sessions = [
       { id: 's-owner', machineId: m1, userId: 'user-1' },
       { id: 's-other', machineId: m2, userId: 'user-2' },
@@ -123,7 +125,7 @@ describe('session visibility', () => {
       filterSessionsByVisibility(sessions, new Set(), new Set(), true, 'user-1').map(
         (item) => item.id
       )
-    ).toEqual(['s-owner']);
+    ).toEqual([]);
   });
 });
 
@@ -174,4 +176,58 @@ it('keeps transferred local-project history visible to the machine owner after t
       new Set([m1])
     )
   ).toBe(true);
+});
+
+describe('machine-bound session read grants', () => {
+  const root = { id: 'root', machineId: m1, userId: 'different-session-owner' };
+  const child = { id: 'child', machineId: m1, parentSessionId: 'root' };
+  const views = new Map([
+    [m1, { machineId: m1, canManage: false, readSharedSessionIds: ['root'] }],
+  ]);
+  it('shows only the granted root and its contained tabs, without machine execution access', () => {
+    const records = new Map([
+      ['root', root],
+      ['child', child],
+    ]);
+    expect(isSessionReadShared(root, views, records)).toBe(true);
+    expect(isSessionReadShared(child, views, records)).toBe(true);
+    expect(
+      filterSessionsByVisibility(
+        [root, child, { id: 'other', machineId: m1 }],
+        new Set(),
+        new Set(),
+        false,
+        'viewer',
+        false,
+        new Set(),
+        views,
+        records
+      ).map((row) => row.id)
+    ).toEqual(['root', 'child']);
+    expect(isSessionVisibleToUser(root, new Set(), new Set(), 'viewer')).toBe(false);
+  });
+  it('withdraws on revocation, machine reassignment or a substituted binding', () => {
+    expect(isSessionReadShared(root, new Map())).toBe(false);
+    expect(isSessionReadShared({ ...root, machineId: m2 }, views)).toBe(false);
+    expect(isSessionReadShared(root, new Map([[m1, { ...views.get(m1)!, machineId: m2 }]]))).toBe(
+      false
+    );
+    expect(isSessionReadShared({ ...child, machineId: m2 }, views, new Map([['root', root]]))).toBe(
+      false
+    );
+  });
+  it('never opens all E2EE history or grants access from a mutable session owner', () => {
+    expect(
+      resolveSessionVisibilityState(root, new Set(), new Set(), {
+        workspaceHistoryReadable: true,
+        currentUserId: root.userId,
+      })
+    ).toBe('hidden');
+    expect(
+      resolveSessionVisibilityState(root, new Set(), new Set(), {
+        currentUserId: 'machine-owner',
+        ownedMachineIds: new Set([m1]),
+      })
+    ).toBe('visible');
+  });
 });

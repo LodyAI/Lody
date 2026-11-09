@@ -49,14 +49,14 @@ export const PrivateProject: Story = {};
 
 export const PrivateProjectPanelOpen: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
   },
 };
 
 export const PrivateProjectPanelOpenDark: Story = {
   globals: { theme: 'dark' },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
   },
 };
 
@@ -87,7 +87,7 @@ export const TeamShareButton: Story = {
   args: { state: teamState, publicShare: { status: 'none', renderEditor: ShareEditorStory } },
 };
 
-/** The trigger reports the published link once the status resolves. */
+/** A published link keeps its independent management entry. */
 export const TeamShared: Story = {
   args: { state: teamState, publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
 };
@@ -101,7 +101,7 @@ export const TeamSharedDark: Story = {
 export const PrivateWithPublishing: Story = {
   args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
   },
 };
 
@@ -109,18 +109,18 @@ export const PrivateWithPublishing: Story = {
 export const PublishInPanel: Story = {
   args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
-    await userEvent.click(await within(document.body).findByRole('tab', { name: 'Web' }));
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
+    await userEvent.click(
+      await within(document.body).findByRole('button', { name: 'Publish to the web' })
+    );
   },
 };
 
-/** A published link outranks the "Share" label on the pill; the scope stays in the popover. */
+/** Public-link management remains separate from the team-access status. */
 export const PrivateAndShared: Story = {
   args: { publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(
-      within(canvasElement).getByRole('button', { name: /Anyone with the link/ })
-    );
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
   },
 };
 
@@ -148,5 +148,22 @@ export const OwnerOnly: Story = {
       machineName: 'Teammate Mac',
       projectName: 'lody',
     },
+  },
+};
+
+export const TeamReadOnly: Story = {
+  args: { state: { ...teamState, access: 'read', setReadAccess: fn() } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Team read-only' }));
+  },
+};
+export const ReadOnlyNonOwner: Story = {
+  args: { state: { ...teamState, access: 'read', canManage: false } },
+  play: TeamReadOnly.play,
+};
+export const MachineEditable: Story = {
+  args: { state: { ...teamState, access: 'edit', openMachineSettings: fn() } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Team can edit' }));
   },
 };

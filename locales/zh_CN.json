@@ -6354,7 +6354,7 @@
   "e2ee.machineSharing.runningTasks": "撤回共享后，已运行任务不会被中止。",
   "e2ee.machineSharing.notOwned": "只读。请使用机器所有者的个人设备更改共享设置。",
   "e2ee.machineSharing.notShared": "机器或项目尚未共享，请联系所有者开启共享后再执行任务。",
-  "e2ee.machineSharing.resignHint": "签发设备已失去授权。请使用所有者当前有效的设备重新签署以恢复共享，已保存的项目选项会保留。",
+  "e2ee.machineSharing.resignHint": "签发设备已失去权限。请使用当前有效的所有者设备重新共享，从私密默认值重新选择项目和会话。",
   "e2ee.machineSharing.resign": "使用当前设备重新签署",
   "e2ee.machineSharing.refresh": "刷新策略",
   "e2ee.machineSharing.retry": "重试更改",
@@ -6465,5 +6465,18 @@
   "workspace.invite.seat.manageBilling": "管理账单",
   "billing.switchResume": "继续处理",
   "invite.billing.retry": "重新尝试加入",
-  "billing.switchBalance": "账户余额抵扣或补缴"
+  "billing.switchBalance": "账户余额抵扣或补缴",
+  "sessions.access.private": "私密",
+  "sessions.access.read": "团队只读",
+  "sessions.access.edit": "团队可编辑",
+  "sessions.access.teamAccess": "团队访问",
+  "sessions.access.machineShared": "团队可编辑 · 由机器共享决定",
+  "sessions.access.machineSettings": "打开机器设置",
+  "sessions.access.failed": "无法更改会话访问权限，请刷新后重试。",
+  "sessions.access.confirmRead": "同事可以阅读此会话，并在自己的会话中引用它。",
+  "sessions.access.unavailable": "此会话未向你共享。",
+  "sessions.access.readonlyMachine": "只读 · 运行在 {{machine}} 的机器上",
+  "sessions.access.reference": "在新会话中引用",
+  "sessions.access.togglePin": "置顶／取消置顶",
+  "e2ee.machineSharing.pendingSession": "待确认更改：{{action}} {{name}} 的只读授权"
 }

@@ -56,15 +56,16 @@ running a seal again creates a new encryption. No product transport is enabled.
 
 The protocol entry also provides an owner-signed complete machine-sharing codec,
 resource binding, version verification and pure execution gate.
-`readMachineSharingHistoryStep` returns authenticated historical full state for
-fresh owner intent, including after its personal signer is revoked; it grants no
-execution authority. The backend
+Policies use current-only v3, with independent read-only session grants. Clients verify
+only the latest original and the current active owner-personal signer. Local high-water
+pins reject lower revisions and differing digests at the same revision; missing older
+policy revisions do not block reads. Parent digests remain server CAS metadata. The backend
 entry admits opaque owner frames; platform/cloud-api define the matching CAS
 DTOs. These are inert primitives, with no network, UI or execution integration.
 The [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
 records the pending Spec increment and remaining host responsibilities.
 
-The signed sharing format is current-only v2. Every scope includes a generation:
+The signed sharing format is current-only v3. Every scope includes a generation:
 the initial machine signing key of its uninterrupted atomic-replacement chain.
 `verifyMachineSharingGeneration` qualifies that chain's original admission records
 at their genuine ledger positions. Supply its opaque `machineGeneration` evidence

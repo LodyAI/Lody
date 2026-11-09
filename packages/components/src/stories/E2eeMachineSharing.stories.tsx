@@ -12,6 +12,7 @@ const state: E2eeMachineSharingView = {
   head: { revision: 4, digest: '33'.repeat(32) },
   sharedWithTeam: true,
   projects: ['work'],
+  sessions: [],
   signer: 'a1'.repeat(32),
   canManage: true,
   needsResign: false,
@@ -82,7 +83,9 @@ export const Interactive: Story = {
             sharedWithTeam:
               change.kind === 'machine'
                 ? change.sharedWithTeam
-                : change.sharedWithTeam || current.sharedWithTeam,
+                : change.kind === 'project'
+                  ? change.sharedWithTeam || current.sharedWithTeam
+                  : current.sharedWithTeam,
             projects:
               change.kind === 'project'
                 ? change.sharedWithTeam

@@ -9,6 +9,9 @@ export const id = z
   .max(256)
   .refine((v) => new TextEncoder().encode(v).length <= 256);
 export const sharingChangeSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('session'), sessionId: id, level: z.literal('read').nullable() })
+    .strict(),
   z.object({ kind: z.literal('machine'), sharedWithTeam: z.boolean() }).strict(),
   z
     .object({ kind: z.literal('project'), localProjectId: id, sharedWithTeam: z.boolean() })

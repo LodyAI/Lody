@@ -34,6 +34,8 @@ export type SessionSubmissionPorts = {
   /** Default backend for new sessions when the payload has no explicit choice. */
   defaultHistoryBackend?: SessionHistoryBackendKind;
   assertSessionCreateAllowed: (sessionId: SessionId) => void;
+  /** Current UI permission for existing targets; separate from billing admission. */
+  assertSessionEditable?: (sessionId: SessionId) => Promise<void>;
   recordWorkspaceActivity: (workspaceId: string | undefined) => void;
   publishSessionMeta: (roomId: string, meta: SessionMeta) => void;
   readSessionMeta: (sessionId: SessionId) => SessionMeta | undefined;
@@ -152,6 +154,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    if (payload.parentSessionId) await ports.assertSessionEditable?.(payload.parentSessionId);
     const { sessionId, sessionMeta } = await prepareCreate(payload);
     const sessionRoomId = getSessionRoomId(sessionId);
     // The local Flock index is the session-count source of truth. Incomplete
@@ -184,6 +187,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    if (payload.parentSessionId) await ports.assertSessionEditable?.(payload.parentSessionId);
     const { sessionId, sessionMeta } = await prepareCreate(payload);
     // The accept unit includes the first user message, so the meta it
     // publishes already carries that activity. Written here, not by a
@@ -233,6 +237,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+
+    await ports.assertSessionEditable?.(sessionId);
 
     // Sending any user message (new chat, reply, child-session/filter reply)
     // counts as an explicit active user action.
@@ -302,6 +308,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    await ports.assertSessionEditable?.(sessionId);
+
     // A held send is written and dispatched by the pending queue.
     if (
       runtime.pendingSends?.has(userTurnId) ||
@@ -323,6 +331,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    await ports.assertSessionEditable?.(sessionId);
+
     // A held guide is offered by the pending queue once it is written.
     if (
       runtime.pendingSends?.has(userTurnId) ||

@@ -322,3 +322,21 @@ describe('mobile project buckets follow the opener', () => {
     expect(container.textContent).not.toContain('loro-dev/lody');
   });
 });
+
+it('marks read-only conversations and leaves them out of destructive swipe actions', async () => {
+  await act(async () => {
+    root.render(
+      <Provider store={store}>
+        <MobileChatListCard
+          chats={[makeItem({ id: 'shared', readOnly: true })]}
+          rowActions={{ onTogglePin: () => {}, onArchive: () => {} }}
+        />
+      </Provider>
+    );
+  });
+  expect(container.querySelector('[aria-label="Team read-only"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Archive"]')).toBeNull();
+  expect(container.querySelector('.mobile-project-conversation-row')?.textContent).toContain(
+    'Session shared'
+  );
+});

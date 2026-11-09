@@ -124,6 +124,15 @@ const exceptions = new Map([
     ]),
   ],
   [
+    'packages/components/src/providers/cloud-session-access.ts',
+    new Map([
+      ...['machines:listSessionAccess', 'machines:setSessionReadSharedWithTeam'].map((name) => [
+        name,
+        'Imperative platform port: CloudPlatformProvider supplies assertScope using the shared live legacy admission verdict before every ordinary read, write or subscription; asynchronous reads fence account/runtime changes.',
+      ]),
+    ]),
+  ],
+  [
     'packages/components/src/providers/cloud-github-token-port.ts',
     new Map([
       ...[

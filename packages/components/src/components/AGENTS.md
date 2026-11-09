@@ -87,12 +87,13 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Conversation access
 
-- `session-sharing.tsx` owns one desktop header control for team and web access: team visibility
-  selects menu/button, public status selects the label, and its audience strip shows current access.
-  Unavailable audiences are disabled with a reason; narrowing, tabs, search, and a second badge are
-  forbidden. Paths and base branch stay in `⋯`. Closed headers read only the `useSessionShareStatus`
-  management row (`unknown` means not shared). The inline panel and `⋯` dialog reuse one keyed
-  publisher; the panel stays open while publishing. [Contract](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
+- `session-sharing.tsx` owns the shared header control. Its button states Private,
+  Team read-only or Team can edit. The panel offers Private and Team read-only;
+  shared-machine editing links to machine settings. Only the machine owner can
+  change session access; other members see disabled choices with a reason.
+  Public links remain a separate section and a busy publisher keeps the panel open.
+  Authoritative access comes through the platform `sessionAccess` port, never
+  SessionMeta. [Contract](../../../../specs/session-access.md).
 
 ## Local projects
 

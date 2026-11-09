@@ -199,10 +199,16 @@ export function MachineSharingPanel({
               {t(
                 pendingChangeShown.kind === 'machine'
                   ? 'e2ee.machineSharing.pendingMachine'
-                  : 'e2ee.machineSharing.pendingProject',
+                  : pendingChangeShown.kind === 'session'
+                    ? 'e2ee.machineSharing.pendingSession'
+                    : 'e2ee.machineSharing.pendingProject',
                 {
                   action: t(
-                    pendingChangeShown.sharedWithTeam
+                    (
+                      pendingChangeShown.kind === 'session'
+                        ? pendingChangeShown.level === 'read'
+                        : pendingChangeShown.sharedWithTeam
+                    )
                       ? 'e2ee.machineSharing.enable'
                       : 'e2ee.machineSharing.disable'
                   ),
@@ -210,7 +216,9 @@ export function MachineSharingPanel({
                     pendingChangeShown.kind === 'project'
                       ? (rows.find((project) => project.id === pendingChangeShown.localProjectId)
                           ?.name ?? pendingChangeShown.localProjectId)
-                      : undefined,
+                      : pendingChangeShown.kind === 'session'
+                        ? pendingChangeShown.sessionId
+                        : undefined,
                 }
               )}
             </p>

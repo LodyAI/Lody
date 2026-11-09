@@ -457,7 +457,7 @@ const createSessionPayload = (sessionId: SessionId): SessionToCreate =>
     agentType: 'codex',
     agentConfigId: 'agent-1',
     env: {},
-  }) as SessionToCreate;
+  }) as Parameters<typeof actions.createSession>[0];
 
 function createContainmentSessions(prefix: string, isArchived: boolean) {
   const rootSession = {
@@ -581,6 +581,7 @@ describe('useSessionActions', () => {
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
       identitySession?: PlatformProvider['identity']['session'];
+      sessionAccess?: PlatformProvider['sessionAccess'];
       onVisibility?: (value: ReturnType<typeof useVisibleSessionMetas>) => void;
     } = {}
   ): Promise<SessionActions> => {
@@ -603,9 +604,10 @@ describe('useSessionActions', () => {
     });
 
     const platform =
-      runtime.contentMode === 'e2ee'
+      runtime.contentMode === 'e2ee' || options.sessionAccess
         ? {
             ...testPlatform,
+            sessionAccess: options.sessionAccess,
             identity: {
               ...testPlatform.identity,
               session:
@@ -648,6 +650,80 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it.each(['plaintext', 'e2ee'] as const)(
+    'permits only personal read preferences on a shared read-only session (%s)',
+    async (contentMode) => {
+      const repo = await LoroRepo.create({});
+      const id = 'read-shared' as SessionId;
+      const meta = {
+        id,
+        machineId: 'private-machine' as MachineId,
+        userId: 'synthetic-session-account',
+        title: 'Original',
+        lastMessageAt: 100,
+      } as SessionMeta;
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      visibilityIndexOverride.current = {
+        machines: new Map(),
+        accessByMachineId: new Map(),
+        isLoading: false,
+      };
+      let shared = true;
+      const view = () => ({
+        machineId: meta.machineId,
+        canManage: false,
+        readSharedSessionIds: shared ? [id] : [],
+      });
+      const runtime = createRuntime({
+        repo,
+        writer: createDirectWorkspaceWriter({ repo } as never),
+      });
+      Object.assign(runtime, { contentMode, accountId: 'synthetic-session-account' });
+      const actions = await renderActions(runtime, {
+        sessionMetaCache: { [getSessionRoomId(id)]: meta },
+        sessionAccess: {
+          read: async () => view(),
+          list: async () => [view()],
+          set: async () => {
+            throw new Error('not-owned');
+          },
+          subscribe: () => () => {},
+        },
+      });
+      try {
+        await expect(actions.updateSessionTitle(id, 'Forbidden')).rejects.toMatchObject({
+          code: 'session_management_denied',
+        });
+        await expect(
+          actions.addSessionHistory(id, {
+            role: 'user',
+            timestamp: new Date(0).toISOString(),
+            items: [{ type: 'text', text: 'Forbidden input' }],
+            fileDiff: [],
+          })
+        ).rejects.toMatchObject({ code: 'session_management_denied' });
+        await expect(
+          actions.createSession({ parentSessionId: id } as Parameters<
+            typeof actions.createSession
+          >[0])
+        ).rejects.toMatchObject({ code: 'session_management_denied' });
+        await actions.setSessionPinned(id, true);
+        await actions.markSessionUnread(id);
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+          title: 'Original',
+          isPinned: true,
+          lastReadAt: 99,
+        });
+        shared = false;
+        await expect(actions.setSessionPinned(id, false)).rejects.toMatchObject({
+          code: 'session_management_denied',
+        });
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
 
   it.each(['plaintext', 'e2ee'] as const)(
     'does not trust a conflicting Loro machine owner (%s)',
@@ -699,8 +775,9 @@ describe('useSessionActions', () => {
         if (contentMode === 'plaintext') {
           expect(visibility?.sessions).toEqual([]);
         } else {
-          // E2EE workspace history intentionally remains readable, but grants no management.
-          expect(visibility?.historyOnlySessionIds.has(id)).toBe(true);
+          // Private encrypted history is hidden unless explicitly shared.
+          expect(visibility?.sessions).toEqual([]);
+          expect(visibility?.historyOnlySessionIds.has(id)).toBe(false);
           await expect(actions.updateSessionTitle(id, 'Unauthorized')).rejects.toMatchObject({
             code: 'session_management_denied',
           });
@@ -927,7 +1004,22 @@ describe('useSessionActions', () => {
     }
   );
 
-  it('retains encrypted author management and rejects metadata/project edits based on stale cached ownership', async () => {
+  it('retains encrypted machine-owner management and rejects metadata/project edits after machine reassignment', async () => {
+    visibilityIndexOverride.current = {
+      machines: new Map(),
+      accessByMachineId: new Map([
+        [
+          'unshared-machine',
+          {
+            machineId: 'unshared-machine',
+            ownerUserId: 'synthetic-session-account',
+            sharedWithTeam: false,
+            updatedAt: 1,
+          },
+        ],
+      ]),
+      isLoading: false,
+    };
     const repo = await LoroRepo.create({});
     const id = 'owned-history' as SessionId;
     const meta = {
@@ -962,7 +1054,10 @@ describe('useSessionActions', () => {
       await actions.restoreSession(id);
       expect((await repo.getDocMeta(getSessionRoomId(child.id)))?.meta?.isArchived).toBe(false);
       // Cache still claims ownership. Current Repo state must decide each new action.
-      await repo.upsertDocMeta(getSessionRoomId(id), { userId: 'different-member' });
+      await repo.upsertDocMeta(getSessionRoomId(id), {
+        machineId: 'different-machine',
+        userId: 'different-member',
+      });
       await expect(
         actions.updateSessionMetadata(id, { projectGroup: { id: 'another-group' } })
       ).rejects.toMatchObject({ code: 'session_management_denied' });
@@ -977,6 +1072,21 @@ describe('useSessionActions', () => {
   });
 
   it('renames a root tab and its sidebar group title independently', async () => {
+    visibilityIndexOverride.current = {
+      machines: new Map(),
+      accessByMachineId: new Map([
+        [
+          'unshared-machine',
+          {
+            machineId: 'unshared-machine',
+            ownerUserId: 'synthetic-session-account',
+            sharedWithTeam: false,
+            updatedAt: 1,
+          },
+        ],
+      ]),
+      isLoading: false,
+    };
     const repo = await LoroRepo.create({});
     const id = 'titled-root' as SessionId;
     const meta = {
@@ -1149,6 +1259,21 @@ describe('useSessionActions', () => {
   });
 
   it('retains management with a bound local identity during uncertain cloud authentication', async () => {
+    visibilityIndexOverride.current = {
+      machines: new Map(),
+      accessByMachineId: new Map([
+        [
+          'unshared-machine',
+          {
+            machineId: 'unshared-machine',
+            ownerUserId: 'synthetic-session-account',
+            sharedWithTeam: false,
+            updatedAt: 1,
+          },
+        ],
+      ]),
+      isLoading: false,
+    };
     const repo = await LoroRepo.create({});
     const id = 'offline-owned-history' as SessionId;
     await repo.upsertDocMeta(getSessionRoomId(id), {

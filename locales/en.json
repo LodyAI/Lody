@@ -6365,7 +6365,7 @@
   "e2ee.machineSharing.runningTasks": "Withdrawing access will not stop tasks that are already running.",
   "e2ee.machineSharing.notOwned": "Read only. Use a personal device belonging to this machine’s owner to change sharing.",
   "e2ee.machineSharing.notShared": "This machine or project is private. Ask its owner to share it before running tasks.",
-  "e2ee.machineSharing.resignHint": "The signing device no longer has authority. Re-sign with a current owner device to restore sharing. Saved project choices will be kept.",
+  "e2ee.machineSharing.resignHint": "The signing device no longer has authority. Share again with a current owner device. Start from private defaults and choose projects and conversations again.",
   "e2ee.machineSharing.resign": "Re-sign with this device",
   "e2ee.machineSharing.refresh": "Refresh policy",
   "e2ee.machineSharing.retry": "Retry change",
@@ -6476,5 +6476,18 @@
   "workspace.invite.seat.manageBilling": "Manage billing",
   "billing.switchResume": "Continue processing",
   "invite.billing.retry": "Try joining again",
-  "billing.switchBalance": "Account balance applied"
+  "billing.switchBalance": "Account balance applied",
+  "sessions.access.private": "Private",
+  "sessions.access.read": "Team read-only",
+  "sessions.access.edit": "Team can edit",
+  "sessions.access.teamAccess": "Team access",
+  "sessions.access.machineShared": "Team can edit · Controlled by machine sharing",
+  "sessions.access.machineSettings": "Open machine settings",
+  "sessions.access.failed": "Could not change conversation access. Refresh and try again.",
+  "sessions.access.confirmRead": "Teammates can read this conversation and reference it in their own sessions.",
+  "sessions.access.unavailable": "This conversation is not shared with you.",
+  "sessions.access.readonlyMachine": "Read-only · Runs on {{machine}}",
+  "sessions.access.reference": "Reference in a new session",
+  "sessions.access.togglePin": "Pin / unpin",
+  "e2ee.machineSharing.pendingSession": "Pending change: {{action}} read access for {{name}}"
 }

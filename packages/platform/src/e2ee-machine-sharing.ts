@@ -40,6 +40,8 @@ export interface E2eeMachineSharingView {
   head: { readonly revision: number; readonly digest: string } | null;
   sharedWithTeam: boolean;
   projects: readonly string[];
+  /** Current owner-signed conversation grants; these never grant machine execution. */
+  sessions: readonly { readonly sessionId: string; readonly level: 'read' }[];
   removed?: boolean;
   /** Current host personal-device authority, derived from the verified ledger. */
   canManage: boolean;
@@ -59,4 +61,5 @@ export type E2eeMachineSharingWriteResult = {
 };
 export type E2eeMachineSharingChange =
   | { readonly kind: 'machine'; readonly sharedWithTeam: boolean }
-  | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean };
+  | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean }
+  | { readonly kind: 'session'; readonly sessionId: string; readonly level: 'read' | null };

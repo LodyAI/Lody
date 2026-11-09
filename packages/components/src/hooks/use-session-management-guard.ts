@@ -11,29 +11,31 @@ import {
 import { userAtom } from '@/atoms';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { isSessionVisibleToUser } from '@/lib/session-visibility';
-import { useWorkspaceHistoryAccess } from './use-workspace-history-access';
+import { isSessionVisibleToUser, isSessionReadShared } from '@/lib/session-visibility';
+import { useSessionAccess } from './use-session-access';
 import { useVisibleMachineIdSet, useVisibleLocalProjectKeySet } from './use-visible-session-metas';
 
 export class SessionManagementDeniedError extends Error {
   readonly code = 'session_management_denied';
 }
 
-/** Read access never admits management. Re-read every target, using the pre-history predicate. */
+/** Read grants admit only the narrow preference path; management requires machine authority. */
 export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
   const store = useStore();
   const platform = usePlatform();
   const { t } = useTranslation();
-  const readable = useWorkspaceHistoryAccess();
-  const enabled = runtime?.contentMode === 'e2ee' && readable;
+  const sessionAccess = useSessionAccess();
+  const enabled = !!runtime;
   const machines = useVisibleMachineIdSet({ enabled });
   const projects = useVisibleLocalProjectKeySet({ enabled });
-  const latest = useRef({ runtime, readable, machines, projects });
-  latest.current = { runtime, readable, machines, projects };
+  const latest = useRef({ runtime, sessionAccess, machines, projects });
+  latest.current = { runtime, sessionAccess, machines, projects };
   return useCallback(
-    async (sessionIds: readonly SessionId[]) => {
-      // Preserve ordinary-workspace management, which this history change never expanded.
-      if (runtime?.contentMode !== 'e2ee') return;
+    async (sessionIds: readonly SessionId[], preferences = false) => {
+      // Local-only composition has no team grants.
+      if (platform.kind === 'local' || (runtime?.contentMode !== 'e2ee' && !platform.sessionAccess))
+        return;
+      if (!runtime) throw new SessionManagementDeniedError(t('sessions.historyMachineUnavailable'));
       const deny = () => {
         throw new SessionManagementDeniedError(t('sessions.historyMachineUnavailable'));
       };
@@ -44,34 +46,66 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
           store.get(activeWorkspaceRuntimeAtom) !== runtime ||
           store.get(currentWorkspaceIdAtom) !== runtime.workspaceId ||
           latest.current.runtime !== runtime ||
-          !latest.current.readable ||
-          !runtime.accountId ||
-          (userId && userId !== runtime.accountId) ||
+          !(store.get(userAtom)?.id ?? runtime.accountId) ||
+          (runtime.accountId && userId && userId !== runtime.accountId) ||
           (platform.kind === 'cloud' &&
             ((session.status === 'unauthenticated' && !session.uncertain) ||
-              (session.status === 'authenticated' && session.user.id !== runtime.accountId)))
+              (session.status === 'authenticated' &&
+                session.user.id !== (runtime.accountId ?? userId))))
         )
           deny();
       };
       assertScope();
       const entries = await Promise.all(
-        [...new Set(sessionIds)].map((id) => runtime.repo.getDocMeta(getSessionRoomId(id)))
+        [...new Set(sessionIds)].map(async (id) => ({
+          id,
+          entry: await runtime.repo.getDocMeta(getSessionRoomId(id)),
+        }))
       );
       assertScope();
       const access = latest.current;
-      for (const entry of entries) {
+      for (const { id, entry } of entries) {
+        if (!entry || isLoroRepoDocDeleted(entry)) deny();
+        const meta = { ...(entry!.meta as SessionMeta), id };
         if (
-          !entry ||
-          isLoroRepoDocDeleted(entry) ||
-          !isSessionVisibleToUser(
-            entry.meta as SessionMeta,
+          isSessionVisibleToUser(
+            meta,
             access.machines.visibleMachineIds,
             access.projects.visibleLocalProjectKeys,
-            runtime.accountId,
+            store.get(userAtom)?.id ?? runtime.accountId,
             access.machines.ownedMachineIds
           )
         )
-          deny();
+          continue;
+        if (!preferences || !access.sessionAccess.port) deny();
+        const records = new Map<string, SessionMeta>([[id, meta]]);
+        let root = meta;
+        const seen = new Set<string>([id]);
+        while (root.parentSessionId) {
+          if (seen.has(root.parentSessionId)) deny();
+          seen.add(root.parentSessionId);
+          const parentId = root.parentSessionId;
+          const parent = await runtime.repo.getDocMeta(getSessionRoomId(parentId));
+          assertScope();
+          if (!parent || isLoroRepoDocDeleted(parent) || parent.meta.machineId !== meta.machineId)
+            deny();
+          root = { ...(parent!.meta as SessionMeta), id: parentId };
+          records.set(parentId, root);
+        }
+        const view = await access.sessionAccess.port!.read(runtime.workspaceId, meta.machineId);
+        assertScope();
+        for (const [recordId, record] of records) {
+          const current = await runtime.repo.getDocMeta(getSessionRoomId(recordId as SessionId));
+          assertScope();
+          if (
+            !current ||
+            isLoroRepoDocDeleted(current) ||
+            current.meta.machineId !== record.machineId ||
+            current.meta.parentSessionId !== record.parentSessionId
+          )
+            deny();
+        }
+        if (!isSessionReadShared(meta, new Map([[view.machineId, view]]), records)) deny();
       }
     },
     [runtime, store, platform, t]

@@ -1,6 +1,7 @@
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
+import { usePlatform } from '@lody/platform/react';
 import { selectAtom } from 'jotai/utils';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
@@ -9,8 +10,8 @@ import {
   useVisibleLocalProjectKeySet,
   useVisibleMachineIdSet,
 } from '@/hooks/use-visible-session-metas';
-import { useWorkspaceHistoryAccess } from '@/hooks/use-workspace-history-access';
-import { isSessionMachineAvailable } from '@/lib/session-visibility';
+import { useSessionAccess } from '@/hooks/use-session-access';
+import { isSessionMachineAvailable, isSessionReadShared } from '@/lib/session-visibility';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { SessionHistoryReader } from './session-history-reader';
 
@@ -23,6 +24,7 @@ function useSessionTarget(sessionId: SessionId) {
           (meta) =>
             meta
               ? {
+                  id: sessionId,
                   machineId: meta.machineId,
                   project: meta.project,
                   parentSessionId: meta.parentSessionId,
@@ -35,7 +37,7 @@ function useSessionTarget(sessionId: SessionId) {
   );
 }
 
-/** An unavailable encrypted target never mounts the interactive machine-owning subtree. */
+/** Read-only targets never mount composers, machine catalogs, controls or RPC viewers. */
 export function SessionHistoryAccessBoundary({
   sessionId,
   urlTab,
@@ -49,23 +51,61 @@ export function SessionHistoryAccessBoundary({
   onMobilePresented?: (sessionId: string) => void;
   children: ReactNode;
 }) {
-  const historyReadable = useWorkspaceHistoryAccess();
+  const localOnly = !usePlatform().capabilities.has('teamSharing');
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const { t } = useTranslation();
   const root = useSessionTarget(sessionId);
   const selectedId = (urlTab || sessionId) as SessionId;
   const selected = useSessionTarget(selectedId);
-  const { visibleMachineIds } = useVisibleMachineIdSet({ enabled: historyReadable });
-  const { visibleLocalProjectKeys } = useVisibleLocalProjectKeySet({ enabled: historyReadable });
+  const access = useSessionAccess();
+  const {
+    visibleMachineIds,
+    ownedMachineIds,
+    isLoading: machinesLoading,
+  } = useVisibleMachineIdSet();
+  const { visibleLocalProjectKeys, isLoading: projectsLoading } = useVisibleLocalProjectKeySet();
   const validTab = selectedId === sessionId || selected?.parentSessionId === sessionId;
-  const historyOnly =
-    historyReadable &&
-    (!isSessionMachineAvailable(root, visibleMachineIds, visibleLocalProjectKeys) ||
+  const editable =
+    !!root &&
+    (ownedMachineIds.has(root.machineId) ||
+      isSessionMachineAvailable(root, visibleMachineIds, visibleLocalProjectKeys)) &&
+    (selectedId === sessionId ||
       (validTab &&
-        !isSessionMachineAvailable(selected, visibleMachineIds, visibleLocalProjectKeys)));
-  if (runtime?.contentMode === 'e2ee' && !historyReadable)
+        !!selected &&
+        (ownedMachineIds.has(selected.machineId) ||
+          isSessionMachineAvailable(selected, visibleMachineIds, visibleLocalProjectKeys))));
+  const [checked, setChecked] = useState<object | null>(null);
+  // Opening a deep link always authenticates this machine's latest policy as a fallback
+  // for missed version notifications. The old policy cannot admit the first read.
+  const checkKey = useMemo(() => ({}), [runtime, root?.machineId, selectedId, access.store]);
+  useEffect(() => {
+    let retired = false;
+    if (!root?.machineId || !access.store || editable) {
+      setChecked(checkKey);
+      return;
+    }
+    void access.store.read(root.machineId).then(
+      () => {
+        if (!retired) setChecked(checkKey);
+      },
+      () => {
+        if (!retired) setChecked(checkKey);
+      }
+    );
+    return () => {
+      retired = true;
+    };
+  }, [root?.machineId, access.store, editable, checkKey]);
+  if (editable || localOnly) return children;
+  if (machinesLoading || projectsLoading || access.loading || checked !== checkKey)
     return <p role="status">{t('common.loading')}</p>;
-  return historyOnly ? (
+  // The detail subtree handles absent metadata, workspace transitions and local-only sessions.
+  if (!root) return children;
+  const readable =
+    isSessionReadShared(root, access.views) &&
+    (selectedId === sessionId || (validTab && !!selected && selected.machineId === root.machineId));
+  if (!readable) return <p role="status">{t('sessions.access.unavailable')}</p>;
+  return (
     <SessionHistoryReader
       key={`${runtime?.workspaceId}:${runtime?.accountId}:${sessionId}:${selectedId}`}
       rootSessionId={sessionId}
@@ -73,7 +113,5 @@ export function SessionHistoryAccessBoundary({
       onMobileBack={onMobileBack}
       onMobilePresented={onMobilePresented}
     />
-  ) : (
-    children
   );
 }

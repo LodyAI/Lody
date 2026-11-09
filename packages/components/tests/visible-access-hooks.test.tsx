@@ -77,7 +77,10 @@ import {
 import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
 import { PlatformContext } from '@lody/platform/react';
 import type { PlatformProvider } from '@lody/platform';
-import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
+import {
+  notifyE2eeLedgerChanged,
+  subscribeE2eeLedgerChanges,
+} from '../src/providers/e2ee-runtime-notifications';
 import { ENCRYPTED_SHARED_MACHINE_REFRESH_MS } from '../src/lib/encrypted-shared-machines';
 import { withoutEncryptedSharedMachines } from '../src/lib/visible-machine-index';
 import { availableLocalHistoryMachineIds } from '../src/lib/session-visibility';
@@ -538,13 +541,13 @@ describe('visible access hooks', () => {
     expectSessionSnapshot(['cached-session'], 'resolved', false);
   });
 
-  it('keeps the current user cached session visible while access is loading', async () => {
+  it('hides metadata-owned sessions while machine authority is loading', async () => {
     const session = createCachedSession('viewer-user');
     cacheSession(session);
 
     await mount('workspace-owner-session', sessionProbe(session));
 
-    expectSessionSnapshot(['cached-session'], 'resolved', true);
+    expectSessionSnapshot([], 'loading', true);
   });
 
   for (const scenario of [
@@ -677,6 +680,7 @@ describe('encrypted shared machine visibility', () => {
     head: { revision: 1, digest: '33'.repeat(32) },
     sharedWithTeam: true,
     projects: ['shared-project'],
+    sessions: [],
     canManage: false,
     signer: '44'.repeat(32),
     needsResign: false,
@@ -763,6 +767,33 @@ describe('encrypted shared machine visibility', () => {
     views.set('failing-machine', new Error('e2ee_sharing_unavailable'));
     const platform = {
       ...TEST_CLOUD_PLATFORM,
+      sessionAccess: {
+        list: async () =>
+          [...views.values()]
+            .filter((value): value is View => !(value instanceof Error))
+            .map((value) => ({
+              machineId: value.machineId,
+              canManage: value.canManage,
+              generation: value.generation,
+              readSharedSessionIds:
+                value.needsResign || value.unavailable
+                  ? []
+                  : value.sessions.map((row) => row.sessionId),
+            })),
+        read: async (_workspace: string, machineId: string) => {
+          const value = views.get(machineId);
+          if (!value || value instanceof Error) throw new Error('missing');
+          return {
+            machineId,
+            canManage: value.canManage,
+            generation: value.generation,
+            readSharedSessionIds: value.sessions.map((row) => row.sessionId),
+          };
+        },
+        set: async () => ({ status: 'saved' }),
+        subscribe: (_workspace: string, invalidate: () => void) =>
+          subscribeE2eeLedgerChanges(member, workspaceId, invalidate),
+      },
       e2eeWorkspaces: {
         ...TEST_CLOUD_PLATFORM.e2eeWorkspaces,
         runtime: {
@@ -811,7 +842,7 @@ describe('encrypted shared machine visibility', () => {
     expect(reads.sort()).toEqual(['failing-machine', 'private-machine', 'shared-machine']);
   });
 
-  it('keeps readable encrypted history on an unshared owner machine out of the execution index', async () => {
+  it('hides encrypted history on an unshared machine by default without adding execution access', async () => {
     const history = {
       ...createCachedSession(owner),
       id: 'history-on-owner-machine' as SessionId,
@@ -833,7 +864,7 @@ describe('encrypted shared machine visibility', () => {
         />
       </>
     );
-    expect(result).toEqual({ activeIds: [history.id], archivedIds: [archived.id] });
+    expect(result).toEqual({ activeIds: [], archivedIds: [] });
     expect(snapshot?.machines).toEqual(['own-machine', 'shared-machine']);
     expect(snapshot?.projects).not.toContain('private-machine:private-project');
   });
@@ -885,13 +916,24 @@ describe('encrypted shared machine visibility', () => {
       }, [access]);
       return null;
     }
+    views.set(
+      'private-machine',
+      view('private-machine', {
+        sharedWithTeam: false,
+        sessions: [
+          { sessionId: privateHistory.id, level: 'read' },
+          { sessionId: ownHistory.id, level: 'read' },
+        ],
+      })
+    );
     await renderTree(<ArchiveProbe />);
     expect(result).toEqual({
       ids: [available.id, privateHistory.id, ownHistory.id].sort(),
-      readOnly: [privateHistory.id],
+      readOnly: [privateHistory.id, ownHistory.id].sort(),
       automaticReaders: ['own-machine'],
     });
-    // Existing authors retain metadata management, without gaining machine readers.
+    firstReadOnly = currentReadOnly;
+    // Assignment never changes read-only permission or adds machine readers.
     await act(async () =>
       store.set(sessionMetaCacheAtom, (previous) => ({
         ...previous,
@@ -912,6 +954,13 @@ describe('encrypted shared machine visibility', () => {
       }, []);
       return <input aria-label="Execution composer" />;
     }
+    views.set(
+      'private-machine',
+      view('private-machine', {
+        sharedWithTeam: false,
+        sessions: [{ sessionId: history.id, level: 'read' }],
+      })
+    );
     const tree = (
       <SessionHistoryAccessBoundary sessionId={history.id}>
         <InteractiveControls />
@@ -925,7 +974,13 @@ describe('encrypted shared machine visibility', () => {
     await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
     expect(container.querySelector('input')?.getAttribute('aria-label')).toBe('Execution composer');
     expect(mountedControls).toBe(1);
-    views.set('private-machine', view('private-machine', { sharedWithTeam: false }));
+    views.set(
+      'private-machine',
+      view('private-machine', {
+        sharedWithTeam: false,
+        sessions: [{ sessionId: history.id, level: 'read' }],
+      })
+    );
     await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
     expect(container.querySelector('article')?.textContent).toBe(history.id);
     expect(container.querySelector('input')).toBeNull();
@@ -944,6 +999,10 @@ describe('encrypted shared machine visibility', () => {
       [getSessionRoomId(parent.id)]: parent,
       [getSessionRoomId(child.id)]: child,
     });
+    views.set(
+      parent.machineId,
+      view(parent.machineId, { sessions: [{ sessionId: parent.id, level: 'read' }] })
+    );
     await renderTree(
       <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={child.id}>
         <input aria-label="Execution composer" />

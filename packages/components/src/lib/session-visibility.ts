@@ -1,4 +1,5 @@
 import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
+import type { SessionAccessView } from '@lody/platform';
 import type { MachineVisibilityAccess } from './visible-machine-index';
 import type { LocalProjectVisibilityAccess } from './visible-local-project-index';
 import { getLocalProjectVisibilityKey } from './visible-local-project-index';
@@ -6,6 +7,8 @@ import { getLocalProjectVisibilityKey } from './visible-local-project-index';
 export type SessionListEntry = SessionMeta & { id: SessionId };
 
 export type SessionMachineRecord = {
+  id?: string;
+  parentSessionId?: string | null;
   machineId?: string | null;
   userId?: string | null;
   project?: { kind?: string; localProjectId?: string | null } | null;
@@ -22,6 +25,8 @@ type SessionVisibilityOptions = {
   localProjectVisibilityLoading?: boolean;
   currentUserId?: string | null;
   workspaceHistoryReadable?: boolean;
+  readSharedSessions?: ReadonlyMap<string, SessionAccessView>;
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>;
   ownedMachineIds?: ReadonlySet<MachineId>;
 };
 
@@ -70,20 +75,14 @@ export function isSessionVisibleToUser(
   session: SessionMachineRecord,
   visibleMachineIds: ReadonlySet<MachineId>,
   visibleLocalProjectKeys: ReadonlySet<string>,
-  currentUserId?: string | null,
+  _currentUserId?: string | null,
   ownedMachineIds?: ReadonlySet<MachineId>
 ): boolean {
   if (typeof session.machineId !== 'string') {
     return false;
   }
-  // Legacy metadata has no immutable creator: retain the owner fallback for
-  // authors whose machine access was revoked. Owner transfer separately requires access.
-  if (
-    currentUserId &&
-    (session.userId === currentUserId || ownedMachineIds?.has(session.machineId as MachineId))
-  ) {
-    return true;
-  }
+  if (ownedMachineIds?.has(session.machineId as MachineId)) return true;
+  if (!visibleMachineIds.has(session.machineId as MachineId)) return false;
   if (isLocalProjectSession(session)) {
     return visibleLocalProjectKeys.has(
       getLocalProjectVisibilityKey(
@@ -101,7 +100,8 @@ export function resolveSessionVisibilityState(
   visibleLocalProjectKeys: ReadonlySet<string>,
   options: SessionVisibilityOptions = {}
 ): SessionVisibilityState {
-  if (options.workspaceHistoryReadable && typeof session.machineId === 'string') return 'visible';
+  if (isSessionReadShared(session, options.readSharedSessions, options.sessionsById))
+    return 'visible';
   if (
     isSessionVisibleToUser(
       session,
@@ -134,14 +134,17 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
   machineVisibilityLoading = false,
   currentUserId?: string | null,
   workspaceHistoryReadable = false,
-  ownedMachineIds?: ReadonlySet<MachineId>
+  ownedMachineIds?: ReadonlySet<MachineId>,
+  readSharedSessions?: ReadonlyMap<string, SessionAccessView>,
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>
 ): T[] {
   if (sessions.length === 0) return [];
   if (
     !workspaceHistoryReadable &&
     visibleMachineIds.size === 0 &&
     visibleLocalProjectKeys.size === 0 &&
-    !currentUserId
+    !currentUserId &&
+    !readSharedSessions?.size
   ) {
     return [];
   }
@@ -152,6 +155,8 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
         currentUserId,
         workspaceHistoryReadable,
         ownedMachineIds,
+        readSharedSessions,
+        sessionsById,
       }) === 'visible'
   );
 }
@@ -186,4 +191,28 @@ export function getSessionOwnerAccessReason(
     if (!project?.sharedWithTeam) return 'projectNotShared';
   }
   return null;
+}
+
+/** Child tabs and Side Chats inherit only a root grant bound to their actual machine. */
+export function isSessionReadShared(
+  session: SessionMachineRecord,
+  views?: ReadonlyMap<string, SessionAccessView>,
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>
+): boolean {
+  if (!session.machineId || !session.id) return false;
+  let root = session;
+  const seen = new Set<string>();
+  while (root.parentSessionId) {
+    if (seen.has(root.parentSessionId)) return false;
+    seen.add(root.parentSessionId);
+    const parent = sessionsById?.get(root.parentSessionId);
+    if (!parent || parent.machineId !== session.machineId) return false;
+    root = parent;
+  }
+  const view = views?.get(session.machineId);
+  return (
+    view?.machineId === session.machineId &&
+    !!root.id &&
+    view.readSharedSessionIds.includes(root.id)
+  );
 }

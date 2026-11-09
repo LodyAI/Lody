@@ -6,8 +6,8 @@ belong to `platform`. This package never constructs a cloud SDK client.
 
 ```text
 Desktop owner intent → validate current personal ownership
-  → authenticate latest ledger/head and consecutive history
-  → apply complete machine/project switches
+  → authenticate latest ledger/head and its current owner signature
+  → apply complete machine/project switches and independent read-only session grants
   → retain requestId + exact ciphertext + full expected head
   → reconcile request → commit exact original under CAS
 
@@ -76,12 +76,18 @@ may retry. No lock or new wait spans ledger, network or crypto work. A malformed
 input grants no authority; rejected history retains the existing workspace-close
 fence. This does not change withdrawal semantics, TTL or UI polling frequency.
 
-Owner re-signing may read an authenticated historical body after its signer was
-revoked. It preserves the complete project list and signs a new explicit intent
-with a current personal device; that historical body never supplies execution
-evidence or advances an accepted pin. Policy history verification is bounded to
-4096 consecutive versions per read and the same freshness interval. Purged gaps
-without a retained original cannot be skipped; policy-dependent work fails closed.
+Policies are current-only v3; no v2 reader, writer or migration exists. Encrypted
+workspaces have no production data requiring an upgrade path. Read only the latest
+original, including on cold open and before writes. Verify its current owner-personal
+signature, binding and generation; reject revisions below the local pin and differing
+digests at the same revision. Revision gaps and missing intermediate originals are
+allowed. `previousDigest` still participates in server CAS, never client chain traversal.
+
+Revoking the issuer invalidates its grants. The display returns private defaults with
+`needsResign`, without importing the old body. Another active owner-personal device
+can sign explicit new intent at the current CAS head; this starts with empty project
+and session grants. It does not preserve the revoked device's grants automatically.
+A locally retained policy whose issuer is now ineligible yields a denial, never a grant.
 
 The CLI's retained identity remains machine-only, so it can consume policy but
 cannot impersonate a personal owner to publish a change. Its host write method
@@ -89,8 +95,8 @@ returns the ownership refusal for that identity. The desktop exposes only
 `readMachineSharing` (returns generation) and `updateMachineSharing` (requires that
 generation before requestId/change); stale window intents cannot enable a new
 generation. Reads also return current personal-owner authority, the verified
-signer and whether the complete historical policy needs re-signing. Historical
-state remains separate from execution credentials; only an active verified policy
+signer and whether the policy needs re-signing. Invalidated
+state grants nothing; only an active verified policy
 can advance accepted pins. No signing or private-key IPC is introduced. Proxy
 dispatch retains the existing two-actor access intersection;
 entries without authenticated actor evidence remain closed.

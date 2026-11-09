@@ -3177,6 +3177,7 @@ describe('SessionExecutionService', () => {
             ...sharingScope,
             sharedWithTeam: mode === 'other-member-shared',
             projects: [],
+            sessions: [],
             revision: 1,
             previousDigest: null,
             requestId: '81'.repeat(16),

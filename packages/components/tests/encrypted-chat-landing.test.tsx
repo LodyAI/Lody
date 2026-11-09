@@ -142,6 +142,24 @@ async function renderLanding(
       ...TEST_CLOUD_PLATFORM.identity,
       session: createStaticStore({ status: 'authenticated', user: { id: TOUR_USER_ID } }),
     },
+    sessionAccess: {
+      list: async () => [
+        {
+          machineId: 'unshared-owner-machine',
+          canManage: false,
+          readSharedSessionIds: ['private-history', 'archived-private'],
+        },
+      ],
+      read: async (_workspace, machineId) => ({
+        machineId,
+        canManage: false,
+        readSharedSessionIds: ['private-history', 'archived-private'],
+      }),
+      set: async () => {
+        throw new Error('not-owner');
+      },
+      subscribe: () => () => {},
+    },
     cloudApi: {
       useQuery,
       useMutation: () => async () => {
@@ -198,7 +216,7 @@ it('renders the real encrypted chat controller without legacy machines, projects
 // Derived from the independent review probe; only the mobile view leaf is replaced.
 // The controller, action hook, writer, target discovery and LoroRepo are real.
 it.each(['Archive', 'Restore', 'Delete', 'Pin'])(
-  'mobile %s cannot manage another member’s unshared history or its child',
+  'mobile %s applies only permitted read preferences to shared history',
   async (operation) => {
     mobile.enabled = true;
     const repo = await LoroRepo.create({});
@@ -247,7 +265,11 @@ it.each(['Archive', 'Restore', 'Delete', 'Pin'])(
       for (const original of [meta, child]) {
         const entry = await repo.getDocMeta(getSessionRoomId(original.id));
         expect.soft(isLoroRepoDocDeleted(entry)).toBe(false);
-        expect.soft(entry?.meta).toEqual(original);
+        expect
+          .soft(entry?.meta)
+          .toEqual(
+            operation === 'Pin' && original.id === id ? { ...original, isPinned: true } : original
+          );
       }
     } finally {
       await repo.destroy();

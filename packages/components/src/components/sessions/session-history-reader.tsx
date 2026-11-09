@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, type ComponentProps } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
+import { userAtom } from '@/atoms';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import { useSessionAccess } from '@/hooks/use-session-access';
+import { chatLandingSessionStateAtomFamily } from '@/atoms/local-storage-cache';
+import { buildChatLandingDraftKey } from '@/atoms/chat-landing-draft';
+import { buildSessionMentionSlug } from '../mentions/mention-session-source';
+import { isSessionReadShared } from '@/lib/session-visibility';
+import { SessionAccessControl } from '../session-sharing';
+import type { SessionSharingState } from '@/lib/session-sharing';
 import { useRouter } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -102,6 +111,11 @@ export function SessionHistoryView({
   nativeApp = false,
   reserveMacTrafficLightInset = false,
   requiresMachine = false,
+  machineName,
+  onReference,
+  onTogglePin,
+  onMarkUnread,
+  sharing,
 }: {
   sessionId: SessionId;
   title: string;
@@ -114,6 +128,11 @@ export function SessionHistoryView({
   nativeApp?: boolean;
   reserveMacTrafficLightInset?: boolean;
   requiresMachine?: boolean;
+  machineName?: string;
+  onReference?: () => void;
+  onTogglePin?: () => void;
+  onMarkUnread?: () => void;
+  sharing?: SessionSharingState;
 }) {
   const { t } = useTranslation();
   const windowDragClass = useWindowDragRegionClass();
@@ -141,6 +160,7 @@ export function SessionHistoryView({
           </Button>
         )}
         <h1 {...stylex.props(styles.title)}>{title}</h1>
+        {sharing && <SessionAccessControl state={sharing} />}
         <Menu.Root>
           <Menu.Trigger
             render={
@@ -155,6 +175,12 @@ export function SessionHistoryView({
             }
           />
           <Menu.Content align="end">
+            {onTogglePin && (
+              <Menu.Item onClick={onTogglePin}>{t('sessions.access.togglePin')}</Menu.Item>
+            )}
+            {onMarkUnread && (
+              <Menu.Item onClick={onMarkUnread}>{t('sessions.contextMenu.markUnread')}</Menu.Item>
+            )}
             {conversations && conversations.length > 1 && onSelect && (
               <Menu.Submenu>
                 <Menu.SubmenuTrigger>{t('sessions.historyConversations')}</Menu.SubmenuTrigger>
@@ -179,8 +205,17 @@ export function SessionHistoryView({
         </Menu.Root>
       </header>
       <p role="status" {...stylex.props(styles.notice)}>
-        {t('sessions.historyMachineUnavailable')}
+        {t('sessions.access.readonlyMachine', {
+          machine: machineName ?? t('sessions.sharing.thisDevice'),
+        })}
       </p>
+      {onReference && (
+        <div {...stylex.props(styles.notice)}>
+          <Button variant="secondary" size="small" onClick={onReference}>
+            {t('sessions.access.reference')}
+          </Button>
+        </div>
+      )}
       {ready && (
         <span
           hidden
@@ -223,6 +258,9 @@ export function SessionHistoryReader({
   onMobilePresented?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
+  const store = useStore();
+  const sessionAccess = useSessionAccess();
+  const machines = useAtomValue(getMachineMetaMapAtom);
   const router = useRouter();
   const fullscreen = useElectronFullscreen();
   const nativeApp = isNativeAppShell();
@@ -272,10 +310,106 @@ export function SessionHistoryReader({
       toast.success(describeCopiedConversation(stats, t));
     }).catch(() => toast.error(t('sessions.copyConversationHistoryFailed')));
   }, [runtime, ownedHistory, historyReady, exportAllowed, run, sessionId, meta, t]);
+  const preference = async (kind: 'pin' | 'unread') => {
+    if (!runtime || !sessionAccess.port) return;
+    try {
+      const entry = await runtime.repo.getDocMeta(getSessionRoomId(rootSessionId));
+      if (!entry || store.get(activeWorkspaceRuntimeAtom) !== runtime) return;
+      const source = { ...(entry.meta as SessionMeta), id: rootSessionId };
+      const view = await sessionAccess.port.read(runtime.workspaceId, source.machineId);
+      const current = await runtime.repo.getDocMeta(getSessionRoomId(rootSessionId));
+      if (
+        !current ||
+        current.meta.machineId !== source.machineId ||
+        current.meta.parentSessionId !== source.parentSessionId
+      )
+        return;
+      if (
+        store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+        !isSessionReadShared(source, new Map([[view.machineId, view]]))
+      )
+        return;
+      const patch =
+        kind === 'pin'
+          ? { isPinned: !source.isPinned }
+          : { lastReadAt: (source.lastMessageAt ?? 1) - 1 };
+      await runtime.writer.upsertDocMeta(getSessionRoomId(rootSessionId), patch);
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    }
+  };
+  const reference = async () => {
+    if (!runtime || !rootMeta || !sessionAccess.store) return;
+    try {
+      const view = await sessionAccess.store.read(rootMeta.machineId);
+      const current = await runtime.repo.getDocMeta(getSessionRoomId(rootSessionId));
+      if (
+        !current ||
+        current.meta.machineId !== rootMeta.machineId ||
+        current.meta.parentSessionId !== rootMeta.parentSessionId
+      )
+        return;
+      if (
+        store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+        !isSessionReadShared({ ...rootMeta, id: rootSessionId }, new Map([[view.machineId, view]]))
+      )
+        return;
+      const accountId = store.get(userAtom)?.id ?? runtime.accountId ?? null;
+      const draftAtom = chatLandingSessionStateAtomFamily(
+        buildChatLandingDraftKey(accountId, runtime.workspaceSlug)
+      );
+      const draft = store.get(draftAtom);
+      const prefix = draft.prompt && !/\s$/.test(draft.prompt) ? ' ' : '';
+      const mention = `@${buildSessionMentionSlug(rootMeta.title, rootSessionId)}`;
+      const start = draft.prompt.length + prefix.length;
+      store.set(draftAtom, {
+        ...draft,
+        prompt: draft.prompt + prefix + mention + ' ',
+        mentionRanges: [
+          ...(draft.mentionRanges ?? []),
+          { start, end: start + mention.length, value: rootSessionId, kind: 'session' },
+        ],
+      });
+      await router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: runtime.workspaceSlug },
+      });
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    }
+  };
+  const sharing: SessionSharingState = {
+    visibility: 'team',
+    access: 'read',
+    canManage: false,
+    machineId: rootMeta?.machineId ?? null,
+    localProjectId: null,
+    machineName: rootMeta ? (machines.get(rootMeta.machineId)?.name ?? null) : null,
+    projectName: null,
+  };
   return (
     <>
       <SessionHistoryView
         sessionId={sessionId}
+        sharing={sharing}
+        machineName={sharing.machineName ?? undefined}
+        onReference={() => {
+          void reference();
+        }}
+        onTogglePin={
+          sessionAccess.port
+            ? () => {
+                void preference('pin');
+              }
+            : undefined
+        }
+        onMarkUnread={
+          sessionAccess.port
+            ? () => {
+                void preference('unread');
+              }
+            : undefined
+        }
         title={meta?.title || t('sessions.untitled')}
         history={ownedHistory}
         ready={historyReady}
