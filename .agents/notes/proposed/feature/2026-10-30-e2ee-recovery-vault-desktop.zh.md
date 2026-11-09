@@ -149,3 +149,35 @@ electron-builder 的 `mac.provisioningProfile` 能否嵌入 Developer ID profile
 - 上面列出的后端工作。
 
 owner 已随 Spec 修订一并批准 R 凭据参数。
+
+## 网页自助解锁的取舍
+
+[客户端保管 Spec 增量](../../../../specs/e2ee/client-custody.zh.md#网页自助解锁待-owner-审批)
+提议把隔离解锁页用于日常接入新浏览器，尚待 owner 审批。它复用上节的 R→C→普通
+网页配对，区别是让同浏览器交接免手抄安全码，并明确展示两个设备身份。推荐
+PRF＋恢复文件，不新增加密密码；若选密码＋安全码，先审完整 KDF/包装协议。
+
+**为何保留隔离。** 普通网页功能和依赖较多；直接把 V 交给它，会把一次工作区访问
+扩大为整个保险库的恢复权限。只交接已认证配对，把 V/R/PRF 留在隔离页，维持既有
+范围。隔离页被恶意下发代码时仍可窃取这些秘密；这是接受的风险，不是 CSP 能证明
+解决的问题。短密码独自包装 V 还会增加离线猜测面，因此不作为缺少 PRF 的自动退路。
+
+以下仅为 2026-11-10 查阅官方公开资料所得，不是产品逆向、真机验证或独立安全审计。
+“对 Lody 的意义”为设计判断：
+
+| 对象 | 已查证的机制与来源 | 对 Lody 的意义 |
+| --- | --- | --- |
+| 1Password 的密码＋Secret Key 路径 | [官方 SRP 说明](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too)区分双秘密派生 2SKD 与不传密码的 SRP 认证；[Secret Key 说明](https://support.1password.com/secret-key-security/)解释随机秘密加强服务端密文的保护。 | 可以学用户现场开包的体验，不能只复制“密码”输入框便声称等同其安全模型；本提案不改 Lody 登录为 SRP。 |
+| Proton Pass | [安全模型](https://proton.me/blog/proton-pass-security-model)使用 SRP 认证、由密码经 bcrypt 保护用户钥，再打开 vault/item 密钥。 | 浏览器可做分层客户端解密；不证明密码包装可直接接到 Lody 已批准的恢复格式。 |
+| MetaMask 扩展的助记词路径 | [官方 passkey 说明](https://support.metamask.io/configure/wallet/passkeys/)描述本地密码保护 vault、passkey 包装本地加密钥；本地 vault 不随同步 passkey 自动出现在另一安装。此处 SRP 指 Secret Recovery Phrase，不是 Secure Remote Password。 | 扩展的本地保险库不等于普通网站从云端自助取回工作区；不推断其社交登录路径。 |
+| WhatsApp Web 的关联设备 | [官方多设备架构](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/)描述各设备独立身份、通过手机扫码关联，关联后可独立连接。此来源是 2021 年的架构说明。 | 适合保留设备批准入口，不能满足“另一台设备不在手边也能首次解锁”。不据此声称其所有现行流程仍相同。 |
+| WebAuthn PRF | [W3C 标准](https://www.w3.org/TR/webauthn-3/#prf-extension)定义每凭据的 32 字节伪随机输出，可用于加密。 | 普通 passkey 签名不是解密钥；必须验证真实 PRF，兼容性不能只看浏览器名字。 |
+
+**归属与替代检查。** 本 Note 已拥有隔离 Web 解锁和恢复接入理由，因此在此更新，
+不再新建平行 Note。[原批准记录](../../implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
+继续作为批准的历史证据；本提案不取代或改写它。原“显示配对码”仍是获批基线，
+自动交接只在上述 draft 内提出；没有已实施决定被完整替代，不归档、不拒绝其他 Note。
+
+**证据界限。** 本次核对了公开 Spec、`packages/e2ee-core/src/internal/recovery/crypto.ts`
+和固定向量位置，没有运行解锁或配对，也未验证私有部署和 Ryugi 画布。上文早期的
+产品接入、PR 状态与平台缺口是当时核查记录，本提案不把它们当作今天的已核实状态。

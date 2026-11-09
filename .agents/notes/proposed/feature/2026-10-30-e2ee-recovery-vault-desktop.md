@@ -190,3 +190,45 @@ unchanged. Several things remain unverified:
 - the backend work listed above.
 
 The owner approved the R credential parameters with the Spec revision.
+
+## Browser self-unlock trade-offs
+
+The [client custody increment](../../../../specs/e2ee/client-custody.md#browser-self-unlock-pending-owner-review)
+proposes using the isolated unlock page for routine admission of new browsers,
+pending owner approval. It reuses R→C→ordinary Web pairing above, replacing manual
+code copying with same-browser handoff and showing both device identities. Prefer
+PRF plus a recovery file without another encryption password. Selecting password
+plus Secret Key requires review of a complete KDF/wrapping protocol first.
+
+**Why retain isolation.** Ordinary Web has more functionality and dependencies.
+Giving it V expands one workspace visit into recovery authority over the whole
+vault. Passing authenticated pairing while keeping V/R/PRF on the isolated page
+preserves the existing boundary. Maliciously delivered isolated-page code can still
+steal these secrets; CSP cannot establish otherwise. A short password alone also
+adds offline guessing exposure, so it is not an automatic fallback for missing PRF.
+
+The following was checked in official public sources on 2026-11-10. This is not
+reverse engineering, device testing or an independent security audit. Implications
+for Lody are design judgments:
+
+| Product | Verified mechanism and source | Implication for Lody |
+| --- | --- | --- |
+| 1Password password plus Secret Key path | Its [SRP explanation](https://1password.com/blog/developers-how-we-use-srp-and-you-can-too) distinguishes two-secret derivation from authentication without transmitting the password. Its [Secret Key guide](https://support.1password.com/secret-key-security/) explains strengthening protection of server ciphertext with a random secret. | Borrow local unlocking, without claiming an equivalent model from merely adding a password field. This proposal does not migrate Lody authentication to SRP. |
+| Proton Pass | Its [security model](https://proton.me/blog/proton-pass-security-model) describes SRP authentication, password/bcrypt protection of the user key, then vault/item keys. | Layered client decryption can work in browsers; its password wrapper does not establish compatibility with Lody recovery formats. |
+| MetaMask Extension seed-phrase path | Its [passkey guide](https://support.metamask.io/configure/wallet/passkeys/) describes a password-protected local vault and passkey wrapping of the local encryption key. Syncing a passkey does not transfer that vault to another installation. Here SRP means Secret Recovery Phrase, not Secure Remote Password. | An extension-local vault does not establish ordinary website recovery of cloud workspace keys. No inference about its social-login path. |
+| WhatsApp Web linked devices | Its [multi-device architecture](https://engineering.fb.com/2021/07/14/security/whatsapp-multi-device/) describes independent identities, phone QR linking and independent operation afterward. This is a 2021 architecture source. | Keep device approval as an alternative; it does not supply first unlock without another device. No claim that every current flow is unchanged. |
+| WebAuthn PRF | The [W3C specification](https://www.w3.org/TR/webauthn-3/#prf-extension) defines per-credential 32-byte pseudorandom outputs usable for encryption. | A normal passkey signature is not a decryption key. Verify actual PRF rather than a browser name. |
+
+**Ownership and supersession.** This note already owns isolated Web unlock and
+recovery integration rationale, so it is updated instead of adding a parallel
+note. The [approval record](../../implemented/architecture/2026-10-28-e2ee-spec-approval.md)
+remains historical approval evidence, not replaced or rewritten by this proposal.
+Showing a pairing code remains the approved baseline; automatic handoff is proposed
+only in the draft increment. No implemented decision is fully superseded and no
+other note is archived or rejected.
+
+**Evidence limits.** This work inspected public Specs,
+`packages/e2ee-core/src/internal/recovery/crypto.ts` and the fixed-vector location.
+No unlock or pairing was executed, and neither private deployment nor the Ryugi
+artboard was verified. Earlier product-integration, PR-state and platform-gap
+statements above are historical inspections, not current facts established here.
