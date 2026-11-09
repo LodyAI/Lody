@@ -699,6 +699,8 @@ export interface MessageHandlerConfig {
    * process boundary owns the actual exit/restart behavior.
    */
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   /** The fleet's access verdict for this workspace; cloud daemon commands resolve from it. */
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
@@ -793,6 +795,8 @@ export class MessageHandler {
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
+  private readonly isMachineIdentityRestoreIdle?: () => boolean;
+  private readonly sealMachineIdentityRestore?: () => boolean;
   private readonly store = new SessionTransientStore();
   private readonly historyOwnerAbort = new AbortController();
   private readonly historyWatchAbort = new AbortController();
@@ -3212,6 +3216,8 @@ export class MessageHandler {
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
+    this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
+    this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
     this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
       launchMode: 'foreground',
@@ -3728,8 +3734,9 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             requestId,
           }),
-        restartMachine: async ({ requesterUserId, requestToken, requestId }) =>
+        restartMachine: async ({ requesterUserId, requestToken, requestId, restoreMachineId }) =>
           await this.prepareMachineRestart({
+            restoreMachineId,
             requesterUserId,
             requestToken,
             requestId,
@@ -9973,6 +9980,7 @@ export class MessageHandler {
   }
 
   private async prepareMachineRestart(args: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -9999,11 +10007,26 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId && args.requesterUserId !== this.userId) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the signed-in daemon owner can restore its machine identity.'
+      );
+    }
+    if (args.restoreMachineId && !this.isMachineIdentityRestoreIdle?.()) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'error',
+        'Stop all tasks on this daemon before restoring its identity.'
+      );
+    }
     const verified = await verifyMachineLifecycleRequest({
       token: this.token,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       action: 'restart',
+      restoreMachineId: args.restoreMachineId,
       requesterUserId: args.requesterUserId,
       requestId: args.requestId,
       requestToken: args.requestToken,
@@ -10017,6 +10040,41 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId) {
+      if (!this.isMachineIdentityRestoreIdle?.()) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'Stop all tasks on this daemon before restoring its identity.'
+        );
+      }
+      const { prepareMachineIdentityRestore, cancelPreparedMachineIdentityRestore } =
+        await import('./machine-identity-restore');
+      const prepared = await prepareMachineIdentityRestore({
+        workspaceId: this.workspaceId,
+        sourceMachineId: this.machineId,
+        targetMachineId: args.restoreMachineId,
+        requestId: args.requestId,
+        requesterUserId: args.requesterUserId,
+      });
+      if (!prepared) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'already_pending',
+          'This identity restore is already pending.'
+        );
+      }
+      // Recheck after disk I/O and synchronously close every workspace's intake.
+      // No task can enter between this acceptance and the bounded restart ACK.
+      if (!this.sealMachineIdentityRestore?.()) {
+        await cancelPreparedMachineIdentityRestore(args.requestId);
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'The daemon started another task. Stop all tasks and retry recovery.'
+        );
+      }
+    }
     this.pendingProcessLifecycleAction = {
       action: 'restart',
       exitCode: EXIT_CODE_REMOTE_RESTART,
@@ -10138,9 +10196,10 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
     const response = await this.prepareMachineRestart(message);
-    dispatchContext.send(response);
-    if (response.accepted) {
-      this.triggerPendingProcessLifecycleAction(response.requestId);
+    try {
+      dispatchContext.send(response);
+    } finally {
+      if (response.accepted) this.triggerPendingProcessLifecycleAction(response.requestId);
     }
   }
 
@@ -11599,9 +11658,18 @@ export class MessageHandler {
     };
   }
 
-  /**
-   * Flush pending ACP updates and tear down session resources.
-   */
+  /** Stop intake synchronously after the daemon-wide idle check wins. */
+  stopNewIdentityRestoreDispatch(): void {
+    this.executionService.stopNewIdentityRestoreExecutions();
+    this.sessionDispatchWatcher.stop();
+    void this.operationCoordinator
+      .stop()
+      .catch((cause) =>
+        this.logger.warn('Identity restore retains Inbox shutdown for cleanup', cause)
+      );
+  }
+
+  /** Flush pending ACP updates and tear down session resources. */
   async prepareForShutdown(): Promise<void> {
     this.acpInteractionStopping = true;
     await (await this.acpInteractionOwner)?.close();
@@ -12080,6 +12148,10 @@ export class MessageHandler {
    */
   getActiveTurnCount(): number {
     return this.sessionActivePresence.activeSessionCount();
+  }
+
+  isIdentityRestoreExecutionIdle(): boolean {
+    return this.getActiveTurnCount() === 0 && this.executionService.isMachineIdentityRestoreIdle();
   }
 
   private logCodeCollabDebug(message: string): void {

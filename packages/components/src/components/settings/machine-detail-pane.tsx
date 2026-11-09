@@ -1,3 +1,4 @@
+import { MachineIdentityRestore } from './machine-identity-restore';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -401,6 +402,8 @@ export type MachineDetailPaneProps = {
   onPing?: (machineId: MachineId) => Promise<number>;
   daemonUpdate?: { currentVersion: string; latestVersion: string };
   onRestartDaemon?: (machineId: MachineId) => Promise<void>;
+  onRestoreIdentity?: (source: MachineId, target: MachineId) => Promise<void>;
+  restoreIdentityCandidates?: MachineViewMeta[];
   onUpgradeDaemon?: (machineId: MachineId, targetVersion: string) => Promise<void>;
   canRevokeCredentials?: boolean;
   /** Must reject on failure so the confirm dialog stays open; the callback owns
@@ -997,6 +1000,15 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
           />
         )}
       </div>
+
+      {mode === 'devices' && isOwn && !readOnly && props.onRestoreIdentity ? (
+        <MachineIdentityRestore
+          key={machine.id}
+          machine={machine}
+          candidates={props.restoreIdentityCandidates ?? []}
+          onRestore={props.onRestoreIdentity}
+        />
+      ) : null}
 
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialog.Content>

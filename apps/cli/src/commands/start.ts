@@ -150,6 +150,19 @@ export const startCommand = new Command('start')
     }
     const supervisorIdentity =
       identityResolution.status === 'supervised' ? identityResolution.identity : null;
+    if (supervisorIdentity?.launchMode === 'daemon' && getCliPlatformKind() === 'cloud') {
+      const { applyPendingMachineIdentityRestore, machineIdentityRestoreStartupExitCode } =
+        await import('@/lib/machine-identity-restore');
+      try {
+        await applyPendingMachineIdentityRestore();
+      } catch (error) {
+        logger.error(
+          'Machine identity restore could not finish. Its intent and available recovery files are retained; inspect this error before changing credentials.',
+          error
+        );
+        process.exit(machineIdentityRestoreStartupExitCode(error));
+      }
+    }
     const machineLifecycleCapability = resolveMachineLifecycleCapability(
       supervisorIdentity?.launchMode
     );

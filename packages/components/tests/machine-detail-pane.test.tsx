@@ -176,3 +176,51 @@ describe('MachineDetailPane revoke machine access', () => {
     expect(document.body.querySelector('button[aria-label="Remove from workspace"]')).toBeNull();
   });
 });
+
+describe('advanced daemon identity restore', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  beforeEach(async () => {
+    await initI18n();
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  it('keeps recovery folded and cannot submit without an old identity', async () => {
+    const { MachineIdentityRestore } =
+      await import('../src/components/settings/machine-identity-restore');
+    await act(async () =>
+      root.render(
+        <MachineIdentityRestore
+          machine={machine}
+          candidates={[]}
+          onRestore={async () => {
+            throw new Error('must not run');
+          }}
+        />
+      )
+    );
+    expect(document.body.textContent).not.toContain('Choose old identity');
+    const advanced = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Advanced recovery')
+    );
+    if (!advanced) throw new Error('Missing advanced recovery trigger');
+    await click(advanced);
+    const choose = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Choose old identity'
+    );
+    if (!choose) throw new Error('Missing recovery action');
+    await click(choose);
+    const dialog = findConfirmDialog();
+    expect(dialog.textContent).toContain('permanently stopped');
+    expect(dialog.textContent).toContain('No other offline machine identities');
+    const submit = Array.from(dialog.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('restore and restart')
+    );
+    expect(submit?.disabled).toBe(true);
+  });
+});

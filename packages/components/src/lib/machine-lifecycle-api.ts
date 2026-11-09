@@ -88,12 +88,14 @@ export async function mintMachineLifecycleRequestToken({
   action,
   requestId,
   targetVersion,
+  restoreMachineId,
   sessionToken,
   authBaseUrl,
 }: {
   workspaceId: string;
   machineId: string;
   action: MachineLifecycleAction;
+  restoreMachineId?: string;
   requestId: string;
   targetVersion?: string;
   sessionToken: string;
@@ -123,6 +125,7 @@ export async function mintMachineLifecycleRequestToken({
           action,
           requestId,
           ...(action === 'upgrade' && targetVersion ? { targetVersion } : {}),
+          ...(restoreMachineId ? { restoreMachineId } : {}),
         }),
       }
     );

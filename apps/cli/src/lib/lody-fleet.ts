@@ -210,6 +210,7 @@ export class LodyFleet {
   private unsubscribeWorkspaces: (() => void) | null = null;
   private stopped = false;
   private shutdownReceipt: Promise<void> | undefined;
+  private identityRestorePending = false;
   private shutdownRecovery: Promise<void> | undefined;
   private localServiceReleaseFailure: unknown;
   private globalShutdownReceipt: Promise<void> | undefined;
@@ -946,11 +947,21 @@ export class LodyFleet {
     this.reconcileRetryDelayMs = 0;
   }
 
+  private isIdentityRestoreIdle(): boolean {
+    return (
+      !this.identityRestorePending &&
+      !this.stopped &&
+      this.startInFlight.size === 0 &&
+      [...this.runtimes.values()].every(({ lody }) => lody.isMachineIdentityRestoreIdle())
+    );
+  }
+
   /** A start may proceed only for a desired workspace that is not waiting for a
    * fresh identity; re-checked after every await in startWorkspace. */
   private mayStart(workspaceId: string): boolean {
     return (
       !this.stopped &&
+      !this.identityRestorePending &&
       !this.e2eeResets.has(workspaceId) &&
       this.desiredWorkspaces.has(workspaceId) &&
       !this.waitingForPairing.has(workspaceId)
@@ -1116,6 +1127,13 @@ export class LodyFleet {
             this.cleanupLocalProjectWorktreeSetupIfUnreferenced(localProjectId),
           onFatalAuthFailure: this.onFatalAuthFailure,
           onProcessLifecycleAction: this.onProcessLifecycleAction,
+          isMachineIdentityRestoreIdle: () => this.isIdentityRestoreIdle(),
+          sealMachineIdentityRestore: () => {
+            if (!this.isIdentityRestoreIdle()) return false;
+            this.identityRestorePending = true;
+            for (const { lody } of this.runtimes.values()) lody.stopNewIdentityRestoreDispatch();
+            return true;
+          },
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
 

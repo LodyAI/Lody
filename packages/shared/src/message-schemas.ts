@@ -1262,6 +1262,7 @@ export const MachineLifecycleDispositionSchema = z.enum([
 export const MachineRestartRequestSchema = z
   .object({
     type: z.literal('machine/restart'),
+    restoreMachineId: MachineIdSchema.optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     requesterUserId: SharedTrimmedNonEmptyStringSchema,
