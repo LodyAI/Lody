@@ -179,6 +179,17 @@ use native pickers in the computer's time zone. Owners can run, pause or resume
 supported tasks and open the last conversation. Teammates' tasks and scheduled
 messages retain their existing read-only rules, and deletion requires confirmation.
 
+Within the current Home page, list snapshots, opened details and editor choices
+stay in memory for the selected account/workspace. Returning to a loaded editor
+shows its snapshot immediately while detail and choices refresh independently;
+failed refreshes retain existing content, and refreshes preserve unsaved edits.
+Cached details can be edited immediately; Save waits for fresh detail validation
+and blocks when the refresh detects changed remote content.
+Pause/resume preview their state immediately and roll back on failure, with the
+existing unknown-outcome warning when a reply is lost. Pending commands fence
+older reads; account/workspace changes discard snapshots and late responses.
+The runtime still re-reads current data before mutations. App restarts load afresh.
+
 ### Code Diffs & Workspace File Browsing
 
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.

@@ -18,6 +18,11 @@ final class ScheduleEditorController: LodyFormController {
   var openChat: ((ScheduleItem) -> Void)?
 
   private var stateRevision = 0
+  private var draftRevision = 0
+  private var draftConflict = false
+  private var detailValidated = false
+  private var loadRevision = 0
+  private let cache: ScheduleCache
   private let workspaceId: String
   private var item: ScheduleItem?
   private let zones: RuntimeContract.SchedulesResult?
@@ -70,12 +75,13 @@ final class ScheduleEditorController: LodyFormController {
   private let spinner = UIActivityIndicatorView(style: .medium)
   private lazy var saveItem = Self.barButton(symbol: "checkmark", label: text("save"), prominent: true) { [weak self] in self?.save() }
 
-  init(workspaceId: String, item: ScheduleItem?, zones: RuntimeContract.SchedulesResult?, catalog: SessionCatalog, service: ScheduleService) {
+  init(workspaceId: String, item: ScheduleItem?, zones: RuntimeContract.SchedulesResult?, catalog: SessionCatalog, service: ScheduleService, cache: ScheduleCache = ScheduleCache()) {
     self.workspaceId = workspaceId
     self.item = item
     self.zones = zones
     self.catalog = catalog
     self.service = service
+    self.cache = cache
     scheduleId = item?.scheduleId ?? UUID().uuidString.lowercased()
     super.init(nibName: nil, bundle: nil)
     title = item?.title ?? text("new")
@@ -154,37 +160,77 @@ final class ScheduleEditorController: LodyFormController {
   }
 
   private func load() {
+    guard cache.valid, !cache.pending.contains(scheduleId) else { return }
+    loadRevision += 1
+    let generation = loadRevision
+    let revision = stateRevision
+    detailValidated = false
     loadFailure = nil
-    spinner.startAnimating()
+    options = options ?? cache.options
+    if !loaded {
+      if !isNew, let cached = cache.details[scheduleId] {
+        apply(cached)
+      } else if isNew, options != nil {
+        apply(nil)
+      }
+    }
+    if !loaded { spinner.startAnimating() }
     rebuild()
-    Task { [weak self, service = service, workspaceId = workspaceId, scheduleId = scheduleId, isNew = isNew] in
-      var options: CreationOptions?
-      var detail: RuntimeContract.ScheduleDetail?
-      var failure: String?
+    // Each read publishes independently, so slow choices cannot hide the schedule.
+    if !isNew {
+      Task { [weak self, service = service, workspaceId = workspaceId, scheduleId = scheduleId] in
+        do {
+          let fresh = try await service.detail(workspaceId, scheduleId)
+          guard let self, self.cache.valid, !self.cache.pending.contains(scheduleId), self.loadRevision == generation, self.stateRevision == revision else { return }
+          self.detailValidated = true
+          self.cache.details[scheduleId] = fresh
+          self.cache.update(fresh.item)
+          self.spinner.stopAnimating()
+          if self.draftRevision == 0 {
+            self.apply(fresh)
+          } else {
+            self.observe(fresh)
+            self.rebuild()
+          }
+        } catch {
+          guard let self, self.cache.valid, !self.cache.pending.contains(scheduleId), self.loadRevision == generation, self.stateRevision == revision else { return }
+          self.spinner.stopAnimating()
+          self.loadFailure = ScheduleFailure.message(error, write: false)
+          self.rebuild()
+        }
+      }
+    }
+    Task { [weak self, service = service, workspaceId = workspaceId] in
       do {
-        if !isNew { detail = try await service.detail(workspaceId, scheduleId) }
+        let fresh = try await service.options(workspaceId)
+        guard let self, self.cache.valid, self.loadRevision == generation else { return }
+        self.cache.options = fresh
+        self.options = fresh
+        if self.isNew, !self.loaded {
+          self.spinner.stopAnimating()
+          self.apply(nil)
+        } else {
+          // Refresh labels and menus without resetting any selected value.
+          self.render()
+        }
       } catch {
-        failure = ScheduleFailure.message(error, write: false)
+        guard let self, self.cache.valid, self.loadRevision == generation else { return }
+        if self.isNew {
+          self.spinner.stopAnimating()
+          self.loadFailure = self.text("loadOptionsError")
+          self.rebuild()
+        }
       }
-      // Choices are optional for a read-only page; the item still names its computer and Agent.
-      options = try? await service.options(workspaceId)
-      if isNew, options == nil, failure == nil { failure = self?.text("loadOptionsError") }
-      guard let self else { return }
-      self.spinner.stopAnimating()
-      if let failure {
-        self.loadFailure = failure
-        self.rebuild()
-        return
-      }
-      self.options = options
-      self.apply(detail)
     }
   }
 
   private func apply(_ detail: RuntimeContract.ScheduleDetail?) {
     self.detail = detail
+    draftConflict = false
     if let detail {
       item = detail.item
+      nameField.text = detail.item.title
+      destination = detail.item.destination == .ownSession ? .ownSession : .newSession
       machineId = detail.item.machineId
       agentId = detail.item.agentConfigId
       rule = detail.item.rule
@@ -290,8 +336,10 @@ final class ScheduleEditorController: LodyFormController {
       errorLabel.text = loadFailure
       let retry = LodyFormButton.make(id: "schedule-retry", title: text("retry")) { [weak self] in self?.load() }
       stack.addArrangedSubview(LodyFormGroup(retry))
-      render()
-      return
+      if !loaded {
+        render()
+        return
+      }
     }
     if !loaded {
       spinner.translatesAutoresizingMaskIntoConstraints = false
@@ -456,7 +504,7 @@ final class ScheduleEditorController: LodyFormController {
   /// Refreshes titles, menus and enablement without rebuilding rows.
   private func render() {
     guard isViewLoaded else { return }
-    errorLabel.text = loadFailure ?? failure
+    errorLabel.text = loadFailure ?? (draftConflict ? text("error.schedule_conflict") : failure)
     errorLabel.superview?.isHidden = errorLabel.text?.isEmpty ?? true
     let editable = !locked
     nameField.isEnabled = editable
@@ -585,7 +633,7 @@ final class ScheduleEditorController: LodyFormController {
   private func barItems() -> [UIBarButtonItem] {
     var items: [UIBarButtonItem] = []
     if !readOnly, !chatBound {
-      saveItem.isEnabled = loaded && !busy && supported && draft() != nil
+      saveItem.isEnabled = loaded && !busy && canSaveDraft && supported && draft() != nil
       items.append(saveItem)
     }
     return items
@@ -594,6 +642,7 @@ final class ScheduleEditorController: LodyFormController {
   // MARK: Edits
 
   private func edited(rebuild structural: Bool = false) {
+    draftRevision += 1
     failure = ""
     if structural { rebuild() } else { render() }
   }
@@ -718,29 +767,52 @@ final class ScheduleEditorController: LodyFormController {
     )
   }
 
+  private var canSaveDraft: Bool {
+    (isNew || detailValidated) && (!draftConflict || pendingSave.map { $0.draft == draft() } == true)
+  }
+
   private func save() {
-    guard !busy, !locked, supported, let draft = draft() else { return }
+    guard cache.valid, !cache.pending.contains(scheduleId), canSaveDraft, !busy, !locked, supported, let draft = draft() else { return }
     let requestId = pendingSave.flatMap { $0.draft == draft ? $0.requestId : nil } ?? ScheduleService.requestId()
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: isNew ? .create : .edit, scheduleId: scheduleId, requestId: requestId, draft: draft
     )
     stateRevision += 1
+    cache.pending.insert(scheduleId)
+    cache.details[scheduleId] = nil
     busy = true
     failure = ""
     render()
     view.endEditing(true)
-    Task { [weak self, service = service] in
+    Task { [weak self, service = service, cache = cache] in
+      guard cache.valid else { return }
       do {
         _ = try await service.command(params)
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        // The command returns only an id. Read the saved item before publishing the list.
+        let fresh = try? await service.detail(params.workspaceId, params.scheduleId)
+        guard cache.valid else { return }
+        if let fresh {
+          cache.details[params.scheduleId] = fresh
+          cache.update(fresh.item)
+        } else {
+          cache.result = nil
+        }
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
-        self.busy = false
         self.pendingSave = nil
+        self.busy = false
         self.changed?()
         LodyShell.shared.close(from: self)
       } catch {
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
         self.busy = false
         self.pendingSave = ScheduleFailure.unknown(error) ? (requestId, draft) : nil
+        self.changed?()
         self.failure = ScheduleFailure.message(error, write: true)
         self.render()
       }
@@ -748,7 +820,7 @@ final class ScheduleEditorController: LodyFormController {
   }
 
   private func confirmDelete() {
-    guard let item else { return }
+    guard cache.valid, let item else { return }
     let alert = UIAlertController(
       title: String(format: text("deleteTitle"), item.title),
       message: text(item.scheduledMessage ? "deleteMessageHelp" : "deleteHelp"), preferredStyle: .alert
@@ -760,18 +832,30 @@ final class ScheduleEditorController: LodyFormController {
 
   /// Pause, resume, run and delete act on the stored schedule at once, each with a fresh key.
   private func command(_ action: ScheduleAction) {
-    guard let item, item.isOwner, !busy else { return }
+    guard cache.valid, !cache.pending.contains(scheduleId), let item, item.isOwner, !busy else { return }
     if action == .resume || action == .run, !supported { return }
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: action, scheduleId: item.scheduleId, requestId: ScheduleService.requestId()
     )
     stateRevision += 1
+    cache.pending.insert(scheduleId)
+    cache.details[scheduleId] = nil
     busy = true
     failure = ""
+    if let optimistic = ScheduleCache.optimistic(item, action: action) {
+      self.item = optimistic
+      cache.update(optimistic)
+      changed?()
+    }
     render()
-    Task { [weak self, service = service] in
+    Task { [weak self, service = service, cache = cache] in
+      guard cache.valid else { return }
       do {
         _ = try await service.command(params)
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        if action == .delete { cache.remove(params.scheduleId) }
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
         self.busy = false
         self.changed?()
@@ -782,13 +866,18 @@ final class ScheduleEditorController: LodyFormController {
           LodyToastOverlay.shared.show(message: String(format: self.text("runStarted"), item.title), kind: .neutral)
           self.render()
         default:
-          self.item?.enabled = action == .resume
           self.render()
           await self.refreshState()
         }
       } catch {
+        guard cache.valid else { return }
+        cache.details[params.scheduleId] = nil
+        cache.update(item)
+        cache.pending.remove(params.scheduleId)
         guard let self else { return }
         self.busy = false
+        self.item = item
+        self.changed?()
         self.failure = ScheduleFailure.message(error, write: true)
         self.render()
       }
@@ -797,10 +886,32 @@ final class ScheduleEditorController: LodyFormController {
 
   /// After a command, the stored state (next run, paused) for the header; edits in progress stay.
   private func refreshState() async {
+    guard cache.valid else { return }
     let revision = stateRevision
-    guard let fresh = try? await service.detail(workspaceId, scheduleId), revision == stateRevision else { return }
-    item = fresh.item
+    guard let fresh = try? await service.detail(workspaceId, scheduleId), cache.valid, !cache.pending.contains(scheduleId), revision == stateRevision else { return }
+    detailValidated = true
+    cache.details[scheduleId] = fresh
+    cache.update(fresh.item)
+    changed?()
+    observe(fresh)
     render()
+  }
+
+  /// Keep the detail that seeded the form as its baseline. Header refreshes must not silently
+  /// rebase old fields onto a remote edit. Status-only changes (including pause) are harmless.
+  private func observe(_ fresh: RuntimeContract.ScheduleDetail) {
+    if let baseline = detail {
+      draftConflict = baseline.item.title != fresh.item.title
+        || baseline.item.machineId != fresh.item.machineId
+        || baseline.item.agentConfigId != fresh.item.agentConfigId
+        || baseline.item.rule != fresh.item.rule
+        || baseline.item.destination != fresh.item.destination
+        || baseline.prompt != fresh.prompt
+        || baseline.modelId != fresh.modelId
+        || baseline.modeId != fresh.modeId
+        || baseline.project != fresh.project
+    }
+    item = fresh.item
   }
 
   private func text(_ key: String) -> String { ScheduleFormat.text(key) }

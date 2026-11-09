@@ -35,6 +35,10 @@ enum NativeDebug {
       LodyShell.shared.pushRootNative(NativeDebugController(), title: "Debug")
       return
     }
+    if scenario.hasPrefix("schedule-fixture-") {
+      ScheduleFixture.shared.control(String(scenario.dropFirst("schedule-fixture-".count)))
+      return
+    }
     if scenario.hasPrefix("toast-") {
       guard LodyUIVerify.enabled, let presenter = LodyShell.shared.presenter else { return }
       LodyToastOverlay.shared.dismiss()

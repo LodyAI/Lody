@@ -5,6 +5,41 @@ typealias ScheduleItem = RuntimeContract.ScheduleItem
 typealias ScheduleRule = RuntimeContract.ScheduleRule
 typealias ScheduleAction = RuntimeContract.ScheduleCommandParamsAction
 
+/// Display snapshots owned by the Schedules page, shared with its pushed editors.
+/// Account/workspace changes invalidate the owner and every outstanding response.
+@MainActor
+final class ScheduleCache {
+  var valid = true
+  var pending = Set<String>()
+  var result: RuntimeContract.SchedulesResult?
+  var details: [String: RuntimeContract.ScheduleDetail] = [:]
+  var options: CreationOptions?
+
+  func update(_ item: ScheduleItem) {
+    guard valid else { return }
+    if let index = result?.items.firstIndex(where: { $0.scheduleId == item.scheduleId }) {
+      result?.items[index] = item
+    }
+    details[item.scheduleId]?.item = item
+  }
+
+  func remove(_ id: String) {
+    result?.items.removeAll { $0.scheduleId == id }
+    details[id] = nil
+  }
+
+  static func optimistic(_ item: ScheduleItem, action: ScheduleAction) -> ScheduleItem? {
+    guard action == .pause || action == .resume else { return nil }
+    var value = item
+    value.enabled = action == .resume
+    // The next execution time comes only from the runtime's reconciliation.
+    value.state = action == .pause
+      ? .init(group: .paused, kind: .paused)
+      : .init(group: .running, kind: .notScheduled)
+    return value
+  }
+}
+
 /// Schedule I/O through the runtime's `schedules` / `scheduleDetail` / `scheduleCommand` calls, plus
 /// the creation options the editor picks computers, agents, models and modes from. Injected so the
 /// offline Home fixture scripts every outcome.

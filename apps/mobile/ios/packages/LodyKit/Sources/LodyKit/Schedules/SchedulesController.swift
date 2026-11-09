@@ -23,7 +23,11 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var list: UICollectionView!
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
-  private var result: RuntimeContract.SchedulesResult?
+  private var cache = ScheduleCache()
+  private var result: RuntimeContract.SchedulesResult? {
+    get { cache.result }
+    set { cache.result = newValue }
+  }
   private var items: [String: ScheduleItem] = [:]
   private var loading = false
   private var failure: String?
@@ -32,7 +36,6 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var counts: [RuntimeContract.ScheduleStateGroup: Int] = [:]
   private var scope = ""
   private var version = 0
-  private var busy = Set<String>()
   private var observers: [NSObjectProtocol] = []
   private var clock: Timer?
 
@@ -156,6 +159,9 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let next = source.state.key
     guard next != scope else { return }
     scope = next
+    cache.valid = false
+    cache = ScheduleCache()
+    failure = nil
     result = nil
     items = [:]
     reload()
@@ -164,6 +170,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private func reload() {
     guard isViewLoaded else { return }
     let state = source.state
+    guard cache.pending.isEmpty else { refresh.endRefreshing(); return }
     version += 1
     let id = version
     guard !state.workspaceId.isEmpty else {
@@ -181,9 +188,13 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       var failure: String?
       do { value = try await service.list(workspaceId) }
       catch { failure = ScheduleFailure.message(error, write: false) }
-      guard let self, self.version == id else { return }
+      guard let self, self.version == id, self.source.state.key == state.key, self.cache.pending.isEmpty else { return }
       // A failed refresh keeps the last list; the error shows only when there is nothing to show.
-      if let value { self.result = value }
+      if let value {
+        self.result = value
+        let ids = Set(value.items.map(\.scheduleId))
+        self.cache.details = self.cache.details.filter { ids.contains($0.key) }
+      }
       if pulled, self.result != nil, let failure { LodyToastOverlay.shared.show(message: failure, kind: .error) }
       self.failure = failure
       self.loading = false
@@ -355,17 +366,24 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   private func open(_ item: ScheduleItem?) {
+    if let item, cache.pending.contains(item.scheduleId) { return }
     let editor = ScheduleEditorController(
-      workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service
+      workspaceId: source.state.workspaceId, item: item, zones: result, catalog: source.state.catalog, service: service, cache: cache
     )
-    editor.changed = { [weak self] in self?.reload() }
+    let owner = cache
+    editor.changed = { [weak self] in
+      guard let self, self.cache === owner, owner.valid else { return }
+      self.version += 1
+      self.render(reconfigure: true)
+      self.reload()
+    }
     editor.openChat = { [weak self] item in self?.openChat(item) }
     LodyShell.shared.pushNative(editor, title: item?.title ?? ScheduleFormat.text("new"), from: self)
   }
 
   /// Owner-only commands; resume and run also need a computer whose CLI runs schedules.
   private func actions(_ item: ScheduleItem) -> [ScheduleAction] {
-    guard item.isOwner, !busy.contains(item.scheduleId) else { return [] }
+    guard item.isOwner, !cache.pending.contains(item.scheduleId) else { return [] }
     var result: [ScheduleAction] = []
     if !item.scheduledMessage, item.machineSupported { result.append(.run) }
     if !item.scheduledMessage, item.rule.kind != .manual {
@@ -422,21 +440,32 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   private func perform(_ action: ScheduleAction, _ item: ScheduleItem) {
     let workspaceId = source.state.workspaceId
-    guard !workspaceId.isEmpty, busy.insert(item.scheduleId).inserted else { return }
+    guard !workspaceId.isEmpty, actions(item).contains(action), cache.pending.insert(item.scheduleId).inserted else { return }
+    let owner = cache
+    let original = items[item.scheduleId] ?? item
+    version += 1 // A read started before this intent must not undo its preview.
+    if let optimistic = ScheduleCache.optimistic(original, action: action) { cache.update(optimistic) }
+    render(reconfigure: true)
     let params = RuntimeContract.ScheduleCommandParams(
       workspaceId: workspaceId, action: action, scheduleId: item.scheduleId, requestId: ScheduleService.requestId()
     )
     Task { [weak self, service] in
       do {
         _ = try await service.command(params)
+        guard let self, self.cache === owner, owner.valid else { return }
+        if action == .delete { owner.remove(item.scheduleId) }
+        owner.details[item.scheduleId] = nil
         if action == .run {
           LodyToastOverlay.shared.show(message: String(format: ScheduleFormat.text("runStarted"), item.title), kind: .neutral)
         }
       } catch {
+        guard let self, self.cache === owner, owner.valid else { return }
+        owner.update(original)
         LodyToastOverlay.shared.show(message: ScheduleFailure.message(error, write: true), kind: .error)
       }
-      guard let self else { return }
-      self.busy.remove(item.scheduleId)
+      guard let self, self.cache === owner, owner.valid else { return }
+      self.cache.pending.remove(item.scheduleId)
+      self.render(reconfigure: true)
       self.reload()
     }
   }
