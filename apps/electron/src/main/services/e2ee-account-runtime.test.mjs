@@ -99,7 +99,8 @@ async function account(options = {}) {
       return () => {}
     },
     getCachedSessionIdentity: () => ({ ...identity }),
-    getBootstrapSession: () => new Promise(() => {})
+    getBootstrapSession: () => new Promise(() => {}),
+    ...options.auth
   }
   const warnings = []
   const api = await load(
@@ -5473,3 +5474,106 @@ void test(
     assert.equal((await f.joiner.open('team')).hasCurrentKey, true)
   }
 )
+
+/** A sign-in server that answers only when told to: each call stays pending until its
+ * caller cancels it or the test answers it. */
+function slowSignIn() {
+  const pending = new Set()
+  return {
+    pending,
+    convexToken: (_options, signal) =>
+      new Promise((resolve, reject) => {
+        const call = { resolve }
+        pending.add(call)
+        signal?.addEventListener(
+          'abort',
+          () => {
+            pending.delete(call)
+            reject(signal.reason)
+          },
+          { once: true }
+        )
+      }),
+    answerAll: () => {
+      for (const call of pending) call.resolve({ data: { token: 'synthetic-auth-jwt' } })
+      pending.clear()
+    }
+  }
+}
+/** The account's own cloud client against one synthetic history endpoint. */
+async function slowSignInAccount(t, signIn) {
+  const directory = await mkdtemp(join(tmpdir(), 'desktop-slow-sign-in-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const { api } = await account({
+    directory,
+    auth: { convexToken: signIn.convexToken },
+    cloud: (input) =>
+      makeE2eeCloudClient({
+        ...input,
+        deploymentUrl: 'https://synthetic.convex.cloud',
+        fetch: async () =>
+          Response.json({
+            status: 'success',
+            value: {
+              workspaceId: 'workspace',
+              genesisHash: '11'.repeat(32),
+              checkpoint: { headHash: '11'.repeat(32), length: 1 },
+              startIndex: 1,
+              recordsHex: [],
+              position: 'p1:workspace:1:synthetic',
+              nextCursor: null
+            }
+          })
+      })
+  })
+  t.after(() => api.closeDesktopE2eeAccount())
+  return api
+}
+const settle = async (until) => {
+  for (let turn = 0; turn < 200 && !until(); turn++)
+    await new Promise((resolve) => setImmediate(resolve))
+}
+void test('quitting ends a request waiting on a slow sign-in token within the quit budget', async (t) => {
+  // Injected clock: the 15 s quit budget and the 30 s request deadline only pass when ticked.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const signIn = slowSignIn()
+  const api = await slowSignInAccount(t, signIn)
+  const { client } = await api.desktopE2eeCloudClient()
+  // Stands in for a key round's history read; the host's close awaits that round.
+  const round = Effect.runPromiseExit(client.history({ workspaceId: 'workspace' }))
+  await settle(() => signIn.pending.size === 1)
+  assert.equal(signIn.pending.size, 1)
+  let finished = false
+  const drained = drainMainProcessQuitResources(
+    [
+      {
+        name: 'e2ee',
+        close: async () => {
+          await api.closeDesktopE2eeAccount({ quit: true })
+          await round
+        }
+      }
+    ],
+    15_000
+  ).finally(() => {
+    finished = true
+  })
+  await settle(() => finished)
+  t.mock.timers.tick(15_000)
+  assert.deepEqual(await drained, [])
+  // Cancelling the quit left no token request behind.
+  assert.equal(signIn.pending.size, 0)
+  assert.equal(Exit.isFailure(await round), true)
+})
+void test('a slow sign-in token still completes a request when nothing is quitting', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const signIn = slowSignIn()
+  const api = await slowSignInAccount(t, signIn)
+  const { client } = await api.desktopE2eeCloudClient()
+  const read = Effect.runPromise(client.history({ workspaceId: 'workspace' }))
+  await settle(() => signIn.pending.size === 1)
+  // Slower than the quit budget, inside the request's own deadline.
+  t.mock.timers.tick(20_000)
+  signIn.answerAll()
+  assert.equal((await read).position, 'p1:workspace:1:synthetic')
+})

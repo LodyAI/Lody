@@ -445,7 +445,9 @@ export async function desktopE2eeCloudClient(): Promise<{
         owner.cloud = yield* makeE2eeCloudClient({
           platformKind: 'cloud',
           deploymentUrl: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
-          convexToken: () => getIpcServiceDeps().authService.convexToken()
+          // The request's signal reaches the sign-in request itself: quitting or a host stop
+          // must not wait on a slow auth server, and no token request outlives it.
+          convexToken: (signal) => getIpcServiceDeps().authService.convexToken(undefined, signal)
         }).pipe(Scope.provide(owner.scope))
       }
       return { accountId: owner.accountId, client: owner.cloud }
