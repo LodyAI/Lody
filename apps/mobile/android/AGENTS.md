@@ -150,3 +150,5 @@
   with overflow edge fades; only opened-by conversations receive hierarchy depth
   and curved connectors. See the conversation
   behavior in [README.md](README.md).
+
+- Schedule lists restore account/workspace display snapshots before live refresh, share account-cache pruning and logout fencing, and never persist optimistic intents. Pause/resume update immediately, suppress concurrent row commands, roll back failures and reject older reads; refresh again after completion.

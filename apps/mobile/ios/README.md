@@ -168,10 +168,9 @@ deterministic linger cancellation and cached artwork.
 
 ### Native Schedules
 
-Schedules starts with filterable Active, Needs attention, Paused and Ended counts,
-followed by native inset-grouped task and scheduled-message lists. Each row
-separates its title and status from the recurrence and execution context; items
-needing attention appear first. Search and status filters work together.
+Schedules uses the Chats list layout, with task and scheduled-message rows grouped
+by Needs attention, Active, Paused and Ended. Each row separates its title and
+status from the recurrence and execution context; search filters by title.
 
 The editor places current status and quick actions above separate Task, When and
 Run with cards. Weekdays and month days are directly selectable; date and time
@@ -179,8 +178,12 @@ use native pickers in the computer's time zone. Owners can run, pause or resume
 supported tasks and open the last conversation. Teammates' tasks and scheduled
 messages retain their existing read-only rules, and deletion requires confirmation.
 
-Within the current Home page, list snapshots, opened details and editor choices
-stay in memory for the selected account/workspace. Returning to a loaded editor
+Successful list reads persist as bounded SQLite display snapshots per account and
+workspace. Cold starts restore the saved list before refreshing from the runtime;
+failed reads retain it. Logout clears these snapshots and fences late writes.
+Optimistic states are never persisted, and cached rows do not authorize mutations.
+Opened details and editor choices stay in memory within the current Home page.
+Returning to a loaded editor
 shows its snapshot immediately while detail and choices refresh independently;
 failed refreshes retain existing content, and refreshes preserve unsaved edits.
 Cached details can be edited immediately; Save waits for fresh detail validation
@@ -188,7 +191,8 @@ and blocks when the refresh detects changed remote content.
 Pause/resume preview their state immediately and roll back on failure, with the
 existing unknown-outcome warning when a reply is lost. Pending commands fence
 older reads; account/workspace changes discard snapshots and late responses.
-The runtime still re-reads current data before mutations. App restarts load afresh.
+The runtime still re-reads current data before mutations. A workspace without a
+saved list shows the loading state until its first successful read.
 
 ### Code Diffs & Workspace File Browsing
 

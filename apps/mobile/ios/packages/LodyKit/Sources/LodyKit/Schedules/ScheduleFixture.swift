@@ -20,9 +20,14 @@ final class ScheduleFixture {
   private var held: Set<String> = []
   private var pending: [String: [CheckedContinuation<Void, Error>]] = [:]
   private var signals: [String: UIView] = [:]
+  private var usesDiskCache = false
 
   func control(_ action: String) {
     guard LodyUIVerify.enabled, NativeHomeFixture.active else { return }
+    if action == "seed-cache" {
+      Task { await seedCache() }
+      return
+    }
     let parts = action.split(separator: "-", maxSplits: 1).map(String.init)
     guard parts.count == 2, ["list", "detail", "options", "command"].contains(parts[1]) else { return }
     let key = parts[1]
@@ -38,6 +43,41 @@ final class ScheduleFixture {
       }
       signal(key, parts[0] == "fail" ? "failed" : "released")
     }
+  }
+
+  // Exercise the production SQLite adapter, including independent account and workspace keys.
+  // Only the current scope's row should reach the first Schedules page.
+  private func seedCache() async {
+    usesDiskCache = true
+    let state = SessionSource.live.state
+    let cloud = ScheduleService.cloud
+    let generation = LocalStore.shared.generation
+    let scopes = [
+      (state.userId, state.workspaceId, "Cached daily review"),
+      (state.userId + "-other", state.workspaceId, "Other account review"),
+      (state.userId, state.workspaceId + "-other", "Other workspace review"),
+    ]
+    for (user, workspace, title) in scopes {
+      var item = items[0]
+      item.title = title
+      cloud.persistList(user, workspace,
+        .init(items: [item], deviceTimeZone: "UTC", machineTimeZones: ["ui": "Asia/Shanghai"], ownedMachineIds: ["ui"]),
+        generation)
+    }
+    // A reply from before logout must not overwrite the current account's snapshot.
+    // Inject the stale generation without clearing the fixture's shared app store.
+    cloud.persistList(state.userId, state.workspaceId,
+      .init(items: [], deviceTimeZone: "UTC", machineTimeZones: [:], ownedMachineIds: []),
+      generation - 1)
+    // Reads share the store queue with writes, so readiness needs no timer or polling.
+    for (user, workspace, title) in scopes {
+      let saved = await cloud.cachedList(user, workspace)
+      guard saved?.items.map(\.title) == [title] else {
+        signal("cache", "scope-mismatch")
+        return
+      }
+    }
+    signal("cache", "ready")
   }
 
   private func signal(_ key: String, _ state: String) {
@@ -81,6 +121,14 @@ final class ScheduleFixture {
       options: { [unowned self] _ in
         try await self.gate("options")
         return Self.options
+      },
+      cachedList: { [unowned self] userId, workspaceId in
+        guard self.usesDiskCache else { return nil }
+        return await ScheduleService.cloud.cachedList(userId, workspaceId)
+      },
+      persistList: { [unowned self] userId, workspaceId, result, generation in
+        guard self.usesDiskCache else { return }
+        ScheduleService.cloud.persistList(userId, workspaceId, result, generation)
       }
     )
   }
