@@ -70,6 +70,12 @@ records the label budget, interaction trade-off, and verification limits.
 
 ## Info bar, status, and session actions
 
+The related-session tree keeps each root and its contained Tabs together on one
+horizontally scrolling row. Pills retain the agent logo, live status and full title
+in their hover title; visible titles are capped at 16ch. Each row hides its scrollbar
+and fades only the edges with more content. Only opened-by relations create child
+rows; Tab navigation retains both the root and exact Tab ids.
+
 `session-machine-info.tsx` shows a monitor icon and machine name on desktop,
 or a compact icon button on mobile. Tap/click (also hover on desktop) opens its
 owner, device and connection details. A machine-only info bar has no raised

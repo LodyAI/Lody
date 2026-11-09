@@ -2159,3 +2159,141 @@ test('proposed documents preserve identity across streaming, completion and clea
     'cleared',
   );
 });
+
+test('operation receipts project creation progress, replies, problems and uncertain batches without duplicate successes', async () => {
+  const { projectSession } = await loadProject();
+  const doc = new LoroDoc();
+  const entry = doc.getList('history').pushContainer(new LoroMap());
+  entry.set('id', 'operations');
+  entry.set('role', 'system');
+  const items = entry.setContainer('items', new LoroList());
+  const target = { sessionId: 'child', userTurnId: 'user-turn' };
+  const succeeded = {
+    status: 'succeeded',
+    target,
+    assistantTurnId: 'answer',
+    output: {
+      text: '# Reply\n\nFull result',
+      truncated: true,
+      omittedBytes: 20,
+    },
+  };
+  const receipt = {
+    type: 'operation_completion',
+    deliveryId: 'receipt',
+    operationId: 'op_create',
+    operationKind: 'session_create',
+    progressMessageId: 'progress',
+    completion: { type: 'result', value: { items: [succeeded] } },
+  };
+  function add(value) {
+    const item = items.pushContainer(new LoroMap());
+    for (const [key, field] of Object.entries(value)) item.set(key, field);
+    return item;
+  }
+  const progress = add({
+    type: 'operation_progress',
+    operationId: 'op_create',
+    operationKind: 'session_create',
+    items: [{ target, label: 'Worker', status: 'running' }],
+  });
+  add(receipt);
+  add({
+    ...receipt,
+    deliveryId: 'reply',
+    operationKind: 'session_chat',
+    completion: { type: 'result', value: { items: [succeeded] } },
+  });
+  add({
+    ...receipt,
+    deliveryId: 'mixed',
+    completion: {
+      type: 'result',
+      value: {
+        items: [
+          succeeded,
+          {
+            status: 'failed',
+            target,
+            error: {
+              code: 'failed',
+              message: 'Command rejected',
+              retryable: false,
+            },
+          },
+          { status: 'cancelled', label: 'Unstarted' },
+        ],
+      },
+    },
+  });
+  add({
+    type: 'operation_completion_batch',
+    batchId: '00000000-0000-4000-8000-000000000001',
+    memberCount: 1,
+    members: [receipt],
+    deliveryStatus: 'settled',
+  });
+  add({
+    type: 'operation_completion_batch',
+    batchId: '00000000-0000-4000-8000-000000000002',
+    memberCount: 2,
+    members: [receipt],
+    deliveryStatus: 'unknown',
+  });
+  add({
+    ...receipt,
+    deliveryId: 'error',
+    completion: {
+      type: 'error',
+      error: {
+        code: 'offline',
+        message: 'Machine unavailable',
+        retryable: true,
+      },
+    },
+  });
+  add({
+    ...receipt,
+    deliveryId: 'cancel',
+    completion: {
+      type: 'cancelled',
+      partial: { items: [{ status: 'cancelled', target }] },
+    },
+  });
+  doc.commit();
+  const before = doc.toJSON();
+  const projected = projectSession(doc, 'live').entries[0].items;
+  assert.equal(projected[0].operation.cards[0].sessionId, 'child');
+  assert.equal(projected[0].operation.cards[0].status, 'running');
+  assert.deepEqual(projected[1].operation, { cards: [], notices: [] });
+  assert.equal(projected[2].operation.cards[0].kind, 'reply');
+  assert.equal(projected[2].operation.cards[0].replyTruncated, true);
+  assert.equal(projected[2].operation.cards[0].reply, '# Reply\n\nFull result');
+  assert.equal(projected[3].operation.cards.length, 1);
+  assert.equal(projected[3].operation.cards[0].detail, 'Command rejected');
+  assert.deepEqual(
+    projected[3].operation.notices.map((n) => n.kind),
+    ['partial', 'cancelled'],
+  );
+  assert.deepEqual(projected[4].operation, { cards: [], notices: [] });
+  assert.equal(projected[5].operation.notices[0].kind, 'batchUnknown');
+  assert.equal(projected[5].operation.notices[0].count, 2);
+  assert.equal(projected[6].operation.notices[0].detail, 'Machine unavailable');
+  assert.equal(projected[7].operation.cards[0].status, 'cancelled');
+  assert.deepEqual(
+    doc.toJSON().history,
+    before.history,
+    'Presentation must not alter durable receipts',
+  );
+  progress.set('items', [{ target, label: 'Worker', status: 'succeeded' }]);
+  doc.commit();
+  const updated = projectSession(doc, 'live').entries[0].items[0];
+  assert.equal(updated.operation.cards[0].status, 'succeeded');
+  assert.ok(updated.rev > projected[0].rev);
+  const restored = new LoroDoc();
+  restored.import(doc.export({ mode: 'snapshot' }));
+  assert.deepEqual(
+    projectSession(restored, 'live').entries[0].items.map((i) => i.operation),
+    projectSession(doc, 'live').entries[0].items.map((i) => i.operation),
+  );
+});

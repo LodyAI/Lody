@@ -73,8 +73,35 @@ What that week actually looked like:
 The iOS app uses fixed Ink accents in both light and dark appearances, including
 Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
 without an accent-color picker. Process status labels use the same regular type
-as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
+as their duration, without a leading loading icon. The final visible command group
+shimmers while its turn runs, even after its tools complete or record a duration,
+and when hidden thinking calls follow it.
+User bubbles collapse to six measured lines. Agent footer icons align with the
+message edge: Copy, Info and Fork, 32 pt apart, followed by time 12 pt after
+the last glyph. The whole opened-chats count row toggles
+its children, while the opener above opens the conversation. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+MCP creation and reply receipts use compact conversation-list rows from the public
+operation payloads: provider marks, single-line titles, trailing status and curved
+child connectors, without filled card backgrounds. Consecutive creation receipts share a five-row expandable group; cards
+retain the creating turn's status and refresh titles and provider marks from the live catalog.
+Progress-linked successes are hidden, while errors, cancellations and uncertain or
+incomplete result batches remain visible. Reply cards open the saved Markdown reply;
+shortened receipts say so, and a separate button opens the exact conversation or Tab.
+The related-conversations icon above the composer opens a live native tree, with
+each conversation and its contained Tabs sharing one horizontally scrolling row.
+Scrollbars stay hidden; edge fades indicate more targets in either direction.
+Only opened-by descendants receive indentation and curved rails. Adjacent operation
+receipts for the same conversation also share a horizontal row, retaining each
+target’s independent full-reply and navigation actions. The current exact target
+uses a subtle background and accessibility selection; layout conveys containment
+without Tab/current/directory labels. Status icons replace redundant visible status
+words while keeping accessible descriptions, reply excerpts and error notices.
+Running rows use the Home working-grid indicator. Missing
+precise openers never fall back to provenance-only root IDs. Archived and side-panel
+sessions are excluded; closed Tabs appear only when current. The tree does not
+change archive ownership or read additional transcripts.
+
 The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
 conversation More. UIKit owns presentation, width, height, scrolling and title
 truncation; there is no six-row limit or custom fade. Actions retain full names,
@@ -109,7 +136,7 @@ The bottom machine capsule is omitted. The trailing Tabs button appears only wit
 other open Tabs; More retains closed-Tab recovery and New current working directory
 conversation, using the existing create-Tab operation.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
-secondary-label grey (links retain link blue); fenced code retains its own sizing
+secondary-label grey (links use web’s muted light/dark blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
 

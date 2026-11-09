@@ -21,7 +21,13 @@ extension SessionController {
     let bar = SessionInfoBar(session: session, repository: repository, busy: busy)
     infoBar = bar
     var result: [String: Any] = [:]
-    result["items"] = resourceItems
+    var items = resourceItems
+    let relations = SessionRelations.tree(sessions: state.catalog.sessions, current: sessionId)
+    if relations.hasRelations {
+      items.append(["id": "relations", "symbol": "bubble.left.and.bubble.right", "tap": true,
+        "accessibilityLabel": String(localized: "session.relations.title", bundle: .lody)])
+    }
+    result["items"] = items
     if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
@@ -96,6 +102,7 @@ extension SessionController {
 
   /// `item` or `item:menuAction`, from the action bar.
   func infoBarAction(_ id: String) {
+    if id == "relations" { presentRelations(); return }
     if githubOperation != nil && (id == "act" || id.hasPrefix("more:")) { return }
     let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
     if ["browser", "simulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }

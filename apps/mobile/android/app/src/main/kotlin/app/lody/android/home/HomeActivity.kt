@@ -247,6 +247,7 @@ private fun chatContext(catalog: CatalogState, id: String, title: String, user: 
     val repository = project?.repoFullName ?: session?.projectId?.removePrefix("github:")?.takeIf { session.projectId.startsWith("github:") }
     return app.lody.android.chat.ChatContext(
         session?.title?.ifBlank { null } ?: title, subtitle, session, user,
+        relatedSessions = snapshot?.sessions.orEmpty(),
         closedTabs = session?.let { app.lody.android.chat.DirectoryTabs.closed(it, snapshot.sessions) }.orEmpty(),
         tabs = session?.let { app.lody.android.chat.DirectoryTabs.sessions(it, snapshot.sessions) }.orEmpty(),
         repository = repository.orEmpty(),

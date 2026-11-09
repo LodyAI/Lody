@@ -5,6 +5,50 @@ import org.junit.Test
 import java.io.File
 class RuntimeProtocolTest {
  private val fixtures=JSONObject(File(System.getProperty("runtime.fixtures")).readText())
+ private fun operationMessages(items: String): List<SessionMessage> = (RuntimeProtocol.event(JSONObject().put("type", "session").put("sessionId", "s")
+  .put("session", """{"v":1,"status":"live","entries":[{"id":"event","role":"system","items":$items}]}""")) as RuntimeEvent.SessionUpdated).snapshot.messages
+ @Test fun operationProgressAndRepliesSurviveTheNativeSessionBoundary() {
+  val progress = operationMessages("""[{"itemId":"progress","rev":1,"type":"operation_progress","operation":{"cards":[{"id":"0","kind":"created","sessionId":"child","label":"Research","status":"running"}],"notices":[]}}]""").single()
+  assertEquals("system", progress.role)
+  assertEquals(OperationCard("child", "Research", "running", null), progress.operations.single().cards.single())
+  val reply = operationMessages("""[{"itemId":"receipt","rev":1,"type":"operation_completion","operation":{"cards":[{"id":"0","kind":"reply","sessionId":"child","status":"succeeded","reply":"The answer"}],"notices":[]}}]""").single().operations.single()
+  assertFalse(reply.creates)
+  assertEquals("The answer", reply.cards.single().reply)
+ }
+ @Test fun savedReplyRetainsFullMarkdownAndUpstreamTruncationIndependentlyOfDetail() {
+  val full = "# Saved answer\n\n" + "Long reply with **formatting**.\n".repeat(40)
+  val card = JSONObject().put("kind", "reply").put("sessionId", "deleted-target")
+   .put("status", "succeeded").put("detail", "Separate detail").put("reply", full).put("replyTruncated", true)
+  val item = JSONObject().put("type", "operation_completion").put("itemId", "saved")
+   .put("operation", JSONObject().put("cards", org.json.JSONArray().put(card)))
+  val decoded = operationMessages(org.json.JSONArray().put(item).toString()).single().operations.single().cards.single()
+  assertEquals(full, decoded.reply)
+  assertEquals("Separate detail", decoded.detail)
+  assertTrue(decoded.replyTruncated)
+  assertNull(app.lody.android.chat.SessionRelations.target(decoded.sessionId, emptyList()))
+  card.remove("replyTruncated")
+  assertFalse(operationMessages(org.json.JSONArray().put(item).toString()).single().operations.single().cards.single().replyTruncated)
+ }
+ @Test fun projectedSuppressionKeepsFailuresAndCancellationWithoutInventingTargets() {
+  val events = operationMessages("""[{"itemId":"receipt","rev":1,"type":"operation_completion","operation":{"cards":[],"notices":[{"kind":"partial"},{"kind":"failed","detail":"Second: Machine offline"},{"kind":"cancelled","detail":"Third"}]}}]""").single().operations
+  assertEquals(listOf("partial", "failed", "cancelled"), events.map { it.outcome })
+  assertEquals("Second: Machine offline", events[1].error)
+  assertTrue(events.all { it.cards.isEmpty() })
+  assertTrue(operationMessages("""[{"itemId":"suppressed","rev":1,"type":"operation_completion","operation":{"cards":[],"notices":[]}}]""").isEmpty())
+  val unknown = operationMessages("""[{"itemId":"batch","rev":1,"type":"operation_completion_batch","operation":{"cards":[],"notices":[{"kind":"batchUnknown","count":1}]}}]""").single().operations.single()
+  assertTrue(unknown.deliveryUnknown)
+  assertEquals(1, unknown.memberCount)
+ }
+ @Test fun batchProjectionPreservesMixedCreateReplyAndFailureDetails() {
+  val events = operationMessages("""[{"itemId":"batch","rev":2,"type":"operation_completion_batch","operation":{"cards":[{"id":"a/0","kind":"created","sessionId":"first","status":"failed","detail":"Dispatch failed"},{"id":"b/0","kind":"reply","sessionId":"second","status":"succeeded","reply":"Finished"}],"notices":[{"kind":"batch","count":3},{"kind":"failed","detail":"Cannot dispatch"}]}}]""").single().operations
+  assertEquals(3, events[0].memberCount)
+  assertEquals("Cannot dispatch", events[1].error)
+  assertTrue(events[2].creates)
+  assertEquals("Dispatch failed", events[2].cards.single().detail)
+  assertFalse(events[3].creates)
+  assertEquals("Finished", events[3].cards.single().reply)
+  assertTrue(operationMessages("""[{"type":"unknown"},{"type":"operation_completion"}]""").isEmpty())
+ }
  @Test fun usageProjectionPrefersContextThenFiveHours() {
   fun usage(json: String): SessionUsage? = (RuntimeProtocol.event(JSONObject().put("type", "session").put("sessionId", "s")
    .put("session", """{"v":1,"status":"live","entries":[],"usage":$json}""")) as RuntimeEvent.SessionUpdated).snapshot.usage

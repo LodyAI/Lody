@@ -76,6 +76,7 @@ data class ChatContext(
     /** The GitHub repository (`owner/name`) the session works in; empty without one. */
     val tabs: List<CatalogSession> = emptyList(),
     val closedTabs: List<CatalogSession> = emptyList(),
+    val relatedSessions: List<CatalogSession> = emptyList(),
     val repository: String = "",
     val machineName: String = "",
     val machineKind: app.lody.android.create.CreateSessionModel.MachineKind = app.lody.android.create.CreateSessionModel.MachineKind.Laptop,
@@ -132,6 +133,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 entries = withContext(Dispatchers.Default) {
                     val next = snapshot.messages.map { message ->
                         rendered[message.id]?.takeIf { it.first == message }?.second ?: when (message.role) {
+                            "system" -> ChatEntry.Operations(message.id, message.operations)
                             "user" -> ChatEntry.User(
                                 message.id, message.text,
                                 TurnIdentity("", time = turnTime(message.timestamp)),
@@ -430,6 +432,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         Unit
     }
     val prUpdates = remember(scope, id) { SessionPullRequestUpdates() }
+    val hasRelations = remember(id, context.relatedSessions) { SessionRelations.rows(id, context.relatedSessions).isNotEmpty() }
     val bar = session?.let { SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend) }
     // Merge / Ready for review go straight to GitHub, one at a time, never retried.
     var merging by remember(id) { mutableStateOf(false) }
@@ -510,6 +513,8 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                     ChatTranscript(
                         all, Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + if (creationNotice != null) LodySize.controlLg else LodySpacing.none, bottom = LodySpacing.md), state = listState, scrollToLatest = scrollToLatest,
                         actions = messageActions,
+                        relatedSessions = context.relatedSessions,
+                        navigateSession = { target -> if (SessionRelations.target(target, context.relatedSessions) != null) onSelectTab(target) },
                         loadDetail = { entryId, itemId -> repository.detail(scope, id, entryId, itemId) },
                         loadDiff = { entryId, path -> repository.turnDiff(scope, id, entryId, path) },
                     )
@@ -542,6 +547,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 ChatActionBar(
                     bar,
                     writing = writing,
+                    relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
                         when {
@@ -1092,12 +1098,16 @@ internal fun ChatActionBar(
     onAction: (SessionInfoBar.Action) -> Unit,
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
+    relations: (@Composable () -> Unit)? = null,
 ) {
     val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
-    if (!context && !diff && bar.actions.isEmpty()) return
+    if (!context && !diff && bar.actions.isEmpty() && relations == null) return
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
-        if (context || diff) ContextItem(bar, diffDot, onCopied, modifier)
+        Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+            relations?.invoke()
+            if (context || diff) ContextItem(bar, diffDot, onCopied)
+        }
     }
     @Composable fun Action() {
         if (writing != null) ActionSplit(listOf(writing), onAction, pending = true)

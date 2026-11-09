@@ -127,7 +127,6 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     view.backgroundColor = .lodyBackground
     view.addSubview(chat)
     installPageHeader()
-    chat.imageSharingEnabled = false
     wireEvents()
     find(query: findQuery, keyboard: false)
     wireSendEvents()
@@ -242,6 +241,20 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     chat.setTitleMenu("[]")
     chat.mentionRepository = session.projectId.hasPrefix("github:") ? String(session.projectId.dropFirst(7)) : ""
+    let operationTitles = SessionRelations.titles(sessions: state.catalog.sessions)
+    let operationAgentTypes = Dictionary(state.catalog.sessions.map { ($0.id, $0.agentType) }, uniquingKeysWith: { first, _ in first })
+    let operationCLITypes = Dictionary(state.catalog.sessions.map { ($0.id, $0.cliType) }, uniquingKeysWith: { first, _ in first })
+    let operationRoots = Dictionary(state.catalog.sessions.filter { operationTitles[$0.id] != nil }.map { ($0.id, $0.parentSessionId ?? $0.id) }, uniquingKeysWith: { first, _ in first })
+    let operationOpened = Set(state.catalog.sessions.filter { $0.parentSessionId == nil && $0.openedBySessionId != nil }.map(\.id))
+    if chat.operationCurrentID != sessionId || chat.operationTitles != operationTitles || chat.operationAgentTypes != operationAgentTypes || chat.operationCLITypes != operationCLITypes || chat.operationRoots != operationRoots || chat.operationOpened != operationOpened {
+      chat.operationCurrentID = sessionId
+      chat.operationRoots = operationRoots
+      chat.operationOpened = operationOpened
+      chat.operationAgentTypes = operationAgentTypes
+      chat.operationCLITypes = operationCLITypes
+      chat.operationTitles = operationTitles
+      chat.applyRows()
+    }
     renderMentions(state, session)
     renderFeed(session)
     updateMoreMenu(session)
