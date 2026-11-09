@@ -17,6 +17,11 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   restart an in-flight or already-started wasm runtime. A pending init retains
   the Loro document held by the snapshot upload.
   [Decision](../../.agents/notes/implemented/bug-fix/2026-11-03-cli-zstd-wasm-init-hang.md).
+- A WebAssembly trap leaves Loro's instance broken for later calls. `lib/loro/wasm-runtime-health.ts`
+  records the first fault and `start.ts` restarts through the ordinary shutdown; timer-driven Loro
+  reads without a caller catch locally and call `reportIfWasmFault`. The `loro-crdt` alias matches the
+  bare specifier only, so the bundle can import `loro-crdt/bundler/*` to read the shared memory
+  ([decision](../../.agents/notes/implemented/bug-fix/2026-11-09-loro-wasm-heap-exhaustion.md)).
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.

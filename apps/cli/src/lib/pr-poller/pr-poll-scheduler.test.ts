@@ -1,6 +1,10 @@
 import { computeDiscoveryFingerprint } from './pr-poll-targets';
 import { planPullRequestLifecycle } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  installWasmFaultMonitor,
+  resetWasmRuntimeHealthForTests,
+} from '@/lib/loro/wasm-runtime-health';
 import type {
   LodyPresenceInstanceId,
   LodyPresenceStateMap,
@@ -101,6 +105,8 @@ function viewingPresence(sessionId: SessionId, updatedAt: number): LodyPresenceS
 class FakeWorkspace {
   readonly metas = new Map<SessionId, SessionMeta>();
   presence: LodyPresenceStateMap = {};
+  /** Thrown by presence reads, as a trapped Loro instance does. */
+  presenceError: Error | null = null;
   initialSyncResult = true;
   credential: ResolvedGitHubCredential | null = {
     token: 'token-1',
@@ -164,7 +170,10 @@ class FakeWorkspace {
         this.presenceListeners.add(listener);
         return () => this.presenceListeners.delete(listener);
       },
-      getPresenceStates: () => this.presence,
+      getPresenceStates: () => {
+        if (this.presenceError) throw this.presenceError;
+        return this.presence;
+      },
       waitForInitialSync: this.waitForInitialSync,
       resolveCredential: this.resolveCredential,
       invalidateCredential: this.invalidateCredential,
@@ -389,6 +398,33 @@ describe('PrPollScheduler', () => {
     workspace.setPresence(viewingPresence(sid('s1'), now));
     await advance(2_000); // presence debounce + wake
     expect(calls()).toHaveLength(2);
+  });
+
+  it('keeps polling when a trapped Loro instance breaks presence reads, and reports the fault', async () => {
+    const faults: string[] = [];
+    const uninstall = installWasmFaultMonitor((fault) => faults.push(fault.source), {
+      console: { error: () => {} },
+      process: { on: () => process, off: () => process },
+    });
+    try {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
+      await startWith([workspace]);
+      expect(calls()).toHaveLength(1);
+
+      workspace.presenceError = new WebAssembly.RuntimeError('unreachable');
+      await advance(60_000);
+      // The presence debounce timer has no caller to catch for it.
+      workspace.setPresence(viewingPresence(sid('s1'), now));
+      await advance(2_000);
+      await advance(config.lowStatusIntervalMs);
+
+      expect(calls().length).toBeGreaterThan(1);
+      expect(faults).toEqual(['reported']);
+    } finally {
+      uninstall();
+      resetWasmRuntimeHealthForTests();
+    }
   });
 
   it('a newly associated PR is due immediately instead of inheriting the repo stamp', async () => {
