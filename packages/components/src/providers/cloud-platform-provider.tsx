@@ -314,6 +314,8 @@ export function CloudPlatformProvider({
                 native.removeMember(workspaceId, membershipId),
               setMemberRole: (workspaceId, membershipId, role) =>
                 native.setMemberRole(workspaceId, membershipId, role),
+              transferOwnership: (workspaceId, membershipId) =>
+                native.transferOwnership(workspaceId, membershipId),
 
               beginRemoteMachinePairing: (workspaceId) =>
                 native.beginRemoteMachinePairing(workspaceId),

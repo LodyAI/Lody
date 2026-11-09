@@ -187,6 +187,8 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     membershipId: string,
     role: 'admin' | 'member'
   ): Promise<void>;
+  /** Owner-only transfer to an existing member, checked against the latest verified ledger. */
+  transferOwnership?(workspaceId: string, membershipId: string): Promise<void>;
   /** Create public email/link pins using a current manager's native device. */
   createMemberInvitation?(input: {
     workspaceId: string;

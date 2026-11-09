@@ -68,6 +68,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'contentStreamsToken',
       'removeMember',
       'setMemberRole',
+      'transferOwnership',
       'refresh',
       'prepareCreation',
       'recordCreated',

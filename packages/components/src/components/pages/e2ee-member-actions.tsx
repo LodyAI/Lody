@@ -29,6 +29,8 @@ export interface E2eeMemberManagement {
   /** Replaces the workspace key after a removal, when this device may sign it. Explicit
    * only: the remove dialog offers it as a checked choice the person confirms. */
   rotate?(): Promise<void>;
+  /** Owner-only: hands ownership to this member; the current owner becomes an admin. */
+  transfer?(membershipId: string): Promise<void>;
 }
 
 /** Display affordances only; native signing rechecks the current ledger and target. */
@@ -39,6 +41,7 @@ export function E2eeMemberActions(props: {
 }) {
   const { t } = useTranslation();
   const [confirming, setConfirming] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
   const [rotateAfter, setRotateAfter] = useState(true);
@@ -90,6 +93,18 @@ export function E2eeMemberActions(props: {
               {t(role === 'admin' ? 'e2ee.members.promote' : 'e2ee.members.demote')}
             </Menu.Item>
           )}
+          {management.actorRole === 'owner' && management.transfer && member.role !== 'guest' && (
+            <Menu.Item
+              data-testid="e2ee-member-transfer"
+              data-membership-id={member.membershipId}
+              onClick={() => {
+                setFailed(false);
+                setTransferring(true);
+              }}
+            >
+              {t('e2ee.members.transfer')}
+            </Menu.Item>
+          )}
           {mayRemove && (
             <Menu.Item
               data-testid="e2ee-member-remove"
@@ -116,6 +131,50 @@ export function E2eeMemberActions(props: {
           <Alert.Description>{t('e2ee.members.rotateFailed')}</Alert.Description>
         </Alert.Root>
       )}
+      <Dialog.Root
+        open={transferring}
+        onOpenChange={(open) => {
+          if (!pending) setTransferring(open);
+        }}
+      >
+        <Dialog.Content
+          data-testid="e2ee-member-transfer-dialog"
+          data-membership-id={member.membershipId}
+          width={440}
+        >
+          <Dialog.Header>
+            <Dialog.Title>{t('e2ee.members.transferTitle', { name: props.name })}</Dialog.Title>
+            <Dialog.Description>{t('e2ee.members.removeLead')}</Dialog.Description>
+          </Dialog.Header>
+          <ul {...stylex.props(styles.effects)}>
+            <li>{t('e2ee.members.transferEffectOwner', { name: props.name })}</li>
+            <li>{t('e2ee.members.transferEffectYou')}</li>
+            <li>{t('e2ee.members.transferEffectRecord')}</li>
+          </ul>
+          {failed && (
+            <Alert.Root tone="warning">
+              <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
+            </Alert.Root>
+          )}
+          <Dialog.Footer>
+            <Button variant="ghost" disabled={pending} onClick={() => setTransferring(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              data-testid="e2ee-member-transfer-confirm"
+              disabled={pending}
+              onClick={() => {
+                void run(async () => {
+                  await management.transfer!(member.membershipId);
+                  setTransferring(false);
+                });
+              }}
+            >
+              {t('e2ee.members.transfer')}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
       <Dialog.Root
         open={confirming}
         onOpenChange={(open) => {

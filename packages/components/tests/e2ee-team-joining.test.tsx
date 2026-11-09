@@ -181,6 +181,10 @@ describe('encrypted team joining', () => {
     await render(<E2eeMemberJoin {...props} />);
     await settle();
     expect(container.textContent).toContain('e2ee.team.waitingKey');
+    // Membership is approved; the one card now waits on key delivery.
+    expect(container.querySelector('[aria-current="step"]')?.getAttribute('data-join-step')).toBe(
+      'key'
+    );
     // Key delivery needs an administrator device; the joining member is told so.
     expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
     expect(button('e2ee.team.submit')).toBeUndefined();
@@ -250,6 +254,9 @@ describe('encrypted team joining', () => {
     await settle();
     expect(saved).toBe(true);
     expect(container.textContent).toContain('e2ee.team.waitingApproval');
+    expect(container.querySelector('[aria-current="step"]')?.getAttribute('data-join-step')).toBe(
+      'approval'
+    );
     expect(button('e2ee.team.submit')).toBeUndefined();
   });
   it('keeps a link request pending until the administrator approves the displayed request', async () => {

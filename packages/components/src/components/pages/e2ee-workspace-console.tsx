@@ -704,6 +704,14 @@ export function E2eeWorkspaceConsole({
                   manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
                 setRole: (membershipId, role) =>
                   manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
+                ...(port.runtime.transferOwnership
+                  ? {
+                      transfer: (membershipId: string) =>
+                        manageMember(() =>
+                          port.runtime!.transferOwnership!(workspaceId, membershipId)
+                        ),
+                    }
+                  : {}),
                 ...(port.runtime.updateKeys
                   ? { rotate: () => manageMember(() => port.runtime!.updateKeys!(workspaceId)) }
                   : {}),

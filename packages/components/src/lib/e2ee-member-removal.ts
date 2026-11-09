@@ -10,7 +10,7 @@ import {
  * removal ends membership; device revocation ends only this device's identity. */
 export type E2eeAccessLoss = 'e2ee_member_removed' | 'e2ee_device_revoked';
 const accessLossPattern =
-  /^(?:Error invoking remote method 'e2ee[.:](?:open|refresh|contentStreamsToken|removeMember|setMemberRole)': Error: )?(e2ee_member_removed|e2ee_device_revoked)$/;
+  /^(?:Error invoking remote method 'e2ee[.:](?:open|refresh|contentStreamsToken|removeMember|setMemberRole|transferOwnership)': Error: )?(e2ee_member_removed|e2ee_device_revoked)$/;
 
 /** Only these exact native results trigger terminal cleanup; any other error never does. */
 export const e2eeAccessLoss = (error: unknown): E2eeAccessLoss | null =>

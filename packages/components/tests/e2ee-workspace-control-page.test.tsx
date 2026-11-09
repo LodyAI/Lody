@@ -347,3 +347,51 @@ it('replaces the key after a confirmed removal by default, and a failed key upda
   expect(document.body.textContent).toContain('e2ee.members.rotateFailed');
   expect(document.body.textContent).not.toContain('e2ee.members.failed');
 });
+
+it('lets only the owner transfer ownership, after a confirmation that states the outcome', async () => {
+  const workspace = { owner: 'self' };
+  const member = {
+    ordinal: 2,
+    membershipId: '56'.repeat(16),
+    userId: '67'.repeat(32),
+    role: 'admin' as const,
+    devices: [],
+  };
+  const management = (actorRole: 'owner' | 'admin') => ({
+    actorRole,
+    remove: async () => {},
+    setRole: async () => {},
+    transfer: async (id: string) => {
+      workspace.owner = id;
+    },
+  });
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  const openMenu = async (actorRole: 'owner' | 'admin') => {
+    act(() =>
+      root!.render(
+        <E2eeMemberActions member={member} name="Jordan" management={management(actorRole)} />
+      )
+    );
+    const trigger = container!.querySelector('button');
+    if (trigger) await act(async () => trigger.click());
+  };
+  await openMenu('admin');
+  expect(document.querySelector('[data-testid="e2ee-member-transfer"]')).toBeNull();
+  await openMenu('owner');
+  await act(async () =>
+    (document.querySelector('[data-testid="e2ee-member-transfer"]') as HTMLElement).click()
+  );
+  expect(workspace.owner).toBe('self');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    'e2ee.members.transferEffectYou'
+  );
+  await act(async () =>
+    (
+      document.querySelector('[data-testid="e2ee-member-transfer-confirm"]') as HTMLButtonElement
+    ).click()
+  );
+  expect(workspace.owner).toBe(member.membershipId);
+  expect(document.querySelector('[data-testid="e2ee-member-transfer-dialog"]')).toBeNull();
+});

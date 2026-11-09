@@ -1,9 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
-import { Switch } from '@lody/ui/switch';
 import { Button } from '@lody/ui/button';
 import type { PendingE2eeWorkspace } from '@/lib/e2ee-workspace-storage';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { shadow } from '@lody/ui/tokens/colors.stylex';
+import { Cloud, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 const styles = stylex.create({
@@ -13,7 +14,45 @@ const styles = stylex.create({
     borderTopColor: colors.separator,
     paddingTop: space[4],
   },
-  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space[3] },
+  heading: {
+    margin: 0,
+    marginBottom: space[2],
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+  },
+  choices: {
+    display: 'grid',
+    gridTemplateColumns: { default: '1fr 1fr', '@media (max-width: 420px)': '1fr' },
+    gap: space[2],
+  },
+  choice: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+    padding: space[3],
+    borderRadius: radius.large,
+    borderWidth: 0,
+    backgroundColor: colors.secondaryBackground,
+    boxShadow: 'none',
+    color: colors.label,
+    font: 'inherit',
+    textAlign: 'start',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.5 },
+  },
+  choiceOn: {
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: `${shadow.card}, 0 0 0 2px ${colors.label}`,
+  },
+  choiceTitle: { display: 'flex', alignItems: 'center', gap: space[1.5], fontWeight: 600 },
+  choiceList: {
+    margin: 0,
+    paddingInlineStart: space[4],
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: 1.6,
+  },
   help: { color: colors.secondaryLabel, fontSize: '0.9em', lineHeight: 1.5, marginTop: space[2] },
   requests: {
     display: 'flex',
@@ -41,14 +80,52 @@ export function E2eeWorkspaceCreationOption(props: {
   const { t } = useTranslation();
   return (
     <section {...stylex.props(styles.section)}>
-      <div {...stylex.props(styles.row)}>
-        <label htmlFor="e2ee-workspace-create">{t('e2ee.create.label')}</label>
-        <Switch
+      <p id="e2ee-workspace-mode" {...stylex.props(styles.heading)}>
+        {t('e2ee.create.label')}
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby="e2ee-workspace-mode"
+        {...stylex.props(styles.choices)}
+      >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={!props.selected}
+          disabled={props.disabled || props.pending}
+          onClick={() => props.onChange(false)}
+          {...stylex.props(styles.choice, !props.selected && styles.choiceOn)}
+        >
+          <span {...stylex.props(styles.choiceTitle)}>
+            <Cloud size={15} aria-hidden="true" />
+            {t('e2ee.create.standard')}
+          </span>
+          <ul {...stylex.props(styles.choiceList)}>
+            <li>{t('e2ee.create.standardPoint1')}</li>
+            <li>{t('e2ee.create.standardPoint2')}</li>
+          </ul>
+        </button>
+        <button
+          type="button"
+          role="radio"
+          // Kept stable for automation that selects encryption by this id.
           id="e2ee-workspace-create"
-          checked={props.selected}
+          data-testid="e2ee-workspace-create"
+          aria-checked={props.selected}
           disabled={props.disabled || props.pending || !props.supported}
-          onCheckedChange={props.onChange}
-        />
+          onClick={() => props.onChange(true)}
+          {...stylex.props(styles.choice, props.selected && styles.choiceOn)}
+        >
+          <span {...stylex.props(styles.choiceTitle)}>
+            <Lock size={15} aria-hidden="true" />
+            {t('e2ee.create.encrypted')}
+          </span>
+          <ul {...stylex.props(styles.choiceList)}>
+            <li>{t('e2ee.create.encryptedPoint1')}</li>
+            <li>{t('e2ee.create.encryptedPoint2')}</li>
+            <li>{t('e2ee.create.encryptedPoint3')}</li>
+          </ul>
+        </button>
       </div>
       <p {...stylex.props(styles.help)}>{t('e2ee.create.description')}</p>
       {!props.supported && <p {...stylex.props(styles.help)}>{t('e2ee.create.unsupported')}</p>}
