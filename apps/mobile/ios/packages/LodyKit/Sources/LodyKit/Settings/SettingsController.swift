@@ -75,8 +75,6 @@ class SettingsController: UIViewController {
       )
     } else if id == "account", state.account != nil {
       LodyShell.shared.pushNative(AccountController(source: source), title: String(localized: "account.title", bundle: .lody), from: self)
-    } else if id == "schedules", workspace != nil {
-      push("schedules", title: String(localized: "schedules.title", bundle: .lody))
     } else if id == "archived", workspace != nil {
       push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
     } else if id == "project-history", workspace != nil {
@@ -86,12 +84,10 @@ class SettingsController: UIViewController {
     } else if id == "connection", workspace != nil, state.connection.state == "offline" {
       source.refresh()
     } else if id == "debug-open" {
-      // A Settings sheet (iPad) closes first; pushed Settings (iPhone) opens Debug over itself.
-      guard let presenter = navigationController?.presentingViewController else {
-        LodyShell.shared.openPage("debug", from: self)
-        return
+      let sheet = navigationController
+      sheet?.presentingViewController?.dismiss(animated: true) {
+        LodyShell.shared.openPage("debug", from: nil)
       }
-      presenter.dismiss(animated: true) { LodyShell.shared.openPage("debug", from: nil) }
     }
   }
 

@@ -1,6 +1,6 @@
 """Launch with --ui-verify --ui-verify-home --ui-verify-home-syncing first.
 The fixture has a long workspace name. Status must stay at the screen centre,
-leave with Home, and return after a Settings round trip.
+leave with Home, and return after a tab round trip.
 """
 import sys
 from driver import UI
@@ -18,9 +18,9 @@ def centred():
 
 ui.element('home-sync-status')
 centred()
-ui.axe('tap', '--id', 'home-settings', '--post-delay', '.5')
+ui.axe('tap', '--id', 'home-tab-schedules', '--post-delay', '.5')
 assert not any(i.get('AXUniqueId') == 'home-sync-status' for i in ui.state())
-ui.axe('tap', '--id', 'BackButton', '--post-delay', '.5')
+ui.axe('tap', '--id', 'home-tab-chats', '--post-delay', '.5')
 ui.element('home-sync-status')
 centred()
 print('PASS: status participates in the navigation bar and is screen-centred with a long workspace name, hides outside Home and returns centred')

@@ -24,6 +24,8 @@ final class InboxChrome {
   var searchChanged: ((String) -> Void)?
   /// Replaces the iPhone view menu (the Projects tab has its own choices).
   var compactMenu: (() -> UIMenu)?
+  /// Pages without view choices (Schedules) show only search on the trailing edge.
+  var showsViewMenu = true
   private static let views = [
     (mode: 0, key: "inbox.settings.view.projects", icon: "folder"),
     (mode: 1, key: "inbox.settings.view.activity", icon: "clock"),
@@ -39,15 +41,6 @@ final class InboxChrome {
   private let settings = LodySymbolButton(frame: .zero)
   private let search = LodyNavigationSearch()
   private let padBar = InboxPadBar()
-  /// iPhone's new-chat action: a floating Liquid Glass button at the bottom trailing corner (no tab bar).
-  private let create = UIButton(configuration: .prominentGlass())
-  private lazy var compactSettingsItem: UIBarButtonItem = {
-    let item = UIBarButtonItem(image: LodyIcon.settings.uiImage, primaryAction: UIAction { [weak self] _ in self?.openSettings?() })
-    item.tintColor = .label
-    item.accessibilityLabel = String(localized: "tabs.settings", bundle: .lody)
-    item.accessibilityIdentifier = "home-settings"
-    return item
-  }()
   private weak var content: UIViewController?
   private lazy var workspaceSlot = InboxBarSlot(workspace)
   private lazy var settingsSlot = InboxBarSlot(settings)
@@ -96,15 +89,6 @@ final class InboxChrome {
     }
     padBar.searchChanged = { [weak self] text in self?.searchChanged?(text) }
     padBar.create = { [weak self] in self?.newSession?() }
-    var configuration = UIButton.Configuration.prominentGlass()
-    configuration.image = LodyIcon.compose.uiImage
-    configuration.cornerStyle = .capsule
-    configuration.baseBackgroundColor = .lodyInk
-    configuration.baseForegroundColor = .lodyGround
-    create.configuration = configuration
-    create.accessibilityIdentifier = "home-new-session"
-    create.accessibilityLabel = String(localized: "tabs.newSession", bundle: .lody)
-    create.addAction(UIAction { [weak self] _ in self?.newSession?() }, for: .primaryActionTriggered)
   }
 
   func attach(to host: UIViewController, content: UIViewController, scrollView: UIScrollView) {
@@ -149,9 +133,10 @@ final class InboxChrome {
     // iPad keeps integrated search in the navigation bar, so the sidebar hosts its own bottom field.
     if regular, header.search === search { header.search = nil }
     if !regular, header.search !== search { header.search = search }
-    // Right items run from the trailing edge. iPhone: Settings, the view menu, then search, as one
-    // glass group; iPad keeps its gear capsule beside the view menu.
-    let right = regular ? [settingsItem, filter] : [compactSettingsItem, filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    // iPhone reaches Settings from the bottom tabs; iPad keeps the gear beside the view menu.
+    // Right items run from the trailing edge: iPhone shows search, then the view menu (design).
+    var right = regular ? [settingsItem, filter] : [filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    if !showsViewMenu { right.removeAll { $0 === filter } }
     (workspaceItem, self.settingsItem, filterItem) = (left[0], settingsItem, filter)
     let shownLeft = searching && !regular ? [] : left
     if header.leftItems ?? [] != shownLeft { header.leftItems = shownLeft.isEmpty ? nil : shownLeft }
@@ -170,16 +155,13 @@ final class InboxChrome {
     workspace.setItems([])
     guard let header else { return }
     if let item = workspaceItem, header.leftItems == [item] { header.leftItems = nil }
-    if let right = header.rightItems, right.contains(where: {
-      $0 === filterItem || $0 === compactSettingsItem || $0 === host?.navigationItem.searchBarPlacementBarButtonItem
-    }) {
+    if let right = header.rightItems, right.contains(where: { $0 === filterItem || $0 === host?.navigationItem.searchBarPlacementBarButtonItem }) {
       header.rightItems = nil
     }
     if header.search === search { header.search = nil }
     if let host, host.navigationItem.titleView === syncPill { host.navigationItem.titleView = nil }
     recoveryTask?.cancel()
     showPadBar(false)
-    showCreate(false)
     if let host, !toolbar.isEmpty, host.toolbarItems ?? [] == toolbar {
       host.setToolbarItems(nil, animated: false)
       if let navigation = host.navigationController, navigation.topViewController === host {
@@ -202,8 +184,7 @@ final class InboxChrome {
     }
     let regular = host.traitCollection.horizontalSizeClass == .regular
     showPadBar(regular)
-    showCreate(!regular)
-    // iPhone's search lives in the navigation bar and new chat in the floating button, so no bottom toolbar on either layout.
+    // iPhone's search lives in the navigation bar and new chat in the system tab bar, so no bottom toolbar on either layout.
     if !toolbar.isEmpty, host.toolbarItems ?? [] == toolbar { host.setToolbarItems(nil, animated: false) }
     toolbar = []
     if let navigation = host.navigationController, navigation.topViewController === host {
@@ -217,28 +198,6 @@ final class InboxChrome {
     let width = host.view.bounds.width - insets.left - insets.right
     let limit = max(44, width - 192)
     workspaceSlot.size = CGSize(width: min(naturalWidth, limit), height: 44)
-  }
-
-  private static let createSize: CGFloat = 56
-
-  /// The floating button lives on the host page, so pushed pages cover it; the list's bottom
-  /// inset keeps its last row clear of it.
-  private func showCreate(_ shown: Bool) {
-    if shown { content?.additionalSafeAreaInsets.bottom = Self.createSize + LodySpacing.md }
-    guard shown, let host else {
-      create.removeFromSuperview()
-      return
-    }
-    guard create.superview !== host.view else { return }
-    create.removeFromSuperview()
-    create.translatesAutoresizingMaskIntoConstraints = false
-    host.view.addSubview(create)
-    NSLayoutConstraint.activate([
-      create.widthAnchor.constraint(equalToConstant: Self.createSize),
-      create.heightAnchor.constraint(equalToConstant: Self.createSize),
-      create.trailingAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.trailingAnchor, constant: -LodySpacing.xl),
-      create.bottomAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.bottomAnchor, constant: -LodySpacing.sm),
-    ])
   }
 
   private func showPadBar(_ shown: Bool) {

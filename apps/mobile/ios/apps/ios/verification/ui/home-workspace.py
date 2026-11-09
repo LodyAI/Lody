@@ -48,7 +48,7 @@ ui.capture('workspace-menu-selection-updated')
 close_menu()
 home_ready()
 # The workspace editor lives in Settings › General.
-ui.axe('tap', '--id', 'home-settings', '--post-delay', '.6')
+ui.axe('tap', '--id', 'home-tab-settings', '--post-delay', '.6')
 ui.axe('tap', '--id', 'workspace-general', '--post-delay', '.8')
 ui.element('workspace-name')
 ui.wait(
@@ -82,7 +82,7 @@ ui.capture('workspace-editor-filled')
 ui.axe('tap', '--label', catalog.text('workspace.edit.save'), '--post-delay', '1')
 renamed_label = catalog.workspace_switch(renamed)
 ui.element('workspace-general')
-ui.axe('tap', '--id', 'BackButton', '--post-delay', '.6')
+ui.axe('tap', '--id', 'home-tab-chats', '--post-delay', '.6')
 ui.wait(
     lambda items: any(i.get('AXLabel') == renamed_label for i in items),
     'Saving the workspace name must update the home capsule',

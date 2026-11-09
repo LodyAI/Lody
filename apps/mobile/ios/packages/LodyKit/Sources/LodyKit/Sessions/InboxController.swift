@@ -150,10 +150,8 @@ final class InboxController: UIViewController {
       self.render()
     }
     // The application shell owns these presentations so external links can dismiss them.
-    // iPhone pushes Settings over Chats (it opens from the header, not a tab); iPad keeps the sheet.
     chrome.openSettings = { [weak self] in
-      let regular = self?.traitCollection.horizontalSizeClass == .regular
-      LodyShell.shared.openPage("settings", options: regular ? ["present": true] : [:], from: self?.parent)
+      LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent)
     }
     chrome.openDebug = { [weak self] in LodyShell.shared.openPage("debug", from: self?.parent) }
     chrome.newSession = { [weak self] in self?.newSession() }
