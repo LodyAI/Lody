@@ -131,7 +131,7 @@ function StoryWrapper({
           machine={machine}
           configs={storyConfigs}
           isOwn={isOwn}
-          isLocal={isOwn}
+          isLocal={isOwn && !showIdentityRestore}
           ownerName={ownerName}
           sharedWithTeam={sharedWithTeam}
           canDelete={canDelete}
