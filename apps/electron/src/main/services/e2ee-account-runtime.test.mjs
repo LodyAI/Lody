@@ -4868,6 +4868,7 @@ async function twoDeviceMemberJoin(t, { latency = () => Effect.void } = {}) {
     ownerApi: owner.api,
     memberApi: member.api,
     memberIdentity: member.identity,
+    setMemberLocked: member.setLocked,
     relay,
     logs,
     async submit() {
@@ -5381,6 +5382,41 @@ void test(
     assert.notEqual(second.signingPublicKey, first.signingPublicKey)
     await assert.rejects(f.joiner.open('team'), /e2ee_member_removed/)
     // The new request is the retained pending join; the removed one no longer refuses it.
+    assert.equal(
+      JSON.stringify(await f.joiner.pendingMemberJoin('team')),
+      JSON.stringify({ offer: again, requestId: second.requestId })
+    )
+  }
+)
+void test(
+  'a removed member whose local erase failed can accept a new invitation once the fault clears',
+  { timeout: 30_000 },
+  async (t) => {
+    const f = await twoDeviceMemberJoin(t)
+    await f.approver.open('team')
+    const first = await f.submit()
+    await f.approver.memberJoinRequests('team')
+    await f.approver.approveMemberJoin('team', first.requestId, 'automatic')
+    await f.approver.keyDeliveryIdle('acc1', 'team')
+    assert.equal((await f.joiner.claimMemberJoin('team', first.requestId)).ready, true)
+    await f.joiner.memberSettleIdle('member', 'team')
+    f.relay.memberRemoved = true
+    // The OS key store becomes unavailable just as the removal is confirmed, so the
+    // receipt is recorded but the local erase that follows it fails.
+    f.relay.onRemovalConfirmed = () => {
+      f.relay.onRemovalConfirmed = undefined
+      f.setMemberLocked(true)
+    }
+    const again = await f.ownerApi.withDesktopE2eeAccount(
+      (account) => account.host.memberOffer('team', 'link', 9_000_000_000_000),
+      'team',
+      false
+    )
+    await assert.rejects(f.joiner.prepareMemberJoin(again))
+    // Once the key store is back, accepting the same invitation finishes the erase and joins.
+    f.setMemberLocked(false)
+    const second = await f.joiner.prepareMemberJoin(again)
+    assert.notEqual(second.requestId, first.requestId)
     assert.equal(
       JSON.stringify(await f.joiner.pendingMemberJoin('team')),
       JSON.stringify({ offer: again, requestId: second.requestId })

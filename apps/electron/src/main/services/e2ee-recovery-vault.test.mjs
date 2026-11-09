@@ -703,6 +703,34 @@ void test('a damaged journal row shows that workspace as unknown and keeps the p
   }
 })
 
+void test('a workspace whose identity cannot be read does not hide the others from the plan', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const plan = await Effect.runPromise(
+      recoveryReplacementPlan({
+        journalPath: join(dir, 'recovery-vault.sqlite'),
+        store: {},
+        replacement: {
+          state: () => Effect.succeed({ current: 'a'.repeat(64), replacing: null })
+        },
+        accountWorkspaces: Effect.succeed([
+          { id: 'here', name: 'Here' },
+          { id: 'fenced', name: 'Fenced' }
+        ]),
+        // A removed workspace whose erase is still pending refuses to open its identity.
+        hasIdentity: (id) =>
+          id === 'fenced' ? Effect.fail(new Error('e2ee_member_removed')) : Effect.succeed(true)
+      })
+    )
+    assert.deepEqual(plan.covered, [{ id: 'here', name: 'Here', status: { kind: 'notSet' } }])
+    assert.deepEqual(plan.uncovered, [
+      { id: 'fenced', name: 'Fenced', status: { kind: 'unknown' } }
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 void test('setting up one workspace needs the current vault and reports a slow delivery', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
   try {

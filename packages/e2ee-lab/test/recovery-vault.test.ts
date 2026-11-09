@@ -1619,6 +1619,60 @@ describe('encrypted recovery vault and genuine workflow', () => {
         )
       );
     }));
+  it('reports a workspace whose identity cannot be checked as failed, then restores it', () =>
+    inDir(async (dir) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const r = yield* replacementFixture(dir);
+            yield* r.newOwner.setup();
+            // The device holds no identity, but the check is briefly unavailable (for
+            // example a busy lease). That is neither "present" nor "absent".
+            let identity: boolean | 'unknown' = 'unknown';
+            let connected = 0;
+            const keys = memoryRecoveryEpochKeys();
+            const target = {
+              id: 'workspace',
+              name: 'Workspace',
+              genesisHash: hex(r.f.initial.genesis.toBytes()),
+              hasIdentity: () => identity,
+              connect: () =>
+                Effect.sync(() => {
+                  connected += 1;
+                  return {
+                    personalSigner: r.f.personal,
+                    personal: { ...r.f.personal, encryptionPublicKey: r.f.personal.enc },
+                    ledger: () => Effect.sync(r.f.view),
+                    installed: keys,
+                    fetchCurrentEnvelope: r.fetchEnvelope,
+                    submitOriginalAsRecovery: (record: Uint8Array) => r.submitOnce(record),
+                    acquirePersonal: () => Effect.fail(new Error('unused')),
+                    recovered: keys.entries,
+                    adopt: () =>
+                      Effect.sync(() => {
+                        identity = true;
+                      }),
+                  };
+                }),
+            };
+            const run = () =>
+              restoreVaultWorkspaces({
+                vault: r.newVault.vault,
+                local: r.local,
+                targets: [target],
+              });
+            // Reported for retry, and nothing is restored over an identity it cannot see.
+            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
+            expect(connected).toBe(0);
+            expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
+            // Once the check works again, the retry restores it.
+            identity = false;
+            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Committed' }]);
+            expect(connected).toBe(1);
+          })
+        )
+      );
+    }));
   it('reads each workspace recovery stage from this device journal without V', () =>
     inDir(async (dir) => {
       await Effect.runPromise(

@@ -240,7 +240,7 @@ export type RecoveryWorkspaceStatus =
   | { readonly kind: 'notSet' }
   | { readonly kind: 'saved' }
   | { readonly kind: 'verified'; readonly update: number }
-  /** This device's journal row for the workspace could not be read. */
+  /** This device's journal row or identity for the workspace could not be read. */
   | { readonly kind: 'unknown' }
 
 /** What a replacement would cover, and whether one is already running. */
@@ -259,11 +259,22 @@ export const recoveryReplacementPlan = (
       const state = yield* io.replacement.state()
       const workspaces = yield* io.accountWorkspaces
       const local = yield* RecoveryVaultLocalStore
+      // One workspace whose identity cannot be read right now (a removal still erasing, a
+      // busy lease, a failed close) is shown as unknown and not acted on; it must not take
+      // the whole plan, and with it every other workspace's controls, down with it.
+      const unreadable = new Set<string>()
       const usable = (id: string) =>
-        Effect.flatMap(io.hasIdentity(id), (has) =>
-          has
-            ? Effect.map(recoveryRestoreIncomplete(local, id), (incomplete) => !incomplete)
-            : Effect.succeed(false)
+        Effect.flatMap(
+          Effect.catch(io.hasIdentity(id), () =>
+            Effect.sync(() => {
+              unreadable.add(id)
+              return false
+            })
+          ),
+          (has) =>
+            has
+              ? Effect.map(recoveryRestoreIncomplete(local, id), (incomplete) => !incomplete)
+              : Effect.succeed(false)
         )
       const progress = state.current
         ? yield* readWorkspaceRecoveryProgress(local, state.current)
@@ -278,14 +289,19 @@ export const recoveryReplacementPlan = (
           ? { kind: 'verified', update: found.testedEpoch }
           : { kind: 'saved' }
       }
-      const plan = planVaultReplacement(
-        workspaces.map((row) => ({ id: row.id, name: row.name, status: status(row.genesisHash) })),
-        new Set(
-          yield* Effect.filter(
-            workspaces.map((row) => row.id),
-            usable
-          )
+      const usableIds = new Set(
+        yield* Effect.filter(
+          workspaces.map((row) => row.id),
+          usable
         )
+      )
+      const plan = planVaultReplacement(
+        workspaces.map((row) => ({
+          id: row.id,
+          name: row.name,
+          status: unreadable.has(row.id) ? ({ kind: 'unknown' } as const) : status(row.genesisHash)
+        })),
+        usableIds
       )
       return {
         hasVault: state.current !== null,
@@ -528,7 +544,7 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
   readonly name: string
   readonly genesisHash: string
   readonly append: RecoveryWorkspaceTarget['append']
-  readonly hasIdentity: () => boolean
+  readonly hasIdentity: () => boolean | 'unknown'
   readonly history: (next?: {
     readonly cursor: string
     readonly checkpoint: P['checkpoint']
