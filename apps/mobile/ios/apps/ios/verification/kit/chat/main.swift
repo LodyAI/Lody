@@ -1016,3 +1016,20 @@ let runningHangRows = ChatTranscript(entries: runningHang).rows(now: 30_000)
 assert(Array(runningHangRows.map(\.kind).prefix(3)) == ["duration", "subagent_task", "subagent_task"],
   "Live sub-agents also hang under the process row")
 print("Process rail: live merge, line two, sub-agent tree placement and held turns passed")
+
+// DSH thoughts are separate disclosures: streaming, toggles and finished work retain their order.
+let dshThoughtsJSON = #"[{"id":"dsh-fold","role":"assistant","status":"running","finished":false,"items":[{"itemId":"think","type":"thought","text":"Private reasoning"},{"itemId":"tool","type":"tool_call","kind":"read","title":"Read"},{"itemId":"reply","type":"text","text":"Answer"}]}]"#
+var dshThoughts = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(dshThoughtsJSON.utf8)))
+let dshClosed = dshThoughts.rows()
+assert(!dshClosed.contains { $0.itemID == "think" })
+assert(dshClosed.contains { $0.processStartID == "__thought__:dsh-fold:thought:think" && !$0.disclosed })
+dshThoughts.expandedThoughts.insert("dsh-fold:thought:think")
+let dshOpen = dshThoughts.rows()
+assert(dshOpen.contains { $0.itemID == "think" && $0.text == "Private reasoning" })
+assert(dshOpen.contains { $0.processStartID == "__thought__:dsh-fold:thought:think" && $0.disclosed })
+dshThoughts.expandedThoughts.removeAll()
+assert(!dshThoughts.rows().contains { $0.itemID == "think" })
+dshThoughts.entries[0].finished = true
+dshThoughts.expandedWork.insert("dsh-fold")
+assert(dshThoughts.rows().contains { $0.processStartID == "__thought__:dsh-fold:thought:think" && !$0.disclosed })
+print("Chat: DSH thoughts default closed and toggle independently")

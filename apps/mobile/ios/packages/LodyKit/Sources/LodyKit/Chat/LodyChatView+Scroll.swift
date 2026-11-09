@@ -57,6 +57,15 @@ extension LodyChatView {
       applyRows()
       return
     }
+    if row.kind == "summary", row.processStartID.hasPrefix("__thought__:") {
+      let key = String(row.processStartID.dropFirst("__thought__:".count))
+      if !expandedThoughts.insert(key).inserted { expandedThoughts.remove(key) }
+      UISelectionFeedbackGenerator().selectionChanged()
+      toggleAnchor = row.id
+      followsBottom = false
+      applyRows()
+      return
+    }
     if row.kind == "changesHeader" {
       UISelectionFeedbackGenerator().selectionChanged()
       onActivityPress(["entryId": row.entryID, "itemId": "", "processStartId": "__turnFiles__"])

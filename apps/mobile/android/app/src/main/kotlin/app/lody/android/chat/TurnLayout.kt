@@ -7,7 +7,7 @@ import app.lody.android.runtime.TurnItem
  *
  * - Consecutive thought / tool steps form one activity group; its header summarizes it ("Ran 3
  *   commands · Read 2 files"). Only builtin DSH shows thoughts ([showThoughts]); then thought runs
- *   and tool runs are separate groups, thoughts open by default and tools closed. Other providers
+ *   and tool runs are separate groups, both closed by default. Other providers
  *   hide thoughts, and `think` tool steps are never shown.
  * - A streaming turn stays expanded. A finished turn keeps its answer — the final contiguous text
  *   run before the never-folded tail (plans, checklists, notices) — and folds the earlier work
@@ -20,8 +20,8 @@ object TurnLayout {
     data class Content(override val key: String, val item: TurnItem) : Block
 
     data class Activity(override val key: String, val items: List<TurnItem>, val summary: Summary) : Block {
-        /** DSH thought-only groups open by default; tool groups start closed. */
-        val opensByDefault: Boolean get() = items.all { it is TurnItem.Thought }
+        /** Activity groups start closed until the reader opens them. */
+        val opensByDefault: Boolean get() = false
     }
 
     data class Summary(

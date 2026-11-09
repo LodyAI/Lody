@@ -229,6 +229,7 @@ extension LodyChatView {
     composer.setQueue(queue)
     let now = Date().timeIntervalSince1970 * 1000
     transcript.expandedWork = expandedWork
+    transcript.expandedThoughts = expandedThoughts
     var projected = transcript.rows(
       processEntryID: processEntryID,
       processStartID: processStartID,

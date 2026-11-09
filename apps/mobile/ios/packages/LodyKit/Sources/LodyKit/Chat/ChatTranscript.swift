@@ -329,6 +329,7 @@ struct ChatTranscript {
   var entries: [ChatEntry] = []
   /// Finished turns whose folded work the reader opened in place, by entry id.
   var expandedWork: Set<String> = []
+  var expandedThoughts: Set<String> = []
 
   func liveSubagentItems() -> [ChatItem] {
     entries.flatMap(\.items).filter(\.isLiveSubagent)
@@ -403,7 +404,7 @@ struct ChatTranscript {
       }
       var visible = entry
       if entry.holdOpen == true || entry.executionId != nil { visible.finished = false }
-      var result = ChatTranscript(entries: [visible]).entryRows(now: now, turnStartedAt: turnStartedAt)
+      var result = ChatTranscript(entries: [visible], expandedWork: expandedWork, expandedThoughts: expandedThoughts).entryRows(now: now, turnStartedAt: turnStartedAt)
       if entry.finished && !visible.finished {
         result.removeAll { $0.kind == "duration" }
         for index in result.indices {
@@ -540,12 +541,23 @@ struct ChatTranscript {
         })
         visible.sort()
       } else {
-        // Keep prose and thoughts in place, folding each consecutive run of tools.
+        // Keep prose in place, folding consecutive runs of thoughts and tools separately.
         var toolStart: Int?
+        var thoughtStart: Int?
         for index in entry.items.indices {
           let item = entry.items[index]
           if item.hidesFromTranscript || (item.type == "tool_call" && item.kind == "think") { continue }
-          if item.type == "tool_call", item.kind != "switch_mode" {
+          if item.type == "thought" {
+            toolStart = nil
+            if let start = thoughtStart {
+              groups[start, default: []].append(index)
+            } else {
+              thoughtStart = index
+              groups[index] = [index]
+              visible.append(index)
+            }
+          } else if item.type == "tool_call", item.kind != "switch_mode" {
+            thoughtStart = nil
             if let start = toolStart {
               groups[start, default: []].append(index)
             } else {
@@ -555,6 +567,7 @@ struct ChatTranscript {
             }
           } else {
             toolStart = nil
+            thoughtStart = nil
             visible.append(index)
           }
         }
@@ -590,7 +603,7 @@ struct ChatTranscript {
             if !row.disclosed { absorbed = groups.keys.min() }
           } else if !entry.finished, entry.holdOpen != true, entry.executionId == nil,
                     let first = visible.first(where: { entry.items[$0].type != "subagent_task" }),
-                    let indices = groups[first] {
+                    let indices = groups[first], entry.items[first].type != "thought" {
             let process = indices.map { entry.items[$0] }
             let tail = entry.items.indices.last { !entry.items[$0].hidesFromTranscript }
             let live = entry.isRunning && indices.last == tail && process.first?.processDurationMs == nil
@@ -619,11 +632,22 @@ struct ChatTranscript {
             title = ChatWorkDuration.title(duration, running: false)
             if !summary.isEmpty { title += " · " + summary }
           }
-          result.append(ChatRow(id: entry.id + ":process" + (firstGroup ? "" : ":" + entry.items[index].itemId), entryID: entry.id, kind: "summary",
+          let isThoughtGroup = process.allSatisfy { $0.type == "thought" } && !(folds && !expandedWork.contains(entry.id))
+          let thoughtKey = entry.id + ":thought:" + entry.items[index].itemId
+          var groupRow = ChatRow(id: entry.id + ":process" + (firstGroup ? "" : ":" + entry.items[index].itemId), entryID: entry.id, kind: "summary",
             text: title,
             symbol: ChatProcessSummary.mark(attention: attention),
-            processStartID: folds && !expandedWork.contains(entry.id) ? "" : entry.items[index].itemId,
-            actionable: true, running: running, attention: attention))
+            processStartID: isThoughtGroup ? "__thought__:" + thoughtKey : (folds && !expandedWork.contains(entry.id) ? "" : entry.items[index].itemId),
+            actionable: true, running: running, attention: attention)
+          groupRow.disclosed = isThoughtGroup && expandedThoughts.contains(thoughtKey)
+          result.append(groupRow)
+          if groupRow.disclosed {
+            for item in process {
+              result.append(ChatRow(id: entry.id + ":" + item.itemId, entryID: entry.id, kind: "thought",
+                text: item.text ?? "", symbol: "brain", itemID: item.itemId,
+                streaming: entry.isRunning && item.itemId == entry.textTailID))
+            }
+          }
           continue
         }
         let item = entry.items[index]

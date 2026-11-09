@@ -79,6 +79,4 @@ isolated execution of the actual row builder and its actual grouping/folding
 helpers passes these scenarios, with unrelated footer/subagent services stubbed.
 This is narrower than a component test or visual desktop verification.
 
-Thought-only DSH groups now default open, including under expanded finished work.
-An explicit false expansion state still wins; mixed groups retain their default.
-Regression coverage includes default opening, collapse/reopen and mixed groups.
+Thought-only DSH groups now default closed, including under expanded finished work. Explicit expansion and search reveal still work. Regression coverage includes the default, toggling and separate groups.

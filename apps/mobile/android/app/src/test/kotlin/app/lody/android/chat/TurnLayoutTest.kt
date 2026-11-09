@@ -33,13 +33,13 @@ class TurnLayoutTest {
         assertEquals(2, layout.visible.size)
     }
 
-    @Test fun onlyDshShowsThoughtsAsTheirOwnOpenGroups() {
+    @Test fun onlyDshShowsThoughtsAsTheirOwnClosedGroups() {
         val items = listOf(thought("1"), tool("2"), thought("3"), text("4"))
         val hidden = TurnLayout.build("t", items, finished = false, showThoughts = false)
         assertEquals(listOf("t:activity:2", "t:content:4"), hidden.blocks.map { it.key })
         val dsh = TurnLayout.build("t", items, finished = false, showThoughts = true)
         val groups = dsh.blocks.filterIsInstance<TurnLayout.Activity>()
-        assertEquals(listOf(true, false, true), groups.map { it.opensByDefault })
+        assertEquals(listOf(false, false, false), groups.map { it.opensByDefault })
     }
 
     @Test fun thinkStepsAndPlanApprovalsAreNotGroupedSteps() {
