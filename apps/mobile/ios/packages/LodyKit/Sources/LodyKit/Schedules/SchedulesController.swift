@@ -3,8 +3,8 @@ import LodyDesignSystem
 import SwiftUI
 import UIKit
 
-/// iPhone Schedules tab, in the Chats list's design language: the Chats header without a title
-/// (workspace capsule, search filtering by name), then a plain list without separators grouped by
+/// Schedules, pushed from Settings (Conversations & History), in the Chats list's design language:
+/// a native title with "+" (new schedule) and search filtering by name, then a plain list without separators grouped by
 /// state like Chats' status grouping (Needs attention, Active, Paused, Ended; empty groups hidden)
 /// under the same group labels. Rows match chat rows: name (dimmed once ended) with the state in
 /// words trailing (tinted only for attention); a footnote line with the kind glyph, frequency and
@@ -18,7 +18,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   private let source: SessionSource
   private let service: ScheduleService
-  private let chrome = InboxChrome(searchPlaceholder: String(localized: "schedules.search", bundle: .lody))
+  private let search = LodyNavigationSearch()
   private var list: UICollectionView!
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
@@ -94,7 +94,15 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     data.supplementaryViewProvider = { collection, _, indexPath in
       collection.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
     }
-    wireChrome()
+    search.configure(LodyNavigationSearch.Config(
+      placeholder: String(localized: "schedules.search", bundle: .lody), placement: "integrated", hideWhenScrolling: false,
+      obscureBackground: false, hideNavigationBar: false
+    ))
+    search.emit = { [weak self] event, text in
+      guard event == "change", let self, text != self.query else { return }
+      self.query = text
+      self.render()
+    }
     observers = source.changes.map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.sourceChanged() }
@@ -105,7 +113,6 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       MainActor.assumeIsolated { self?.render(reconfigure: true) }
     }
     scope = source.state.key
-    renderChrome()
   }
 
   override func viewWillAppear(_ animated: Bool) {
@@ -116,23 +123,21 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     LodyScrollEdges.bind(list, to: self)
-    chrome.layout()
   }
 
   override func didMove(toParent parent: UIViewController?) {
     super.didMove(toParent: parent)
-    if let parent {
-      chrome.attach(to: parent, content: self, scrollView: list)
-      renderChrome()
-    } else {
-      chrome.detach()
-    }
+    guard let item = parent?.navigationItem else { return }
+    let header = LodyNavigationHeader.of(item)
+    header.search = search
+    let add = LodyFormController.barButton(symbol: "plus", label: ScheduleFormat.text("new")) { [weak self] in self?.newSchedule() }
+    add.accessibilityIdentifier = "schedules-new"
+    header.rightItems = [add]
   }
 
   // MARK: Loading
 
   private func sourceChanged() {
-    renderChrome()
     let next = source.state.key
     guard next != scope else { return }
     scope = next
@@ -181,46 +186,6 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   }
 
   // MARK: Rendering
-
-  private func wireChrome() {
-    chrome.showsViewMenu = false
-    chrome.selectWorkspace = { id in
-      guard NativeHomeFixture.active else {
-        CatalogSession.shared.selectWorkspace(id)
-        return
-      }
-      Task { try? await NativeHomeFixture.request("selectWorkspace", ["workspaceId": id]) }
-    }
-    chrome.openSettings = { [weak self] in LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent) }
-    chrome.openDebug = { [weak self] in LodyShell.shared.openPage("debug", from: self?.parent) }
-    chrome.newSession = { [weak self] in self?.newSchedule() }
-    chrome.searchChanged = { [weak self] text in
-      guard let self, text != self.query else { return }
-      self.query = text
-      self.render()
-    }
-  }
-
-  private func renderChrome() {
-    guard isViewLoaded else { return }
-    let state = source.state
-    guard !state.userId.isEmpty else {
-      chrome.update(nil)
-      return
-    }
-    chrome.update(InboxChrome.Model(
-      accountEmail: state.accountEmail,
-      workspaces: state.workspaces, selected: state.workspace,
-      devices: InboxDevices(catalog: state.catalog, presence: state.presence),
-      running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
-      mode: 0, sort: .activity, connection: Self.connection(state)
-    ))
-  }
-
-  private static func connection(_ state: SessionListState) -> HomeSyncState {
-    if !state.connected { return .offline }
-    return state.loading ? .syncing : .live
-  }
 
   private func render(reconfigure: Bool = false) {
     guard isViewLoaded else { return }
@@ -308,7 +273,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   // MARK: Actions
 
-  /// The tab bar's "+": a new schedule's editor, pushed over the list.
+  /// The header's "+": a new schedule's editor, pushed over the list.
   func newSchedule() {
     let state = source.state
     guard state.workspace != nil, !state.workspaceId.isEmpty else {

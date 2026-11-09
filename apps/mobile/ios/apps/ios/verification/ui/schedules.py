@@ -1,4 +1,4 @@
-"""Offline --ui-verify-home Schedules tab: production list and editor over the scripted ScheduleFixture."""
+"""Offline --ui-verify-home Schedules (Settings › Conversations & History): production list and editor over the scripted ScheduleFixture."""
 import sys
 from driver import UI
 import catalog
@@ -16,16 +16,12 @@ def labeled(label):
 
 def list_element(identifier, *, editor=False):
     # UIKit virtualizes rows, and a pause/resume can move the row between groups.
-    # Search from the top, then drag until the whole target clears the tab bar.
+    # Search from the top, then drag until the whole target is on screen.
     for attempt in range(10):
         items = ui.state()
         row = next((i for i in items if i.get('AXUniqueId') == identifier), None)
-        if editor:
-            screen = next(i for i in items if i.get('type') == 'Application')['frame']
-            bottom = screen['y'] + screen['height'] - 40
-        else:
-            tab = next(i for i in items if i.get('AXUniqueId') == 'home-tab-schedules')['frame']
-            bottom = tab['y'] - 24
+        screen = next(i for i in items if i.get('type') == 'Application')['frame']
+        bottom = screen['y'] + screen['height'] - 40
         if row and row['frame']['y'] >= 120 and row['frame']['y'] + row['frame']['height'] <= bottom:
             return row
         down = (row and row['frame']['y'] < 120) or (not row and attempt < 2)
@@ -80,9 +76,10 @@ def swipe_action(identifier, action):
 
 
 ui.element('home-chat-list')
-ui.axe('tap', '--id', 'home-tab-schedules', '--post-delay', '.8')
+ui.axe('tap', '--id', 'home-settings', '--post-delay', '.8')
+list_element('schedules', editor=True)
+ui.axe('tap', '--id', 'schedules', '--post-delay', '.8')
 ui.element('home-schedules-list')
-ui.element('workspace-menu')
 ui.element('schedules-section:attention')
 list_element('schedules-section:running')
 list_element('schedule:nightly-build')
@@ -92,8 +89,8 @@ assert text('paused') in row_text('schedule:weekly-digest')
 assert text('status.manual') in row_text('schedule:release-check')
 ui.capture('schedules-list')
 
-# The tab bar's create action reads "+ New schedule" here.
-create = ui.element('home-new-session')
+# The header's "+" reads "New schedule".
+create = ui.element('schedules-new')
 assert create.get('AXLabel') == text('new'), create
 
 # Hold replies at the service boundary. These assertions must pass before either
@@ -211,7 +208,7 @@ ui.capture('schedule-cached-detail-failed')
 back()
 
 # New schedule: Save stays disabled until name and prompt are set.
-ui.axe('tap', '--id', 'home-new-session', '--post-delay', '.8')
+ui.axe('tap', '--id', 'schedules-new', '--post-delay', '.8')
 ui.element('schedule-frequency')
 save = labeled(text('save'))
 assert not save.get('enabled', True), save
@@ -236,4 +233,4 @@ ui.capture('schedule-delete-confirm')
 ui.axe('tap', '--label', text('delete'), '--post-delay', '1')
 ui.element('home-schedules-list')
 ui.wait(lambda items: not any(i.get('AXUniqueId') == 'schedule:launch-once' for i in items), 'Deleted schedule stayed listed')
-print('PASS: Schedules tab lists sections with worded states, optimistic pause/resume rollback before reconciliation, cached detail through pending/failed refresh, swipe pause, read-only and unsupported rules, create and confirmed delete. Offline fixture; visual review required.')
+print('PASS: Schedules (from Settings) lists sections with worded states, optimistic pause/resume rollback before reconciliation, cached detail through pending/failed refresh, swipe pause, read-only and unsupported rules, create and confirmed delete. Offline fixture; visual review required.')
