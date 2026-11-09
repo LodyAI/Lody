@@ -6475,8 +6475,8 @@
   "sessions.access.failed": "无法更改会话访问权限，请刷新后重试。",
   "sessions.access.confirmRead": "同事可以阅读此会话，并在自己的会话中引用它。",
   "sessions.access.unavailable": "此会话未向你共享。",
-  "sessions.access.readonlyMachine": "只读 · 运行在 {{machine}} 的机器上",
+  "sessions.access.readonly": "只读",
+  "sessions.access.readonlyMachine": "只读 · 运行在 {{machine}} 上",
   "sessions.access.reference": "在新会话中引用",
-  "sessions.access.togglePin": "置顶／取消置顶",
   "e2ee.machineSharing.pendingSession": "待确认更改：{{action}} {{name}} 的只读授权"
 }

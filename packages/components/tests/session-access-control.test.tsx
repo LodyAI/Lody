@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -154,11 +152,31 @@ describe('SessionAccessControl', () => {
   });
 
   it('explains effective machine sharing and links to its settings without offering a private override', async () => {
-    await render({ state: { ...baseState, visibility: 'team', access: 'edit' } });
+    let opened = false;
+    await render({
+      state: {
+        ...baseState,
+        visibility: 'team',
+        access: 'edit',
+        openMachineSettings: () => {
+          opened = true;
+        },
+      },
+    });
     await openPanel();
     expect(panel().textContent).toContain('Team can edit · Controlled by machine sharing');
     expect(panelButton('Open machine settings')).toBeDefined();
-    expect(panel().querySelector('[aria-pressed]')).toBeNull();
+    expect(panel().querySelector('[role=tab]')).toBeNull();
+    await act(async () => panelButton('Open machine settings').click());
+    expect(opened).toBe(true);
+    expect(document.querySelector('[role=dialog]')).toBeNull();
+  });
+
+  it('omits machine settings when its callback is unavailable', async () => {
+    await render({ state: { ...baseState, visibility: 'team', access: 'edit' } });
+    await openPanel();
+    expect(panel().textContent).toContain('Team can edit · Controlled by machine sharing');
+    expect(panel().textContent).not.toContain('Open machine settings');
   });
 
   it('keeps public publication available in a solo workspace', async () => {
@@ -172,8 +190,8 @@ describe('SessionAccessControl', () => {
     await render({ state: { ...baseState, visibility: 'unknown' } });
     expect(trigger().textContent).toContain('Checking visibility');
     await openPanel();
-    expect(panelButton('Private').disabled).toBe(true);
-    expect(panelButton('Team read-only').disabled).toBe(true);
+    expect(panelButton('Private').getAttribute('aria-disabled')).toBe('true');
+    expect(panelButton('Team read-only').getAttribute('aria-disabled')).toBe('true');
   });
 
   it('keeps team access independent of an unresolved or published public link', async () => {
@@ -188,9 +206,11 @@ describe('SessionAccessControl', () => {
   it('disables both choices for a non-owner and explains the reason', async () => {
     await render({ state: { ...baseState, canManage: false, visibility: 'team', access: 'read' } });
     await openPanel();
-    expect(panelButton('Private').disabled).toBe(true);
-    expect(panelButton('Team read-only').disabled).toBe(true);
+    expect(panelButton('Private').getAttribute('aria-disabled')).toBe('true');
+    expect(panelButton('Team read-only').getAttribute('aria-disabled')).toBe('true');
     expect(panel().textContent).toContain('Only the device owner can share');
+    await act(async () => panelButton('Private').click());
+    expect(trigger().textContent).toContain('Team read-only');
   });
 
   it('lets the owner grant and revoke one read-only conversation while the panel stays open', async () => {
@@ -210,9 +230,9 @@ describe('SessionAccessControl', () => {
     await openPanel();
     await act(async () => panelButton('Team read-only').click());
     expect(trigger().textContent).toContain('Team read-only');
-    expect(panelButton('Team read-only').getAttribute('aria-pressed')).toBe('true');
+    expect(panelButton('Team read-only').getAttribute('aria-selected')).toBe('true');
     await act(async () => panelButton('Private').click());
     expect(trigger().textContent).toContain('Private');
-    expect(panelButton('Private').getAttribute('aria-pressed')).toBe('true');
+    expect(panelButton('Private').getAttribute('aria-selected')).toBe('true');
   });
 });

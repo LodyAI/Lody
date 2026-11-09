@@ -589,12 +589,6 @@ export function ConversationRow({
         )}
       </div>
       <SessionRowAuthorAvatar author={conversation.owner} />
-      {conversation.readOnly ? (
-        <Eye
-          className="h-4 w-4 shrink-0 text-muted-foreground"
-          aria-label={t('sessions.access.read')}
-        />
-      ) : null}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         {conversation.isPinned ? (
           /* h-4 matches ~15px title optically (glyph fills less than
@@ -614,6 +608,12 @@ export function ConversationRow({
         >
           {conversation.title}
         </span>
+        {conversation.readOnly ? (
+          <Eye
+            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+            aria-label={t('sessions.access.read')}
+          />
+        ) : null}
       </div>
       {showMergeablePill ? (
         <SessionMergeablePill />

@@ -49,14 +49,14 @@ export const PrivateProject: Story = {};
 
 export const PrivateProjectPanelOpen: Story = {
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
 };
 
 export const PrivateProjectPanelOpenDark: Story = {
   globals: { theme: 'dark' },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
 };
 
@@ -101,7 +101,7 @@ export const TeamSharedDark: Story = {
 export const PrivateWithPublishing: Story = {
   args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
 };
 
@@ -109,7 +109,7 @@ export const PrivateWithPublishing: Story = {
 export const PublishInPanel: Story = {
   args: { publicShare: { status: 'none', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
     await userEvent.click(
       await within(document.body).findByRole('button', { name: 'Publish to the web' })
     );
@@ -120,7 +120,7 @@ export const PublishInPanel: Story = {
 export const PrivateAndShared: Story = {
   args: { publicShare: { status: 'shared', renderEditor: ShareEditorStory } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: /^Private$/ }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
 };
 
@@ -154,7 +154,7 @@ export const OwnerOnly: Story = {
 export const TeamReadOnly: Story = {
   args: { state: { ...teamState, access: 'read', setReadAccess: fn() } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Team read-only' }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
 };
 export const ReadOnlyNonOwner: Story = {
@@ -164,6 +164,15 @@ export const ReadOnlyNonOwner: Story = {
 export const MachineEditable: Story = {
   args: { state: { ...teamState, access: 'edit', openMachineSettings: fn() } },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Team can edit' }));
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
+};
+
+export const TeamReadOnlyChinese: Story = {
+  ...TeamReadOnly,
+  globals: { locale: 'zh_CN' },
+};
+export const ReadOnlyNonOwnerDark: Story = {
+  ...ReadOnlyNonOwner,
+  globals: { theme: 'dark' },
 };

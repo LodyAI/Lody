@@ -12,7 +12,7 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import { useRouter } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowLeft, Copy, Ellipsis } from 'lucide-react';
+import { ArrowLeft, AtSign, Copy, Ellipsis, Eye } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -86,6 +86,29 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
     fontSize: text.captionSize,
   },
+  footer: {
+    marginTop: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexWrap: 'wrap',
+    flexShrink: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    paddingBottom: `calc(${space[2]} + env(safe-area-inset-bottom, 0px))`,
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+  },
+  footerText: {
+    margin: 0,
+    flexGrow: 1,
+    minWidth: 0,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+    overflowWrap: 'anywhere',
+  },
+  footerIcon: { width: 14, height: 14, flexShrink: 0, color: colors.secondaryLabel },
   stream: { flexGrow: 1, minHeight: 0 },
 });
 const attachments = {
@@ -114,6 +137,7 @@ export function SessionHistoryView({
   machineName,
   onReference,
   onTogglePin,
+  pinned = false,
   onMarkUnread,
   sharing,
 }: {
@@ -131,6 +155,7 @@ export function SessionHistoryView({
   machineName?: string;
   onReference?: () => void;
   onTogglePin?: () => void;
+  pinned?: boolean;
   onMarkUnread?: () => void;
   sharing?: SessionSharingState;
 }) {
@@ -176,7 +201,9 @@ export function SessionHistoryView({
           />
           <Menu.Content align="end">
             {onTogglePin && (
-              <Menu.Item onClick={onTogglePin}>{t('sessions.access.togglePin')}</Menu.Item>
+              <Menu.Item onClick={onTogglePin}>
+                {t(pinned ? 'sessions.contextMenu.unpin' : 'sessions.contextMenu.pin')}
+              </Menu.Item>
             )}
             {onMarkUnread && (
               <Menu.Item onClick={onMarkUnread}>{t('sessions.contextMenu.markUnread')}</Menu.Item>
@@ -204,18 +231,6 @@ export function SessionHistoryView({
           </Menu.Content>
         </Menu.Root>
       </header>
-      <p role="status" {...stylex.props(styles.notice)}>
-        {t('sessions.access.readonlyMachine', {
-          machine: machineName ?? t('sessions.sharing.thisDevice'),
-        })}
-      </p>
-      {onReference && (
-        <div {...stylex.props(styles.notice)}>
-          <Button variant="secondary" size="small" onClick={onReference}>
-            {t('sessions.access.reference')}
-          </Button>
-        </div>
-      )}
       {ready && (
         <span
           hidden
@@ -242,6 +257,20 @@ export function SessionHistoryView({
           />
         </SessionReadonlyContext.Provider>
       )}
+      <footer {...stylex.props(styles.footer)}>
+        <Eye {...stylex.props(styles.footerIcon)} aria-hidden="true" />
+        <p role="status" {...stylex.props(styles.footerText)}>
+          {machineName
+            ? t('sessions.access.readonlyMachine', { machine: machineName })
+            : t('sessions.access.readonly')}
+        </p>
+        {onReference && (
+          <Button variant="secondary" size="small" onClick={onReference}>
+            <AtSign aria-hidden="true" />
+            {t('sessions.access.reference')}
+          </Button>
+        )}
+      </footer>
     </section>
   );
 }
@@ -392,6 +421,7 @@ export function SessionHistoryReader({
       <SessionHistoryView
         sessionId={sessionId}
         sharing={sharing}
+        pinned={rootMeta?.isPinned ?? false}
         machineName={sharing.machineName ?? undefined}
         onReference={() => {
           void reference();

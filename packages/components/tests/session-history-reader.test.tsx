@@ -19,7 +19,10 @@ import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/w
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view/create-conversation-view-from-history';
-import { SessionHistoryReader } from '../src/components/sessions/session-history-reader';
+import {
+  SessionHistoryReader,
+  SessionHistoryView,
+} from '../src/components/sessions/session-history-reader';
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 
@@ -209,7 +212,7 @@ async function selectCopy() {
 it('reads history without a composer or machine operation and requires explicit consent for copying', async () => {
   await render();
   expect(container.textContent).toContain('Prior conversation');
-  expect(container.querySelector('[role="status"]')?.textContent).toContain('Read-only · Runs on');
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('Read-only');
   expect(container.querySelector('textarea, input, [contenteditable="true"]')).toBeNull();
   expect(
     container
@@ -353,5 +356,45 @@ it.each([false, true])(
     } finally {
       delete platform.sessionAccess;
     }
+  }
+);
+
+it.each([false, true])(
+  'shows the current pin action and machine in the read-only footer; pinned=%s',
+  async (pinned) => {
+    let toggled = false;
+    await act(async () =>
+      root.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <SessionHistoryView
+              sessionId={sessionId}
+              title="Prior conversation"
+              history={view}
+              ready
+              machineName="Studio Mac"
+              pinned={pinned}
+              onTogglePin={() => {
+                toggled = true;
+              }}
+            />
+          </Provider>
+        </PlatformContext.Provider>
+      )
+    );
+    expect(container.querySelector('footer [role="status"]')?.textContent).toBe(
+      'Read-only · Runs on Studio Mac'
+    );
+    expect(container.querySelector('textarea, input, [contenteditable="true"]')).toBeNull();
+    expect(container.querySelector('footer button')).toBeNull();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!.click()
+    );
+    const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === (pinned ? 'Unpin Session' : 'Pin Session')
+    );
+    expect(action).toBeDefined();
+    await act(async () => action!.click());
+    expect(toggled).toBe(true);
   }
 );
