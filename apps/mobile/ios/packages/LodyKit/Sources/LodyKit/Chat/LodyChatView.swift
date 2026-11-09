@@ -177,6 +177,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var displayError: String? { didSet { composer.displayError = displayError } }
   var applying = false
   var needsApply = false
+  var needsTextRefresh = false
   var historyPreparation: DispatchWorkItem?
   var historyStartID: String?
   var historyTargetID: String?
@@ -726,14 +727,32 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     measurements.removeAll()
     empty.font = .dynamic(of: 16, compatibleWith: traitCollection)
     guard dataSource != nil else { return }
+    guard !applying else { needsTextRefresh = true; return }
     var snapshot = dataSource.snapshot()
     let ids = snapshot.itemIdentifiers
     if !ids.isEmpty {
+      applying = true
       snapshot.reconfigureItems(ids)
       dataSource.apply(snapshot, animatingDifferences: false)
+      applying = false
+      if needsApply || needsTextRefresh {
+        DispatchQueue.main.async { [weak self] in self?.drainChatUpdates() }
+      }
     }
     collection.collectionViewLayout.invalidateLayout()
     setNeedsLayout()
+  }
+
+  func drainChatUpdates() {
+    guard !applying else { return }
+    if needsTextRefresh {
+      needsTextRefresh = false
+      refreshTextRendering()
+    }
+    if needsApply {
+      needsApply = false
+      applyRows()
+    }
   }
 
   override func didMoveToWindow() {

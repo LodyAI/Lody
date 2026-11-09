@@ -36,6 +36,7 @@ checks = {
     'html-preview': ['LodyLocalization.swift', 'HTMLPreview/HTMLPreviewResource.swift', 'HTMLPreview/HTMLPreviewText.swift'],
     'simulator-transport': ['LodyLocalization.swift', 'SimulatorStream/SimulatorDeviceView.swift', 'SimulatorStream/SimulatorRemote.swift', 'SimulatorStream/SimulatorRTCFrame.swift', 'SimulatorStream/SimulatorRTC.swift', 'SimulatorStream/SimulatorTransport.swift'],
     'chat-kit': [],
+    'chat-snapshot-reentrancy': [],
     'lexical-swift': [],
     'scroll-edges': ['Chrome/LodyScrollEdges.swift', 'LodyTint.swift', 'Chrome/LodyEdgeFade.swift'],
     'glass-transition': [],
@@ -177,6 +178,12 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         return lexical_dir
 
     for name, files in checks.items():
+        if name == 'chat-snapshot-reentrancy':
+            subprocess.run(['xcodebuild', 'test', '-scheme', 'LodyKit', '-destination', f'id={args.udid}',
+                '-derivedDataPath', str(root / '.artifacts/native-lody-kit'), '-collect-test-diagnostics', 'never',
+                '-only-testing:LodyKitTests/ChatSnapshotReentrancyTests'],
+                cwd=kit, check=True, timeout=1800)
+            continue
         if name == 'lexical-swift':
             subprocess.run(['xcodebuild', 'test', '-scheme', 'Lexical-Package', '-destination', f'id={args.udid}',
                 '-derivedDataPath', str(root / '.artifacts/native-lexical-swift'), '-collect-test-diagnostics', 'never'],
