@@ -146,6 +146,8 @@ import {
   type ResolvedTurnDispatchConfig,
   type SessionLiveStatusBatchItem,
   type DelegatedSessionRequester,
+  assertSessionManagementAccess,
+  SessionManagementAccessDeniedError,
 } from '@/commands/session';
 import { classifyMachinePresence, type MachinePresence } from '@/commands/session-machine-presence';
 import type {
@@ -1242,6 +1244,9 @@ const jsonTextResult = (value: unknown, isError = false) =>
   textResult(JSON.stringify(value, null, 2), isError);
 
 const normalizeMcpError = (error: unknown) => {
+  if (error instanceof SessionManagementAccessDeniedError) {
+    return makeLodyError(error.code, error.message, error.retryable);
+  }
   if (error instanceof LodyOperationStoreError) {
     return error.toLodyError();
   }
@@ -3793,10 +3798,11 @@ const applySessionRenameItems = async (
 const persistSessionRenameItems = async (
   manager: LoroDocumentManager,
   items: readonly ResolvedSessionRenameItem[],
-  syncReason: string
+  syncReason: string,
+  assertCanManage: (sessionId: SessionId) => Promise<SessionMeta>
 ): Promise<Awaited<ReturnType<typeof applySessionRenameItems>>> => {
   const results = await applySessionRenameItems(items, async (item) => {
-    const session = await readCurrentSessionMeta(manager, item.sessionId);
+    let session = await readCurrentSessionMeta(manager, item.sessionId);
     if (!session) {
       throw new LodyOperationStoreError(
         'SESSION_NOT_FOUND',
@@ -3804,6 +3810,7 @@ const persistSessionRenameItems = async (
         false
       );
     }
+    session = await assertCanManage(item.sessionId);
     if (item.scope === 'group' && session.parentSessionId) {
       throw new LodyOperationStoreError(
         'COMMAND_REJECTED',
@@ -3834,7 +3841,11 @@ const renameSessionItems = async (
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const reason = `mcp.session_rename_many:${ctx.sessionId}`;
     await syncWorkspaceMetaForRead(manager, reason);
-    return await persistSessionRenameItems(manager, resolved, reason);
+    const identity = buildInvocationIdentity(await resolveInvokingTurnSource());
+    const delegatedRequester = toDelegatedSessionRequester(identity);
+    return await persistSessionRenameItems(manager, resolved, reason, (sessionId) =>
+      assertSessionManagementAccess({ auth, workspace, manager, sessionId, delegatedRequester })
+    );
   });
 };
 
@@ -5636,13 +5647,24 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         const auth = getCliAuthContextOrThrow('mcp');
         const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
         return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+          const delegatedRequester = toDelegatedSessionRequester(
+            buildInvocationIdentity(await resolveInvokingTurnSource())
+          );
           const archive = async (rawSessionId: string) => {
             const sessionId = resolveMcpSessionId(rawSessionId, ctx);
             try {
               const archivedChildSessionIds = await runSessionOperationWithSyncedMetadata(
                 manager,
                 sessionId as SessionId,
-                'archive'
+                'archive',
+                (targetId) =>
+                  assertSessionManagementAccess({
+                    auth,
+                    workspace,
+                    manager,
+                    sessionId: targetId,
+                    delegatedRequester,
+                  })
               );
               return { ok: true as const, sessionId, archivedChildSessionIds };
             } catch (error) {

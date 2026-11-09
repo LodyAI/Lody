@@ -1,3 +1,4 @@
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 // @vitest-environment jsdom
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -5,7 +6,7 @@ import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStaticStore, type PlatformProvider, type SessionAccessView } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
-import type { MachineId, SessionMeta, WorkspaceId } from '@lody/shared';
+import { getSessionRoomId, type MachineId, type SessionMeta, type WorkspaceId } from '@lody/shared';
 import { runtimeAtom } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
@@ -59,8 +60,12 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
 });
-async function render(mode: 'plaintext' | 'e2ee') {
+async function render(mode: 'plaintext' | 'e2ee', records: SessionMeta[] = [session]) {
   const store = createStore();
+  store.set(
+    sessionMetaCacheAtom,
+    Object.fromEntries(records.map((meta) => [getSessionRoomId(meta.id), meta]))
+  );
   store.set(userAtom, { id: 'owner' } as never);
   store.set(currentWorkspaceIdAtom, workspaceId);
   store.set(currentWorkspaceSlugAtom, 'sharing');
@@ -132,6 +137,27 @@ describe.each(['plaintext', 'e2ee'] as const)('single-session sharing in %s', (m
     await act(async () => result.resolve(session).setReadAccess!(null));
     expect(result.resolve(session).access).toBe('private');
   });
+  it.each(['tab', 'side-panel', 'sidebar', 'other-machine'] as const)(
+    'targets a %s share according to the containment contract',
+    async (kind) => {
+      const child = {
+        ...session,
+        id: 'child',
+        parentSessionId: session.id,
+        ...(kind === 'tab' || kind === 'other-machine' ? {} : { childSessionPlacement: kind }),
+      } as unknown as SessionMeta;
+      const parent =
+        kind === 'other-machine'
+          ? { ...session, machineId: 'other-machine' as MachineId }
+          : session;
+      await render(mode, [parent, child]);
+      await act(async () => result.resolve(child).setReadAccess!('read'));
+      expect(view.readSharedSessionIds).toEqual([
+        kind === 'tab' || kind === 'side-panel' ? session.id : child.id,
+      ]);
+      expect(result.resolve(child).access).toBe('read');
+    }
+  );
   it('refuses a non-owner even when a visible control retains its callback', async () => {
     await render(mode);
     const retained = result.resolve(session);

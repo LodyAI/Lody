@@ -1,4 +1,7 @@
-import { useCallback, useRef } from 'react';
+import { useAtomValue } from 'jotai';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
+import { resolveSessionReadRoot, isSessionReadShared } from '@/lib/session-visibility';
+import { useCallback, useRef, useMemo } from 'react';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { useVisibleLocalProjects } from './use-visible-local-projects';
@@ -22,6 +25,11 @@ type UseSessionSharingOptions = {
 /** Team read grants use the same owner-only port in ordinary and encrypted workspaces. */
 export function useSessionSharing(options: UseSessionSharingOptions = {}) {
   const { openSettings } = useOpenSettings();
+  const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
+  const sessionsById = useMemo(
+    () => new Map(Object.values(sessionMetaCache).map((meta) => [meta.id, meta])),
+    [sessionMetaCache]
+  );
   const currentUserId = useWorkspaceLocalAccountId();
   const scope = useResolvedWorkspaceScope(options);
   const teamSharingAvailable = useAppCapability('teamSharing');
@@ -92,9 +100,8 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         isLoading,
       });
       const grant = access.views.get(session.machineId);
-      const rootId = session.parentSessionId ?? session.id;
-      const readShared =
-        grant?.machineId === session.machineId && grant.readSharedSessionIds.includes(rootId);
+      const rootId = resolveSessionReadRoot(session, sessionsById).id;
+      const readShared = isSessionReadShared(session, access.views, sessionsById);
       const effective = base.visibility === 'team' ? 'edit' : readShared ? 'read' : 'private';
       return {
         ...base,
@@ -114,6 +121,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
       accessByProjectKey,
       isLoading,
       access.views,
+      sessionsById,
       setReadAccess,
       openSettings,
     ]

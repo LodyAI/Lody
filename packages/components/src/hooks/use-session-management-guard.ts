@@ -11,7 +11,11 @@ import {
 import { userAtom } from '@/atoms';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { isSessionVisibleToUser, isSessionReadShared } from '@/lib/session-visibility';
+import {
+  isSessionVisibleToUser,
+  isSessionReadShared,
+  isContainedSession,
+} from '@/lib/session-visibility';
 import { useSessionAccess } from './use-session-access';
 import { useVisibleMachineIdSet, useVisibleLocalProjectKeySet } from './use-visible-session-metas';
 
@@ -79,18 +83,14 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
           continue;
         if (!preferences || !access.sessionAccess.port) deny();
         const records = new Map<string, SessionMeta>([[id, meta]]);
-        let root = meta;
-        const seen = new Set<string>([id]);
-        while (root.parentSessionId) {
-          if (seen.has(root.parentSessionId)) deny();
-          seen.add(root.parentSessionId);
-          const parentId = root.parentSessionId;
+        if (meta.parentSessionId) {
+          const parentId = meta.parentSessionId;
           const parent = await runtime.repo.getDocMeta(getSessionRoomId(parentId));
           assertScope();
-          if (!parent || isLoroRepoDocDeleted(parent) || parent.meta.machineId !== meta.machineId)
-            deny();
-          root = { ...(parent!.meta as SessionMeta), id: parentId };
-          records.set(parentId, root);
+          if (parent && !isLoroRepoDocDeleted(parent)) {
+            const parentMeta = { ...(parent.meta as SessionMeta), id: parentId };
+            if (isContainedSession(meta, parentMeta)) records.set(parentId, parentMeta);
+          }
         }
         const view = await access.sessionAccess.port!.read(runtime.workspaceId, meta.machineId);
         assertScope();
@@ -101,7 +101,8 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
             !current ||
             isLoroRepoDocDeleted(current) ||
             current.meta.machineId !== record.machineId ||
-            current.meta.parentSessionId !== record.parentSessionId
+            current.meta.parentSessionId !== record.parentSessionId ||
+            current.meta.childSessionPlacement !== record.childSessionPlacement
           )
             deny();
         }

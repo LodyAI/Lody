@@ -1017,6 +1017,42 @@ describe('encrypted shared machine visibility', () => {
     expect(container.querySelector('input')).toBeNull();
   });
 
+  it.each(['sidebar', 'other-machine', 'nested'] as const)(
+    'rejects a forged %s parent relation in a read-only tab deep link',
+    async (kind) => {
+      const parent = {
+        ...createCachedSession(owner),
+        id: 'root' as SessionId,
+        ...(kind === 'nested' ? { parentSessionId: 'outer' as SessionId } : {}),
+      };
+      const child = {
+        ...parent,
+        id: 'forged-child' as SessionId,
+        parentSessionId: parent.id,
+        ...(kind === 'sidebar' ? { childSessionPlacement: 'sidebar' } : {}),
+        ...(kind === 'other-machine' ? { machineId: 'different-machine' as MachineId } : {}),
+      } as unknown as SessionMeta;
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(parent.id)]: parent,
+        [getSessionRoomId(child.id)]: child,
+      });
+      views.set(
+        parent.machineId,
+        view(parent.machineId, {
+          sharedWithTeam: false,
+          sessions: [{ sessionId: parent.id, level: 'read' }],
+        })
+      );
+      await renderTree(
+        <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={child.id}>
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('article')).toBeNull();
+      expect(container.querySelector('input')).toBeNull();
+    }
+  );
+
   it('removes a withdrawn machine on the next ledger change and on the bounded refresh', async () => {
     views.set(
       'shared-machine',

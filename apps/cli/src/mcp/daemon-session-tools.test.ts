@@ -1,3 +1,5 @@
+import { ConvexHttpClient } from 'convex/browser';
+import { getFunctionName } from 'convex/server';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -149,6 +151,20 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     machineId,
     machineName: 'Daemon',
   });
+
+  function admitSharedMachineManagement() {
+    // Keep ordinary cloud admission in the production path; only the service I/O is synthetic.
+    vi.spyOn(ConvexHttpClient.prototype, 'query').mockImplementation(async (reference, args) => {
+      if (getFunctionName(reference) !== 'machines:canDelegateMachineUseFromCliToken')
+        throw new Error('Unexpected cloud request in the management fixture');
+      const allowed =
+        args?.cliToken === 'synthetic-token' &&
+        args.workspaceId === workspaceId &&
+        args.machineId === machineId &&
+        [ownerUserId, 'synthetic-collaborator'].includes(args.requesterUserId);
+      return allowed ? { allowed: true } : { allowed: false, reason: 'not_visible' };
+    });
+  }
 
   function createEnvironment() {
     return createLocalSessionCommandEnvironment({
@@ -1230,6 +1246,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         },
       });
       if (composition === 'cloud') {
+        admitSharedMachineManagement();
         vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
         vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
           id: workspaceId,
@@ -1291,6 +1308,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
       vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
       if (composition === 'cloud') {
+        admitSharedMachineManagement();
         vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
         vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
           id: workspaceId,
@@ -1361,6 +1379,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
   );
 
   it('serves bound Session tools from the daemon access verdict while workspace discovery is down', async () => {
+    admitSharedMachineManagement();
     const list = vi
       .spyOn(workspaceApi, 'listWorkspacesForToken')
       .mockRejectedValue(new Error('Synthetic workspace discovery outage'));

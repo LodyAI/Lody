@@ -9,6 +9,8 @@ export type SessionListEntry = SessionMeta & { id: SessionId };
 export type SessionMachineRecord = {
   id?: string;
   parentSessionId?: string | null;
+  childSessionPlacement?: unknown;
+  openedBySessionId?: string | null;
   machineId?: string | null;
   userId?: string | null;
   project?: { kind?: string; localProjectId?: string | null } | null;
@@ -193,6 +195,34 @@ export function getSessionOwnerAccessReason(
   return null;
 }
 
+/** The sparse default is a Tab; side-panel is the only supported override.
+ * Synced relation fields are untrusted: unknown placements, cross-machine links
+ * and nested containment never inherit. Provenance alone is not containment.
+ */
+export function isContainedSession(
+  child: SessionMachineRecord | null | undefined,
+  parent: SessionMachineRecord | null | undefined
+): boolean {
+  return (
+    !!child?.id &&
+    !!parent?.id &&
+    child.id !== parent.id &&
+    child.parentSessionId === parent.id &&
+    !parent.parentSessionId &&
+    !!child.machineId &&
+    child.machineId === parent.machineId &&
+    (child.childSessionPlacement === undefined || child.childSessionPlacement === 'side-panel')
+  );
+}
+
+export function resolveSessionReadRoot<T extends SessionMachineRecord>(
+  session: T,
+  sessionsById?: ReadonlyMap<string, T>
+): T {
+  const parent = session.parentSessionId ? sessionsById?.get(session.parentSessionId) : undefined;
+  return parent && isContainedSession(session, parent) ? parent : session;
+}
+
 /** Child tabs and Side Chats inherit only a root grant bound to their actual machine. */
 export function isSessionReadShared(
   session: SessionMachineRecord,
@@ -200,15 +230,7 @@ export function isSessionReadShared(
   sessionsById?: ReadonlyMap<string, SessionMachineRecord>
 ): boolean {
   if (!session.machineId || !session.id) return false;
-  let root = session;
-  const seen = new Set<string>();
-  while (root.parentSessionId) {
-    if (seen.has(root.parentSessionId)) return false;
-    seen.add(root.parentSessionId);
-    const parent = sessionsById?.get(root.parentSessionId);
-    if (!parent || parent.machineId !== session.machineId) return false;
-    root = parent;
-  }
+  const root = resolveSessionReadRoot(session, sessionsById);
   const view = views?.get(session.machineId);
   return (
     view?.machineId === session.machineId &&

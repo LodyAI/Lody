@@ -708,6 +708,13 @@ describe('useSessionActions', () => {
             typeof actions.createSession
           >[0])
         ).rejects.toMatchObject({ code: 'session_management_denied' });
+        await expect(actions.archiveSession(id)).rejects.toMatchObject({
+          code: 'session_management_denied',
+        });
+        await expect(actions.deleteSessions([id])).rejects.toMatchObject({
+          code: 'session_management_denied',
+        });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
         await actions.setSessionPinned(id, true);
         await actions.markSessionUnread(id);
         expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({

@@ -231,3 +231,26 @@ describe('machine-bound session read grants', () => {
     ).toBe('visible');
   });
 });
+
+it('inherits read access only through a direct same-machine contained Tab or side panel', () => {
+  const root = { id: 'root', machineId: m1 };
+  const views = new Map([
+    [m1, { machineId: m1, canManage: false, readSharedSessionIds: ['root'] }],
+  ]);
+  const records = new Map([['root', root]]);
+  const child = { id: 'child', machineId: m1, parentSessionId: 'root' };
+  expect(isSessionReadShared(child, views, records)).toBe(true);
+  expect(
+    isSessionReadShared({ ...child, childSessionPlacement: 'side-panel' }, views, records)
+  ).toBe(true);
+  expect(isSessionReadShared({ ...child, childSessionPlacement: 'sidebar' }, views, records)).toBe(
+    false
+  );
+  expect(isSessionReadShared({ ...child, machineId: m2 }, views, records)).toBe(false);
+  expect(
+    isSessionReadShared({ id: 'opened', machineId: m1, openedBySessionId: 'root' }, views, records)
+  ).toBe(false);
+  expect(
+    isSessionReadShared(child, views, new Map([['root', { ...root, parentSessionId: 'other' }]]))
+  ).toBe(false);
+});

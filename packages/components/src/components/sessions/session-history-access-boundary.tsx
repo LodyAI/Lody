@@ -11,7 +11,11 @@ import {
   useVisibleMachineIdSet,
 } from '@/hooks/use-visible-session-metas';
 import { useSessionAccess } from '@/hooks/use-session-access';
-import { isSessionMachineAvailable, isSessionReadShared } from '@/lib/session-visibility';
+import {
+  isSessionMachineAvailable,
+  isSessionReadShared,
+  isContainedSession,
+} from '@/lib/session-visibility';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { SessionHistoryReader } from './session-history-reader';
 
@@ -28,6 +32,7 @@ function useSessionTarget(sessionId: SessionId) {
                   machineId: meta.machineId,
                   project: meta.project,
                   parentSessionId: meta.parentSessionId,
+                  childSessionPlacement: meta.childSessionPlacement,
                 }
               : null,
           jsonValueEqual
@@ -64,7 +69,7 @@ export function SessionHistoryAccessBoundary({
     isLoading: machinesLoading,
   } = useVisibleMachineIdSet();
   const { visibleLocalProjectKeys, isLoading: projectsLoading } = useVisibleLocalProjectKeySet();
-  const validTab = selectedId === sessionId || selected?.parentSessionId === sessionId;
+  const validTab = selectedId === sessionId || isContainedSession(selected, root);
   const editable =
     !!root &&
     (ownedMachineIds.has(root.machineId) ||

@@ -479,7 +479,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const lineBoxClassName = showMetaLine
     ? cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)
     : 'contents';
-  const showInlineArchive = !isMobile;
+  const readOnly = sharing?.access === 'read';
+  const showInlineArchive = !isMobile && !readOnly;
   const showWorktreeIcon = session.isWorktree === true;
   const isPinned = Boolean(session.isPinned);
   // Local-project sessions linked to a GitHub repo can carry a PR — the repo
@@ -490,7 +491,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const showPr = Boolean(prInfo.url);
   const prRepoFullName = resolveProjectGitHubRepo(session.project) ?? null;
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
-  const canRename = typeof onRename === 'function';
+  const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !hasUnreadMessages;
@@ -775,17 +776,19 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           shareMenuState ||
           openerSessionId ||
           isElectronRenderer()) &&
-        true ? (
+        !readOnly ? (
           <ContextMenu.Separator />
         ) : null}
-        <ContextMenu.Item
-          icon={Archive}
-          onClick={() => {
-            onArchive(session.id);
-          }}
-        >
-          {contextMenuLabels.archive}
-        </ContextMenu.Item>
+        {!readOnly ? (
+          <ContextMenu.Item
+            icon={Archive}
+            onClick={() => {
+              onArchive(session.id);
+            }}
+          >
+            {contextMenuLabels.archive}
+          </ContextMenu.Item>
+        ) : null}
       </ContextMenu.Content>
     </ContextMenu.Root>
   ) : (
@@ -1833,22 +1836,20 @@ export function LoroAppSidebar({
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      if (rejectHistoryWrite([sessionId])) return;
       void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [rejectHistoryWrite, setSessionPinned]
+    [setSessionPinned]
   );
 
   const handleMarkSessionUnread = useCallback(
     (sessionId: string) => {
-      if (rejectHistoryWrite([sessionId])) return;
       void markSessionUnread(sessionId as SessionId).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [markSessionUnread, rejectHistoryWrite]
+    [markSessionUnread]
   );
 
   const sessionById = useMemo(() => {
@@ -1860,12 +1861,12 @@ export function LoroAppSidebar({
   }, [allActiveSessions, sessions]);
   const sessionSharingById = useMemo(() => {
     const map = new Map<string, SessionSharingState>();
-    if (!showSessionSharing) return map;
     for (const [sessionId, session] of sessionById) {
-      map.set(sessionId, resolveSessionSharing(session));
+      if (showSessionSharing || historyOnlySessionIds.has(sessionId))
+        map.set(sessionId, resolveSessionSharing(session));
     }
     return map;
-  }, [resolveSessionSharing, sessionById, showSessionSharing]);
+  }, [resolveSessionSharing, sessionById, showSessionSharing, historyOnlySessionIds]);
 
   const copySessionUrl = useCallback(
     async (sessionId: string, successMessage: string) => {
