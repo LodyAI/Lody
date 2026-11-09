@@ -4503,23 +4503,6 @@
         }
       }
     },
-    "settings.connection.live": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已连接"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connected"
-          }
-        }
-      }
-    },
     "settings.connection.syncing": {
       "extractionState": "manual",
       "localizations": {
@@ -4553,41 +4536,6 @@
           }
         }
       }
-    },
-    "settings.connection.tapToResync": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "点按重新同步"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tap to resync"
-          }
-        }
-      }
-    },
-    "settings.connection.syncedAt": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "同步于 %1$@"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Synced %1$@"
-          }
-        }
-      },
-      "comment": "1: time"
     },
     "settings.section.account": {
       "extractionState": "manual",
@@ -4806,47 +4754,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sign in to connect your workspace"
-          }
-        }
-      }
-    },
-    "settings.machineCount": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 台电脑"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 台电脑"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld computer"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld computers"
-                }
-              }
-            }
           }
         }
       }

@@ -404,15 +404,12 @@
     <!-- Schedules tab -->
     <string name="home_tab_schedules">定时任务</string>
     <string name="schedules_new">新建定时任务</string>
-    <string name="schedules_section_tasks">定时任务</string>
-    <string name="schedules_section_messages">定时消息</string>
     <string name="schedules_loading">正在加载定时任务…</string>
     <string name="schedules_load_error">无法加载定时任务。</string>
     <string name="schedules_retry">重试</string>
     <string name="schedules_empty">还没有定时任务</string>
     <string name="schedules_empty_help">设置要做的事和运行时间，你的机器会在每次运行时创建新会话。</string>
     <string name="schedules_search_empty">没有匹配“%1$s”的定时任务</string>
-    <string name="schedules_more">更多操作</string>
     <string name="schedules_pause">暂停</string>
     <string name="schedules_resume">恢复</string>
     <string name="schedules_run">运行</string>

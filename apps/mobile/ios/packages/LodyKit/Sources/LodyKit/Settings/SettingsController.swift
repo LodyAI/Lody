@@ -23,6 +23,8 @@ class SettingsController: UIViewController {
     list.frame = view.bounds
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.setPlaceholder("")
+    // The main page shares the Chats list's design language; inner pages keep the flat settings rows.
+    list.setChatStyle(true)
     list.forwarded = { [weak self] name, body in
       guard name == "rowPress", let id = body["id"] as? String else { return }
       self?.open(id)
