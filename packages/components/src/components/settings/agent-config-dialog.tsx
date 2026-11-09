@@ -27,6 +27,7 @@ import {
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   machineSupportsProviderSetupProtocol,
   machineSupportsProtocolCapability,
   getDeepSeekHarnessProviderConfigPath,
@@ -1522,6 +1523,10 @@ function resolveInitialTestedCustomKey(
   if (entry.sourceVersion !== `custom:${serializeCustomAcpLaunchSpec(config.customAcp)}`) {
     return null;
   }
+  // A degraded persisted entry (e.g. an empty model catalog) never proves a
+  // working provider — the config needs a fresh test instead of inheriting the
+  // degraded verification.
+  if (hasEmptyModelSelectOption(entry.configOptions)) return null;
   return formatCustomAcpCommandLine(config.customAcp);
 }
 
@@ -2153,6 +2158,20 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           );
           return;
         }
+        if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+          // The probe succeeded but the agent advertised an empty model
+          // catalog: unusable for real sessions and never a verified state.
+          setAuthRequired(false);
+          setManuallyTested(false);
+          setVerifiedBuiltinContext(null);
+          setProbeError(
+            t(
+              'settings.agent.dialog.emptyModelCatalog',
+              'Provider responded but reported no usable models — try verifying again.'
+            )
+          );
+          return;
+        }
         setAuthRequired(false);
         setManuallyTested(true);
         if (requiresBuiltinVerification) {
@@ -2213,9 +2232,20 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
           response.error ?? t('settings.agent.dialog.probeFailed', 'Provider verification failed.')
         );
       }
+      if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+        throw new Error(
+          t(
+            'settings.agent.dialog.emptyModelCatalog',
+            'Provider responded but reported no usable models — try verifying again.'
+          )
+        );
+      }
       setAuthRequired(false);
       setTestedCustomKey(probedKey);
     } catch (error) {
+      // Any failed verification invalidates the prior tested key for the same
+      // command — the provider may have degraded since then.
+      setTestedCustomKey(null);
       setProbeError(error instanceof Error ? error.message : String(error));
     } finally {
       setProbing(false);

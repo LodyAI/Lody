@@ -21,7 +21,13 @@ extension SessionController {
     let bar = SessionInfoBar(session: session, repository: repository, busy: busy)
     infoBar = bar
     var result: [String: Any] = [:]
-    result["items"] = [machineItem(session)].compactMap { $0 } + resourceItems
+    var items = resourceItems
+    let relations = SessionRelations.tree(sessions: state.catalog.sessions, current: sessionId)
+    if relations.hasRelations {
+      items.append(["id": "relations", "symbol": "bubble.left.and.bubble.right", "tap": true,
+        "accessibilityLabel": String(localized: "session.relations.title", bundle: .lody)])
+    }
+    result["items"] = items
     if let context = contextItem(bar, projectName: project?.name) { result["context"] = context }
     if bar.added + bar.removed > 0 {
       result["diff"] = [
@@ -45,22 +51,6 @@ extension SessionController {
       ]
     }
     return result
-  }
-
-  private func machineItem(_ session: SessionItem) -> [String: Any]? {
-    let state = source.state
-    guard let name = state.catalog.machineNames[session.machineId], !name.isEmpty else { return nil }
-    let status = state.presence.status(of: session.machineId)
-    let symbols = ["win32": "pc", "linux": "server.rack"]
-    let statusText = String(localized: String.LocalizationValue("devices." + status), bundle: .lody)
-    return [
-      "id": "machine", "symbol": symbols[state.catalog.machineOs[session.machineId] ?? ""] ?? "desktopcomputer",
-      // Colour only for a confirmed problem; unknown presence stays neutral.
-      "tint": status == "offline" ? "warning" : "secondary",
-      "accessibilityLabel": "\(name), \(statusText)",
-      "menuTitle": name,
-      "actions": [["id": "status", "title": statusText, "symbol": status == "online" ? "checkmark.circle" : "circle.dashed", "disabled": true]],
-    ]
   }
 
   /// PR number, else branch, else the repository name without its owner (web truncated the
@@ -112,6 +102,7 @@ extension SessionController {
 
   /// `item` or `item:menuAction`, from the action bar.
   func infoBarAction(_ id: String) {
+    if id == "relations" { presentRelations(); return }
     if githubOperation != nil && (id == "act" || id.hasPrefix("more:")) { return }
     let parts = id.split(separator: ":", maxSplits: 1).map(String.init)
     if ["browser", "simulator"].contains(parts[0]) { resourceAction(parts[0], parts.count > 1 ? parts[1] : "open"); return }
@@ -126,7 +117,7 @@ extension SessionController {
     case "context:branch":
       guard !bar.branch.isEmpty else { return }
       UIPasteboard.general.string = bar.branch
-      LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: "info")
+      LodyToastOverlay.shared.show(message: String(localized: "session.title.branchCopied", bundle: .lody), kind: .neutral)
     default:
       if id.hasPrefix("more:"), let action = SessionInfoBar.Action(rawValue: String(id.dropFirst(5))) { performInfoBarAction(action) }
     }
@@ -169,7 +160,7 @@ extension SessionController {
     var payload: [String: Any] = ["workspaceId": state.workspaceId, "repository": pr.repository, "number": pr.number, "operation": operation]
     if let method { payload["method"] = method }
     let pending = operation == "merge" ? "bar.merge.pending" : "bar.ready.pending"
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(pending), bundle: .lody), kind: "info")
+    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(pending), bundle: .lody), kind: .neutral)
     Task { @MainActor [weak self] in
       defer {
         if let self, self.source.state.key == state.key {
@@ -184,11 +175,11 @@ extension SessionController {
         self.githubUpdates.finish(success: true)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         let done = operation == "merge" ? "bar.merge.done" : "bar.ready.done"
-        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(done), bundle: .lody), kind: "success")
+        LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(done), bundle: .lody), kind: .neutral)
       } catch {
         guard let self, self.source.state.key == state.key else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)
-        LodyToastOverlay.shared.show(message: Self.writeError(error, operation: operation), kind: "error")
+        LodyToastOverlay.shared.show(message: Self.writeError(error, operation: operation), kind: .error)
       }
     }
   }

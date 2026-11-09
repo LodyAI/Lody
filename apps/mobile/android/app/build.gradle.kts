@@ -3,12 +3,26 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// Shared, non-executable .env.local parser; shell environment takes precedence.
+val backendJson = providers.exec {
+    commandLine("node", rootProject.file("../backend-config.mjs").absolutePath)
+}.standardOutput.asText.get()
+val backends = groovy.json.JsonSlurper().parseText(backendJson) as Map<*, *>
+
 android {
     namespace = "app.lody.android"
     compileSdk = 37
 
     defaultConfig {
         applicationId = "ai.lody.android"
+        // Public OAuth Web client ID, never a client secret. Empty disables Google clearly.
+        val googleClient = providers.gradleProperty("LODY_GOOGLE_WEB_CLIENT_ID").orElse("").get()
+        require(googleClient.matches(Regex("[A-Za-z0-9._-]*")))
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleClient\"")
+        for (key in listOf("CONVEX_URL", "CONVEX_SITE_URL", "CF_WORKER_URL", "STORAGE_SUFFIX")) {
+            val name = if (key == "STORAGE_SUFFIX") "BACKEND_STORAGE_SUFFIX" else key
+            buildConfigField("String", name, groovy.json.JsonOutput.toJson(backends[key]))
+        }
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -49,6 +63,10 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.credentials)
+    implementation(libs.credentials.play)
+    implementation(libs.googleid)
+    implementation(libs.browser)
     implementation(libs.onesignal)
     implementation(libs.firebase.messaging)
     implementation(libs.okhttp)

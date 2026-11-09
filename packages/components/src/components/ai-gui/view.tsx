@@ -1,3 +1,4 @@
+import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { shareFileBytesNatively } from '@/lib/session-file-native-save';
@@ -1359,9 +1360,7 @@ export const buildChatVirtualRows = ({
         block.entries,
         selectionSearchBlockId
       );
-      const thoughtOnly =
-        showThoughts && block.entries.every((entry) => entry.content.type === 'thought');
-      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? thoughtOnly);
+      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? false);
       const isActive =
         isLastAssistantMessage && message.finished !== true && blockIndex === blocks.length - 1;
       const lastEntry = block.entries[block.entries.length - 1];
@@ -6466,7 +6465,7 @@ function useImageBlobUrls(
   }, [open]);
 
   useEffect(() => {
-    if (!open || activeIndex === -1 || !workspaceId || !authToken) {
+    if (!open || activeIndex === -1 || !workspaceId) {
       return undefined;
     }
 
@@ -6477,20 +6476,23 @@ function useImageBlobUrls(
     let active = true;
     indicesToLoad.forEach((i) => {
       const entry = entries[i];
-      if (!entry) {
+      if (!entry || (!authToken && entry.transport !== 'local' && !entry.localImageId)) {
         return;
       }
 
       void getSessionImageBlobUrl({
         workspaceId,
-        sessionId: entry.sessionId,
-        imageId: entry.imageId,
+        ...entry,
+        mimeType: entry.mimeType,
+        sizeBytes: entry.sizeBytes,
+        transport: entry.transport,
+        machineId: entry.machineId,
         encryption: entry.encryption,
         attachmentToken:
           attachmentRuntime?.workspaceId === workspaceId
             ? attachmentRuntime.attachmentToken
             : undefined,
-        token: authToken,
+        token: authToken ?? '',
         variant: 'original',
       })
         .then((url) => {
@@ -6677,9 +6679,9 @@ export const WorkspaceUserImageBlock = ({
   const imageLoadUnavailableLabel = t('sessions.imageLoadUnavailable', 'Unable to load image');
   const imageLoadFailedLabel = t('sessions.imageLoadFailed', 'Failed to load image');
   const cachedThumbnailUrl =
-    workspaceId && authToken
+    workspaceId && (authToken || entry.transport === 'local' || entry.localImageId)
       ? peekSessionImageUrl(
-          { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+          { workspaceId, ...entry, transport: entry.transport, machineId: entry.machineId },
           useNativeIOSShareSafeImageUrl
         )
       : null;
@@ -6690,7 +6692,7 @@ export const WorkspaceUserImageBlock = ({
 
     setLocalActiveImageKey(null);
 
-    if (!workspaceId || !authToken) {
+    if (!workspaceId || (!authToken && entry.transport !== 'local' && !entry.localImageId)) {
       setThumbnailBlobUrl(null);
       setIsThumbnailLoading(false);
       setThumbnailLoadingError(imageLoadUnavailableLabel);
@@ -6700,7 +6702,7 @@ export const WorkspaceUserImageBlock = ({
     }
 
     const cachedUrl = peekSessionImageUrl(
-      { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+      { workspaceId, ...entry, transport: entry.transport, machineId: entry.machineId },
       useNativeIOSShareSafeImageUrl
     );
     if (cachedUrl) {
@@ -6721,14 +6723,17 @@ export const WorkspaceUserImageBlock = ({
 
     void loadImageUrl({
       workspaceId,
-      sessionId: entry.sessionId,
-      imageId: entry.imageId,
+      ...entry,
+      mimeType: entry.mimeType,
+      sizeBytes: entry.sizeBytes,
+      transport: entry.transport,
+      machineId: entry.machineId,
       encryption: entry.encryption,
       attachmentToken:
         attachmentRuntime?.workspaceId === workspaceId
           ? attachmentRuntime.attachmentToken
           : undefined,
-      token: authToken,
+      token: authToken ?? '',
       variant: 'thumbnail',
       thumbnailWidth,
       thumbnailHeight,
@@ -6755,6 +6760,12 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.mimeType,
+    entry.sizeBytes,
+    entry.localImageId,
+    entry.storageSessionId,
+    entry.transport,
+    entry.machineId,
     entry.encryption,
     attachmentRuntime,
     entry.sessionId,
@@ -6954,13 +6965,80 @@ export const ImageGroupBubble = ({
   );
 };
 
-/**
- * Container for a run of adjacent `file` blocks. Owns the workspace/token
- * atoms, machine-name resolution, download, and the in-app preview dialog, then
- * renders the pure `SessionFileCard`s. Adjacent file blocks are aggregated into
- * one list (decision #3) at the call site; this component handles however many
- * it is handed.
- */
+const localAttachmentImageStyles = stylex.create({
+  frame: { width: 320, maxWidth: '100%', height: 320 },
+});
+
+function LocalAttachmentImage({
+  attachment,
+  workspaceId,
+  sessionId,
+}: {
+  attachment: SessionLocalAttachment;
+  workspaceId: string;
+  sessionId: SessionId;
+}) {
+  const { t } = useTranslation();
+  // The parent keys this owner by the complete reference and workspace scope.
+  const attachmentRef = useRef(attachment);
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setUrl(null);
+    setFailed(false);
+    void (async () => {
+      try {
+        const ipc = getIpcServices();
+        if (!ipc) throw new Error('Local attachment unavailable');
+        const preview = await ipc.machineRpc.previewFile({
+          machineId: attachmentRef.current.machineId,
+          path: attachmentRef.current.path,
+          workspaceRoot: null,
+        });
+        if (!active) return;
+        if (preview?.status !== 'resource' || preview.kind !== 'binary')
+          throw new Error('Local image preview unavailable');
+        setUrl(preview.url);
+      } catch {
+        if (active) setFailed(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [workspaceId, sessionId, attempt]);
+
+  if (url)
+    return (
+      <div
+        {...stylex.props(localAttachmentImageStyles.frame)}
+        onErrorCapture={() => {
+          setUrl(null);
+          setFailed(true);
+        }}
+      >
+        <SessionFileImagePreview path={attachment.fileName} url={url} />
+      </div>
+    );
+  return (
+    <SessionFileCardLayout
+      fileName={attachment.fileName}
+      mimeType={attachment.mimeType}
+      subtitle={
+        failed
+          ? t('sessions.localAttachmentUnavailable', 'Local attachment unavailable')
+          : t('sessions.markdownImage.loading', 'Loading image…')
+      }
+      actionIcon={failed ? null : <Spinner className="h-4 w-4" />}
+      failed={failed}
+      isInteractive={failed}
+      onClick={() => setAttempt((value) => value + 1)}
+    />
+  );
+}
+
 export const LocalAttachmentCard = ({
   attachment,
   sessionId,
@@ -6977,7 +7055,13 @@ export const LocalAttachmentCard = ({
   const { openLocalFile } = useContext(SessionChatActionContext);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
-  const binding = `${workspaceId}:${sessionId}:${attachment.referenceId}:${machineId}`;
+  const binding = JSON.stringify([
+    workspaceId,
+    sessionId,
+    attachment.machineId,
+    attachment.path,
+    machineId,
+  ]);
   const currentBinding = useRef<string | null>(binding);
   currentBinding.current = binding;
   useEffect(
@@ -6987,11 +7071,17 @@ export const LocalAttachmentCard = ({
     []
   );
   const remote = machineId !== attachment.machineId;
-  const available =
-    !readonly &&
-    sessionId === attachment.sessionId &&
-    !!workspaceId &&
-    (remote ? !!runtime : !!openLocalFile);
+  const available = !readonly && !!workspaceId && (remote ? !!runtime : !!openLocalFile);
+  if (!readonly && !remote && workspaceId && attachment.kind === 'image') {
+    return (
+      <LocalAttachmentImage
+        key={JSON.stringify([workspaceId, sessionId, attachment])}
+        attachment={attachment}
+        workspaceId={workspaceId}
+        sessionId={sessionId}
+      />
+    );
+  }
   return (
     <SessionFileCardLayout
       fileName={attachment.fileName}
@@ -7025,8 +7115,8 @@ export const LocalAttachmentCard = ({
               attachment.machineId as MachineId,
               {
                 sessionId,
-                path: attachment.fileName,
-                attachment: { ...attachment, sessionId },
+                path: attachment.path,
+                attachment,
                 ...range,
               },
               session?.parentSessionId ?? sessionId
@@ -7052,27 +7142,20 @@ export const LocalAttachmentCard = ({
             });
           return;
         }
-        const ipc = getIpcServices();
-        if (!ipc) {
-          setOpening(false);
-          setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'));
-          return;
-        }
-        void ipc.localProjects
-          .resolveLocalAttachment({ workspaceId, sessionId, attachment })
-          .then((filePath) => {
-            if (currentBinding.current === binding)
-              openLocalFile?.(filePath, { pathKind: 'canonical' });
-          })
-          .catch(() =>
-            setError(t('sessions.localAttachmentUnavailable', 'Local attachment unavailable'))
-          )
-          .finally(() => setOpening(false));
+        openLocalFile?.(attachment.path, { pathKind: 'canonical' });
+        setOpening(false);
       }}
     />
   );
 };
 
+/**
+ * Container for a run of adjacent `file` blocks. Owns the workspace/token
+ * atoms, machine-name resolution, download, and the in-app preview dialog, then
+ * renders the pure `SessionFileCard`s. Adjacent file blocks are aggregated into
+ * one list (decision #3) at the call site; this component handles however many
+ * it is handed.
+ */
 export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
   const readonly = useContext(SessionReadonlyContext);
   return readonly ? (

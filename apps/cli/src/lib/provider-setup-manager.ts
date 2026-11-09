@@ -9,6 +9,7 @@ import {
   getMachineFlockProviderSetupCancellations,
   getServerNow,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   isManagedBuiltinAgentType,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -250,6 +251,13 @@ export class ProviderSetupManager {
         force: true,
       });
       if (response.success) {
+        if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+          // The agent answered but its model catalog is empty: the provider is
+          // degraded, not verified. Do not publish it as a working config — a
+          // later setup attempt can verify again once the catalog heals.
+          await this.fail(verifying.id, attempt, 'verification-failed');
+          return;
+        }
         await this.publishVerifiedConfig(verifying.id, attempt);
         return;
       }

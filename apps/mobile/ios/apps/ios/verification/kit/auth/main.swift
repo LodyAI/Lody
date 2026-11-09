@@ -1,19 +1,11 @@
 import Foundation
 
 final class Fixture: @unchecked Sendable {
-  var now = 0.0
-  var waits: [Double] = []
   var requests: [URLRequest] = []
   var replies: [(Any, Int)] = []
 
   func api() -> AuthAPI {
     var api = AuthAPI()
-    api.now = { self.now }
-    api.sleep = { milliseconds in
-      try Task.checkCancellation()
-      self.waits.append(milliseconds)
-      self.now += milliseconds
-    }
     api.transport = { request in
       self.requests.append(request)
       precondition(!self.replies.isEmpty, "Unexpected request \(request.url!)")
@@ -34,47 +26,114 @@ final class Fixture: @unchecked Sendable {
 
 @main struct AuthCheck {
   static func main() async throws {
-    let code = DeviceCode(deviceCode: "synthetic", userCode: "CODE", verificationURL: "https://lody.ai/device", expiresIn: 30, interval: 1)
+    if AuthAPI.authOrigin != "https://backend.lody.ai" {
+      var api = AuthAPI()
+      api.loginTransport = { _ in preconditionFailure("Nonproduction reset must never send a request") }
+      let rejected = await failure { try await api.requestPasswordReset(email: "person@example.test") }
+      precondition(rejected?.message == "auth.reset.unsupportedLocal")
+      print("PASS: nonproduction password reset is rejected before any network request")
+      return
+    }
     var fixture = Fixture()
-    fixture.replies = [(["error": "authorization_pending"], 400), (["error": "slow_down"], 400), (["access_token": "synthetic-token"], 200)]
-    let token = try await fixture.api().pollToken(code)
-    precondition(token == "synthetic-token" && fixture.waits == [1000, 1000, 6000])
-    precondition(fixture.body(0)["grant_type"] as? String == "urn:ietf:params:oauth:grant-type:device_code")
-    precondition(fixture.body(0)["client_id"] as? String == "lody-cli" && fixture.body(0)["device_code"] as? String == "synthetic")
-    precondition(fixture.requests[0].url?.absoluteString == "https://backend.lody.ai/api/auth/device/token")
-    fixture = Fixture()
-    fixture.replies = [(["error": "access_denied"], 400)]
-    let result1 = await failure { _ = try await fixture.api().pollToken(code) }
-    precondition(result1?.message == "auth.error.accessDenied")
-    fixture = Fixture()
-    let short = DeviceCode(deviceCode: "synthetic", userCode: "CODE", verificationURL: "", expiresIn: 1, interval: 1)
-    let result2 = await failure { _ = try await fixture.api().pollToken(short) }
-    precondition(result2?.message == "auth.error.codeExpired")
-    precondition(fixture.requests.isEmpty, "must not request after expiry")
-    fixture = Fixture()
-    var waiting = fixture.api()
-    waiting.sleep = { _ in try await Task.sleep(nanoseconds: 60_000_000_000) }
-    let cancelled = Task { [waiting] in try await waiting.pollToken(code) }
-    cancelled.cancel()
-    let cancelledToken = try? await cancelled.value
-    precondition(cancelledToken == nil && fixture.requests.isEmpty, "must not request after cancellation")
-    print("PASS: device authorization honors pending, slow down, expiry, denial and cancellation")
+    var native = AuthAPI()
+    native.loginTransport = { request in
+      precondition(request.url?.absoluteString == "https://backend.lody.ai/api/auth/sign-in/email")
+      precondition(request.httpMethod == "POST" && request.value(forHTTPHeaderField: "Authorization") == nil)
+      let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
+      precondition(body == ["email": "person@example.test", "password": "synthetic-password", "callbackURL": "https://backend.lody.ai/api/auth/mobile/email-verified"])
+      return AuthAPI.Reply(data: Data("{\"token\":\"body-token\"}".utf8), status: 200, token: "body-token.synthetic-signature")
+    }
+    let emailToken = try await native.email(email: "person@example.test", password: "synthetic-password")
+    precondition(emailToken == "body-token", "Streams authorization requires the raw JSON session token, not the signed cookie header")
+    native.loginTransport = { request in
+      let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+      precondition(request.url?.path == "/api/auth/sign-in/social" && body["provider"] as? String == "apple")
+      let identity = body["idToken"] as! [String: String]
+      precondition(identity == ["token": "synthetic-identity", "nonce": "synthetic-nonce"])
+      return AuthAPI.Reply(data: Data("{\"token\":\"session-token\"}".utf8), status: 200)
+    }
+    let appleToken = try await native.idToken(provider: "apple", token: "synthetic-identity", nonce: "synthetic-nonce")
+    precondition(appleToken == "session-token", "ID token exchange returns a session, never the provider token")
+    for status in [302, 401, 500] {
+      native.loginTransport = { _ in AuthAPI.Reply(data: Data("{\"token\":\"untrusted\"}".utf8), status: status, token: "untrusted") }
+      let rejected = await failure { _ = try await native.email(email: "e", password: "p") }
+      precondition(rejected != nil, "Redirect and error responses cannot install credentials")
+    }
+    // A signed cookie alone cannot authorize Lody's raw-token Streams endpoint.
+    for body in ["{}", "{\"token\":null}", "{\"token\":\"\"}", "{\"token\":42}"] {
+      native.loginTransport = { _ in AuthAPI.Reply(data: Data(body.utf8), status: 200, token: "body-token.synthetic-signature") }
+      let missing = await failure { _ = try await native.email(email: "e", password: "p") }
+      precondition(missing != nil, "Missing or invalid raw session tokens must be rejected even when a signed cookie header exists")
+    }
+    print("PASS: native login selects raw session credentials for Streams and rejects header-only or unsuccessful responses")
 
-    fixture = Fixture()
-    let device: [String: Any] = ["device_code": "synthetic-device", "user_code": "TESTCODE", "expires_in": 300, "interval": 5]
-    fixture.replies = [
-      (device.merging(["verification_uri_complete": "https://backend.lody.ai/device?user_code=TESTCODE"]) { $1 }, 200),
-      (device.merging(["verification_uri_complete": "https://untrusted.invalid/device?user_code=TESTCODE"]) { $1 }, 200),
-      (device.merging(["verification_uri_complete": "https://lody.ai/device", "interval": true]) { $1 }, 200),
-    ]
-    let issued = try await fixture.api().deviceCode()
-    precondition(issued.verificationURL == "https://lody.ai/device?user_code=TESTCODE" && issued.userCode == "TESTCODE")
-    precondition(fixture.body(0)["client_id"] as? String == "lody-cli" && fixture.requests[0].httpMethod == "POST")
-    let result3 = await failure { _ = try await fixture.api().deviceCode() }
-    precondition(result3?.message == "auth.error.invalidAuthorizeUrl")
-    let result4 = await failure { _ = try await fixture.api().deviceCode() }
-    precondition(result4?.message == "auth.error.invalidExpiry")
-    print("PASS: official auth-site device URL opens the web approval page and rejects foreign origins")
+    let handoff = NativeAuthHandoff(state: "native-state", verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+    precondition(handoff.challenge == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "Native OAuth uses RFC 7636 S256")
+    let start = try handoff.startURL(provider: "github")
+    let query = URLComponents(url: start, resolvingAgainstBaseURL: false)!.queryItems!
+    precondition(start.host == "backend.lody.ai" && start.path == "/api/auth/mobile/start")
+    precondition(query.first { $0.name == "redirect_uri" }?.value == "lody://auth/mobile-callback")
+    precondition(!start.absoluteString.contains(handoff.verifier), "The browser never receives the PKCE verifier")
+    let code = try handoff.code(from: URL(string: "lody://auth/mobile-callback?state=native-state&code=one-time-code")!)
+    precondition(code == "one-time-code")
+    for address in [
+      "lody://auth/mobile-callback?state=wrong&code=c",
+      "lody://auth/mobile-callback?state=native-state&state=native-state&code=c",
+      "lody://auth/mobile-callback?state=native-state&code=c&token=leaked",
+      "lody://auth/mobile-callback?state=native-state&error=oauth_failed",
+      "lody://other/mobile-callback?state=native-state&code=c",
+      "lody://auth/mobile-callback?state=native-state&code=c#fragment",
+      "https://auth/mobile-callback?state=native-state&code=c",
+    ] {
+      let rejected = await failure { _ = try handoff.code(from: URL(string: address)!) }
+      precondition(rejected != nil, "Foreign, duplicate, failed and mismatched callbacks cannot exchange credentials")
+    }
+    native.loginTransport = { request in
+      precondition(request.url?.path == "/api/auth/mobile/exchange")
+      let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
+      precondition(body == ["code": "one-time-code", "code_verifier": handoff.verifier, "redirect_uri": NativeAuthHandoff.redirectURI])
+      return AuthAPI.Reply(data: Data("{\"token\":\"native-session\"}".utf8), status: 200)
+    }
+    let exchanged = try await native.exchangeHandoff(code: code, handoff: handoff)
+    precondition(exchanged == "native-session")
+    print("PASS: provider callbacks are attempt-bound and exchange only with the local S256 verifier")
+
+    native.loginTransport = { request in
+      let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
+      precondition(request.url?.path == "/api/auth/request-password-reset")
+      precondition(body == ["email": "person@example.test", "redirectTo": "https://lody.ai/reset-password"])
+      return AuthAPI.Reply(data: Data("{\"status\":true}".utf8), status: 200)
+    }
+    try await native.requestPasswordReset(email: "person@example.test")
+    print("PASS: password reset requests keep completion on HTTPS, not a custom scheme")
+
+    let registrationRequests = Fixture()
+    native.loginTransport = { request in
+      registrationRequests.requests.append(request)
+      let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
+      precondition(body["callbackURL"] == "https://backend.lody.ai/api/auth/mobile/email-verified")
+      if request.url?.path == "/api/auth/sign-up/email" {
+        precondition(body["name"] == "New User" && body["password"] == "synthetic-password")
+        return AuthAPI.Reply(data: Data("{\"token\":null,\"user\":{\"id\":\"new-user\"}}".utf8), status: 200)
+      }
+      precondition(request.url?.path == "/api/auth/send-verification-email" && body["email"] == "new@example.test")
+      return AuthAPI.Reply(data: Data("{\"status\":true}".utf8), status: 200)
+    }
+    let registration = try await native.register(name: "New User", email: "new@example.test", password: "synthetic-password")
+    precondition(registration == nil && registrationRequests.requests.count == 2,
+                 "Registration without a session explicitly sends verification because sendOnSignUp is disabled")
+    try await native.resendVerification(email: "new@example.test")
+    precondition(registrationRequests.requests.count == 3)
+    native.loginTransport = { request in
+      let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+      let identity = body["idToken"] as! [String: Any]
+      let user = identity["user"] as! [String: Any]
+      precondition(user["name"] as? [String: String] == ["firstName": "First", "lastName": "Last"],
+                   "Apple first-consent name must survive the native ID-token exchange")
+      return AuthAPI.Reply(data: Data("{\"token\":\"synthetic-session\"}".utf8), status: 200)
+    }
+    _ = try await native.idToken(provider: "apple", token: "synthetic-id-token", nonce: "nonce", name: ["firstName": "First", "lastName": "Last"])
+    print("PASS: native registration explicitly sends verification and Apple first-consent names reach Better Auth")
 
     for (image, expected) in [("https://avatars.githubusercontent.com/u/1", "https://avatars.githubusercontent.com/u/1"),
                               ("http://avatars.githubusercontent.com/u/1", nil), ("javascript:alert(1)", nil), ("", nil)] as [(String, String?)] {

@@ -1,5 +1,6 @@
 package app.lody.android.diagnostics
 
+import app.lody.android.home.HomeActivity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -30,16 +31,8 @@ class CloudProbeActivity : ComponentActivity() {
                     Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Lody Cloud", style = MaterialTheme.typography.headlineMedium)
                         Text("Read-only connection probe", style = MaterialTheme.typography.titleMedium)
-                        Text("Authorize this Android app independently. Device Flow currently uses the registered lody-cli client.")
-                        auth.failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        val verification = auth.verification
-                        if (verification != null) {
-                            Text("Authorization code: ${verification.userCode}", style = MaterialTheme.typography.titleLarge)
-                            Text("Complete authorization in your browser. This code expires in ${verification.expiresIn / 60} minutes.")
-                            Button(onClick = { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(verification.url))) }) { Text("Open authorization page") }
-                            OutlinedButton(onClick = { app.account.cancel() }) { Text("Cancel authorization") }
-                        } else if (auth.account == null) {
-                            Button(onClick = { app.account.login() }, enabled = !auth.busy) { Text(if (auth.busy) "Connecting…" else "Sign in to Lody") }
+                        if (auth.account == null) {
+                            Button(onClick = { startActivity(Intent(this@CloudProbeActivity, HomeActivity::class.java)) }) { Text("Open native sign-in") }
                             OutlinedButton(onClick = { app.account.restore() }, enabled = !auth.busy) { Text("Retry saved account") }
                         }
                         auth.account?.let { account ->

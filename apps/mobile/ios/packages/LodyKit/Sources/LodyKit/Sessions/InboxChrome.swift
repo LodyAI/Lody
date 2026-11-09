@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 final class InboxChrome {
   struct Model {
+    var accountEmail = ""
     var workspaces: [AuthWorkspace]
     var selected: AuthWorkspace?
     var devices: InboxDevices
@@ -15,7 +16,6 @@ final class InboxChrome {
   }
 
   var selectWorkspace: ((String) -> Void)?
-  var editWorkspace: (() -> Void)?
   var setView: ((Int) -> Void)?
   var setSort: ((InboxSort) -> Void)?
   var openSettings: (() -> Void)?
@@ -24,8 +24,8 @@ final class InboxChrome {
   var searchChanged: ((String) -> Void)?
   /// Replaces the iPhone view menu (the Projects tab has its own choices).
   var compactMenu: (() -> UIMenu)?
-
-  static let editId = "workspace:edit"
+  /// Pages without view choices (Schedules) show only search on the trailing edge.
+  var showsViewMenu = true
   private static let views = [
     (mode: 0, key: "inbox.settings.view.projects", icon: "folder"),
     (mode: 1, key: "inbox.settings.view.activity", icon: "clock"),
@@ -58,7 +58,7 @@ final class InboxChrome {
   private var syncShown: HomeSyncPill.Shown?
   private var recoveryTask: Task<Void, Never>?
 
-  init() {
+  init(searchPlaceholder: String = String(localized: "search.field.placeholder", bundle: .lody)) {
     workspace.accessibilityIdentifier = "workspace-menu"
     workspace.selected = { [weak self] id in self?.selected(id) }
     workspace.sized = { [weak self] width in
@@ -74,7 +74,7 @@ final class InboxChrome {
     // No toolbar integration: with a toolbar-less page UIKit otherwise drops the button to the
     // bottom edge, under the system tab bar. `update` places it in the trailing nav items instead.
     search.configure(LodyNavigationSearch.Config(
-      placeholder: String(localized: "search.field.placeholder", bundle: .lody), placement: "integratedButton", hideWhenScrolling: false,
+      placeholder: searchPlaceholder, placement: "integratedButton", hideWhenScrolling: false,
       allowToolbarIntegration: false
     ))
     search.emit = { [weak self] event, text in
@@ -120,6 +120,7 @@ final class InboxChrome {
     let compactLayout = host.traitCollection.horizontalSizeClass != .regular
     workspace.setDetail(compactLayout ? "" : [model.devices.summary, running].filter { !$0.isEmpty }.joined(separator: " · "))
     updateSync(model.connection, compact: compactLayout)
+    workspace.setAccountEmail(model.accountEmail)
     workspace.setItems(menuItems(model))
     layout()
     let regular = host.traitCollection.horizontalSizeClass == .regular
@@ -134,7 +135,8 @@ final class InboxChrome {
     if !regular, header.search !== search { header.search = search }
     // iPhone reaches Settings from the bottom tabs; iPad keeps the gear beside the view menu.
     // Right items run from the trailing edge: iPhone shows search, then the view menu (design).
-    let right = regular ? [settingsItem, filter] : [filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    var right = regular ? [settingsItem, filter] : [filter, host.navigationItem.searchBarPlacementBarButtonItem]
+    if !showsViewMenu { right.removeAll { $0 === filter } }
     (workspaceItem, self.settingsItem, filterItem) = (left[0], settingsItem, filter)
     let shownLeft = searching && !regular ? [] : left
     if header.leftItems ?? [] != shownLeft { header.leftItems = shownLeft.isEmpty ? nil : shownLeft }
@@ -149,9 +151,13 @@ final class InboxChrome {
   }
 
   private func clear() {
+    workspace.setAccountEmail("")
+    workspace.setItems([])
     guard let header else { return }
     if let item = workspaceItem, header.leftItems == [item] { header.leftItems = nil }
-    if let filterItem, let right = header.rightItems, right.contains(filterItem) { header.rightItems = nil }
+    if let right = header.rightItems, right.contains(where: { $0 === filterItem || $0 === host?.navigationItem.searchBarPlacementBarButtonItem }) {
+      header.rightItems = nil
+    }
     if header.search === search { header.search = nil }
     if let host, host.navigationItem.titleView === syncPill { host.navigationItem.titleView = nil }
     recoveryTask?.cancel()
@@ -211,9 +217,9 @@ final class InboxChrome {
     ])
   }
 
+  /// The switcher lists only workspaces; devices and workspace editing live in Settings.
   private func menuItems(_ model: Model) -> [LodyMenuItem] {
-    var items = [model.devices.menu]
-    items += model.workspaces.map { workspace in
+    model.workspaces.map { workspace in
       var item = LodyMenuItem()
       item.id = workspace.id
       item.title = workspace.name
@@ -223,21 +229,10 @@ final class InboxChrome {
       item.monogram = String(workspace.name.prefix(1)).uppercased()
       return item
     }
-    if model.selected != nil {
-      var edit = LodyMenuItem()
-      edit.id = Self.editId
-      edit.title = String(localized: "workspace.edit.action", bundle: .lody)
-      items.append(edit)
-    }
-    return items
   }
 
   private func selected(_ id: String) {
-    if id == Self.editId {
-      editWorkspace?()
-    } else if !id.hasPrefix("__device") {
-      selectWorkspace?(id)
-    }
+    selectWorkspace?(id)
   }
 
   private func setSearching(_ value: Bool) {

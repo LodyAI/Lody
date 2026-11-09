@@ -52,6 +52,16 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       updateBackdrop()
     }
   }
+  var projectIndexEnabled = false {
+    didSet {
+      guard projectIndexEnabled != oldValue else { return }
+      projectIndex.cancel()
+      rebuildProjectIndex()
+    }
+  }
+  private lazy var projectIndex = InboxProjectIndex(scroll: collection)
+  private var applyingSections = false
+  private var sectionGeneration = 0
   private var detailsObserver: NSObjectProtocol?
 
   override init(frame: CGRect) {
@@ -83,7 +93,10 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     layoutConfiguration.interSectionSpacing = LodySpacing.md
     layout.configuration = layoutConfiguration
     let collection = ChatListCollectionView(frame: bounds, collectionViewLayout: layout)
-    collection.onLayout = { [weak self] in self?.updateBackdrop() }
+    collection.onLayout = { [weak self] in
+      self?.updateBackdrop()
+      self?.refreshProjectIndex()
+    }
     self.collection = collection
     collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     collection.backgroundColor = .clear
@@ -121,6 +134,10 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     placeholder.adjustsFontForContentSizeCategory = true
     placeholder.isHidden = true
     addSubview(placeholder)
+    projectIndex.accessibilityLabel = String(localized: "inbox.projectIndex.accessibility", bundle: .lody)
+    projectIndex.accessibilityHint = String(localized: "inbox.projectIndex.hint", bundle: .lody)
+    projectIndex.jump = { [weak self] in self?.jumpToSection($0) }
+    addSubview(projectIndex)
     detailsObserver = NotificationCenter.default.addObserver(forName: .lodyChatRowDetailsChanged, object: nil, queue: .main) {
       [weak self] _ in MainActor.assumeIsolated { self?.detailsChanged() }
     }
@@ -143,9 +160,12 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    if projectIndex.frame.size != bounds.size { projectIndex.cancel() }
     collection.frame = bounds
+    projectIndex.frame = bounds
+    refreshProjectIndex()
     updateBackdrop()
-    let inset = LodyLayout.screenPaddingX * 2
+    let inset = LodyLayout.listEdgeX * 2
     placeholder.frame = CGRect(x: inset, y: bounds.midY - 60, width: max(0, bounds.width - inset * 2), height: 120)
   }
 
@@ -155,6 +175,11 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   }
 
   func setSections(_ sections: [LodyListSection]) {
+    projectIndex.cancel()
+    projectIndex.update([])
+    applyingSections = true
+    sectionGeneration += 1
+    let generation = sectionGeneration
     lastSections = sections
     var snapshot = NSDiffableDataSourceSnapshot<String, Item>()
     var next: [Item: Entry] = [:]
@@ -200,10 +225,75 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     snapshot.reloadItems(Array(actionsChanged))
     snapshot.reconfigureItems(Array(changed.subtracting(actionsChanged)))
     dataSource.apply(snapshot, animatingDifferences: window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
-      self?.updateBackdrop()
+      guard let self, self.sectionGeneration == generation else { return }
+      self.applyingSections = false
+      self.updateBackdrop()
+      self.rebuildProjectIndex()
     }
     updateBackdrop()
     updatePlaceholder()
+  }
+
+  private func rebuildProjectIndex() {
+    guard !applyingSections else { return }
+    let snapshot = dataSource.snapshot()
+    let sections = Dictionary(lastSections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let items: [InboxProjectIndex.Item] = projectIndexEnabled ? snapshot.sectionIdentifiers.compactMap { id in
+      guard let section = sections[id], snapshot.numberOfItems(inSection: id) > 0 else { return nil }
+      let tints = section.rows.flatMap { [$0.imageTint, $0.collapsedImageTint] }
+      let tint = ["danger", "warning", "blue"].first(where: tints.contains)
+        ?? (section.rows.contains(where: \.unread) ? "blue" : "")
+      let symbol = ["pinned": "pin.fill", "group:chat": "bubble.left" ][id] ?? ""
+      // HomeRows preserves raw repository identity even when grouping hides row.place.
+      // Use the root, never a cross-project opened child or Pinned's first row.
+      let repository = section.rows.first?.repository ?? ""
+      let image = symbol.isEmpty ? RepositoryImages.url(repository)?.absoluteString ?? "" : ""
+      return InboxProjectIndex.Item(id: id, title: section.header, symbol: symbol, tint: tint, image: image)
+    } : []
+    projectIndex.update(items)
+    collection.showsVerticalScrollIndicator = items.count < 2
+    refreshProjectIndex()
+  }
+
+  private func refreshProjectIndex() {
+    guard !applyingSections else { return }
+    let top = collection.contentOffset.y + collection.adjustedContentInset.top
+    let path = collection.indexPathsForVisibleItems.filter { path in
+      (collection.layoutAttributesForItem(at: path)?.frame.maxY ?? 0) > top
+    }.min()
+    let id = path.flatMap { dataSource.itemIdentifier(for: $0)?.section }
+    projectIndex.refresh(current: id)
+  }
+
+  func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    refreshProjectIndex()
+    projectIndex.setScrolling(true)
+  }
+
+  func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+    if !decelerate { projectIndex.setScrolling(false) }
+  }
+
+  func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+    projectIndex.setScrolling(false)
+  }
+
+  private func jumpToSection(_ id: String) {
+    guard projectIndexEnabled, !applyingSections else { return }
+    let snapshot = dataSource.snapshot()
+    guard snapshot.sectionIdentifiers.contains(id), let item = snapshot.itemIdentifiers(inSection: id).first,
+      let path = dataSource.indexPath(for: item),
+      let attributes = collection.layoutAttributesForItem(at: path) else { return }
+    // Item geometry is unpinned and belongs to the committed snapshot. Never query
+    // supplementary attributes with a path retained across a diffable update.
+    let headerHeight = collection.collectionViewLayout.layoutAttributesForSupplementaryView(
+      ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: path.section)
+    )?.frame.height ?? 0
+    let lower = -collection.adjustedContentInset.top
+    let upper = max(lower, collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+    let y = min(upper, max(lower, attributes.frame.minY - headerHeight - collection.adjustedContentInset.top))
+    collection.setContentOffset(CGPoint(x: collection.contentOffset.x, y: y), animated: false)
+    collection.layoutIfNeeded()
   }
 
   private func toggleOpener(_ id: String) {
@@ -484,8 +574,8 @@ private struct GroupHeader: View {
     HStack(spacing: LodyLayout.listRowGap) {
       Glyph(icon: icon)
       Text(row.title)
-        .lodyTextStyle(.bodyEmphasis)
-        .foregroundStyle(LodyColor.textPrimary)
+        .lodyTextStyle(.groupLabel)
+        .foregroundStyle(LodyColor.textTertiary)
         .lineLimit(1)
       Spacer(minLength: LodySpacing.sm)
       if expanded == false || !canToggle, !row.badge.isEmpty, row.badge != "0" {
@@ -504,7 +594,7 @@ private struct GroupHeader: View {
         Color.clear.frame(width: LodySpacing.xs, height: 1)
       }
     }
-    .padding(.leading, LodyLayout.screenPaddingX)
+    .padding(.leading, LodyLayout.listEdgeX)
     .padding(.trailing, LodySpacing.xs)
     .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .leading)
     .accessibilityElement(children: .contain)
@@ -585,7 +675,7 @@ private struct ChatRowContent: View {
             let fork = max(0, turn - LodySpacing.md)
             path.move(to: CGPoint(x: Self.railX, y: 0))
             path.addLine(to: CGPoint(x: Self.railX, y: fork))
-            path.addCurve(to: CGPoint(x: LodyLayout.childIndent - LodySpacing.sm, y: turn),
+            path.addCurve(to: CGPoint(x: ChatRowContent.childIndent - LodySpacing.sm, y: turn),
               control1: CGPoint(x: Self.railX, y: turn - LodyRadius.sm),
               control2: CGPoint(x: Self.railX + LodySpacing.xs, y: turn))
             if !row.lastChild {
@@ -647,12 +737,12 @@ private struct ChatRowContent: View {
         }
       }
     }
-    .padding(.horizontal, LodyLayout.screenPaddingX)
+    .padding(.horizontal, LodyLayout.listEdgeX)
     .padding(.vertical, snippet != nil || hasDetailLine ? LodySpacing.sm : 0)
     .frame(maxWidth: .infinity, minHeight: nested ? LodySize.controlMd : LodySize.listRow, alignment: .leading)
   }
 
-  /// "4 个子对话，已展开" for VoiceOver; the toggle itself is an accessibility action.
+  /// Child count and expanded state for VoiceOver; the toggle is an accessibility action.
   private var familyLabel: String {
     guard let expanded else { return "" }
     let count = String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount)
@@ -663,45 +753,37 @@ private struct ChatRowContent: View {
   /// The family chevron sits at the opener's title edge; the rail runs down its centre.
   private static let chevronSize = LodyIconSize.xs
   private static let railWidth = LodySpacing.xxs / 2
-  private static let railX = LodyLayout.screenPaddingX + chevronSize / 2
+  private static let railX = LodyLayout.listEdgeX + chevronSize / 2
   /// One nesting level: how far a child's title steps in.
   static let childLevel = LodyLayout.childIndent - LodyLayout.screenPaddingX
+  /// A nested title's leading edge: the list edge plus one level.
+  static let childIndent = LodyLayout.listEdgeX + childLevel
 
-  /// The family's own line under the opener (Slack's "7 replies"): chevron + "7 opened chats",
-  /// aligned with the opener's title. Same place folded or open; the chevron turns down when the
-  /// family shows and the rail starts beneath it. Only the chevron and count are the target; the
-  /// rest of the line opens the parent.
+  /// The whole family line toggles its children; the opener above still opens the chat.
   private func familyToggle(_ expanded: Bool) -> some View {
-    HStack(spacing: 0) {
-      Button(action: onToggle) {
-        HStack(spacing: LodySpacing.xs) {
-          Image(systemName: "chevron.right")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(LodyColor.iconSecondary)
-            .frame(width: Self.chevronSize, height: Self.chevronSize)
-            .rotationEffect(.degrees(expanded ? 90 : 0))
-            .animation(LodySpring.snappy, value: expanded)
-          Text(String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount))
-            .lodyTextStyle(.footnote)
-            .foregroundStyle(LodyColor.textSecondary)
-            .monospacedDigit()
+    Button(action: onToggle) {
+      HStack(spacing: LodySpacing.xs) {
+        Image(systemName: "chevron.right")
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundStyle(LodyColor.iconSecondary)
+          .frame(width: Self.chevronSize, height: Self.chevronSize)
+          .rotationEffect(.degrees(expanded ? 90 : 0))
+          .animation(LodySpring.snappy, value: expanded)
+        Text(String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount))
+          .lodyTextStyle(.footnote)
+          .foregroundStyle(LodyColor.textSecondary)
+          .monospacedDigit()
+        Spacer(minLength: LodySpacing.sm)
+        if !expanded, let status = Attention(tint: row.collapsedImageTint, unread: false) {
+          AttentionGlyph(attention: status)
+            .frame(width: LodyIconSize.md, height: LodyIconSize.md)
         }
-        .padding(.leading, LodySpacing.xs)
-        .padding(.trailing, LodySpacing.md)
-        .frame(minHeight: LodySize.controlSm, alignment: .leading)
-        .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
-      Spacer(minLength: LodySpacing.sm)
-      if !expanded, let status = Attention(tint: row.collapsedImageTint, unread: false) {
-        AttentionGlyph(attention: status)
-          .frame(width: LodyIconSize.md, height: LodyIconSize.md)
-          .allowsHitTesting(false)
-      }
+      .padding(.horizontal, LodyLayout.listEdgeX)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .contentShape(Rectangle())
     }
-    .padding(.leading, LodyLayout.screenPaddingX - LodySpacing.xs)
-    .padding(.trailing, LodyLayout.screenPaddingX)
-    .padding(.top, -LodySpacing.xs)
+    .buttonStyle(.plain)
     .accessibilityHidden(true)
   }
 
@@ -758,7 +840,7 @@ private struct MoreRowContent: View {
     Text(title)
       .lodyTextStyle(.body)
       .foregroundStyle(LodyColor.textTertiary)
-      .padding(.leading, LodyLayout.childIndent)
+      .padding(.leading, ChatRowContent.childIndent)
       .frame(maxWidth: .infinity, minHeight: LodySize.listRow, alignment: .leading)
       .accessibilityAddTraits(.isButton)
   }
@@ -772,9 +854,9 @@ private struct SectionTitle: View {
       Color.clear.frame(height: LodySpacing.sm)
     } else {
       Text(text)
-        .lodyTextStyle(.subhead)
+        .lodyTextStyle(.groupLabel)
         .foregroundStyle(LodyColor.textTertiary)
-        .padding(.horizontal, LodyLayout.screenPaddingX)
+        .padding(.horizontal, LodyLayout.listEdgeX)
         .padding(.top, LodySpacing.xs)
         .padding(.bottom, LodySpacing.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -784,7 +866,7 @@ private struct SectionTitle: View {
 }
 
 /// Compact person identity; shares the native image cache with message avatars.
-private struct ChatOwnerAvatar: View {
+struct ChatOwnerAvatar: View {
   let member: WorkspaceMember
   @State private var loaded: UIImage?
   @State private var loadedURL: URL?

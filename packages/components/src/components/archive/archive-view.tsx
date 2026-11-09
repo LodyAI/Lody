@@ -56,6 +56,7 @@ import { MobileArchiveScreen } from '@/components/mobile/mobile-archive-screen';
 import { WebArchiveScreen } from './web-archive-screen';
 import {
   getMachineFlockLocalProjects,
+  getSessionGroupTitle,
   getSessionLaunchConfigLegacyFields,
   type MachineId,
   type PrStatus,
@@ -603,7 +604,7 @@ function sessionActivityTime(session: SessionMeta): number {
 }
 
 function sessionTitle(session: SessionMeta): string {
-  return session.title?.trim() || 'Untitled session';
+  return getSessionGroupTitle(session) || 'Untitled session';
 }
 
 function sortArchivedSessions(
@@ -758,7 +759,7 @@ function getArchivedSessionItemViewModel(
   session: SessionMeta,
   now: Date
 ): ArchivedSessionItemViewModel {
-  const title = session.title?.trim() || 'Untitled session';
+  const title = sessionTitle(session);
   const relativeTime = formatCompactRelativeTime(session.lastMessageAt, now);
   const branchName = session.branchName?.trim() || '';
   const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };

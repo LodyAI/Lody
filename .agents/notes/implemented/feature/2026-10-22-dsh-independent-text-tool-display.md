@@ -7,13 +7,13 @@ Translation: current
 
 ## Abstract
 
-Lody groups DSH thoughts and tools together, so a visible thought-only group can
-collapse when a tool joins it. The adapter preserves text versus reasoning types;
+Grouping DSH thoughts and tools together caused a visible thought-only group to
+collapse when a tool joined it. The adapter preserves text versus reasoning types;
 ordinary text is delivered on each committed assistant message, not only at turn
-completion. DSH prose now stays independently readable while tools default to collapsed
-summaries, retaining thought semantics and explicit user toggles. The outer
-finished-work fold is disabled for DSH to retain chronological order. Provider
-streaming and persisted history remain unchanged.
+completion. DSH thoughts and tools use separate, default-closed disclosures and
+retain explicit user toggles. Completed work uses the shared outer fold while
+retaining chronological order. Provider streaming and persisted history remain
+unchanged.
 
 ## Evidence and ownership
 
@@ -24,7 +24,7 @@ streaming and persisted history remain unchanged.
 - Lody's [block builder](../../../../packages/components/src/components/ai-gui/assistant-turn-render-blocks.ts)
   combines consecutive thoughts/tools. The
   [row builder](../../../../packages/components/src/components/ai-gui/view.tsx)
-  defaults only pure DSH thought groups open. Completed process output can also
+  defaults thought and tool groups closed. Completed process output can also
   disappear behind the outer worked-group disclosure.
 - Upstream Web `master`, inspected 2026-10-22, separates ordinary Markdown in
   [AssistantMarkdown](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx),
@@ -42,15 +42,13 @@ streaming and persisted history remain unchanged.
 
 Only builtin DSH, selected from Session metadata, enables the separate-thought
 layout. A thought/tool boundary flushes the current activity group, preserving
-keys when tools arrive. Thought groups default open and tool groups closed;
-explicit toggles and search reveals retain their existing behavior. DSH skips
-outer finished-work folding, keeping intermediate text visible and tools in their
-original positions. Duration uses the existing footer. Both layout and row caches
-include the provider policy; other providers retain their previous behavior.
+keys when tools arrive. Thought and tool groups default closed; explicit toggles
+and search reveals retain their existing behavior. Completed work uses the shared
+outer fold and preserves the original order when expanded. Duration follows the
+shared header/footer policy. Both layout and row caches include the provider policy; other providers retain their previous behavior.
 
-This costs vertical space compared with upstream's collapsed Think preview, but
-meets the requested readable intermediate prose. No stored types or provider
-transport changed. Live ordinary text still waits for each committed message;
+The separate disclosure retains access to thought prose without displaying it by
+default. No stored types or provider transport changed. Live ordinary text still waits for each committed message;
 streaming it would require separate retry/interruption and deduplication work.
 
 This revises the mixed-group presentation in the

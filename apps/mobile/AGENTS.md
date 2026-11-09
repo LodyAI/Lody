@@ -13,3 +13,8 @@ Native mobile clients maintained in the Lody public repository. Read
   implementation, credentials, or captured user transcripts.
 - Nested iOS GitHub workflows are retained as upstream references, not active CI.
   Root checks do not replace native build and platform verification.
+
+- Backend origins come from `backend-config.mjs`: optional ignored `.env.local`,
+  process environment overrides, production defaults. Both platforms must use
+  the same resolver and endpoint-tuple storage namespace. Never inject secrets
+  or disable TLS validation. See README.md#backend-configuration.

@@ -1,5 +1,35 @@
 import UIKit
 
+enum LodyToastKind {
+  case neutral, success, warning, error
+
+  var symbol: String {
+    switch self {
+    case .neutral: "info.circle"
+    case .success: "checkmark"
+    case .warning: "exclamationmark.triangle.fill"
+    case .error: "exclamationmark.circle.fill"
+    }
+  }
+
+  var tint: UIColor {
+    switch self {
+    case .neutral, .success: .secondaryLabel
+    case .warning: .systemOrange
+    case .error: .systemRed
+    }
+  }
+
+  var feedback: UINotificationFeedbackGenerator.FeedbackType? {
+    switch self {
+    case .neutral: nil
+    case .success: .success
+    case .warning: .warning
+    case .error: .error
+    }
+  }
+}
+
 /// Toasts use their own window so failures remain visible above presented sheets.
 @MainActor
 enum LodyToastOverlay {
@@ -14,7 +44,7 @@ enum LodyToastOverlay {
 
     func show(
       message: String,
-      kind: String,
+      kind: LodyToastKind,
       actionTitle: String? = nil,
       action: (() -> Void)? = nil
     ) {
@@ -82,7 +112,7 @@ enum LodyToastOverlay {
 
     func enqueue(
       _ message: String,
-      kind: String,
+      kind: LodyToastKind,
       actionTitle: String? = nil,
       action: (() -> Void)? = nil
     ) {
@@ -90,14 +120,7 @@ enum LodyToastOverlay {
         restartTimer()
         return
       }
-      let symbol: String
-      let tint: UIColor
-      switch kind {
-      case "error": symbol = "exclamationmark.circle.fill"; tint = .systemRed
-      case "warning": symbol = "exclamationmark.triangle.fill"; tint = .systemOrange
-      default: symbol = "checkmark"; tint = .secondaryLabel
-      }
-      let pill = LodyToastPillView(message: message, symbol: symbol, tint: tint, actionTitle: actionTitle)
+      let pill = LodyToastPillView(message: message, symbol: kind.symbol, tint: kind.tint, actionTitle: actionTitle)
       pill.onAction = { [weak self] in
         action?()
         self?.dismiss()
@@ -109,7 +132,7 @@ enum LodyToastOverlay {
       layoutPills(entering: pill)
       restartTimer()
       UIAccessibility.post(notification: .announcement, argument: message)
-      UINotificationFeedbackGenerator().notificationOccurred(kind == "error" ? .error : .success)
+      if let feedback = kind.feedback { UINotificationFeedbackGenerator().notificationOccurred(feedback) }
     }
 
     func showBanner(title: String, kind: String) {

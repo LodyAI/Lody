@@ -71,6 +71,11 @@ const SESSION_RECONCILE_CONCURRENCY = 4;
 type SessionUserResolverLike = Pick<SessionUserResolver, 'resolve' | 'clear'>;
 
 type SessionDispatchWatcherDeps = {
+  reconcileLocalImages?: (
+    sessionId: SessionId,
+    doc: SessionDocumentHandle,
+    turnId: string | undefined
+  ) => Promise<void>;
   /** Encrypted turn execution is admitted only by its verified-device gate. */
   encryptedWorkspace?: boolean;
   /** Encrypted only: who this turn runs as. A row's `userId` stays display data. */
@@ -1397,6 +1402,9 @@ export class SessionDispatchWatcher {
         outcome = 'no-meta';
         return;
       }
+
+      await this.deps.reconcileLocalImages?.(sessionId, sessionDoc, meta.latestUserMsgId);
+      ensureActive();
 
       // ── Gather snapshot ──
       const snapshot = {

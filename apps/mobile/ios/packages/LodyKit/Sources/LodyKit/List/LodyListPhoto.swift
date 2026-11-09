@@ -9,7 +9,7 @@ enum LodyListPhoto {
   private static let cache = NSCache<NSURL, UIImage>()
   private static let originals = NSCache<NSURL, UIImage>()
   private static var waiters: [URL: [(UIImage?) -> Void]] = [:]
-  private static let disk = PhotoDiskCache(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("avatars-v1"))
+  private static let disk = PhotoDiskCache(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("avatars-v1\(BackendEnvironment.storageSuffix)"))
   private static let photoIO = DispatchQueue(label: "ai.lody.avatar-cache", qos: .utility)
   private static var tasks: [URL: URLSessionDataTask] = [:]
 

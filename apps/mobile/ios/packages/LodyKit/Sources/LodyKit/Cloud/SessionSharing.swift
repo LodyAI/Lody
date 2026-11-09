@@ -34,7 +34,7 @@ import Security
         return try await management(args, workspace: workspace, userId: userId, check: check, call: { method, fields in
           try check()
           if jwt == nil {
-            let auth = try await request("https://backend.lody.ai/api/auth/convex/token", credential: credential, transport: transport, timeout: 15)
+            let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", credential: credential, transport: transport, timeout: 15)
             try check()
             guard let token = auth["token"] as? String, !token.isEmpty else { throw failure() }
             jwt = token
@@ -42,7 +42,7 @@ import Security
           let kind = method == "revoke" ? "mutation" : "query"
           let response: [String: Any]
           do {
-            response = try await request("https://convex.lody.ai/api/\(kind)", credential: jwt!, body: [
+            response = try await request("\(BackendEnvironment.convex)/api/\(kind)", credential: jwt!, body: [
               "path": "sessionSharing:\(method)", "format": "convex_encoded_json", "args": [fields]
             ], transport: transport, timeout: 15)
           } catch let error as HTTPStatus where [401, 403].contains(error.code) {
@@ -112,7 +112,7 @@ import Security
       guard let intent = args["intent"] as? [String: Any], intent["workspaceId"] as? String == workspace else { throw failure() }
       let response: [String: Any]
       do {
-        response = try await request("https://backend.lody.ai/api/session-preview/request-token", credential: credential, body: intent, transport: transport)
+        response = try await request("\(BackendEnvironment.site)/api/session-preview/request-token", credential: credential, body: intent, transport: transport)
       } catch let error as HTTPStatus {
         return ["status": error.code]
       }
@@ -126,11 +126,11 @@ import Security
     if method == "getManagement" || method == "beginDeployment" {
       guard values["workspaceId"] as? String == workspace else { throw failure() }
     }
-    let auth = try await request("https://backend.lody.ai/api/auth/convex/token", credential: credential, transport: transport)
+    let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", credential: credential, transport: transport)
     try check()
     guard let jwt = auth["token"] as? String, !jwt.isEmpty else { throw failure() }
     let kind = method == "getManagement" ? "query" : "mutation"
-    let response = try await request("https://convex.lody.ai/api/\(kind)", credential: jwt, body: [
+    let response = try await request("\(BackendEnvironment.convex)/api/\(kind)", credential: jwt, body: [
       "path": "sessionSharing:\(method)", "format": "convex_encoded_json", "args": [values]
     ], transport: transport)
     try check()

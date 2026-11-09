@@ -24,7 +24,7 @@ def reveal(identifier):
             viewport = items[0]['frame']
             if frame['y'] + frame['height'] < viewport['y'] + viewport['height'] - 16:
                 return match
-        ui.axe('swipe', '--start-x', '210', '--start-y', '720',
+        ui.axe('drag', '--start-x', '210', '--start-y', '720',
                '--end-x', '210', '--end-y', '360', '--duration', '.4', '--post-delay', '.3')
     raise AssertionError(f'Could not reach {identifier}')
 
@@ -57,18 +57,19 @@ for index, scenario in enumerate(scenarios):
     signed_in = scenario != 'signed-out'
     has_workspace = signed_in and scenario != 'no-workspace'
     account = ui.element('account')
-    preferences, appearance = ui.element('preferences'), ui.element('appearance')
-    assert account['frame']['y'] < preferences['frame']['y'] < appearance['frame']['y']
+    preferences = ui.element('preferences')
+    assert account['frame']['y'] < preferences['frame']['y']
     expected_name = 'Settings Preview' if signed_in else catalog.text('settings.account.welcome')
     assert expected_name in account.get('AXLabel', ''), account
     assert account['frame']['height'] >= 44
     assert has_text('settings.section.personal')
     top = identifiers(ui.state())
+    assert not {'appearance', 'remote-mcp', 'memory-settings'} & top
     assert not {'notifications', 'queued-message-behavior', 'accent-color', 'app-icon'} & top
     ui.capture(f'{scenario}-top')
     if scenario == 'live':
-        flat_rows.assert_flat(ui, 'live-flat', 'preferences', 'appearance')
-        flat_rows.assert_section_gap(ui, 'appearance', 'workspace-general')
+        flat_rows.assert_flat(ui, 'live-flat', 'remote-machine', 'remote-agent')
+        flat_rows.assert_section_gap(ui, 'preferences', 'workspace-general')
 
     if scenario == 'live':
         tap('account')
@@ -90,19 +91,9 @@ for index, scenario in enumerate(scenarios):
         assert catalog.text('notifications.hint.signedOut') in ui.element('notification-permission')['AXLabel']
         back()
         assert ui.element('queued-message-behavior').get('AXValue') == original
-        back()
-        tap('appearance')
         assert 'accent-color' not in identifiers(ui.state())
         ui.element('app-icon')
-        ui.capture('appearance-opened')
-        previous = ui.element('appearance')['AXValue']
-        ui.axe('tap', '--id', 'appearance', '--post-delay', '.3')
-        ui.axe('tap', '--label', catalog.text('settings.appearance.black'), '--post-delay', '.4')
-        assert ui.element('appearance')['AXValue'] == catalog.text('settings.appearance.black')
-        ui.capture('appearance-menu-updated')
-        ui.axe('tap', '--id', 'appearance', '--post-delay', '.3')
-        ui.axe('tap', '--label', previous, '--post-delay', '.4')
-        assert ui.element('appearance')['AXValue'] == previous
+        ui.capture('preferences-app-icon')
         tap('app-icon')
         ui.element('app-icon-default')
         ui.capture('app-icons-opened')
@@ -125,10 +116,11 @@ for index, scenario in enumerate(scenarios):
         back()
 
     if has_workspace:
-        for identifier in ('remote-machine', 'remote-agent', 'remote-mcp', 'project-history', 'archived'):
+        for identifier in ('remote-machine', 'remote-agent', 'project-history', 'archived'):
             reveal(identifier)
         state = scenario if scenario in ('live', 'syncing') else 'offline'
-        assert has_text(f'settings.connection.{state}'), f'Missing {state} workspace footer'
+        # Only an offline workspace has a footer; connected and syncing stay quiet.
+        assert has_text('settings.connection.offline') == (state == 'offline'), f'Unexpected {state} workspace footer'
         visible = identifiers(ui.state())
         assert ('connection' in visible) == (state == 'offline')
         if scenario == 'cached':
@@ -139,7 +131,7 @@ for index, scenario in enumerate(scenarios):
                                      and item.get('AXLabel') == 'syncing:refreshes=1'
                                      for item in items), 'Resync missed refresh boundary')
             assert 'connection' not in identifiers(ui.state())
-            assert has_text('settings.connection.syncing')
+            assert not has_text('settings.connection.offline')
             ui.capture('cached-retry-syncing')
     elif signed_in:
         reveal('workspace-unavailable')
@@ -149,6 +141,7 @@ for index, scenario in enumerate(scenarios):
     ui.element('diagnostics')
     ui.element('about')
     visible = identifiers(ui.state())
+    assert not {'appearance', 'remote-mcp', 'memory-settings'} & visible
     assert not {'licenses', 'notifications', 'queued-message-behavior', 'accent-color', 'app-icon'} & visible
     if not has_workspace:
         assert not {'remote-machine', 'archived', 'connection', 'project-history'} & visible

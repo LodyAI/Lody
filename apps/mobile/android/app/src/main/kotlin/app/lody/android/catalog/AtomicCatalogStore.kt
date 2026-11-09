@@ -19,7 +19,7 @@ import java.security.MessageDigest
 /** Whole display snapshots, serialized on IO. No tokens, CRDT replicas or cursors. */
 internal class AtomicCatalogStore(context: Context, name: String = "catalog") : CatalogStore, CreationOptionsStore, WorkspaceMemberStore {
     init { require(name.matches(Regex("[a-zA-Z0-9_-]+"))) }
-    private val directory = File(context.noBackupFilesDir, name)
+    private val directory = File(context.noBackupFilesDir, name + app.lody.android.BackendEnvironment.storageSuffix)
     private val mutex = Mutex()
     private suspend fun <T> io(block: () -> T): T = mutex.withLock { withContext(Dispatchers.IO) { block() } }
     private val accountFile get() = File(directory, "account.json")

@@ -8,7 +8,6 @@ ui = UI(sys.argv[1], sys.argv[2])
 forms = {
     'machine': ['setting-name'],
     'agent': ['setting-name', 'setting-prompt'],
-    'mcp': ['setting-name'],
     'workspace': ['workspace-name'],
 }
 
@@ -27,4 +26,4 @@ for form, fields in forms.items():
     ui.wait(lambda items: not any(item.get('AXUniqueId') == fields[0] for item in items),
             f'{form}: editor did not dismiss')
 
-print('PASS: machine, Agent, MCP and workspace forms retain distinct cards with and without the keyboard; no saves or service actions.')
+print('PASS: machine, Agent and workspace forms retain distinct cards with and without the keyboard; no saves or service actions.')

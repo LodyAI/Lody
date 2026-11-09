@@ -101,6 +101,8 @@ final class InboxController: UIViewController {
     }, uniquingKeysWith: { _, new in new }) : [:]
     list.setOwners(owners)
     loadViews(state)
+    list.setProjectIndexEnabled(!state.userId.isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && traitCollection.horizontalSizeClass != .regular && HomeGrouping.stored == .project)
     guard !state.userId.isEmpty else {
       chrome.update(nil)
       list.setPlaceholder("")
@@ -109,6 +111,7 @@ final class InboxController: UIViewController {
     }
     let catalog = state.catalog.viewed(views)
     chrome.update(InboxChrome.Model(
+      accountEmail: state.accountEmail,
       workspaces: state.workspaces, selected: state.workspace,
       devices: InboxDevices(catalog: state.catalog, presence: state.presence),
       running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
@@ -139,7 +142,6 @@ final class InboxController: UIViewController {
 
   private func wireChrome() {
     chrome.selectWorkspace = { [weak self] id in self?.selectWorkspace(id) }
-    chrome.editWorkspace = { [weak self] in self?.editWorkspace() }
     chrome.setView = { [weak self] mode in self?.setView(mode) }
     chrome.setSort = { [weak self] sort in
       guard let self else { return }
@@ -188,7 +190,7 @@ final class InboxController: UIViewController {
       case .success(let hits):
         self.search = (key, catalog, hits)
       case .failure:
-        LodyToastOverlay.shared.show(message: String(localized: "search.toast.failed", bundle: .lody), kind: "error")
+        LodyToastOverlay.shared.show(message: String(localized: "search.toast.failed", bundle: .lody), kind: .error)
         self.search = (key, catalog, InboxSections.match(catalog, keyword: term))
       }
       self.render()
@@ -291,21 +293,10 @@ final class InboxController: UIViewController {
     Task { try? await NativeHomeFixture.request("selectWorkspace", ["workspaceId": id]) }
   }
 
-  private func editWorkspace() {
-    guard let workspace = source.state.workspace else { return }
-    var params: [String: Any] = [
-      "workspaceId": workspace.id, "name": workspace.name,
-      "color": LodyAccent.hex(UIColor.lodyAccent.resolvedColor(with: traitCollection)),
-    ]
-    params["image"] = workspace.image
-    LodyShell.shared.presentNative(WorkspaceEditorController(params: params),
-      title: String(localized: "workspace.edit.title", bundle: .lody), detents: [0.5])
-  }
-
   func newSession() {
     let state = source.state
     guard state.workspace != nil else {
-      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: .neutral)
       return
     }
     SessionActions.create(["workspaceId": state.workspaceId, "zoomSourceLabel": String(localized: "tabs.newSession", bundle: .lody)])

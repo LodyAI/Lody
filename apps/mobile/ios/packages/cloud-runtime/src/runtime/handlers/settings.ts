@@ -4,7 +4,6 @@ import type {
   ShortcutRequest,
 } from '../../models/prompt-shortcuts.ts';
 import type { PublishedSharePage } from '../../models/session-sharing.ts';
-import { memorySettings } from '../memory-settings';
 import { promptShortcuts } from '../prompt-shortcuts';
 import { roleSettings } from '../role-settings';
 import { remoteSettings } from '../settings';
@@ -100,19 +99,6 @@ export function registerSettings(ctx: RuntimeContext) {
     };
     return { flock: replica!.flock, check, scopedGrant };
   };
-  channel.handle('memorySettings', async (args) => {
-    const { flock, check, scopedGrant } = replicaScope(args);
-    return memorySettings(
-      args,
-      args.userId,
-      flock,
-      state.machineReplicas,
-      () => state.presence,
-      scopedGrant,
-      AbortSignal.timeout(35000),
-      check,
-    );
-  });
   channel.handle('agentRoles', async (args) => {
     const { flock, check, scopedGrant } = replicaScope(args);
     return roleSettings(

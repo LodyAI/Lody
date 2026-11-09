@@ -141,9 +141,12 @@ const scalarNames = [
 ] as const;
 export const roostInspectionShape: Shape = {
   ...Object.fromEntries(scalarNames.map((name) => [name, true as const])),
-  inputConfig: Object.fromEntries(
-    SESSION_DIRECTORY_INPUT_CONFIG_KEYS.map((name) => [name, true as const])
-  ),
+  inputConfig: {
+    ...Object.fromEntries(SESSION_DIRECTORY_INPUT_CONFIG_KEYS.map((name) => [name, true as const])),
+    inputBlocks: [
+      { type: true, transport: true, machineId: true, localImageId: true, storageSessionId: true },
+    ],
+  },
   scheduleRun: { scheduleId: true },
   plan: [{}],
   items: [
@@ -159,6 +162,9 @@ export const roostInspectionShape: Shape = {
       status: true,
       fileId: true,
       transport: true,
+      machineId: true,
+      localImageId: true,
+      storageSessionId: true,
     },
   ],
   __lody_roost_clear_fields_v1: true,

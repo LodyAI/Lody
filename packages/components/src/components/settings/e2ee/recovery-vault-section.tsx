@@ -21,12 +21,36 @@ const styles = stylex.create({
     fontSize: text.subheadlineSize,
   },
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap' },
+  line: { display: 'block' },
+  // Name and status share one column so the buttons wrap below them at the same left edge.
+  workspace: {
+    alignSelf: 'stretch',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[3],
+    rowGap: space[2],
+  },
+  workspaceLabel: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '16em',
+    minWidth: 0,
+  },
 });
 
+type WorkspaceStatus =
+  | { kind: 'notSet' }
+  | { kind: 'saved' }
+  | { kind: 'verified'; update: number }
+  | { kind: 'unknown' };
 type Plan = {
+  hasVault: boolean;
   replaceable: boolean;
   replacing: boolean;
-  covered: readonly { id: string; name: string }[];
+  covered: readonly { id: string; name: string; status: WorkspaceStatus }[];
   uncovered: readonly { id: string; name: string }[];
 };
 type Result =
@@ -55,10 +79,13 @@ type Result =
 export function RecoveryVaultSection() {
   const { t } = useTranslation();
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
-  const e2ee = getIpcServices()?.e2ee;
+  // The proxy is new on every call; keep one so the loading effect runs once.
+  const [e2ee] = useState(() => getIpcServices()?.e2ee);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>();
   const [plan, setPlan] = useState<Plan>();
+  const [planFailed, setPlanFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   const [dialog, setDialog] = useState<'begin' | 'continue'>();
   const [passkey, setPasskey] = useState(false);
   const [events, setEvents] = useState<readonly { id: string; kind: string; occurredAt: number }[]>(
@@ -73,9 +100,15 @@ export function RecoveryVaultSection() {
     let live = true;
     void e2ee.recoveryReplacementPlan().then(
       (next) => {
-        if (live) setPlan(next);
+        if (!live) return;
+        setPlan(next);
+        setPlanFailed(false);
       },
-      () => undefined
+      () => {
+        if (!live) return;
+        setPlan(undefined);
+        setPlanFailed(true);
+      }
     );
     void e2ee.recentAccountSecurityEvents().then(
       (next) => {
@@ -92,8 +125,23 @@ export function RecoveryVaultSection() {
     return () => {
       live = false;
     };
-  }, [enabled, e2ee, result]);
+  }, [enabled, e2ee, result, reload]);
   if (!enabled || !e2ee) return null;
+  // One state decides which actions exist, so only one primary action shows at a time.
+  // When the state cannot be read, retry leads and the actions that change nothing stay;
+  // creating stays too because main and the service refuse a second vault.
+  const mode = !plan
+    ? planFailed
+      ? 'failed'
+      : 'unknown'
+    : plan.replacing
+      ? 'replacing'
+      : plan.hasVault
+        ? 'ready'
+        : 'none';
+  // An older file still restores during a replacement, and main does not refuse it.
+  const canRestore =
+    mode === 'failed' || ((mode === 'ready' || mode === 'replacing') && !!plan?.uncovered.length);
   const run = async (work: () => Promise<Result | undefined>) => {
     if (busy) return;
     setBusy(true);
@@ -121,40 +169,61 @@ export function RecoveryVaultSection() {
     <CompactSection title={t('e2ee.recovery.title')}>
       <div {...stylex.props(styles.body)}>
         <p>{t('e2ee.recovery.lead')}</p>
+        {mode === 'failed' && (
+          <Alert.Root>
+            <Alert.Description>{t('e2ee.recovery.planFailed')}</Alert.Description>
+          </Alert.Root>
+        )}
         <div {...stylex.props(styles.actions)}>
-          <Button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const created = await e2ee.createRecoveryVault();
-                return created.outcome === 'created'
-                  ? { kind: 'created', vaultId: created.vaultId }
-                  : undefined;
-              })
-            }
-          >
-            {t('e2ee.recovery.create')}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const opened = await e2ee.inspectRecoveryFile();
-                return opened.outcome === 'opened'
-                  ? { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces }
-                  : undefined;
-              })
-            }
-          >
-            {t('e2ee.recovery.check')}
-          </Button>
-          {plan?.replaceable && !plan.replacing && (
+          {mode === 'failed' && (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setPlanFailed(false);
+                setReload((n) => n + 1);
+              }}
+            >
+              {t('common.retry')}
+            </Button>
+          )}
+          {(mode === 'none' || mode === 'failed') && (
+            <Button
+              variant={mode === 'none' ? undefined : 'secondary'}
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const created = await e2ee.createRecoveryVault();
+                  return created.outcome === 'created'
+                    ? { kind: 'created', vaultId: created.vaultId }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.create')}
+            </Button>
+          )}
+          {(mode === 'ready' || mode === 'failed') && (
+            <Button
+              variant={mode === 'ready' ? undefined : 'secondary'}
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const opened = await e2ee.inspectRecoveryFile();
+                  return opened.outcome === 'opened'
+                    ? { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces }
+                    : undefined;
+                })
+              }
+            >
+              {t('e2ee.recovery.check')}
+            </Button>
+          )}
+          {mode === 'ready' && (
             <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
               {t('e2ee.recovery.replace')}
             </Button>
           )}
-          {!!plan?.uncovered.length && (
+          {canRestore && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -170,7 +239,7 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.restore')}
             </Button>
           )}
-          {passkey && !!plan?.uncovered.length && (
+          {canRestore && passkey && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -186,7 +255,7 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.restorePasskey')}
             </Button>
           )}
-          {passkey && plan?.replaceable && (
+          {mode === 'ready' && passkey && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -200,7 +269,7 @@ export function RecoveryVaultSection() {
               {t('e2ee.recovery.passkeyAdd')}
             </Button>
           )}
-          {passkey && plan?.replaceable && (
+          {mode === 'ready' && passkey && (
             <Button
               variant="secondary"
               disabled={busy}
@@ -267,38 +336,32 @@ export function RecoveryVaultSection() {
             )}
           </div>
         )}
-        {!!plan?.covered.length && (
+        {mode === 'ready' && !!plan?.covered.length && (
           <div {...stylex.props(styles.body)}>
             <p>{t('e2ee.recovery.workspaces')}</p>
             {plan.covered.map((workspace) => (
-              <div key={workspace.id} {...stylex.props(styles.actions)}>
-                <span>{workspace.name}</span>
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      const done = await e2ee.setupWorkspaceRecovery(workspace.id);
-                      if (done.outcome === 'cancelled') return undefined;
-                      return {
-                        kind: 'notice',
-                        key:
-                          done.outcome === 'Committed' && done.recoverable
-                            ? 'e2ee.recovery.setupDone'
-                            : 'e2ee.recovery.replacePending',
-                      };
-                    })
-                  }
-                >
-                  {t('e2ee.recovery.setup')}
-                </Button>
-                {passkey && (
+              <div key={workspace.id} {...stylex.props(styles.workspace)}>
+                <span {...stylex.props(styles.workspaceLabel)}>
+                  <span>{workspace.name}</span>
+                  <span>
+                    {workspace.status.kind === 'verified'
+                      ? t('e2ee.recovery.workspace.verified', { update: workspace.status.update })
+                      : t(
+                          workspace.status.kind === 'saved'
+                            ? 'e2ee.recovery.workspace.saved'
+                            : workspace.status.kind === 'unknown'
+                              ? 'e2ee.recovery.workspace.unknown'
+                              : 'e2ee.recovery.workspace.notSet'
+                        )}
+                  </span>
+                </span>
+                <span {...stylex.props(styles.actions)}>
                   <Button
                     variant="secondary"
                     disabled={busy}
                     onClick={() =>
                       void run(async () => {
-                        const done = await e2ee.setupWorkspaceRecovery(workspace.id, 'passkey');
+                        const done = await e2ee.setupWorkspaceRecovery(workspace.id);
                         if (done.outcome === 'cancelled') return undefined;
                         return {
                           kind: 'notice',
@@ -310,9 +373,30 @@ export function RecoveryVaultSection() {
                       })
                     }
                   >
-                    {t('e2ee.recovery.setupPasskey')}
+                    {t('e2ee.recovery.setup')}
                   </Button>
-                )}
+                  {passkey && (
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const done = await e2ee.setupWorkspaceRecovery(workspace.id, 'passkey');
+                          if (done.outcome === 'cancelled') return undefined;
+                          return {
+                            kind: 'notice',
+                            key:
+                              done.outcome === 'Committed' && done.recoverable
+                                ? 'e2ee.recovery.setupDone'
+                                : 'e2ee.recovery.replacePending',
+                          };
+                        })
+                      }
+                    >
+                      {t('e2ee.recovery.setupPasskey')}
+                    </Button>
+                  )}
+                </span>
               </div>
             ))}
           </div>
@@ -381,7 +465,7 @@ export function RecoveryVaultSection() {
                 </li>
               ))}
             </ul>
-            {plan?.replaceable && !plan.replacing && (
+            {mode === 'ready' && (
               <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
                 {t('e2ee.recovery.eventNotMe')}
               </Button>
@@ -513,8 +597,15 @@ export function RecoveryVaultSection() {
               )}
             </AlertDialog.Title>
             <AlertDialog.Description>
-              {dialog === 'begin' && t('e2ee.recovery.replaceBody')}{' '}
-              {t('e2ee.recovery.replaceOldFile')}
+              {/* Separate lines, not a joining space: Chinese takes no space between sentences. */}
+              <span {...stylex.props(styles.line)}>
+                {t(
+                  dialog === 'continue'
+                    ? 'e2ee.recovery.replaceContinueBody'
+                    : 'e2ee.recovery.replaceBody'
+                )}
+              </span>
+              <span {...stylex.props(styles.line)}>{t('e2ee.recovery.replaceOldFile')}</span>
             </AlertDialog.Description>
           </AlertDialog.Header>
           {!!plan?.uncovered.length && (
@@ -557,9 +648,7 @@ export function RecoveryVaultSection() {
               }}
             >
               {t(
-                dialog === 'continue'
-                  ? 'e2ee.recovery.replaceContinue'
-                  : 'e2ee.recovery.replaceSave'
+                dialog === 'continue' ? 'e2ee.recovery.replaceFinish' : 'e2ee.recovery.replaceSave'
               )}
             </Button>
           </AlertDialog.Footer>

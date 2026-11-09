@@ -605,6 +605,8 @@ assert(pictureRows.map(\.kind) == ["attachments", "user"])
 assert(pictureRows.first?.id == "picture-turn:user")
 assert(pictureRows.first?.attachments.first?.image?.id == "image1")
 assert(pictureRows.last?.text == "What is this?", "Attachment filenames must not be flattened into the message bubble")
+precondition(pictureRows.first?.author.isEmpty == false && pictureRows.last?.author.isEmpty == true,
+  "Attachments open the user's message: the turn header belongs to them, not to the bubble below")
 imageTranscript.entries[0].items.removeFirst()
 assert(imageTranscript.rows().map(\.kind) == ["attachments"], "Image-only messages must not add an empty bubble")
 print("Chat image rows: media before caption, stable anchor, and image-only layout passed")
@@ -683,6 +685,9 @@ let pendingRows = localPending.rows(entries: [])
 precondition(pendingRows.map(\.kind) == ["delivery", "attachments", "user"],
   "Delivery belongs above text and attachments")
 precondition(pendingRows.first?.text == localPending.status)
+precondition(pendingRows.first { $0.kind == "attachments" }?.readState == "sending"
+  && pendingRows.first { $0.kind == "user" }?.author.isEmpty == true,
+  "A local send's header sits on its attachments, the first row of the message")
 let blankStatus = try! JSONDecoder().decode(ChatPendingSend.self, from: Data(#"{"id":"blank-status","text":"hello","attachments":[],"status":""}"#.utf8))
 precondition(
   blankStatus.rows(entries: []).contains {
@@ -1011,3 +1016,20 @@ let runningHangRows = ChatTranscript(entries: runningHang).rows(now: 30_000)
 assert(Array(runningHangRows.map(\.kind).prefix(3)) == ["duration", "subagent_task", "subagent_task"],
   "Live sub-agents also hang under the process row")
 print("Process rail: live merge, line two, sub-agent tree placement and held turns passed")
+
+// DSH thoughts are separate disclosures: streaming, toggles and finished work retain their order.
+let dshThoughtsJSON = #"[{"id":"dsh-fold","role":"assistant","status":"running","finished":false,"items":[{"itemId":"think","type":"thought","text":"Private reasoning"},{"itemId":"tool","type":"tool_call","kind":"read","title":"Read"},{"itemId":"reply","type":"text","text":"Answer"}]}]"#
+var dshThoughts = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(dshThoughtsJSON.utf8)))
+let dshClosed = dshThoughts.rows()
+assert(!dshClosed.contains { $0.itemID == "think" })
+assert(dshClosed.contains { $0.processStartID == "__thought__" && !$0.disclosed })
+dshThoughts.expandedThoughts.insert("dsh-fold:process")
+let dshOpen = dshThoughts.rows()
+assert(dshOpen.contains { $0.itemID == "think" && $0.text == "Private reasoning" })
+assert(dshOpen.contains { $0.processStartID == "__thought__" && $0.disclosed })
+dshThoughts.expandedThoughts.removeAll()
+assert(!dshThoughts.rows().contains { $0.itemID == "think" })
+dshThoughts.entries[0].finished = true
+dshThoughts.expandedWork.insert("dsh-fold")
+assert(dshThoughts.rows().contains { $0.processStartID == "__thought__" && !$0.disclosed })
+print("Chat: DSH thoughts default closed and toggle independently")

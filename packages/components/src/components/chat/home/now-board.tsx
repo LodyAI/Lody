@@ -13,11 +13,11 @@ import {
   CircleX,
   GitMerge,
   GitPullRequest,
+  GitPullRequestDraft,
   Hand,
   ChevronDown,
   ChevronUp,
   History,
-  PencilLine,
   type LucideIcon,
 } from 'lucide-react';
 import { flushSync } from 'react-dom';
@@ -272,7 +272,7 @@ const REASON_GLYPH: Record<HomeNowReason, { glyph: LucideIcon | null; tone: styl
     ciFailed: { glyph: CircleX, tone: styles.failed },
     // The unread dot is not a lucide glyph; ReasonMark draws it.
     finished: { glyph: null, tone: styles.quiet },
-    draft: { glyph: PencilLine, tone: styles.quiet },
+    draft: { glyph: GitPullRequestDraft, tone: styles.quiet },
     readyToMerge: { glyph: GitMerge, tone: styles.good },
     openPr: { glyph: GitPullRequest, tone: styles.quiet },
     recent: { glyph: History, tone: styles.quiet },

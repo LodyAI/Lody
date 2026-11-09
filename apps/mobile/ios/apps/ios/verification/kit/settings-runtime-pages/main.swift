@@ -1,66 +1,6 @@
 import Foundation
 
-let review = MemoryAssociation(machineId: "studio", providerId: "nowledge-mem", memoryId: "review", name: "Reviewer",
-                               description: "Code review preferences")
-let deleted = MemoryAssociation(machineId: "studio", providerId: "nowledge-mem", memoryId: "deleted", name: "Previous identity")
-let memory = MemorySnapshot(
-  machines: [MemoryMachine(id: "studio", name: "Studio"), MemoryMachine(id: "laptop", name: "Laptop")], machineId: "studio",
-  entries: [review, deleted], identities: [MemoryIdentity(id: "review", name: "Reviewer"), MemoryIdentity(id: "new", name: "")],
-  status: "ready", cached: false
-)
-precondition(MemorySections.entryId(review) == #"["nowledge-mem","review"]"#, "Saved ids match JSON.stringify")
-precondition(MemorySections.entryId(MemoryAssociation(machineId: "m", providerId: "a/b", memoryId: "é", name: "")) == #"["a/b","é"]"#)
-precondition(MemorySections.source(memory) == "Studio")
-var sourceless = memory
-sourceless.machines = []
-precondition(MemorySections.source(sourceless) == "studio")
-precondition(MemorySections.missing(memory, deleted) && !MemorySections.missing(memory, review))
-var offline = memory
-offline.status = "offline"
-precondition(!MemorySections.missing(offline, deleted), "Only a ready inventory proves an identity is missing")
-
-let sections = MemorySections.list(memory, loading: false, failed: false, uncertain: false)
-precondition(sections.map(\.id) == ["machines", "provider", "saved", "available"])
-precondition(sections[0].rows.map(\.id) == ["machine:studio", "machine:laptop"] && sections[0].rows[0].selected)
-let saved = sections[2].rows
-precondition(saved.map(\.id) == [#"saved:["nowledge-mem","review"]"#, #"saved:["nowledge-mem","deleted"]"#])
-precondition(saved[1].subtitle == "Studio · nowledge-mem · deleted · settings.memory.missing", saved[1].subtitle)
-precondition(saved.allSatisfy { $0.navigates && $0.action })
-let available = sections[3].rows
-precondition(available[0].subtitle == "review · settings.memory.imported" && !available[0].action, "Linked identities cannot be imported twice")
-precondition(available[1].title == "new" && available[1].action)
-precondition(MemorySections.list(memory, loading: false, failed: false, uncertain: true)[3].rows.allSatisfy { !$0.action })
-var cached = memory
-cached.cached = true
-precondition(!MemorySections.list(cached, loading: false, failed: false, uncertain: false).map(\.id).contains("available"))
-var missingProvider = memory
-missingProvider.status = "not_installed"
-let install = MemorySections.list(missingProvider, loading: false, failed: false, uncertain: false)[1].rows
-precondition(install.map(\.id) == ["provider-status", "provider-install"])
-var noMachine = memory
-noMachine.machineId = nil
-precondition(MemorySections.list(noMachine, loading: false, failed: false, uncertain: false).map(\.id) == ["machines"])
-precondition(MemorySections.list(nil, loading: false, failed: false, uncertain: false).isEmpty)
-
-let detail = MemorySections.detail(review, snapshot: memory, busy: false, uncertain: false)
-precondition(detail[0].rows.map(\.id) == ["memory-name", "memory-id", "memory-source", "memory-provider", "memory-status"])
-precondition(detail[0].rows[2].title == "Studio" && detail[0].rows[2].subtitle == "studio")
-precondition(detail[1].rows[0].destructive && detail[1].rows[0].action)
-precondition(!MemorySections.detail(review, snapshot: cached, busy: false, uncertain: false)[1].rows[0].action)
-precondition(!MemorySections.detail(review, snapshot: memory, busy: false, uncertain: true)[1].rows[0].action)
-let foreign = MemoryAssociation(machineId: "m", providerId: "future-provider", memoryId: "future", name: "Other")
-precondition(MemorySections.detail(foreign, snapshot: memory, busy: false, uncertain: false)[0].rows[4].title == "settings.memory.unverifiedProvider")
-
 struct Failure: Error, CustomStringConvertible { let description: String }
-precondition(MemoryFailure(Failure(description: "memory_forbidden")) == MemoryFailure(text: "settings.memory.forbidden"))
-precondition(MemoryFailure(Failure(description: "memory_not_running")) == MemoryFailure(text: "settings.memory.status.not_running", status: "not_running"))
-precondition(MemoryFailure(Failure(description: "memory_conflict")).text == "settings.remote.conflict")
-let unknown = MemoryFailure(Failure(description: "memory_write_unknown"))
-precondition(unknown.uncertain && unknown.status == nil, "write_unknown is never mistaken for the unknown provider status")
-let wrapped = NSError(domain: "LodyKit.DataRuntime", code: 1, userInfo: [NSLocalizedDescriptionKey: "command_failed: memory_offline"])
-precondition(MemoryFailure(wrapped).status == "offline")
-let request = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(MemoryRequest(workspaceId: "w", action: "list"))) as! [String: String]
-precondition(request == ["workspaceId": "w", "action": "list"], "Memory request must encode the expected fields")
 
 func share(_ id: String, publisher: String = "me", status: String = "active", link: Bool = true, revoke: Bool = true) -> PublishedShare {
   PublishedShare(shareId: id, rootSessionId: "source", publisherUserId: publisher, status: status, title: id == "untitled" ? "" : "Title",
@@ -105,4 +45,4 @@ precondition(!bad.valid)
 let list = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PublishedSharesRequest.list("w", cursor: nil))) as! [String: String]
 precondition(list == ["workspaceId": "w", "action": "list"])
 
-print("PASS: memory sections, failure mapping, published share sections, paging and validation")
+print("PASS: published share sections, paging and validation")

@@ -349,7 +349,9 @@ precondition(restingBar.isDescendant(of: restingSurface) && !restingBar.isHidden
 precondition(restingBar.convert(restingBar.bounds, to: restingSurface).maxY <= restingInput.convert(restingInput.bounds, to: restingSurface).minY + 0.5,
   "The attachment row must sit above the text")
 let restingTile = restingBar.attachmentFrame(id: "resting-file")!
-precondition(abs(restingTile.height - 48) < 0.5, "Sheet attachments must be 48-point tiles; got \(restingTile)")
+precondition(abs(restingTile.height - 80) < 0.5, "Sheet attachments must be 80-point tiles; got \(restingTile)")
+let restingTextEdge = restingInput.convert(CGPoint(x: restingInput.textContainerInset.left + restingInput.textContainer.lineFragmentPadding, y: 0), to: restingBar).x
+precondition(abs(restingTile.minX - restingTextEdge) < 0.5, "Attachment and visible text must share their leading edge")
 let restingRemove = descendants(restingBar).compactMap { $0 as? UIButton }.first {
   $0.accessibilityLabel == String.localizedStringWithFormat(String(localized: "native.chat.attachment.remove", bundle: .lody), String(describing: "notes.txt"))
 }!
@@ -801,6 +803,29 @@ relayComposer.restoreDraft(token: 1)
 precondition(relayInput.text == "Keep until adopted", "An adopted send must remain restorable")
 print("Composer relay: prepare preserves draft, adoption consumes once, failure restores")
 
+// Pushed creation keeps focus until navigation removes the form.
+throwWindow.isHidden = false
+for dismisses in [false, true] {
+  let creationComposer = ChatComposerView(frame: CGRect(x: 0, y: 500, width: 390, height: 180))
+  creationComposer.cardStyle = true
+  creationComposer.dismissesKeyboardOnSend = dismisses
+  throwWindow.addSubview(creationComposer)
+  creationComposer.setComposerState(ready)
+  creationComposer.setInitialDraft("Creation keyboard handoff")
+  let creationInput = descendants(creationComposer).compactMap { $0 as? UITextView }.first!
+  precondition(creationInput.becomeFirstResponder())
+  creationComposer.commitSend(["id": "creation-focus-\(dismisses)", "queue": false])
+  precondition(creationInput.isFirstResponder == !dismisses,
+    "Only the pushed creation host retains focus through its send")
+  precondition(creationInput.text.isEmpty, "Retaining focus must still consume the draft")
+  creationComposer.restoreDraft(token: 1)
+  precondition(creationInput.text == "Creation keyboard handoff", "Failed creation restores the draft")
+  ChatSendHandoff.cancel(id: "creation-focus-\(dismisses)")
+  creationInput.resignFirstResponder()
+  creationComposer.removeFromSuperview()
+}
+print("Composer: pushed creation retains focus, ordinary send dismisses, failure restores")
+
 let queueComposer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 244))
 let runningState = #"{"editable":true,"canSend":true,"sending":false,"running":true,"canStop":true,"notice":"","reconnect":false,"placeholder":"任务"}"#
 queueComposer.setComposerState(runningState)
@@ -1189,7 +1214,7 @@ removeMaterialAttachment("b.txt")
 precondition(materialBar.hasVisiblePills && materialHeight == withAttachment,
   "The final attachment reserves its height through dematerialization")
 RunLoop.main.run(until: Date().addingTimeInterval(0.4))
-precondition(!materialBar.hasVisiblePills && materialHeight == withAttachment - 60, "The emptied attachment row releases its 12-point inset and 48-point tile height; got \(withAttachment - materialHeight)")
+precondition(!materialBar.hasVisiblePills && materialHeight == withAttachment - 88, "The emptied attachment row releases its 8-point inset and 80-point tile height; got \(withAttachment - materialHeight)")
 materialInput.resignFirstResponder()
 print("Glass hosts: queue and final attachment retain their space through exit; unrelated pills retain identity")
 

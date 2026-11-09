@@ -206,19 +206,21 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   let processChevron = UIImageView()
   let processTree = CAShapeLayer()
   var row: ChatRow?
-  /// A user turn's header (read mark, name · time) and the sender's avatar beside the bubble.
-  private let authorMark = UIImageView()
-  private let authorLabel = UILabel()
-  private let authorAvatar = UIImageView()
-  private var authorPhoto: URL?
-  static let avatarSize: CGFloat = 36
-  static let avatarSlot: CGFloat = avatarSize + 10
-  static let authorHeader: CGFloat = 22
+  /// A user turn's header and avatar, shown when this bubble opens its turn.
+  private let author = ChatAuthorHeader()
+  static var avatarSlot: CGFloat { ChatAuthorHeader.avatarSlot }
+  static var authorHeader: CGFloat { ChatAuthorHeader.height }
   var onInteraction: (() -> Void)?
   var canEdit: (() -> Bool)?
   var onEdit: (() -> Void)?
   func updateEditAccessibility() {
     var actions = label.linkActions
+    if let row, row.kind == "user" {
+      actions.append(UIAccessibilityCustomAction(name: String(localized: "native.chat.copy", bundle: .lody)) { _ in
+        UIPasteboard.general.setMessageMarkdown(row.text)
+        return true
+      })
+    }
     if canEdit?() == true {
       actions.append(UIAccessibilityCustomAction(name: String(localized: "native.chat.editAction", bundle: .lody)) { [weak self] _ in
         guard self?.canEdit?() == true else { return false }
@@ -231,7 +233,6 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
   var onToggle: (() -> Void)?
   var onActivate: (() -> Void)?
   var expanded = false
-  var collapsedHeight: CGFloat = ChatMessageContent.maximumCollapsedHeight
   var expandable = false
   private var markReady = false
   /// The summary's text, to place its chevron right after it.
@@ -262,49 +263,16 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       view.isHidden = true
       contentView.addSubview(view)
     }
-    authorLabel.font = .dynamic(of: 13)
-    authorLabel.textColor = .tertiaryLabel
-    authorLabel.textAlignment = .right
-    authorMark.contentMode = .scaleAspectFit
-    authorAvatar.contentMode = .scaleAspectFill
-    authorAvatar.clipsToBounds = true
-    authorAvatar.layer.cornerRadius = Self.avatarSize / 2
-    for view in [authorMark, authorLabel, authorAvatar] as [UIView] {
-      view.isAccessibilityElement = false
-      view.isHidden = true
-      contentView.addSubview(view)
-    }
+    author.install(in: contentView)
     isAccessibilityElement = true
     contentView.addInteraction(UIContextMenuInteraction(delegate: self))
   }
 
   /// Web's user-turn header: a check once the agent picked the turn up, an open circle before.
   private func applyAuthor(_ row: ChatRow) {
-    let shown = row.kind == "user" && !row.author.isEmpty
-    for view in [authorMark, authorLabel, authorAvatar] as [UIView] { view.isHidden = !shown }
-    accessibilityValue = nil
-    guard shown else { return }
-    let who = (name: row.authorName.isEmpty ? String(localized: "native.chat.member", bundle: .lody) : row.authorName, image: row.authorImage)
-    // Web's order: delivery mark, time, then the sender.
-    authorLabel.text = [row.authorTime, who.name].filter { !$0.isEmpty }.joined(separator: "  ")
-    let marks: [String: (String, UIColor)] = [
-      "seen": ("checkmark.circle", .lodyAccent), "queued": ("clock", .tertiaryLabel),
-      "sending": ("circle.dotted", .tertiaryLabel), "sent": ("circle", .tertiaryLabel),
-    ]
-    let mark = marks[row.readState] ?? marks["sent"]!
-    authorMark.image = UIImage(systemName: mark.0, withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular))
-    authorMark.tintColor = mark.1
-    let monogram = LodyListPhoto.monogram(String(who.name.prefix(1)).uppercased(), side: Self.avatarSize)
-    authorPhoto = LodyListPhoto.url(who.image)
-    authorAvatar.image = monogram
-    if let url = authorPhoto {
-      if let cached = LodyListPhoto.image(for: url, ready: { [weak self] image in
-        guard let self, self.authorPhoto == url else { return }
-        self.authorAvatar.image = image
-      }) { authorAvatar.image = cached }
-    }
-    let state = String(localized: String.LocalizationValue("native.chat.read." + row.readState), bundle: .lody)
-    accessibilityValue = [who.name, row.authorTime, state].filter { !$0.isEmpty }.joined(separator: ", ")
+    var shown = row
+    if row.kind != "user" { shown.author = "" }
+    accessibilityValue = author.apply(shown)
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
   func configure(_ row: ChatRow, text: NSAttributedString) {
@@ -363,7 +331,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
 
   private func applyProcess(_ row: ChatRow) {
     let rail = row.kind == "duration"
-    processGlyph.isHidden = !rail || (!row.running && !row.attention)
+    processGlyph.isHidden = !rail || !row.attention
     processTitle.isHidden = !rail
     processDetail.isHidden = !rail || row.detail.isEmpty
     processChevron.isHidden = !(row.actionable && (rail || row.kind == "summary"))
@@ -490,7 +458,11 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       }]
       if self.canEdit?() == true {
         let edit = self.onEdit
-        actions.append(UIAction(title: String(localized: "native.chat.editAction", bundle: .lody), image: UIImage(systemName: "pencil")) { _ in edit?() })
+        let canEdit = self.canEdit
+        actions.append(UIAction(title: String(localized: "native.chat.editAction", bundle: .lody), image: UIImage(systemName: "pencil")) { _ in
+          guard canEdit?() == true else { return }
+          edit?()
+        })
       }
       return UIMenu(children: actions)
     }
@@ -564,7 +536,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
     return CGRect(x: 2, y: textY, width: 20, height: min(textHeight, 20))
   }
   static func textWidth(_ row: ChatRow, width: CGFloat) -> CGFloat {
-    if row.kind == "user" { return max(1, width * 0.84 - 26 - avatarSlot) }
+    if row.kind == "user" { return max(1, width - 26 - avatarSlot) }
     if row.kind == "delivery" { return max(1, width * 0.84) }
     if row.kind == "summary" && row.actionable { return max(1, width - leading(row) - chevronSlot) }
     return max(1, width - leading(row))
@@ -586,8 +558,9 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       return
     }
     if row.kind == "user" {
-      let size = label.sizeThatFits(CGSize(width: width * 0.84 - 26 - Self.avatarSlot, height: .greatestFiniteMagnitude))
-      expandable = size.height + 20 > ChatMessageContent.maximumCollapsedHeight
+      let size = label.sizeThatFits(CGSize(width: width - 26 - Self.avatarSlot, height: .greatestFiniteMagnitude))
+      let collapsedHeight = ChatMessageContent.collapsedHeight(label: label, width: width - 26 - Self.avatarSlot)
+      expandable = label.lineAdvances(width: width - 26 - Self.avatarSlot).count > ChatMessageContent.collapsedLineCount
       messageContent.expandable = expandable
       messageContent.expanded = expanded
       isAccessibilityElement = true
@@ -600,17 +573,12 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       let disclosureKey = expanded ? "native.chat.message.collapse" : "native.chat.message.expand"
       if expandable { accessibilityValue = String(localized: String.LocalizationValue(disclosureKey), bundle: .lody) }
       let height = ChatMessageContent.height(textHeight: size.height, limit: collapsedHeight, expanded: expanded)
-      let bubbleWidth = expandable ? width * 0.84 - Self.avatarSlot : size.width + 26
+      let bubbleWidth = expandable ? width - Self.avatarSlot : size.width + 26
       // Every bubble of a turn leaves the avatar column free; the first also has the header.
       let header = row.author.isEmpty ? 0 : Self.authorHeader
       let bubbleRight = width - Self.avatarSlot
       messageContent.frame = CGRect(x: bubbleRight - bubbleWidth, y: ChatRowPadding.content + header, width: bubbleWidth, height: height)
-      if !row.author.isEmpty {
-        authorAvatar.frame = CGRect(x: width - Self.avatarSize, y: messageContent.frame.minY, width: Self.avatarSize, height: Self.avatarSize)
-        let labelWidth = min(bubbleRight - 16, authorLabel.sizeThatFits(CGSize(width: bubbleRight, height: header)).width)
-        authorLabel.frame = CGRect(x: bubbleRight - labelWidth, y: ChatRowPadding.content, width: labelWidth, height: header - 4)
-        authorMark.frame = CGRect(x: authorLabel.frame.minX - 18, y: authorLabel.frame.midY - 7, width: 14, height: 14)
-      }
+      author.layout(width: width, top: ChatRowPadding.content)
       messageContent.setNeedsLayout()
       messageContent.layoutIfNeeded()
     } else {
@@ -686,7 +654,11 @@ private func hint(for row: ChatRow) -> String? {
       return String(localized: String.LocalizationValue(row.disclosed ? "native.chat.message.collapse" : "native.chat.message.expand"), bundle: .lody)
     }
     return String(localized: "native.chat.row.openProcess", bundle: .lody)
-  case "summary": return String(localized: "native.chat.row.openProcess", bundle: .lody)
+  case "summary":
+    if row.processStartID == "__thought__" {
+      return String(localized: String.LocalizationValue(row.disclosed ? "native.chat.message.collapse" : "native.chat.message.expand"), bundle: .lody)
+    }
+    return String(localized: "native.chat.row.openProcess", bundle: .lody)
   case "changes": return String(localized: "native.chat.row.openChanges", bundle: .lody)
   default: return nil
   }

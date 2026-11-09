@@ -63,14 +63,15 @@ extension LodyChatView {
 
   func layoutFind() {
     let height: CGFloat = findPresented ? findBar.preferredHeight : 0
-    findBar.frame = CGRect(x: safeAreaInsets.left, y: safeAreaInsets.top,
+    findBar.frame = CGRect(x: safeAreaInsets.left, y: safeAreaInsets.top + pageHeaderHeight,
       width: bounds.width - safeAreaInsets.left - safeAreaInsets.right, height: height)
-    if collection.contentInset.top != height {
+    let topInset = pageHeaderHeight + height
+    if collection.contentInset.top != topInset {
       let offset = collection.contentOffset
-      collection.contentInset.top = height
+      collection.contentInset.top = topInset
       collection.contentOffset = offset
     }
-    collection.verticalScrollIndicatorInsets.top = height
+    collection.verticalScrollIndicatorInsets.top = topInset
     if let keyboard = findFocusRequest, let window {
       findFocusRequest = nil
       if keyboard { findBar.field.becomeFirstResponder() }

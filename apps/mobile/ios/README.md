@@ -71,14 +71,124 @@ What that week actually looked like:
 - **Native Input (`ChatComposerView`)**: Pixel-perfect keyboard avoidance matching system input methods, local draft persistence with automatic restoration, and real-time model thinking effort controls.
 
 The iOS app uses fixed Ink accents in both light and dark appearances, including
-Send and Stop; conversation activity/status colors remain unchanged. Appearance settings retain dark-background and app-icon choices,
-without an accent-color picker. Process status labels use the same regular type
-as their duration. Normal replies use 16 pt body text and 18 pt semibold headings;
+Send and Stop; conversation activity/status colors remain unchanged. Preferences contains the app-icon picker. Settings has no Appearance, MCP servers,
+or Memory pages; dark canvases use fixed soft backgrounds. Process status labels use the same regular type
+as their duration, without a leading loading icon. The final visible command group
+shimmers while its turn runs, even after its tools complete or record a duration,
+and when hidden thinking calls follow it.
+User bubbles collapse to six measured lines. Agent footer icons align with the
+message edge: Copy, Info and Fork, 32 pt apart, followed by time 12 pt after
+the last glyph. The whole opened-chats count row toggles
+its children, while the opener above opens the conversation. Normal replies use 16 pt body text and 18 pt semibold headings;
 thoughts retain 15 pt body text and 17 pt headings, with Dynamic Type scaling.
+MCP creation and reply receipts use compact conversation-list rows from the public
+operation payloads: provider marks, single-line titles, trailing status and curved
+child connectors, without filled card backgrounds. Consecutive creation receipts share a five-row expandable group; cards
+retain the creating turn's status and refresh titles and provider marks from the live catalog.
+Progress-linked successes are hidden, while errors, cancellations and uncertain or
+incomplete result batches remain visible. Reply cards open the saved Markdown reply;
+shortened receipts say so, and a separate button opens the exact conversation or Tab.
+The related-conversations icon above the composer opens a live native tree, with
+each conversation and its contained Tabs sharing one horizontally scrolling row.
+Scrollbars stay hidden; edge fades indicate more targets in either direction.
+Only opened-by descendants receive indentation and curved rails. Adjacent operation
+receipts for the same conversation also share a horizontal row, retaining each
+target’s independent full-reply and navigation actions. The current exact target
+uses a subtle background and accessibility selection; layout conveys containment
+without Tab/current/directory labels. Status icons replace redundant visible status
+words while keeping accessible descriptions, reply excerpts and error notices.
+Running rows use the Home working-grid indicator. Missing
+precise openers never fall back to provenance-only root IDs. Archived and side-panel
+sessions are excluded; closed Tabs appear only when current. The tree does not
+change archive ownership or read additional transcripts.
+
+The workspace switcher uses `UIButton.menu` with `showsMenuAsPrimaryAction`, like
+conversation More. UIKit owns presentation, width, height, scrolling and title
+truncation; there is no six-row limit or custom fade. Actions retain full names,
+circular avatars and native selected state. Selecting the current workspace is a
+no-op; catalog changes refresh the menu. The root menu title displays the account
+email in UIKit’s heading style, projected explicitly through the session source
+and chrome model. Empty email removes the heading; synthetic sources never fall
+back to the live account. Workspace management stays in Settings.
+
+Conversation Back, title/machine, Tabs and More controls belong to the page, so
+UIKit’s interactive pop moves them with its content instead of separately animating
+the system back circle. The transparent header registers its controls with UIKit through
+`UIScrollEdgeElementContainerInteraction`, retaining the transcript’s native `.soft`
+top-edge blur. A noninteractive 55% semantic canvas tint protects the title and
+machine subtitle, fading to transparent over 32 pt below the header rather than
+adding an opaque chrome material. The transcript scrolls underneath;
+content/find insets keep initial content and search below the controls. The shell hides native navigation only for conversations;
+detail pages retain their native bars. Back uses the existing navigation/split
+owner, and controls retain native glass styling and accessibility labels. The book-layout
+conversation list popover anchors to the visible page sidebar button and its bounds;
+native navigation-bar controls retain their bar-item anchors.
+
+Conversation titles use 16 pt semibold system text, fading at the trailing edge
+only on overflow rather than inserting an ellipsis. VoiceOver retains the full title. User bubbles fill the available
+reading width beside the avatar; long-press offers Copy, plus Edit for the last
+eligible user message, without inline action buttons. Below the conversation title,
+secondary-gray machine text starts with a presence icon; tapping the header opens
+the panel with name and presence, owner avatar and name, then
+private/shared visibility. Visibility comes from the public machine-registration
+query on opening; unavailable data is shown as unknown, never inferred as private.
+The bottom machine capsule is omitted. The trailing Tabs button appears only with
+other open Tabs; More retains closed-Tab recovery and New current working directory
+conversation, using the existing create-Tab operation.
 Chat inline code matches the body size in a monospaced face. Prose blocks use
-secondary-label grey (links retain link blue); fenced code retains its own sizing
+secondary-label grey (links use web’s muted light/dark blue); fenced code retains its own sizing
 and colours. With MarkdownView's shared code colour, a list or quote containing a
 fence keeps its original code colours throughout that block.
+
+In compact Chats Home, project grouping reveals an opaque project index while
+scrolling, over the existing full-width list. Tap a logo or scrub the rail to jump
+through committed rendered sections, including Pinned and unassigned chats. Only
+the visible 56 pt rail intercepts touches; no index recognizer is installed on rows.
+It stays visible through dragging/deceleration and for 0.8 seconds after scrolling
+or scrubbing ends. Renewed interaction invalidates pending dismissal. Snapshot
+replacement, backgrounding, detachment and size changes cancel the interaction.
+Search, time/status groupings and the iPad sidebar retain their existing lists.
+VoiceOver adjustment follows rendered group order. Repository identities flow from
+catalog `repoFullName` through the root row to cached GitHub owner avatars, displayed
+in dedicated 24 pt image views at full opacity; projects without artwork use one
+initial. Targets are 48 × 48 pt with 48 pt centre spacing, 12 pt capsule end
+padding and an 8 pt trailing screen inset. Dense rails show a bounded set of evenly
+spaced landmarks without shrinking targets or artwork. Landmarks stay fixed during
+a gesture; selection highlights a landmark only when that destination is selected.
+Scrubbing anchors to the tapped destination with an 8 pt movement allowance, then
+maps each direction to the rail endpoint; small finger drift does not jump to a
+different proportional destination. Scrubbing and VoiceOver still reach every project. Pinned and unassigned
+groups keep their symbols. The opaque semantic
+background follows light/dark appearance. Entrance and exit use a short 12 pt slide
+and fade, with full opacity at rest. Dismissal disables touch targets immediately;
+Reduce Motion uses immediate visibility changes.
+`verify:native --case chat-list-scroll` covers hit bounds, direct navigation,
+48 pt target spacing, stable dense landmark taps, complete scrub/VoiceOver reach,
+deterministic linger cancellation and cached artwork.
+
+### Native Schedules
+
+Schedules starts with filterable Active, Needs attention, Paused and Ended counts,
+followed by native inset-grouped task and scheduled-message lists. Each row
+separates its title and status from the recurrence and execution context; items
+needing attention appear first. Search and status filters work together.
+
+The editor places current status and quick actions above separate Task, When and
+Run with cards. Weekdays and month days are directly selectable; date and time
+use native pickers in the computer's time zone. Owners can run, pause or resume
+supported tasks and open the last conversation. Teammates' tasks and scheduled
+messages retain their existing read-only rules, and deletion requires confirmation.
+
+Within the current Home page, list snapshots, opened details and editor choices
+stay in memory for the selected account/workspace. Returning to a loaded editor
+shows its snapshot immediately while detail and choices refresh independently;
+failed refreshes retain existing content, and refreshes preserve unsaved edits.
+Cached details can be edited immediately; Save waits for fresh detail validation
+and blocks when the refresh detects changed remote content.
+Pause/resume preview their state immediately and roll back on failure, with the
+existing unknown-outcome warning when a reply is lost. Pending commands fence
+older reads; account/workspace changes discard snapshots and late responses.
+The runtime still re-reads current data before mutations. App restarts load afresh.
 
 ### Code Diffs & Workspace File Browsing
 
@@ -101,7 +211,7 @@ fence keeps its original code colours throughout that block.
 
 ### Security First & Hardware Isolation
 
-- **Standard Device Flow Auth**: Authorizes via the official Better Auth Device Flow.
+- **Native Sign-in**: Email and password, Sign in with Apple, Google SDK, and GitHub/Discord system authorization with a PKCE handoff. No device codes or hosted login UI. See [configuration and verification](docs/native-auth.md).
 - **System Keychain Storage**: All authentication credentials and sensitive communication keys are strictly isolated in the iOS Keychain and never exposed in app-accessible shared storage.
 
 ---
@@ -250,14 +360,19 @@ Lody iOS is made possible thanks to these open-source projects and creators:
 - **[libdatachannel](https://github.com/paullouisageneau/libdatachannel)**: Native data-only Simulator transport (MPL-2.0), built from pinned source at `pnpm prebuild` with media and WebSocket disabled, over [libjuice](https://github.com/paullouisageneau/libjuice) (MPL-2.0), [usrsctp](https://github.com/sctplab/usrsctp) (BSD-3-Clause) and [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) (Apache-2.0). No camera, microphone or WebView is involved.
 - **[vphone-client](https://github.com/datdadev/vphone-client)**: Its native remote iPhone viewer (hardware decode into `AVSampleBufferDisplayLayer`, raw UIKit touch forwarding, never dropping input behind video) shaped the design of Lody's simulator viewer.
 
+## Backend configuration
+
+See [native backend configuration](docs/backend-configuration.md) for the optional
+`../.env.local`, production defaults, public TLS endpoints and isolated local stores.
+
 ### Native canvas appearance
 
 App-owned dark backgrounds are fixed soft `#111113`. `LodyTint` provides plain,
 grouped and opaque canvases, while `LodyAppearance` uses the same dark base for
 `bgBase` and `bgGrouped`. Light backgrounds retain their existing semantics.
 Camera and simulator media surfaces use the fixed dark color in both themes;
-launch uses the matching dynamic `CanvasBackground` asset. Appearance settings
-only offer the app icon: legacy `darkBackground` values are ignored, not migrated.
+launch uses the matching dynamic `CanvasBackground` asset. The app icon is available under Settings → Preferences. There is no Appearance
+page; legacy `darkBackground` values are ignored, not migrated.
 This supersedes the optional pure-black background described in the historical
 Home design and settings migration documents. Masks, scrims, shadows, media
 content and foreground colors remain unchanged. The native `design` check tests

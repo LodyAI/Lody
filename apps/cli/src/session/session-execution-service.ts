@@ -110,6 +110,7 @@ import {
   getServerNow,
   getSessionRoomId,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   hasRecentResumeNotice,
   isReplayEntryExcluded,
   isSessionCollaborationStopped,
@@ -680,6 +681,7 @@ export type SessionExecutionServiceDeps = {
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
   buildAcpPromptBlocks: (args: {
+    requesterUserId?: string;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     /** The input's history turn; an agent author adds a provenance header. */
@@ -2403,6 +2405,7 @@ export class SessionExecutionService {
       const inputBlocks = resolveSessionExecutionInputBlocks(options.inputConfig);
       const promptBlocks = await wait(
         this.deps.buildAcpPromptBlocks({
+          requesterUserId: options.userId,
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
           userTurnId: options.userTurnId,
@@ -7138,6 +7141,7 @@ export class SessionExecutionService {
           { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
           async () =>
             await self.deps.buildAcpPromptBlocks({
+              requesterUserId: message.userId,
               workspaceId: message.workspaceId,
               sessionId,
               userTurnId: message.userTurnId,
@@ -8023,6 +8027,7 @@ export class SessionExecutionService {
               { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
               async () =>
                 await self.deps.buildAcpPromptBlocks({
+                  requesterUserId: message.userId,
                   workspaceId,
                   sessionId,
                   userTurnId,
@@ -8960,6 +8965,17 @@ export class SessionExecutionService {
             error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
           };
         }
+        if (hasEmptyModelSelectOption(refresh.capability?.configOptions)) {
+          // Auth worked, but the agent's catalog is still degraded: that is not
+          // a successful verification, and the caller must not mark the provider
+          // verified on the strength of the authentication alone.
+          return {
+            ...resolvedBase,
+            ...result,
+            capabilitiesRefreshed: false,
+            error: 'Authentication succeeded, but the provider reported no usable models',
+          };
+        }
         return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
       }
 
@@ -9293,6 +9309,12 @@ export class SessionExecutionService {
         message.configId,
         fingerprintAcpLaunchInputs(message)
       );
+      if (hasEmptyModelSelectOption(configOptions)) {
+        this.deps.logger.warn(
+          `[acp-refresh] ${message.cliType}/${message.agentType} advertised a model select with zero options; the persisted entry stays degraded and will be re-probed on the next refresh`,
+          { configId: message.configId }
+        );
+      }
 
       return {
         type: 'machine/acp-capabilities-refresh_response',

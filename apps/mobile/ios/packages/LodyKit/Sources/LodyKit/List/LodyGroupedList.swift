@@ -139,6 +139,9 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
   private var transparent = false
   private var contentStyle = false
   private var grouped = false
+  /// The Chats list's design language for a flat list: no separators, `body` titles, `footnote`
+  /// subtitles, tertiary `groupLabel` headers at the screen edge and the pressed fill.
+  private var chatStyle = false
   private var textLeadings: [String: CGFloat] = [:]
   private var flatSystem: Bool { !grouped && !contentStyle }
   private static let flatHeaderTop: CGFloat = 10
@@ -186,6 +189,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
 
   private func flatten(_ cell: SettingsListCell, _ row: LodyListRow) {
     guard var content = cell.contentConfiguration as? UIListContentConfiguration else { return }
+    if chatStyle { return chatFlatten(cell, row, content) }
     let textLeading = textLeadings[row.id] ?? LodyFlatRows.readingMargin
     let monogram = !row.monogram.isEmpty && row.image.isEmpty && row.filePath.isEmpty
     let photo = LodyListPhoto.url(row.image) != nil || monogram
@@ -226,6 +230,49 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     content.directionalLayoutMargins = .init(top: vertical, leading: leading, bottom: vertical, trailing: LodyDesign.Rail.trailing)
     cell.preservesSuperviewLayoutMargins = false
     cell.directionalLayoutMargins = .init(top: 0, leading: 0, bottom: 0, trailing: LodyDesign.Rail.trailing)
+    cell.contentConfiguration = content
+  }
+
+  /// A chat row's metrics: `listEdgeX` edges, a `md` glyph then `listRowGap` before the title,
+  /// `body` / `footnote` text and at least `LodySize.listRow` tall.
+  private func chatFlatten(_ cell: SettingsListCell, _ row: LodyListRow, _ base: UIListContentConfiguration) {
+    var content = base
+    let monogram = !row.monogram.isEmpty && row.image.isEmpty && row.filePath.isEmpty
+    let photo = LodyListPhoto.url(row.image) != nil || monogram
+    let font = photo ? LodyTextStyle.bodyEmphasis.uiFont : LodyTextStyle.body.uiFont
+    let secondaryFont = row.subtitleMono ? LodyDesign.mono(12) : LodyTextStyle.footnote.uiFont
+    content.textProperties.font = font
+    if !row.destructive { content.textProperties.color = LodyUIColor.textPrimary }
+    content.secondaryTextProperties.font = secondaryFont
+    content.secondaryTextProperties.color = LodyUIColor.textSecondary
+    content.textToSecondaryTextVerticalPadding = LodySpacing.xxs
+    if monogram {
+      content.image = LodyListPhoto.monogram(row.monogram, side: LodyFlatRows.avatarSize)
+    }
+    if content.image != nil, photo {
+      let side = CGSize(width: LodyFlatRows.avatarSize, height: LodyFlatRows.avatarSize)
+      content.imageProperties.maximumSize = side
+      content.imageProperties.reservedLayoutSize = side
+      content.imageProperties.cornerRadius = side.width / 2
+      content.imageToTextPadding = LodyLayout.listRowGap
+    } else if content.image != nil {
+      let side = CGSize(width: LodyIconSize.md, height: LodyIconSize.md)
+      content.imageProperties.reservedLayoutSize = side
+      content.imageProperties.maximumSize = side
+      content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+      if row.imageTint.isEmpty, !row.destructive, !row.imageOriginal, row.filePath.isEmpty, row.status.isEmpty {
+        content.imageProperties.tintColor = LodyUIColor.iconSecondary
+      }
+      content.imageToTextPadding = LodyLayout.listRowGap
+    }
+    let text = font.lineHeight + (content.secondaryText == nil ? 0 : secondaryFont.lineHeight + LodySpacing.xxs)
+    let lines = max(text, content.image == nil ? 0 : content.imageProperties.reservedLayoutSize.height)
+    let vertical = max(LodySpacing.sm, ceil((LodySize.listRow - lines) / 2))
+    content.directionalLayoutMargins = .init(
+      top: vertical, leading: LodyLayout.listEdgeX, bottom: vertical, trailing: LodyLayout.listEdgeX
+    )
+    cell.preservesSuperviewLayoutMargins = false
+    cell.directionalLayoutMargins = .init(top: 0, leading: 0, bottom: 0, trailing: LodyLayout.listEdgeX)
     cell.contentConfiguration = content
   }
 
@@ -563,14 +610,15 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       // The collection owns the ground; the layout must not repaint it at full detent.
       configuration.backgroundColor = .clear
       if flat {
-        configuration.headerTopPadding = flatSystem && index > 0 ? LodyDesign.Rail.groupGap - Self.flatHeaderTop : 0
-        configuration.showsSeparators = flatSystem
+        configuration.headerTopPadding = flatSystem && index > 0 && !(self?.chatStyle ?? false)
+          ? LodyDesign.Rail.groupGap - Self.flatHeaderTop : 0
+        configuration.showsSeparators = flatSystem && !(self?.chatStyle ?? false)
       }
       // `.firstItemInSection` splits the inset card into a header card and an
       // items card; a parent row is a plain first item so the card stays whole.
       let model = self?.section(at: index)
       let outline = model?.rows.first?.parent ?? false
-      if flatSystem {
+      if flatSystem, !(self?.chatStyle ?? false) {
         var separators = UIListSeparatorConfiguration(listAppearance: .plain)
         separators.color = .lodyLine
         configuration.separatorConfiguration = separators
@@ -606,7 +654,9 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
       // Plain lists pin headers by default; a clear header would float over rows.
       for item in section.boundarySupplementaryItems { item.pinToVisibleBounds = false }
-      if flat, !flatSystem, index > 0, outline {
+      if flatSystem, self?.chatStyle == true, index > 0 {
+        section.contentInsets.top = LodySpacing.lg
+      } else if flat, !flatSystem, index > 0, outline {
         section.contentInsets.top = LodyDesign.Rail.bandGap
       } else if flat, !flatSystem, index > 0 {
         section.contentInsets.top = model?.gap == .group ? LodyDesign.Rail.groupGap : LodyDesign.Rail.sectionGap
@@ -1050,6 +1100,14 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     setNeedsLayout()
   }
 
+  func setChatStyle(_ value: Bool) {
+    guard value != chatStyle else { return }
+    chatStyle = value
+    collection.collectionViewLayout.invalidateLayout()
+    collection.reloadData()
+    setNeedsLayout()
+  }
+
   func setGrouped(_ value: Bool) {
     guard value != grouped else { return }
     grouped = value
@@ -1257,6 +1315,14 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       cell.configurationUpdateHandler = { cell, state in
         cell.backgroundConfiguration = LodyListCellBackground.railConfiguration(for: state)
       }
+    } else if flatSystem, chatStyle {
+      // Pressed rows tint like chat rows.
+      cell.automaticallyUpdatesBackgroundConfiguration = false
+      cell.configurationUpdateHandler = { cell, state in
+        var background = UIBackgroundConfiguration.clear()
+        background.backgroundColor = state.isHighlighted || state.isSelected || state.isSwiped ? LodyUIColor.fillPressed : .clear
+        cell.backgroundConfiguration = background
+      }
     } else if flatSystem {
       cell.automaticallyUpdatesBackgroundConfiguration = false
       cell.configurationUpdateHandler = { cell, state in
@@ -1352,7 +1418,11 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       content = section.headerProminent ? .prominentInsetGroupedHeader() : .groupedHeader()
       if section.headerProminent { content.textProperties.color = .label }
     }
-    if flatSystem {
+    if flatSystem, chatStyle {
+      content.textProperties.transform = .none
+      content.textProperties.color = LodyUIColor.textTertiary
+      content.textProperties.font = header ? LodyTextStyle.groupLabel.uiFont : LodyTextStyle.footnote.uiFont
+    } else if flatSystem {
       content.textProperties.transform = .none
       content.textProperties.color = .lodySecondary
       content.textProperties.font = header
@@ -1373,7 +1443,13 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     } else {
       view.accessibilityLabel = nil
     }
-    if flatSystem {
+    if flatSystem, chatStyle {
+      // The group label sits at the list edge, clear of the previous group and with
+      // room before its own rows so the label reads as a heading, not a row.
+      content.directionalLayoutMargins = header
+        ? .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: LodySpacing.sm, trailing: LodyLayout.listEdgeX)
+        : .init(top: LodySpacing.sm, leading: LodyLayout.listEdgeX, bottom: 0, trailing: LodyLayout.listEdgeX)
+    } else if flatSystem {
       let footerLeading = LodyFlatRows.textLeading(sectionHasIcons: LodyFlatRows.sectionHasIcons(section.rows))
       content.directionalLayoutMargins = header
         ? .init(top: Self.flatHeaderTop, leading: LodyFlatRows.readingMargin, bottom: 6, trailing: LodyDesign.Rail.trailing)

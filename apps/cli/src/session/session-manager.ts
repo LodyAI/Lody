@@ -304,6 +304,7 @@ export interface CreateAgentConfig {
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
   onSessionTitleUpdate: (title: string) => void;
+  onNativeWorkChanged?: (work: import('../agent/agent-client').NativeAgentWork) => void;
   onAgentWarning: (warning: AgentSessionWarning) => void;
   loadExternalMcpServers: NonNullable<AgentClientOptions['loadExternalMcpServers']>;
   releaseExternalMcpServers?: () => Promise<void>;
@@ -362,6 +363,10 @@ interface SessionManagerEvents {
   ) => void;
   onThreadGoalCleared: (sessionId: SessionId, threadId: string) => void;
   onSessionTitleUpdate: (sessionId: SessionId, title: string) => void;
+  onNativeWorkChanged: (
+    sessionId: SessionId,
+    work: import('../agent/agent-client').NativeAgentWork
+  ) => void;
   onAgentWarning: (sessionId: SessionId, warning: AgentSessionWarning) => void;
   onImageGenerationBegin: (sessionId: SessionId, event: ImageGenerationBeginEvent) => void;
   onImageGenerationEnd: (sessionId: SessionId, event: ImageGenerationEndEvent) => void;
@@ -790,6 +795,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onThreadGoalUpdated: (goal) => this.emit('onThreadGoalUpdated', sessionId, goal),
       onThreadGoalCleared: (threadId) => this.emit('onThreadGoalCleared', sessionId, threadId),
       onSessionTitleUpdate: (title) => this.emit('onSessionTitleUpdate', sessionId, title),
+      onNativeWorkChanged: (work) => {
+        if (this.sessions.get(sessionId) === session)
+          this.emit('onNativeWorkChanged', sessionId, work);
+      },
       onAgentWarning: (warning) => this.emit('onAgentWarning', sessionId, warning),
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
@@ -1678,10 +1687,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const repoId = config.repoId;
     this.reportStartStage(config, 'workdir');
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
+    const sessionMeta = await sessionDoc.getMetaState();
+    config.agentRoleId = sessionMeta?.agentRoleId;
+    config.openedBySessionId = sessionMeta?.openedBySessionId;
     const ownerDoc = config.parentSessionId
       ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
       : sessionDoc;
-    config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    const ownerMeta = config.parentSessionId ? await ownerDoc.getMetaState() : sessionMeta;
+    config.projectRun = ownerMeta?.projectRun ?? config.projectRun;
     if (config.projectRun)
       await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     if (config.githubRepo && !config.projectRun)
@@ -2125,6 +2138,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.sessionEventDetachers.get(session)?.();
     this.sessionEventDetachers.delete(session);
     if (this.sessions.get(session.sessionId) === session) {
+      this.emit('onNativeWorkChanged', session.sessionId, null);
       this.sessions.delete(session.sessionId);
       void this.rebalanceSessionSandboxes().catch((cause: unknown) =>
         this.logger.warn(`Sandbox rebalance after detach failed: ${formatErrorMessage(cause)}`)

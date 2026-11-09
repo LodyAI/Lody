@@ -26,6 +26,11 @@
       "result": "ControlTurnResult",
       "timeoutMs": 45000
     },
+    "conversationMarkdown": {
+      "params": "ConversationMarkdownParams",
+      "result": "ConversationMarkdownResult",
+      "timeoutMs": 15000
+    },
     "createSession": {
       "params": "CreateSessionParams",
       "result": "CreateSessionResult",
@@ -167,6 +172,21 @@
       "result": "Empty",
       "timeoutMs": 10000
     },
+    "scheduleCommand": {
+      "params": "ScheduleCommandParams",
+      "result": "ScheduleCommandResult",
+      "timeoutMs": 70000
+    },
+    "scheduleDetail": {
+      "params": "ScheduleDetailParams",
+      "result": "ScheduleDetail",
+      "timeoutMs": 45000
+    },
+    "schedules": {
+      "params": "SchedulesParams",
+      "result": "SchedulesResult",
+      "timeoutMs": 45000
+    },
     "sendTurn": {
       "params": "SendTurnParams",
       "result": "SendTurnResult",
@@ -182,10 +202,20 @@
       "result": "SessionSharingResult",
       "timeoutMs": 130000
     },
+    "sessionWorkspacePath": {
+      "params": "SessionWorkspacePathParams",
+      "result": "SessionWorkspacePathResult",
+      "timeoutMs": 15000
+    },
     "setActive": {
       "params": "SetActiveParams",
       "result": "Empty",
       "timeoutMs": 10000
+    },
+    "setSessionOwner": {
+      "params": "SetSessionOwnerParams",
+      "result": "Empty",
+      "timeoutMs": 45000
     },
     "setTabClosed": {
       "params": "SetTabClosedParams",
@@ -661,6 +691,57 @@
             "reason": { "type": "string" }
           },
           "required": ["state"]
+        }
+      ]
+    },
+    "ConversationMarkdownParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "participants": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "incompleteNotice": { "type": "string" }
+      },
+      "required": [
+        "workspaceId",
+        "sessionId",
+        "participants",
+        "incompleteNotice"
+      ]
+    },
+    "ConversationMarkdownResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "empty" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "ready" },
+            "markdown": { "type": "string" },
+            "estimatedTokens": { "type": "number" },
+            "overBudget": { "type": "boolean" },
+            "toolCallsCollapsed": { "type": "boolean" },
+            "thinkingTruncated": { "type": "boolean" },
+            "terminalTrimmed": { "type": "boolean" },
+            "toolResultsTruncated": { "type": "number" }
+          },
+          "required": [
+            "state",
+            "markdown",
+            "estimatedTokens",
+            "overBudget",
+            "toolCallsCollapsed",
+            "thinkingTruncated",
+            "terminalTrimmed",
+            "toolResultsTruncated"
+          ]
         }
       ]
     },
@@ -2520,6 +2601,238 @@
       },
       "required": ["code", "retryable"]
     },
+    "ScheduleCommandParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": ["create", "edit", "pause", "resume", "run", "delete"]
+        },
+        "scheduleId": { "type": "string", "minLength": 1 },
+        "requestId": { "type": "string", "minLength": 1 },
+        "draft": { "$ref": "ScheduleDraft" }
+      },
+      "required": ["workspaceId", "action", "scheduleId", "requestId"]
+    },
+    "ScheduleCommandResult": {
+      "type": "object",
+      "properties": { "scheduleId": { "type": "string" } },
+      "required": ["scheduleId"]
+    },
+    "ScheduleDetail": {
+      "type": "object",
+      "properties": {
+        "item": { "$ref": "ScheduleItem" },
+        "prompt": { "type": "string" },
+        "modelId": { "type": "string" },
+        "modeId": { "type": "string" },
+        "project": { "$ref": "ScheduleProject" }
+      },
+      "required": ["item", "prompt"]
+    },
+    "ScheduleDetailParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "scheduleId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "scheduleId"]
+    },
+    "ScheduleDraft": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "machineId": { "type": "string", "minLength": 1 },
+        "agentConfigId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string" },
+        "modeId": { "type": "string" },
+        "project": { "$ref": "ScheduleProject" },
+        "destination": {
+          "type": "string",
+          "enum": ["new_session", "own_session"]
+        },
+        "rule": { "$ref": "ScheduleRule" }
+      },
+      "required": [
+        "title",
+        "prompt",
+        "machineId",
+        "agentConfigId",
+        "destination",
+        "rule"
+      ]
+    },
+    "ScheduleItem": {
+      "type": "object",
+      "properties": {
+        "scheduleId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "isOwner": { "type": "boolean" },
+        "machineId": { "type": "string" },
+        "machineName": { "type": "string" },
+        "machineSupported": { "type": "boolean" },
+        "agentConfigId": { "type": "string" },
+        "agentName": { "type": "string" },
+        "agentType": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "scheduledMessage": { "type": "boolean" },
+        "rule": { "$ref": "ScheduleRule" },
+        "destination": {
+          "type": "string",
+          "enum": ["new_session", "own_session", "existing_session"]
+        },
+        "destinationSessionId": { "type": "string" },
+        "projectKind": { "type": "string", "enum": ["local", "github"] },
+        "projectKey": { "type": "string" },
+        "projectName": { "type": "string" },
+        "state": { "$ref": "ScheduleState" },
+        "lastRunAt": { "type": "number" },
+        "lastSessionId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": [
+        "scheduleId",
+        "title",
+        "ownerId",
+        "isOwner",
+        "machineId",
+        "machineSupported",
+        "agentConfigId",
+        "enabled",
+        "scheduledMessage",
+        "rule",
+        "destination",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ScheduleProject": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["local", "github"] },
+        "localProjectId": { "type": "string" },
+        "repoFullName": { "type": "string" },
+        "branch": { "type": "string" },
+        "useWorktree": { "type": "boolean" },
+        "name": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
+    "ScheduleRule": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "once",
+            "minutes",
+            "hours",
+            "daily",
+            "weekdays",
+            "weekly",
+            "monthly",
+            "unsupported"
+          ]
+        },
+        "every": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "hour": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "minute": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "weekdays": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "at": { "type": "number" },
+        "timeZone": { "type": "string" },
+        "summary": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
+    "SchedulesParams": {
+      "type": "object",
+      "properties": { "workspaceId": { "type": "string", "minLength": 1 } },
+      "required": ["workspaceId"]
+    },
+    "SchedulesResult": {
+      "type": "object",
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "ScheduleItem" } },
+        "deviceTimeZone": { "type": "string" },
+        "machineTimeZones": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "ownedMachineIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": [
+        "items",
+        "deviceTimeZone",
+        "machineTimeZones",
+        "ownedMachineIds"
+      ]
+    },
+    "ScheduleState": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string",
+          "enum": ["running", "paused", "attention", "ended"]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "sent",
+            "cancelled",
+            "notSent",
+            "cancelling",
+            "sendsAt",
+            "waitingToSend",
+            "paused",
+            "blocked",
+            "retrying",
+            "due",
+            "waitingForAgent",
+            "manual",
+            "runsAt",
+            "done",
+            "notScheduled"
+          ]
+        },
+        "at": { "type": "number" },
+        "blockedCode": { "type": "string" }
+      },
+      "required": ["group", "kind"]
+    },
     "SendTurnParams": {
       "type": "object",
       "properties": {
@@ -2762,10 +3075,32 @@
       },
       "required": ["sessionId", "event"]
     },
+    "SessionWorkspacePathParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId"]
+    },
+    "SessionWorkspacePathResult": {
+      "type": "object",
+      "properties": { "path": { "type": ["string", "null"] } },
+      "required": ["path"]
+    },
     "SetActiveParams": {
       "type": "object",
       "properties": { "active": { "type": "boolean" } },
       "required": ["active"]
+    },
+    "SetSessionOwnerParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId", "userId"]
     },
     "SetTabClosedParams": {
       "type": "object",

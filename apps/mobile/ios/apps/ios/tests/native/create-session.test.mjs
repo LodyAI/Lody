@@ -660,7 +660,7 @@ test('legacy capability keys preserve all builtin agent types', async () => {
     await transform(
       source
         .slice(
-          source.indexOf('export function creationOptions('),
+          source.indexOf('function metadataAgents('),
           source.indexOf('const attempted ='),
         )
         .replace('export function', 'function'),

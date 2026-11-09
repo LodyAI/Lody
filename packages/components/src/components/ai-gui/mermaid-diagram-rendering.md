@@ -30,6 +30,23 @@ why they read the way they do. Coverage:
   fails to load renders the source as an SVG listing, so the block's controls keep
   working. Decision: [Pele renderer note](../../../../../.agents/notes/implemented/feature/2026-10-18-pele-mermaid-renderer.md).
 
+## A diagram is content, not a card
+
+- The block draws no frame, fill, or reserved height. A diagram sits in the prose
+  the way an image does and is sized by its own content; the earlier card made
+  every diagram read as a widget and left a message-height of empty space under a
+  short one. The palette variables still hang off the block. The hover controls
+  float in a lane above the diagram's top-right corner — a rendered diagram is
+  drawn to its own bounds and has no empty corner inside — so they never cover a
+  node, and a tall diagram scrolls beneath that lane instead of under the pill.
+- The rendered SVG is scaled to the message width and never upscaled: a diagram
+  that already fits keeps its natural size, and a wider one shrinks instead of
+  being cut off at the right edge. Only height is bounded, at
+  `min(70vh, 36rem)`; a tall sequence diagram scrolls inside that bound instead of
+  running for several screens of the conversation. The chaining rule below is what
+  keeps the conversation scrollable at its edges, and the full-screen viewer still
+  opens at natural size.
+
 ## A diagram in a message is a still preview until it is clicked
 
 - It NEVER captures an unmodified wheel, activated or not. The only wheel the

@@ -116,31 +116,6 @@ precondition(containsText(nav.navigationBar, "Project name"), "Nav bar must show
 precondition(containsText(nav.navigationBar, "Studio"), "Nav bar must show the computer name")
 precondition(subtitleAttachments(button) == 2, "Folder and computer symbols must survive layout")
 
-ChatNavigationTitle.setDisappearing(true, on: session.navigationItem)
-ChatNavigationTitle.preserveSubtitle("Project name · Studio", on: session.navigationItem)
-session.navigationItem.titleView = nil
-session.navigationItem.title = "Session title"
-nav.view.setNeedsLayout()
-nav.view.layoutIfNeeded()
-precondition(session.navigationItem.titleView == nil, "A disappearing page must let screens keep the slot for the pop transition")
-precondition(
-  session.navigationItem.subtitle == "Project name · Studio",
-  "A screens header update that nils titleView must keep UINavigationItem.subtitle"
-)
-precondition(
-  containsText(nav.navigationBar, "Project name"),
-  "Project name must stay visible after titleView is cleared"
-)
-precondition(
-  containsText(nav.navigationBar, "Studio"),
-  "Computer name must stay visible after titleView is cleared"
-)
-
-ChatNavigationTitle.setDisappearing(false, on: session.navigationItem)
-precondition(session.navigationItem.titleView === button, "Cancelled return must restore the tappable title")
-ChatNavigationTitle.apply(title: "Session title", subtitle: "Project name · Studio", button: button, to: session.navigationItem)
-precondition(session.navigationItem.subtitle == nil, "Restoring titleView must drop the native subtitle so the button stays visible")
-
 ChatNavigationTitle.detach(button: button, from: session.navigationItem)
 precondition(session.navigationItem.titleView !== button)
 session.navigationItem.title = "Static route title"
@@ -149,12 +124,9 @@ ChatNavigationTitle.apply(title: "Session title", subtitle: "Project name · Stu
 precondition(session.navigationItem.titleView === button)
 precondition(session.navigationItem.title == "Session title", "Attaching takes the title back from the static route title")
 
-// A full-screen preview preserves the fallback without removing our titleView.
-ChatNavigationTitle.preserveSubtitle("Project name · Studio", on: session.navigationItem)
 ChatNavigationTitle.apply(title: "Session title", subtitle: "Project name · Studio", button: button, to: session.navigationItem)
 nav.view.layoutIfNeeded()
-precondition(session.navigationItem.subtitle == nil, "Preview return must not show a second subtitle alongside the retained titleView")
-precondition(session.navigationItem.titleView === button)
+precondition(session.navigationItem.subtitle == nil && session.navigationItem.titleView === button)
 
 button.layoutIfNeeded()
 
@@ -362,7 +334,53 @@ precondition(button.captionLabel.lineBreakMode == .byTruncatingMiddle,
   "A long branch still leaves the trailing device state visible")
 precondition(button.accessibilityLabel!.contains(String(localized: "devices.online", bundle: .lody)), "VoiceOver states device liveness")
 ChatNavigationTitle.configureButton(button, title: "Session", subtitle: "Project", machine: "Studio", branch: "feature/a-very-long-branch-name", machineState: "offline")
-precondition(subtitleText(button).contains(String(localized: "devices.offline", bundle: .lody)), "Offline is visible text, not color alone")
+precondition(button.accessibilityLabel!.contains(String(localized: "devices.offline", bundle: .lody)), "Offline state is accessible")
 precondition(!button.accessibilityLabel!.contains(String(localized: "devices.online", bundle: .lody)), "VoiceOver does not retain the previous state")
 precondition(button.sizeThatFits(CGSize(width: 220, height: 44)).height == 44, "Device status adds no navigation row")
 print("PASS: chat navigation subtitle shows project and computer names")
+
+ChatNavigationTitle.configureButton(button, title: "Conversation", subtitle: "", machine: "Studio", machineState: "online")
+let machineCaption = button.captionLabel.attributedText!
+precondition(machineCaption.attribute(.attachment, at: 0, effectiveRange: nil) != nil, "Presence icon precedes the machine name")
+precondition(subtitleText(button).contains("Studio"), "Header retains execution machine")
+
+// Native navigation owns the outer margins; the title must not lose another inset.
+for direction: UISemanticContentAttribute in [.forceLeftToRight, .forceRightToLeft] {
+  button.semanticContentAttribute = direction
+  button.bounds = CGRect(x: 0, y: 0, width: 220, height: 44)
+  button.setNeedsLayout()
+  button.layoutIfNeeded()
+  precondition(button.titleHost.frame.minX == 0 && button.titleHost.frame.width == 220,
+    "Conversation title uses the full native allocation in either layout direction")
+  precondition(button.captionLabel.frame.width == 220, "Machine subtitle shares the title width")
+}
+ChatNavigationTitle.configureButton(button, title: "", subtitle: "")
+precondition(button.intrinsicContentSize.width >= 44 && button.intrinsicContentSize.height == 44,
+  "Compact titles retain the minimum navigation touch target")
+print("PASS: title uses native horizontal spacing and preserves its touch target")
+
+let overflowTitle = String(repeating: "Long conversation title ", count: 12)
+ChatNavigationTitle.configureButton(button, title: overflowTitle, subtitle: "Machine")
+for direction: UISemanticContentAttribute in [.forceLeftToRight, .forceRightToLeft] {
+  button.titleHost.semanticContentAttribute = direction
+  button.bounds = CGRect(x: 0, y: 0, width: 180, height: 44)
+  button.setNeedsLayout()
+  button.layoutIfNeeded()
+  button.titleHost.setNeedsLayout()
+  button.titleHost.layoutIfNeeded()
+  let mask = button.titleHost.layer.mask as! CAGradientLayer
+  precondition(mask.frame == button.titleHost.bounds, "Fade is bounded to title, not subtitle or buttons")
+  precondition(mask.endPoint.x == (direction == .forceRightToLeft ? 0 : 1), "Fade follows trailing edge")
+  precondition(button.titleHost.subviews[0].bounds.width > button.titleHost.bounds.width,
+    "Title renders at natural width instead of ellipsizing")
+  precondition(button.accessibilityLabel!.contains(overflowTitle), "Full title remains accessible")
+  precondition(button.captionLabel.layer.mask == nil, "Subtitle remains unaffected")
+}
+ChatNavigationTitle.configureButton(button, title: "Short", subtitle: "Machine")
+button.bounds.size.width = 400
+button.setNeedsLayout()
+button.layoutIfNeeded()
+button.titleHost.setNeedsLayout()
+button.titleHost.layoutIfNeeded()
+precondition(button.titleHost.layer.mask == nil, "A fitting title removes the overflow fade")
+print("PASS: overflowing titles retain full text with directional fade; fitting titles stay unmasked")

@@ -1,6 +1,7 @@
 import {
   Bytes,
   memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   RecoveryVaults,
   type EpochStagedGroup,
   type RecoveryVault,
@@ -234,12 +235,20 @@ export const recentAccountSecurityEvents = (
       .sort((a, b) => b.occurredAt - a.occurredAt)
   )
 
+/** One workspace's recovery state on this device, for settings. */
+export type RecoveryWorkspaceStatus =
+  | { readonly kind: 'notSet' }
+  | { readonly kind: 'saved' }
+  | { readonly kind: 'verified'; readonly update: number }
+  /** This device's journal row or identity for the workspace could not be read. */
+  | { readonly kind: 'unknown' }
+
 /** What a replacement would cover, and whether one is already running. */
 export const recoveryReplacementPlan = (
   io: RecoveryVaultIo & {
     readonly replacement: Pick<RecoveryVaultReplacement, 'state'>
     readonly accountWorkspaces: Effect.Effect<
-      readonly { readonly id: string; readonly name: string }[],
+      readonly { readonly id: string; readonly name: string; readonly genesisHash?: string }[],
       unknown
     >
     readonly hasIdentity: (workspaceId: string) => Effect.Effect<boolean, unknown>
@@ -250,24 +259,55 @@ export const recoveryReplacementPlan = (
       const state = yield* io.replacement.state()
       const workspaces = yield* io.accountWorkspaces
       const local = yield* RecoveryVaultLocalStore
+      // One workspace whose identity cannot be read right now (a removal still erasing, a
+      // busy lease, a failed close) is shown as unknown and not acted on; it must not take
+      // the whole plan, and with it every other workspace's controls, down with it.
+      const unreadable = new Set<string>()
       const usable = (id: string) =>
-        Effect.flatMap(io.hasIdentity(id), (has) =>
-          has
-            ? Effect.map(recoveryRestoreIncomplete(local, id), (incomplete) => !incomplete)
-            : Effect.succeed(false)
+        Effect.flatMap(
+          Effect.catch(io.hasIdentity(id), () =>
+            Effect.sync(() => {
+              unreadable.add(id)
+              return false
+            })
+          ),
+          (has) =>
+            has
+              ? Effect.map(recoveryRestoreIncomplete(local, id), (incomplete) => !incomplete)
+              : Effect.succeed(false)
         )
+      const progress = state.current
+        ? yield* readWorkspaceRecoveryProgress(local, state.current)
+        : []
+      // Read from this device's journal, so it needs no V. A key update after the test is
+      // not visible here; the next real test reports it.
+      const status = (genesisHash: string | undefined): RecoveryWorkspaceStatus => {
+        const found = progress.find((row) => row.genesis === genesisHash)
+        if (!found) return { kind: 'notSet' }
+        if (found.stage === 'unknown') return { kind: 'unknown' }
+        return found.stage === 'recoverable' && found.testedEpoch !== null
+          ? { kind: 'verified', update: found.testedEpoch }
+          : { kind: 'saved' }
+      }
+      const usableIds = new Set(
+        yield* Effect.filter(
+          workspaces.map((row) => row.id),
+          usable
+        )
+      )
+      const plan = planVaultReplacement(
+        workspaces.map((row) => ({
+          id: row.id,
+          name: row.name,
+          status: unreadable.has(row.id) ? ({ kind: 'unknown' } as const) : status(row.genesisHash)
+        })),
+        usableIds
+      )
       return {
+        hasVault: state.current !== null,
         replaceable: state.current !== null,
         replacing: state.replacing !== null,
-        ...planVaultReplacement(
-          workspaces,
-          new Set(
-            yield* Effect.filter(
-              workspaces.map((row) => row.id),
-              usable
-            )
-          )
-        )
+        ...plan
       }
     }).pipe(Effect.provide(vaults(io)))
   )
@@ -504,7 +544,7 @@ export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
   readonly name: string
   readonly genesisHash: string
   readonly append: RecoveryWorkspaceTarget['append']
-  readonly hasIdentity: () => boolean
+  readonly hasIdentity: () => boolean | 'unknown'
   readonly history: (next?: {
     readonly cursor: string
     readonly checkpoint: P['checkpoint']

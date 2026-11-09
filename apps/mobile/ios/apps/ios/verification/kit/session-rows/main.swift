@@ -338,3 +338,58 @@ var separateOpenedChat = runningTab
 separateOpenedChat.parentSessionId = nil
 separateOpenedChat.openedBySessionId = tabOwner.id
 precondition(tabRows([separateOpenedChat]).first?.imageTint == "")
+
+// Hiding the repeated project label must not erase raw repository identity used by
+// the index; an opened child from another project must not supply the root logo.
+let logoCatalog = SessionCatalog(projects: [
+  SessionProject(id: "logo-root", name: "Root", repoFullName: "synthetic-owner/root"),
+  SessionProject(id: "logo-child", name: "Child", repoFullName: "another-owner/child"),
+], sessions: [
+  SessionItem(id: "logo-session", projectId: "logo-root"),
+  SessionItem(id: "logo-opened", projectId: "logo-child", openedBySessionId: "logo-session"),
+])
+let logoGroups = InboxSections.home(logoCatalog, grouping: .project, now: now)
+precondition(logoGroups.count == 1 && logoGroups[0].id == "group:logo-root")
+precondition(logoGroups[0].rows[0].place.isEmpty)
+precondition(logoGroups[0].rows[0].repository == "synthetic-owner/root")
+precondition(logoGroups[0].rows[1].repository == "another-owner/child")
+print("PASS: project grouping hides presentation while retaining root and cross-project child repository identity")
+
+
+var relationRoot = SessionItem(id: "relation-root", title: "Root")
+var relationTab = SessionItem(id: "relation-tab", title: "Tab", parentSessionId: relationRoot.id)
+var relationChild = SessionItem(id: "relation-child", title: "Child", openedBySessionId: relationTab.id, openedByRootSessionId: relationRoot.id)
+var relationSibling = SessionItem(id: "relation-sibling", openedBySessionId: relationRoot.id)
+var relationGrandchild = SessionItem(id: "relation-grandchild", openedBySessionId: relationChild.id)
+var relationSide = SessionItem(id: "relation-side", childSessionPlacement: "side-panel", parentSessionId: relationRoot.id)
+var relationClosed = SessionItem(id: "relation-closed", isTabClosed: true, parentSessionId: relationRoot.id)
+let related = [relationRoot, relationTab, relationChild, relationSibling, relationGrandchild, relationSide, relationClosed]
+let relationTree = SessionRelations.tree(sessions: related, current: relationChild.id)
+precondition(relationTree.hasRelations)
+precondition(Set(relationTree.rows.flatMap { $0.sessions.map(\.id) }) == Set([relationRoot.id, relationTab.id, relationChild.id, relationSibling.id, relationGrandchild.id]))
+precondition(relationTree.rows.first { $0.session.id == relationChild.id }?.depth == 1)
+precondition(relationTree.rows.first { $0.session.id == relationGrandchild.id }?.depth == 2)
+precondition(relationTree.rows.count == 4, "Contained Tabs do not add hierarchy rows")
+precondition(relationTree.rows.first { $0.session.id == relationRoot.id }?.tabs.map(\.id) == [relationTab.id])
+precondition(!relationTree.rows.contains { $0.session.id == relationTab.id }, "Tabs share the root row")
+let branchRows = relationTree.rows
+let rootBranch = SessionRelations.branch(at: 0, rows: branchRows)
+let childBranch = SessionRelations.branch(at: branchRows.firstIndex { $0.session.id == relationChild.id }!, rows: branchRows)
+let grandchildBranch = SessionRelations.branch(at: branchRows.firstIndex { $0.session.id == relationGrandchild.id }!, rows: branchRows)
+let lastBranch = SessionRelations.branch(at: branchRows.count - 1, rows: branchRows)
+precondition(rootBranch.depth == 0 && rootBranch.ancestors.isEmpty)
+precondition(childBranch.depth == 1 && childBranch.continues, "Parent rail continues through its descendants to the next sibling")
+precondition(grandchildBranch.depth == 2 && grandchildBranch.ancestors == [0] && !grandchildBranch.continues)
+precondition(!lastBranch.continues, "Final child ends its curved branch without a dangling trunk")
+precondition(SessionRelations.target(relationTab.id, sessions: related) == relationTab.id)
+precondition(SessionRelations.target(relationTab.id, sessions: related.filter { $0.id != relationRoot.id }) == nil)
+precondition(!SessionRelations.tree(sessions: [relationRoot, relationTab], current: relationTab.id).hasRelations)
+precondition(!SessionRelations.tree(sessions: [relationRoot, relationChild], current: relationChild.id).hasRelations, "Missing precise opener must not fall back to openedByRootSessionId")
+precondition(SessionRelations.tree(sessions: related, current: relationClosed.id).rows.contains { $0.tabs.contains { $0.id == relationClosed.id } })
+relationRoot.archived = true
+precondition(SessionRelations.target(relationTab.id, sessions: [relationRoot, relationTab]) == nil)
+relationRoot.archived = false
+relationRoot.openedBySessionId = relationGrandchild.id
+let cycle = SessionRelations.tree(sessions: [relationRoot, relationTab, relationChild, relationGrandchild], current: relationChild.id)
+precondition(cycle.rows.count == 3 && Set(cycle.rows.flatMap { $0.sessions.map(\.id) }).count == 4)
+print("Related conversations: precise opener, containment, exact Tab targets, missing/archived roots and cycles passed")

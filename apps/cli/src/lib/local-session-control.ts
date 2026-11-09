@@ -11,7 +11,8 @@ import {
 import type { LocalSessionControlResponse } from '@lody/shared';
 import { LocalControlHandler, type LocalSessionControlConfig } from '@/lib/local-control-handler';
 
-export const MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
+// Accommodate a 20 MiB image encoded as base64, plus its JSON envelope.
+export const MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 let nextControlRequestId = 1;
 export type { LocalSessionControlConfig } from '@/lib/local-control-handler';
 

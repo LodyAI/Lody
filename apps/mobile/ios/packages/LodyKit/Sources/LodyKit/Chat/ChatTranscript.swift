@@ -81,11 +81,102 @@ struct ChatTextReference: Decodable, Equatable {
   let target: String?
 }
 
+struct ChatOperationCard: Decodable, Equatable {
+  let id: String
+  let kind: String
+  let sessionId: String
+  let label: String?
+  let status: String
+  let detail: String?
+  let reply: String?
+  var replyTruncated: Bool? = nil
+
+  var statusLabel: String {
+    let prefix = kind == "reply" ? "session.operation.reply." : "session.operation.status."
+    return String(localized: String.LocalizationValue(prefix + status), bundle: .lody)
+  }
+  var opening: String {
+    (detail ?? reply ?? "").split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+  }
+}
+
+struct ChatOperationPresentation: Decodable {
+  struct Notice: Decodable {
+    let kind: String
+    let detail: String?
+    let count: Int?
+  }
+  let cards: [ChatOperationCard]
+  let notices: [Notice]
+
+  func rows(entryID: String, itemID: String) -> [ChatRow] {
+    let prefix = entryID + ":" + itemID
+    var rows: [ChatRow] = []
+    for (index, notice) in notices.enumerated() {
+      var title = String(localized: String.LocalizationValue("session.operation." + notice.kind), bundle: .lody)
+      if let count = notice.count { title = String.localizedStringWithFormat(title, count) }
+      rows.append(ChatRow(id: prefix + ":notice:\(index)", entryID: entryID, kind: "operationNotice", text: title,
+        itemID: itemID, detail: notice.detail ?? ""))
+    }
+    let created = cards.filter { $0.kind == "created" }
+    if !created.isEmpty {
+      rows.append(ChatRow(id: prefix + ":created", entryID: entryID, kind: "operationHeader",
+        text: String.localizedStringWithFormat(String(localized: "session.operation.createdCount", bundle: .lody), created.count),
+        itemID: itemID, actionable: created.count > 5))
+    }
+    for card in cards {
+      rows.append(ChatRow(id: prefix + ":card:" + card.id, entryID: entryID, kind: "operationCard",
+        text: card.label ?? "", itemID: itemID, actionable: true, operation: card, detail: card.opening))
+    }
+    return rows
+  }
+
+  /// Keep large creation groups compact without losing their rows from history.
+  static func visible(_ rows: [ChatRow], expanded: Set<String>, titles: [String: String]) -> [ChatRow] {
+    var grouped: [ChatRow] = []
+    var pending: [ChatRow] = []
+    var groupForRow: [String: String] = [:]
+    func flush() {
+      guard var header = pending.first else { return }
+      let cards = pending.filter { $0.operation != nil }
+      let group = header.entryID + ":" + header.itemID
+      header.text = String.localizedStringWithFormat(String(localized: "session.operation.createdCount", bundle: .lody), cards.count)
+      header.actionable = cards.count > 5
+      grouped.append(header)
+      for card in cards { groupForRow[card.id] = group; grouped.append(card) }
+      pending.removeAll()
+    }
+    for row in rows {
+      if row.kind == "operationHeader" || row.operation?.kind == "created" { pending.append(row) }
+      else { flush(); grouped.append(row) }
+    }
+    flush()
+    var counts: [String: Int] = [:]
+    return grouped.compactMap { source in
+      var row = source
+      let group = groupForRow[row.id] ?? (row.entryID + ":" + row.itemID)
+      if row.kind == "operationHeader" { row.disclosed = expanded.contains(group) }
+      if let card = row.operation {
+        if card.kind == "created" {
+          counts[group, default: 0] += 1
+          if counts[group, default: 0] > 5 && !expanded.contains(group) { return nil }
+        }
+        row.text = titles[card.sessionId]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if row.text.isEmpty { row.text = card.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        if row.text.isEmpty { row.text = String(localized: "session.operation.untitled", bundle: .lody) }
+        row.actionable = titles[card.sessionId] != nil
+      }
+      return row
+    }
+  }
+}
+
 struct ChatItem: Decodable {
   var references: [ChatTextReference]? = nil
   struct Permission: Decodable { let requestId: String; let pending: Bool }
   struct Plan: Decodable { let content: String; let status: String }
   struct NoticeMeta: Decodable, Equatable { let reason: String?; let code: String?; let message: String? }
+  var operation: ChatOperationPresentation? = nil
   var meta: NoticeMeta? = nil
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
   let itemId: String
@@ -109,8 +200,9 @@ struct ChatItem: Decodable {
   var isBackgrounded: Bool? = nil
   var skipTranscript: Bool? = nil
   var processDurationMs: Int? = nil
-  var isProcess: Bool { type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  var isProcess: Bool { operation == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   var hidesFromTranscript: Bool {
+    if let operation { return operation.cards.isEmpty && operation.notices.isEmpty }
     if type == "proposed_plan" {
       return !["delta", "completed"].contains(status ?? "") || (markdown ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -154,6 +246,11 @@ struct ChatRow: Equatable {
   var workDurationMs: Int? = nil
   var imageAsset = ""
   var subagent: ChatSubagentCard? = nil
+  var operation: ChatOperationCard? = nil
+  var operationCurrent = false
+  var operationPeers: [ChatOperationPeer] = []
+  var operationCLIType: String? = nil
+  var operationAgentType: String? = nil
   var detail = ""
   var treeChild = false
   var treeLast = false
@@ -329,6 +426,7 @@ struct ChatTranscript {
   var entries: [ChatEntry] = []
   /// Finished turns whose folded work the reader opened in place, by entry id.
   var expandedWork: Set<String> = []
+  var expandedThoughts: Set<String> = []
 
   func liveSubagentItems() -> [ChatItem] {
     entries.flatMap(\.items).filter(\.isLiveSubagent)
@@ -403,7 +501,7 @@ struct ChatTranscript {
       }
       var visible = entry
       if entry.holdOpen == true || entry.executionId != nil { visible.finished = false }
-      var result = ChatTranscript(entries: [visible]).entryRows(now: now, turnStartedAt: turnStartedAt)
+      var result = ChatTranscript(entries: [visible], expandedThoughts: expandedThoughts).entryRows(now: now, turnStartedAt: turnStartedAt)
       if entry.finished && !visible.finished {
         result.removeAll { $0.kind == "duration" }
         for index in result.indices {
@@ -488,18 +586,18 @@ struct ChatTranscript {
         if !text.isEmpty {
           result.append(ChatRow(id: entry.id + (result.isEmpty ? ":user" : ":user-text"), entryID: entry.id, kind: "user", text: text, references: references))
         }
-        // The turn's first bubble carries its sender, time and read state (web's header).
-        if let first = result.firstIndex(where: { $0.kind == "user" }) {
-          result[first].author = entry.userId ?? ChatAuthors.unknownSender
-          result[first].authorTime = ChatAuthors.time(entry.timestamp)
-          result[first].readState = ChatAuthors.readState(entry.status)
+        // The turn's first row (its attachments, else its bubble) carries its sender, time and
+        // read state (web's header), so attachments read as part of the message.
+        if !result.isEmpty {
+          result[0].author = entry.userId ?? ChatAuthors.unknownSender
+          result[0].authorTime = ChatAuthors.time(entry.timestamp)
+          result[0].readState = ChatAuthors.readState(entry.status)
         }
         if let delivery = entry.delivery, delivery != "accepted" {
           let key = "native.chat.message.guide." + delivery
           result.insert(ChatRow(id: entry.id + ":delivery", entryID: entry.id, kind: "delivery",
             text: String(localized: String.LocalizationValue(key), bundle: .lody), attention: delivery == "rejected" || delivery == "unknown"), at: 0)
         }
-        if !result.isEmpty { result.append(ChatRow(id: entry.id + ":userActions", entryID: entry.id, kind: "userActions", text: "")) }
         return result
       }
       let answer = ChatTranscript.answerRun(entry.items)
@@ -529,23 +627,34 @@ struct ChatTranscript {
         }
       } else if folds && !expandedWork.contains(entry.id) {
         let process = entry.items.indices.filter {
-          !answer.contains($0) && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task"
+          !answer.contains($0) && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task" && entry.items[$0].operation == nil
         }
         if let first = process.first { groups[first] = process }
         visible = process.first.map { [$0] } ?? []
         visible.append(contentsOf: answer)
         visible.append(contentsOf: entry.items.indices.filter {
           entry.items[$0].type == "proposed_plan" || entry.items[$0].isAttachment || entry.items[$0].isChatFailure
-            || (entry.items[$0].type == "subagent_task" && !entry.items[$0].hidesFromTranscript)
+            || entry.items[$0].operation != nil || (entry.items[$0].type == "subagent_task" && !entry.items[$0].hidesFromTranscript)
         })
         visible.sort()
       } else {
-        // Keep prose and thoughts in place, folding each consecutive run of tools.
+        // Keep prose in place, folding consecutive runs of thoughts and tools separately.
         var toolStart: Int?
+        var thoughtStart: Int?
         for index in entry.items.indices {
           let item = entry.items[index]
           if item.hidesFromTranscript || (item.type == "tool_call" && item.kind == "think") { continue }
-          if item.type == "tool_call", item.kind != "switch_mode" {
+          if item.type == "thought" {
+            toolStart = nil
+            if let start = thoughtStart {
+              groups[start, default: []].append(index)
+            } else {
+              thoughtStart = index
+              groups[index] = [index]
+              visible.append(index)
+            }
+          } else if item.type == "tool_call", item.kind != "switch_mode" {
+            thoughtStart = nil
             if let start = toolStart {
               groups[start, default: []].append(index)
             } else {
@@ -555,6 +664,7 @@ struct ChatTranscript {
             }
           } else {
             toolStart = nil
+            thoughtStart = nil
             visible.append(index)
           }
         }
@@ -590,10 +700,13 @@ struct ChatTranscript {
             if !row.disclosed { absorbed = groups.keys.min() }
           } else if !entry.finished, entry.holdOpen != true, entry.executionId == nil,
                     let first = visible.first(where: { entry.items[$0].type != "subagent_task" }),
-                    let indices = groups[first] {
+                    let indices = groups[first], entry.items[first].type != "thought" {
             let process = indices.map { entry.items[$0] }
-            let tail = entry.items.indices.last { !entry.items[$0].hidesFromTranscript }
-            let live = entry.isRunning && indices.last == tail && process.first?.processDurationMs == nil
+            let tail = entry.items.indices.last {
+              let item = entry.items[$0]
+              return !item.hidesFromTranscript && !(item.type == "tool_call" && item.kind == "think")
+            }
+            let live = entry.isRunning && indices.last == tail
             row.detail = ChatProcessSummary.title(items: process, running: live)
             row.actionable = true
             row.processStartID = entry.items[first].itemId
@@ -607,8 +720,11 @@ struct ChatTranscript {
           if index == absorbed { continue }
           let process = indices.map { entry.items[$0] }
           let needsPermission = process.contains { $0.permission?.pending == true }
-          let tail = entry.items.indices.last { !entry.items[$0].hidesFromTranscript }
-          let running = entry.isRunning && indices.last == tail && process.first?.processDurationMs == nil
+          let tail = entry.items.indices.last {
+            let item = entry.items[$0]
+            return !item.hidesFromTranscript && !(item.type == "tool_call" && item.kind == "think")
+          }
+          let running = entry.isRunning && indices.last == tail
           let firstGroup = index == groups.keys.min()
           // Only a step waiting on the person flags the summary; a failed command needs no special
           // treatment (its own row says it failed).
@@ -619,14 +735,28 @@ struct ChatTranscript {
             title = ChatWorkDuration.title(duration, running: false)
             if !summary.isEmpty { title += " · " + summary }
           }
-          result.append(ChatRow(id: entry.id + ":process" + (firstGroup ? "" : ":" + entry.items[index].itemId), entryID: entry.id, kind: "summary",
+          let isThoughtGroup = process.allSatisfy { $0.type == "thought" } && !(folds && !expandedWork.contains(entry.id))
+          var groupRow = ChatRow(id: entry.id + ":process" + (firstGroup ? "" : ":" + entry.items[index].itemId), entryID: entry.id, kind: "summary",
             text: title,
             symbol: ChatProcessSummary.mark(attention: attention),
-            processStartID: folds && !expandedWork.contains(entry.id) ? "" : entry.items[index].itemId,
-            actionable: true, running: running, attention: attention))
+            processStartID: isThoughtGroup ? "__thought__" : (folds && !expandedWork.contains(entry.id) ? "" : entry.items[index].itemId),
+            actionable: true, running: running, attention: attention)
+          groupRow.disclosed = isThoughtGroup && expandedThoughts.contains(groupRow.id)
+          result.append(groupRow)
+          if groupRow.disclosed {
+            for item in process {
+              result.append(ChatRow(id: entry.id + ":" + item.itemId, entryID: entry.id, kind: "thought",
+                text: item.text ?? "", symbol: "brain", itemID: item.itemId,
+                streaming: entry.isRunning && item.itemId == entry.textTailID))
+            }
+          }
           continue
         }
         let item = entry.items[index]
+        if let operation = item.operation {
+          result += operation.rows(entryID: entry.id, itemID: item.itemId)
+          continue
+        }
         if item.isImage {
           let images = item.type == "image" ? item.image.map { [$0] } ?? [] : item.images ?? []
           for (imageIndex, image) in images.enumerated() {
@@ -910,12 +1040,13 @@ extension ChatPendingSend {
       }
       let body = displayText ?? text
       if !body.isEmpty {
-        var row = ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body)
-        // A local send in flight is the signed-in user's own turn.
-        row.author = ChatAuthors.unknownSender
-        row.authorTime = ChatAuthors.time(Date().ISO8601Format())
-        row.readState = "sending"
-        result.append(row)
+        result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body))
+      }
+      // A local send in flight is the signed-in user's own turn; its first row carries the header.
+      if !result.isEmpty {
+        result[0].author = ChatAuthors.unknownSender
+        result[0].authorTime = ChatAuthors.time(Date().ISO8601Format())
+        result[0].readState = "sending"
       }
     }
     if failed == true {
@@ -994,4 +1125,46 @@ struct ChatPlanDecisionState: Decodable, Equatable {
   let enabled: Bool
   let pending: Bool
   let message: String
+}
+
+struct ChatOperationPeer: Equatable {
+  var card: ChatOperationCard
+  var text: String
+  var detail: String
+  var actionable: Bool
+  var cliType: String?
+  var agentType: String?
+  var current = false
+}
+
+enum ChatOperationGrouping {
+  /// Group only adjacent receipts in the same turn; never cross a notice or reorder history.
+  static func rows(_ rows: [ChatRow], roots: [String: String], opened: Set<String>) -> [ChatRow] {
+    var result: [ChatRow] = []
+    var index = 0
+    while index < rows.count {
+      var row = rows[index]
+      guard let card = row.operation else { result.append(row); index += 1; continue }
+      let root = roots[card.sessionId] ?? card.sessionId
+      var group = [row]
+      index += 1
+      while index < rows.count, let next = rows[index].operation,
+        rows[index].entryID == row.entryID, (roots[next.sessionId] ?? next.sessionId) == root {
+        group.append(rows[index]); index += 1
+      }
+      row.treeChild = group.contains { $0.operation?.sessionId == root } && opened.contains(root)
+      if group.count > 1 {
+        row.operationPeers = group.compactMap { member in
+          guard let card = member.operation else { return nil }
+          return ChatOperationPeer(card: card, text: member.text, detail: member.detail, actionable: member.actionable,
+            cliType: member.operationCLIType, agentType: member.operationAgentType, current: member.operationCurrent)
+        }
+      }
+      result.append(row)
+    }
+    for index in result.indices where result[index].operation != nil {
+      result[index].treeLast = index + 1 == result.count || !result[index + 1].treeChild || result[index + 1].entryID != result[index].entryID
+    }
+    return result
+  }
 }

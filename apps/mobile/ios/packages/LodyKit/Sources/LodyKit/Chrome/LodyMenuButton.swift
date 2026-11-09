@@ -1,14 +1,10 @@
 import UIKit
 
+/// One workspace in the switcher panel: its logo (`photo`, the `monogram` until it loads) and name.
 struct LodyMenuItem: Equatable {
   var id: String = ""
   var title: String = ""
-  var symbol: String = ""
-  var selected: Bool?
-  var subtitle: String = ""
-  var disabled: Bool = false
-  var children: [LodyMenuItem] = []
-  /// A remote avatar (workspace logo) drawn as the item's image; `monogram` until it loads.
+  var selected = false
   var photo: String = ""
   var monogram: String = ""
 }
@@ -19,18 +15,20 @@ struct LodyMenuAvatar {
   var image: String = ""
 }
 
+/// The workspace capsule uses the same native button menu as conversation More.
+@MainActor
 final class LodyMenuButton: UIView {
-  var onSelect: ([String: Any]) -> Void = { _ in }
-  var onSize: ([String: Any]) -> Void = { _ in }
   var selected: ((String) -> Void)?
   var sized: ((CGFloat) -> Void)?
   private let button = UIButton(type: .system)
   private var avatar = LodyMenuAvatar()
   private var photoURL: URL?
   private var photo: UIImage?
+  private var accountEmail = ""
   private var label = ""
   private var labelHidden = false
   private var detail = ""
+  private var items: [LodyMenuItem] = []
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
@@ -50,6 +48,12 @@ final class LodyMenuButton: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     button.frame = bounds
+  }
+
+  /// The capsule's identifier is on the control VoiceOver and UI checks actually reach.
+  override var accessibilityIdentifier: String? {
+    get { button.accessibilityIdentifier }
+    set { button.accessibilityIdentifier = newValue }
   }
 
   func setAccessibilityName(_ value: String) {
@@ -86,81 +90,39 @@ final class LodyMenuButton: UIView {
     apply()
   }
 
-  private var items: [LodyMenuItem] = []
-  private var loadingPhotos = Set<URL>()
-
-  /// The item's avatar: a cached photo, else its monogram while the photo loads (the menu is
-  /// rebuilt once it arrives), else its SF Symbol.
-  private func image(_ item: LodyMenuItem) -> UIImage? {
-    let side: CGFloat = 24
-    if let url = LodyListPhoto.url(item.photo) {
-      if let photo = LodyListPhoto.cached(url) {
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
-          photo.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
-        }.withRenderingMode(.alwaysOriginal)
-      }
-      if loadingPhotos.insert(url).inserted {
-        LodyListPhoto.load(url) { [weak self] loaded in
-          guard let self else { return }
-          self.loadingPhotos.remove(url)
-          if loaded != nil, self.itemsContainPhoto(url) { self.rebuildMenu() }
-        }
-      }
-    }
-    if !item.monogram.isEmpty { return LodyListPhoto.monogram(item.monogram, side: side).withRenderingMode(.alwaysOriginal) }
-    return item.symbol.isEmpty ? nil : UIImage(systemName: item.symbol)
+  func setAccountEmail(_ value: String) {
+    let email = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard accountEmail != email else { return }
+    accountEmail = email
+    updateMenu()
   }
 
   func setItems(_ value: [LodyMenuItem]) {
     guard items != value else { return }
     items = value
-    rebuildMenu()
+    updateMenu()
   }
 
-  private func itemsContainPhoto(_ url: URL) -> Bool {
-    func contains(_ item: LodyMenuItem) -> Bool {
-      LodyListPhoto.url(item.photo) == url || item.children.contains(where: contains)
-    }
-    return items.contains(where: contains)
-  }
-
-  private func rebuildMenu() {
-    let value = items
-    func action(_ item: LodyMenuItem, state: UIMenuElement.State = .off) -> UIAction {
-      let result = UIAction(
-        title: item.title,
-        image: image(item),
-        attributes: item.disabled ? .disabled : [],
-        state: state
-      ) { [weak self] _ in
-        self?.onSelect(["id": item.id])
-        self?.selected?(item.id)
+  private func updateMenu() {
+    button.menu = items.isEmpty ? nil : UIMenu(title: accountEmail, children: items.map { item in
+      UIAction(title: item.title, image: menuImage(item), identifier: UIAction.Identifier(item.id),
+               state: item.selected ? .on : .off) { [weak self] _ in
+        guard let self, let current = self.items.first(where: { $0.id == item.id }), !current.selected else { return }
+        self.selected?(current.id)
       }
-      result.subtitle = item.subtitle.isEmpty ? nil : item.subtitle
-      return result
+    })
+  }
+
+  private func menuImage(_ item: LodyMenuItem) -> UIImage {
+    var image = LodyListPhoto.monogram(item.monogram, side: 24)
+    if let url = LodyListPhoto.url(item.photo) {
+      image = LodyListPhoto.image(for: url, ready: { [weak self] _ in self?.updateMenu() }) ?? image
     }
 
-    func element(_ item: LodyMenuItem) -> UIMenuElement {
-      if item.children.isEmpty { return action(item) }
-      return UIMenu(title: item.title, subtitle: item.subtitle.isEmpty ? nil : item.subtitle,
-        image: item.symbol.isEmpty ? nil : UIImage(systemName: item.symbol), children: item.children.map(element))
-    }
-
-    let choices = value.compactMap { item -> UIAction? in
-      guard let selected = item.selected else { return nil }
-      return action(item, state: selected ? .on : .off)
-    }
-    var children: [UIMenuElement] = []
-    if !choices.isEmpty {
-      children.append(UIMenu(options: [.displayInline, .singleSelection], children: choices))
-    }
-    let actions = value.compactMap { item in
-      item.selected == nil ? element(item) : nil
-    }
-    if !actions.isEmpty {
-      children.append(UIMenu(options: .displayInline, children: actions))
-    }
-    button.menu = UIMenu(children: children)
+    return UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
+      UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 24, height: 24)).addClip()
+      image.draw(in: CGRect(x: 0, y: 0, width: 24, height: 24))
+    }.withRenderingMode(.alwaysOriginal)
   }
 
   private func apply() {
@@ -176,8 +138,6 @@ final class LodyMenuButton: UIView {
       ),
       showsLabel: !labelHidden, to: button
     )
-    let width = LodyMenuButtonStyle.unconstrainedWidth(for: button)
-    onSize(["width": width])
-    sized?(width)
+    sized?(LodyMenuButtonStyle.unconstrainedWidth(for: button))
   }
 }

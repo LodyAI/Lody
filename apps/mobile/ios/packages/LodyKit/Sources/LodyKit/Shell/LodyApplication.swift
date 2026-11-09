@@ -1,3 +1,4 @@
+import GoogleSignIn
 import LodyCore
 import UIKit
 
@@ -50,6 +51,7 @@ public final class LodyApplication {
   }
 
   public func open(_ url: URL) {
+    if GIDSignIn.sharedInstance.handle(url) { return }
     guard let destination = AppLink.parse(url.absoluteString) else { return }
     switch destination {
     case .share: shares.wake()
@@ -80,7 +82,7 @@ public final class LodyApplication {
       guard onboarding == nil else { return }
       let regular = HomeController.current?.traitCollection.horizontalSizeClass == .regular
       let page = LodyShell.shared.presentNative(OnboardingController(), title: "", dismissible: false,
-        style: regular ? "formSheet" : "pageSheet", headerShown: false)
+        style: regular ? "formSheet" : "fullScreen", headerShown: false)
       onboarding = page
       page.onClose = { [weak self] in self?.onboarding = nil; self?.reconcile() }
       return
@@ -142,7 +144,7 @@ public final class LodyApplication {
     case .discard(let failure):
       DiagnosticsStore.shared.record("notification", "navigation_rejected", fields: ["reason": failure.rawValue])
       let keys: [NotificationNavigation.Failure: String] = [.wrongAccount: "wrongAccount", .unknownRoute: "unknown", .noWorkspace: "noWorkspace", .sessionMissing: "gone"]
-      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("notifications.route." + keys[failure]!), bundle: .lody), kind: "error")
+      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue("notifications.route." + keys[failure]!), bundle: .lody), kind: .error)
     }
     if link != nil { link = nil }
     else if let id = pending?["id"] { PushNotifications.shared.acknowledge(id) }

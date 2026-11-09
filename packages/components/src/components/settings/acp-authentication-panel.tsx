@@ -1077,7 +1077,8 @@ export function AcpAuthenticationPanel({
     </div>
   );
 
-  if (layout === 'action' && advertisedMethods.length === 0) return null;
+  const actionMethodId = onlyMethodId ?? advertisedMethods[0]?.id;
+  if (layout === 'action' && !actionMethodId) return null;
 
   return (
     <div
@@ -1095,7 +1096,7 @@ export function AcpAuthenticationPanel({
           disabled={waiting || !authArgs || !interactiveProtocolSupported || !canSelectAuthMethod}
           onClick={() => {
             setActionOpen(true);
-            void startAuthenticationFromPersistedConfig(advertisedMethods[0].id);
+            void startAuthenticationFromPersistedConfig(actionMethodId);
           }}
         >
           {t('lodyAgentConnections.enterKey')}
@@ -1134,7 +1135,10 @@ export function AcpAuthenticationPanel({
                     size="small"
                     variant="secondary"
                     disabled={waiting || !authArgs || !interactiveProtocolSupported}
-                    onClick={() => void startAuthenticationFromPersistedConfig(method.id)}
+                    onClick={() => {
+                      setActionOpen(true);
+                      void startAuthenticationFromPersistedConfig(method.id);
+                    }}
                   >
                     {t('agents.authentication.signInShort', 'Sign in')}
                   </Button>
@@ -1144,7 +1148,7 @@ export function AcpAuthenticationPanel({
           ))}
         </div>
       ) : null}
-      {layout === 'action' ? (
+      {layout === 'action' || methodRows ? (
         <Dialog.Root
           open={actionOpen}
           onOpenChange={(open) => {
@@ -1154,7 +1158,12 @@ export function AcpAuthenticationPanel({
         >
           <Dialog.Content width="420px">
             <Dialog.Header>
-              <Dialog.Title>{t('lodyAgentConnections.keyTitle', { name: provider })}</Dialog.Title>
+              <Dialog.Title>
+                {layout === 'action'
+                  ? t('lodyAgentConnections.keyTitle', { name: provider })
+                  : (advertisedMethods.find((method) => method.id === runningMethodId)?.name ??
+                    provider)}
+              </Dialog.Title>
             </Dialog.Header>
             {waiting && !interaction ? waitingStatus : null}
             {details}

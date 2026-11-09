@@ -34,7 +34,7 @@ final class SubagentTaskController: UIViewController {
     list.forwarded = { [weak self] name, body in
       guard name == "rowPress", body["id"] as? String == "subagent-detail-copy", let self else { return }
       UIPasteboard.general.string = result
-      LodyToastOverlay.shared.show(message: String(localized: "subagent.detail.copied", bundle: .lody), kind: "info")
+      LodyToastOverlay.shared.show(message: String(localized: "subagent.detail.copied", bundle: .lody), kind: .neutral)
     }
     render()
   }

@@ -751,27 +751,33 @@ assert(LodyFlatRows.separatorLeading(textLeading: 46, isLast: true) == nil, "The
 assert(LodyFlatRows.minHeight(hasSubtitle: false) == 44 && LodyFlatRows.minHeight(hasSubtitle: true) == 52, "Flat rows keep 44 / 52 pt minimums")
 print("PASS: flat system rows place icons on the rail and hairlines under the text column")
 
-// Catalog updates must not replace an unchanged, potentially presented menu.
-let stableMenu = LodyMenuButton()
-let nativeMenuButton = stableMenu.subviews.compactMap { $0 as? UIButton }.first!
-var workspaceChoice = LodyMenuItem(id: "workspace", title: "Workspace", selected: true)
-stableMenu.setItems([workspaceChoice])
-let originalMenu = nativeMenuButton.menu!
-for _ in 0..<10 { stableMenu.setItems([workspaceChoice]) }
-assert(nativeMenuButton.menu === originalMenu, "Unchanged updates must preserve the presented menu")
-workspaceChoice.title = "Renamed workspace"
-stableMenu.setItems([workspaceChoice])
-assert(nativeMenuButton.menu !== originalMenu, "Changed menu content must still update")
-
-var devicesMenu = LodyMenuItem(id: "devices", title: "Devices", children: [LodyMenuItem(id: "device", title: "Offline")])
-stableMenu.setItems([workspaceChoice, devicesMenu])
-let offlineMenu = nativeMenuButton.menu!
-devicesMenu.children[0].title = "Online"
-stableMenu.setItems([workspaceChoice, devicesMenu])
-assert(nativeMenuButton.menu !== offlineMenu, "Nested device changes must still refresh")
-let onlineMenu = nativeMenuButton.menu!
-stableMenu.setItems([workspaceChoice, devicesMenu])
-assert(nativeMenuButton.menu === onlineMenu, "Nested equal values must preserve the menu")
+// Workspace selection is a native button menu, with full titles and system state.
+let capsule = LodyMenuButton()
+let capsuleButton = capsule.subviews.compactMap { $0 as? UIButton }.first!
+capsule.accessibilityIdentifier = "workspace-menu"
+let longWorkspace = "Workspace with a name longer than the native menu can display in one line"
+capsule.setItems([
+  LodyMenuItem(id: "current", title: longWorkspace, selected: true, monogram: "W"),
+  LodyMenuItem(id: "other", title: "Other", monogram: "O"),
+])
+assert(capsuleButton.showsMenuAsPrimaryAction)
+assert(capsuleButton.menu!.title.isEmpty)
+capsule.setAccountEmail("preview@example.test")
+assert(capsuleButton.menu!.title == "preview@example.test")
+capsule.setAccountEmail("changed@example.test")
+assert(capsuleButton.menu!.title == "changed@example.test")
+capsule.setAccountEmail("  ")
+assert(capsuleButton.menu!.title.isEmpty, "Clearing account identity removes the menu heading without changing workspaces")
+let menuActions = capsuleButton.menu!.children.compactMap { $0 as? UIAction }
+assert(menuActions.map(\.title) == [longWorkspace, "Other"])
+assert(menuActions.map(\.state) == [.on, .off])
+assert(menuActions.allSatisfy { $0.image?.size == CGSize(width: 24, height: 24) })
+capsule.setItems([LodyMenuItem(id: "other", title: "Renamed", selected: true)])
+let updatedAction = capsuleButton.menu!.children.first as! UIAction
+assert(updatedAction.title == "Renamed" && updatedAction.state == .on)
+capsule.setItems([])
+assert(capsuleButton.menu == nil)
+print("PASS: workspace menus preserve full names, avatars and selection, refresh on catalog changes and clear when empty")
 
 // Chat renders this shared cached photo at 36 pt. A 3x display needs 108 real pixels.
 let retinaFormat = UIGraphicsImageRendererFormat()

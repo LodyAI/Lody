@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","memorySettings","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","publishedShares","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentRoles","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","deleteSession","editSession","ensureSession","fileDiff","forkSession","hello","iosSimulatorControl","itemDetail","listDir","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","publishedShares","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","start","turnDiff","workspaceChanges"]
 
   public enum AgentRoleItemVisibility: String, Codable, Sendable, Equatable, CaseIterable {
     case `private` = "private"
@@ -3313,236 +3313,6 @@ extension RuntimeContract {
     }
   }
 
-  public struct MemoryAssociation: Codable, Sendable, Equatable {
-    public var machineId: String
-    public var providerId: String
-    public var memoryId: String
-    public var name: String
-    public var description: String?
-    public init(machineId: String, providerId: String, memoryId: String, name: String, description: String? = nil) {
-      self.machineId = machineId
-      self.providerId = providerId
-      self.memoryId = memoryId
-      self.name = name
-      self.description = description
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.machineId = try c.decode(String.self, forKey: Key("machineId"))
-      self.providerId = try c.decode(String.self, forKey: Key("providerId"))
-      self.memoryId = try c.decode(String.self, forKey: Key("memoryId"))
-      self.name = try c.decode(String.self, forKey: Key("name"))
-      self.description = try c.decodeIfPresent(String.self, forKey: Key("description"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.machineId, forKey: Key("machineId"))
-      try c.encode(self.providerId, forKey: Key("providerId"))
-      try c.encode(self.memoryId, forKey: Key("memoryId"))
-      try c.encode(self.name, forKey: Key("name"))
-      try c.encodeIfPresent(self.description, forKey: Key("description"))
-    }
-  }
-
-  public struct MemorySettingsParamsList: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var userId: String
-    public var machineId: String?
-    public init(workspaceId: String, userId: String, machineId: String? = nil) {
-      self.workspaceId = workspaceId
-      self.userId = userId
-      self.machineId = machineId
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.userId, forKey: Key("userId"))
-      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
-    }
-  }
-
-  public struct MemorySettingsParamsImport: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var userId: String
-    public var machineId: String?
-    public var memoryId: String
-    public init(workspaceId: String, userId: String, machineId: String? = nil, memoryId: String) {
-      self.workspaceId = workspaceId
-      self.userId = userId
-      self.machineId = machineId
-      self.memoryId = memoryId
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
-      self.memoryId = try c.decode(String.self, forKey: Key("memoryId"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.userId, forKey: Key("userId"))
-      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
-      try c.encode(self.memoryId, forKey: Key("memoryId"))
-    }
-  }
-
-  public struct MemorySettingsParamsRemove: Codable, Sendable, Equatable {
-    public var workspaceId: String
-    public var userId: String
-    public var machineId: String?
-    public var base: MemoryAssociation
-    public init(workspaceId: String, userId: String, machineId: String? = nil, base: MemoryAssociation) {
-      self.workspaceId = workspaceId
-      self.userId = userId
-      self.machineId = machineId
-      self.base = base
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
-      self.userId = try c.decode(String.self, forKey: Key("userId"))
-      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
-      self.base = try c.decode(MemoryAssociation.self, forKey: Key("base"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
-      try c.encode(self.userId, forKey: Key("userId"))
-      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
-      try c.encode(self.base, forKey: Key("base"))
-    }
-  }
-
-  public enum MemorySettingsParams: Codable, Sendable, Equatable {
-    case list(MemorySettingsParamsList)
-    case `import`(MemorySettingsParamsImport)
-    case remove(MemorySettingsParamsRemove)
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      let tag = try c.decode(String.self, forKey: Key("action"))
-      switch tag {
-      case "list": self = .list(try MemorySettingsParamsList(from: decoder))
-      case "import": self = .`import`(try MemorySettingsParamsImport(from: decoder))
-      case "remove": self = .remove(try MemorySettingsParamsRemove(from: decoder))
-      default: throw DecodingError.dataCorruptedError(forKey: Key("action"), in: c, debugDescription: "Unknown action \(tag)")
-      }
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      switch self {
-      case .list(let value):
-        try c.encode("list", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .`import`(let value):
-        try c.encode("import", forKey: Key("action"))
-        try value.encode(to: encoder)
-      case .remove(let value):
-        try c.encode("remove", forKey: Key("action"))
-        try value.encode(to: encoder)
-      }
-    }
-  }
-
-  public struct MemorySnapshotMachinesItem: Codable, Sendable, Equatable {
-    public var id: String
-    public var name: String
-    public init(id: String, name: String) {
-      self.id = id
-      self.name = name
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.id = try c.decode(String.self, forKey: Key("id"))
-      self.name = try c.decode(String.self, forKey: Key("name"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.id, forKey: Key("id"))
-      try c.encode(self.name, forKey: Key("name"))
-    }
-  }
-
-  public struct MemorySnapshotIdentitiesItem: Codable, Sendable, Equatable {
-    public var id: String
-    public var name: String
-    public var description: String?
-    public var role: String?
-    public init(id: String, name: String, description: String? = nil, role: String? = nil) {
-      self.id = id
-      self.name = name
-      self.description = description
-      self.role = role
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.id = try c.decode(String.self, forKey: Key("id"))
-      self.name = try c.decode(String.self, forKey: Key("name"))
-      self.description = try c.decodeIfPresent(String.self, forKey: Key("description"))
-      self.role = try c.decodeIfPresent(String.self, forKey: Key("role"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.id, forKey: Key("id"))
-      try c.encode(self.name, forKey: Key("name"))
-      try c.encodeIfPresent(self.description, forKey: Key("description"))
-      try c.encodeIfPresent(self.role, forKey: Key("role"))
-    }
-  }
-
-  public enum MemorySnapshotStatus: String, Codable, Sendable, Equatable, CaseIterable {
-    case ready = "ready"
-    case notInstalled = "not_installed"
-    case notRunning = "not_running"
-    case error = "error"
-    case offline = "offline"
-    case unknown = "unknown"
-    case unsupported = "unsupported"
-    case forbidden = "forbidden"
-  }
-
-  public struct MemorySnapshot: Codable, Sendable, Equatable {
-    public var machines: [MemorySnapshotMachinesItem]
-    public var machineId: String?
-    public var entries: [MemoryAssociation]
-    public var identities: [MemorySnapshotIdentitiesItem]
-    public var status: MemorySnapshotStatus
-    public var cached: Bool
-    public init(machines: [MemorySnapshotMachinesItem], machineId: String? = nil, entries: [MemoryAssociation], identities: [MemorySnapshotIdentitiesItem], status: MemorySnapshotStatus, cached: Bool) {
-      self.machines = machines
-      self.machineId = machineId
-      self.entries = entries
-      self.identities = identities
-      self.status = status
-      self.cached = cached
-    }
-    public init(from decoder: any Decoder) throws {
-      let c = try decoder.container(keyedBy: Key.self)
-      self.machines = try c.decode([MemorySnapshotMachinesItem].self, forKey: Key("machines"))
-      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
-      self.entries = try c.decode([MemoryAssociation].self, forKey: Key("entries"))
-      self.identities = try c.decode([MemorySnapshotIdentitiesItem].self, forKey: Key("identities"))
-      self.status = try c.decode(MemorySnapshotStatus.self, forKey: Key("status"))
-      self.cached = try c.decode(Bool.self, forKey: Key("cached"))
-    }
-    public func encode(to encoder: any Encoder) throws {
-      var c = encoder.container(keyedBy: Key.self)
-      try c.encode(self.machines, forKey: Key("machines"))
-      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
-      try c.encode(self.entries, forKey: Key("entries"))
-      try c.encode(self.identities, forKey: Key("identities"))
-      try c.encode(self.status, forKey: Key("status"))
-      try c.encode(self.cached, forKey: Key("cached"))
-    }
-  }
-
   public enum MentionCatalogItemsItemKind: String, Codable, Sendable, Equatable, CaseIterable {
     case file = "file"
     case skill = "skill"
@@ -4854,7 +4624,6 @@ extension RuntimeContract {
   public enum RemoteSettingKind: String, Codable, Sendable, Equatable, CaseIterable {
     case machine = "machine"
     case agent = "agent"
-    case mcp = "mcp"
   }
 
   public struct RemoteSetting: Codable, Sendable, Equatable {
@@ -4866,10 +4635,7 @@ extension RuntimeContract {
     public var readOnly: Bool?
     public var detail: String?
     public var prompt: String?
-    public var enabledByDefault: Bool?
-    public var configured: Bool?
-    public var updatedAt: Double?
-    public init(kind: RemoteSettingKind, id: String, name: String, machineId: String? = nil, machineName: String? = nil, readOnly: Bool? = nil, detail: String? = nil, prompt: String? = nil, enabledByDefault: Bool? = nil, configured: Bool? = nil, updatedAt: Double? = nil) {
+    public init(kind: RemoteSettingKind, id: String, name: String, machineId: String? = nil, machineName: String? = nil, readOnly: Bool? = nil, detail: String? = nil, prompt: String? = nil) {
       self.kind = kind
       self.id = id
       self.name = name
@@ -4878,9 +4644,6 @@ extension RuntimeContract {
       self.readOnly = readOnly
       self.detail = detail
       self.prompt = prompt
-      self.enabledByDefault = enabledByDefault
-      self.configured = configured
-      self.updatedAt = updatedAt
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -4892,9 +4655,6 @@ extension RuntimeContract {
       self.readOnly = try c.decodeIfPresent(Bool.self, forKey: Key("readOnly"))
       self.detail = try c.decodeIfPresent(String.self, forKey: Key("detail"))
       self.prompt = try c.decodeIfPresent(String.self, forKey: Key("prompt"))
-      self.enabledByDefault = try c.decodeIfPresent(Bool.self, forKey: Key("enabledByDefault"))
-      self.configured = try c.decodeIfPresent(Bool.self, forKey: Key("configured"))
-      self.updatedAt = try c.decodeIfPresent(Double.self, forKey: Key("updatedAt"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
@@ -4906,42 +4666,34 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.readOnly, forKey: Key("readOnly"))
       try c.encodeIfPresent(self.detail, forKey: Key("detail"))
       try c.encodeIfPresent(self.prompt, forKey: Key("prompt"))
-      try c.encodeIfPresent(self.enabledByDefault, forKey: Key("enabledByDefault"))
-      try c.encodeIfPresent(self.configured, forKey: Key("configured"))
-      try c.encodeIfPresent(self.updatedAt, forKey: Key("updatedAt"))
     }
   }
 
   public enum RemoteSettingsParamsKind: String, Codable, Sendable, Equatable, CaseIterable {
     case machine = "machine"
     case agent = "agent"
-    case mcp = "mcp"
   }
 
   public struct RemoteSettingsParamsEdit: Codable, Sendable, Equatable {
     public var item: RemoteSetting
     public var name: String
     public var prompt: String?
-    public var enabledByDefault: Bool?
-    public init(item: RemoteSetting, name: String, prompt: String? = nil, enabledByDefault: Bool? = nil) {
+    public init(item: RemoteSetting, name: String, prompt: String? = nil) {
       self.item = item
       self.name = name
       self.prompt = prompt
-      self.enabledByDefault = enabledByDefault
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.item = try c.decode(RemoteSetting.self, forKey: Key("item"))
       self.name = try c.decode(String.self, forKey: Key("name"))
       self.prompt = try c.decodeIfPresent(String.self, forKey: Key("prompt"))
-      self.enabledByDefault = try c.decodeIfPresent(Bool.self, forKey: Key("enabledByDefault"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.item, forKey: Key("item"))
       try c.encode(self.name, forKey: Key("name"))
       try c.encodeIfPresent(self.prompt, forKey: Key("prompt"))
-      try c.encodeIfPresent(self.enabledByDefault, forKey: Key("enabledByDefault"))
     }
   }
 
@@ -4950,13 +4702,11 @@ extension RuntimeContract {
     public var userId: String
     public var kind: RemoteSettingsParamsKind
     public var edit: RemoteSettingsParamsEdit?
-    public var remove: RemoteSetting?
-    public init(workspaceId: String, userId: String, kind: RemoteSettingsParamsKind, edit: RemoteSettingsParamsEdit? = nil, remove: RemoteSetting? = nil) {
+    public init(workspaceId: String, userId: String, kind: RemoteSettingsParamsKind, edit: RemoteSettingsParamsEdit? = nil) {
       self.workspaceId = workspaceId
       self.userId = userId
       self.kind = kind
       self.edit = edit
-      self.remove = remove
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -4964,7 +4714,6 @@ extension RuntimeContract {
       self.userId = try c.decode(String.self, forKey: Key("userId"))
       self.kind = try c.decode(RemoteSettingsParamsKind.self, forKey: Key("kind"))
       self.edit = try c.decodeIfPresent(RemoteSettingsParamsEdit.self, forKey: Key("edit"))
-      self.remove = try c.decodeIfPresent(RemoteSetting.self, forKey: Key("remove"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
@@ -4972,7 +4721,6 @@ extension RuntimeContract {
       try c.encode(self.userId, forKey: Key("userId"))
       try c.encode(self.kind, forKey: Key("kind"))
       try c.encodeIfPresent(self.edit, forKey: Key("edit"))
-      try c.encodeIfPresent(self.remove, forKey: Key("remove"))
     }
   }
 
@@ -5113,6 +4861,470 @@ extension RuntimeContract {
       try c.encode(self.code, forKey: Key("code"))
       try c.encode(self.retryable, forKey: Key("retryable"))
       try c.encodeIfPresent(self.detail, forKey: Key("detail"))
+    }
+  }
+
+  public enum ScheduleCommandParamsAction: String, Codable, Sendable, Equatable, CaseIterable {
+    case create = "create"
+    case edit = "edit"
+    case pause = "pause"
+    case resume = "resume"
+    case run = "run"
+    case delete = "delete"
+  }
+
+  public struct ScheduleCommandParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var action: ScheduleCommandParamsAction
+    public var scheduleId: String
+    public var requestId: String
+    public var draft: ScheduleDraft?
+    public init(workspaceId: String, action: ScheduleCommandParamsAction, scheduleId: String, requestId: String, draft: ScheduleDraft? = nil) {
+      self.workspaceId = workspaceId
+      self.action = action
+      self.scheduleId = scheduleId
+      self.requestId = requestId
+      self.draft = draft
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.action = try c.decode(ScheduleCommandParamsAction.self, forKey: Key("action"))
+      self.scheduleId = try c.decode(String.self, forKey: Key("scheduleId"))
+      self.requestId = try c.decode(String.self, forKey: Key("requestId"))
+      self.draft = try c.decodeIfPresent(ScheduleDraft.self, forKey: Key("draft"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.action, forKey: Key("action"))
+      try c.encode(self.scheduleId, forKey: Key("scheduleId"))
+      try c.encode(self.requestId, forKey: Key("requestId"))
+      try c.encodeIfPresent(self.draft, forKey: Key("draft"))
+    }
+  }
+
+  public struct ScheduleCommandResult: Codable, Sendable, Equatable {
+    public var scheduleId: String
+    public init(scheduleId: String) {
+      self.scheduleId = scheduleId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.scheduleId = try c.decode(String.self, forKey: Key("scheduleId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.scheduleId, forKey: Key("scheduleId"))
+    }
+  }
+
+  public struct ScheduleDetail: Codable, Sendable, Equatable {
+    public var item: ScheduleItem
+    public var prompt: String
+    public var modelId: String?
+    public var modeId: String?
+    public var project: ScheduleProject?
+    public init(item: ScheduleItem, prompt: String, modelId: String? = nil, modeId: String? = nil, project: ScheduleProject? = nil) {
+      self.item = item
+      self.prompt = prompt
+      self.modelId = modelId
+      self.modeId = modeId
+      self.project = project
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.item = try c.decode(ScheduleItem.self, forKey: Key("item"))
+      self.prompt = try c.decode(String.self, forKey: Key("prompt"))
+      self.modelId = try c.decodeIfPresent(String.self, forKey: Key("modelId"))
+      self.modeId = try c.decodeIfPresent(String.self, forKey: Key("modeId"))
+      self.project = try c.decodeIfPresent(ScheduleProject.self, forKey: Key("project"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.item, forKey: Key("item"))
+      try c.encode(self.prompt, forKey: Key("prompt"))
+      try c.encodeIfPresent(self.modelId, forKey: Key("modelId"))
+      try c.encodeIfPresent(self.modeId, forKey: Key("modeId"))
+      try c.encodeIfPresent(self.project, forKey: Key("project"))
+    }
+  }
+
+  public struct ScheduleDetailParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var scheduleId: String
+    public init(workspaceId: String, scheduleId: String) {
+      self.workspaceId = workspaceId
+      self.scheduleId = scheduleId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.scheduleId = try c.decode(String.self, forKey: Key("scheduleId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.scheduleId, forKey: Key("scheduleId"))
+    }
+  }
+
+  public enum ScheduleDraftDestination: String, Codable, Sendable, Equatable, CaseIterable {
+    case newSession = "new_session"
+    case ownSession = "own_session"
+  }
+
+  public struct ScheduleDraft: Codable, Sendable, Equatable {
+    public var title: String
+    public var prompt: String
+    public var machineId: String
+    public var agentConfigId: String
+    public var modelId: String?
+    public var modeId: String?
+    public var project: ScheduleProject?
+    public var destination: ScheduleDraftDestination
+    public var rule: ScheduleRule
+    public init(title: String, prompt: String, machineId: String, agentConfigId: String, modelId: String? = nil, modeId: String? = nil, project: ScheduleProject? = nil, destination: ScheduleDraftDestination, rule: ScheduleRule) {
+      self.title = title
+      self.prompt = prompt
+      self.machineId = machineId
+      self.agentConfigId = agentConfigId
+      self.modelId = modelId
+      self.modeId = modeId
+      self.project = project
+      self.destination = destination
+      self.rule = rule
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.title = try c.decode(String.self, forKey: Key("title"))
+      self.prompt = try c.decode(String.self, forKey: Key("prompt"))
+      self.machineId = try c.decode(String.self, forKey: Key("machineId"))
+      self.agentConfigId = try c.decode(String.self, forKey: Key("agentConfigId"))
+      self.modelId = try c.decodeIfPresent(String.self, forKey: Key("modelId"))
+      self.modeId = try c.decodeIfPresent(String.self, forKey: Key("modeId"))
+      self.project = try c.decodeIfPresent(ScheduleProject.self, forKey: Key("project"))
+      self.destination = try c.decode(ScheduleDraftDestination.self, forKey: Key("destination"))
+      self.rule = try c.decode(ScheduleRule.self, forKey: Key("rule"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.title, forKey: Key("title"))
+      try c.encode(self.prompt, forKey: Key("prompt"))
+      try c.encode(self.machineId, forKey: Key("machineId"))
+      try c.encode(self.agentConfigId, forKey: Key("agentConfigId"))
+      try c.encodeIfPresent(self.modelId, forKey: Key("modelId"))
+      try c.encodeIfPresent(self.modeId, forKey: Key("modeId"))
+      try c.encodeIfPresent(self.project, forKey: Key("project"))
+      try c.encode(self.destination, forKey: Key("destination"))
+      try c.encode(self.rule, forKey: Key("rule"))
+    }
+  }
+
+  public enum ScheduleItemDestination: String, Codable, Sendable, Equatable, CaseIterable {
+    case newSession = "new_session"
+    case ownSession = "own_session"
+    case existingSession = "existing_session"
+  }
+
+  public enum ScheduleItemProjectKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case local = "local"
+    case github = "github"
+  }
+
+  public struct ScheduleItem: Codable, Sendable, Equatable {
+    public var scheduleId: String
+    public var title: String
+    public var ownerId: String
+    public var isOwner: Bool
+    public var machineId: String
+    public var machineName: String?
+    public var machineSupported: Bool
+    public var agentConfigId: String
+    public var agentName: String?
+    public var agentType: String?
+    public var enabled: Bool
+    public var scheduledMessage: Bool
+    public var rule: ScheduleRule
+    public var destination: ScheduleItemDestination
+    public var destinationSessionId: String?
+    public var projectKind: ScheduleItemProjectKind?
+    public var projectKey: String?
+    public var projectName: String?
+    public var state: ScheduleState
+    public var lastRunAt: Double?
+    public var lastSessionId: String?
+    public var createdAt: Double
+    public var updatedAt: Double
+    public init(scheduleId: String, title: String, ownerId: String, isOwner: Bool, machineId: String, machineName: String? = nil, machineSupported: Bool, agentConfigId: String, agentName: String? = nil, agentType: String? = nil, enabled: Bool, scheduledMessage: Bool, rule: ScheduleRule, destination: ScheduleItemDestination, destinationSessionId: String? = nil, projectKind: ScheduleItemProjectKind? = nil, projectKey: String? = nil, projectName: String? = nil, state: ScheduleState, lastRunAt: Double? = nil, lastSessionId: String? = nil, createdAt: Double, updatedAt: Double) {
+      self.scheduleId = scheduleId
+      self.title = title
+      self.ownerId = ownerId
+      self.isOwner = isOwner
+      self.machineId = machineId
+      self.machineName = machineName
+      self.machineSupported = machineSupported
+      self.agentConfigId = agentConfigId
+      self.agentName = agentName
+      self.agentType = agentType
+      self.enabled = enabled
+      self.scheduledMessage = scheduledMessage
+      self.rule = rule
+      self.destination = destination
+      self.destinationSessionId = destinationSessionId
+      self.projectKind = projectKind
+      self.projectKey = projectKey
+      self.projectName = projectName
+      self.state = state
+      self.lastRunAt = lastRunAt
+      self.lastSessionId = lastSessionId
+      self.createdAt = createdAt
+      self.updatedAt = updatedAt
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.scheduleId = try c.decode(String.self, forKey: Key("scheduleId"))
+      self.title = try c.decode(String.self, forKey: Key("title"))
+      self.ownerId = try c.decode(String.self, forKey: Key("ownerId"))
+      self.isOwner = try c.decode(Bool.self, forKey: Key("isOwner"))
+      self.machineId = try c.decode(String.self, forKey: Key("machineId"))
+      self.machineName = try c.decodeIfPresent(String.self, forKey: Key("machineName"))
+      self.machineSupported = try c.decode(Bool.self, forKey: Key("machineSupported"))
+      self.agentConfigId = try c.decode(String.self, forKey: Key("agentConfigId"))
+      self.agentName = try c.decodeIfPresent(String.self, forKey: Key("agentName"))
+      self.agentType = try c.decodeIfPresent(String.self, forKey: Key("agentType"))
+      self.enabled = try c.decode(Bool.self, forKey: Key("enabled"))
+      self.scheduledMessage = try c.decode(Bool.self, forKey: Key("scheduledMessage"))
+      self.rule = try c.decode(ScheduleRule.self, forKey: Key("rule"))
+      self.destination = try c.decode(ScheduleItemDestination.self, forKey: Key("destination"))
+      self.destinationSessionId = try c.decodeIfPresent(String.self, forKey: Key("destinationSessionId"))
+      self.projectKind = try c.decodeIfPresent(ScheduleItemProjectKind.self, forKey: Key("projectKind"))
+      self.projectKey = try c.decodeIfPresent(String.self, forKey: Key("projectKey"))
+      self.projectName = try c.decodeIfPresent(String.self, forKey: Key("projectName"))
+      self.state = try c.decode(ScheduleState.self, forKey: Key("state"))
+      self.lastRunAt = try c.decodeIfPresent(Double.self, forKey: Key("lastRunAt"))
+      self.lastSessionId = try c.decodeIfPresent(String.self, forKey: Key("lastSessionId"))
+      self.createdAt = try c.decode(Double.self, forKey: Key("createdAt"))
+      self.updatedAt = try c.decode(Double.self, forKey: Key("updatedAt"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.scheduleId, forKey: Key("scheduleId"))
+      try c.encode(self.title, forKey: Key("title"))
+      try c.encode(self.ownerId, forKey: Key("ownerId"))
+      try c.encode(self.isOwner, forKey: Key("isOwner"))
+      try c.encode(self.machineId, forKey: Key("machineId"))
+      try c.encodeIfPresent(self.machineName, forKey: Key("machineName"))
+      try c.encode(self.machineSupported, forKey: Key("machineSupported"))
+      try c.encode(self.agentConfigId, forKey: Key("agentConfigId"))
+      try c.encodeIfPresent(self.agentName, forKey: Key("agentName"))
+      try c.encodeIfPresent(self.agentType, forKey: Key("agentType"))
+      try c.encode(self.enabled, forKey: Key("enabled"))
+      try c.encode(self.scheduledMessage, forKey: Key("scheduledMessage"))
+      try c.encode(self.rule, forKey: Key("rule"))
+      try c.encode(self.destination, forKey: Key("destination"))
+      try c.encodeIfPresent(self.destinationSessionId, forKey: Key("destinationSessionId"))
+      try c.encodeIfPresent(self.projectKind, forKey: Key("projectKind"))
+      try c.encodeIfPresent(self.projectKey, forKey: Key("projectKey"))
+      try c.encodeIfPresent(self.projectName, forKey: Key("projectName"))
+      try c.encode(self.state, forKey: Key("state"))
+      try c.encodeIfPresent(self.lastRunAt, forKey: Key("lastRunAt"))
+      try c.encodeIfPresent(self.lastSessionId, forKey: Key("lastSessionId"))
+      try c.encode(self.createdAt, forKey: Key("createdAt"))
+      try c.encode(self.updatedAt, forKey: Key("updatedAt"))
+    }
+  }
+
+  public enum ScheduleProjectKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case local = "local"
+    case github = "github"
+  }
+
+  public struct ScheduleProject: Codable, Sendable, Equatable {
+    public var kind: ScheduleProjectKind
+    public var localProjectId: String?
+    public var repoFullName: String?
+    public var branch: String?
+    public var useWorktree: Bool?
+    public var name: String?
+    public init(kind: ScheduleProjectKind, localProjectId: String? = nil, repoFullName: String? = nil, branch: String? = nil, useWorktree: Bool? = nil, name: String? = nil) {
+      self.kind = kind
+      self.localProjectId = localProjectId
+      self.repoFullName = repoFullName
+      self.branch = branch
+      self.useWorktree = useWorktree
+      self.name = name
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.kind = try c.decode(ScheduleProjectKind.self, forKey: Key("kind"))
+      self.localProjectId = try c.decodeIfPresent(String.self, forKey: Key("localProjectId"))
+      self.repoFullName = try c.decodeIfPresent(String.self, forKey: Key("repoFullName"))
+      self.branch = try c.decodeIfPresent(String.self, forKey: Key("branch"))
+      self.useWorktree = try c.decodeIfPresent(Bool.self, forKey: Key("useWorktree"))
+      self.name = try c.decodeIfPresent(String.self, forKey: Key("name"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.kind, forKey: Key("kind"))
+      try c.encodeIfPresent(self.localProjectId, forKey: Key("localProjectId"))
+      try c.encodeIfPresent(self.repoFullName, forKey: Key("repoFullName"))
+      try c.encodeIfPresent(self.branch, forKey: Key("branch"))
+      try c.encodeIfPresent(self.useWorktree, forKey: Key("useWorktree"))
+      try c.encodeIfPresent(self.name, forKey: Key("name"))
+    }
+  }
+
+  public enum ScheduleRuleKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case manual = "manual"
+    case once = "once"
+    case minutes = "minutes"
+    case hours = "hours"
+    case daily = "daily"
+    case weekdays = "weekdays"
+    case weekly = "weekly"
+    case monthly = "monthly"
+    case unsupported = "unsupported"
+  }
+
+  public struct ScheduleRule: Codable, Sendable, Equatable {
+    public var kind: ScheduleRuleKind
+    public var every: Int?
+    public var hour: Int?
+    public var minute: Int?
+    public var weekdays: [Int]?
+    public var days: [Int]?
+    public var at: Double?
+    public var timeZone: String?
+    public var summary: String?
+    public init(kind: ScheduleRuleKind, every: Int? = nil, hour: Int? = nil, minute: Int? = nil, weekdays: [Int]? = nil, days: [Int]? = nil, at: Double? = nil, timeZone: String? = nil, summary: String? = nil) {
+      self.kind = kind
+      self.every = every
+      self.hour = hour
+      self.minute = minute
+      self.weekdays = weekdays
+      self.days = days
+      self.at = at
+      self.timeZone = timeZone
+      self.summary = summary
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.kind = try c.decode(ScheduleRuleKind.self, forKey: Key("kind"))
+      self.every = try c.decodeIfPresent(Int.self, forKey: Key("every"))
+      self.hour = try c.decodeIfPresent(Int.self, forKey: Key("hour"))
+      self.minute = try c.decodeIfPresent(Int.self, forKey: Key("minute"))
+      self.weekdays = try c.decodeIfPresent([Int].self, forKey: Key("weekdays"))
+      self.days = try c.decodeIfPresent([Int].self, forKey: Key("days"))
+      self.at = try c.decodeIfPresent(Double.self, forKey: Key("at"))
+      self.timeZone = try c.decodeIfPresent(String.self, forKey: Key("timeZone"))
+      self.summary = try c.decodeIfPresent(String.self, forKey: Key("summary"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.kind, forKey: Key("kind"))
+      try c.encodeIfPresent(self.every, forKey: Key("every"))
+      try c.encodeIfPresent(self.hour, forKey: Key("hour"))
+      try c.encodeIfPresent(self.minute, forKey: Key("minute"))
+      try c.encodeIfPresent(self.weekdays, forKey: Key("weekdays"))
+      try c.encodeIfPresent(self.days, forKey: Key("days"))
+      try c.encodeIfPresent(self.at, forKey: Key("at"))
+      try c.encodeIfPresent(self.timeZone, forKey: Key("timeZone"))
+      try c.encodeIfPresent(self.summary, forKey: Key("summary"))
+    }
+  }
+
+  public struct SchedulesParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public init(workspaceId: String) {
+      self.workspaceId = workspaceId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+    }
+  }
+
+  public struct SchedulesResult: Codable, Sendable, Equatable {
+    public var items: [ScheduleItem]
+    public var deviceTimeZone: String
+    public var machineTimeZones: [String: String]
+    public var ownedMachineIds: [String]
+    public init(items: [ScheduleItem], deviceTimeZone: String, machineTimeZones: [String: String], ownedMachineIds: [String]) {
+      self.items = items
+      self.deviceTimeZone = deviceTimeZone
+      self.machineTimeZones = machineTimeZones
+      self.ownedMachineIds = ownedMachineIds
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.items = try c.decode([ScheduleItem].self, forKey: Key("items"))
+      self.deviceTimeZone = try c.decode(String.self, forKey: Key("deviceTimeZone"))
+      self.machineTimeZones = try c.decode([String: String].self, forKey: Key("machineTimeZones"))
+      self.ownedMachineIds = try c.decode([String].self, forKey: Key("ownedMachineIds"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.items, forKey: Key("items"))
+      try c.encode(self.deviceTimeZone, forKey: Key("deviceTimeZone"))
+      try c.encode(self.machineTimeZones, forKey: Key("machineTimeZones"))
+      try c.encode(self.ownedMachineIds, forKey: Key("ownedMachineIds"))
+    }
+  }
+
+  public enum ScheduleStateGroup: String, Codable, Sendable, Equatable, CaseIterable {
+    case running = "running"
+    case paused = "paused"
+    case attention = "attention"
+    case ended = "ended"
+  }
+
+  public enum ScheduleStateKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case sent = "sent"
+    case cancelled = "cancelled"
+    case notSent = "notSent"
+    case cancelling = "cancelling"
+    case sendsAt = "sendsAt"
+    case waitingToSend = "waitingToSend"
+    case paused = "paused"
+    case blocked = "blocked"
+    case retrying = "retrying"
+    case due = "due"
+    case waitingForAgent = "waitingForAgent"
+    case manual = "manual"
+    case runsAt = "runsAt"
+    case done = "done"
+    case notScheduled = "notScheduled"
+  }
+
+  public struct ScheduleState: Codable, Sendable, Equatable {
+    public var group: ScheduleStateGroup
+    public var kind: ScheduleStateKind
+    public var at: Double?
+    public var blockedCode: String?
+    public init(group: ScheduleStateGroup, kind: ScheduleStateKind, at: Double? = nil, blockedCode: String? = nil) {
+      self.group = group
+      self.kind = kind
+      self.at = at
+      self.blockedCode = blockedCode
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.group = try c.decode(ScheduleStateGroup.self, forKey: Key("group"))
+      self.kind = try c.decode(ScheduleStateKind.self, forKey: Key("kind"))
+      self.at = try c.decodeIfPresent(Double.self, forKey: Key("at"))
+      self.blockedCode = try c.decodeIfPresent(String.self, forKey: Key("blockedCode"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.group, forKey: Key("group"))
+      try c.encode(self.kind, forKey: Key("kind"))
+      try c.encodeIfPresent(self.at, forKey: Key("at"))
+      try c.encodeIfPresent(self.blockedCode, forKey: Key("blockedCode"))
     }
   }
 
@@ -7280,16 +7492,6 @@ extension RuntimeContract {
         return nil
       }
     }
-    public enum MemorySettings: RuntimeCall {
-      public typealias Params = RuntimeContract.MemorySettingsParams
-      public typealias Result = RuntimeContract.MemorySnapshot
-      public static let method = "memorySettings"
-      public static let timeout: Double = 45
-      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
-        if case .memorySettings(let result) = value { return result }
-        return nil
-      }
-    }
     public enum MentionCatalog: RuntimeCall {
       public typealias Params = RuntimeContract.MentionCatalogParams
       public typealias Result = RuntimeContract.MentionCatalog
@@ -7427,6 +7629,36 @@ extension RuntimeContract {
       public static let timeout: Double = 10
       public static func result(_ value: RuntimeContract.CallResult) -> Result? {
         if case .restoreSessions(let result) = value { return result }
+        return nil
+      }
+    }
+    public enum ScheduleCommand: RuntimeCall {
+      public typealias Params = RuntimeContract.ScheduleCommandParams
+      public typealias Result = RuntimeContract.ScheduleCommandResult
+      public static let method = "scheduleCommand"
+      public static let timeout: Double = 70
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .scheduleCommand(let result) = value { return result }
+        return nil
+      }
+    }
+    public enum ScheduleDetail: RuntimeCall {
+      public typealias Params = RuntimeContract.ScheduleDetailParams
+      public typealias Result = RuntimeContract.ScheduleDetail
+      public static let method = "scheduleDetail"
+      public static let timeout: Double = 45
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .scheduleDetail(let result) = value { return result }
+        return nil
+      }
+    }
+    public enum Schedules: RuntimeCall {
+      public typealias Params = RuntimeContract.SchedulesParams
+      public typealias Result = RuntimeContract.SchedulesResult
+      public static let method = "schedules"
+      public static let timeout: Double = 45
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .schedules(let result) = value { return result }
         return nil
       }
     }
@@ -7580,7 +7812,6 @@ extension RuntimeContract {
     case listDir(RuntimeContract.DirectoryListing)
     case localProjects(RuntimeContract.LocalProjectsResult)
     case markSessionRead(RuntimeContract.Empty)
-    case memorySettings(RuntimeContract.MemorySnapshot)
     case mentionCatalog(RuntimeContract.MentionCatalog)
     case openSession(RuntimeContract.Empty)
     case ping(RuntimeContract.Empty)
@@ -7595,6 +7826,9 @@ extension RuntimeContract {
     case renameSession(RuntimeContract.Empty)
     case respondPermission(RuntimeContract.RespondPermissionResult)
     case restoreSessions(RuntimeContract.Empty)
+    case scheduleCommand(RuntimeContract.ScheduleCommandResult)
+    case scheduleDetail(RuntimeContract.ScheduleDetail)
+    case schedules(RuntimeContract.SchedulesResult)
     case sendTurn(RuntimeContract.SendTurnResult)
     case sessionPreview(RuntimeContract.SessionPreviewResult)
     case sessionSharing(RuntimeContract.SessionSharingResult)
@@ -7686,7 +7920,6 @@ extension RuntimeContract {
         case "listDir": message = .result(id: id, .listDir(try c.decode(RuntimeContract.DirectoryListing.self, forKey: Key("payload"))))
         case "localProjects": message = .result(id: id, .localProjects(try c.decode(RuntimeContract.LocalProjectsResult.self, forKey: Key("payload"))))
         case "markSessionRead": message = .result(id: id, .markSessionRead(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
-        case "memorySettings": message = .result(id: id, .memorySettings(try c.decode(RuntimeContract.MemorySnapshot.self, forKey: Key("payload"))))
         case "mentionCatalog": message = .result(id: id, .mentionCatalog(try c.decode(RuntimeContract.MentionCatalog.self, forKey: Key("payload"))))
         case "openSession": message = .result(id: id, .openSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "ping": message = .result(id: id, .ping(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
@@ -7701,6 +7934,9 @@ extension RuntimeContract {
         case "renameSession": message = .result(id: id, .renameSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "respondPermission": message = .result(id: id, .respondPermission(try c.decode(RuntimeContract.RespondPermissionResult.self, forKey: Key("payload"))))
         case "restoreSessions": message = .result(id: id, .restoreSessions(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
+        case "scheduleCommand": message = .result(id: id, .scheduleCommand(try c.decode(RuntimeContract.ScheduleCommandResult.self, forKey: Key("payload"))))
+        case "scheduleDetail": message = .result(id: id, .scheduleDetail(try c.decode(RuntimeContract.ScheduleDetail.self, forKey: Key("payload"))))
+        case "schedules": message = .result(id: id, .schedules(try c.decode(RuntimeContract.SchedulesResult.self, forKey: Key("payload"))))
         case "sendTurn": message = .result(id: id, .sendTurn(try c.decode(RuntimeContract.SendTurnResult.self, forKey: Key("payload"))))
         case "sessionPreview": message = .result(id: id, .sessionPreview(try c.decode(RuntimeContract.SessionPreviewResult.self, forKey: Key("payload"))))
         case "sessionSharing": message = .result(id: id, .sessionSharing(try c.decode(RuntimeContract.SessionSharingResult.self, forKey: Key("payload"))))

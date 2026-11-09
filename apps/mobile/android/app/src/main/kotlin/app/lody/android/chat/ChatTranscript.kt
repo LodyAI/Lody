@@ -1,6 +1,11 @@
 package app.lody.android.chat
 
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -79,6 +84,8 @@ enum class Delivery { Sending, Sent, Queued, Seen, Failed }
 sealed interface ChatEntry {
     val id: String
 
+    data class Operations(override val id: String, val events: List<app.lody.android.runtime.OperationEvent>) : ChatEntry
+
     data class User(
         override val id: String, val text: String, val who: TurnIdentity, val delivery: Delivery = Delivery.Sent,
         val attachments: List<app.lody.android.runtime.MessageAttachment> = emptyList(),
@@ -126,6 +133,8 @@ fun ChatTranscript(
     state: LazyListState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE),
     scrollToLatest: Int = 0,
     actions: MessageActionState = MessageActionState(),
+    relatedSessions: List<app.lody.android.runtime.CatalogSession> = emptyList(),
+    navigateSession: (String) -> Unit = {},
     /** Opens a step's detail; null where there is no runtime (previews, the stream probe). */
     loadDetail: (suspend (entryId: String, itemId: String) -> StepDetail)? = null,
     /** Opens a changed file's diff for a turn; null where there is no runtime. */
@@ -211,7 +220,7 @@ fun ChatTranscript(
     }
     LazyColumn(modifier, state = state, contentPadding = contentPadding) content@{
         keys.reset()
-        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions) }
+        with(KeyRecorder(this@content, keys)) { transcriptRows(entries, open, toggle, details, openTasks, openFiles, actions, relatedSessions, navigateSession) }
         // A small stable end anchor avoids enormous scroll offsets and measuring the
         // whole final Markdown block merely to discover its bottom.
         item(key = "transcript-end", contentType = "end") { Spacer(Modifier.height(LodySpacing.xxs)) }
@@ -261,9 +270,12 @@ private fun LazyListScope.transcriptRows(
     onOpenTasks: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
     actions: MessageActionState,
+    relatedSessions: List<app.lody.android.runtime.CatalogSession>,
+    navigateSession: (String) -> Unit,
 ) {
         entries.forEach { entry ->
             when (entry) {
+                is ChatEntry.Operations -> item(key = entry.id, contentType = "operations") { OperationCards(entry.events, relatedSessions, navigateSession) }
                 is ChatEntry.User -> item(key = entry.id, contentType = "user") { UserTurn(entry, actions) }
                 is ChatEntry.Assistant -> {
                     val layout = entry.layout
@@ -304,15 +316,19 @@ val TranscriptMargin = LodySpacing.lg
 @Composable
 private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
     val colors = LodyTheme.colors
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(entry.id) { mutableStateOf(false) }
+    var overflowing by remember(entry.text) { mutableStateOf(false) }
+    var menu by remember(entry.id) { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = TranscriptMargin)
+            .padding(horizontal = LodySpacing.sm)
             .padding(top = LodySpacing.lg, bottom = LodySpacing.xl),
         horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm, Alignment.End),
         verticalAlignment = Alignment.Top,
     ) {
-        Column(Modifier.weight(1f, fill = false), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
+        Column(Modifier.weight(1f, fill = false).combinedClickable(onClick = {}, onLongClick = { menu = true }), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             Row(
                 Modifier.height(UserHeaderHeight).padding(end = LodySpacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
@@ -338,19 +354,34 @@ private fun UserTurn(entry: ChatEntry.User, actions: MessageActionState) {
                     append(entry.text)
                     entry.references.forEach { reference ->
                         if (reference.start >= 0 && reference.end <= length && reference.end > reference.start)
-                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.accentDefault), reference.start, reference.end)
+                            addStyle(androidx.compose.ui.text.SpanStyle(color = colors.textLink), reference.start, reference.end)
                     }
                 },
                 style = LodyTheme.typography.reading,
                 color = colors.textPrimary,
+                maxLines = if (expanded) Int.MAX_VALUE else 6,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { if (!expanded) overflowing = it.hasVisualOverflow },
                 modifier = Modifier
                     .widthIn(max = LodyLayout.readableMaxWidth)
                     .background(colors.fillSecondary, RoundedCornerShape(UserBubbleRadius))
-                    .padding(horizontal = LodySpacing.xl, vertical = LodySpacing.lg),
+                    .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.lg),
             )
-            Row {
-                if (entry.id == actions.editable) MessageActionButton(LodyIcons.Edit, stringResource(R.string.message_edit)) { actions.edit(entry.id) }
-                MessageCopyButton(entry.text)
+            if (overflowing || expanded) app.lody.android.designsystem.LodyTextButton(onClick = { expanded = !expanded }) {
+                Text(stringResource(if (expanded) R.string.message_show_less else R.string.message_show_more), color = colors.textSecondary)
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.message_copy)) },
+                    leadingIcon = { Icon(LodyIcons.Copy, contentDescription = null) },
+                    enabled = entry.text.isNotBlank(),
+                    onClick = { clipboard.setText(AnnotatedString(entry.text)); menu = false },
+                )
+                if (entry.id == actions.editable) DropdownMenuItem(
+                    text = { Text(stringResource(R.string.message_edit)) },
+                    leadingIcon = { Icon(LodyIcons.Edit, contentDescription = null) },
+                    onClick = { menu = false; actions.edit(entry.id) },
+                )
             }
         }
         // Beside the bubble's top: past the header line and the gap under it.

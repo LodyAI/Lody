@@ -36,6 +36,7 @@ checks = {
     'html-preview': ['LodyLocalization.swift', 'HTMLPreview/HTMLPreviewResource.swift', 'HTMLPreview/HTMLPreviewText.swift'],
     'simulator-transport': ['LodyLocalization.swift', 'SimulatorStream/SimulatorDeviceView.swift', 'SimulatorStream/SimulatorRemote.swift', 'SimulatorStream/SimulatorRTCFrame.swift', 'SimulatorStream/SimulatorRTC.swift', 'SimulatorStream/SimulatorTransport.swift'],
     'chat-kit': [],
+    'chat-snapshot-reentrancy': [],
     'lexical-swift': [],
     'scroll-edges': ['Chrome/LodyScrollEdges.swift', 'LodyTint.swift', 'Chrome/LodyEdgeFade.swift'],
     'glass-transition': [],
@@ -44,9 +45,9 @@ checks = {
     'session-sharing': ['Cloud/SessionSharing.swift'],
     'settings': ['Cloud/WorkspaceSettingsCloud.swift', 'Cloud/WorkspaceUsage.swift'],
     'workspace-settings-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/SettingsWorkspace.swift', 'Settings/ProjectVisibilitySections.swift', 'Settings/GitHubSettingsSections.swift'],
-    'settings-runtime-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/MemorySettingsSections.swift', 'Settings/PublishedSharesSections.swift'],
+    'settings-runtime-pages': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/PublishedSharesSections.swift'],
     'remote-settings': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/SettingsWorkspace.swift', 'Settings/RemoteSettingsSections.swift', 'Sessions/SessionUsageSelection.swift', 'Chat/LodyAgentIcon.swift'],
-    'session-rows': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift', 'Sessions/SessionTabSelection.swift', 'Sessions/HomeGrouping.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
+    'session-rows': ['Sessions/SessionRelations.swift', 'LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift', 'Sessions/SessionTabSelection.swift', 'Sessions/HomeGrouping.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
     'ai-usage': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift', 'Settings/AIUsageModels.swift', 'Settings/AIUsageSections.swift'],
     'settings-roles': ['LodyLocalization.swift', 'List/LodyListModels.swift', 'Settings/PromptShortcutSections.swift', 'Settings/AgentRoleSections.swift'],
     'notifications': ['Notifications/PushRegistration.swift', 'Notifications/PushPermissionLaunchRequest.swift', 'Notifications/PushClickBuffer.swift'],
@@ -54,7 +55,8 @@ checks = {
     'photo-cache': ['List/PhotoDiskCache.swift'],
     'file-link': ['Chat/ChatFileLink.swift', 'Sessions/SessionController+Files.swift', 'Shell/LodyPageController.swift', 'LodyLocalization.swift'],
     'strings': ['LodyLocalization.swift'],
-    'auth': ['LodyLocalization.swift', 'Auth/AuthAPI.swift'],
+    'auth': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/NativeAuthHandoff.swift'],
+    'auth-session': ['LodyLocalization.swift', 'Auth/AuthAPI.swift', 'Auth/AuthSession.swift', 'Auth/NativeLoginMethod.swift', 'Onboarding/OnboardingService.swift', 'Onboarding/LoginAppearance.swift', 'Onboarding/LoginDitherView.swift', 'Onboarding/OnboardingController.swift', 'Onboarding/PasswordResetController.swift'],
     'session-permission': ['Sessions/PermissionProjection.swift', 'Sessions/SessionPermission.swift', 'Sessions/SessionEnvelope.swift'],
     'session-decisions': ['LodyLocalization.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift', 'Sessions/SessionDecisions.swift'],
     'outbox': ['LodyLocalization.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionSender.swift', 'Outbox/OutboxRecord.swift', 'Outbox/OutboxStore.swift', 'Outbox/OutboxDispatcher.swift', 'Outbox/OutboxForeground.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
@@ -67,7 +69,7 @@ checks = {
     'watchdog': [],
     'local-store': ['Cloud/LocalStore.swift', 'Cloud/SessionProse.swift', 'Text/MarkdownPlainText.swift', 'Text/MarkdownRuby.swift', 'Text/TextSearch.swift', 'LodyLocalization.swift'],
     'content-store': ['Cloud/ContentStore.swift'],
-    'chat-render': ['List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift'],
+    'chat-render': ['List/ConversationTabStrip.swift', 'List/ConversationTreeRow.swift', 'Chat/ChatOperationCell.swift', 'Chat/ChatMessageActionsCell.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatAuthorHeader.swift', 'Chat/ChatUserMentions.swift'],
     'chat-subagent': ['LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift', 'Chat/ChatSubagentCell.swift'],
     'chat-files': ['LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift', 'Chat/ChatFileCell.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift'],
     'chat-chrome': ['LodyLocalization.swift', 'Chat/ChatOverlay.swift'],
@@ -92,7 +94,7 @@ checks = {
         'Text/TextSearch.swift',
     ],
     'list-snapshots': ['List/LodyListModels.swift'],
-    'chat-list-scroll': ['Sessions/ChatListCollectionView.swift'],
+    'chat-list-scroll': ['Sessions/ChatListCollectionView.swift', 'Sessions/InboxProjectIndex.swift', 'Projects/RepositoryIcon.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyTint.swift'],
     'banner': [
         'LodyLocalization.swift',
         'Toast/LodySessionBannerView.swift',
@@ -128,6 +130,8 @@ for files in checks.values():
         files.append('Chat/ChatTurnMetadata.swift')
     if 'Chat/ChatSendHandoff.swift' in files or 'Chat/ChatMentionPanel.swift' in files:
         files.insert(0, 'LodyUIVerify.swift')
+    if 'Cloud/BackendEnvironment.swift' not in files:
+        files.append('Cloud/BackendEnvironment.swift')
 if 'markdown-repair' in checks:
     subprocess.run(['node', str(root / 'apps/ios/scripts/build-decoder.mjs')], cwd=root, check=True, timeout=120)
 with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
@@ -174,6 +178,12 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         return lexical_dir
 
     for name, files in checks.items():
+        if name == 'chat-snapshot-reentrancy':
+            subprocess.run(['xcodebuild', 'test', '-scheme', 'LodyKit', '-destination', f'id={args.udid}',
+                '-derivedDataPath', str(root / '.artifacts/native-lody-kit'), '-collect-test-diagnostics', 'never',
+                '-only-testing:LodyKitTests/ChatSnapshotReentrancyTests'],
+                cwd=kit, check=True, timeout=1800)
+            continue
         if name == 'lexical-swift':
             subprocess.run(['xcodebuild', 'test', '-scheme', 'Lexical-Package', '-destination', f'id={args.udid}',
                 '-derivedDataPath', str(root / '.artifacts/native-lexical-swift'), '-collect-test-diagnostics', 'never'],
@@ -192,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['file-link', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files']
+        simulator = name in ['auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
         if name in ['message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows']:
@@ -217,7 +227,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 *map(str, sources), '-o', str(Path(output) / 'libAnchoredOverlayKit.a'),
             ], check=True, timeout=120)
             command += ['-I', output, '-L', output, '-lAnchoredOverlayKit']
-        if name in ['file-link', 'session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings']:
+        if name in ['auth-session', 'session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings', 'file-link']:
             command += ['-parse-as-library']
         if name == 'inline-diff':
             command += ['-framework', 'UIKit']
@@ -283,6 +293,20 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                                                                        'SIMCTL_CHILD_OS_ACTIVITY_DT_MODE': 'enable'})
                 finally:
                     server.terminate()
+        elif name == 'auth':
+            subprocess.run(command, check=True, timeout=60)
+            # Exercise the real build-owned Bundle configuration, not a policy stub.
+            import plistlib
+            import shutil
+            contents = Path(output) / 'LocalReset.app/Contents'
+            (contents / 'MacOS').mkdir(parents=True)
+            executable = contents / 'MacOS/auth'
+            shutil.copy2(binary, executable)
+            (contents / 'Info.plist').write_bytes(plistlib.dumps({
+                'CFBundleExecutable': 'auth', 'CFBundleIdentifier': 'ai.lody.verify.local-reset',
+                'LodyBackends': {'CONVEX_SITE_URL': 'https://local.example.test'},
+            }))
+            subprocess.run([str(executable)], check=True, timeout=60)
         elif name == 'strings':
             resources = Path(output) / 'Localization.bundle'
             resources.mkdir()

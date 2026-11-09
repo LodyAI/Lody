@@ -121,13 +121,8 @@ final class RuntimeContractTests: XCTestCase {
       .result(id: "req-ping", .ping(.init())),
       .result(id: "req-shortcuts", .promptShortcuts(.list(.init(entries: [entry])))),
       .result(id: "req-settings", .remoteSettings(.init(settings: [
-        .init(kind: .mcp, id: "mcp-2", name: "Search", readOnly: false, detail: "stdio", enabledByDefault: true, configured: true),
+        .init(kind: .machine, id: "machine-1", name: "Studio", readOnly: false),
       ]))),
-      .result(id: "req-memory", .memorySettings(.init(
-        machines: [.init(id: "machine-1", name: "Studio")], machineId: "machine-1",
-        entries: [.init(machineId: "machine-1", providerId: "nowledge-mem", memoryId: "memory-1", name: "Work")],
-        identities: [.init(id: "memory-1", name: "Work")], status: .ready, cached: false
-      ))),
       .result(id: "req-roles", .agentRoles(.init(roles: [role], agents: [
         .init(id: "agent-1", name: "Claude", machineId: "machine-1", machineName: "Studio", cliType: "builtin", agentType: "claude"),
       ]))),
@@ -140,7 +135,6 @@ final class RuntimeContractTests: XCTestCase {
       .result(id: "req-shortcut-save", .promptShortcuts(.save(.init(entry: saved)))),
       .result(id: "req-shares-denied", .publishedShares(.failed(.init(error: "shares_forbidden")))),
       .error(id: "req-settings", method: "remoteSettings", .init(code: "setting_read_only", retryable: false)),
-      .error(id: "req-memory", method: "memorySettings", .init(code: "memory_forbidden", retryable: false)),
       .error(id: "req-roles", method: "agentRoles", .init(code: "role_conflict", retryable: false)),
       .error(id: "req-shortcuts", method: "promptShortcuts", .init(code: "workspace_changed", retryable: false)),
       .error(id: "req-mentions", method: "mentionCatalog", .init(code: "metadata_not_ready", retryable: false)),
@@ -295,70 +289,66 @@ final class RuntimeContractTests: XCTestCase {
       createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, prompt: "Review @README.md",
       mentions: [.init(start: 7, end: 17, label: "@README.md", target: readme)])
     try await roundTrip(Contract.Calls.PromptShortcuts.self, .list(.init(workspaceId: "workspace-1", userId: "user-1")), reply: 27)
-    try await roundTrip(Contract.Calls.RemoteSettings.self, .init(workspaceId: "workspace-1", userId: "user-1", kind: .mcp,
-      remove: .init(kind: .mcp, id: "mcp-1", name: "Docs", readOnly: false, detail: "http", enabledByDefault: false,
-        configured: true, updatedAt: 1_700_000_000_000)), reply: 28)
-    try await roundTrip(Contract.Calls.MemorySettings.self, .`import`(.init(workspaceId: "workspace-1", userId: "user-1",
-      machineId: "machine-1", memoryId: "memory-1")), reply: 29)
+    try await roundTrip(Contract.Calls.RemoteSettings.self, .init(workspaceId: "workspace-1", userId: "user-1", kind: .machine), reply: 28)
     try await roundTrip(Contract.Calls.AgentRoles.self, .save(.init(workspaceId: "workspace-1", userId: "user-1", id: "role-1",
       base: nil, fields: .init(name: "Reviewer", description: "", promptPrefix: "Review carefully", visibility: .workspace),
-      target: .init(machineId: "machine-1", agentConfigId: "agent-1"))), reply: 30)
-    try await roundTrip(Contract.Calls.PublishedShares.self, .list(.init(workspaceId: "workspace-1", userId: "user-1", cursor: "cursor-1")), reply: 31)
+      target: .init(machineId: "machine-1", agentConfigId: "agent-1"))), reply: 29)
+    try await roundTrip(Contract.Calls.PublishedShares.self, .list(.init(workspaceId: "workspace-1", userId: "user-1", cursor: "cursor-1")), reply: 30)
     try await roundTrip(Contract.Calls.MentionCatalog.self, .init(workspaceId: "workspace-1", userId: "user-1",
-      category: .session, sessionId: "session-1"), reply: 32)
+      category: .session, sessionId: "session-1"), reply: 31)
     try await roundTrip(Contract.Calls.PromptShortcuts.self, .save(.init(workspaceId: "workspace-1", userId: "user-1",
-      entry: nil, value: shortcut, bodyDocId: "body-2")), reply: 33)
-    try await roundTrip(Contract.Calls.CreationOptions.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1"), reply: 40)
+      entry: nil, value: shortcut, bodyDocId: "body-2")), reply: 32)
+    try await roundTrip(Contract.Calls.CreationOptions.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1"), reply: 38)
     try await roundTrip(Contract.Calls.LocalProjects.self, .browse(.init(workspaceId: "workspace-1", browserId: "browser-1",
-      userId: "user-1", machineId: "machine-1", path: "/Users/dev", cursor: "cursor-1")), reply: 42)
+      userId: "user-1", machineId: "machine-1", path: "/Users/dev", cursor: "cursor-1")), reply: 40)
     let target = Contract.HistoryTarget(machineId: "machine-1", machineName: "Studio", localProjectId: "p1",
       projectName: "App", rootPath: "/Users/dev/app", provider: .init(cliType: .builtin, agentType: "claude"))
     try await roundTrip(Contract.Calls.LocalProjects.self, .history(.init(workspaceId: "workspace-1", browserId: "history-1",
-      userId: "user-1", history: .`import`(.init(target: target, acpSessionIds: ["acp-1", "acp-2"])))), reply: 43)
+      userId: "user-1", history: .`import`(.init(target: target, acpSessionIds: ["acp-1", "acp-2"])))), reply: 41)
     try await roundTrip(Contract.Calls.SessionSharing.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      editorId: "ios-share-1", action: .publish, selected: ["session-1"]), reply: 47)
+      editorId: "ios-share-1", action: .publish, selected: ["session-1"]), reply: 45)
     try await roundTrip(Contract.Calls.SessionSharing.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      editorId: "ios-share-1", action: .close), reply: 48)
-    try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create), reply: 50)
+      editorId: "ios-share-1", action: .close), reply: 46)
+    try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create), reply: 48)
     try await roundTrip(Contract.Calls.IosSimulatorControl.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))), reply: 52)
-    try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"), reply: 55)
-    try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"), reply: 57)
-    try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"), reply: 58)
-    try await roundTrip(Contract.Calls.WorkspaceChanges.self, .init(sessionId: "session-1"), reply: 59)
-    try await roundTrip(Contract.Calls.ReadFile.self, .init(sessionId: "session-1", path: "README.md"), reply: 60)
+      userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))), reply: 50)
+    try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"), reply: 53)
+    try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"), reply: 55)
+    try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"), reply: 56)
+    try await roundTrip(Contract.Calls.WorkspaceChanges.self, .init(sessionId: "session-1"), reply: 57)
+    try await roundTrip(Contract.Calls.ReadFile.self, .init(sessionId: "session-1", path: "README.md"), reply: 58)
     try await roundTrip(Contract.Calls.ListDir.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      relativePath: "src", userId: "user-1"), reply: 63)
+      relativePath: "src", userId: "user-1"), reply: 61)
     let free = Contract.BillingEntitlement(effectivePlanTier: .free, checkoutPending: false)
     try await roundTrip(Contract.Calls.CreateSession.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1",
       sessionId: "00000000-0000-4000-8000-000000000002", machineId: "machine-1", agentConfigId: "agent-1", userId: "user-1",
-      title: "Fix login", billingEntitlement: free), reply: 65)
+      title: "Fix login", billingEntitlement: free), reply: 63)
     try await roundTrip(Contract.Calls.DeleteSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      sessionIds: ["session-1", "session-3"]), reply: 66)
-    try await roundTrip(Contract.Calls.ArchiveSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", archived: true), reply: 67)
-    try await roundTrip(Contract.Calls.PinSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", pinned: true), reply: 68)
+      sessionIds: ["session-1", "session-3"]), reply: 64)
+    try await roundTrip(Contract.Calls.ArchiveSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", archived: true), reply: 65)
+    try await roundTrip(Contract.Calls.PinSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", pinned: true), reply: 66)
     try await roundTrip(Contract.Calls.MarkSessionRead.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      lastReadAt: 1_700_000_000_000), reply: 69)
-    try await roundTrip(Contract.Calls.RenameSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", title: "Renamed"), reply: 70)
-    try await roundTrip(Contract.Calls.CheckTurnQuota.self, .init(sessionId: "session-1", billingEntitlement: nil), reply: 71)
+      lastReadAt: 1_700_000_000_000), reply: 67)
+    try await roundTrip(Contract.Calls.RenameSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", title: "Renamed"), reply: 68)
+    try await roundTrip(Contract.Calls.CheckTurnQuota.self, .init(sessionId: "session-1", billingEntitlement: nil), reply: 69)
     try await roundTrip(Contract.Calls.SendTurn.self, .init(sessionId: "session-1", id: "00000000-0000-4000-8000-000000000003",
       backgroundTaskId: "task-1", queue: false, guide: false, machineId: "machine-1", userId: "user-1", text: "Hello",
       attachmentBlocks: [["type": .string("image"), "imageId": .string("image-1"), "mimeType": .string("image/png"), "sizeBytes": .number(2048)]],
       cliType: "builtin", agentType: "claude", modelId: .init(value: nil), reasoningEffort: .init(value: "high"),
       reasoningEffortConfigId: "reasoning_effort", configOptionValues: ["fast": .bool(true)],
-      billingEntitlement: .init(effectivePlanTier: .plus, checkoutPending: false)), reply: 72)
+      billingEntitlement: .init(effectivePlanTier: .plus, checkoutPending: false)), reply: 70)
     try await roundTrip(Contract.Calls.EditSession.self, .read(.init(sessionId: "session-1", expectedUserTurnId: "turn-1",
-      userId: "user-1", billingEntitlement: nil)), reply: 73)
+      userId: "user-1", billingEntitlement: nil)), reply: 71)
     try await roundTrip(Contract.Calls.EditSession.self, .send(.init(sessionId: "session-1", expectedUserTurnId: "turn-1", id: "turn-2",
       userId: "user-1", billingEntitlement: free, backgroundTaskId: "task-2", text: "Edited", retainedIds: ["original:0"],
-      attachmentBlocks: [])), reply: 74)
+      attachmentBlocks: [])), reply: 72)
     try await roundTrip(Contract.Calls.ControlTurn.self, .init(action: .steer, sessionId: "session-1", machineId: "machine-1",
-      turnId: "turn-3", messageId: "turn-4", interrupt: false), reply: 75)
+      turnId: "turn-3", messageId: "turn-4", interrupt: false), reply: 73)
     try await roundTrip(Contract.Calls.RespondPermission.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1",
       requestId: "permission-1", optionId: "submit", answers: [
         "Scope": .string("Repository"), "Checks": .array([.string("Lint"), .string("Tests")]),
-      ]), reply: 76)
-    try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"), reply: 93)
+      ]), reply: 74)
+    try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"), reply: 91)
     XCTAssertEqual(harness.posts.count, expected.count)
     for index in 4..<expected.count {
       XCTAssertEqual(try json(harness.posts[index]), try json(expected[index]))

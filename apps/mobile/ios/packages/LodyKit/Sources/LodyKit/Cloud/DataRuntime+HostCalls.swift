@@ -80,7 +80,7 @@ extension DataRuntime {
     guard let workspace, let view = webView else { deliverGrant(nil); return }
     do {
       guard let token = try AuthKeychain.read() else { throw NSError(domain: "MissingAuth", code: 1) }
-      var request = URLRequest(url: URL(string: "https://backend.lody.ai/api/loro-streams/token")!, timeoutInterval: 15)
+      var request = URLRequest(url: URL(string: "\(BackendEnvironment.site)/api/loro-streams/token")!, timeoutInterval: 15)
       request.httpMethod = "POST"
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")

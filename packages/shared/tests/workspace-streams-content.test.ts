@@ -75,6 +75,37 @@ describe('availability-first epoch selection', () => {
       vi.useRealTimers();
     }
   });
+  it('asks its owner to transition again once a timed-out installation settles', async () => {
+    vi.useFakeTimers();
+    let settled = 0;
+    const gate = createWorkspaceEpochTransitionLegacy({
+      epoch: 0,
+      timeoutMs: 20,
+      onLateInstallation: () => {
+        settled++;
+      },
+    });
+    const release = Promise.withResolvers<typeof status>();
+    try {
+      gate.observe(status);
+      const work = gate.transition({ install: () => release.promise });
+      const result = work.catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(await result).toBe('e2ee_key_update_timeout');
+      expect(settled).toBe(0);
+      // Slow, not failed: the installation finishes after its deadline.
+      release.resolve(status);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(1);
+      expect(gate.epoch()).toBe(0);
+      expect(await gate.transition({ install: async () => status })).toBe(true);
+      expect(gate.epoch()).toBe(1);
+    } finally {
+      release.resolve(status);
+      await gate.close();
+      vi.useRealTimers();
+    }
+  });
   it('never selects a keyless or superseded epoch and can retry the newer verified status', async () => {
     const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
     gate.observe(status);

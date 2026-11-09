@@ -16,10 +16,17 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isLocalAttachment(value: unknown): boolean {
-  return isObjectRecord(value) && value.type === 'local_attachment' &&
-    typeof value.referenceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.referenceId) &&
-    ['machineId', 'sessionId', 'turnId', 'fileName', 'mimeType'].every(key => typeof value[key] === 'string' && value[key].length > 0) &&
-    (value.kind === 'file' || value.kind === 'image') && typeof value.sizeBytes === 'number' && Number.isSafeInteger(value.sizeBytes) && value.sizeBytes >= 0;
+  return (
+    isObjectRecord(value) &&
+    value.type === 'local_attachment' &&
+    ['machineId', 'path', 'fileName', 'mimeType'].every(
+      (key) => typeof value[key] === 'string' && value[key].length > 0
+    ) &&
+    (value.kind === 'file' || value.kind === 'image') &&
+    typeof value.sizeBytes === 'number' &&
+    Number.isSafeInteger(value.sizeBytes) &&
+    value.sizeBytes >= 0
+  );
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -650,7 +657,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.customAcp === 'undefined' &&
       typeof value.runtimeOverrides === 'undefined' &&
       typeof value.env === 'undefined' &&
-      typeof value.methodId === 'undefined'
+      (value.action === 'start' || typeof value.methodId === 'undefined')
     );
   }
 
@@ -682,10 +689,19 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
-  if (value.type === 'session/attachment-register' || value.type === 'session/attachment-resolve') {
-    if (!['machineId', 'workspaceId', 'sessionId'].every(key => typeof value[key] === 'string' && value[key].length > 0)) return false;
-    if (value.type === 'session/attachment-resolve') return isLocalAttachment(value.attachment);
-    return ['turnId', 'referenceId', 'path', 'fileName', 'mimeType'].every(key => typeof value[key] === 'string' && value[key].length > 0) && typeof value.managed === 'boolean' && (value.kind === 'file' || value.kind === 'image');
+  if (value.type === 'session/attachment-prepare') {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].length > 0
+      )
+    )
+      return false;
+    return (
+      ['path', 'fileName', 'mimeType'].every(
+        (key) => typeof value[key] === 'string' && value[key].length > 0
+      ) &&
+      (value.kind === 'file' || value.kind === 'image')
+    );
   }
 
   if (value.type === 'session/file-upload' || value.type === 'session/file-send-local') {
@@ -1146,9 +1162,13 @@ export function isLocalSessionControlResponse(
     );
   }
 
-  if (value.type === 'session/attachment-register_response' || value.type === 'session/attachment-resolve_response') {
-    return typeof value.sessionId === 'string' && typeof value.success === 'boolean' && isOptionalString(value.error) &&
-      (!value.success || (value.type === 'session/attachment-register_response' ? isLocalAttachment(value.attachment) : typeof value.path === 'string'));
+  if (value.type === 'session/attachment-prepare_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (!value.success || isLocalAttachment(value.attachment))
+    );
   }
 
   if (value.type === 'session/file-send-local_response') {

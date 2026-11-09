@@ -140,6 +140,7 @@ export type CreateAcpClientOptions = {
   onThreadGoalUpdated?(goal: Extract<MessageContent, { type: 'goal' }>): void;
   onThreadGoalCleared?(threadId: string): void;
   onSessionTitleUpdate?(title: string): void;
+  onNativeWorkChanged?(work: import('./agent-client').NativeAgentWork): void;
   onAgentWarning?(warning: AgentSessionWarning): void;
   loadExternalMcpServers?: AgentClientOptions['loadExternalMcpServers'];
   onImageGenerationBegin?(event: ImageGenerationBeginEvent): void;
@@ -177,6 +178,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     onThreadGoalUpdated: options.onThreadGoalUpdated,
     onThreadGoalCleared: options.onThreadGoalCleared,
     onSessionTitleUpdate: options.onSessionTitleUpdate,
+    onNativeWorkChanged: options.onNativeWorkChanged,
     onAgentWarning: options.onAgentWarning,
     loadExternalMcpServers: options.loadExternalMcpServers,
     onImageGenerationBegin: options.onImageGenerationBegin,

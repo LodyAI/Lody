@@ -1,4 +1,4 @@
-"""Native Home workspace icon and name editing with reflected catalog updates."""
+"""Native Home workspace menu and Settings icon/name editing reflected in it."""
 import sys
 import time
 import subprocess
@@ -13,15 +13,43 @@ def home_ready():
     ui.wait(lambda items: any(i.get('AXLabel') == avatar_label for i in items), 'Missing workspace avatar')
 home_ready()
 
-ui.axe('tap', '--label', avatar_label, '--post-delay', '.5')
-ui.wait(
-    lambda items: any(i.get('AXLabel') == catalog.text('workspace.edit.action') for i in items),
-    'Workspace menu must include the edit action',
-)
-edit_workspace = next(i for i in ui.state() if i.get('AXLabel') == catalog.text('workspace.edit.action'))
-assert 'selected' not in str(edit_workspace.get('traits') or []).lower(), edit_workspace
+def menu_row(name):
+    return ui.wait(lambda items: next((i for i in items if i.get('AXLabel') == name), None), 'Missing native workspace action: ' + name)
+
+def open_menu(label):
+    ui.axe('tap', '--label', label, '--post-delay', '.5')
+    menu_row(workspace_name)
+    menu_row("preview@example.test")
+    texts = {i.get('AXLabel') for i in ui.state()}
+    assert catalog.text('workspace.edit.action') not in texts
+    assert catalog.text('devices.title') not in texts
+
+def close_menu():
+    ui.axe('tap', '--label', workspace_name, '--post-delay', '.6')
+    ui.wait(lambda items: not any(i.get('AXLabel') == workspace_name for i in items), 'Menu did not close')
+
+open_menu(avatar_label)
 ui.capture('workspace-menu')
-ui.axe('tap', '--label', catalog.text('workspace.edit.action'), '--post-delay', '.8')
+ui.axe('tap', '-x', '350', '-y', '700', '--post-delay', '.5')
+ui.wait(lambda items: not any(i.get('AXLabel') == workspace_name for i in items), 'Outside tap did not dismiss menu')
+home_ready()
+open_menu(avatar_label)
+close_menu()
+home_ready()
+open_menu(avatar_label)
+ui.axe('drag', '--start-x', '140', '--start-y', '510', '--end-x', '140', '--end-y', '260', '--duration', '1', '--post-delay', '.5')
+ui.capture('workspace-menu-scrolled')
+last = menu_row('Workspace 5 — Research and international collaboration with a very long name')
+ui.axe('tap', '--label', last['AXLabel'], '--post-delay', '.6')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'workspace-menu' and 'Workspace 5' in (i.get('AXLabel') or '') for i in items), 'Workspace selection did not update the capsule')
+ui.axe('tap', '--id', 'workspace-menu', '--post-delay', '.5')
+menu_row(workspace_name)
+ui.capture('workspace-menu-selection-updated')
+close_menu()
+home_ready()
+# The workspace editor lives in Settings › General.
+ui.axe('tap', '--id', 'home-tab-settings', '--post-delay', '.6')
+ui.axe('tap', '--id', 'workspace-general', '--post-delay', '.8')
 ui.element('workspace-name')
 ui.wait(
     lambda items: any(i.get('AXLabel') == catalog.text('workspace.edit.nameFooter') for i in items)
@@ -53,13 +81,15 @@ renamed = ui.element('workspace-name')['AXValue']
 ui.capture('workspace-editor-filled')
 ui.axe('tap', '--label', catalog.text('workspace.edit.save'), '--post-delay', '1')
 renamed_label = catalog.workspace_switch(renamed)
+ui.element('workspace-general')
+ui.axe('tap', '--id', 'home-tab-chats', '--post-delay', '.6')
 ui.wait(
     lambda items: any(i.get('AXLabel') == renamed_label for i in items),
-    'Saving the workspace name must update the home menu',
+    'Saving the workspace name must update the home capsule',
 )
 ui.capture('workspace-renamed')
-ui.axe('tap', '--label', renamed_label, '--post-delay', '.5')
-edit_workspace = next(i for i in ui.state() if i.get('AXLabel') == catalog.text('workspace.edit.action'))
-assert 'selected' not in str(edit_workspace.get('traits') or []).lower(), edit_workspace
+workspace_name = renamed
+open_menu(renamed_label)
 ui.capture('workspace-menu-after-edit')
-print('PASS: workspace icon selection returns and the saved name updates the Home menu.')
+close_menu()
+print('PASS: the native workspace menu selects, dismisses outside, reopens and updates; the Settings editor returns icon selection and the saved name updates the Home capsule and menu.')

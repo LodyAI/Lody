@@ -1,6 +1,5 @@
 import LodyCore
 import LodyDesignSystem
-import SwiftUI
 import UIKit
 
 @MainActor
@@ -15,6 +14,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   /// iPhone tabs: each root page is built on first use and kept, so lists keep their scroll and state.
   private var selectedTab: HomeTab = .chats
   private var tabPages: [HomeTab: LodyPageController] = [:]
+  private weak var schedules: SchedulesController?
   private let tabsHost = HomeTabsController()
   private let compactNavigation = HomeCompactNavigation()
   private var tabNavigations: [HomeTab: UINavigationController] = [:]
@@ -237,7 +237,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     tabsHost.onSelect = { [weak self] in self?.selectedTab = $0 }
     tabsHost.onCreate = { [weak self] in
       guard let self else { return }
-      if self.selectedTab == .projects { self.addProject() } else { self.inbox.newSession() }
+      if self.selectedTab == .schedules { self.schedules?.newSchedule() } else { self.inbox.newSession() }
     }
     tabsHost.onDebug = { [weak self] in
       guard let self else { return }
@@ -279,33 +279,6 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     return navigation
   }
 
-  /// The Projects tab's "+": the add menu springs out of the button; tapping it again folds it.
-  private func addProject() {
-    let host = tabsHost.view!
-    if let shown = ProjectAddMenu.shown(in: host) { return shown.close() }
-    let state = source.state
-    guard state.workspace != nil, !state.workspaceId.isEmpty else {
-      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: "error")
-      return
-    }
-    let workspaceId = state.workspaceId
-    ProjectAddMenu.present(in: host, above: tabsHost.tabBar, onLocal: {
-      Task { @MainActor in
-        guard let project = await DirectoryController.browse(workspaceId: workspaceId) else { return }
-        LodyToastOverlay.shared.show(
-          message: String.localizedStringWithFormat(String(localized: "projects.add.done", bundle: .lody), project.name), kind: "success")
-      }
-    }, onGitHub: {
-      let model = GitHubRepositoryModel(workspaceId: workspaceId)
-      let picker = UIHostingController(rootView: GitHubRepositoryPicker(model: model))
-      model.onAdded = { [weak picker] repo in
-        (picker?.parent ?? picker)?.navigationController?.dismiss(animated: true)
-        LodyToastOverlay.shared.show(message: String.localizedStringWithFormat(String(localized: "projects.add.done", bundle: .lody), repo), kind: "success")
-      }
-      LodyShell.shared.presentNative(picker, title: String(localized: "projects.add.github", bundle: .lody), detents: [1], grabber: true)
-    })
-  }
-
   func selectTab(_ next: HomeTab) {
     if next == selectedTab { tabNavigations[next]?.popToRootViewController(animated: !UIAccessibility.isReduceMotionEnabled) }
     selectedTab = next
@@ -316,14 +289,20 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     if let page = tabPages[tab] { return page }
     let (content, title): (UIViewController, String) = switch tab {
     case .chats: (inbox, "")
-    // Projects shares the Chats header (workspace capsule, search, view menu): no title.
-    case .projects: (ProjectsListController(source: source), "")
+    // Schedules shares the Chats header (workspace capsule, search): no title.
+    case .schedules: (schedulesPage(), "")
     case .settings: (SettingsController(), tab.title)
     }
     let next = page(content, title: title)
     next.hidesBottomBarWhenPushed = false
     tabPages[tab] = next
     return next
+  }
+
+  private func schedulesPage() -> SchedulesController {
+    let page = SchedulesController(source: source)
+    schedules = page
+    return page
   }
 
   private func page(_ content: UIViewController, title: String) -> LodyPageController {
@@ -395,6 +374,10 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       let key = shown ? "ipad.sidebar.hide" : "ipad.sidebar.show"
       sidebarItem.accessibilityLabel = String(localized: String.LocalizationValue(key), bundle: .lody)
     }
+    if let session {
+      session.setSidebarItem(toggle)
+      return
+    }
     if let toggle {
       if header.leftItems != [toggle] { header.leftItems = [toggle] }
     } else if let current = header.leftItems, current == [bookSidebarItem] || current == [sidebarItem] {
@@ -410,7 +393,9 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   private func showBookList() {
     guard folded, panelOpen, !listInPopover else { return }
     release(primary)
-    if LodyShell.shared.presentNavigation(primary, popoverFrom: bookSidebarItem) != nil {
+    let anchor = session?.sidebarAnchorView
+    if LodyShell.shared.presentNavigation(primary, popoverFrom: anchor == nil ? bookSidebarItem : nil,
+      sourceView: anchor, sourceRect: anchor?.bounds) != nil {
       listInPopover = true
       primary.viewControllers.compactMap { $0 as? LodyPageController }.forEach { $0.isRehosting = true }
       primary.popoverPresentationController?.delegate = self

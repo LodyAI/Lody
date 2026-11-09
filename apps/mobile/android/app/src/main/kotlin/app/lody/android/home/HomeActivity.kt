@@ -1,9 +1,10 @@
 package app.lody.android.home
 
+import app.lody.android.BackendEnvironment
+
 import app.lody.android.auth.WorkspaceMember
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,6 +47,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import app.lody.android.LodyApplication
 import app.lody.android.R
+import app.lody.android.auth.NativeSignInScreen
 import app.lody.android.auth.AuthState
 import app.lody.android.catalog.CatalogState
 import app.lody.android.catalog.ConnectionPhase
@@ -74,7 +76,7 @@ class HomeActivity : ComponentActivity() {
         pushIntent = intent
         val app = application as LodyApplication
         val auth = app.account.state.value
-        if (savedInstanceState == null && auth.account == null && !auth.busy) app.account.restore()
+        if (savedInstanceState == null && auth.account == null && !auth.busy && auth.failure == null && auth.notice == null) app.account.restore()
         setContent {
             LodyTheme {
                 val account by app.account.state.collectAsState()
@@ -87,7 +89,7 @@ class HomeActivity : ComponentActivity() {
                     activeScope?.let { scope -> app.members.observe(scope).collect { members = it } }
                 }
                 val browsing = remember {
-                    val prefs = getSharedPreferences("tab-browsing-v1", MODE_PRIVATE)
+                    val prefs = getSharedPreferences("tab-browsing-v1" + BackendEnvironment.storageSuffix, MODE_PRIVATE)
                     TabBrowsing({ prefs.getString(it, null) }) { key, value -> prefs.edit().putString(key, value).apply() }
                 }
                 val browsingRevision by browsing.revision.collectAsState()
@@ -152,12 +154,7 @@ class HomeActivity : ComponentActivity() {
                     if (first != null && catalog.workspace == null && !account.busy) app.cloud.select(first)
                 }
                 if (user == null) {
-                    SignInScreen(
-                        state = account,
-                        onSignIn = { app.account.login() },
-                        onOpen = { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
-                        onCancel = { app.account.cancel() },
-                    )
+                    NativeSignInScreen(account, app.account, this@HomeActivity)
                 } else {
                     val workspace = catalog.workspace
                     val route = selectedId ?: if (creating) "create" else "home"
@@ -192,9 +189,10 @@ class HomeActivity : ComponentActivity() {
                                     selectedTitle = if (selectedId == row.id) row.title else ""
                                 },
                                 onNewChat = { creating = true },
-                                projects = app.projectAdding,
+                                schedules = app.schedules,
+                                creation = creator,
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
-                                onOpenUrl = { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                                onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )
                         }
                     }
@@ -240,72 +238,6 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
     )
 }
 
-@Composable
-private fun SignInScreen(state: AuthState, onSignIn: () -> Unit, onOpen: (String) -> Unit, onCancel: () -> Unit) {
-    val colors = LodyTheme.colors
-    val type = LodyTheme.typography
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.bgBase)
-            .safeDrawingPadding()
-            .padding(horizontal = LodyLayout.screenPaddingX * 2),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
-            Text(stringResource(R.string.sign_in_title), style = type.title, color = colors.textPrimary, textAlign = TextAlign.Center)
-            val verification = state.verification
-            if (verification == null) {
-                Text(stringResource(R.string.sign_in_body), style = type.body, color = colors.textSecondary, textAlign = TextAlign.Center)
-                PrimaryButton(
-                    label = stringResource(if (state.busy) R.string.sign_in_connecting else R.string.sign_in_action),
-                    enabled = !state.busy,
-                    onClick = onSignIn,
-                )
-            } else {
-                Text(stringResource(R.string.sign_in_code), style = type.subhead, color = colors.textTertiary)
-                Text(verification.userCode, style = type.title.copy(fontFamily = type.code.fontFamily), color = colors.textPrimary)
-                Text(
-                    stringResource(R.string.sign_in_code_hint, verification.expiresIn / 60),
-                    style = type.footnote,
-                    color = colors.textSecondary,
-                    textAlign = TextAlign.Center,
-                )
-                PrimaryButton(stringResource(R.string.sign_in_open), enabled = true) { onOpen(verification.url) }
-                Text(
-                    stringResource(R.string.sign_in_cancel),
-                    style = type.subhead,
-                    color = colors.textLink,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(LodyRadius.md))
-                        .clickable(role = Role.Button, onClick = onCancel)
-                        .padding(horizontal = LodySpacing.lg, vertical = LodySpacing.md),
-                )
-            }
-            state.failure?.let { Text(it, style = type.footnote, color = colors.dangerDefault, textAlign = TextAlign.Center) }
-        }
-    }
-}
-
-@Composable
-private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) {
-    val colors = LodyTheme.colors
-    val shape = RoundedCornerShape(LodyRadius.md)
-    app.lody.android.designsystem.LodyButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().height(LodySize.controlLg),
-        shape = shape,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(),
-        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-            containerColor = colors.accentSolid, contentColor = colors.textOnAccent,
-            disabledContainerColor = colors.fillDisabled, disabledContentColor = colors.textDisabled,
-        ),
-    ) {
-        Text(label, style = LodyTheme.typography.subhead)
-    }
-}
-
 /** The conversation's header and sending context from the catalog (title, project · branch). */
 private fun chatContext(catalog: CatalogState, id: String, title: String, user: app.lody.android.auth.Account): app.lody.android.chat.ChatContext {
     val snapshot = catalog.snapshot
@@ -315,6 +247,7 @@ private fun chatContext(catalog: CatalogState, id: String, title: String, user: 
     val repository = project?.repoFullName ?: session?.projectId?.removePrefix("github:")?.takeIf { session.projectId.startsWith("github:") }
     return app.lody.android.chat.ChatContext(
         session?.title?.ifBlank { null } ?: title, subtitle, session, user,
+        relatedSessions = snapshot?.sessions.orEmpty(),
         closedTabs = session?.let { app.lody.android.chat.DirectoryTabs.closed(it, snapshot.sessions) }.orEmpty(),
         tabs = session?.let { app.lody.android.chat.DirectoryTabs.sessions(it, snapshot.sessions) }.orEmpty(),
         repository = repository.orEmpty(),

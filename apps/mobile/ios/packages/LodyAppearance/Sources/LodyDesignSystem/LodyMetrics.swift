@@ -150,6 +150,8 @@ public enum LodySize {
 public enum LodyLayout {
     /// Horizontal content inset on phones.
     public static let screenPaddingX: CGFloat = 16
+    /// Horizontal inset of the Chats and Schedules lists: a little wider than `screenPaddingX` so titles and status marks breathe.
+    public static let listEdgeX: CGFloat = 20
     public static let listRowPaddingX: CGFloat = 16
     public static let listRowPaddingY: CGFloat = 10
     /// Leading icon to title.
@@ -167,6 +169,7 @@ public enum LodyLayout {
 
     public static let all: [(name: String, value: CGFloat)] = [
         ("screenPaddingX", screenPaddingX),
+        ("listEdgeX", listEdgeX),
         ("listRowPaddingX", listRowPaddingX),
         ("listRowPaddingY", listRowPaddingY),
         ("listRowGap", listRowGap),

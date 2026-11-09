@@ -1,5 +1,4 @@
 import { localProbeResultAtom } from '../src/atoms/local-probe';
-import * as electronIpc from '../src/lib/electron-ipc-client';
 import { SessionChatActionContext } from '../src/components/ai-gui/view';
 import {
   resolveSessionFileOpenTarget,
@@ -203,10 +202,8 @@ it('downloads a remote local attachment only after clicking its card', async () 
             sessionId: 'session' as never,
             attachment: {
               type: 'local_attachment',
-              referenceId: 'e788cc78-cb44-4d20-8199-69fe70dcc1ed',
+              path: '/synthetic/input.txt',
               machineId: 'remote',
-              sessionId: 'session',
-              turnId: 'turn',
               kind: 'file',
               fileName: 'input.txt',
               mimeType: 'text/plain',
@@ -247,11 +244,6 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace' as never);
     store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
-    const ipc = vi
-      .spyOn(electronIpc, 'getIpcServices')
-      .mockReturnValue({
-        localProjects: { resolveLocalAttachment: async () => filePath },
-      } as never);
     let opened: string | undefined;
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -279,10 +271,8 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
                 sessionId: 'session' as never,
                 attachment: {
                   type: 'local_attachment',
-                  referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
+                  path: filePath,
                   machineId: 'local',
-                  sessionId: 'session',
-                  turnId: 'turn',
                   kind: 'file',
                   fileName: 'attachment',
                   mimeType: 'text/plain',
@@ -298,7 +288,6 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
     } finally {
       await act(async () => root.unmount());
       container.remove();
-      ipc.mockRestore();
     }
   }
 );

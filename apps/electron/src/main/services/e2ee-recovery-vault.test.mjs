@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { Effect, Exit, Result, Scope } from 'effect'
 import { decodeRecoveryVaultCiphertext } from '@lody/e2ee-core/host'
+import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { vaultCiphertextDigest } from '@lody/e2ee-core/protocol'
 import { E2eePasskeyCancelled } from '@lody/platform/e2ee-passkey'
 import { makeE2eeCloudClient } from './e2ee-cloud-client.mts'
@@ -658,12 +659,76 @@ void test('the plan names workspaces this device cannot act on', async () => {
     })
   )
   assert.deepEqual(plan, {
+    hasVault: true,
     replaceable: true,
     replacing: false,
-    covered: [{ id: 'here', name: 'Here' }],
-    uncovered: [{ id: 'elsewhere', name: 'Elsewhere' }]
+    covered: [{ id: 'here', name: 'Here', status: { kind: 'notSet' } }],
+    uncovered: [{ id: 'elsewhere', name: 'Elsewhere', status: { kind: 'notSet' } }]
   })
   rmSync(dir, { recursive: true, force: true })
+})
+
+void test('a damaged journal row shows that workspace as unknown and keeps the plan', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const journalPath = join(dir, 'recovery-vault.sqlite')
+    const vaultId = 'a'.repeat(64)
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const local = yield* sqliteRecoveryVaultLocalStore({
+            path: journalPath,
+            mode: 'create-or-open'
+          })
+          yield* local.compareAndSwap(
+            `vault-v1/${vaultId}/workspace/g1/m1`,
+            null,
+            Uint8Array.of(0xff, 0x00, 0x13)
+          )
+        })
+      )
+    )
+    const plan = await Effect.runPromise(
+      recoveryReplacementPlan({
+        journalPath,
+        store: {},
+        replacement: { state: () => Effect.succeed({ current: vaultId, replacing: null }) },
+        accountWorkspaces: Effect.succeed([{ id: 'here', name: 'Here', genesisHash: 'g1' }]),
+        hasIdentity: () => Effect.succeed(true)
+      })
+    )
+    assert.deepEqual(plan.covered, [{ id: 'here', name: 'Here', status: { kind: 'unknown' } }])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('a workspace whose identity cannot be read does not hide the others from the plan', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const plan = await Effect.runPromise(
+      recoveryReplacementPlan({
+        journalPath: join(dir, 'recovery-vault.sqlite'),
+        store: {},
+        replacement: {
+          state: () => Effect.succeed({ current: 'a'.repeat(64), replacing: null })
+        },
+        accountWorkspaces: Effect.succeed([
+          { id: 'here', name: 'Here' },
+          { id: 'fenced', name: 'Fenced' }
+        ]),
+        // A removed workspace whose erase is still pending refuses to open its identity.
+        hasIdentity: (id) =>
+          id === 'fenced' ? Effect.fail(new Error('e2ee_member_removed')) : Effect.succeed(true)
+      })
+    )
+    assert.deepEqual(plan.covered, [{ id: 'here', name: 'Here', status: { kind: 'notSet' } }])
+    assert.deepEqual(plan.uncovered, [
+      { id: 'fenced', name: 'Fenced', status: { kind: 'unknown' } }
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 void test('setting up one workspace needs the current vault and reports a slow delivery', async () => {

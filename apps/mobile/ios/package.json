@@ -22,7 +22,7 @@
     "licenses:check": "pnpm --filter @lody-ios/ios licenses:check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --experimental-strip-types --experimental-test-module-mocks --test apps/ios/tests/**/*.test.mjs && python3 apps/ios/verification/ui/runner_test.py && python3 apps/ios/verification/simulator_test.py && python3 apps/ios/verification/build_test.py",
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --test apps/ios/tests/**/*.test.mjs && python3 apps/ios/verification/ui/runner_test.py && python3 apps/ios/verification/simulator_test.py && python3 apps/ios/verification/build_test.py && python3 apps/ios/tests/backend-build_test.py",
     "verify:build": "python3 apps/ios/verification/build.py",
     "verify:ui": "python3 apps/ios/verification/ui/run.py",
     "verify:native": "python3 apps/ios/verification/native.py",

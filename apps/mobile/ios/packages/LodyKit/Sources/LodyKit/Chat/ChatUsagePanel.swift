@@ -138,16 +138,19 @@ private final class ChatUsageResetRow: UIStackView {
 
 @MainActor
 enum ChatUsageRing {
+  /// The ring beside Send: a 14 pt circle on an 18 pt canvas.
+  static let side: CGFloat = 18
   static func image(_ percent: Double) -> UIImage {
-    UIGraphicsImageRenderer(size: CGSize(width: 14, height: 14)).image { context in
-      let center = CGPoint(x: 7, y: 7)
+    UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+      let center = CGPoint(x: side / 2, y: side / 2)
+      let radius = side / 2 - 2
       context.cgContext.setLineWidth(2)
       context.cgContext.setLineCap(.round)
       UIColor.label.withAlphaComponent(0.2).setStroke()
-      context.cgContext.strokeEllipse(in: CGRect(x: 2, y: 2, width: 10, height: 10))
+      context.cgContext.strokeEllipse(in: CGRect(x: 2, y: 2, width: radius * 2, height: radius * 2))
       if percent > 0 {
         UIColor.label.setStroke()
-        context.cgContext.addArc(center: center, radius: 5, startAngle: -.pi / 2, endAngle: -.pi / 2 + 2 * .pi * min(100, percent) / 100, clockwise: false)
+        context.cgContext.addArc(center: center, radius: radius, startAngle: -.pi / 2, endAngle: -.pi / 2 + 2 * .pi * min(100, percent) / 100, clockwise: false)
         context.cgContext.strokePath()
       }
     }.withRenderingMode(.alwaysTemplate)

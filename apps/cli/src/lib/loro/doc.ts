@@ -3763,6 +3763,31 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     });
   }
 
+  /** Promote only the locator, against current queue state; never replace a stale row. */
+  async promoteLocalImageReferences(
+    image: import('@lody/shared').SessionImagePayload
+  ): Promise<void> {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    this.mirror.setState((prev) => {
+      for (const item of (prev.mq ?? []) as MessageQueueItem[]) {
+        const blocks = item.acpSessionConfig?.inputBlocks;
+        if (!Array.isArray(blocks)) continue;
+        for (const block of blocks) {
+          if (!block || typeof block !== 'object') continue;
+          if (
+            block.type === 'image' &&
+            block.transport === 'local' &&
+            block.localImageId === image.localImageId &&
+            block.machineId === image.machineId &&
+            block.storageSessionId === image.storageSessionId
+          )
+            Object.assign(block, image);
+        }
+      }
+      return prev;
+    });
+  }
+
   async removeMessageQueueItem(cid: string): Promise<void> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');

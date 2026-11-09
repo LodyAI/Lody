@@ -431,6 +431,144 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it('selects the new epoch when every key install outlasts its deadline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-slow-key-install-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    let slow = false;
+    // Each slow mailbox page waits for the test, which first lets the 10 s deadline pass.
+    const pages: { entered: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> }[] =
+      [];
+    let slowFetches = 0;
+    const nextPage = () => {
+      const signals = {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      };
+      pages.push(signals);
+      return signals;
+    };
+    try {
+      const accountId = 'synthetic-slow-key-account';
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+      const stagedGroup = fixture.stagedGroup;
+      if (!stagedGroup) throw new Error('missing synthetic epoch publication');
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      });
+      const devicePublicKey = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.toBytes()),
+          signingPublicKey: devicePublicKey,
+        })
+      );
+      let history = page(fixture.records);
+      vi.stubGlobal('fetch', async () =>
+        Response.json({ status: 'success', value: encodeEpochStagedGroup(stagedGroup) })
+      );
+      const stagingPort = createCloudE2eePort({
+        authBaseUrl: 'https://synthetic-staging.convex.cloud',
+      });
+      const cloud = {
+        getHistory: async () => history,
+        readEpochGroup: stagingPort.readEpochGroup,
+        mailboxCall: async (
+          method: keyof E2eeMailboxRequests,
+          input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+        ) => {
+          if (method === 'fetch') {
+            // A slow link: every mailbox page takes longer than the install deadline.
+            if (slow) {
+              const page = pages[slowFetches++] ?? nextPage();
+              page.entered.resolve();
+              await page.release.promise;
+            }
+            return {
+              items:
+                (input as E2eeMailboxRequests['fetch']).epoch === 0
+                  ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                  : [],
+              next: null,
+            };
+          }
+          if (method === 'status')
+            return {
+              ...(input as E2eeMailboxRequests['status']).slot,
+              revision: 0,
+              status: 'EnvelopeStored',
+            };
+          if (method === 'report') return null;
+          throw new Error('unexpected mailbox operation');
+        },
+      } as CloudE2eePort;
+      host = await openCliE2eeWorkspaceLegacy({
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => {},
+      });
+      await host.refresh();
+      expect(await host.status()).toMatchObject({ epoch: 0, epochPhase: 'ready' });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      slow = true;
+      const first = nextPage();
+      const second = nextPage();
+      history = page([...fixture.records, ...fixture.rotationSuffix]);
+      void host.refresh();
+      await first.entered.promise;
+      // The install outlasts its deadline, and the 1 s retry finds it still running.
+      await vi.advanceTimersByTimeAsync(11_000);
+      first.release.resolve();
+      // A finished slow install must select the epoch, not fetch the mailbox again.
+      const selected = async () => {
+        for (let turn = 0; turn < 500; turn++) {
+          if ((await host!.status()).epochPhase === 'ready') return 'selected';
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        return 'still installing';
+      };
+      const outcome = await Promise.race([
+        second.entered.promise.then(() => 'fetched again'),
+        selected(),
+      ]);
+      second.release.resolve();
+      expect(outcome).toBe('selected');
+      expect(await host.status()).toMatchObject({
+        epoch: 1,
+        hasCurrentKey: true,
+        epochPhase: 'ready',
+      });
+    } finally {
+      for (const page of pages) page.release.resolve();
+      vi.useRealTimers();
+      await host?.close();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
     'receives the current RPC key through the real workspace with %s',
     async (mode) => {
@@ -692,6 +830,98 @@ describe('machine E2EE local runtime', () => {
           Effect.die('no frame')
         );
         expect(retried).toBe(true);
+      })
+    )
+  );
+
+  effectIt.effect(
+    'reads the newest page first on every attempt, then continues the older scan',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-newest-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          // A long stream: 40 pages, newest first. The frame this machine just wrote
+          // is uploaded only after the first attempt has already scanned past the head.
+          const reads: (string | undefined)[] = [];
+          const recovery = makeExecutionOriginRecovery(
+            new ExecutionOrigins(join(directory, 'origins.sqlite')),
+            async (input) => {
+              reads.push(input.before);
+              const page = input.before === undefined ? 40 : Number(input.before);
+              return { messages: [], before: String(page - 1), atStart: page <= 1 };
+            },
+            { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+            `lody-e2ee:${'ab'.repeat(32)}`
+          );
+          const attempt = () =>
+            recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+              Effect.die('no frame')
+            );
+          yield* attempt();
+          expect(reads[0]).toBeUndefined();
+          const scanned = reads.length;
+          yield* attempt();
+          // The second attempt sees a frame uploaded since the first, then resumes.
+          expect(reads[scanned]).toBeUndefined();
+          expect(reads[scanned + 1]).toBe(String(40 - scanned));
+        })
+      )
+  );
+
+  effectIt.effect('keeps scanning older pages when every page is slow', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-slow-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        // Each page takes 1.6 s: the test answers it only after moving the clock.
+        const pending: { before?: string; answer: () => void }[] = [];
+        let arrived = Promise.withResolvers<void>();
+        const older: string[] = [];
+        const recovery = makeExecutionOriginRecovery(
+          new ExecutionOrigins(join(directory, 'origins.sqlite')),
+          (input, signal) =>
+            new Promise((resolve, reject) => {
+              const page = input.before === undefined ? 40 : Number(input.before);
+              pending.push({
+                before: input.before,
+                answer: () => {
+                  if (input.before !== undefined) older.push(input.before);
+                  resolve({ messages: [], before: String(page - 1), atStart: page <= 1 });
+                },
+              });
+              signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+              arrived.resolve();
+            }),
+          { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+          `lody-e2ee:${'ab'.repeat(32)}`
+        );
+        const attempt = Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(
+            recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+              Effect.die('no frame')
+            )
+          );
+          for (let step = 0; step < 20; step++) {
+            const next = yield* Effect.raceFirst(
+              Effect.promise(() => arrived.promise).pipe(Effect.as('read' as const)),
+              Fiber.await(fiber).pipe(Effect.as('done' as const))
+            );
+            if (next === 'done') return;
+            arrived = Promise.withResolvers<void>();
+            const read = pending.shift()!;
+            yield* TestClock.adjust(1600);
+            read.answer();
+            yield* Effect.yieldNow;
+          }
+        });
+        for (let round = 0; round < 4; round++) yield* attempt;
+        // Every attempt still moves the older scan forward despite rereading the head.
+        expect(new Set(older).size).toBeGreaterThanOrEqual(4);
       })
     )
   );
@@ -6525,6 +6755,50 @@ describe('encrypted queued input evidence', () => {
 });
 
 describe('machine execution authorization freshness', () => {
+  it('waits for a ledger read that is unavailable instead of refusing the turn', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-unavailable-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          let authorization: { _tag: 'Authorized' } | { _tag: 'Denied'; reason: 'unavailable' } = {
+            _tag: 'Denied',
+            reason: 'unavailable',
+          };
+          const gate = makeEncryptedAgentExecution({
+            machineUserId: 'synthetic-machine-account',
+            genesis: '11'.repeat(32),
+            workspaceId: 'workspace',
+            targetMachineId: 'machine',
+            journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 0),
+            resolveVerifiedOriginal: (input) =>
+              Effect.succeed({
+                requesterDevice: 'aa'.repeat(32),
+                requesterCryptoUserId: 'bb'.repeat(32),
+                // The original's own deadline bounds the wait.
+                expiresAt: input.userTurnId === 'expired' ? 1 : Number.MAX_SAFE_INTEGER,
+              }),
+            authorizeExecution: () => Effect.sync(() => authorization),
+          });
+          const intent = (userTurnId: string) => ({
+            workspaceId: 'workspace',
+            sessionId: 'session',
+            userTurnId,
+            requesterUserId: 'synthetic-member',
+            inputConfig: { prompt: userTurnId },
+          });
+          // A slow or failed read decides nothing: the turn waits inside its window.
+          expect((yield* gate.claim(intent('slow-backend'))).state).toBe('pending-evidence');
+          authorization = { _tag: 'Authorized' };
+          expect((yield* gate.claim(intent('slow-backend'))).state).toBe('claimed');
+          authorization = { _tag: 'Denied', reason: 'unavailable' };
+          expect((yield* gate.claim(intent('expired'))).state).toBe('expired');
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   effectIt.effect.each([
     'valid',
     'no-source-capability',

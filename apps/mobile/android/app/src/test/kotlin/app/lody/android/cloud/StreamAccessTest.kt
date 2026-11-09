@@ -20,6 +20,11 @@ class StreamAccessTest {
   for ((stream,method) in listOf("workspace:meta" to "POST", "workspace:s:s1" to "PUT", "workspace:s:s1" to "POST", "workspace:rpc:req:m" to "POST", "workspace:rpc:res:m:r" to "PUT", "workspace:rpc:res:m:r" to "GET")) assertTrue(access.allows("https://streams.example.org/ds/lody/$stream",method))
   for ((stream,method) in listOf("other:s:s1" to "POST", "workspace:mf:m" to "POST", "workspace:meta" to "PUT", "workspace:rpc:req:m" to "GET", "workspace:rpc:res:m:r" to "POST", "workspace:s:s1/bootstrap" to "POST")) assertFalse(access.allows("https://streams.example.org/ds/lody/$stream",method))
  }
+ @Test fun permitsScheduleRegistryAndDocumentsInsideTheWorkspace() {
+  val access=StreamAccess("workspace","https://streams.example.org")
+  for ((stream,method) in listOf("workspace%3Asr" to "GET", "workspace%3Asr" to "POST", "workspace%3Asr" to "PUT", "workspace%3Asr/bootstrap" to "GET", "workspace%3Aschedule%3As1" to "PUT", "workspace%3Aschedule%3As1" to "POST", "workspace%3Aschedule%3As1" to "GET")) assertTrue("$stream $method", access.allows("https://streams.example.org/ds/lody/$stream",method))
+  for ((stream,method) in listOf("workspace%3Asr" to "DELETE", "other%3Asr" to "GET", "other%3Aschedule%3As1" to "PUT", "workspace%3Aschedule%3As1" to "DELETE", "workspace%3Aschedule%3Aa%3Ab" to "PUT", "workspace%3Aschedule%3As1/bootstrap" to "POST")) assertFalse("$stream $method", access.allows("https://streams.example.org/ds/lody/$stream",method))
+ }
  @Test fun rejectsCredentialsPortsPrivateAddressesAndUntrustedPathInGrant() {
   for(url in listOf("http://streams.example.org","https://user@streams.example.org","https://127.0.0.1","https://localhost","https://streams.example.org:8080","https://streams.example.org/path","https://streams.example.org?secret=x"))assertThrows(IllegalArgumentException::class.java){StreamAccess("workspace",url)}
  }

@@ -141,7 +141,8 @@ export type WorkspaceEpochPhase = 'ready' | 'installing' | 'waiting-key' | 'fail
  * hosts select the verified current epoch for new seals; these hints grant no
  * authority to seal new content at an older epoch. Reception never removes
  * transports or blocks already sealed old-epoch sends. Timed-out raw
- * work stays owned until settlement; its late receipt cannot commit a selection.
+ * work stays owned until settlement; its late receipt cannot commit a selection,
+ * but `onLateInstallation` tells the owner to run a fresh transition then.
  * @deprecated Compose this Promise SDK boundary when its callers migrate.
  */
 export function createWorkspaceEpochTransitionLegacy(input: {
@@ -149,6 +150,8 @@ export function createWorkspaceEpochTransitionLegacy(input: {
   rotationRequired?: boolean;
   timeoutMs?: number;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
+  /** A timed-out installation settled. Its result is not used; call `transition` again. */
+  onLateInstallation?: () => void;
 }) {
   let epoch = input.epoch;
   let latest: WorkspaceEpochStatus = {
@@ -222,20 +225,20 @@ export function createWorkspaceEpochTransitionLegacy(input: {
       publish('installing');
       const raw = Promise.resolve().then(ports.install);
       installation = raw;
-      void raw.then(
-        () => {
-          if (installation === raw) installation = undefined;
-        },
-        () => {
-          if (installation === raw) installation = undefined;
-        }
-      );
+      let timedOut = false;
+      const settle = () => {
+        if (installation === raw) installation = undefined;
+        // A slow installation is not a failed one: the owner's retry while it ran
+        // found it still owned, so nothing else would select its epoch.
+        if (timedOut && !isClosed()) input.onLateInstallation?.();
+      };
+      void raw.then(settle, settle);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('e2ee_key_update_timeout')),
-          input.timeoutMs ?? 10_000
-        );
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error('e2ee_key_update_timeout'));
+        }, input.timeoutMs ?? 10_000);
       });
       flight = (async () => {
         try {

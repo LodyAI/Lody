@@ -78,7 +78,8 @@ describe('readHostDefaultGitIdentity', () => {
     home = path.join(dir, process.platform === 'win32' ? 'home with space' : 'home "quoted"');
     xdg = path.join(home, '.config');
     mkdirSync(xdg, { recursive: true });
-    process.env = { ...originalEnv, HOME: home, XDG_CONFIG_HOME: xdg };
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = xdg;
     for (const key of Object.keys(process.env)) {
       if (/^(GIT_|LODY_GIT_|SSH_)/.test(key)) delete process.env[key];
     }
@@ -92,7 +93,10 @@ describe('readHostDefaultGitIdentity', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    process.env = originalEnv;
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, originalEnv);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -131,6 +135,9 @@ describe('readHostDefaultGitIdentity', () => {
     writeConfig(path.join(home, '.gitconfig'), identityConfig(machine.name, machine.email));
     process.env.GIT_CONFIG_GLOBAL = 'chosen config';
     writeConfig(path.join(dir, 'chosen config'), identityConfig(requester.name, requester.email));
+    expect(
+      execFileSync('git', ['config', '--global', '--get', 'user.name'], { encoding: 'utf8' }).trim()
+    ).toBe(requester.name);
     expect(readHostDefaultGitIdentity()).toEqual(requester);
 
     process.env.GIT_CONFIG_GLOBAL = '';

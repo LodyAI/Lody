@@ -99,6 +99,9 @@ targets:
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: Aqua
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     preBuildScripts:
+      - name: Validate backend build policy
+        script: python3 "${SRCROOT}/scripts/check-backend-build.py"
+        basedOnDependencyAnalysis: false
       - name: Verify native sources
         script: python3 "${SRCROOT}/scripts/check-native-sources.py"
         basedOnDependencyAnalysis: false
@@ -179,6 +182,7 @@ targets:
           - CreateSession/CreateSessionContext.swift
           - CreateSession/CreateSessionPickers.swift
           - CreateSession/ShareStore.swift
+          - Cloud/BackendEnvironment.swift
           - Resources/Localizable.xcstrings
       - App/Icons.xcassets
       - App/Colors.xcassets

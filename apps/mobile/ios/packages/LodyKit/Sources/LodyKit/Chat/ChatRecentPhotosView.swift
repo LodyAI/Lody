@@ -16,48 +16,6 @@ final class ChatPhotoGridLayout: UICollectionViewFlowLayout {
   }
 }
 
-private enum PhotoGridPresentation: String, CaseIterable {
-  case inset, edgeToEdge
-  static let preferenceKey = "chat.photoGridPresentation"
-  var inset: CGFloat { self == .inset ? 12 : 0 }
-  var cornerRadius: CGFloat { self == .inset ? 6 : 2 }
-  static var saved: Self {
-    Self(rawValue: UserDefaults.standard.string(forKey: preferenceKey) ?? "") ?? .edgeToEdge
-  }
-  @MainActor var appearance: OverlayAppearance {
-    // Equal top/side spacing gives the photo and panel corners a shared center.
-    let top = self == .inset ? cornerRadius + inset : 40
-    return OverlayAppearance(corners: .bottomConcentric(top: top))
-  }
-  var title: String { String(localized: String.LocalizationValue("native.chat.attachment.grid." + rawValue), bundle: .lody) }
-}
-
-/// Adjacent controls keep their individual 44pt hit areas even though their
-/// visible glass is 40pt tall. The action bar reserves the surrounding hit space.
-private final class ChatPhotoActions: UIView {
-  init(toggle: UIButton, confirm: UIButton) {
-    super.init(frame: .zero)
-    for button in [toggle, confirm] {
-      button.translatesAutoresizingMaskIntoConstraints = false
-      addSubview(button)
-      NSLayoutConstraint.activate([
-        button.topAnchor.constraint(equalTo: topAnchor),
-        button.bottomAnchor.constraint(equalTo: bottomAnchor),
-      ])
-    }
-    NSLayoutConstraint.activate([
-      toggle.leadingAnchor.constraint(equalTo: leadingAnchor),
-      toggle.widthAnchor.constraint(equalToConstant: 40),
-      confirm.leadingAnchor.constraint(equalTo: toggle.trailingAnchor, constant: 8),
-      confirm.trailingAnchor.constraint(equalTo: trailingAnchor),
-    ])
-  }
-  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-    subviews.contains { $0.point(inside: convert(point, to: $0), with: event) }
-  }
-}
-
 private final class ChatPhotoCell: UICollectionViewCell {
   let image = UIImageView()
   private let badge = UILabel()
@@ -105,10 +63,14 @@ private final class ChatPhotoCell: UICollectionViewCell {
     ])
     isAccessibilityElement = true
     accessibilityTraits = .image
+    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (cell: ChatPhotoCell, _: UITraitCollection) in
+      cell.refreshAccent()
+    }
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
   func refreshAccent() {
-    badge.backgroundColor = selectionOrder == nil ? .clear : UIColor.lodyAccent.resolvedColor(with: traitCollection)
+    badge.textColor = selectionOrder == nil ? .white : LodyAccent.foregroundColor
+    badge.backgroundColor = selectionOrder == nil ? .clear : .lodyAccent
     image.layer.borderColor = UIColor.lodyAccent.resolvedColor(with: traitCollection).cgColor
   }
   func mark(order: Int?, video: Bool = false) {
@@ -125,14 +87,13 @@ private final class ChatPhotoCell: UICollectionViewCell {
 }
 
 final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, OverlayContentSafeArea, OverlayPageChrome, OverlayBoundaryHighlighting {
-  static var initialAppearance: OverlayAppearance { PhotoGridPresentation.saved.appearance }
-  var onAppearanceChange: ((OverlayAppearance) -> Void)?
+  private static let gridInset: CGFloat = 12
+  private static let thumbnailRadius: CGFloat = 6
+  static var initialAppearance: OverlayAppearance {
+    OverlayAppearance(corners: .bottomConcentric(top: gridInset + thumbnailRadius))
+  }
   var overlayChrome: UIView { actionBar }
-  private lazy var actions = ChatPhotoActions(toggle: layoutToggle, confirm: confirm)
-  private lazy var actionBar = OverlayActionBar(leading: back, trailing: actions)
-  private let layoutToggle = OverlayActionButton()
-  private var presentation = PhotoGridPresentation.saved
-  private var gridEdges: [NSLayoutConstraint] = []
+  private lazy var actionBar = OverlayActionBar(leading: back, trailing: confirm)
   var onPick: (([ChatAttachment]) -> Void)?
   var onBack: (() -> Void)?
   var onLibrary: (() -> Void)?
@@ -168,8 +129,8 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
 
   @objc private func refreshAccent() {
     let accent = LodyAccent.color.resolvedColor(with: traitCollection)
-    layoutToggle.accentColor = accent
     confirm.accentColor = accent
+    updateConfirm()
     for case let cell as ChatPhotoCell in grid.visibleCells {
       // Preserve the existing media indicator while refreshing the selection color.
       cell.refreshAccent()
@@ -197,6 +158,21 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     manage.addAction(UIAction { [weak self] _ in self?.manageLimited() }, for: .touchUpInside)
     confirm.horizontalPadding = 20
     confirm.accessibilityIdentifier = "attachment-photos-confirm"
+    confirm.configurationUpdateHandler = { [weak self] button in
+      guard let self, !self.selection.isEmpty else { return }
+      let previous = button.configuration
+      // Keep selected Add solid Ink: prominent glass can override its contrasting text.
+      var configuration = UIButton.Configuration.filled()
+      configuration.baseBackgroundColor = self.confirm.accentColor
+      var ink: CGFloat = 0
+      self.confirm.accentColor.getRed(&ink, green: nil, blue: nil, alpha: nil)
+      configuration.baseForegroundColor = ink > 0.5 ? .black : .white
+      configuration.cornerStyle = .capsule
+      configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)
+      configuration.title = previous?.title
+      configuration.showsActivityIndicator = previous?.showsActivityIndicator ?? false
+      button.configuration = configuration
+    }
     confirm.addAction(UIAction { [weak self] _ in
       guard let self else { return }
       if self.selection.isEmpty { self.onLibrary?() } else { self.commit() }
@@ -205,13 +181,6 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     back.accessibilityLabel = String(localized: "native.chat.attachment.back", bundle: .lody)
     back.accessibilityIdentifier = "attachment-photos-back"
     back.addAction(UIAction { [weak self] _ in self?.onBack?() }, for: .touchUpInside)
-    layoutToggle.accessibilityLabel = String(localized: "native.chat.attachment.grid.options", bundle: .lody)
-    layoutToggle.accessibilityIdentifier = "attachment-photos-layout"
-    layoutToggle.addAction(UIAction { [weak self] _ in
-      guard let self else { return }
-      self.setPresentation(self.presentation == .inset ? .edgeToEdge : .inset)
-    }, for: .touchUpInside)
-    updatePresentationControl()
     grid.accessibilityIdentifier = "attachment-photos-grid"
     grid.contentInsetAdjustmentBehavior = .never
     statusAction.accessibilityIdentifier = "attachment-photos-access"
@@ -221,13 +190,12 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
       item.translatesAutoresizingMaskIntoConstraints = false
       overlayChrome.addSubview(item)
     }
-    gridEdges = [
-      grid.topAnchor.constraint(equalTo: topAnchor, constant: presentation.inset),
-      grid.leadingAnchor.constraint(equalTo: leadingAnchor, constant: presentation.inset),
-      trailingAnchor.constraint(equalTo: grid.trailingAnchor, constant: presentation.inset),
-      bottomAnchor.constraint(equalTo: grid.bottomAnchor, constant: presentation.inset),
-    ]
-    NSLayoutConstraint.activate(gridEdges)
+    NSLayoutConstraint.activate([
+      grid.topAnchor.constraint(equalTo: topAnchor, constant: Self.gridInset),
+      grid.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.gridInset),
+      trailingAnchor.constraint(equalTo: grid.trailingAnchor, constant: Self.gridInset),
+      bottomAnchor.constraint(equalTo: grid.bottomAnchor, constant: Self.gridInset),
+    ])
     NSLayoutConstraint.activate([
       manage.bottomAnchor.constraint(equalTo: actionBar.controlsGuide.topAnchor, constant: -8),
       manage.centerXAnchor.constraint(equalTo: overlayChrome.centerXAnchor),
@@ -239,50 +207,6 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     ])
     updateConfirm()
     refresh()
-  }
-
-  private func updatePresentationControl() {
-    let inset = presentation == .inset
-    layoutToggle.actionStyle = inset ? .emphasized : .neutral
-    layoutToggle.appearance = inset ? .automatic : ChatAttachmentMenu.mediaActionAppearance
-    layoutToggle.configuration?.image = UIImage(systemName: inset ? "arrow.down.forward.and.arrow.up.backward" : "arrow.down.backward.and.arrow.up.forward")
-    layoutToggle.isSelected = inset
-    layoutToggle.accessibilityValue = presentation.title
-  }
-
-  private func setPresentation(_ mode: PhotoGridPresentation) {
-    guard presentation != mode else { return }
-    grid.layoutIfNeeded()
-    let oldMaximum = max(-grid.adjustedContentInset.top,
-      grid.contentSize.height - grid.bounds.height + grid.adjustedContentInset.bottom)
-    let wasAtBottom = oldMaximum > 0 && abs(grid.contentOffset.y - oldMaximum) < 1
-    let first = grid.indexPathsForVisibleItems.sorted().first
-    let frame = first.flatMap { grid.layoutAttributesForItem(at: $0)?.frame }
-    let relativeOffset = frame.map { (grid.contentOffset.y - $0.minY) / max(1, $0.height) } ?? 0
-    presentation = mode
-    UserDefaults.standard.set(mode.rawValue, forKey: PhotoGridPresentation.preferenceKey)
-    updatePresentationControl()
-    for edge in gridEdges { edge.constant = mode.inset }
-    onAppearanceChange?(mode.appearance)
-    let updates = {
-      self.layoutIfNeeded()
-      self.grid.layoutIfNeeded()
-      self.updateInsets()
-      if let first, let frame = self.grid.layoutAttributesForItem(at: first)?.frame {
-        let y = frame.minY + relativeOffset * frame.height
-        let minimum = -self.grid.adjustedContentInset.top
-        let maximum = max(minimum, self.grid.contentSize.height - self.grid.bounds.height + self.grid.adjustedContentInset.bottom)
-        self.grid.contentOffset.y = wasAtBottom ? maximum : min(maximum, max(minimum, y))
-      }
-      for case let cell as ChatPhotoCell in self.grid.visibleCells {
-        cell.image.layer.cornerRadius = mode.cornerRadius
-      }
-    }
-    if UIAccessibility.isReduceMotionEnabled { updates() }
-    else {
-      UIView.animate(withDuration: 0.28, delay: 0, usingSpringWithDamping: 1,
-        initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: updates)
-    }
   }
 
   private func refresh() {
@@ -328,7 +252,6 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     confirm.configuration?.showsActivityIndicator = false
     grid.isUserInteractionEnabled = true
     back.isEnabled = true
-    layoutToggle.isEnabled = true
     guard !picked.isEmpty else { return }
     guard window != nil, let onPick else { ChatAttachment.discardImports(picked); return }
     onPick(picked)
@@ -340,7 +263,7 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
   }
 
   private func updateInsets() {
-    grid.contentInset.bottom = max(0, actionBar.contentBottomInset - presentation.inset) + (manage.isHidden ? 0 : 52)
+    grid.contentInset.bottom = max(0, actionBar.contentBottomInset - Self.gridInset) + (manage.isHidden ? 0 : 52)
     grid.verticalScrollIndicatorInsets.bottom = grid.contentInset.bottom
   }
 
@@ -349,7 +272,7 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
       guard let cell = cell as? ChatPhotoCell,
             let id = cell.assetID, selection.contains(id) else { return nil }
       return OverlayBoundaryHighlight(view: cell.image,
-        shape: .roundedRect(radius: presentation.cornerRadius), clippedTo: grid,
+        shape: .roundedRect(radius: Self.thumbnailRadius), clippedTo: grid,
         color: .lodyAccent, lineWidth: 2)
     }
   }
@@ -362,14 +285,13 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "photo", for: indexPath) as! ChatPhotoCell
     guard let asset = assets?.object(at: indexPath.item) else { return cell }
     cell.image.image = nil
-    cell.image.layer.cornerRadius = presentation.cornerRadius
+    cell.image.layer.cornerRadius = Self.thumbnailRadius
     cell.accessibilityIdentifier = "attachment-photo-\(indexPath.item)"
     cell.assetID = asset.localIdentifier
     cell.mark(order: selection.firstIndex(of: asset.localIdentifier).map { $0 + 1 }, video: asset.mediaType == .video)
     let indexKey = asset.mediaType == .video ? "native.chat.attachment.videoIndex" : "native.chat.attachment.photoIndex"
     cell.accessibilityLabel = String.localizedStringWithFormat(String(localized: String.LocalizationValue(indexKey), bundle: .lody), String(describing: indexPath.item + 1))
-    // Request the largest layout size so switching from inset never upscales a smaller thumbnail.
-    let side = max(1, (bounds.width - 6) / 3) * (window?.screen.scale ?? 2)
+    let side = max(1, (grid.bounds.width - 6) / 3) * (window?.screen.scale ?? 2)
     let options = PHImageRequestOptions()
     options.isNetworkAccessAllowed = true
     options.deliveryMode = .opportunistic
@@ -408,9 +330,12 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
       ? String(localized: "native.chat.composer.photoLibrary", bundle: .lody)
       : String.localizedStringWithFormat(String(localized: "native.chat.attachment.addCount", bundle: .lody), selection.count)
     confirm.actionStyle = selection.isEmpty ? .neutral : .emphasized
-    confirm.appearance = selection.isEmpty ? ChatAttachmentMenu.mediaActionAppearance : .automatic
+    confirm.appearance = selection.isEmpty
+      ? ChatAttachmentMenu.mediaActionAppearance
+      : OverlayActionAppearance(foregroundColor: LodyAccent.foregroundColor)
     confirm.horizontalPadding = 20
     confirm.configuration?.title = title
+    confirm.setNeedsUpdateConfiguration()
     confirm.accessibilityValue = String(selection.count)
   }
 
@@ -420,7 +345,6 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     confirm.isEnabled = false
     grid.isUserInteractionEnabled = false
     back.isEnabled = false
-    layoutToggle.isEnabled = false
     confirm.configuration?.showsActivityIndicator = true
     let group = DispatchGroup()
     let attachments = ChatAttachmentCollector()

@@ -246,6 +246,35 @@ describe('SessionGCManager', () => {
       expect(cleanMock.mock.calls).toEqual([[s1]]);
     });
 
+    it('retains a session that starts background work during the final eligibility read', async () => {
+      const sessionId = 'session-background-race' as SessionId;
+      sessionActivities.set(sessionId, Date.now() - 2000);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let reads = 0;
+      const manager = createManager(
+        { idleTimeoutMs: 1000, nativeBackgroundMaxIdleMs: 5000 },
+        'linux',
+        {
+          hasPendingUserWork: async () => {
+            if (++reads === 2) {
+              entered.resolve();
+              await release.promise;
+            }
+            return false;
+          },
+        }
+      );
+
+      const sweep = manager.sweep();
+      await entered.promise;
+      nativeWork.set(sessionId, 'background');
+      release.resolve();
+      await sweep;
+
+      expect(cleanMock).not.toHaveBeenCalled();
+    });
+
     it('does not clean sessions in archive flight', async () => {
       const manager = createManager({ idleTimeoutMs: 1000 });
       const now = Date.now();

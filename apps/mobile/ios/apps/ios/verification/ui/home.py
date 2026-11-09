@@ -42,10 +42,9 @@ def assert_swipe_has_no_selection(action_label):
 
 
 def assert_flat_ground(row, project):
-    edit_label = catalog.text('workspace.edit.action')
-    if any(i.get('AXLabel') == edit_label for i in ui.state()):
+    if any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in ui.state()):
         ui.axe('tap', '-x', str(screen / 2), '-y', '700', '--post-delay', '.6')
-    ui.wait(lambda items: not any(i.get('AXLabel') == edit_label for i in items), 'The workspace menu must not cover the list')
+    ui.wait(lambda items: not any(i.get('AXLabel') == '我的超长工作区名称不能折行' for i in items), 'The workspace menu must not cover the list')
     ui.screenshot('rail-ground')
     width = round(screen)
     pixels = subprocess.check_output([

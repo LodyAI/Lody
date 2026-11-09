@@ -14,7 +14,8 @@
     "./maintenance": "./src/maintenance.ts",
     "./recovery-restore": "./src/recovery-restore.ts",
     "./vault-replacement": "./src/vault-replacement.ts",
-    "./passkey-unlock": "./src/passkey-unlock.ts"
+    "./passkey-unlock": "./src/passkey-unlock.ts",
+    "./passkey-browser": "./src/passkey-browser.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

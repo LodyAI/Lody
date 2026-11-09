@@ -25,6 +25,14 @@ import {
   ProjectGroupsResult,
 } from './projects.ts';
 import {
+  ScheduleCommandParams,
+  ScheduleCommandResult,
+  ScheduleDetail,
+  ScheduleDetailParams,
+  SchedulesParams,
+  SchedulesResult,
+} from './schedules.ts';
+import {
   OpenSessionParams,
   ReleaseReserveParams,
   RestoreSessionsParams,
@@ -34,8 +42,6 @@ import {
 import {
   AgentRoleSnapshot,
   AgentRolesParams,
-  MemorySettingsParams,
-  MemorySnapshot,
   RemoteSettingsParams,
   RemoteSettingsResult,
 } from './settings.ts';
@@ -163,11 +169,6 @@ export const runtimeCalls = {
     result: RemoteSettingsResult,
     timeoutMs: 45_000,
   },
-  memorySettings: {
-    params: MemorySettingsParams,
-    result: MemorySnapshot,
-    timeoutMs: 45_000,
-  },
   agentRoles: {
     params: AgentRolesParams,
     result: AgentRoleSnapshot,
@@ -192,6 +193,21 @@ export const runtimeCalls = {
     params: ProjectGroupsParams,
     result: ProjectGroupsResult,
     timeoutMs: 45_000,
+  },
+  schedules: {
+    params: SchedulesParams,
+    result: SchedulesResult,
+    timeoutMs: 45_000,
+  },
+  scheduleDetail: {
+    params: ScheduleDetailParams,
+    result: ScheduleDetail,
+    timeoutMs: 45_000,
+  },
+  scheduleCommand: {
+    params: ScheduleCommandParams,
+    result: ScheduleCommandResult,
+    timeoutMs: 70_000,
   },
   localProjects: {
     params: LocalProjectsParams,

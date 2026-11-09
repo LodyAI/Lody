@@ -57,6 +57,14 @@ extension LodyChatView {
       applyRows()
       return
     }
+    if row.kind == "summary", row.processStartID == "__thought__" {
+      if !expandedThoughts.insert(row.id).inserted { expandedThoughts.remove(row.id) }
+      UISelectionFeedbackGenerator().selectionChanged()
+      toggleAnchor = row.id
+      followsBottom = false
+      applyRows()
+      return
+    }
     if row.kind == "changesHeader" {
       UISelectionFeedbackGenerator().selectionChanged()
       onActivityPress(["entryId": row.entryID, "itemId": "", "processStartId": "__turnFiles__"])
@@ -453,19 +461,22 @@ extension LodyChatView {
       return ChatPlanCell.height(body: body, expanded: expandedPlans.contains(row.id), review: !row.planPermissionItemID.isEmpty, decision: row.planDecision)
     }
     if row.kind == "attachments" {
-      return ChatMessageAttachmentsCell.height(count: row.attachments.count, width: width, expanded: expandedAttachments.contains(row.entryID))
+      return ChatMessageAttachmentsCell.height(count: row.attachments.count, width: width,
+        expanded: expandedAttachments.contains(row.entryID), author: !row.author.isEmpty)
     }
     if row.kind == "chat_failed" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "tasksHeader" { return row.detail.isEmpty ? ChatFileCell.headerHeight : 56 }
     if row.subagent != nil { return ChatSubagentCell.height(row, width: width, traits: traitCollection) }
+    if row.kind.hasPrefix("operation") { return ChatOperationCell.height(row, traits: traitCollection) }
     if row.kind == "meta" { return 44 }
-    if row.kind == "userActions" { return 44 }
     if row.kind == "duration" { return ChatCell.processHeight(for: row, width: width, traits: traitCollection) }
     if row.kind == "changesHeader" { return ChatFileCell.headerHeight }  // Same height as the tasks row without a step.
     let measured = measure(row, width: width)
     if row.kind == "user" {
+      measuringText.setText(text(for: row))
+      let limit = ChatMessageContent.collapsedHeight(label: measuringText, width: ChatCell.textWidth(row, width: width))
       return ChatMessageContent.height(textHeight: measured,
-        limit: collapsedMessageHeights[row.entryID] ?? ChatMessageContent.maximumCollapsedHeight,
+        limit: limit,
         expanded: expandedMessages.contains(row.entryID)) + ChatRowPadding.content + 12
     }
     let measuredHeight = measured + ChatCell.rowExtra(for: row, previousKind: previousKind ?? kind(before: row.id))
@@ -719,44 +730,5 @@ final class ChatPerformanceProbe: NSObject {
       }
     }
     return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
-  }
-}
-
-
-extension LodyChatView {
-  func messageMenu(entryID: String, source: UIButton) -> UIMenu {
-    UIMenu(children: [UIDeferredMenuElement.uncached { [weak self, weak source] completion in
-      guard let self, let source,
-        let content = ChatMessageShare.content(in: self.transcript, entryID: entryID) else {
-        completion([])
-        return
-      }
-      @MainActor func action(_ key: String, symbol: String, disabled: Bool = false) -> UIAction {
-        UIAction(title: String(localized: String.LocalizationValue("native.chat.message." + key), bundle: .lody), image: UIImage(systemName: symbol),
-          attributes: disabled ? .disabled : []) { [weak self, weak source] _ in
-          guard let self, let source else { return }
-          if key == "copy" {
-            UIPasteboard.general.setMessageMarkdown(content.text)
-            LodyToastOverlay.shared.show(message: String(localized: "native.chat.message.copied", bundle: .lody), kind: "info")
-          } else if key == "image" {
-            var snapshot = content
-            snapshot.workspace = self.imageWorkspace
-            snapshot.session = self.imageSession
-            guard let data = try? JSONEncoder().encode(snapshot), let json = String(data: data, encoding: .utf8) else { return }
-            self.onShareImage(["contentJSON": json])
-          } else if let owner = self.presenter(), owner.presentedViewController == nil {
-            let sheet = UIActivityViewController(activityItems: [content.text], applicationActivities: nil)
-            sheet.popoverPresentationController?.sourceView = source
-            sheet.popoverPresentationController?.sourceRect = source.bounds
-            owner.present(sheet, animated: true)
-          }
-        }
-      }
-      completion([
-        action("copy", symbol: "doc.on.doc", disabled: content.text.isEmpty),
-        action("image", symbol: "photo", disabled: !self.imageSharingEnabled),
-        action("share", symbol: "square.and.arrow.up", disabled: content.text.isEmpty),
-      ])
-    }])
   }
 }

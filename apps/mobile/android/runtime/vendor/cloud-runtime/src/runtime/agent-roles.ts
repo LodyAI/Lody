@@ -107,17 +107,29 @@ export async function resolveTurnRole(
   signal: AbortSignal,
   open: typeof openSettings = openSettings,
 ): Promise<TurnRole> {
-  const { flock } = await open(`${args.workspaceId}:wf:workspace`, getGrant, signal);
+  const { flock } = await open(
+    `${args.workspaceId}:wf:workspace`,
+    getGrant,
+    signal,
+  );
   return bindTurnRole(flock.get(['agentRole', args.roleId]), args);
 }
 
 export function bindTurnRole(
   row: unknown,
-  args: { roleId: string; userId: string; machineId: string; agentConfigId: string },
+  args: {
+    roleId: string;
+    userId: string;
+    machineId: string;
+    agentConfigId: string;
+  },
 ): TurnRole {
   const role = readRole(row, args.roleId);
-  if (!role || !readableRole(role, args.userId)) throw new Error('role_unavailable');
-  const target = role.targets.find((entry) => entry.machineId === args.machineId);
+  if (!role || !readableRole(role, args.userId))
+    throw new Error('role_unavailable');
+  const target = role.targets.find(
+    (entry) => entry.machineId === args.machineId,
+  );
   if (!target || target.agentConfigId !== args.agentConfigId)
     throw new Error('role_unavailable');
   return {

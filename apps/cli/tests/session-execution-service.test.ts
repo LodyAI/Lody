@@ -75,6 +75,8 @@ import {
   inputBlocksToHistoryItems,
   SessionStatusFactory,
   type AcpCapabilityCacheEntry,
+  type AcpConfigOptionSummary,
+  getAcpCapabilityCacheEntryAuthority,
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -5473,13 +5475,10 @@ describe('SessionExecutionService', () => {
     } satisfies Extract<SessionInputBlock, { type: 'file' }>;
     const buildAcpPromptBlocks: SessionExecutionServiceDeps['buildAcpPromptBlocks'] = async ({
       inputBlocks,
-      userTurnId,
     }) =>
       inputBlocks.flatMap((block): ContentBlock[] => {
         if (block.type === 'local_attachment') {
-          if (userTurnId !== block.turnId)
-            throw new Error('Local attachment requires its original turn');
-          return [{ type: 'resource_link', uri: 'file:///tmp/local.txt', name: block.fileName }];
+          return [{ type: 'resource_link', uri: `file://${block.path}`, name: block.fileName }];
         }
         if (block.type === 'text') return [{ type: 'text', text: block.text }];
         if (block.type === 'file')
@@ -5520,10 +5519,8 @@ describe('SessionExecutionService', () => {
           fileBlock,
           {
             type: 'local_attachment',
-            referenceId: '148aa46f-967a-45c1-b752-04e1bb81eb11',
             machineId: 'machine-1',
-            sessionId: 'session-file-create',
-            turnId: 'turn-user-file',
+            path: '/tmp/local.txt',
             kind: 'file',
             fileName: 'local.txt',
             mimeType: 'text/plain',
@@ -11263,6 +11260,85 @@ describe('SessionExecutionService', () => {
     }
   });
 
+  it('does not mark a provider verified when the post-authentication probe has an empty model catalog', async () => {
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockResolvedValue({ success: true, disposition: 'authenticated' });
+    const fetchAcpCapabilities = vi.fn(async () => ({
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'model-a',
+          options: [],
+        },
+      ],
+      sessionFork: false,
+      acknowledgedSteer: true,
+    }));
+    const updateAcpCapabilities = vi.fn(async () => ({
+      cliType: 'registry' as const,
+      agentType: 'deepseek',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'model-a',
+          options: [],
+        },
+      ],
+      sessionFork: false,
+      acknowledgedSteer: true,
+      sessionTitle: false,
+      sessionForkWorktree: false,
+      fetchedAt: 1,
+    }));
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        fetchAcpCapabilities,
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({ cliType: 'registry', agentType: 'deepseek', env: {} })
+          ),
+          updateAcpCapabilities,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      const result = await service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'auth-degraded-catalog',
+        action: 'start',
+        configId: capabilityConfigId,
+      });
+
+      // Auth succeeded but the catalog is degraded: not a verification pass.
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          disposition: 'authenticated',
+          capabilitiesRefreshed: false,
+          error: 'Authentication succeeded, but the provider reported no usable models',
+        })
+      );
+      // The degraded probe is still persisted so the cache can identify it.
+      expect(updateAcpCapabilities).toHaveBeenCalledOnce();
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
   it('forwards a browser authorization code to the active login process', async () => {
     const submitAuthorizationCode = vi
       .spyOn(AcpAuthenticationManager.prototype, 'submitAuthorizationCode')
@@ -11471,6 +11547,7 @@ describe('SessionExecutionService', () => {
         env?: Record<string, string>;
         expectedSourceVersion?: () => string | undefined;
         getAcpCapabilities?: () => Promise<AcpCapabilityCacheEntry | undefined>;
+        probeConfigOptions?: () => AcpConfigOptionSummary[] | undefined;
       } = {}
     ) => {
       const flock = new InMemoryMachineFlock();
@@ -11518,6 +11595,7 @@ describe('SessionExecutionService', () => {
           return {
             modes: [{ id: 'default', name: 'Default' }],
             models: [{ modelId: 'model-a', name: 'Model A' }],
+            configOptions: options.probeConfigOptions?.(),
             availableCommands: probeCommands,
             sessionFork: false,
             acknowledgedSteer: true,
@@ -11756,6 +11834,55 @@ describe('SessionExecutionService', () => {
           })
         );
         expect(harness.probes()).toBe(0);
+      }));
+
+    it('re-probes a persisted entry whose model select advertised zero choices, then caches the healed result', () =>
+      withClock(async () => {
+        let catalog: AcpConfigOptionSummary[] | undefined = [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [],
+          },
+        ];
+        const harness = createHarness({ probeConfigOptions: () => catalog });
+
+        // The degraded probe persists like any other result...
+        const degraded = await harness.service.refreshMachineAcpCapabilities(request);
+        expect(degraded.success).toBe(true);
+        expect(harness.storedEntry()?.configOptions?.[0]?.options).toEqual([]);
+        expect(getAcpCapabilityCacheEntryAuthority(harness.storedEntry(), undefined)).toBe(
+          'degraded'
+        );
+
+        // ...but it never answers a refresh: the cache misses and probes again.
+        await harness.service.refreshMachineAcpCapabilities(request);
+        expect(harness.probes()).toBe(2);
+
+        // Once a real catalog lands, the entry is authoritative again and the
+        // next refresh is served from it without another probe.
+        catalog = [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [{ value: 'model-a', name: 'Model A' }],
+          },
+        ];
+        await harness.service.refreshMachineAcpCapabilities(request);
+        expect(harness.probes()).toBe(3);
+        expect(getAcpCapabilityCacheEntryAuthority(harness.storedEntry(), undefined)).toBe(
+          'authoritative'
+        );
+
+        const cached = await harness.service.refreshMachineAcpCapabilities(request);
+        expect(harness.probes()).toBe(3);
+        expect(cached.success).toBe(true);
       }));
   });
 

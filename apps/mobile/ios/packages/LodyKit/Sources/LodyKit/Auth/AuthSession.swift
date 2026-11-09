@@ -1,22 +1,15 @@
 import Foundation
-import SafariServices
 import UIKit
 
 struct AuthSnapshot: Encodable, Sendable {
-  struct Code: Encodable, Sendable {
-    let user_code: String
-    let verification_uri_complete: String
-    let expires_in: Double
-    let interval: Double
-  }
-
   var account: AuthAccount?
   var busy = true
   var localReady = false
   var initialWorkspace = ""
   var catalogRevision = 0
-  var code: Code?
   var error: String?
+  /// An email sign-up or resend sent a verification link; nothing was installed.
+  var verificationSent = false
 
   var json: String {
     let encoder = JSONEncoder()
@@ -57,12 +50,12 @@ final class AuthSession {
   private var initialWorkspace = ""
   private var initialCatalog: String?
   private var catalogRevision = 0
-  private var code: DeviceCode?
   private var error: String?
+  private var verificationSent = false
   private var current: Task<Void, Never>?
   private var attempt = 0
   private var started = false
-  private var browser: SFSafariViewController?
+  private let providers = NativeAuthProviders()
 
   var catalogScope: AuthCatalogScope {
     AuthCatalogScope(account: account, localReady: localReady, initialWorkspace: initialWorkspace, initialCatalog: initialCatalog)
@@ -78,34 +71,22 @@ final class AuthSession {
     await begin { id in await self.performRestore(id) }
   }
 
-  func login() async throws {
-    guard !LodyUIVerify.enabled else {
-      throw AuthFailure(message: "Login is disabled during offline UI verification")
-    }
-    await begin { id in await self.performLogin(id) }
+  func login(_ method: NativeLoginMethod) async {
+    guard !LodyUIVerify.enabled else { return }
+    await begin { id in await self.performLogin(id, method: method) }
   }
 
   func cancel() {
     current?.cancel()
-    current = nil
     attempt += 1
-    closeBrowser()
+    providers.cancel()
     busy = false
-    code = nil
     publish()
   }
 
   func logout() async {
     let token = credential
     await begin { id in await self.performLogout(id, token: token) }
-  }
-
-  func reopen() {
-    guard let code else { return }
-    do { try openBrowser(code.verificationURL) } catch {
-      self.error = String(localized: "auth.error.openAuthorizePage", bundle: .lody)
-      publish()
-    }
   }
 
   func updateWorkspace(id: String, name: String) async throws {
@@ -125,15 +106,22 @@ final class AuthSession {
   }
 
   private func begin(_ work: @escaping @MainActor (Int) async -> Void) async {
-    current?.cancel()
+    let previous = current
+    previous?.cancel()
+    providers.cancel()
     attempt += 1
     let id = attempt
-    let task = Task { await work(id) }
+    let task = Task {
+      // Drain prior local persistence before admitting a replacement account.
+      await previous?.value
+      guard self.active(id) else { return }
+      await work(id)
+    }
     current = task
     await task.value
   }
 
-  private func active(_ id: Int) -> Bool { id == attempt }
+  private func active(_ id: Int) -> Bool { id == attempt && !Task.isCancelled }
 
   private func update(_ id: Int, _ change: () -> Void) {
     guard active(id) else { return }
@@ -201,32 +189,48 @@ final class AuthSession {
     update(id) { account = fresh; credential = token }
   }
 
-  private func performLogin(_ id: Int) async {
-    update(id) { busy = true; code = nil; error = nil }
+  private func performLogin(_ id: Int, method: NativeLoginMethod) async {
+    update(id) { busy = true; error = nil; verificationSent = false }
     do {
-      let code = try await api.deviceCode()
-      update(id) { self.code = code }
-      guard active(id) else { throw AuthFailure(message: String(localized: "common.cancelled", bundle: .lody)) }
-      try openBrowser(code.verificationURL)
-      let token = try await api.pollToken(code)
+      let token: String
+      switch method {
+      case let .email(email, password): token = try await api.email(email: email, password: password)
+      case let .register(name, email, password):
+        guard let registered = try await api.register(name: name, email: email, password: password) else {
+          update(id) { busy = false; localReady = true; verificationSent = true }
+          return
+        }
+        token = registered
+      case let .resendVerification(email):
+        try await api.resendVerification(email: email)
+        update(id) { busy = false; localReady = true; verificationSent = true }
+        return
+      case .apple, .google, .github, .discord:
+        guard let controller = presenter?() else { throw CancellationError() }
+        token = try await providers.signIn(method, presenting: controller, api: api)
+      }
+      guard active(id) else { return }
       let fresh = try await api.account(token: token)
-      guard active(id) else { throw AuthFailure(message: String(localized: "common.cancelled", bundle: .lody)) }
+      guard active(id) else { return }
       try await clearLocal()
-      try AuthKeychain.save(token)
+      // clearLocal suspends: cancellation must be rechecked BEFORE Keychain writes.
+      guard active(id) else { return }
       await save(fresh)
-      guard active(id) else { throw AuthFailure(message: String(localized: "common.cancelled", bundle: .lody)) }
-      update(id) { account = fresh; credential = token; self.code = nil }
+      guard active(id) else { return }
+      try AuthKeychain.save(token)
+      NativeLastLoginMethod(method)?.write()
+      update(id) { account = fresh; credential = token }
+    } catch is CancellationError {
+      // Cancellation is not an authentication error.
     } catch {
-      update(id) { self.error = error.localizedDescription; code = nil }
+      update(id) { self.error = error.localizedDescription }
     }
-    guard active(id) else { return }
-    closeBrowser()
     update(id) { busy = false; localReady = true }
   }
 
   private func performLogout(_ id: Int, token: String?) async {
     update(id) { busy = true; error = nil }
-    update(id) { account = nil; credential = nil; code = nil; setCatalog(nil) }
+    update(id) { account = nil; credential = nil; setCatalog(nil) }
     do {
       guard await clearLocalAndCredentials() else { throw AuthFailure(message: String(localized: "auth.error.signOutIncomplete", bundle: .lody)) }
       if let token { try await api.signOut(token: token) }
@@ -271,23 +275,8 @@ final class AuthSession {
     publish()
   }
 
-  private func openBrowser(_ address: String) throws {
-    guard let url = URL(string: address), url.scheme == "https", url.host == "lody.ai",
-          url.user == nil, url.password == nil, let controller = presenter?() else {
-      throw NSError(domain: "LodyKit.AuthBrowser", code: 1)
-    }
-    let browser = SFSafariViewController(url: url)
-    self.browser = browser
-    controller.present(browser, animated: true)
-  }
-
-  private func closeBrowser() {
-    browser?.dismiss(animated: true)
-    browser = nil
-  }
-
   private func toast(_ key: String) {
-    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: "error")
+    LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: .error)
   }
 
   private func publish() {
@@ -300,11 +289,8 @@ final class AuthSession {
       localReady: localReady,
       initialWorkspace: initialWorkspace,
       catalogRevision: catalogRevision,
-      code: code.map {
-        AuthSnapshot.Code(user_code: $0.userCode, verification_uri_complete: $0.verificationURL,
-                          expires_in: $0.expiresIn, interval: $0.interval)
-      },
-      error: error
+      error: error,
+      verificationSent: verificationSent
     )
     guard Self.published.set(snapshot.json) else { return }
     NotificationCenter.default.post(name: .lodyAuthDidChange, object: nil)
