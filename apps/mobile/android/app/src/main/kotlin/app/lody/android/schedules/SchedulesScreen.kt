@@ -1,5 +1,5 @@
 // The Schedules tab (web `schedule-list.tsx` on mobile): Scheduled tasks and Scheduled messages
-// sections; rows are name, frequency · agent · computer, and the status in words.
+// sections; rows are name, frequency · computer, and the status in words.
 package app.lody.android.schedules
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -267,7 +267,7 @@ private fun ScheduleRow(
     val attention = item.state.group == "attention"
     val status = statusText(item.state)
     val separator = stringResource(R.string.schedules_detail_separator)
-    val summary = listOfNotNull(item.agentName, item.machineName ?: item.machineId, item.projectName).filter { it.isNotBlank() }.joinToString(separator)
+    val summary = listOfNotNull(item.machineName ?: item.machineId, item.projectName).filter { it.isNotBlank() }.joinToString(separator)
     val actions = rowActions(item)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = LodyLayout.screenPaddingX, vertical = LodySpacing.xxs)

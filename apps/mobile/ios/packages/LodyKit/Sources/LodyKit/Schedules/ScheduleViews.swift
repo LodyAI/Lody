@@ -82,7 +82,7 @@ struct ScheduleMarkView: View {
   }
 }
 
-/// One list row: mark tile; name and the short state; rule summary; Agent · computer · project;
+/// One list row: mark tile; name and the short state; rule summary; computer · project;
 /// a reason line only when the schedule needs a look.
 struct ScheduleRowView: View {
   let item: ScheduleItem
@@ -136,7 +136,7 @@ struct ScheduleRowView: View {
   }
 
   private var meta: String {
-    [item.agentName ?? "", item.machineName ?? "", item.projectName ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+    [item.machineName ?? "", item.projectName ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
   }
 }
 
