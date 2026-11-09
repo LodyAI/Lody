@@ -135,7 +135,7 @@ The following requirements are established:
   The local-only OSS desktop has no Lody Memory.
 - Prioritize reliable Agent tool reads and updates. Conflicting writes must be
   reported rather than blindly overwriting a newer revision.
-- Provide provenance for current memory content. Restorable old versions, undo,
+- Provide provenance for each current memory fact or entry. Restorable old versions, undo,
   and a complete historical audit trail are not required.
 - Normal credential renewal must not interrupt a mounted memory, invalidate open
   handles, or lose in-flight writes. Unmount/remount is not an acceptable renewal
@@ -203,28 +203,36 @@ requirement; neither is selected for the initial implementation.
 
 ### Current-content provenance
 
-The proposed first unit of provenance is a file's current revision, not each
-sentence or fact. A Lody Agent update associates memory ID, path, revision (or
-content hash), user ID, machine ID, session ID, turn ID, tool-call/change ID, and
-service-confirmed time. Identity comes from authenticated context; a caller's
-arbitrary actor label is not proof of identity. Session links remain subject to
-session access control and must not expose private conversation content to shared
-memory readers.
+Provenance is required for each current memory fact or entry, not merely the last
+writer of its containing file. Updating one entry must preserve the provenance
+of unchanged entries. Reordering or moving an entry must not attribute its content
+to the person who merely reorganized the document. Current entries retain their
+source associations without requiring old document bodies or a complete edit log.
 
-The source record must match the content being displayed. A stale record must
-never attribute new content to a previous writer. A file update followed by a
-separate provenance append can fail between steps; the implementation design must
-specify idempotent reconciliation, retry behavior and an explicit incomplete
-result. It must not report both content and provenance complete when only the
-content was saved. The storage/commit mechanism is still unresolved; no journal
-atomicity is assumed, and filesystem tokens cannot append Drive9 journals.
+The proposed design gives entries stable identities and associates their current
+content with source records. A source record includes entry ID, memory ID, path,
+content identity, user/machine ID, session ID, turn ID, tool-call/change ID and
+service-confirmed time. Original source and subsequent content updates must be
+distinguishable; a file revision alone is insufficient. Entry encoding in Markdown,
+record storage, and rules for split/merged entries remain implementation design
+work. Tools should expose entry-level changes while keeping files readable with
+ordinary tools; these format choices are not yet approved.
 
-For external mounted edits, Lody cannot infer an Agent session or turn. The
-proposal is to show only authenticated user/device information when available,
-and otherwise mark the current version as external/unknown. Whether that fallback
-is acceptable requires confirmation. A later external edit must invalidate an old
-Agent attribution when the current content is next read. No old document bodies
-need be retained solely to provide this current-version attribution.
+Identity comes from authenticated context; arbitrary actor labels do not prove
+identity. Session links remain subject to session access control and must not
+expose private conversation content to shared-memory readers. Source records must
+match the entries being displayed. A file update followed by a separate provenance
+append can fail between steps; the design must define idempotent reconciliation,
+retry behavior and an explicit incomplete result. It must not report content and
+provenance complete when only content was saved. No journal atomicity is assumed;
+filesystem tokens cannot append Drive9 journals.
+
+External/unknown attribution is accepted for external mounted changes when an
+authenticated source cannot be established. Lody must not invent an Agent session
+or turn. Preserve source associations for entries that can be reliably matched and
+shown unchanged; changed or ambiguous entries must not inherit stale Agent
+attribution. If matching cannot be trusted, mark the affected content unknown on
+its next read rather than claiming verified provenance.
 
 ### Implementation plan and acceptance
 
@@ -232,7 +240,7 @@ need be retained solely to provide this current-version attribution.
 | --- | --- | --- |
 | 1. Contracts | Resolve the scope questions below; define backend DTOs, current-version provenance states, access checks and credential lifecycle. | No owner-key distribution, no implicit history promises, explicit incomplete-write and conflict results. |
 | 2. Agent tool path | Implement hosted credential port and Drive9 backend for create, list, read, search, update, rename and delete; connect Role-bound tools and client RPC. | Agent updates are visible on subsequent reads; sibling-memory access is denied; stale revisions conflict; revoked access fails. |
-| 3. Provenance and UI | Implement current-content source records and reconciliation; expose memory management, visibility and source viewing. | The displayed source matches current content; interrupted provenance writes cannot show stale attribution or false success; private sessions remain protected. |
+| 3. Provenance and UI | Implement per-entry source records and reconciliation; expose memory management, visibility and source viewing. | Unchanged entries retain their sources; modified or ambiguous entries cannot inherit stale attribution; interrupted provenance writes cannot show stale attribution or false success; private sessions remain protected. |
 | 4. Shared mounts | Package/manage Drive9 and implement credential hot rotation without unmounting. Investigate external-editor atomic replacement separately from tool writes. | Normal renewal preserves mount, open handles and in-flight operations; revocation blocks new server access; credentials stay out of persistent state. |
 | 5. Release verification | Validate supported platforms, private/shared access transitions, multi-device reads, tool conflicts and hosted limits. | The chosen release scope passes its behavioral checks; quotas and failure behavior are defined. No offline, history-recovery or universal editor-compatibility claims. |
 
@@ -246,12 +254,6 @@ still require investigation, not assumptions from local TiDB measurements.
 1. May the first release provide Agent tools while shared mounting follows later,
    or must the first release include both? Tool-first priority alone does not
    settle mount delivery timing.
-2. Does provenance mean the last update of each current Markdown file, with a link
-   to its session/turn, or the source of each fact/passage? The latter needs
-   finer-grained content/source associations and is outside the current proposal.
-3. For external mounted changes, is external/unknown provenance acceptable when
-   authenticated user/device attribution cannot be established?
-
 Unless changed during review, the proposed design defers live SSE refresh,
 recoverable history, read-only member roles and user-supplied Drive9 endpoints.
 Only the absence of a historical recovery requirement is already established;

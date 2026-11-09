@@ -37,7 +37,10 @@ The owner decided the following:
 - **Lody hosts the drive9 tenants.**
 - **Online-only is accepted.**
 - **Prioritize Agent tool writes in Lody** over arbitrary editor saves.
-- **Current-memory provenance is required; recoverable history is not.**
+- **Provenance is required per current memory entry; recoverable history is not.**
+  Unchanged entries retain their sources when another entry is updated.
+- **External/unknown provenance is accepted** when external edits cannot be
+  reliably attributed. Never carry stale Agent attribution onto changed content.
 - **Credential renewal must not interrupt mounts.** Unmount/remount is not an
   acceptable renewal strategy.
 - **Visibility is mutable** and stored as catalog metadata.
@@ -124,8 +127,8 @@ a user-supplied or self-hosted drive9 endpoint is an open question.
   to explain the current memory, not to require recoverable versions.
   The filesystem token cannot append journals. A file write followed by a separate
   append is not atomic; crash recovery and idempotent reconciliation need a design.
-- **Mount writes.** External-write attribution policy remains open, including
-  whether explicit unknown attribution is acceptable. The pinned
+- **Mount writes.** External/unknown attribution is accepted when a source cannot be
+  reliably established; changed entries must not retain stale Agent attribution. The pinned
   WebDAV mount never configures `SetActor`, and `X-Dat9-Actor` is caller-supplied,
   not authenticated identity. FUSE generates a mount actor, not the proposed
   `lody:<userId>:<machineId>` identity. Neither establishes trusted provenance.
@@ -186,14 +189,12 @@ work before it can meet the proposed contract:
 | Renewal | Mount clients retain their initial credentials. If mounts ship, tested hot rotation without interruption or unmount/remount is required; uninterrupted, no-loss renewal is unverified. |
 | macOS WebDAV | Scoped macOS mounts read/write successfully, but replacing an existing file with `os.replace(tmp, target)` fails with `EINVAL`. Previously read contents remain readable from cache after expiry/revocation; uncached reads and new writes fail. Arbitrary editor saves are lower priority than Agent tool writes; this limitation remains. Uninterrupted renewal is a gate if mounts ship. |
 | Search and concurrency | Literal English and Chinese Markdown searches return the fixture; stale conditional writes return 409. This is not a recall benchmark or protection against unconditional mount writes. |
-| Current-memory provenance | Journal permissions and append/verify work; reliable association of current content with provenance remains unresolved. External-write attribution policy and file versus per-fact granularity are open. Recoverable history is not a gate. |
+| Current-memory provenance | Journal permissions and append/verify work; reliable association of current content with provenance remains unresolved. Per-entry provenance is required; external/unknown attribution is accepted. Entry identity, matching and commit consistency still need a design. Recoverable history is not a gate. |
 | Hosting | Local tenant readiness took approximately 6.6–9.7 seconds in two successful samples on TiDB v8.5.1. This is not hosted provisioning latency. Hosted price, quotas and provisioning SLA remain unverified; no cloud tenant was provisioned. |
 
 ## Open questions
 
 - May a tool-only milestone ship first, or must launch include mounts?
-- How should external writes be attributed; is explicit unknown attribution acceptable?
-- Is provenance required per file or per fact within a file?
 - Should members get a read-only role later? The current decision is read-write
   for all members.
 
