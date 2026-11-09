@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { Clock, Data, Effect, Fiber, Result, Scope, Semaphore } from 'effect';
+import { Clock, Data, Effect, Exit, Fiber, Result, Scope, Semaphore } from 'effect';
 import { z } from 'zod';
 import {
   Bytes,
@@ -75,6 +75,9 @@ const matches = (binding: MachineSharingBinding, value: MachineSharingBinding) =
 const sameHead = (a: MachineSharingHead | null, b: MachineSharingHead | null) =>
   a?.revision === b?.revision && a?.digest === b?.digest;
 const ttl = 900_000;
+// Denials may trail a new grant by at most five seconds of local retry cooldown.
+// This limits head traffic per binding without shortening the accepted revocation TTL.
+const denialRefreshInterval = 5_000;
 type Stamp = { wall: number; mono: bigint };
 export const sharingStamp = Effect.gen(function* () {
   return { wall: yield* Clock.currentTimeMillis, mono: yield* Clock.monotonicTimeNanos };
@@ -473,6 +476,61 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       });
     return { policy, state: fullState, head };
   });
+  type Latest = Effect.Success<ReturnType<typeof latest>>;
+  type DenialRefresh = {
+    stamp: Stamp;
+    pending: boolean;
+    fiber?: Fiber.Fiber<Latest, unknown>;
+    result?: Latest;
+  };
+  const denialRefreshes = new Map<string, DenialRefresh>();
+  yield* Effect.addFinalizer(() => Effect.sync(() => denialRefreshes.clear()));
+  const refreshSerial = yield* Semaphore.make(1);
+  const coolingDown = (stamp: Stamp, now: Stamp) =>
+    now.wall >= stamp.wall &&
+    now.wall - stamp.wall < denialRefreshInterval &&
+    now.mono >= stamp.mono &&
+    now.mono - stamp.mono < BigInt(denialRefreshInterval) * 1_000_000n;
+  const refreshDenial = Effect.fnUntraced(function* (
+    binding: MachineSharingBinding,
+    remote: SharingRemote,
+    machineGeneration: VerifiedMachineSharingGeneration
+  ) {
+    // Only coordinate producer selection. Independent bindings never wait for I/O here.
+    const work = yield* refreshSerial.withPermit(
+      Effect.gen(function* () {
+        yield* guard();
+        const resource = key(binding);
+        const now = yield* sharingStamp;
+        const previous = denialRefreshes.get(resource);
+        if (previous?.pending && previous.fiber) return Fiber.join(previous.fiber);
+        if (previous && coolingDown(previous.stamp, now))
+          return previous.result
+            ? Effect.succeed(previous.result)
+            : Effect.fail(fail('sharing_unavailable'));
+        for (const [resource, entry] of denialRefreshes)
+          if (!entry.pending && !coolingDown(entry.stamp, now)) denialRefreshes.delete(resource);
+        const entry: DenialRefresh = { stamp: now, pending: true };
+        denialRefreshes.set(resource, entry);
+        const fiber = yield* Effect.forkIn(
+          latest(binding, remote, machineGeneration, true).pipe(
+            Effect.onExit((exit) =>
+              Effect.sync(() => {
+                entry.pending = false;
+                entry.fiber = undefined;
+                // A failure leaves only a retry timestamp, never policy evidence or a rejected fiber.
+                if (Exit.isSuccess(exit)) entry.result = exit.value;
+              })
+            )
+          ),
+          scope
+        );
+        entry.fiber = entry.pending ? fiber : undefined;
+        return Fiber.join(fiber);
+      })
+    );
+    return yield* work;
+  });
   const read = Effect.fnUntraced(function* (
     machineId: string,
     remote: SharingRemote,
@@ -673,9 +731,25 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
         );
         if (uncertain) return yield* unknown();
-        const refreshed = yield* Effect.result(
-          latest(initial.binding, remote, initial.machineGeneration)
+        const resource = key(initial.binding);
+        const cachedBefore = cache.get(resource);
+        const hadFreshCache =
+          !!cachedBefore && sharingFresh(cachedBefore.stamp, yield* sharingStamp);
+        let refreshed = yield* Effect.result(
+          !cachedBefore && denialRefreshes.has(resource)
+            ? refreshDenial(initial.binding, remote, initial.machineGeneration)
+            : latest(initial.binding, remote, initial.machineGeneration)
         );
+        if (hadFreshCache && Result.isSuccess(refreshed)) {
+          const decision = decide(yield* options.ledger(), refreshed.success.policy);
+          if (
+            !decision.allowed &&
+            (decision.reason === 'machine-not-shared' || decision.reason === 'project-not-shared')
+          )
+            refreshed = yield* Effect.result(
+              refreshDenial(initial.binding, remote, initial.machineGeneration)
+            );
+        }
         if (Result.isFailure(refreshed)) {
           const denial = yield* pinnedDenial(initial, decide, localProjectId);
           if (denial) return denial;
@@ -892,10 +966,12 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     invalidate: () => {
       invalidationToken = {};
       cache.clear();
+      denialRefreshes.clear();
     },
     stop: () => {
       closed = true;
       cache.clear();
+      denialRefreshes.clear();
     },
   };
 });

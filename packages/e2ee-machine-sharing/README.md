@@ -48,6 +48,17 @@ also checks the returned synchronous fence and the current ledger generation.
 Every new start checks its actual localProjectId; the RPC receipt alone never
 starts an agent. Withdrawal leaves already-started work running.
 
+A fresh cached grant is reused without head I/O. Before refusing a cached
+`machine-not-shared` or `project-not-shared` decision, authorization forces an
+authenticated latest read and verifies the resulting policy. Per binding (including
+generation), concurrent denial refreshes share one workspace-owned producer, with
+at most one attempt per five seconds from read start. During that cooldown, callers
+reuse the verified result; a failed attempt retains only its retry timestamp and
+falls back to the existing pinned denial or unavailable outcome, never permission.
+Invalidation clears this coordination together with the policy cache. This short
+window bounds request traffic and newly granted access delay without changing the
+15-minute revocation trade-off or the actual-start fence.
+
 Desktop ledger ingest retires RAM policies only when the genuine verified view's
 `(length, head hash)` changes. An unchanged page, replay or transport cursor does
 not renew the policy's original freshness stamp or clear it. The optional
