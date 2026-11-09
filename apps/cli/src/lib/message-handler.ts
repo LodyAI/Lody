@@ -4347,6 +4347,10 @@ export class MessageHandler {
       );
     });
 
+    this.sessionManager.on('onNativeWorkChanged', (sessionId, work) => {
+      this.sessionActivePresence.native.setNativeWork(sessionId, work);
+    });
+
     this.sessionManager.on('onSessionTitleUpdate', (sessionId, title) => {
       void this.maybeStoreAgentSessionTitle(sessionId, title);
     });
