@@ -21,7 +21,7 @@ owner='visibility:m1:same';foreign='visibility:m2:same'
 assert catalog.text('settings.projects.private') in spoken(ui.element(owner))
 assert catalog.text('settings.projects.othersOwner') in spoken(ui.element(foreign))
 no_header_refresh(ui)
-assert not any(item.get('AXUniqueId','').startswith('unknown:') for item in ui.state()), 'Unregistered projects should not be listed'
+assert catalog.text('settings.projects.unknown') in spoken(ui.element('unknown:m1:local:unregistered'))
 ui.capture('project-visibility-list')
 choose(owner,'settings.projects.shared')
 notice(ui,'settings.state.unconfirmed');assert catalog.text('settings.projects.private') in spoken(ui.element(owner))

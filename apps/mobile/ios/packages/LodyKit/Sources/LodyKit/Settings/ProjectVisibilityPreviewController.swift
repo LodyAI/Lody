@@ -14,7 +14,7 @@ final class ProjectVisibilityPreviewController: ProjectVisibilityController {
     )
     super.init(
       workspace: SettingsWorkspace(userId: "fixture", workspaceId: "visibility-fixture", catalog: catalog),
-      service: { try await fixture.request($0) },
+      service: { request, _ in try await fixture.request(request) },
       changed: {}
     )
     title = "Projects"
