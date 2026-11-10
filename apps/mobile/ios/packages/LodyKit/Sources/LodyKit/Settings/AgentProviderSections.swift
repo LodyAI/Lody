@@ -161,12 +161,9 @@ enum AgentProviderSections {
     var seen: Set<String> = []
     var result: [String: [LodyListVisualItem]] = [:]
     for provider in snapshot.providers where provider.machineId == machine.id {
-      guard let config = reported.configs.first(where: { $0.id == provider.id }), config.eligible,
-            !seen.contains(config.provider) else { continue }
       let item = RemoteSetting(kind: "agent", id: provider.id, name: provider.name, machineId: machine.id, detail: provider.agentType)
-      let rings = RemoteSettingsSections.rings(item, reported, now: now)
+      let rings = RemoteSettingsSections.rings(item, reported, now: now).filter { seen.insert($0.id).inserted }
       guard !rings.isEmpty else { continue }
-      seen.insert(config.provider)
       result[provider.id] = rings
     }
     return result

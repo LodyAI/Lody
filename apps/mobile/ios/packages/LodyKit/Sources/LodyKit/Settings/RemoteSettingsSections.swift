@@ -148,7 +148,9 @@ enum RemoteSettingsSections {
   static func rings(_ item: RemoteSetting, _ usage: AgentUsage?, now: Double) -> [LodyListVisualItem] {
     guard let usage, let config = usage.configs.first(where: { $0.id == item.id }), config.eligible else { return [] }
     if let detail = item.detail, !detail.isEmpty, detail != config.provider { return [] }
-    return usage.quotas.filter { $0.provider == config.provider }.flatMap { quota in
+    let matching = usage.quotas.filter { $0.provider == config.provider && $0.agentConfigId == config.id }
+    let quotas = matching.isEmpty ? usage.quotas.filter { $0.provider == config.provider && $0.agentConfigId == nil } : matching
+    return quotas.flatMap { quota in
       quota.windows.enumerated().map { index, window in
         let name = quota.name.flatMap { $0.isEmpty ? nil : $0 } ?? agentNames[config.provider] ?? config.provider
         let label = [name, windowDuration(window.duration), window.label ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -157,7 +159,7 @@ enum RemoteSettingsSections {
         let caption = resetCaption(window.resetsAt, now: now)
         let forecast = pace(used, window.duration, window.resetsAt, now: now)
         var ring = LodyListVisualItem()
-        ring.id = "usage:\(item.machineId ?? ""):\(config.provider):\(quota.id):\(index)"
+        ring.id = "usage:\(item.machineId ?? ""):\(config.provider):\(quota.agentConfigId ?? "shared"):\(quota.id):\(index)"
         ring.label = label
         ring.value = value
         ring.caption = caption
@@ -243,11 +245,9 @@ enum RemoteSettingsSections {
       row.imageAsset = agentIcon(item.detail ?? "")
       groups[machine]?.section.rows.append(row)
       let reported = usage[item.machineId ?? ""]
-      guard let config = reported?.configs.first(where: { $0.id == item.id }), config.eligible,
-            groups[machine]?.providers.contains(config.provider) == false else { continue }
-      let rings = self.rings(item, reported, now: now)
+      let rings = self.rings(item, reported, now: now).filter { groups[machine]?.providers.contains($0.id) == false }
       guard !rings.isEmpty else { continue }
-      groups[machine]?.providers.insert(config.provider)
+      groups[machine]?.providers.formUnion(rings.map(\.id))
       groups[machine]?.rings.append(contentsOf: rings)
     }
     return order.compactMap { groups[$0] }.map { group in
