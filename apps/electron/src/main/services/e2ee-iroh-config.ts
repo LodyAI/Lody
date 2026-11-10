@@ -59,13 +59,11 @@ export function desktopIrohConfig(input: {
 }
 
 /** Relays from the official cloud build; the local composition has none. */
-export function irohRelaysFromBuild(env: {
-  VITE_LODY_PLATFORM?: string
-  VITE_IROH_RELAYS?: string
-  VITE_IROH_RELAY_TOKEN?: string
-}): E2eeIrohRelays | undefined {
+export function irohRelaysFromBuild(buildEnv: object): E2eeIrohRelays | undefined {
+  // Build env interfaces differ per tsconfig; read the three keys structurally.
+  const env = buildEnv as Readonly<Record<string, unknown>>
   if (env.VITE_LODY_PLATFORM !== 'cloud') return undefined
-  const urls = (env.VITE_IROH_RELAYS ?? '')
+  const urls = (typeof env.VITE_IROH_RELAYS === 'string' ? env.VITE_IROH_RELAYS : '')
     .split(',')
     .map((url) => url.trim())
     .filter(Boolean)
@@ -77,6 +75,7 @@ export function irohRelaysFromBuild(env: {
       return undefined
     }
   }
-  const token = env.VITE_IROH_RELAY_TOKEN?.trim()
+  const token =
+    typeof env.VITE_IROH_RELAY_TOKEN === 'string' ? env.VITE_IROH_RELAY_TOKEN.trim() : undefined
   return { urls, ...(token ? { token } : {}) }
 }
