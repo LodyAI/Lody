@@ -44,7 +44,7 @@ def main():
    if status=='BLOCKED':blocked.append(name)
    print(name,{k:results[name][k] for k in ('result','distinctStates','exit','temporalChecked')},flush=True)
  if not args.source_only and not args.safety_only:
-  for module,name,exit_code in [('Delivery','delivery-legacy-negative-ack',12),('OutputGate','gate-legacy',11),('OutputGate','gate-late-write-mutant',12)]:
+  for module,name,exit_code in [('Delivery','delivery-legacy-negative-ack',12),('OutputGate','gate-legacy',11),('OutputGate','gate-late-write-mutant',12),('OutputGate','gate-timeout-abort-mutant',12)]:
    source=(skill/(module+'.tla')).read_text().replace('---- MODULE '+module+' ----','---- MODULE Model ----',1)
    result=base.run_tlc(java,jar,source,(skill/(name+'.cfg')).read_text(),out/name)
    assert result['exit']==exit_code,'Broken model behavior was not caught: '+name
@@ -74,6 +74,10 @@ def main():
  (out/'unsafe-late-write.out').write_text(mutation.stdout+mutation.stderr)
  assert mutation.returncode==1 and 'AssertionError' in mutation.stderr and 'NoLateWrites:' in mutation.stderr,'Actual assistant writer cancellation fence mutation was not caught'
  mutations.append({'property':'NoLateWrites','result':'CAUGHT'})
+ mutation=subprocess.run(['node',str(here/'sync-replay.mjs'),str(root),str(args.tools),'unsafe-timeout-abort'],capture_output=True,text=True,timeout=60)
+ (out/'unsafe-timeout-abort.out').write_text(mutation.stdout+mutation.stderr)
+ assert mutation.returncode==1 and 'AssertionError' in mutation.stderr and 'TimeoutMetadata:' in mutation.stderr,'Timeout abort source mutation was not caught'
+ mutations.append({'property':'LiveCallbackKeepsMetadata','result':'CAUGHT'})
  results['sourceMutations']=mutations
  failures=[]
  if results.get('sync-replay-current',{}).get('outputGate',{}).get('result')=='FAIL':failures.append('OUTPUT_GATE_DISPOSE_DOES_NOT_RELEASE')

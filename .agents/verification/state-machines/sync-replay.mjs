@@ -41,6 +41,11 @@ await build({stdin:{contents:[
  b.onResolve({filter:/^@\/utils\/format-error$/},()=>({path:path.join(root,'apps/cli/src/utils/format-error.ts')}));
  b.onLoad({filter:/\/turn-history-gate\.ts$/},async a=>{
   let text=await fs.readFile(a.path,'utf8');
+  if(variant==='unsafe-timeout-abort'){
+   const release="    this.phase = 'open';";assert.equal(text.split(release).length,3);
+   const at=text.indexOf(release,text.indexOf('  private release():'));
+   text=text.slice(0,at)+"    this.beforeOpenAbort.abort();\n"+text.slice(at);
+  }
   if(variant==='unsafe-gate'){
    const before="    if (reason === 'disposed') {\n      this.release();";
    assert.equal(text.split(before).length,2);
@@ -155,20 +160,29 @@ for(const [trigger,release] of [['history','dispose'],['history','deadline'],['t
  }finally{complete?.();gate?.dispose();globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear;}
 }
 const lateWriterCases=[];
-if(variant!=='unsafe-gate')for(const release of ['dispose','deadline']){
+if(variant!=='unsafe-gate')for(const trigger of ['history','timeout'])for(const release of ['dispose','deadline','deadline-dispose']){
  const realSet=globalThis.setTimeout,realClear=globalThis.clearTimeout;let deadline;
  globalThis.setTimeout=callback=>{deadline=callback;return {unref(){}};};globalThis.clearTimeout=()=>{};
  const db=new Database(':memory:');
- db.exec("CREATE TABLE assistant_turns(id TEXT PRIMARY KEY,finished INTEGER NOT NULL); INSERT INTO assistant_turns VALUES('old-assistant',1),('new-assistant',0);");
+ db.exec("CREATE TABLE assistant_turns(id TEXT PRIMARY KEY,finished INTEGER NOT NULL, data TEXT); INSERT INTO assistant_turns VALUES('old-assistant',1,NULL),('new-assistant',0,NULL);");
  let enter,unblock;const entered=new Promise(r=>enter=r),backendReady=new Promise(r=>unblock=r);
- const backend={history:{readTurn:async id=>({state:'ready',turn:{id,role:'assistant',author:{v:1,kind:'agent',sessionId:'s',turnId:id,name:'Fixture Agent'}}})},openAssistantTurn:async ({turnId})=>{db.prepare('UPDATE assistant_turns SET finished=0 WHERE id=?').run(turnId);}};
+ const backend={history:{readTurn:async id=>({state:'ready',turn:{id,role:'assistant',author:{v:1,kind:'agent',sessionId:'s',turnId:id,name:'Fixture Agent'}}})},openAssistantTurn:async entry=>{db.prepare('UPDATE assistant_turns SET finished=0,data=? WHERE id=?').run(JSON.stringify(entry),entry.turnId);}};
  const writer=new AssistantWriterSubject(backendReady);let work;
- const gate=TurnHistoryGate.waitForUserTurn({logger:{debug(){},warn(){},error(){}},sessionId:'s',userTurnId:'A',hasUserTurn:async()=>true,subscribeHistory:()=>()=>{},onBeforeOpen:(_reason,signal)=>{enter();work=writer.writeAssistantEntryForTurn('s',{},'old-assistant',undefined,'A',signal);return work;}});
+ const gate=TurnHistoryGate.waitForUserTurn({logger:{debug(){},warn(){},error(){}},sessionId:'s',userTurnId:'A',hasUserTurn:async()=>trigger==='history',subscribeHistory:()=>()=>{},onBeforeOpen:(_reason,signal)=>{enter();work=writer.writeAssistantEntryForTurn('s',{},'old-assistant',{modelId:'fixture-model'},'A',signal);return work;}});
  try{
-  await entered;if(release==='dispose')gate.dispose();else deadline();await gate.waitUntilOpen();
+  if(trigger==='timeout')deadline();
+  await entered;if(release==='dispose')gate.dispose();else {deadline();if(release==='deadline-dispose')gate.dispose();}await gate.waitUntilOpen();
   unblock(backend);await work;
-  assert.deepEqual(db.prepare('SELECT * FROM assistant_turns ORDER BY id').all(),[{id:'new-assistant',finished:0},{id:'old-assistant',finished:1}],'NoLateWrites: a late callback reopened an ended assistant turn');
-  lateWriterCases.push({release,result:'PASS',oldTurnRemainsFinished:true,successorUnchanged:true});
+  const rows=db.prepare('SELECT * FROM assistant_turns ORDER BY id').all();
+  assert.deepEqual(rows[0],{id:'new-assistant',finished:0,data:null},'successor unchanged');
+  if(release==='deadline'){
+   assert.equal(rows[1].finished,0,'TimeoutMetadata: the live assistant entry must still open');
+   const entry=JSON.parse(rows[1].data);
+   assert.equal(entry.author.name,'Fixture Agent','TimeoutMetadata: author retained');
+   assert.deepEqual(entry.modelInfo,{modelId:'fixture-model'},'TimeoutMetadata: model retained');
+   assert.equal(entry.userTurnId,'A');assert.ok(!Number.isNaN(Date.parse(entry.timestamp)));
+  }else assert.deepEqual(rows[1],{id:'old-assistant',finished:1,data:null},'NoLateWrites: a late callback reopened an ended assistant turn');
+  lateWriterCases.push({trigger,release,result:'PASS',metadataWritten:release==='deadline',successorUnchanged:true});
  }finally{unblock(backend);gate.dispose();globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear;db.close();}
 }
 const result={variant,sqliteTimelines:{result:'PASS',...counts,bounds:'Two explicit messages in one session, one preexisting and one future completion, one exact-ID Stop and duplicate, one lease-safe owner handoff; accept/begin/submit/settle/release A ordered; B, Stop and handoff interleave in all 336 possible orders. Late A release is also tried while future input owns slot. Injected synchronous provider-start boundary; no native process or lease producer.'},lateWriterCases,outputGate:{result:gateResults.some(x=>x.result==='FAIL')?'FAIL':'PASS',cases:gateResults},limits:'SQL transactions, gate class and the complete assistant-entry write method are production code. The late-writer witness uses a synthetic SQLite-backed history port and a diagnostic span stub; it does not test the real HistoryWriter. This is not end-to-end CRDT, RPC, permission, watcher, provider or UI acceptance. Accepted two-message events represent host admission after verified delivery, not arbitrary raw remote packets.'};

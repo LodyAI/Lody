@@ -1,10 +1,10 @@
 {
   "system": "Session Inbox admission, submission and continuation scheduling",
-  "syncCommit": "727cdfc3c9269d283c997de5e5e258dd0bdefa88",
+  "syncCommit": "4804795ef5aa31e8ff0fd67bcd58b16d0e18930a",
   "sources": [
     {
       "path": "apps/cli/src/orchestration/inbox/service.ts",
-      "sha256": "45121d5a1286c811eedce8bf7f018893f41882e82516fd880b4e82527a43ee04"
+      "sha256": "cd60c7c8bd61cf125277ee1f51c0ce0ad323f41b82b312083872a7e1140ca51a"
     },
     {
       "path": "apps/cli/src/orchestration/inbox/sqlite.ts",
@@ -59,65 +59,6 @@
     "cause": "An unresolved A settlement aborts retrySettlements before scan reaches repo.pending; outer catch reports and returns to Queue.take. Every further wake retries A first and can abort again.",
     "originalLine": 224
   },
-  "modelProfiles": {
-    "safety": {
-      "result": "PASS",
-      "distinctStates": 1112,
-      "exit": 0
-    },
-    "progress": {
-      "result": "PASS",
-      "distinctStates": 459,
-      "exit": 0
-    },
-    "control": {
-      "result": "PASS",
-      "distinctStates": 459,
-      "exit": 0
-    },
-    "legacyProgressMutation": {
-      "result": "CAUGHT",
-      "distinctStates": 375
-    },
-    "modelMutations": [
-      {
-        "property": "AtMostOnce",
-        "result": "CAUGHT"
-      },
-      {
-        "property": "NoStartAfterStop",
-        "result": "CAUGHT"
-      },
-      {
-        "property": "RetryEvidenceRetained",
-        "result": "CAUGHT"
-      },
-      {
-        "property": "OldReleaseCannotFreeSuccessor",
-        "result": "CAUGHT"
-      },
-      {
-        "property": "ConsumedOnlyAfterStart",
-        "result": "CAUGHT"
-      }
-    ]
-  },
-  "sourceProof": {
-    "currentProgress": "PASS",
-    "legacyScanMutation": "FAIL (caught)",
-    "sourceSafetyTraces": 9,
-    "nativeSQLiteFull": {
-      "currentProgress": "PASS",
-      "legacyScanMutation": "FAIL (caught)",
-      "retainedAAfterCapacityRepair": "unknown"
-    },
-    "negativeAckSelection": "PASS; actual Agent re-execution not run",
-    "outputGateAndLateWriter": "PASS; synthetic history port, not full HistoryWriter",
-    "sameSessionFreshInputDuringPersistentFault": "PASS in trigger and native capacity fixtures",
-    "originalModelMutationsCaught": 5,
-    "legacyProgressMutationCaught": true,
-    "expandedSourceMutationsCaught": 4
-  },
   "actions": {
     "RecordASettlement": "service.ts settle: retain Map receipt before repository.settle; failed write stays retained and wakes scanner; execution-owner.ts finishWork observes the latest outcome",
     "ReleaseA": "execution-owner.ts finishWork then sqlite.ts release transaction; storage retry evidence survives slot release",
@@ -139,54 +80,46 @@
     "progress.cfg": "c44093eb799740b7928e4caabc408513940188c077575389f9385effd1bb9053",
     "control.cfg": "c44093eb799740b7928e4caabc408513940188c077575389f9385effd1bb9053",
     "chart.cfg": "6969ad5b9b1764f5d132a9318dd1b599d549d1acdaf32b1567996506422bd740",
-    "control-chart.cfg": "6969ad5b9b1764f5d132a9318dd1b599d549d1acdaf32b1567996506422bd740",
     "view.mjs": "fb0af75d278415172511b1e1ff350eee4e53e768cba9497ba5354c723f3dcfb7",
     "diagnostic-view.mjs": "4bb7985fab9e653a954c547b27c92979527692eb7196274808d194fb4f7d0416",
     "chart.mmd": "c1351a0069a8ab6afbe00495e2060d80f0ae3712089b9d55c27ece9e44beacec",
-    "chart-report.md": "c9b6575ad5347fc3ed26ab02e12c1fc3ba55bc43a04d720c1445e8743a71a3bb",
-    "control-chart.mmd": "c1351a0069a8ab6afbe00495e2060d80f0ae3712089b9d55c27ece9e44beacec",
-    "control-chart-report.md": "c9b6575ad5347fc3ed26ab02e12c1fc3ba55bc43a04d720c1445e8743a71a3bb",
-    "mutation-reports.md": "285ff0257c28ecbaa6fd7e70d43b677b4b65f50223f9160e80d19ccb44e2eab2",
-    "full-reports.md": "d51612dc18e55188cc4d45f06c3d52f09d300af311f7b5eb12d213f3b404d19b",
     "toolchain.package.json": "65ccca68894db6b7212b7695a08ccf0dae4d9dddd7bfc87cc7e68185a14ae86c",
     "toolchain.lock.json": "0c57d17f74da6f06925e5cf4651f6ac0e00fa5829be4c66c59264888520b40f1",
     "Delivery.tla": "1d7b5cc557c0956f975fad958d4dd5cc8fabf37cf039df046e3eb6b2e5d7b771",
-    "OutputGate.tla": "bca835636b6bfdb92c7175c60b314f84a40d0b47757304b116c4afdfe6d0b307",
+    "OutputGate.tla": "149ce681a6388c562da657d58ba09f5ac3f60f26c183bac9cd7bbbb6bc22967e",
     "expanded-view.mjs": "1636533193d8f7cd3d248436995f47bfe3e8d373662b73bcb3e9f11ab2f62476",
-    "expanded-coverage.json": "dc8b62aaf6537a20dbe94ce1f2bdcecbd4541ee830b8c1cb0eac0a6a53eb1088",
-    "expanded-results.json": "a4718c16063c6ca0bef811849794e9eb2e8af49873e10d912800f33f17c40dc3",
-    "requirements.md": "6f95602b0f5088d3e08d03e1b74b864916944ef20c1aed2d0de604cd26fd777e",
+    "expanded-coverage.json": "beaa90c0a33dd8077e38f7fd106a427aa68030d823c1167b0d16c2c050526a42",
+    "requirements.md": "d812b128969a8b769dcd7e68fe663414bb7e012c58fa2b8c192477e6861c78dc",
     "delivery-negative-ack.cfg": "3cc93494a78ee68c97ad92f0962da8699940d57066c608c494ff76ef6e851c6f",
-    "gate-deadlock.cfg": "b5242530f1957c6044ed2a4c846d0f3688c3c414c4555864418b213f9560b2f6",
+    "gate-deadlock.cfg": "ea3a8742f47f2a76bf530fda9106a024b8dad34e9d4b64a11e2bd1109c9be70f",
     "delivery-progress.cfg": "3049bf9974dca919fe862a1d27f97279620b5f2c933003051c8942b9e2325cc7",
-    "gate-cancel-control.cfg": "cc34d89b24f50976fa81b553c94fcec1a8ba7e58989ea3e51db799751c13e25f",
-    "gate-current.cfg": "cc34d89b24f50976fa81b553c94fcec1a8ba7e58989ea3e51db799751c13e25f",
+    "gate-cancel-control.cfg": "ca2130b4907a786d37e3f36b431ff6fa49aee62e8591cafbd023181ab32c8ba8",
+    "gate-current.cfg": "ca2130b4907a786d37e3f36b431ff6fa49aee62e8591cafbd023181ab32c8ba8",
     "delivery-durable-control.cfg": "617aef2939ca89f4f05b6e0f325e20a578393d010cf99c37332e929b6d685223",
-    "gate-completing.cfg": "17e92bd331952a02cdb3c193c197a18d6c06a8a5f61ef5779e5933c7945cc4ab",
+    "gate-completing.cfg": "37478f1521cee9506e2b29bbfbf01680d0a2fe74cbfff8d0bb9ec92933b138dc",
     "delivery-safety.cfg": "34c12f2ae9f6da1b4134a069b9797e6e1188f6d24119f99045ad51b6cf8643ee",
     "delivery-partition.cfg": "456560ab47b99b3badc12a02abf08963930d326cdc7dff9a11fea6e84494cf41",
-    "SKILL.md": "0b3ad7defe43b75a3110433888568ac70ebf6f54b13a8f2dd6a2e0444babaf4d",
-    "gate-view.mjs": "c6d9e9cf74f1f7515381d36be9a0ab1995eaf8313073ba3ab21ae9e4a9f2761e",
-    "gate-chart.mmd": "a5c6a626860917761bbabff0a9aa4d6983839553ea7c6ad62aa1ee78660ce1ab",
-    "gate-chart-report.md": "1990770f081fafdf90f86c23ef0eccd2191643be61a185493f12b4ebbcea0685",
+    "SKILL.md": "325ab25807be6736b13cc8c89f33af6aa2d1741ef5fc9db030dd4011f8c282a9",
+    "gate-view.mjs": "76f0f278163f288c23415a81b46cf90c4c23315440227cb5fb2c8b2e1119de20",
+    "gate-chart.mmd": "0a41e4913af739ab4b0aac878213f67125545902f6e799027119899d96618379",
     "delivery-legacy-negative-ack.cfg": "d9e1b1f75ff7e259c6e1687c08ce0d1faaa3dda38fca498f5bb215a43266dca7",
     "legacy-progress.cfg": "238da307766c40081928b4d89dd0affb68b6ca628e6464ed9bceea6a2c152e07",
-    "gate-late-write-mutant.cfg": "a8ce496beed9458918f4e2a5c6262437909bdbb5b4b077da65c27f32c91322cf",
-    "gate-legacy.cfg": "9db75adbeab4e6c24543cdd21f7f1d85ee1f4505ffcf11ab69468e5b2b5ebc2e"
+    "gate-late-write-mutant.cfg": "4eedc24304182724f7e627f2f613ac7eda3c763b6d59d901019201d28ab4ea99",
+    "gate-legacy.cfg": "51477e3a4b8a920243e949b67b539b59c1d681a455a4b1dc79c6a314016853c5",
+    "gate-timeout-abort-mutant.cfg": "b52deb8e95c9cadf39b60691aa1a07aecad5be322478cee7d2b884b86277d9a8"
   },
   "verifierHashes": {
     ".agents/verification/state-machines/check.py": "aa67959ee6307d660cccdc4ad280412a34cee66825e868facb1da80fb17f0503",
-    ".agents/verification/state-machines/history.py": "0411c15da79ab94ebfc34aefcc2b0e7c9925e6b42dc38c32dba8b1d5bf22055c",
+    ".agents/verification/state-machines/history.py": "01a58e7f846c2f394217f86772ea7f766c51c81b5437d34dd7b81e4bb5b1ac5e",
     ".agents/verification/state-machines/replay.mjs": "a2e4f2ac86114b33554bdddcd7053cc60e8e593cc217d5bc94162920cf771461",
-    ".agents/verification/state-machines/expanded.py": "e4a840c9d76c0f2e34dd74ac2cf414cfaeaa823294917c993747260e7a7cc077",
-    ".agents/verification/state-machines/sync-replay.mjs": "f4d1151619b7d9fefdd380087fa45f49634ac503065cb819e08d1063b984af15",
+    ".agents/verification/state-machines/expanded.py": "c826e940fe7e52d58507ccc9f47181782c99a1d26ee0101a454eb969b0eab9da",
+    ".agents/verification/state-machines/sync-replay.mjs": "cc3b142b099ffd5366dc8975d41ded7f66aa89c1aeb203f04217ffcbb8c4efbc",
     ".agents/verification/state-machines/decision-replay.mjs": "007aae393de985ba157c9d6782d7cd5a6a63e715ebc76ec6c8aa7f3cb5f13a48"
   },
   "expanded": {
     "coverage": "expanded-coverage.json",
     "requirements": "requirements.md",
-    "results": "expanded-results.json",
-    "status": "Current finite temporal profiles and source replays pass; no full implementation/device proof."
+    "output": "External --out folder: summary.json, raw TLC and source replay logs"
   },
   "syncWorkingTree": false
 }

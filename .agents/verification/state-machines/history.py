@@ -9,9 +9,11 @@ END='2026-11-10T00:00:00+08:00'
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--out',type=Path,required=True)
+ parser.add_argument('--revision',default='HEAD')
  args=parser.parse_args()
- head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
- text=subprocess.check_output(['git','log','--first-parent','--since-as-filter='+START,'--until='+END,'--numstat','--format=COMMIT%x09%H%x09%cI%x09%s','--','apps','packages'],cwd=ROOT,text=True)
+ assert not args.out.resolve().is_relative_to(ROOT),'Keep generated history output outside repository'
+ head=subprocess.check_output(['git','rev-parse',args.revision],cwd=ROOT,text=True).strip()
+ text=subprocess.check_output(['git','log','--first-parent','--since-as-filter='+START,'--until='+END,'--numstat','--format=COMMIT%x09%H%x09%cI%x09%s',head,'--','apps','packages'],cwd=ROOT,text=True)
  commits=[]
  for line in text.splitlines():
   if line.startswith('COMMIT\t'):

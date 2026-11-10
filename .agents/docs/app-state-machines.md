@@ -17,10 +17,10 @@
 
 UI 目录也有更多修复，不能因为目录大就称其最易错。这里优先选择反复修复 **输入保留、重复消费、Stop、取消后释放、未知结果恢复和执行卡住** 的执行系统：它的错误能造成重复执行、输入丢失，或者让其他会话不能继续。选定的是本次最值得深入的高风险系统，不是统计上已证明缺陷率最高的模块。
 
-[selection.json](../verification/state-machines/selection.json) 保留统计方法、候选排名和代表性公开修复提交。仓库是 shallow checkout，但本地第一父链始于 8 月 7 日，早于本次窗口；不声称覆盖所有远程分支。重新统计：
+[统计脚本](../verification/state-machines/history.py) 按上述基准生成候选排名与代表性公开修复提交，输出到仓库外。仓库是 shallow checkout，但本地第一父链始于 8 月 7 日，早于本次窗口；不声称覆盖所有远程分支。重新统计：
 
 ```sh
-python3 .agents/verification/state-machines/history.py --out /tmp/lody-session-selection.json
+python3 .agents/verification/state-machines/history.py --revision 886ad65f0c80635063eade5add93171440af8647 --out /tmp/lody-session-selection.json
 ```
 
 ## 状态分别由谁持有
@@ -79,7 +79,7 @@ stateDiagram-v2
 
 [投递失败确认](../notes/implemented/bug-fix/2026-11-10-missing-history-acknowledgements.md) 使用 `missingHistoryUserMsgIds`，同时读取旧标量。只有同一会话串行的主机 watcher 增加记录，生产者只发布新激活，不再清除旧失败。正文/RPC 选择、待执行判断、持久接纳、Roost 激活和界面使用同一个精确 ID 判断。两次失败后，迟到的旧消息仍被排除，新 ID 仍可使用。旧超时也不能误判恢复期间刚到的新激活。
 
-[回复等待器](../../apps/cli/src/session/turn-history-gate.ts) 在写入前回调等待期间保留原始截止时间。到期或结束立即放行，并给回调发送取消信号。[MessageHandler](../../apps/cli/src/lib/message-handler.ts) 在异步读取后、实际写入前检查该信号，防止迟到回调重新打开已结束的回复条目。已经发出的写入不被当作已取消；结果继续被观察。下面也是 pstack 生成的当前图：
+[回复等待器](../../apps/cli/src/session/turn-history-gate.ts) 在写入前回调等待期间保留原始截止时间。到期立即放行等待者，但让存活中的回调继续补齐作者和模型。只有结束这一轮时才给回调发送取消信号，即使超时已放行也要取消。[MessageHandler](../../apps/cli/src/lib/message-handler.ts) 在异步读取后、实际写入前检查该信号，防止迟到回调重新打开已结束的回复条目。已经发出的写入不被当作已取消；结果继续被观察。下面也是 pstack 生成的当前图：
 
 ```mermaid
 ---
@@ -87,45 +87,43 @@ title: "回复写入等待与限时放行"
 ---
 stateDiagram-v2
   s0: 等待用户正文#65292;原始期限仍在计时
-  s1: 旧输入已结束#65292;等待已解除
-  s2: 正文已到#65292;回复条目写入仍在等待
-  s3: 到达期限#65292;放行回复并取消旧回调
-  s4: 回复写入可以继续
+  s1: 到达期限#65292;放行回复并继续补齐条目
+  s2: 旧输入已结束#65292;等待已解除
+  s3: 正文已到#65292;回复条目写入仍在等待
+  s4: 回复条目已准备#65292;后续写入已放行
+  s5: 回复写入可以继续
   [*] --> s0
-  s0 --> s1: 结束旧输入
-  s0 --> s2: 用户正文同步到达
-  s0 --> s3: 原始期限到达
-  s2 --> s3: 原始期限到达
-  s2 --> s1: 结束旧输入
-  s3 --> s1: 结束旧输入
-  s3 --> s4: 继续回复写入
-  s4 --> s1: 结束旧输入
+  s0 --> s1: 原始期限到达
+  s0 --> s2: 结束旧输入
+  s0 --> s3: 用户正文同步到达
+  s1 --> s4: 回调返回#65292;存活时补齐条目#65292;结束后跳过
+  s1 --> s5: 继续回复写入
+  s1 --> s2: 结束旧输入
+  s3 --> s1: 原始期限到达
+  s3 --> s4: 回调返回#65292;存活时补齐条目#65292;结束后跳过
+  s3 --> s2: 结束旧输入
+  s4 --> s5: 继续回复写入
+  s4 --> s2: 结束旧输入
+  s5 --> s2: 结束旧输入
 ```
 
-[调度报告](../skills/verify-session-execution/chart-report.md) 与 [回复等待报告](../skills/verify-session-execution/gate-chart-report.md) 记录展示合并、状态数量及每条性质。
+## 如何验证
 
-## 验证结果
+[覆盖映射](../skills/verify-session-execution/coverage.json) 与 [证明义务](../skills/verify-session-execution/requirements.md) 定义检查范围、源码哈希和假设；仓库不保存运行结果快照。
 
-| 检查 | 当前结果 | 范围 |
-| --- | --- | --- |
-| 调度安全 | PASS | 1,112 个状态；Stop、固定成员、消费顺序、未知不重放、保留失败、释放不清掉他人 |
-| 健康会话进展 | PASS | 459 个状态；A 持续失败也不要求故障先恢复 |
-| 多端投递安全与进展 | PASS | 1,696 个状态；两客户端、两输入、分开的到达与两次超时 |
-| 第一条输入正文永久不可达 | PASS | 246 个状态；第二条最终完成或有明确投递失败；第一条可待恢复 |
-| 回复等待安全与进展 | PASS | 回调不返回时 8 个状态；会返回时 12 个状态；进展不假定用户最终按 Stop |
-| 真实 Effect＋SQLite | PASS | 九类边界/恢复轨迹；A 定向写入错误和原生 SQLite 容量错误期间 B 均可开始，A 所在会话的新输入也能提交，故障修复后原记录可补写 |
-| Stop、新输入和 epoch | PASS | 336 种 SQL 命令交错；每种后均检查新输入/未来结果，迟到 Stop/release 不动新执行 |
-| 投递与取消选择 | PASS | 24 个取消快照、30 个到达顺序；真实恢复方法保留两次失败，旧消息不重新入选 |
-| 回复源代码 | PASS | 14 个 owning Vitest 用例；真实写入方法的两条迟到回放保留旧条目的结束状态、不改变新条目 |
-| 恢复旧错误的变体 | 均被抓住 | 扫描阻塞、丢失败记录、越过 start/owner 检查、忘记失败身份、卡住等待及缺少迟到写入检查 |
-
-SQL 容量 fixture 通过 `max_page_count` 限制 A 的合成约 1 MiB 错误诊断，而给 B 的小写入保留空间；它证明的是局部 SQLite 故障隔离，不是操作系统磁盘耗尽事故。额外检查包括：失败的 pause 回调不跳过独立 release/settle，持续 prepare 错误与坏诊断不阻塞 B 的后续 Inbox，launch 同步抛错不留下永久 running 标记，失败 Stop 只否决自己的旧输入，以及失败 settlement 不丢失已提交请求的记录。
+- 调度模型检查 Stop、固定批次、消费顺序、未知不重放和持久局部故障下的健康会话进展。
+- 投递模型拆分两客户端的正文、RPC、凭据与激活到达，检查失败身份不复活，以及另一输入在永久分区下的进展。
+- 回复模型检查回调不返回时的限时放行、存活回调补齐元数据、结束后取消迟到写入；进展不假定用户最终按 Stop。
+- 真实 Effect/SQLite 回放包含局部写入失败、336 种 Stop/新输入/安全 epoch 交错、取消与投递选择。助手条目回放执行完整 MessageHandler 方法，检查超时后的作者、模型、关联输入和时间戳，以及结束后不重新打开条目。
+- 负对照故意恢复扫描阻塞、丢恢复记录、越过启动检查、失败身份复活、等待死锁、迟到写入或超时误取消；校验器必须抓住这些错误。
 
 ```sh
-python3 .agents/verification/state-machines/check.py
+python3 .agents/verification/state-machines/check.py --out /tmp/lody-session-check-new
 ```
 
-新机器可加 `--prepare-tools`；固定工具和原始输出保存在仓库外。当前默认命令应退出 0；当前性质失败退出 1；工具/映射无法完成退出 2。故意恢复旧错误的变体必须失败，但不能把当前代码的失败转成 PASS。额外源代码检查可运行 `expanded.py --source-only`；`--safety-only` 明确不运行时间性质，不能替代默认检查。[结果快照](../verification/state-machines/results.json)、[扩展结果](../skills/verify-session-execution/expanded-results.json)、[覆盖映射](../skills/verify-session-execution/coverage.json) 与 [证明义务](../skills/verify-session-execution/requirements.md) 保留范围和限制。
+新机器加 `--prepare-tools`，依赖安装与原始日志也保存在仓库外。锁文件固定传递依赖及完整性值，支持可复现的 `npm ci`。输出目录必须新建且位于仓库外，包含 `summary.json` 和逐项日志；PASS、FAIL、BLOCKED 分开记录。退出 0 表示本次所请求检查通过，1 表示当前性质失败，2 表示工具或映射无法完成。`expanded.py --source-only` 和 `--safety-only` 不能替代默认完整检查。
+
+状态图保留 Mermaid 源文件及生成视图；pstack 原始报告写入外部目录。图会合并同类状态，不代表缩小证明边界。
 
 ## 证明与验收边界
 
@@ -137,4 +135,4 @@ Session 的 `AGENTS.md` 字数上限由 1,200 调整为 1,280，完整保留新�
 
 ## 技能来源
 
-沿用 pstack 固定版本 `6b0300214a09fd6029cfb7077043125758cd1fd2` 的 [create-formal-verification-skill](https://github.com/cursor/plugins/blob/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack/skills/create-formal-verification-skill/SKILL.md)、[maintain-formal-verification-skill](https://github.com/cursor/plugins/blob/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack/skills/maintain-formal-verification-skill/SKILL.md) 与 [statechart](https://github.com/cursor/plugins/blob/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack/skills/statechart/SKILL.md)。只保留 [verify-session-execution](../skills/verify-session-execution/SKILL.md) 这一套系统技能。当前已补完之前受本机端口权限限制的时间性质和新状态图；检查通过不表示已完成产品发布或设备验收。
+沿用 pstack 固定版本 `6b0300214a09fd6029cfb7077043125758cd1fd2` 的 [create-formal-verification-skill](https://github.com/cursor/plugins/blob/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack/skills/create-formal-verification-skill/SKILL.md)、[maintain-formal-verification-skill](https://github.com/cursor/plugins/blob/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack/skills/maintain-formal-verification-skill/SKILL.md) 与 [statechart](https://github.com/cursor/plugins/blob/6b0300214a09fd6029cfb7077043125758cd1fd2/pstack/skills/statechart/SKILL.md)。只保留 [verify-session-execution](../skills/verify-session-execution/SKILL.md) 这一套系统技能。检查通过不表示已完成产品发布或设备验收。
