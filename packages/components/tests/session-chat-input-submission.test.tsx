@@ -694,6 +694,55 @@ describe('SessionChatInputArea submission feedback', () => {
     });
   });
 
+  it('appends an inline quote question after the draft and sends it, or keeps it as a draft', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    await act(async () => {
+      expect(
+        composerRef.current!.addMessageQuote('Keep this', { comment: '  Why keep it?  ' })
+      ).toBe(true);
+    });
+    expect(submitted).toHaveLength(0);
+    expect(textarea.value.startsWith('focus regression draft')).toBe(true);
+    expect(textarea.value.endsWith('\nWhy keep it?')).toBe(true);
+    await act(async () => {
+      expect(
+        composerRef.current!.addMessageQuote('Second passage', {
+          comment: 'And this?',
+          send: true,
+        })
+      ).toBe(true);
+    });
+    expect(submitted).toHaveLength(1);
+    const block = submitted[0]![0]!;
+    expect(block).toMatchObject({
+      type: 'text',
+      spans: [
+        { kind: 'message_quote', quoteVersion: 1 },
+        { kind: 'message_quote', quoteVersion: 1 },
+      ],
+    });
+    const sent = block.type === 'text' ? block.text : '';
+    const order = [
+      'focus regression draft',
+      formatMessageQuote('Keep this'),
+      'Why keep it?',
+      formatMessageQuote('Second passage'),
+      'And this?',
+    ].map((part) => sent.indexOf(part));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(textarea.value).toBe('');
+  });
+
   it('preserves a quote draft when the target machine loses support', async () => {
     scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
     const composerRef = createRef<SessionChatInputAreaHandle>();

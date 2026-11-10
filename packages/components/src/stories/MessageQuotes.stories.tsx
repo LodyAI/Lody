@@ -77,8 +77,9 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
       <MessageQuoteAction
         root={area}
         enabled
-        onQuote={(text) => {
-          const caret = textarea.current?.selectionEnd ?? value.length;
+        onQuote={(text, options) => {
+          const comment = options?.comment?.trim() ?? '';
+          const caret = comment ? value.length : (textarea.current?.selectionEnd ?? value.length);
           const inserted = insertPastedTextDraft({
             currentValue: value,
             pastedText: text,
@@ -90,7 +91,7 @@ function QuoteHarness({ reject = false }: { reject?: boolean }) {
             kind: 'message_quote',
           });
           if (!inserted) return false;
-          setValue(inserted.nextValue);
+          setValue(comment ? `${inserted.nextValue}\n${comment}` : inserted.nextValue);
           setDrafts((current) =>
             getPastedTextDraftsAfterInsertion({
               drafts: current,

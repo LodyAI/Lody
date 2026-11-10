@@ -552,7 +552,11 @@ export type SessionSendMessageOptions = {
 };
 
 export type SessionChatInputAreaHandle = {
-  addMessageQuote: (text: string) => boolean;
+  /**
+   * Insert a message quote. A `comment` is appended after the quote at the end of
+   * the draft; `send` then sends the composer once the edit is committed.
+   */
+  addMessageQuote: (text: string, options?: { comment?: string; send?: boolean }) => boolean;
   addDocumentSelection: (selection: DocumentSelection) => boolean;
   setInputText: (text: string) => void;
   focusInput: () => void;
@@ -692,6 +696,8 @@ export const SessionChatInputArea = memo(
     promptSuggestionRef.current = { text: promptSuggestion, markPromptSuggestionAnswered };
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const quoteCaretRef = useRef<{ sessionId: SessionId; position: number } | null>(null);
+    const pendingQuoteSendRef = useRef<{ sessionId: SessionId; draftId: string } | null>(null);
+    const [quoteSendRevision, setQuoteSendRevision] = useState(0);
     useEffect(() => {
       quoteCaretRef.current = null;
       const input = textareaRef.current;
@@ -1469,7 +1475,17 @@ export const SessionChatInputArea = memo(
     );
 
     const insertLargePastedTextAtSelection = useCallback(
-      (text: string, options?: { label: string; append?: boolean; kind?: 'message_quote' }) => {
+      (
+        text: string,
+        options?: {
+          label: string;
+          append?: boolean;
+          kind?: 'message_quote';
+          /** Plain text written right after a message quote in the same edit. */
+          suffix?: string;
+          onInserted?: (draftId: string) => void;
+        }
+      ) => {
         if (isArchived) {
           return false;
         }
@@ -1482,7 +1498,14 @@ export const SessionChatInputArea = memo(
         }
 
         let currentValue = textareaRef.current?.value ?? userInput;
-        if (options?.append && currentValue && !currentValue.endsWith('\n\n'))
+        // A quote is spliced against the input's own value, so it takes no
+        // separator that the textarea would not also receive.
+        if (
+          options?.append &&
+          options.kind !== 'message_quote' &&
+          currentValue &&
+          !currentValue.endsWith('\n\n')
+        )
           currentValue += '\n\n';
         const selectionStart = options?.append
           ? currentValue.length
@@ -1526,10 +1549,14 @@ export const SessionChatInputArea = memo(
               text: result.draft.displayText,
               id: result.draft.id,
               at: result.draft.start,
+              suffix: options.suffix,
             })
           )
             return false;
-          quoteCaretRef.current = { sessionId: session.id, position: result.draft.end };
+          quoteCaretRef.current = {
+            sessionId: session.id,
+            position: result.draft.end + (options.suffix?.length ?? 0),
+          };
         } else setUserInput(result.nextValue);
         updatePastedTextDraftsForSession(session.id, (prev) =>
           getPastedTextDraftsAfterInsertion({
@@ -1540,6 +1567,7 @@ export const SessionChatInputArea = memo(
           })
         );
 
+        options?.onInserted?.(result.draft.id);
         requestAnimationFrame(() => {
           if (
             activeSessionIdRef.current !== session.id ||
@@ -1743,7 +1771,7 @@ export const SessionChatInputArea = memo(
     useImperativeHandle(
       ref,
       () => ({
-        addMessageQuote: (text) => {
+        addMessageQuote: (text, options) => {
           if (isArchived || submissionPending || !text.trim()) return false;
           if (!machineSupportsMessageQuotes(quoteMachineRef.current)) {
             toast.error(
@@ -1755,9 +1783,17 @@ export const SessionChatInputArea = memo(
             return false;
           }
           const excerpt = Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 32).join('');
+          const comment = options?.comment?.trim() ?? '';
           return insertLargePastedTextAtSelection(text, {
             kind: 'message_quote',
             label: t('composer.messageQuoteInlineLabel', '[Quote: {{text}}]', { text: excerpt }),
+            ...(comment ? { append: true, suffix: `\n${comment}` } : {}),
+            onInserted: options?.send
+              ? (draftId) => {
+                  pendingQuoteSendRef.current = { sessionId: session.id, draftId };
+                  setQuoteSendRevision((revision) => revision + 1);
+                }
+              : undefined,
           });
         },
         addDocumentSelection,
@@ -1784,6 +1820,7 @@ export const SessionChatInputArea = memo(
         isArchived,
         submissionPending,
         quoteMachineRef,
+        session.id,
         t,
         insertLargePastedTextAtSelection,
         addDocumentSelection,
@@ -2081,6 +2118,22 @@ export const SessionChatInputArea = memo(
         t,
       ]
     );
+
+    // An inline quote reply sends once its quote and comment are committed to
+    // the composer, so the send reads the same text, ranges and drafts as a
+    // press of the send button would.
+    useEffect(() => {
+      const pending = pendingQuoteSendRef.current;
+      if (!pending) return;
+      if (pending.sessionId !== session.id) {
+        pendingQuoteSendRef.current = null;
+        return;
+      }
+      if (!mentionRangesRef.current.some((range) => range.value === pending.draftId)) return;
+      if (textareaRef.current && textareaRef.current.value !== userInput) return;
+      pendingQuoteSendRef.current = null;
+      void sendMessage();
+    }, [draftMentionRevision, quoteSendRevision, sendMessage, session.id, userInput]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

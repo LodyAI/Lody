@@ -606,7 +606,13 @@ function AgentRoleMentionHydrator({
  */
 export type CombinedMentionTextareaHandle = {
   /** Insert an externally owned atom through the same splice as menu/drop edits. */
-  insertExternalMention: (request: { text: string; id: string; at: number }) => boolean;
+  insertExternalMention: (request: {
+    text: string;
+    id: string;
+    at: number;
+    /** Plain text written right after the atom in the same transaction. */
+    suffix?: string;
+  }) => boolean;
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
@@ -645,9 +651,9 @@ function MentionActionsBridge({
   React.useImperativeHandle(
     actionsRef,
     () => ({
-      insertExternalMention: ({ text, id, at }) => {
+      insertExternalMention: ({ text, id, at, suffix }) => {
         if (context.disabled || context.readonly || !text) return false;
-        onMentionInsert({ text, value: id, kind: 'pasted_text', at });
+        onMentionInsert({ text, value: id, kind: 'pasted_text', at, suffix });
         return true;
       },
       insertSessionMention: (sessionId, options) => {
