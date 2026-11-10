@@ -225,6 +225,19 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
             call(raw.accountApproval.invitation(...args)),
           access: () => call(raw.accountApproval.access()),
         }),
+        members: Object.freeze({
+          invite: (...args: Parameters<RawSession['members']['invite']>) =>
+            call(raw.members.invite(...args)),
+          pending: () => call(raw.members.pending()),
+          admission: (...args: Parameters<RawSession['members']['admission']>) =>
+            call(raw.members.admission(...args)),
+          read: (...args: Parameters<RawSession['members']['read']>) =>
+            call(raw.members.read(...args)),
+          reject: (...args: Parameters<RawSession['members']['reject']>) =>
+            call(raw.members.reject(...args)),
+          revoke: (...args: Parameters<RawSession['members']['revoke']>) =>
+            call(raw.members.revoke(...args)),
+        }),
         acknowledgeRotation: (...args: Parameters<RawSession['acknowledgeRotation']>) =>
           call(raw.acknowledgeRotation(...args)),
         prepareDispatch: (...args: Parameters<RawSession['prepareDispatch']>) =>

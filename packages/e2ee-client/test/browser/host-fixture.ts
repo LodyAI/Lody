@@ -43,6 +43,8 @@ import {
   verifyLedger,
   signLedgerSnapshot,
   prepareLedgerCommand,
+  prepareJoinRequest,
+  signDeviceCredentialBinding,
   prepareDeviceAdmission,
   signLedgerRecord,
   prepareEpochEnvelope,
@@ -98,6 +100,8 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { LedgerFeedError } from '@lody/e2ee-core';
 import { toHex, fromHex } from '../../src/bytes';
+import { encodeMemberKeyPackage } from '../../src/member';
+import type { E2eeMemberRequest } from '@lody/cloud-api';
 let runtimePorts: Layer.Layer<PersonalHostPorts, unknown>;
 let runtime: E2eeWorkspaceRuntime;
 let runtimeAccount = 'account';
@@ -155,6 +159,65 @@ let failStaging = false;
 let oldSession: typeof session;
 let otherSession: typeof session;
 let trackNextReader = false;
+/** The synthetic member relay: one waiting applicant at a time, plus a call log. */
+let memberRelay: {
+  item?: E2eeMemberRequest;
+  others: E2eeMemberRequest[];
+  /** What the relay answers when asked for the listed item, if it lies. */
+  readAs?: E2eeMemberRequest;
+  calls: string[];
+} = { calls: [], others: [] };
+let loseNextAppendReply = false;
+/** The relay authenticates the admitted device's own credential, as the real one does. */
+function memberRelayAccess(access: { workspaceId: string; credential: string }) {
+  const claim = decodePersonalRequest(localStorage.getItem('last-request')!);
+  if (
+    access.workspaceId !== offer.workspaceId ||
+    toHex(sha256(fromHex(access.credential))) !== claim.credentialHash
+  )
+    throw new Error('wrong device credential');
+}
+/** A synthetic joining device's public key package, signed by its own fresh key. */
+const memberApplicant = (seed: number, requestByte: number) =>
+  Effect.gen(function* () {
+    const genesis = Result.getOrThrow(Bytes.genesisHash(fromHex(offer.genesisHash)));
+    const applicant = yield* importBrowserDevice({
+      signingPrivate: new Uint8Array(32).fill(seed),
+      encryptionPrivate: new Uint8Array(32).fill(seed + 1),
+    }).pipe(Scope.provide(scope));
+    const request = yield* prepareJoinRequest({
+      genesis,
+      requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(requestByte))),
+      userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(seed + 2))),
+      encryptionPublicKey: applicant.enc,
+      expiresAt: FIXED_NOW + 3_600_000,
+      signer: applicant,
+    });
+    const credentialHash = toHex(sha256(new Uint8Array(32).fill(seed + 3)));
+    const binding = yield* signDeviceCredentialBinding({
+      genesis,
+      pairingSessionId: request.requestId.toBytes(),
+      signingPublicKey: applicant.publicKey,
+      credentialHash: fromHex(credentialHash),
+      signer: applicant,
+    });
+    const keyPackageHex = encodeMemberKeyPackage({
+      request,
+      credentialHash,
+      bindingSignature: binding.toBytes(),
+    });
+    return {
+      id: 'relay-' + requestByte,
+      workspaceId: offer.workspaceId,
+      accountId: 'applicant-account',
+      keyPackageHex,
+      signingPublicKey: toHex(applicant.publicKey.toBytes()),
+      requestId: toHex(request.requestId.toBytes()),
+      source: 'link' as const,
+      state: 'pending' as const,
+      expiresAt: FIXED_NOW + 3_600_000,
+    };
+  });
 let releasedReaders: { device: string; phase: string }[] = [];
 let loseBegin = false,
   holdBegin = false,
@@ -291,6 +354,55 @@ export async function boot(
           genesis: genesis.genesis,
         },
         protection: 'web-crypto',
+        members: {
+          createInvitation: (access, input) =>
+            Effect.gen(function* () {
+              memberRelayAccess(access);
+              memberRelay.calls.push('invite:' + input.offer.mode);
+              return { offer: input.offer };
+            }),
+          pending: (access) =>
+            Effect.sync(() => {
+              memberRelayAccess(access);
+              memberRelay.calls.push('pending');
+              const item = memberRelay.item;
+              return {
+                invitations: [],
+                items: [...(item ? [item] : []), ...memberRelay.others].map((entry) => ({
+                  ...entry,
+                  applicantName: 'Riley',
+                  applicantEmail: 'r@example.test',
+                })),
+                hasMore: false,
+                seatPreview: null as never,
+              };
+            }),
+          read: (access, requestId) =>
+            Effect.sync(() => {
+              memberRelayAccess(access);
+              memberRelay.calls.push('read');
+              const listed = [memberRelay.item!, ...memberRelay.others].find(
+                (entry) => entry.requestId === requestId
+              );
+              if (!listed) throw new Error('unknown request');
+              const item =
+                memberRelay.readAs && listed === memberRelay.item
+                  ? { ...memberRelay.readAs, requestId }
+                  : listed;
+              const admitted = view().inspectState().devices.has(item.signingPublicKey);
+              return { ...item, state: admitted ? ('committed' as const) : item.state };
+            }),
+          reject: (access) =>
+            Effect.sync(() => {
+              memberRelayAccess(access);
+              return { state: 'rejected' as const };
+            }),
+          revoke: (access) =>
+            Effect.sync(() => {
+              memberRelayAccess(access);
+              return { revoked: true as const };
+            }),
+        },
         contentToken: (binding, credential, request) =>
           Effect.gen(function* () {
             const current = view();
@@ -378,6 +490,13 @@ export async function boot(
                       return yield* new LedgerLogError({});
                     records.push(new Uint8Array(record));
                     retain();
+                    if (loseNextAppendReply) {
+                      // The record landed; only its reply is lost on the way back.
+                      loseNextAppendReply = false;
+                      return yield* new LedgerLogError({
+                        cause: new Error('synthetic lost reply'),
+                      });
+                    }
                     return undefined;
                   }),
               });
@@ -1659,6 +1778,79 @@ export async function runtimeInvoke(action: string) {
         break;
       case 'forbiddenRole':
         value = await runtime.setMemberRole!(offer.workspaceId, '0a'.repeat(16), 'admin');
+        break;
+      case 'forbiddenTransfer':
+        value = await runtime.transferOwnership!(offer.workspaceId, '0a'.repeat(16));
+        break;
+      case 'memberInvite':
+        value = (
+          await runtime.createMemberInvitation!({ workspaceId: offer.workspaceId, mode: 'link' })
+        ).mode;
+        break;
+      case 'memberApplicant':
+        memberRelay.item = await Effect.runPromise(memberApplicant(41, 0x51));
+        value = memberRelay.item.requestId;
+        break;
+      case 'memberSwap': {
+        // Same request id, a different device: what a relay could try after the preview.
+        const other = await Effect.runPromise(memberApplicant(61, 0x51));
+        memberRelay.item = { ...memberRelay.item!, keyPackageHex: other.keyPackageHex };
+        value = true;
+        break;
+      }
+      case 'memberRestore':
+        memberRelay.item = await Effect.runPromise(memberApplicant(41, 0x51));
+        value = true;
+        break;
+      case 'memberList':
+        value = (await runtime.memberJoinRequests!(offer.workspaceId)).items.map(
+          (item) => item.requestId
+        );
+        break;
+      case 'memberApprove':
+        value = await runtime.approveMemberJoin!(
+          offer.workspaceId,
+          memberRelay.item!.requestId,
+          'explicit'
+        );
+        break;
+      case 'memberAutomatic':
+        value = await runtime.approveMemberJoin!(
+          offer.workspaceId,
+          memberRelay.item!.requestId,
+          'automatic'
+        );
+        break;
+      case 'memberSecondApplicant':
+        memberRelay.others = [await Effect.runPromise(memberApplicant(71, 0x52))];
+        value = memberRelay.others[0]!.requestId;
+        break;
+      case 'memberReadSecondAsFirst':
+        // Asked for the first request, the relay answers with the second's package.
+        memberRelay.readAs = memberRelay.others[0];
+        value = true;
+        break;
+      case 'memberReadHonest':
+        memberRelay.readAs = undefined;
+        value = true;
+        break;
+      case 'memberSecondAdmitted':
+        value = view().inspectState().devices.has(memberRelay.others[0]!.signingPublicKey);
+        break;
+      case 'memberLoseReply':
+        loseNextAppendReply = true;
+        localStorage.setItem('synthetic-offline', '1');
+        value = true;
+        break;
+      case 'memberOnline':
+        localStorage.removeItem('synthetic-offline');
+        value = true;
+        break;
+      case 'memberAdmitted':
+        value = view().inspectState().devices.has(memberRelay.item!.signingPublicKey);
+        break;
+      case 'memberRecordCount':
+        value = view().length;
         break;
       case 'rpc':
         value = await runtime.prepareDispatch!(offer.workspaceId, 'fixture-machine', {
