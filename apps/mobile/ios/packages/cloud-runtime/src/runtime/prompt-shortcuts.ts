@@ -130,7 +130,7 @@ export function shortcutAccess(
       });
       if (!created.ok) throw new Error('shortcut_write_unknown');
     }
-    return openSettings(stream, getGrant, signal);
+    return openSettings(stream, getGrant, signal, { cached: !write });
   };
   const list = async () => {
     const rows = await directory();

@@ -11,11 +11,11 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
-// Settings are read on demand inside the native-owned runtime. Each stream's last
-// read stays cached for this runtime, so the next open only catches up from its
-// offset instead of bootstrapping the whole history. Callers always receive a
-// private copy: a write that fails to append never leaks into the cache, and a
-// fresh catch-up before an edit still preserves fields another client changed.
+// Settings are read on demand inside the native-owned runtime. List reads may opt
+// into a per-runtime cache of each stream's last read, so the next list only catches
+// up from its offset instead of bootstrapping the whole history. Callers always
+// receive a private copy, so a write that fails to append never leaks into the
+// cache; writes and turn-time reads still bootstrap fresh.
 type Cached = {
   flock: Flock;
   offset: string;
@@ -73,9 +73,10 @@ export async function openSettings(
   stream: string,
   grant: Grant,
   signal: AbortSignal,
+  options: { cached?: boolean } = {},
 ) {
   const client = await clientFor(stream, grant);
-  const cached = replicas.get(stream);
+  const cached = options.cached ? replicas.get(stream) : undefined;
   if (cached) {
     try {
       await catchUp(client, cached, signal);
@@ -125,6 +126,7 @@ export async function openSettings(
       throw new Error('stalled_cursor');
     ({ nextOffset: offset, cursor, upToDate } = next.result);
   }
+  if (!options.cached) return { flock, client };
   if (replicas.size >= 64) replicas.delete(replicas.keys().next().value!);
   replicas.set(stream, { flock, offset, cursor, size });
   return { flock: copy(flock), client };

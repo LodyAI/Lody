@@ -88,7 +88,9 @@ export async function roleSettings(
   let replica;
   let missing = false;
   try {
-    replica = await openSettings(stream, grant, signal);
+    replica = await openSettings(stream, grant, signal, {
+      cached: request.action === 'list',
+    });
   } catch (error) {
     if (error instanceof Error && error.message === 'forbidden')
       throw new Error('role_forbidden');

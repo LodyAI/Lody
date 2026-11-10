@@ -418,7 +418,9 @@ export async function agentProviders(
     // Computers whose replica is not synced yet are read in parallel.
     const fetched = await Promise.all(
       pending.map((machine) =>
-        openSettings(`${request.workspaceId}:mf:${machine.id}`, grant, signal)
+        openSettings(`${request.workspaceId}:mf:${machine.id}`, grant, signal, {
+          cached: true,
+        })
           .then(({ flock }) =>
             providerRows(flock, machine.id, machine.readOnly),
           )
