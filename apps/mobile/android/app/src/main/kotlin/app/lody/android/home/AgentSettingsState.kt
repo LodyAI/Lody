@@ -31,7 +31,8 @@ class RuntimeAgentProviderService(private val owner: RuntimeOwner) : AgentProvid
 /** One screen/scope owns reads; writes are never replayed, and stale display never grants editing. */
 internal class AgentSettingsState(private val service: AgentProviderService, private val scope: RuntimeScope) {
     private val operations = Mutex()
-    var snapshot by mutableStateOf<AgentProviders?>(null); private set
+    /** The last accepted list for this scope shows at once; it never grants editing ([live]). */
+    var snapshot by mutableStateOf(remembered?.takeIf { it.first == scope }?.second); private set
     var busy by mutableStateOf(false); private set
     var live by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -60,6 +61,13 @@ internal class AgentSettingsState(private val service: AgentProviderService, pri
         if (!canManage(snapshot?.machines?.find { it.id == machineId })) return false
         if (!operations.tryLock()) return false
         busy = true; error = null
+        val previous = snapshot
+        // Deletions leave the list at once and come back if the write fails.
+        when (action) {
+            is ProviderAction.Delete -> snapshot = previous?.copy(providers = previous.providers.filterNot { it.id == action.base.id && it.machineId == machineId })
+            is ProviderAction.DeleteSetup -> snapshot = previous?.copy(setups = previous.setups.filterNot { it.id == action.setup.id && it.machineId == machineId })
+            else -> Unit
+        }
         try {
             val result = service.perform(scope, action)
             authRequired = result.authRequired
@@ -68,18 +76,26 @@ internal class AgentSettingsState(private val service: AgentProviderService, pri
             return true
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) {
+            snapshot = previous
             live = false
             error = (failure as? app.lody.android.runtime.RuntimeException)?.fault?.code ?: "provider_write_unknown"
             return false
         } finally { busy = false; operations.unlock() }
     }
     private fun merge(result: AgentProviders, machineId: String?) {
-        if (machineId == null) { snapshot = result; return }
-        val retained = result.machines.map { it.id }.toSet() - machineId
-        snapshot = result.copy(
-            providers = snapshot?.providers.orEmpty().filter { it.machineId in retained } + result.providers.filter { it.machineId == machineId },
-            setups = snapshot?.setups.orEmpty().filter { it.machineId in retained } + result.setups.filter { it.machineId == machineId },
-        )
+        snapshot = if (machineId == null) result else {
+            val retained = result.machines.map { it.id }.toSet() - machineId
+            result.copy(
+                providers = snapshot?.providers.orEmpty().filter { it.machineId in retained } + result.providers.filter { it.machineId == machineId },
+                setups = snapshot?.setups.orEmpty().filter { it.machineId in retained } + result.setups.filter { it.machineId == machineId },
+            )
+        }
+        remembered = scope to snapshot!!.copy(authRequired = false)
+    }
+
+    private companion object {
+        /** Process memory only (one scope): reopening the page shows the last list while it refreshes. */
+        @Volatile var remembered: Pair<RuntimeScope, AgentProviders>? = null
     }
 
 }

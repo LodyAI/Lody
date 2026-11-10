@@ -14,7 +14,12 @@ class PromptShortcutsController: UIViewController {
   private var pulled = false
   private var loadedAt: Double?
   private var version = 0
+  /// Whether the shown list is from a live read; cached rows never authorize writes.
+  private var live = false
   private var observer: NSObjectProtocol?
+  private var store: SettingsSnapshotStore<[PromptShortcutEntry]> {
+    SettingsSnapshotStore(kind: "prompt-shortcuts", userId: workspace.userId, workspaceId: workspace.workspaceId)
+  }
 
   init(workspace: SettingsWorkspace? = nil, service: @escaping PromptShortcutService = PromptShortcutsController.cloud) {
     fixed = workspace
@@ -57,7 +62,20 @@ class PromptShortcutsController: UIViewController {
     items = []
     loaded = false
     loadedAt = nil
-    refresh()
+    live = false
+    guard fixed == nil else { return refresh() }
+    version += 1
+    let id = version, store = store
+    Task { [weak self] in
+      // The last accepted list shows at once; the live read replaces it.
+      let cached = await store.read()
+      guard let self, self.version == id else { return }
+      if let cached, !self.loaded {
+        self.items = cached
+        self.loaded = true
+      }
+      self.refresh()
+    }
   }
 
   private func refresh() {
@@ -72,7 +90,9 @@ class PromptShortcutsController: UIViewController {
       if case .list(let value)? = result {
         self.items = value.entries
         self.loaded = true
+        self.live = true
         self.loadedAt = LodyRelativeTime.now()
+        if self.fixed == nil { self.store.write(value.entries) }
       } else {
         self.failed = true
       }
@@ -100,7 +120,7 @@ class PromptShortcutsController: UIViewController {
     let add = LodyFormController.barButton(symbol: "plus", label: PromptShortcutSections.text("add")) { [weak self] in
       self?.edit(nil)
     }
-    add.isEnabled = loaded && !loading && !failed
+    add.isEnabled = live
     parent?.navigationItem.rightBarButtonItems = [add]
   }
 
@@ -133,7 +153,23 @@ class PromptShortcutsController: UIViewController {
       }
       guard let self, self.version == id else { return }
       let editor = PromptShortcutEditorController(workspace: workspace, entry: entry, value: value, service: service)
-      editor.saved = { [weak self] in self?.refresh() }
+      var previous: [PromptShortcutEntry]?
+      editor.willSave = { [weak self] next in
+        guard let self, self.workspace.key == workspace.key else { return }
+        previous = self.items
+        self.version += 1
+        self.loading = false
+        self.items.removeAll { $0.id == next.id }
+        self.items.append(next)
+        self.items.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        self.render()
+      }
+      editor.failed = { [weak self] in
+        guard let self, self.workspace.key == workspace.key else { return }
+        if let previous { self.items = previous }
+        self.render()
+      }
+      editor.saved = { [weak self] _ in self?.refresh() }
       LodyShell.shared.presentNative(editor, title: PromptShortcutSections.text("title"))
     }
   }

@@ -59,6 +59,7 @@ import app.lody.android.auth.Account
 import app.lody.android.designsystem.*
 import app.lody.android.runtime.*
 import app.lody.android.home.AgentMark
+import app.lody.android.home.AppPreferences
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.time.Instant
@@ -356,7 +357,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         val role = SessionRoles.send(roles != null, activeRole, pickedRole, durableRole)
         val switches = if (chosen) chosenOptions else emptyMap()
         coroutines.launch {
-            val queue = session.status in RunningStatuses
+            val busy = session.status in RunningStatuses
+            // The Guide preference steers the running reply when the agent can; otherwise it queues.
+            val guide = busy && capability?.steer == true && AppPreferences.queuedMessageBehavior(appContext) == AppPreferences.GUIDE
+            val queue = busy && !guide
             val blocks = try { repository.upload(scope, id, files) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
@@ -370,7 +374,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 repository.send(scope, SendTextRequest(
                     id, turnId, text, session.machineId, session.cliType!!, session.agentType!!, session.resume, queue = queue,
                     modelId = choice.first, modeId = choice.second, effort = choice.third, explicitChoice = explicit, attachments = blocks,
-                    role = role, agentConfigId = session.agentConfigId, configOptionValues = switches,
+                    role = role, agentConfigId = session.agentConfigId, configOptionValues = switches, guide = guide,
                 )).state
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { "unknown" }

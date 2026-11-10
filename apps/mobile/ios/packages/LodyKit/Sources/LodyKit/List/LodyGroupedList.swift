@@ -205,6 +205,8 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     var leading = textLeading
     if monogram {
       content.image = LodyListPhoto.monogram(row.monogram, side: LodyFlatRows.avatarSize)
+    } else if !row.emoji.isEmpty {
+      content.image = LodyListPhoto.emoji(row.emoji, side: LodyFlatRows.iconSize)
     }
     if content.image != nil, photo {
       let side = CGSize(width: LodyFlatRows.avatarSize, height: LodyFlatRows.avatarSize)
@@ -248,6 +250,8 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     content.textToSecondaryTextVerticalPadding = LodySpacing.xxs
     if monogram {
       content.image = LodyListPhoto.monogram(row.monogram, side: LodyFlatRows.avatarSize)
+    } else if !row.emoji.isEmpty {
+      content.image = LodyListPhoto.emoji(row.emoji, side: LodyIconSize.md)
     }
     if content.image != nil, photo {
       let side = CGSize(width: LodyFlatRows.avatarSize, height: LodyFlatRows.avatarSize)

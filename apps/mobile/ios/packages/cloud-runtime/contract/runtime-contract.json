@@ -1033,7 +1033,8 @@
                 "visibility": {
                   "type": "string",
                   "enum": ["private", "workspace"]
-                }
+                },
+                "emoji": { "type": "string" }
               },
               "required": ["name", "description", "promptPrefix", "visibility"]
             },
@@ -1832,74 +1833,6 @@
       },
       "required": ["protocol", "methods"]
     },
-    "HistoryRequest": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": { "kind": { "type": "string", "const": "targets" } },
-          "required": ["kind"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": { "type": "string", "const": "sync" },
-            "target": { "$ref": "HistoryTarget" }
-          },
-          "required": ["kind", "target"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": { "type": "string", "const": "import" },
-            "target": { "$ref": "HistoryTarget" },
-            "acpSessionIds": {
-              "type": "array",
-              "items": { "type": "string", "minLength": 1 }
-            }
-          },
-          "required": ["kind", "target", "acpSessionIds"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": { "type": "string", "const": "resolve" },
-            "target": { "$ref": "HistoryTarget" },
-            "sessionId": { "type": "string", "minLength": 1 },
-            "acpSessionId": { "type": "string", "minLength": 1 }
-          },
-          "required": ["kind", "target", "sessionId", "acpSessionId"]
-        }
-      ]
-    },
-    "HistoryTarget": {
-      "type": "object",
-      "properties": {
-        "machineId": { "type": "string", "minLength": 1 },
-        "machineName": { "type": "string" },
-        "localProjectId": { "type": "string", "minLength": 1 },
-        "projectName": { "type": "string" },
-        "rootPath": { "type": "string" },
-        "provider": {
-          "type": "object",
-          "properties": {
-            "cliType": {
-              "type": "string",
-              "enum": ["builtin", "registry", "custom"]
-            },
-            "agentType": { "type": "string" }
-          },
-          "required": ["cliType", "agentType"]
-        }
-      },
-      "required": [
-        "machineId",
-        "machineName",
-        "localProjectId",
-        "projectName",
-        "rootPath",
-        "provider"
-      ]
-    },
     "IosSimulatorControlParams": {
       "type": "object",
       "properties": {
@@ -2151,23 +2084,6 @@
             "workspaceId": { "type": "string", "minLength": 1 },
             "browserId": { "type": "string", "minLength": 1 },
             "userId": { "type": "string" },
-            "action": { "type": "string", "const": "history" },
-            "history": { "$ref": "HistoryRequest" }
-          },
-          "required": [
-            "workspaceId",
-            "browserId",
-            "userId",
-            "action",
-            "history"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "browserId": { "type": "string", "minLength": 1 },
-            "userId": { "type": "string" },
             "action": { "type": "string", "const": "browse" },
             "machineId": { "type": "string" },
             "path": { "type": "string" },
@@ -2215,49 +2131,6 @@
             }
           },
           "required": ["outcome", "machines"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "outcome": { "type": "string", "const": "targets" },
-            "targets": { "type": "array", "items": { "$ref": "HistoryTarget" } }
-          },
-          "required": ["outcome", "targets"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "outcome": { "type": "string", "const": "history" },
-            "sessions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "acpSessionId": { "type": "string", "minLength": 1 },
-                  "title": { "type": "string" },
-                  "updatedAt": { "type": "string" },
-                  "importedSessionId": { "type": "string", "minLength": 1 },
-                  "status": {
-                    "type": "string",
-                    "enum": ["available", "imported", "sync_conflict"]
-                  }
-                },
-                "required": ["acpSessionId", "title"]
-              }
-            },
-            "failures": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "acpSessionId": { "type": "string", "minLength": 1 },
-                  "message": { "type": "string" }
-                },
-                "required": ["acpSessionId", "message"]
-              }
-            }
-          },
-          "required": ["outcome", "sessions"]
         },
         {
           "type": "object",

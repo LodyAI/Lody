@@ -10,6 +10,7 @@ final class NativeShareCoordinator {
   private var scope = ""
   private var catalogJSON = ""
   private var optionsKey = ""
+  private var snapshotCache: (scope: String, catalog: SessionCatalog, sort: InboxSort, projects: [CreateProject], json: String)?
 
   func wake() {
     failed.removeAll()
@@ -19,7 +20,7 @@ final class NativeShareCoordinator {
   func stop() {
     drain?.cancel(); drain = nil; prefetch?.cancel(); prefetch = nil
     if let form { LodyShell.shared.close(from: form) }
-    scope = ""; optionsKey = ""; catalogJSON = ""
+    scope = ""; optionsKey = ""; catalogJSON = ""; snapshotCache = nil
   }
 
   func reconcile() {
@@ -31,7 +32,7 @@ final class NativeShareCoordinator {
     if scope != state.key {
       drain?.cancel(); drain = nil; prefetch?.cancel()
       if let form { LodyShell.shared.close(from: form) }
-      scope = state.key; failed.removeAll(); optionsKey = ""
+      scope = state.key; failed.removeAll(); optionsKey = ""; snapshotCache = nil
     }
     snapshot(state)
     guard drain == nil else { return }
@@ -59,11 +60,18 @@ final class NativeShareCoordinator {
   private func snapshot(_ state: SessionListState) {
     let index = UserDefaults.standard.integer(forKey: "inboxProjectSort")
     let sort = InboxSort.allCases.indices.contains(index) ? InboxSort.allCases[index] : .name
-    let projects = InboxSections.sortProjects(state.catalog.projects, sessions: state.catalog.sessions, sort: sort)
-      .filter { !SessionRows.isChat($0.id) }
-      .map { CreateProject(id: $0.id, machineId: $0.machineId, name: $0.name, rootPath: $0.rootPath) }
-    let catalog = ShareCatalog(userId: state.userId, workspaceId: state.workspaceId, projects: projects, machineNames: state.catalog.machineNames)
-    let json = CreateJSON.encode(catalog)
+    // Presence and connection deliveries do not change the extension's catalog.
+    // Retain only the latest projection; persistence failures still retry below.
+    if snapshotCache?.scope != state.key || snapshotCache?.catalog != state.catalog || snapshotCache?.sort != sort {
+      let projects = InboxSections.sortProjects(state.catalog.projects, sessions: state.catalog.sessions, sort: sort)
+        .filter { !SessionRows.isChat($0.id) }
+        .map { CreateProject(id: $0.id, machineId: $0.machineId, name: $0.name, rootPath: $0.rootPath) }
+      let catalog = ShareCatalog(userId: state.userId, workspaceId: state.workspaceId, projects: projects, machineNames: state.catalog.machineNames)
+      snapshotCache = (state.key, state.catalog, sort, projects, CreateJSON.encode(catalog))
+    }
+    guard let cached = snapshotCache else { return }
+    let projects = cached.projects
+    let json = cached.json
     if json != catalogJSON {
       do { try ShareStore.writeCatalog(json); catalogJSON = json }
       catch { report(error, operation: "snapshot") }

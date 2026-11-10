@@ -122,6 +122,7 @@ internal object RuntimeProtocol {
         }
         "networkStatus" -> RuntimeEvent.SyncFailed(if (message.optString("status") == "authorization_required") "grant_expired" else "network_unavailable")
         "grant" -> RuntimeEvent.GrantRequested
+        "shortcutCloud" -> RuntimeEvent.ShortcutCloudRequested(message.getString("requestId"), message.getString("operation"), message.getString("args"))
         else -> null
     }
     fun schema(message: JSONObject): RuntimeResult.Schema {

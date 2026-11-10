@@ -88,38 +88,6 @@ export const CreationOptions = z
   .meta({ id: 'CreationOptions' });
 export type CreationOptions = z.input<typeof CreationOptions>;
 
-export const HistoryTarget = z
-  .object({
-    machineId: z.string().min(1),
-    machineName: z.string(),
-    localProjectId: z.string().min(1),
-    projectName: z.string(),
-    rootPath: z.string(),
-    provider: z.object({
-      cliType: z.enum(['builtin', 'registry', 'custom']),
-      agentType: z.string(),
-    }),
-  })
-  .meta({ id: 'HistoryTarget' });
-
-export const HistoryRequest = z
-  .discriminatedUnion('kind', [
-    z.object({ kind: z.literal('targets') }),
-    z.object({ kind: z.literal('sync'), target: HistoryTarget }),
-    z.object({
-      kind: z.literal('import'),
-      target: HistoryTarget,
-      acpSessionIds: z.array(z.string().min(1)),
-    }),
-    z.object({
-      kind: z.literal('resolve'),
-      target: HistoryTarget,
-      sessionId: z.string().min(1),
-      acpSessionId: z.string().min(1),
-    }),
-  ])
-  .meta({ id: 'HistoryRequest' });
-
 const browser = {
   workspaceId: z.string().min(1),
   browserId: z.string().min(1),
@@ -130,11 +98,6 @@ export const LocalProjectsParams = z
   .discriminatedUnion('action', [
     z.object({ ...browser, action: z.literal('cancel') }),
     z.object({ ...browser, action: z.literal('machines') }),
-    z.object({
-      ...browser,
-      action: z.literal('history'),
-      history: HistoryRequest,
-    }),
     z.object({
       ...browser,
       action: z.literal('browse'),
@@ -157,27 +120,6 @@ export const LocalProjectsResult = z
     z.object({
       outcome: z.literal('machines'),
       machines: z.array(z.object({ id: z.string(), name: z.string() })),
-    }),
-    z.object({
-      outcome: z.literal('targets'),
-      targets: z.array(HistoryTarget),
-    }),
-    z.object({
-      outcome: z.literal('history'),
-      sessions: z.array(
-        z.object({
-          acpSessionId: z.string().min(1),
-          title: z.string(),
-          updatedAt: z.string().optional(),
-          importedSessionId: z.string().min(1).optional(),
-          status: z.enum(['available', 'imported', 'sync_conflict']).optional(),
-        }),
-      ),
-      failures: z
-        .array(
-          z.object({ acpSessionId: z.string().min(1), message: z.string() }),
-        )
-        .optional(),
     }),
     z.object({
       outcome: z.literal('directory'),

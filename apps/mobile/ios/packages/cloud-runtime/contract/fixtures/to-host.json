@@ -630,53 +630,6 @@
     "v": 1,
     "gen": 3,
     "kind": "result",
-    "id": "req-projects-history",
-    "method": "localProjects",
-    "payload": {
-      "outcome": "history",
-      "sessions": [
-        {
-          "acpSessionId": "acp-1",
-          "title": "Fix login",
-          "status": "imported",
-          "importedSessionId": "session-9"
-        }
-      ],
-      "failures": [
-        {
-          "acpSessionId": "acp-2",
-          "message": "missing transcript"
-        }
-      ]
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
-    "id": "req-projects-targets",
-    "method": "localProjects",
-    "payload": {
-      "outcome": "targets",
-      "targets": [
-        {
-          "machineId": "machine-1",
-          "machineName": "Studio",
-          "localProjectId": "p1",
-          "projectName": "App",
-          "rootPath": "/Users/dev/app",
-          "provider": {
-            "cliType": "builtin",
-            "agentType": "claude"
-          }
-        }
-      ]
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
     "id": "req-projects-add",
     "method": "localProjects",
     "payload": {

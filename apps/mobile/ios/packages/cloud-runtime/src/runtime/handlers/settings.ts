@@ -226,12 +226,19 @@ export function registerSettings(ctx: RuntimeContext) {
   });
   channel.handle('agentProviders', async (args) => {
     const { check, scopedGrant } = providerScope(args);
+    // A list reads the already-synced workspace replicas; writes open fresh copies.
+    const machines = new Map(
+      [...state.machineReplicas].filter(([id]) => !state.unhealthy.has(id)),
+    );
     return agentProviders(
       args,
       scopedGrant,
       AbortSignal.timeout(125000),
       state.presence,
       check,
+      state.metaReplica && !state.unhealthy.has('meta')
+        ? { meta: state.metaReplica.flock, machines }
+        : undefined,
     );
   });
   channel.handle('agentRoles', async (args) => {

@@ -192,6 +192,8 @@ class HomeActivity : ComponentActivity() {
                                 schedules = app.schedules,
                                 creation = creator,
                                 agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
+                                roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
+                                shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )

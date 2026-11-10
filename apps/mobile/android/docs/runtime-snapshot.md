@@ -83,3 +83,20 @@ flow. Native deadlines exceed the canonical 135-second probe, 60-second auth and
 MCP session selection remains supported. The upstream delta removes the unused
 `memorySettings` contract and its two implementation files; Android has no consumer
 and retains an explicit Memory placeholder. Dependencies and license files are unchanged.
+
+## Settings caching and Agent Roles
+
+The snapshot at `eff22abf` lets settings list reads keep an incremental per-runtime
+stream cache (cleared on account or workspace change; callers get private copies, and
+writes and turn-time Role reads still bootstrap fresh), lists `agentProviders` from the synced workspace
+replicas with online and own computers first, loads prompt-shortcut indexes in
+parallel, accepts a Role `emoji` on save and removes the project-history action.
+`role-commands.mjs` bridges `agentRoleSettings` (list / save / delete) with the native
+identity and a closed error vocabulary; both network gates permit read, create and
+append of `<workspace>:wf:workspace` only. Prompt shortcuts: the contract bridge forwards
+the runtime's allow-listed `shortcutCloud` host calls for the current workspace to native as
+`shortcutCloud` events and answers each once through `shortcutCloudReply` (`{value}` or
+null → `shortcut_unavailable`, 60-second native deadline); `shortcut-commands.mjs` bridges
+`shortcutSettings` (list / read / save). Both gates permit read, create and append of
+`shortcut-index:<workspace>:<owner>:<visibility>` and `shortcut-body:<id>`, whose
+stream-specific tokens come from `getStreamToken`.

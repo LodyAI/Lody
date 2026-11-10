@@ -15,7 +15,6 @@ enum SettingsSections {
     }
     if workspace != nil {
       sections.append(section("sessions", header: text("section.sessions"), rows: [
-        row("project-history", text("history.title"), image: "arrow.triangle.2.circlepath"),
         row("archived", text("archived.title"), image: "archivebox"),
       ]))
     }

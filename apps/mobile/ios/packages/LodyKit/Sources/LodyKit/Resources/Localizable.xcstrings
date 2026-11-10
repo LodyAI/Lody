@@ -4860,23 +4860,6 @@
         }
       }
     },
-    "settings.preferences.notifications": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "通知"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Notifications"
-          }
-        }
-      }
-    },
     "settings.preferences.chat": {
       "extractionState": "manual",
       "localizations": {
@@ -4907,23 +4890,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Queued message behavior"
-          }
-        }
-      }
-    },
-    "settings.queuedMessageBehavior.hint": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择 Agent 工作时发送的消息是等待排队，还是立即引导当前回复。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose whether messages sent while the agent is working wait in the queue or steer the active response."
           }
         }
       }
@@ -12179,126 +12145,6 @@
         }
       }
     },
-    "settings.history.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent 会话同步"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent Conversation Sync"
-          }
-        }
-      }
-    },
-    "settings.history.hint": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择电脑上的项目，再选择 Agent 查看会话。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose a project on your computer, then select an agent to view its conversations."
-          }
-        }
-      }
-    },
-    "settings.history.emptyTargets": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有可同步的项目。请连接电脑、更新 Lody，并在已添加的本地项目中运行 ACP Agent。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No supported projects found. Connect your computer, update Lody, and run an ACP agent in a registered local project."
-          }
-        }
-      }
-    },
-    "settings.history.emptySessions": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此 Agent 在该项目下暂无会话。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This agent has no conversations for this project yet."
-          }
-        }
-      }
-    },
-    "settings.history.sync": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "刷新"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Refresh"
-          }
-        }
-      }
-    },
-    "settings.history.selectAll": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "全选"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select All"
-          }
-        }
-      }
-    },
-    "settings.history.import": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "导入所选（%1$@）"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Import Selected (%1$@)"
-          }
-        }
-      },
-      "comment": "1: count"
-    },
     "settings.history.selected": {
       "extractionState": "manual",
       "localizations": {
@@ -12312,429 +12158,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Selected"
-          }
-        }
-      }
-    },
-    "settings.history.imported": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已导入"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Imported"
-          }
-        }
-      }
-    },
-    "settings.history.conflict": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "冲突 · 处理"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Conflict · Resolve"
-          }
-        }
-      }
-    },
-    "settings.history.untitled": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "未命名会话"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Untitled Conversation"
-          }
-        }
-      }
-    },
-    "settings.history.importHint": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择要导入此项目的会话。点按冲突会话可确认替换。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose conversations to import into this project. Tap a conflicting conversation to review replacement."
-          }
-        }
-      }
-    },
-    "settings.history.loadFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法加载历史记录。请检查电脑连接后刷新。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not load history. Check the computer connection and try refreshing."
-          }
-        }
-      }
-    },
-    "settings.history.writeFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法确认导入结果。请先刷新查看已完成的会话，再重试。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The import result could not be confirmed. Refresh to check what completed before trying again."
-          }
-        }
-      }
-    },
-    "settings.history.progress": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已处理 %1$@ / %2$@"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Processed %1$@ of %2$@"
-          }
-        }
-      },
-      "comment": "1: done; 2: total"
-    },
-    "settings.history.replaceTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "替换已导入的历史？"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace Imported History?"
-          }
-        }
-      }
-    },
-    "settings.history.replaceHint": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "使用电脑上 Agent 的当前历史替换此 Lody 会话历史。在 Lody 中产生的更改可能丢失。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace this Lody conversation’s history with the current history from the agent on your computer. Changes made in Lody may be lost."
-          }
-        }
-      }
-    },
-    "settings.history.replace": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "替换历史"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace History"
-          }
-        }
-      }
-    },
-    "settings.history.resolved": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "历史已替换。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "History replaced."
-          }
-        }
-      }
-    },
-    "settings.history.partialFailure": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "有 %lld 个会话失败。已完成的导入已保留，失败会话仍保持选中。"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "有 %lld 个会话失败。已完成的导入已保留，失败会话仍保持选中。"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld conversation failed. Completed imports are kept; failed conversations remain selected."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld conversations failed. Completed imports are kept; failed conversations remain selected."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "settings.history.deselectAll": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "取消全选"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deselect All"
-          }
-        }
-      }
-    },
-    "settings.history.loadingSessions": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在读取此 Agent 的会话…首次读取可能需要一些时间。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reading conversations from this agent… This may take a little while."
-          }
-        }
-      }
-    },
-    "settings.history.loadingProjects": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在读取项目…"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Loading projects…"
-          }
-        }
-      }
-    },
-    "settings.history.importing": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在导入所选会话…"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Importing selected conversations…"
-          }
-        }
-      }
-    },
-    "settings.history.replacing": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在替换会话历史…"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replacing conversation history…"
-          }
-        }
-      }
-    },
-    "settings.history.chooseAgent": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择 Agent"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose an Agent"
-          }
-        }
-      }
-    },
-    "settings.history.agentCount": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个 Agent"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个 Agent"
-                }
-              }
-            }
-          }
-        },
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld agent"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld agents"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "settings.history.provider.builtin": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "内置"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Built-in"
-          }
-        }
-      }
-    },
-    "settings.history.provider.registry": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已安装"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Installed"
-          }
-        }
-      }
-    },
-    "settings.history.provider.custom": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自定义"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Custom"
           }
         }
       }
@@ -18791,40 +18214,6 @@
         }
       }
     },
-    "settings.projects.unknown": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "状态未知"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "State unknown"
-          }
-        }
-      }
-    },
-    "settings.projects.unknownShort": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "未知"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unknown"
-          }
-        }
-      }
-    },
     "settings.projects.othersOwner": {
       "extractionState": "manual",
       "localizations": {
@@ -20714,23 +20103,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Language"
-          }
-        }
-      }
-    },
-    "settings.preferences.languageHint": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 iOS 设置中打开“App → Lody → 语言”。更改语言后，iOS 会重新启动 Lody。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "In iOS Settings, open Apps → Lody → Language. iOS restarts Lody to apply language changes."
           }
         }
       }
@@ -24145,23 +23517,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "登录引导验收"
-          }
-        }
-      }
-    },
-    "debug.native.project.conversation.sync.verification": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Project conversation sync verification"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "项目会话同步验收"
           }
         }
       }
@@ -30337,6 +29692,261 @@
           "stringUnit": {
             "state": "translated",
             "value": "请更新所选电脑上的 Lody"
+          }
+        }
+      }
+    },
+    "settings.providers.ownerOnlyFooter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the computer’s owner can add or change its providers."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有这台电脑的所有者可以添加或修改提供方。"
+          }
+        }
+      }
+    },
+    "settings.providers.usage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用量"
+          }
+        }
+      }
+    },
+    "settings.providers.emptyAdd": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No providers yet. Tap + to add one."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有提供方。点右上角的 + 添加。"
+          }
+        }
+      }
+    },
+    "settings.providers.teammateMachine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teammate’s computer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成员的电脑"
+          }
+        }
+      }
+    },
+    "settings.providers.ownMachine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your computer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的电脑"
+          }
+        }
+      }
+    },
+    "settings.providers.actions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "操作"
+          }
+        }
+      }
+    },
+    "settings.roles.emoji": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emoji"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表情"
+          }
+        }
+      }
+    },
+    "settings.roles.emojiHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap to change the emoji"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轻点更换表情"
+          }
+        }
+      }
+    },
+    "settings.roles.emojiLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Role emoji %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "角色表情 %@"
+          }
+        }
+      }
+    },
+    "settings.roles.emojiCustom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Any emoji"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他表情"
+          }
+        }
+      }
+    },
+    "settings.roles.emojiUse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用"
+          }
+        }
+      }
+    },
+    "settings.roles.agent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent"
+          }
+        }
+      }
+    },
+    "settings.roles.mine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Roles"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "我的角色"
+          }
+        }
+      }
+    },
+    "settings.roles.sharedByOthers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shared by teammates"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成员共享的角色"
+          }
+        }
+      }
+    },
+    "settings.roles.hintShort": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mention a Role with @ in the composer to start a chat with it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在输入框中用 @ 提及角色，即可用它开始对话。"
           }
         }
       }

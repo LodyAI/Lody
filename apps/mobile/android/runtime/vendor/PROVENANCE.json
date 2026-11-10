@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "82e848b8e01937bec9768c64d342b81f1d44bd6e",
+  "commit": "eff22abfca8108a5a3ccd1a59eb05935f7e2ee49",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 82e848b8e01937bec9768c64d342b81f1d44bd6e apps/mobile/ios/packages/cloud-runtime",
-  "note": "Reviewed immutable whole-package Agent settings contract snapshot; no local overlays. Adds provider CRUD/detail/probe, interactive encrypted authentication, runtime operations, Pi discovery, quota refresh and target invalidation events. Preserves MCP session selection. Removes unused native memorySettings contract; Android Memory remains an explicit placeholder. Dependencies and licenses unchanged."
+  "export": "git archive eff22abfca8108a5a3ccd1a59eb05935f7e2ee49 apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package snapshot; no local overlays. Relative to 82e848b8, settings list reads keep an incremental per-runtime stream cache, agentProviders lists read synced workspace replicas and sort online and own computers first, prompt shortcut indexes load in parallel, Role saves accept an emoji, and the project-history (Agent conversation sync) action is removed. Dependencies and licenses unchanged."
 }
