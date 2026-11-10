@@ -10,6 +10,18 @@ export type SessionSharingPrivateReason =
 
 export type SessionSharingState = {
   visibility: 'unknown' | 'private' | 'team';
+  access?: 'private' | 'read' | 'edit';
+  sessionId?: string;
+  ownerUserId?: string;
+  memberUserIds?: readonly string[];
+  availableMembers?: readonly { userId: string; name: string; image?: string | null }[];
+  membersLoading?: boolean;
+  membersError?: boolean;
+  retryMembers?: () => void;
+  setMemberReadAccess?: (userId: string, shared: boolean) => Promise<void>;
+  openMachineSettings?: () => void;
+  /** Narrow owner action supplied by the bound session-access port. */
+  setReadAccess?: (level: 'read' | null) => Promise<void>;
   privateReason?: SessionSharingPrivateReason;
   canManage: boolean;
   machineId: MachineId | null;

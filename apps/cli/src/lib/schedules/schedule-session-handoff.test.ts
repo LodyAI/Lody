@@ -48,6 +48,7 @@ describe('Schedule to ordinary Session handoff', () => {
               writeFileSync(path.join(directory, id + '.loro'), doc.export({ mode: 'snapshot' }));
           },
         },
+        isEncryptedWorkspace: () => false,
         getOrCreateSessionDoc: async (id: string) => {
           if (!docs.has(id)) {
             const doc = new LoroDoc();

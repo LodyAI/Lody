@@ -1,3 +1,5 @@
+import { reserveMachineTurn } from './machine-turn-admission';
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -217,6 +219,32 @@ type FinalizeTurnContext = {
 };
 
 type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
+
+/** One message per definite encrypted refusal; only a sender without rights reads as one. */
+function encryptedRefusalMessage(
+  reason: Exclude<
+    Extract<
+      import('@/lib/e2ee/agent-execution').EncryptedExecutionClaim,
+      { state: 'denied' }
+    >['reason'],
+    undefined
+  >
+): string {
+  switch (reason) {
+    case 'e2ee_machine_not_shared':
+      return 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。';
+    case 'e2ee_sender_not_authorized':
+      return 'e2ee_sender_not_authorized: The sender is not authorized to run turns in this encrypted workspace now, so this turn will not run.';
+    case 'e2ee_machine_not_member':
+      return 'e2ee_machine_not_member: This machine is no longer a member of this encrypted workspace, so it cannot run this turn.';
+    case 'e2ee_signature_missing':
+      return 'e2ee_signature_missing: This encrypted turn has no signature, so it will not run. Send it again.';
+    case 'e2ee_signature_invalid':
+      return 'e2ee_signature_invalid: This encrypted turn does not match its signature, so it will not run.';
+    case 'e2ee_scope_mismatch':
+      return 'e2ee_scope_mismatch: This encrypted turn was signed for another conversation or machine, so it will not run here.';
+  }
+}
 
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
 /** Trailing history rows searched for the last assistant turn and its user input. */
@@ -949,6 +977,17 @@ export class SessionExecutionService {
   }
 
   private readonly shutdownAbort = new AbortController();
+  private machineIdentityRestoreSealed = false;
+
+  isMachineIdentityRestoreIdle(): boolean {
+    // An execution owner can exist before its active presence is published.
+    return !this.machineIdentityRestoreSealed && this.turnRuntimeBySession.size === 0;
+  }
+
+  stopNewIdentityRestoreExecutions(): void {
+    this.machineIdentityRestoreSealed = true;
+  }
+
   private readonly ownedWork = new Set<Promise<unknown>>();
   private ownBookkeeping<T>(sessionId: SessionId, work: Promise<T>): Promise<T | undefined> {
     const observed = work.catch((error: unknown) => {
@@ -1208,7 +1247,7 @@ export class SessionExecutionService {
       const read = await (await createSessionBackend(doc)).readTurn(args.inputId);
       if (
         meta?.lastHandledUserMsgId === args.inputId ||
-        meta?.lastMissingHistoryUserMsgId === args.inputId ||
+        isMissingHistoryUserTurn(meta, args.inputId) ||
         (read.state === 'ready' &&
           (read.turn.role !== 'user' ||
             ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')))
@@ -4613,12 +4652,15 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
+    const releaseAdmission = reserveMachineTurn();
+    if (!releaseAdmission) return 'execution-deferred';
     const owned = this.runVisibleSessionTurnOwned(options, body);
     this.ownedWork.add(owned);
     try {
       return await owned;
     } finally {
       this.ownedWork.delete(owned);
+      releaseAdmission();
       daemonLossObserver.changed();
     }
   }
@@ -4627,6 +4669,7 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
+    if (this.machineIdentityRestoreSealed) return 'identity-restore-pending';
     const { sessionId, sessionDoc, userTurnId } = options;
     const assistantEntryParentTurnId = options.assistantEntryParentTurnId ?? userTurnId;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
@@ -4757,6 +4800,13 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
+      // Recheck after every pre-owner await has finished. No await may separate
+      // this check from registration: Fleet either sees this owner or seals first.
+      // Returning before ownership leaves pending input/history and Inbox intact.
+      if (this.machineIdentityRestoreSealed) {
+        span.end({ outcome: 'identity-restore-pending' });
+        return 'identity-restore-pending';
+      }
       turnId = this.deps.beginConversationTurn(sessionId, assistantEntryParentTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
@@ -5402,11 +5452,9 @@ export class SessionExecutionService {
                     ? 'Result unknown. This encrypted turn may already have started and will not be started again. Send a new turn to continue.'
                     : result.state === 'completed'
                       ? 'This encrypted turn already finished and will not be started again.'
-                      : result.state === 'expired'
-                        ? 'This encrypted turn expired before execution. Send a new turn to continue.'
-                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_shared'
-                          ? 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。'
-                          : 'This encrypted turn is not authorized for execution.',
+                      : result.state === 'denied' && result.reason
+                        ? encryptedRefusalMessage(result.reason)
+                        : 'This encrypted turn is not authorized for execution.',
               });
             });
 
@@ -6635,10 +6683,12 @@ export class SessionExecutionService {
     rawMessage: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    if (this.machineIdentityRestoreSealed) return;
     const message =
       dispatchOptions?.dispatchSource === 'inbox'
         ? rawMessage
         : await this.withVerifiedRequester(rawMessage);
+    if (this.machineIdentityRestoreSealed) return;
     if (
       dispatchOptions?.dispatchSource === 'inbox' &&
       (!dispatchOptions.inboxBatch || !this.operationInbox)
@@ -6646,6 +6696,7 @@ export class SessionExecutionService {
       throw new Error('INBOX_BATCH_REQUIRED');
     }
     const turn = await this.prepareContinueSessionTurn(message, dispatchOptions);
+    if (this.machineIdentityRestoreSealed) return;
     if (
       dispatchOptions?.dispatchSource !== 'inbox' &&
       (await this.markCancelledUserTurnBeforeOwner({
@@ -7659,8 +7710,11 @@ export class SessionExecutionService {
     rawMessage: SessionCreateRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    if (this.machineIdentityRestoreSealed) return;
     const message = await this.withVerifiedRequester(rawMessage);
+    if (this.machineIdentityRestoreSealed) return;
     const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
+    if (this.machineIdentityRestoreSealed) return;
     const userTurnId =
       typeof message.userTurnId === 'string' && message.userTurnId.trim()
         ? message.userTurnId.trim()

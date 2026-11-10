@@ -98,8 +98,10 @@ export function MobileWorkspaceSwitcherSheet({
                       ) : null
                     }
                   >
-                    <span className="truncate text-[0.95rem] font-medium">{workspace.name}</span>
-                    {workspace.encrypted ? <EncryptedWorkspaceMark /> : null}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-[0.95rem] font-medium">{workspace.name}</span>
+                      {workspace.encrypted ? <EncryptedWorkspaceMark /> : null}
+                    </span>
                   </SheetRow>
                 </li>
               ))}

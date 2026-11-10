@@ -372,34 +372,6 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
-    "id": "req-projects-history",
-    "method": "localProjects",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "browserId": "history-1",
-      "userId": "user-1",
-      "action": "history",
-      "history": {
-        "kind": "import",
-        "target": {
-          "machineId": "machine-1",
-          "machineName": "Studio",
-          "localProjectId": "p1",
-          "projectName": "App",
-          "rootPath": "/Users/dev/app",
-          "provider": {
-            "cliType": "builtin",
-            "agentType": "claude"
-          }
-        },
-        "acpSessionIds": ["acp-1", "acp-2"]
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
     "id": "req-sharing",
     "method": "sessionSharing",
     "payload": {

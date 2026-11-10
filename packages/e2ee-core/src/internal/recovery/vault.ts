@@ -1,4 +1,4 @@
-import { Effect, Result, Schema, Semaphore } from 'effect';
+import { Deferred, Effect, Result, Schema, Semaphore } from 'effect';
 import type {
   RecoveryVaultLocalStore as RecoveryVaultLocalStorePort,
   RecoveryVaultStore as RecoveryVaultStorePort,
@@ -223,13 +223,20 @@ const makeSession = Effect.fnUntraced(function* (input: {
   input.master.fill(0);
   let closed = false;
   const mutex = yield* Semaphore.make(1);
+  let readers = 0;
+  const readsDrained = Deferred.makeUnsafe<void>();
   yield* Effect.addFinalizer(() =>
-    mutex.withPermit(
-      Effect.sync(() => {
-        closed = true;
-        master.fill(0);
-      })
-    )
+    Effect.gen(function* () {
+      yield* mutex.withPermit(
+        Effect.sync(() => {
+          closed = true;
+          master.fill(0);
+        })
+      );
+      // Entry readers own independent key copies. Close stops admission, then
+      // waits for their actual network/decryption settlement before returning.
+      if (readers > 0) yield* Deferred.await(readsDrained);
+    })
   );
   const ownedOperation = <A, E, R>(work: Effect.Effect<A, E, R>) =>
     mutex.withPermit(Effect.uninterruptible(work));
@@ -297,14 +304,14 @@ const makeSession = Effect.fnUntraced(function* (input: {
     yield* attempt(guard);
     return { header, value };
   });
-  const readEntry = Effect.fnUntraced(function* (ref: RecoveryEntryReference) {
+  const readEntry = Effect.fnUntraced(function* (ref: RecoveryEntryReference, readMaster = master) {
     yield* attempt(guard);
     const remote = yield* store.readEntry(vaultId, ref.entryId);
     if (!remote) return yield* vaultError('missing');
     const header = yield* attempt(() => ownCiphertext(remote));
     if (ciphertextDigest(header) !== ref.digest) return yield* vaultError('authentication');
     return yield* Effect.acquireUseRelease(
-      attempt(() => decryptVault(master, vaultId, header, 'workspace-entry')),
+      attempt(() => decryptVault(readMaster, vaultId, header, 'workspace-entry')),
       (plain) =>
         attempt(() => {
           // ownRecoveryPackage returns copies; the decoded temporaries are wiped.
@@ -525,7 +532,26 @@ const makeSession = Effect.fnUntraced(function* (input: {
     vaultId,
     locator,
     readIndex: () => ownedOperation(index()),
-    readEntry: (ref: RecoveryEntryReference) => ownedOperation(readEntry(ref)),
+    /** Each immutable package read owns a short-lived key copy, not the index lock. */
+    readEntry: (ref: RecoveryEntryReference) => {
+      const reference = { ...ref };
+      return Effect.acquireUseRelease(
+        mutex.withPermit(
+          attempt(() => {
+            guard();
+            const key = master.slice();
+            readers++;
+            return key;
+          })
+        ),
+        (key) => readEntry(reference, key),
+        (key) =>
+          Effect.sync(() => {
+            key.fill(0);
+            if (--readers === 0 && closed) Deferred.doneUnsafe(readsDrained, Effect.void);
+          })
+      ).pipe(Effect.uninterruptible);
+    },
     upload: (value: RecoveryPrivatePackage, entryId = hex(random(32))) =>
       ownedOperation(upload(value, entryId)),
     reserve: (candidate: RecoveryEntryReference) => ownedOperation(reserve(candidate)),

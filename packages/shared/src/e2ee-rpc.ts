@@ -15,6 +15,9 @@ export type E2eePreparedDispatch = {
   frames?: string[];
   requesterDevice: string;
   expiresAt: number;
+  /** Dispatch only: the signed execution intent the caller stores with the turn or queue
+   * item in the same commit (`e2ee-execution-intent.ts`). */
+  e2eeIntent?: string;
 };
 /** Delivery receipt only. Actual execution remains behind the shared agent-start claim. */
 export type E2eeDispatchAck = {
@@ -54,6 +57,7 @@ export type E2eeFeatureInput = { requestId: string; request: LocalMachineRpcRequ
 
 /** Closed set of reads with no machine writes or execution claims. */
 export const E2EE_READ_QUERY_METHODS = [
+  'session/history-read',
   'machine/status',
   'machine/ping',
   'machine/acp-binary-status',

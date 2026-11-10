@@ -14,6 +14,8 @@ import { encryptedRpcFixture } from './fixtures/e2ee-native-fixture';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { Bytes } from '@lody/e2ee-core/protocol';
 import { Result } from 'effect';
+import { verifyExecutionIntent } from '@lody/e2ee-core/protocol';
+import { decodeE2eeIntentRecord, E2EE_INTENT_KIND, turnExecutionDigest } from '@lody/shared';
 import { copyEpochKeyBytes } from '../../e2ee-core/src/internal/foundation/epoch-key';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
@@ -63,6 +65,7 @@ describe('trusted-host encrypted dispatch originals', () => {
           join(f.directory, response ? 'owner.sqlite' : 'held-decrypt.sqlite')
         ),
         ledger: f.ledger.ledger,
+        signIntent: () => Effect.fail(new Error('unused')),
         binding: (resource) =>
           Effect.gen(function* () {
             const binding = yield* makeRealtimeContentBinding({
@@ -429,12 +432,47 @@ describe('trusted-host encrypted dispatch originals', () => {
         Buffer.from(f.input.inputConfig.prompt)
       )
     ).toBe(false);
+    // Input that cannot run is never signed.
     await expect(
       Effect.runPromise(
         reopened.prepareDispatch(f.machineId, { ...f.input, inputConfig: { prompt: 'different' } })
       )
-    ).rejects.toThrow('intent_conflict');
+    ).rejects.toThrow('e2ee_rpc_invalid');
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, f.input))).toEqual(first);
+  });
+
+  it('signs one execution intent that the receiver gets back and a retry reuses', async () => {
+    const f = fixture();
+    const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
+    const record = decodeE2eeIntentRecord(original.e2eeIntent);
+    expect(record).toMatchObject({ kind: E2EE_INTENT_KIND.memberInput });
+    expect(Buffer.from(record!.signer).toString('hex')).toBe(original.requesterDevice);
+    const intent = {
+      kind: E2EE_INTENT_KIND.memberInput,
+      genesis: f.ledger.context.genesis,
+      workspaceId: f.workspaceId,
+      targetMachineId: f.machineId,
+      scope: f.input.sessionId,
+      messageId: f.input.userTurnId,
+      contentDigest: Buffer.from(turnExecutionDigest({ inputConfig: f.input.inputConfig })!, 'hex'),
+    };
+    expect(Result.isSuccess(verifyExecutionIntent(intent, record!.signer, record!.signature))).toBe(
+      true
+    );
+    // Another machine or message cannot reuse it.
+    for (const altered of [
+      { ...intent, targetMachineId: 'other-machine' },
+      { ...intent, messageId: 'other-turn' },
+    ])
+      expect(
+        Result.isFailure(verifyExecutionIntent(altered, record!.signer, record!.signature))
+      ).toBe(true);
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
+    expect(opened.e2eeIntent).toBe(original.e2eeIntent);
+    expect(opened.args).not.toHaveProperty('e2eeIntent');
+    expect(
+      await Effect.runPromise(f.native('owner').prepareDispatch(f.machineId, f.input))
+    ).toEqual(original);
   });
 
   it('retains one original for real composer configs with undefined optional fields', async () => {
@@ -456,14 +494,15 @@ describe('trusted-host encrypted dispatch originals', () => {
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
     const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.args).toStrictEqual(canonical);
-    await expect(
-      Effect.runPromise(
-        reopened.prepareDispatch(f.machineId, {
-          ...input,
-          inputConfig: { ...inputConfig, prompt: 'changed composer input' },
-        })
-      )
-    ).rejects.toThrow('intent_conflict');
+    // An edit keeps the message ID and is signed again as its own original.
+    const edited = await Effect.runPromise(
+      reopened.prepareDispatch(f.machineId, {
+        ...input,
+        inputConfig: { ...inputConfig, prompt: 'changed composer input' },
+      })
+    );
+    expect(edited.requestId).not.toBe(original.requestId);
+    expect(edited.e2eeIntent).not.toBe(original.e2eeIntent);
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
   });
 
@@ -500,7 +539,7 @@ describe('trusted-host encrypted dispatch originals', () => {
           responseHex
         )
       )
-    ).rejects.toThrow('intent_conflict');
+    ).rejects.toThrow('e2ee_rpc_original_missing');
     expect(
       await Effect.runPromise(f.sender.acceptResponse(f.machineId, input, responseHex))
     ).toEqual(f.ack);

@@ -181,6 +181,15 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 `InstalledEpochKeys.check(epoch)` 检查已安装密钥的当前资格和承诺，随后释放临时
 密钥材料；状态读取方无需领取秘密。
 
+## 执行意图
+
+`executionIntentBytes`、`signExecutionIntent` 和 `verifyExecutionIntent` 对加密输入将要执行的
+内容签名（owner 2026-11-10 决定）。签名字节依次为 UTF-8 `lody-e2ee/execution-intent/v1`、一个零字节、
+类型（1 成员输入，2 机器输入，3 定时任务声明）、已钉住的 genesis（32 字节）、四个 u16be 长度前缀的
+UTF-8 字段（工作区 ID、目标机器 ID、作用域、消息 ID，各不超过 1,024 字节），以及规范化内容的
+32 字节 SHA-256。不依赖任何文档操作、帧或 epoch。签名有效只证明作者身份；验证方仍要检查签名者
+当前的成员身份和权限，执行日志仍保证每个消息 ID 只启动一次。
+
 ## 设备访问凭证绑定
 
 `deviceCredentialBindingBytes`、`signDeviceCredentialBinding` 和
@@ -192,3 +201,8 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 `test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。
 
 桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。
+
+恢复也可以修复已获准、但本地工作区密钥丢失的个人设备。验证恢复设备、
+包内检查点与当前密钥信封后，必须匹配当前个人设备的签名、公钥和成员身份，
+再通过原有密钥安装边界恢复，不重复接纳设备。已撤销或身份不匹配的设备不会
+因此获得权限。

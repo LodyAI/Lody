@@ -1,3 +1,4 @@
+import { forgetSettings } from '../settings';
 import {
   closeSession,
   ensureSession,
@@ -115,37 +116,47 @@ export function registerLifecycle(ctx: RuntimeContext) {
     await result;
     return {};
   });
-  channel.handle('start', ({ workspaceId, userId, active, knownRepos }) => {
-    if (state.workspace !== workspaceId || state.userId !== userId)
-      stopSessions();
-    state.workspace = workspaceId;
-    state.userId = userId;
-    startAcceptedInputs({
-      accountId: userId,
-      workspaceId,
-      getGrant,
-      emit: emitSession,
-      markDispatch,
-      async getDocMeta(roomId) {
-        if (state.workspace !== workspaceId || state.userId !== userId)
-          throw new Error('workspace_changed');
-        if (!state.metaReplica || state.unhealthy.has('meta'))
-          throw new Error('metadata_not_ready');
-        return getDocMeta(roomId);
-      },
-      resolveTarget: (id) => {
-        if (state.workspace !== workspaceId || state.userId !== userId)
-          throw new Error('workspace_changed');
-        return resolveTarget(id);
-      },
-    });
-    state.knownProjects = Object.entries(knownRepos ?? {}).map(
-      ([id, repoFullName]) => ({ id, repoFullName }),
-    );
-    ctx.watch('meta');
-    if (active) ctx.startPresence();
-    return {};
-  });
+  let scopeStartVersion = 0;
+  channel.handle(
+    'start',
+    async ({ workspaceId, userId, active, knownRepos }) => {
+      const version = ++scopeStartVersion;
+      if (workspaceId !== state.workspace || userId !== state.userId) {
+        forgetSettings();
+        await ctx.disposeProviderOperations?.();
+      }
+      if (version !== scopeStartVersion) return {};
+      if (workspaceId !== state.workspace || userId !== state.userId)
+        stopSessions();
+      state.workspace = workspaceId;
+      state.userId = userId;
+      startAcceptedInputs({
+        accountId: userId,
+        workspaceId,
+        getGrant,
+        emit: emitSession,
+        markDispatch,
+        async getDocMeta(roomId) {
+          if (state.workspace !== workspaceId || state.userId !== userId)
+            throw new Error('workspace_changed');
+          if (!state.metaReplica || state.unhealthy.has('meta'))
+            throw new Error('metadata_not_ready');
+          return getDocMeta(roomId);
+        },
+        resolveTarget: (id) => {
+          if (state.workspace !== workspaceId || state.userId !== userId)
+            throw new Error('workspace_changed');
+          return resolveTarget(id);
+        },
+      });
+      state.knownProjects = Object.entries(knownRepos ?? {}).map(
+        ([id, repoFullName]) => ({ id, repoFullName }),
+      );
+      ctx.watch('meta');
+      if (active) ctx.startPresence();
+      return {};
+    },
+  );
   channel.handle('setActive', ({ active }) => {
     if (!state.workspace) return {};
     if (active) {

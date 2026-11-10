@@ -136,6 +136,8 @@ export interface AccountSettingsPureProps {
   pendingInvitations: Invitation[];
   workspaceJoinRequestsSlot?: ReactNode;
   workspaceOwnershipSlot?: ReactNode;
+  /** An end-to-end encrypted workspace: leaving and deletion state their encryption consequences. */
+  encryptedWorkspace?: boolean;
   /** Account-only machine overview supplied by the runtime-aware container. */
   accountMachinesSlot?: ReactNode;
   accountBillingSlot?: ReactNode;
@@ -197,6 +199,7 @@ export function AccountSettingsPure({
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
   workspaceOwnershipSlot,
+  encryptedWorkspace = false,
   accountMachinesSlot,
   accountBillingSlot,
   memberLimit = null,
@@ -1037,7 +1040,11 @@ export function AccountSettingsPure({
           {role !== 'owner' && (
             <CompactRow
               label={t('workspace.danger.leaveWorkspace.title')}
-              helper={t('workspace.danger.leaveWorkspace.description')}
+              helper={t(
+                encryptedWorkspace
+                  ? 'workspace.danger.leaveWorkspace.encryptedDescription'
+                  : 'workspace.danger.leaveWorkspace.description'
+              )}
             >
               <Button
                 variant="secondary"
@@ -1052,7 +1059,11 @@ export function AccountSettingsPure({
           {role === 'owner' && (
             <CompactRow
               label={t('workspace.danger.deleteWorkspace.title')}
-              helper={t('workspace.danger.deleteWorkspace.description')}
+              helper={t(
+                encryptedWorkspace
+                  ? 'workspace.danger.deleteWorkspace.encryptedDescription'
+                  : 'workspace.danger.deleteWorkspace.description'
+              )}
             >
               <Button
                 variant="secondary"
@@ -1209,6 +1220,16 @@ export function AccountSettingsPure({
             </Dialog.Description>
           </Dialog.Header>
           <div {...stylex.props(styles.dialogForm)}>
+            {encryptedWorkspace ? (
+              <Alert.Root tone="danger" data-testid="e2ee-delete-consequences">
+                <Alert.Description>
+                  {t('workspace.danger.deleteWorkspace.encryptedLoss')}
+                </Alert.Description>
+                <Alert.Description>
+                  {t('workspace.danger.deleteWorkspace.encryptedDownloaded')}
+                </Alert.Description>
+              </Alert.Root>
+            ) : null}
             {billingUiAvailable && deleteBillingGuard?.kind === 'cancel-scheduled' ? (
               <Alert.Root tone="warning">
                 <Alert.Description>

@@ -1,5 +1,7 @@
 import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
 import type { Meta, StoryObj } from '@storybook/react';
+import { Button } from '@lody/ui/button';
+import { CompactRow } from '@/components/settings/compact-layout';
 import * as stylex from '@stylexjs/stylex';
 import type { ComponentProps } from 'react';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
@@ -249,6 +251,35 @@ export const OwnershipTransfer: Story = {
         onTransfer={noop}
       />
     ),
+  },
+};
+
+/** An encrypted workspace owner: transfer opens the encryption console; delete states
+ * that encrypted content cannot be recovered. Open "删除工作区" for the confirmation. */
+export const EncryptedWorkspaceDangerZone: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    workspaceOwnershipSlot: (
+      <CompactRow
+        label="转移所有权"
+        helper="在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。"
+      >
+        <Button variant="secondary" size="small" tone="destructive">
+          转移…
+        </Button>
+      </CompactRow>
+    ),
+  },
+};
+
+/** An encrypted workspace member: leaving says what it means for this device's access. */
+export const EncryptedWorkspaceMemberLeave: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    role: 'member',
+    hasAdminPermission: false,
   },
 };
 

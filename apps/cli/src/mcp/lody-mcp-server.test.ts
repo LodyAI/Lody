@@ -1,3 +1,8 @@
+import { LoroRepo } from 'loro-repo';
+import {
+  runWithSessionCommandEnvironment,
+  type SessionCommandEnvironment,
+} from '@/lib/session-command-environment';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
@@ -48,6 +53,7 @@ import {
 import {
   __lodyMcpServerInternals,
   buildLodyMcpServer,
+  buildSessionToolServer,
   runWithMcpSessionContext,
 } from './lody-mcp-server';
 
@@ -70,7 +76,7 @@ const {
   assertBatchSize,
   resolveSessionRenameItems,
   applySessionRenameItems,
-  persistSessionRenameItems,
+  persistSessionRenameItems: persistWithAdmission,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -89,6 +95,18 @@ const {
   makeMachineLivenessLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
+const persistSessionRenameItems = (
+  manager: LoroDocumentManager,
+  items: Parameters<typeof persistWithAdmission>[1],
+  reason: string
+) =>
+  persistWithAdmission(
+    manager,
+    items,
+    reason,
+    async (id) =>
+      ({ ...(await manager.repo.getDocMeta(getSessionRoomId(id)))!.meta, id }) as SessionMeta
+  );
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -1490,6 +1508,91 @@ describe('session MCP input schemas', () => {
       { sessionId: 'session-3', ok: true, title: 'Three', scope: 'tab' },
     ]);
   });
+
+  it.each(
+    ['reader', 'editor', 'host-owner'].flatMap((requester) =>
+      ['rename', 'archive'].map((operation) => [requester, operation] as const)
+    )
+  )(
+    'authorizes %s %s batches as the active Turn user, never the host owner',
+    async (requesterUserId, operation) => {
+      const repo = await LoroRepo.create({});
+      const privateId = 'read-shared' as SessionId;
+      const editableId = 'editable' as SessionId;
+      for (const [id, machineId] of [
+        [privateId, 'private-machine'],
+        [editableId, 'shared-machine'],
+      ])
+        await repo.upsertDocMeta(getSessionRoomId(id as SessionId), {
+          id,
+          machineId,
+          userId: 'reader',
+          title: 'Original',
+        });
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+      } as unknown as LoroDocumentManager;
+      const environment = {
+        auth: { userId: 'host-owner', machineId: 'host-machine', token: 'synthetic-token' },
+        workspace: { id: 'workspace-1', slug: 'synthetic' },
+        manager,
+        host: {
+          readInvocation: () => ({
+            active: true,
+            requesterUserId,
+            sourceTurnId: 'active-turn',
+            inputConfig: {},
+          }),
+        },
+        checkMachineAccess: async (target: { requesterUserId: string; machineId: string }) =>
+          target.requesterUserId === 'host-owner' ||
+          (target.requesterUserId === 'editor' && target.machineId === 'shared-machine')
+            ? { allowed: true }
+            : { allowed: false, reason: 'not_visible' },
+      } as unknown as SessionCommandEnvironment;
+      const handlers: NonNullable<Parameters<typeof buildSessionToolServer>[0]> = new Map();
+      const server = buildSessionToolServer(handlers);
+      try {
+        const response = await runWithSessionCommandEnvironment(environment, () =>
+          runWithMcpSessionContext(
+            { sessionId: 'caller', workspaceId: 'workspace-1', machineId: 'host-machine' },
+            () =>
+              handlers.get(`lody_session_${operation === 'rename' ? 'rename_many' : 'archive'}`)!(
+                operation === 'rename'
+                  ? {
+                      items: [
+                        { sessionId: privateId, title: 'Changed private' },
+                        { sessionId: editableId, title: 'Changed shared' },
+                      ],
+                    }
+                  : { sessionIds: [privateId, editableId] }
+              )
+          )
+        );
+        const results = JSON.parse((response.content![0] as { text: string }).text).items;
+        for (const [index, id] of [privateId, editableId].entries()) {
+          const allowed =
+            requesterUserId === 'host-owner' || (requesterUserId === 'editor' && id === editableId);
+          expect(results[index]).toMatchObject(
+            allowed
+              ? { ok: true }
+              : { ok: false, error: { code: 'SESSION_MANAGEMENT_DENIED', retryable: false } }
+          );
+          const meta = (await repo.getDocMeta(getSessionRoomId(id)))?.meta;
+          if (operation === 'rename')
+            expect(meta?.title).toBe(
+              allowed ? (index === 0 ? 'Changed private' : 'Changed shared') : 'Original'
+            );
+          else expect(meta?.isArchived === true).toBe(allowed);
+        }
+      } finally {
+        await server.close();
+        await repo.destroy();
+      }
+    }
+  );
 
   it('persists only existing sessions as user titles and confirms successful writes', async () => {
     const upsertDocMeta = vi.fn(async () => undefined);

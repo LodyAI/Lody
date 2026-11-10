@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
+import { SESSION_HISTORY_PROTOCOL_VERSION } from '../../../../packages/cloud-runtime/vendor/upstream-roost/packages/shared/src/machine-protocol-capabilities.ts';
 
 // Exercise the native bridge boundary: the Role must bind authoritative metadata,
 // including field-level writes, rather than a caller-provided config ID.
@@ -128,7 +129,7 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     flock.set(['e', 'machine-m'], true);
     flock.set(['m', 'machine-m'], {
       protocolCapabilities: {
-        sessionHistory: 3,
+        sessionHistory: SESSION_HISTORY_PROTOCOL_VERSION,
         sessionHistoryIncremental: 1,
         sessionHistoryWatch: 1,
         sessionHistoryInspection: 2,
@@ -159,14 +160,14 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     assert.throws(() => globalThis.__target(), /workspace_changed/);
     state.workspace = 'w';
     flock.set(['m', 'machine-m', 'protocolCapabilities'], {
-      sessionHistory: '3',
+      sessionHistory: String(SESSION_HISTORY_PROTOCOL_VERSION),
       sessionHistoryIncremental: 1,
       sessionHistoryWatch: 1,
     });
     flock.commit();
     assert.throws(() => globalThis.__target(), /roost_history_unsupported/);
     flock.set(['m', 'machine-m', 'protocolCapabilities'], {
-      sessionHistory: 3,
+      sessionHistory: SESSION_HISTORY_PROTOCOL_VERSION,
     });
     flock.commit();
     const compatible = globalThis.__target();

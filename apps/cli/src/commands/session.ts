@@ -5,7 +5,11 @@ import {
   syncMcpCatalog,
   waitForMcpDefaultCatalog,
 } from '@/lib/workspace-mcp-store';
-import { getDaemonWorkspace, readEncryptedMachineAccess } from '@/lib/session-command-environment';
+import {
+  getDaemonWorkspace,
+  readBoundDaemonOwnerAccess,
+  readEncryptedMachineAccess,
+} from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
 import {
   buildSessionGroupRenamePatch,
@@ -1142,10 +1146,59 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   return history;
 }
 
+export class SessionManagementAccessDeniedError extends Error {
+  readonly code = 'SESSION_MANAGEMENT_DENIED';
+  readonly retryable = false;
+  constructor() {
+    super(
+      'This session requires machine and project editing access. Read-only access cannot manage it.'
+    );
+  }
+}
+
+/** Metadata management needs editing authority, not machine presence or session authorship. */
+export async function assertSessionManagementAccess(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  delegatedRequester?: DelegatedSessionRequester;
+}): Promise<SessionMeta> {
+  const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
+  const nativeOwner = await readBoundDaemonOwnerAccess({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspace.id as WorkspaceId,
+    machineId: session.machineId,
+    requesterUserId: resolveSessionRequester(args.auth, undefined, args.delegatedRequester).userId,
+  });
+  const access =
+    nativeOwner !== undefined
+      ? { allowed: nativeOwner }
+      : await readSessionMachineAccess({
+          auth: args.auth,
+          workspaceId: args.workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          delegatedRequester: args.delegatedRequester,
+          localProjectId:
+            session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+        });
+  if (!access.allowed) throw new SessionManagementAccessDeniedError();
+  const current = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
+  if (
+    current.machineId !== session.machineId ||
+    (current.project?.kind === 'local' ? current.project.localProjectId : null) !==
+      (session.project?.kind === 'local' ? session.project.localProjectId : null)
+  )
+    throw new SessionManagementAccessDeniedError();
+  return current;
+}
+
 export async function runSessionOperationWithSyncedMetadata(
   manager: LoroDocumentManager,
   sessionId: SessionId,
-  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>
+  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>,
+  assertCanManage: (sessionId: SessionId) => Promise<unknown>
 ): Promise<SessionId[]> {
   const reason = `session.${operation}:${sessionId}`;
   await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);
@@ -1154,9 +1207,12 @@ export async function runSessionOperationWithSyncedMetadata(
   if (operation !== 'archive' && root.isArchived !== true) {
     throw new Error(`Session ${sessionId} is not archived.`);
   }
+  // Preflight the entire discovered set before any write or cleanup.
+  for (const target of targets) await assertCanManage(target.id);
   // Keep the root discoverable if deleting a child fails. Writes are not a
   // transaction; each owning machine observes state and reconciles resources.
   for (const target of operation === 'delete' ? [...targets].reverse() : targets) {
+    await assertCanManage(target.id);
     const roomId = getSessionRoomId(target.id);
     if (operation === 'delete') {
       await manager.repo.deleteDoc(roomId);
@@ -1477,6 +1533,14 @@ export async function appendUserPromptHistory(args: {
   steer?: boolean;
   /** Encrypted shared-member derivation origin; part of the signed input. */
   derivedFrom?: { sessionId: string; userTurnId: string };
+  /** Encrypted: this machine's signed intent for the input, written in the same commit. */
+  signMachineInput?: (input: {
+    sessionId: string;
+    targetMachineId: string;
+    userTurnId: string;
+    inputConfig: unknown;
+    derivedFrom?: unknown;
+  }) => Promise<string | undefined>;
 }): Promise<{
   id: string;
   timestamp: string;
@@ -1530,6 +1594,19 @@ export async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
+  if (args.signMachineInput && inputConfig) {
+    const meta = await sessionDoc.getMetaState();
+    const e2eeIntent = meta?.machineId
+      ? await args.signMachineInput({
+          sessionId: meta.id,
+          targetMachineId: meta.machineId,
+          userTurnId: historyId,
+          inputConfig,
+          ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
+        })
+      : undefined;
+    if (e2eeIntent) entry.e2eeIntent = e2eeIntent;
+  }
   if (args.steer) await backend.appendHistoryTurn(entry);
   else await backend.appendUserTurn(entry);
   return {
@@ -2713,7 +2790,6 @@ async function writeDispatchPointer(args: {
 }): Promise<void> {
   await args.manager.repo.upsertDocMeta(getSessionRoomId(args.sessionId), {
     latestUserMsgId: args.userTurnId,
-    lastMissingHistoryUserMsgId: undefined,
   } satisfies Partial<SessionMeta>);
 }
 
@@ -4300,6 +4376,9 @@ export async function sendSessionChatResult(
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
     ...(derivedFrom ? { derivedFrom } : {}),
+    ...(manager.isEncryptedWorkspace()
+      ? { signMachineInput: (input) => manager.signMachineInput(input) }
+      : {}),
     inputBlocks,
     sessionDoc,
     prompt,
@@ -4500,7 +4579,6 @@ export async function sendSessionChatResult(
       await manager.repo
         .upsertDocMeta(getSessionRoomId(sessionId), {
           latestUserMsgId: undefined,
-          lastMissingHistoryUserMsgId: undefined,
         } satisfies Partial<SessionMeta>)
         .catch(() => undefined);
     }
@@ -5872,7 +5950,8 @@ const sessionRenameCommand = new Command('rename')
           options.workspace
         );
         await withWorkspaceManager(auth, workspace, async (manager) => {
-          const meta = await resolveSessionMetaOrThrow(manager, sessionId);
+          await syncWorkspaceMetaForRead(manager, `session.rename:${sessionId}:prewrite`);
+          const meta = await assertSessionManagementAccess({ auth, workspace, manager, sessionId });
           if (options.group && meta.parentSessionId) {
             throw new Error(
               `Session ${sessionId} is a child tab; only a root session has a group title.`
@@ -5920,7 +5999,9 @@ const sessionArchiveCommand = new Command('archive')
         const childSessionIds = await runSessionOperationWithSyncedMetadata(
           manager,
           sessionId,
-          'archive'
+          'archive',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
 
         if (options.json) {
@@ -5956,7 +6037,9 @@ const sessionRestoreCommand = new Command('restore')
         const childSessionIds = await runSessionOperationWithSyncedMetadata(
           manager,
           sessionId,
-          'restore'
+          'restore',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
 
         if (options.json) {
@@ -5992,7 +6075,9 @@ const sessionDeleteCommand = new Command('delete')
         const childSessionIds = await runSessionOperationWithSyncedMetadata(
           manager,
           sessionId,
-          'delete'
+          'delete',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
 
         if (options.json) {

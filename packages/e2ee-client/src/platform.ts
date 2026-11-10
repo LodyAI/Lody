@@ -21,7 +21,13 @@ import {
   type ClientCustodyScope,
   type ClientPairingKey,
 } from '@lody/e2ee-core/services';
-import type { E2eeContentToken, E2eeContentTokenRequest } from '@lody/cloud-api';
+import type {
+  E2eeContentToken,
+  E2eeContentTokenRequest,
+  E2eeDeviceAccess,
+  E2eeMemberOffer,
+  E2eeMemberReplies,
+} from '@lody/cloud-api';
 import type {
   E2eeMachineSharingView,
   E2eeMachineSharingWriteResult,
@@ -93,6 +99,46 @@ export class PersonalHostPlatform extends Context.Service<
       credential: Uint8Array,
       request: Omit<E2eeContentTokenRequest, 'workspaceId' | 'credential' | 'cliToken'>
     ): Effect.Effect<E2eeContentToken, unknown>;
+    /** Optional device-authenticated member invitation relay. The session supplies its
+     * own credential; product callers never see it. Absence does not advertise team
+     * management. Replies are untrusted until the session verifies them. */
+    members?: {
+      createInvitation(
+        access: E2eeDeviceAccess,
+        input: { offer: E2eeMemberOffer; email?: string }
+      ): Effect.Effect<E2eeMemberReplies['createInvitation'], unknown>;
+      pending(access: E2eeDeviceAccess): Effect.Effect<E2eeMemberReplies['pending'], unknown>;
+      read(
+        access: E2eeDeviceAccess,
+        requestId: string
+      ): Effect.Effect<E2eeMemberReplies['read'], unknown>;
+      reject(
+        access: E2eeDeviceAccess,
+        requestId: string
+      ): Effect.Effect<E2eeMemberReplies['reject'], unknown>;
+      revoke(
+        access: E2eeDeviceAccess,
+        token: string
+      ): Effect.Effect<E2eeMemberReplies['revoke'], unknown>;
+      /** Joining side, authenticated by the account login only: the joining device has
+       * no admitted credential yet. Submission is retried with the retained original. */
+      submit?(input: {
+        token: string;
+        keyPackageHex: string;
+      }): Effect.Effect<E2eeMemberReplies['submit'], unknown>;
+      /** Relay state for this account's own request. `committed` is a hint; only the
+       * verified signed history admits the device. */
+      claim?(input: {
+        workspaceId: string;
+        requestId: string;
+      }): Effect.Effect<E2eeMemberReplies['claim'], unknown>;
+      /** Retire this account's earlier request before joining from another invitation.
+       * Only `cancelled` (terminal, expired or revoked) lets the old identity move on. */
+      retire?(input: {
+        token: string;
+        keyPackageHex: string;
+      }): Effect.Effect<E2eeMemberReplies['retire'], unknown>;
+    };
     /** Real optional policy host. Uses existing core policy verification/pins; absence does not advertise sharing. */
     machineSharing?(
       binding: ClientCustodyBinding,

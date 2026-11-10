@@ -52,3 +52,21 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   account and owner; retain incomplete failures until actual close confirmation.
   Account change retires the assembly permanently. Only real optional port Layers
   advertise RPC or machine sharing; no unsupported channel becomes plaintext.
+
+- `personalRuntimeRecovery` exposes only closed setup/restore commands on the
+  existing owned host. Setup requires an active reader; callers release only
+  their own reader. Recovery failure never retires unrelated content readers.
+
+- Member approval on the portable runtime uses the optional `members` platform port with
+  the session's own credential. A listed key package is pinned per session; approval
+  signs only that pinned package through the session's ledger journal, never re-signs on
+  a lost reply, and key delivery afterwards never holds or undoes the admission.
+- Joining a team on the portable runtime prepares this workspace's identity for
+  `memberPairingOffer`, whose request id is the admitted membership and the pairing
+  session of the credential binding. The key package is retained before submission and
+  resubmitted unchanged on retry. The relay's `committed` is a hint: only this device's
+  admission in the verified full signed history is accepted, as a history approval.
+- A new invitation after an ended join first retires the old request through the relay;
+  only `cancelled` writes the terminal receipt that settles it. The old credential is
+  pinned to that membership, so the new one gets a replacement identity, activated only
+  after its own verified admission. An admitted or still-live join keeps refusing.

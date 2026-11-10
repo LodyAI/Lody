@@ -1,3 +1,17 @@
+export type WorkspaceDirectoryMember = {
+  userId: string;
+  name: string | null;
+  image: string | null;
+};
+export type {
+  MachineIdentityRestoreIntent,
+  MachineIdentityRestoreResult,
+} from './machine-identity-restore';
+import type {
+  E2eeAutomaticPairingRecord,
+  E2eeAutomaticPairingCommand,
+} from './e2ee-automatic-pairing';
+export type * from './e2ee-automatic-pairing';
 export type SubscriptionPaymentStatus = {
   billingInterval: BillingInterval;
   effectiveAt: number | null;
@@ -429,6 +443,16 @@ export type SeatInvitePreview =
 
 export type CloudApi = {
   e2eeMachineSharing: {
+    /** Untrusted invalidation hints, never policy authority or content. */
+    listVersions: Query<
+      { workspaceId: string },
+      Array<{
+        machineId: string;
+        generation: string;
+        revision: number;
+      }>
+    >;
+
     readHead: Action<E2eeMachineSharingRequests['readHead'], E2eeMachineSharingReplies['readHead']>;
     readVersion: Action<
       E2eeMachineSharingRequests['readVersion'],
@@ -466,6 +490,11 @@ export type CloudApi = {
     claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
   };
   /** Account-wide personal device pairing relay; relays and notifies, never approves. */
+  e2eeAutomaticPairing: {
+    pending: Query<Record<string, never>, E2eeAutomaticPairingRecord[]>;
+    read: Query<{ id: string }, E2eeAutomaticPairingRecord | null>;
+    exchange: Mutation<E2eeAutomaticPairingCommand, E2eeAutomaticPairingRecord>;
+  };
   e2eeAccountPairing: {
     submit: Mutation<E2eeAccountPairingRequests['submit'], E2eeAccountPairingReplies['submit']>;
     pending: Query<E2eeAccountPairingRequests['pending'], E2eeAccountPairingReplies['pending']>;
@@ -640,6 +669,9 @@ export type CloudApi = {
       { workspaceId: string },
       { created: boolean; dayStartMs: number }
     >;
+  };
+  workspaceMembers: {
+    list: Query<{ workspaceId: string; accountId: string }, WorkspaceDirectoryMember[]>;
   };
   auth: {
     transferWorkspaceOwnership: Mutation<{ workspaceId: string; targetMemberId: string }, null>;
@@ -956,6 +988,27 @@ export type CloudApi = {
     getRequest: Query<{ requestId: string }, MachinePairingView | null>;
   };
   machines: {
+    /** Account-member directory of grants only; this never grants machine execution. */
+    listSessionAccess: Query<
+      { workspaceId: string },
+      Array<{
+        machineId: string;
+        readSharedSessionIds: string[];
+        memberReadSharedSessions?: Array<{ sessionId: string; userId: string }>;
+        canManage: boolean;
+      }>
+    >;
+    setSessionReadSharedWithTeam: Mutation<
+      {
+        workspaceId: string;
+        machineId: string;
+        sessionId: string;
+        sharedWithTeam: boolean;
+        audience?: 'team' | { userId: string };
+      },
+      { success: true }
+    >;
+
     listVisibleMachines: Query<
       { workspaceId: string },
       Array<{
@@ -1009,6 +1062,19 @@ export type CloudApi = {
             | 'not_visible'
             | 'project_not_shared';
         }
+    >;
+    canRequestSessionReadFromCliToken: Query<
+      {
+        cliToken: string;
+        workspaceId: string;
+        machineId: string;
+        sessionId: string;
+        rootSessionId: string;
+        sessionOwnerUserId?: string;
+        localProjectId?: string;
+        requester: { userId: string; machineId: string };
+      },
+      { allowed: boolean }
     >;
     canRequestMachineFromCliToken: Query<
       {

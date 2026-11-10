@@ -44,6 +44,27 @@ The cloud response binds the product workspace ID to `contentMode=e2ee`, version
 
 ## History and runtime boundary
 
+Desktop workspace-specific device approval reads and verifies one immutable join
+request, signs its admission, and confirms the admitted record through ledger-only
+refresh before publishing the invitation. The approval does not wait for a full
+key-maintenance round. The existing account/workspace-bound main delivery owner
+tracks the original admission request and recipient, retains its own reader, and
+retries distribution independently of the approving window. Invitation publication
+is not proof of key receipt or content readiness; an unconfirmed ledger cannot
+publish an invitation or start that delivery.
+
+Each explicit approval captures its account generation before its first await and
+its native owner on first access. An in-flight operation ticket is invalidated by
+matching workspace/account reset even before any delivery slot exists. Registration
+rechecks that ticket and original owner under the account lock; same-account login
+cannot reuse an earlier generation. Tickets are released when the call settles and
+never gate unrelated workspaces. A control-only sender receives its missing current
+key before distribution. Existing main retries retain admission, back off from ten
+seconds to five minutes for at most eight automatic retries, and stop on revoked or
+removed access. Delivery slots also retain their login generation, so an already
+registered retry cannot borrow a later same-account login. Explicit retry accepts
+the original `personal-device-<UUID>` id.
+
 History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. Creation starts at genesis; later accepted records appear through the same reader, without invented events.
 
 Verified history checkpoints are retained per account and workspace, with independent storage keys so concurrent windows cannot overwrite a newer observation. Only a prefix actually verified by the core is recorded. Later pages and refreshes must agree with every retained checkpoint; a failed or incomplete refresh keeps the previous history visible and never accepts a shorter or conflicting chain.
@@ -117,3 +138,9 @@ are not revoked. Personal identities still require OS protection.
 ## Member controls and terminal local cleanup
 
 The native member controls sign ordinary `SetRole` and capability-1 `RemoveMember` commands through the existing `host.manage` entry and its durable submission journal. Only `rotate` recovers an uncommitted candidate; independent commands first reconcile any unknown CAS using its original bytes, then compare the full operation intent before reporting success. Role changes require Owner authority. Owner/Admin removal preserves the epoch and leaves rotation to the existing settings key-update entry. A `rotationRequired` hint never gates sending. Only a credential-authenticated whole-member removal response triggers automatic cleanup: match the original native account/device/credential, retain a terminal receipt, stop the workspace and drain its owners. The account coordinator then takes the exclusive identity lease before erasing native data. Renderer storage and cleanup share the exact account/workspace/genesis/signing-key namespace; replica/cursor/high-water state adds window scope, and pending inputs/locks/broadcasts share the identity instance across windows. A public retained locator handles cold-open removal without deleting another account or rejoined device. CLI content lives at `e2ee/<account-hash>/<workspace>/content/<genesis>/<signing-key>` under the same identity lease as its owner. Close waits for identity verification and the terminal receipt before releasing custody; full deletion remains independent of parent close. CLI execution drains before deletion and keeps user project directories. Busy/interrupted deletion retries on the next relevant workspace open; ordinary network and individual-device failures retain data. See [the decision and limits](../notes/proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.md).
+
+## Automatic personal-device request
+
+Native hosts with automatic pairing start a current-workspace request when an unapproved device opens that workspace. An existing same-account personal device displays a matching comparison code and one authorization action. Later retains a Device requests count in desktop and mobile chrome and resumes the same request. The dialog initially focuses its container, never the authorization button; another open dialog defers presentation. Manual invitation and recovery remain under help. Approval does not bypass the existing reader, ledger or current-key installation.
+
+The six-digit SAS compares a committed ephemeral channel; it does not carry the old pairing secret. See [the coordinator and limits](../../packages/e2ee-client/README.md#automatic-device-verification). Deploy the private discovery relay before clients and update an approving app too. A running background desktop shows a deduplicated generic OS notification and focuses only after its click. This path adds no APNs/FCM wakeup for suspended mobile apps.

@@ -108,6 +108,14 @@ compare-and-swap. It never receives the unlock secret, the vault master key or
 a private recovery key. Wire schemas are in `@lody/e2ee-core/host`; see the
 [backend guide](backend-guide.md#5-recovery-vault).
 
+`RecoveryVault.readEntry` borrows its own temporary master-key copy under the
+session lock, then releases that lock before fetching immutable ciphertext. A
+slow workspace package cannot block another package read or index access. The
+reader owns and wipes its copy after actual settlement, including failure; vault
+close stops new reads and waits for admitted readers. Index mutation serialization
+and local/remote CAS stay unchanged. Returned packages remain caller-owned and
+must be wiped after use.
+
 ## Platform ports
 
 ### DeviceIdentity

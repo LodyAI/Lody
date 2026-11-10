@@ -64,11 +64,11 @@ for index, scenario in enumerate(scenarios):
     assert account['frame']['height'] >= 44
     assert has_text('settings.section.personal')
     top = identifiers(ui.state())
-    assert not {'appearance', 'remote-mcp', 'memory-settings'} & top
+    assert not {'appearance', 'remote-mcp', 'memory-settings', 'remote-machine'} & top
     assert not {'notifications', 'queued-message-behavior', 'accent-color', 'app-icon'} & top
     ui.capture(f'{scenario}-top')
     if scenario == 'live':
-        flat_rows.assert_flat(ui, 'live-flat', 'remote-machine', 'remote-agent')
+        flat_rows.assert_chat_rows(ui, 'live-chat-rows', 'remote-agent', 'agent-roles')
         flat_rows.assert_section_gap(ui, 'preferences', 'workspace-general')
 
     if scenario == 'live':
@@ -105,6 +105,7 @@ for index, scenario in enumerate(scenarios):
         version = ui.element('app-version')
         assert 'Lody for iOS' in version['AXLabel']
         ui.capture('about-opened')
+        flat_rows.assert_flat(ui, 'about-flat', 'app-version', 'licenses')
         tap('licenses')
         tap('Lody for iOS')
         ui.wait(lambda items: any('GNU AFFERO GENERAL PUBLIC LICENSE' in (item.get('AXLabel') or '')
@@ -116,7 +117,7 @@ for index, scenario in enumerate(scenarios):
         back()
 
     if has_workspace:
-        for identifier in ('remote-machine', 'remote-agent', 'project-history', 'archived'):
+        for identifier in ('remote-agent', 'archived'):
             reveal(identifier)
         state = scenario if scenario in ('live', 'syncing') else 'offline'
         # Only an offline workspace has a footer; connected and syncing stay quiet.
@@ -144,7 +145,7 @@ for index, scenario in enumerate(scenarios):
     assert not {'appearance', 'remote-mcp', 'memory-settings'} & visible
     assert not {'licenses', 'notifications', 'queued-message-behavior', 'accent-color', 'app-icon'} & visible
     if not has_workspace:
-        assert not {'remote-machine', 'archived', 'connection', 'project-history'} & visible
+        assert not {'remote-machine', 'archived', 'connection'} & visible
     ui.capture(f'{scenario}-bottom')
     observations.append({'scenario': scenario, 'workspace': has_workspace,
                          'seconds': round(time.monotonic() - started, 2)})

@@ -8,8 +8,10 @@
     "./pairing": "./src/pairing.ts",
     "./account-pairing": "./src/account-pairing.ts",
     "./account-pairing/browser": "./src/account-pairing-browser.ts",
+    "./automatic-pairing": "./src/automatic-pairing.ts",
     "./account-requester": "./src/account-requester.ts",
     "./history": "./src/admission.ts",
+    "./member": "./src/member.ts",
     "./errors": "./src/errors.ts",
     "./maintenance": "./src/maintenance.ts",
     "./recovery-restore": "./src/recovery-restore.ts",
@@ -42,6 +44,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "esbuild": "0.28.2",
+    "loro-crdt": "catalog:",
     "@playwright/test": "1.58.2"
   }
 }

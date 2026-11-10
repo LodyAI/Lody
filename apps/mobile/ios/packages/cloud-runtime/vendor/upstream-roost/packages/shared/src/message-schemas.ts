@@ -1,3 +1,7 @@
+import {
+  ManagedDaemonUpdateStatusSchema,
+  ManagedDaemonUpgradeOptionsSchema,
+} from './daemon-update';
 import { EncryptedAttachmentSchema } from './encrypted-attachment';
 import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
 import { automationOriginSchema } from './automations/contracts';
@@ -138,6 +142,9 @@ const OptionalStringSchema = z.preprocess(
 export const SessionImagePayloadSchema = z
   .object({
     imageId: SharedStringSchema,
+    transport: z.enum(['local', 'r2']).optional(),
+    machineId: MachineIdSchema.optional(),
+    localImageId: z.string().uuid().optional(),
     encryption: EncryptedAttachmentSchema.optional(),
     mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
     fileName: OptionalStringSchema,
@@ -148,6 +155,16 @@ export const SessionImagePayloadSchema = z
   })
   .strict()
   .superRefine((image, ctx) => {
+    if (
+      image.transport === 'local' &&
+      (!image.machineId ||
+        !image.localImageId ||
+        image.imageId !== image.localImageId ||
+        image.encryption)
+    )
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid local image reference' });
+    if (image.localImageId && !image.machineId)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Local image requires its machine' });
     const manifest = image.encryption;
     if (
       manifest &&
@@ -381,10 +398,8 @@ const SessionVisualAnnotationReferenceInputBlockSchema =
 export const SessionLocalAttachmentSchema = z
   .object({
     type: z.literal('local_attachment'),
-    referenceId: z.string().uuid(),
     machineId: MachineIdSchema,
-    sessionId: SessionIdSchema,
-    turnId: SharedTrimmedNonEmptyStringSchema,
+    path: SharedTrimmedNonEmptyStringSchema,
     kind: z.enum(['file', 'image']),
     fileName: SharedTrimmedNonEmptyStringSchema,
     mimeType: SharedTrimmedNonEmptyStringSchema,
@@ -516,7 +531,11 @@ export const normalizeSessionTurnInputConfig = (
   if (
     !inputBlocks &&
     Array.isArray(record.inputBlocks) &&
-    record.inputBlocks.some((block) => block?.type === 'local_attachment')
+    record.inputBlocks.some(
+      (block) =>
+        block?.type === 'local_attachment' ||
+        (block?.type === 'image' && block?.transport === 'local')
+    )
   )
     throw new Error('Invalid local attachment input');
   if (inputBlocks) {
@@ -1158,6 +1177,7 @@ export const MachineStatusRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     /** Only for daemons advertising `machineDiskStatus`. */
     includeDisk: z.literal(true).optional(),
+    includeDaemonUpdate: z.literal(true).optional(),
   })
   .strict();
 
@@ -1200,6 +1220,7 @@ export const MachineStatusResponseSchema = z
     resources: MachineResourceInfoSchema.optional(),
     disk: MachineDiskInfoSchema.optional(),
     lifecycle: MachineLifecycleCapabilitySchema.optional(),
+    daemonUpdate: ManagedDaemonUpdateStatusSchema.nullable().optional(),
     error: SharedOptionalStringSchema,
   })
   .strict();
@@ -1247,6 +1268,7 @@ export const MachineLifecycleDispositionSchema = z.enum([
 export const MachineRestartRequestSchema = z
   .object({
     type: z.literal('machine/restart'),
+    restoreMachineId: MachineIdSchema.optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     requesterUserId: SharedTrimmedNonEmptyStringSchema,
@@ -1276,6 +1298,7 @@ export const MachineUpgradeRequestSchema = z
     requestToken: SharedTrimmedNonEmptyStringSchema,
     requestId: SharedTrimmedNonEmptyStringSchema,
     targetVersion: z.string().trim().min(1).optional(),
+    upgrade: ManagedDaemonUpgradeOptionsSchema.optional(),
   })
   .strict();
 
@@ -1883,42 +1906,64 @@ export const SessionFileUploadResponseSchema = z
   })
   .strict();
 
-export const SessionAttachmentResolveRequestSchema = z
+export const SessionImagePrepareLocalRequestSchema = z
   .object({
-    type: z.literal('session/attachment-resolve'),
+    type: z.literal('session/image-prepare-local'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     sessionId: SessionIdSchema,
-    attachment: SessionLocalAttachmentSchema,
+    imageId: z.string().uuid(),
+    source: z.union([
+      z.object({ path: SharedTrimmedNonEmptyStringSchema }).strict(),
+      z.object({ base64: z.string().min(1).max(27962028) }).strict(),
+    ]),
+    fileName: SharedTrimmedNonEmptyStringSchema,
+    mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
   })
   .strict();
-export const SessionAttachmentResolveResponseSchema = z
+export const SessionImagePrepareLocalResponseSchema = z
   .object({
-    type: z.literal('session/attachment-resolve_response'),
+    type: z.literal('session/image-prepare-local_response'),
     sessionId: SessionIdSchema,
     success: z.boolean(),
-    path: z.string().optional(),
-    error: z.string().optional(),
+    error: SharedOptionalStringSchema,
+    image: SessionImagePayloadSchema.optional(),
   })
   .strict();
-export const SessionAttachmentRegisterRequestSchema = z
+export const SessionImageResolveLocalRequestSchema = z
   .object({
-    type: z.literal('session/attachment-register'),
+    type: z.literal('session/image-resolve-local'),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     sessionId: SessionIdSchema,
-    turnId: SharedTrimmedNonEmptyStringSchema,
-    referenceId: z.string().uuid(),
+    image: SessionImagePayloadSchema,
+  })
+  .strict();
+export const SessionImageResolveLocalResponseSchema = z
+  .object({
+    type: z.literal('session/image-resolve-local_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    error: SharedOptionalStringSchema,
+    path: SharedOptionalStringSchema,
+  })
+  .strict();
+
+export const SessionAttachmentPrepareRequestSchema = z
+  .object({
+    type: z.literal('session/attachment-prepare'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
     path: SharedTrimmedNonEmptyStringSchema,
-    managed: z.boolean(),
     kind: z.enum(['file', 'image']),
     fileName: SharedTrimmedNonEmptyStringSchema,
     mimeType: SharedTrimmedNonEmptyStringSchema,
   })
   .strict();
-export const SessionAttachmentRegisterResponseSchema = z
+export const SessionAttachmentPrepareResponseSchema = z
   .object({
-    type: z.literal('session/attachment-register_response'),
+    type: z.literal('session/attachment-prepare_response'),
     sessionId: SessionIdSchema,
     success: z.boolean(),
     error: z.string().optional(),
@@ -2494,8 +2539,9 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageUploadRequestSchema,
   SessionFileUploadRequestSchema,
   SessionFileSendLocalRequestSchema,
-  SessionAttachmentRegisterRequestSchema,
-  SessionAttachmentResolveRequestSchema,
+  SessionImagePrepareLocalRequestSchema,
+  SessionImageResolveLocalRequestSchema,
+  SessionAttachmentPrepareRequestSchema,
   SessionHistoryReadRequestSchema,
   SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
@@ -2533,8 +2579,9 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageUploadResponseSchema,
   SessionFileUploadResponseSchema,
   SessionFileSendLocalResponseSchema,
-  SessionAttachmentRegisterResponseSchema,
-  SessionAttachmentResolveResponseSchema,
+  SessionImagePrepareLocalResponseSchema,
+  SessionImageResolveLocalResponseSchema,
+  SessionAttachmentPrepareResponseSchema,
   SessionHistoryReadResponseSchema,
   SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,

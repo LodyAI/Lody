@@ -15,7 +15,6 @@ enum SettingsSections {
     }
     if workspace != nil {
       sections.append(section("sessions", header: text("section.sessions"), rows: [
-        row("project-history", text("history.title"), image: "arrow.triangle.2.circlepath"),
         row("archived", text("archived.title"), image: "archivebox"),
       ]))
     }
@@ -46,7 +45,6 @@ enum SettingsSections {
     general.navigates = false
     var rows = [
       general,
-      row("remote-machine", text("remote.machine"), image: "desktopcomputer"),
       row("remote-agent", text("remote.agent"), image: "sparkles"),
       row("agent-roles", text("roles.title"), image: "person.crop.square"),
       row("prompt-shortcuts", text("shortcuts.title"), image: "doc.text"),

@@ -214,5 +214,6 @@ extension SessionItem {
 
 extension Notification.Name {
   static let lodyOutboxDidChange = Notification.Name("LodyOutboxDidChange")
+  static let lodyOutboxInflightReleased = Notification.Name("LodyOutboxInflightReleased")
   static let lodyAttachmentUploadProgress = Notification.Name("LodyAttachmentUploadProgress")
 }

@@ -16,8 +16,8 @@ Read parent rules and linked context.
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive/delete; reopen clears only it, never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
-- `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
-  they stay separate actions.
+- `Change owner` writes the OWNER `SessionMeta.userId`, never sharing;
+  candidates need machine/project access.
 
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
@@ -58,7 +58,7 @@ Read parent rules and linked context.
   with the original error and React component stacks.
 - Read receipts require per-surface `isVisible`, never mere mounting.
 - Every user management action uses `useSessionActions`; its shared guard checks current Repo metadata for every affected target before side effects, including contained/opened sessions.
-- Encrypted history uses the bound runtime's document access without expanding machine/project execution indexes. Unavailable targets mount only the document reader, without machine probes or RPC. [Boundary](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#member-visibility-a4).
+- Read-only sessions require authoritative root grants matching the current Meta machine. Mount only the independent reader, preserving preferences, Markdown and references. Never expose machine controls or management. [Boundary](../../../../../specs/session-access.md).
 - Window-top history headers reuse the shared drag-region helper and exempt interactive controls, so workspace drag strips cannot cover their buttons.
 - Keep question drafts on navigation and IME Enter; show failures.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:

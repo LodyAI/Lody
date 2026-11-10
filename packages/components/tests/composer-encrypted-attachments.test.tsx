@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createStore as createPlatformStore, type PlatformProvider } from '@lody/platform';
 import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
 import {
+  buildSessionTurnInputConfig,
   SESSION_IMAGE_MAX_COUNT,
   SESSION_FILE_MAX_COUNT,
   SESSION_IMAGE_MAX_SIZE_BYTES,
@@ -32,6 +33,8 @@ import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
+import i18next from 'i18next';
+import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
 import { protectedAttachmentBlob } from '../src/lib/encrypted-session-attachment';
 import { clearSessionImageCache, getSessionImageBlobUrl } from '../src/lib/session-image-cache';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
@@ -116,9 +119,11 @@ function fixture(contentMode: 'e2ee' | 'plaintext' = 'e2ee') {
       }) as never,
     releaseRef: () => {},
   });
+  const signer = encryptedDispatchSigner();
   const runtime = {
     workspaceId,
     contentMode,
+    prepareEncryptedDispatch: signer.prepareEncryptedDispatch,
     attachmentToken: async () => 'attachment-only-token',
     sendResources,
     repo: { getDocMeta: async (id: string) => ({ meta: metas.get(id) }) },
@@ -160,7 +165,7 @@ function fixture(contentMode: 'e2ee' | 'plaintext' = 'e2ee') {
       const stop = runtime.pendingSends!.subscribe(check);
       check();
     });
-  return { runtime, doc, session, metas, until };
+  return { runtime, doc, session, metas, until, signer };
 }
 
 function Composer({ runtime, slug = 'encrypted' }: { runtime: WorkspaceRuntime; slug?: string }) {
@@ -213,7 +218,12 @@ function Composer({ runtime, slug = 'encrypted' }: { runtime: WorkspaceRuntime; 
         timestamp: '2026-10-29T00:00:00Z',
         items: [],
         fileDiff: [],
-        inputConfig: { inputBlocks: [{ type: 'text', text: 'keep draft' }] },
+        // As the real composer builds it: the selected agent is always named.
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: [{ type: 'text', text: 'keep draft' }],
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
       } as unknown as SessionHistory;
       await acceptSessionUserTurn(
         runtime,
@@ -335,6 +345,22 @@ function relay() {
   };
 }
 
+it('fails a send visibly, writing nothing, when the host refuses to sign it', async () => {
+  const f = fixture();
+  relay();
+  Object.assign(f.runtime, {
+    prepareEncryptedDispatch: async () => {
+      throw new Error('e2ee_rpc_invalid');
+    },
+  });
+  await mount(f.runtime);
+  await attach('select', [new File(['private file bytes'], 'secret.txt', { type: 'text/plain' })]);
+  await submit();
+  await f.until(() => Boolean(f.runtime.pendingSends!.getSnapshot()[0]?.error));
+  expect(f.runtime.pendingSends!.getSnapshot()[0]?.error).toBe(i18next.t('sessions.sendError'));
+  expect(f.session.historyWriter.readStored()).toEqual([]);
+});
+
 it.each(['paste', 'drop', 'select'] as const)(
   'sends new image and file through the real composer and protected pending queue via %s',
   async (method) => {
@@ -350,6 +376,12 @@ it.each(['paste', 'drop', 'select'] as const)(
     expect(container.querySelector('output')!.textContent).toBe('');
     await f.until(() => !f.runtime.pendingSends!.getSnapshot().length);
     expect(f.session.historyWriter.readStored()).toHaveLength(1);
+    // The signed input carries both protected attachments, so the machine runs them.
+    expect(f.signer.signed[0]?.inputConfig.inputBlocks?.map((block) => block.type).sort()).toEqual([
+      'file',
+      'image',
+      'text',
+    ]);
     expect(local.files).toEqual([]);
     expect(server.requests).toHaveLength(2);
     expect(

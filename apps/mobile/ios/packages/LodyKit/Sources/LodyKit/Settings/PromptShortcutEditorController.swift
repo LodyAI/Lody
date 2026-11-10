@@ -3,7 +3,10 @@ import UIKit
 
 @MainActor
 final class PromptShortcutEditorController: LodyFormController {
-  var saved: (() -> Void)?
+  var saved: ((PromptShortcutEntry) -> Void)?
+  /// The provisional index entry, shown in the list while the save is in flight.
+  var willSave: ((PromptShortcutEntry) -> Void)?
+  var failed: (() -> Void)?
   private let workspace: SettingsWorkspace
   private let entry: PromptShortcutEntry?
   private let value: PromptShortcutValue?
@@ -86,14 +89,18 @@ final class PromptShortcutEditorController: LodyFormController {
     attempt = request
     busy = true
     render()
+    if case .save(_, let value, let bodyDocId) = request {
+      willSave?(Self.entry(value, bodyDocId: bodyDocId))
+    }
     Task { [weak self, service] in
-      let ok = (try? await service(request)) != nil
+      let result = try? await service(request)
       guard let self else { return }
       self.busy = false
-      if ok {
-        self.saved?()
+      if case .save(let saved)? = result {
+        self.saved?(saved.entry)
         self.closeForm()
       } else {
+        self.failed?()
         LodyToastOverlay.shared.show(message: self.text("saveFailed"), kind: .error)
         self.render()
       }
@@ -109,6 +116,15 @@ final class PromptShortcutEditorController: LodyFormController {
       revision: Self.uuid(), createdAt: value?.createdAt ?? now, updatedAt: now, prompt: prompt.text, mentions: []
     )
     return .save(entry: entry, value: next, bodyDocId: Self.uuid())
+  }
+
+  static func entry(_ value: PromptShortcutValue, bodyDocId: String) -> PromptShortcutEntry {
+    PromptShortcutEntry(
+      v: 1, id: value.id, workspaceId: value.workspaceId, ownerUserId: value.ownerUserId,
+      visibility: value.visibility == .workspace ? .workspace : .private, name: value.name, emoji: value.emoji,
+      slug: value.slug, description: value.description, scope: value.scope, revision: value.revision,
+      createdAt: value.createdAt, updatedAt: value.updatedAt, bodyDocId: bodyDocId, dependencySummary: []
+    )
   }
 
   private static func uuid() -> String { UUID().uuidString.lowercased() }

@@ -99,7 +99,8 @@ async function account(options = {}) {
       return () => {}
     },
     getCachedSessionIdentity: () => ({ ...identity }),
-    getBootstrapSession: () => new Promise(() => {})
+    getBootstrapSession: () => new Promise(() => {}),
+    ...options.auth
   }
   const warnings = []
   const api = await load(
@@ -3565,6 +3566,472 @@ const approvalRequest = '55'.repeat(16)
 // IPC results come from the service's separate VM realm.
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const approvalDevice = '77'.repeat(32)
+const personalApprovalRequest = 'personal-device-12345678-1234-1234-1234-123456789abc'
+/** Real personal approval IPC over a controlled cloud and native-host boundary. */
+async function personalApprovalFixture({
+  confirmed = true,
+  publish = true,
+  publication,
+  invitationGate,
+  invitationGates,
+  prepareGate,
+  local = { hasCurrentKey: true },
+  receive,
+  distribution,
+  appendReceiptLost = false
+} = {}) {
+  const session = '44'.repeat(16)
+  let committed = false
+  let ingested = false
+  let published = false
+  let publicationAttempted = false
+  const writes = new Map()
+  const f = await memberIpcFixture({
+    realRefresh: true,
+    client: {
+      joinReadRequest: () => Effect.succeed({ requestHex: 'abcd', status: 'pending' }),
+      appendRecord: (pending) =>
+        Effect.sync(() => {
+          const original = writes.get(pending.requestId)
+          if (original) assert.deepEqual(plain(pending), original)
+          else writes.set(pending.requestId, plain(pending))
+          committed = true
+          if (appendReceiptLost) throw new Error('synthetic append response lost')
+        }),
+      history: () =>
+        Effect.succeed({ checkpoint: {}, nextCursor: null, admission: committed && confirmed }),
+      joinPublish: () =>
+        Effect.promise(async () => {
+          assert.equal(ingested, true, 'only a locally verified admission may publish')
+          publicationAttempted = true
+          publication?.entered.resolve()
+          if (publication) await publication.release.promise
+          if (!publish) throw new Error('synthetic publication unavailable')
+          published = true
+        })
+    },
+    host: {
+      previewPersonalAdmission: () =>
+        Effect.succeed({ pairingSessionId: session, signingPublicKey: approvalDevice }),
+      preparePersonalAdmission: () =>
+        Effect.promise(async () => {
+          if (prepareGate) {
+            prepareGate.entered.resolve()
+            await prepareGate.release.promise
+          }
+          return { requestId: personalApprovalRequest, recordHex: 'ab' }
+        }),
+      ingestLedgerRecords: (_workspace, page) =>
+        Effect.sync(() => {
+          if (page.admission) ingested = true
+        }),
+      personalInvitation: (workspaceId) =>
+        Effect.promise(async () => {
+          if (!ingested) throw new Error('e2ee_local-evidence-conflict')
+          const gate =
+            invitationGates?.get(workspaceId) ??
+            (workspaceId === 'team' ? invitationGate : undefined)
+          if (gate) {
+            gate.entered.resolve()
+            await gate.release.promise
+          }
+          return { invitationHex: 'cafe' }
+        }),
+      status: () => Effect.succeed({ hasCurrentKey: local.hasCurrentKey }),
+      ...(receive ? { receiveKeys: receive } : {}),
+      ...(distribution ? { distributeKeys: distribution } : {}),
+      keyDeliveryTarget: (_workspace, device) =>
+        Effect.succeed(ingested && device === approvalDevice),
+      keyDeliveryEvidence: () => Effect.succeed('delivered'),
+      ...(!confirmed ? { keyRound: () => Effect.void } : {})
+    }
+  })
+  return {
+    ...f,
+    session,
+    published: () => published,
+    publicationAttempted: () => publicationAttempted,
+    committed: () => committed,
+    writes
+  }
+}
+for (const publish of [true, false])
+  void test(`personal approval publishes before a blocked key round; publication succeeds: ${publish}`, async () => {
+    const f = await personalApprovalFixture({ publish })
+    const approval = f.ipc.approvePersonalJoin('team', f.session)
+    try {
+      await f.keyEntered.promise
+      // The old full-refresh sequence reaches this gate before it can publish.
+      assert.equal(f.publicationAttempted(), true)
+      assert.equal(f.published(), publish)
+      assert.deepEqual(plain(await approval), { admitted: true, invitationPublished: publish })
+      assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivering')
+      // Closing the approving window cannot abandon a committed device's delivery.
+      f.owner().readers.get('team').delete(1)
+      assert.deepEqual(f.closed, [])
+    } finally {
+      f.keyGate.resolve()
+      await approval.catch(() => {})
+      await f.ipc.keyDeliveryIdle('A', 'team')
+    }
+    assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivered')
+    assert.deepEqual(f.closed, ['original-A'])
+  })
+void test('personal approval cannot publish or start delivery before ledger confirmation', async () => {
+  const f = await personalApprovalFixture({ confirmed: false })
+  try {
+    await assert.rejects(f.ipc.approvePersonalJoin('team', f.session), /e2ee_append_unconfirmed/)
+    assert.equal(f.published(), false)
+    assert.equal(keyDeliveryState(f, personalApprovalRequest), null)
+  } finally {
+    f.keyGate.resolve()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+  }
+})
+void test('a late personal invitation publication cannot restart delivery after workspace reset', async () => {
+  const publication = { entered: deferredMember(), release: deferredMember() }
+  const f = await personalApprovalFixture({ publication })
+  const approval = f.ipc.approvePersonalJoin('team', f.session)
+  let delivery
+  try {
+    await publication.entered.promise
+    await f.keyEntered.promise
+    delivery = f.ipc.keyDeliveryIdle('A', 'team')
+    await f.ipc
+      .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
+      .catch(() => {})
+    f.keyGate.resolve()
+    await delivery
+    publication.release.resolve()
+    await assert.rejects(approval, /e2ee_account_mismatch/)
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+  } finally {
+    f.keyGate.resolve()
+    publication.release.resolve()
+    await approval.catch(() => {})
+    await delivery
+  }
+})
+for (const change of [
+  'workspace-reset',
+  'account-reset',
+  'same-account-login',
+  'signed-out',
+  'different-account',
+  'same-account-owner'
+])
+  void test(`pending personal invitation is invalidated by ${change} before delivery registration`, async () => {
+    const invitationGate = { entered: deferredMember(), release: deferredMember() }
+    const f = await personalApprovalFixture({ invitationGate })
+    const approval = f.ipc.approvePersonalJoin('team', f.session)
+    const outcome = approval.then(
+      (value) => ({ value }),
+      (error) => ({ error })
+    )
+    try {
+      await invitationGate.entered.promise
+      if (change.endsWith('reset')) {
+        await f.ipc
+          .resetIdentity({
+            ...(change === 'workspace-reset' ? { workspaceId: 'team' } : {}),
+            resetId: randomUUID(),
+            confirm: true
+          })
+          .catch(() => {})
+      } else if (change === 'same-account-owner') {
+        f.setOwner(f.makeOwner('A', 'replacement-A'))
+      } else {
+        f.identity.userId = undefined
+        f.identity.generation += 1
+        f.identity.userId =
+          change === 'signed-out' ? undefined : change === 'different-account' ? 'B' : 'A'
+        f.identity.generation += 1
+      }
+      invitationGate.release.resolve()
+      const result = await outcome
+      assert.ok(result.error, 'the old approval cannot authorize work under a later identity')
+      assert.equal(f.published(), false)
+      assert.equal(f.committed(), true)
+      assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+      assert.equal(f.ipc.personalApprovals.size, 0)
+    } finally {
+      invitationGate.release.resolve()
+      f.keyGate.resolve()
+      await outcome
+      await f.ipc.keyDeliveryIdle('A', 'team')
+    }
+  })
+for (const resetScope of ['workspace', 'account'])
+  void test(`${resetScope} reset fences the correct concurrent personal approvals`, async () => {
+    const team = { entered: deferredMember(), release: deferredMember() }
+    const other = { entered: deferredMember(), release: deferredMember() }
+    const f = await personalApprovalFixture({
+      invitationGates: new Map([
+        ['team', team],
+        ['other', other]
+      ])
+    })
+    f.owner().readers.set('other', new Map([[1, 1]]))
+    const first = f.ipc.approvePersonalJoin('team', f.session).then(
+      (value) => ({ value }),
+      (error) => ({ error })
+    )
+    let second
+    try {
+      await team.entered.promise
+      second = f.ipc.approvePersonalJoin('other', f.session).then(
+        (value) => ({ value }),
+        (error) => ({ error })
+      )
+      await other.entered.promise
+      await f.ipc
+        .resetIdentity({
+          ...(resetScope === 'workspace' ? { workspaceId: 'team' } : {}),
+          resetId: randomUUID(),
+          confirm: true
+        })
+        .catch(() => {})
+      other.release.resolve()
+      const result = await second
+      team.release.resolve()
+      assert.ok((await first).error)
+      assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+      if (resetScope === 'account') {
+        assert.ok(result.error)
+        assert.equal(f.ipc.keyDeliveries.has('A\nother'), false)
+      } else {
+        assert.deepEqual(plain(result.value), { admitted: true, invitationPublished: true })
+        await f.keyEntered.promise
+        f.keyGate.resolve()
+        await f.ipc.keyDeliveryIdle('A', 'other')
+        assert.equal(
+          f.ipc.keyDeliveries.get('A\nother').requests.get(personalApprovalRequest).state,
+          'delivered'
+        )
+      }
+      assert.equal(f.ipc.personalApprovals.size, 0)
+    } finally {
+      team.release.resolve()
+      other.release.resolve()
+      f.keyGate.resolve()
+      await first
+      await second
+      await f.ipc.keyDeliveryIdle('A', 'other')
+    }
+  })
+void test('a control-only personal approver receives its missing current key before distributing without blocking admission', async () => {
+  const local = { hasCurrentKey: false }
+  const received = deferredMember(),
+    release = deferredMember()
+  let receiving = false
+  const f = await personalApprovalFixture({
+    local,
+    receive: () =>
+      Effect.promise(async () => {
+        receiving = true
+        received.resolve()
+        await release.promise
+        local.hasCurrentKey = true
+      }),
+    distribution: () => Effect.sync(() => assert.equal(local.hasCurrentKey, true))
+  })
+  try {
+    assert.deepEqual(plain(await f.ipc.approvePersonalJoin('team', f.session)), {
+      admitted: true,
+      invitationPublished: true
+    })
+    await Promise.race([received.promise, f.ipc.keyDeliveryIdle('A', 'team')])
+    assert.equal(receiving, true)
+    assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivering')
+  } finally {
+    release.resolve()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+  }
+  assert.equal(local.hasCurrentKey, true)
+  assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivered')
+})
+void test('personal key failures keep admission, exhaust bounded backoff, and accept the original personal-device retry id', async () => {
+  const local = { hasCurrentKey: false }
+  let outage = true,
+    now = 1_800_000_000_000
+  const f = await personalApprovalFixture({
+    local,
+    receive: () =>
+      Effect.suspend(() => {
+        if (outage) return Effect.fail(new Error('e2ee_management_retry'))
+        local.hasCurrentKey = true
+        return Effect.void
+      }),
+    distribution: () => Effect.sync(() => assert.equal(local.hasCurrentKey, true))
+  })
+  const clock = fakeKeyDeliveryTimers()
+  f.ipc.keyDeliveryTimers = clock.timers
+  f.ipc.keyDeliveryNow = () => now
+  assert.deepEqual(plain(await f.ipc.approvePersonalJoin('team', f.session)), {
+    admitted: true,
+    invitationPublished: true
+  })
+  for (let retry = 0; retry <= 8; retry++) {
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'failed')
+    assert.equal(f.committed(), true)
+    if (retry === 8) {
+      assert.deepEqual(clock.pending, [])
+      break
+    }
+    const timer = clock.pending.shift()
+    assert.equal(timer.ms, Math.min(10_000 * 2 ** retry, 300_000))
+    now += timer.ms
+    timer.run()
+  }
+  outage = false
+  const retried = plain(await f.ipc.retryMemberKeyDelivery('team', personalApprovalRequest))
+  assert.equal(retried.requestId, personalApprovalRequest)
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivered')
+  assert.equal(local.hasCurrentKey, true)
+  assert.deepEqual(clock.pending, [])
+})
+for (const Terminal of [E2eeDeviceRevokedError, E2eeMemberRemovedError])
+  void test(`personal delivery ends without retry when local key receipt reports ${Terminal.name}`, async () => {
+    const f = await personalApprovalFixture({
+      local: { hasCurrentKey: false },
+      receive: () => Effect.fail(new Terminal()),
+      distribution: () => Effect.die(new Error('must not distribute after terminal access loss'))
+    })
+    const clock = fakeKeyDeliveryTimers()
+    f.ipc.keyDeliveryTimers = clock.timers
+    assert.deepEqual(plain(await f.ipc.approvePersonalJoin('team', f.session)), {
+      admitted: true,
+      invitationPublished: true
+    })
+    await f.ipc.keyDeliveryIdle('A', 'team')
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+    assert.equal(f.committed(), true)
+    assert.deepEqual(clock.pending, [])
+  })
+void test('main retries a personal delivery after an outage and installs the local key without a page or poll', async () => {
+  const local = { hasCurrentKey: false }
+  let outage = true
+  const f = await personalApprovalFixture({
+    local,
+    receive: () =>
+      Effect.suspend(() => {
+        if (outage) return Effect.fail(new Error('e2ee_management_retry'))
+        local.hasCurrentKey = true
+        return Effect.void
+      }),
+    distribution: () => Effect.sync(() => assert.equal(local.hasCurrentKey, true))
+  })
+  const clock = fakeKeyDeliveryTimers()
+  f.ipc.keyDeliveryTimers = clock.timers
+  f.ipc.keyDeliveryNow = () => 1_800_000_000_000
+  await f.ipc.approvePersonalJoin('team', f.session)
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'failed')
+  outage = false
+  clock.pending.shift().run()
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'delivered')
+  assert.equal(local.hasCurrentKey, true)
+  assert.deepEqual(clock.pending, [])
+})
+void test('personal approval reconciles an unknown append result and retries publication with the same admission original', async () => {
+  const f = await personalApprovalFixture({ appendReceiptLost: true, publish: false })
+  try {
+    const expected = { admitted: true, invitationPublished: false }
+    assert.deepEqual(plain(await f.ipc.approvePersonalJoin('team', f.session)), expected)
+    assert.deepEqual(plain(await f.ipc.approvePersonalJoin('team', f.session)), expected)
+    assert.equal(f.committed(), true)
+    assert.deepEqual(
+      [...f.writes],
+      [[personalApprovalRequest, { requestId: personalApprovalRequest, recordHex: 'ab' }]]
+    )
+  } finally {
+    f.keyGate.resolve()
+    await f.ipc.keyDeliveryIdle('A', 'team')
+  }
+})
+void test('reset while native admission preparation is pending prevents any later cloud append', async () => {
+  const prepareGate = { entered: deferredMember(), release: deferredMember() }
+  const f = await personalApprovalFixture({ prepareGate })
+  const approval = f.ipc.approvePersonalJoin('team', f.session)
+  const outcome = approval.then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  )
+  try {
+    await prepareGate.entered.promise
+    await f.ipc
+      .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
+      .catch(() => {})
+    prepareGate.release.resolve()
+    assert.ok((await outcome).error)
+    assert.equal(f.committed(), false)
+    assert.equal(f.writes.size, 0)
+    assert.equal(f.published(), false)
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+  } finally {
+    prepareGate.release.resolve()
+    f.keyGate.resolve()
+    await outcome
+    await f.ipc.keyDeliveryIdle('A', 'team')
+  }
+})
+void test('a personal delivery retry cannot cross a same-account logout and login generation', async () => {
+  let outage = true
+  const delivered = []
+  const f = await personalApprovalFixture({
+    distribution: () =>
+      Effect.sync(() => {
+        if (outage) throw new Error('e2ee_management_retry')
+        delivered.push(f.identity.generation)
+      })
+  })
+  const clock = fakeKeyDeliveryTimers()
+  f.ipc.keyDeliveryTimers = clock.timers
+  await f.ipc.approvePersonalJoin('team', f.session)
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.equal(keyDeliveryState(f, personalApprovalRequest).state, 'failed')
+  f.identity.userId = undefined
+  f.identity.generation++
+  f.identity.userId = 'A'
+  f.identity.generation++
+  outage = false
+  clock.pending.shift().run()
+  await f.ipc.keyDeliveryIdle('A', 'team')
+  assert.deepEqual(delivered, [])
+  assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+  assert.deepEqual(clock.pending, [])
+})
+void test('a personal delivery registered before publication retires after same-account re-login', async () => {
+  const publication = { entered: deferredMember(), release: deferredMember() }
+  const f = await personalApprovalFixture({ publication })
+  const approval = f.ipc.approvePersonalJoin('team', f.session).then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  )
+  let delivery
+  try {
+    await publication.entered.promise
+    await f.keyEntered.promise
+    delivery = f.ipc.keyDeliveryIdle('A', 'team')
+    f.identity.userId = undefined
+    f.identity.generation++
+    f.identity.userId = 'A'
+    f.identity.generation++
+    publication.release.resolve()
+    assert.ok((await approval).error)
+    f.keyGate.resolve()
+    await delivery
+    assert.equal(f.ipc.keyDeliveries.has('A\nteam'), false)
+  } finally {
+    publication.release.resolve()
+    f.keyGate.resolve()
+    await approval
+    await delivery
+  }
+})
 /** Mirrors runDesktopE2eeOperation's public projection: only top-level typed access loss
  * and allow-listed codes survive; nested key-round causes become a generic failure. */
 const projectNativeFailure = (error) =>
@@ -5473,3 +5940,106 @@ void test(
     assert.equal((await f.joiner.open('team')).hasCurrentKey, true)
   }
 )
+
+/** A sign-in server that answers only when told to: each call stays pending until its
+ * caller cancels it or the test answers it. */
+function slowSignIn() {
+  const pending = new Set()
+  return {
+    pending,
+    convexToken: (_options, signal) =>
+      new Promise((resolve, reject) => {
+        const call = { resolve }
+        pending.add(call)
+        signal?.addEventListener(
+          'abort',
+          () => {
+            pending.delete(call)
+            reject(signal.reason)
+          },
+          { once: true }
+        )
+      }),
+    answerAll: () => {
+      for (const call of pending) call.resolve({ data: { token: 'synthetic-auth-jwt' } })
+      pending.clear()
+    }
+  }
+}
+/** The account's own cloud client against one synthetic history endpoint. */
+async function slowSignInAccount(t, signIn) {
+  const directory = await mkdtemp(join(tmpdir(), 'desktop-slow-sign-in-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const { api } = await account({
+    directory,
+    auth: { convexToken: signIn.convexToken },
+    cloud: (input) =>
+      makeE2eeCloudClient({
+        ...input,
+        deploymentUrl: 'https://synthetic.convex.cloud',
+        fetch: async () =>
+          Response.json({
+            status: 'success',
+            value: {
+              workspaceId: 'workspace',
+              genesisHash: '11'.repeat(32),
+              checkpoint: { headHash: '11'.repeat(32), length: 1 },
+              startIndex: 1,
+              recordsHex: [],
+              position: 'p1:workspace:1:synthetic',
+              nextCursor: null
+            }
+          })
+      })
+  })
+  t.after(() => api.closeDesktopE2eeAccount())
+  return api
+}
+const settle = async (until) => {
+  for (let turn = 0; turn < 200 && !until(); turn++)
+    await new Promise((resolve) => setImmediate(resolve))
+}
+void test('quitting ends a request waiting on a slow sign-in token within the quit budget', async (t) => {
+  // Injected clock: the 15 s quit budget and the 30 s request deadline only pass when ticked.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const signIn = slowSignIn()
+  const api = await slowSignInAccount(t, signIn)
+  const { client } = await api.desktopE2eeCloudClient()
+  // Stands in for a key round's history read; the host's close awaits that round.
+  const round = Effect.runPromiseExit(client.history({ workspaceId: 'workspace' }))
+  await settle(() => signIn.pending.size === 1)
+  assert.equal(signIn.pending.size, 1)
+  let finished = false
+  const drained = drainMainProcessQuitResources(
+    [
+      {
+        name: 'e2ee',
+        close: async () => {
+          await api.closeDesktopE2eeAccount({ quit: true })
+          await round
+        }
+      }
+    ],
+    15_000
+  ).finally(() => {
+    finished = true
+  })
+  await settle(() => finished)
+  t.mock.timers.tick(15_000)
+  assert.deepEqual(await drained, [])
+  // Cancelling the quit left no token request behind.
+  assert.equal(signIn.pending.size, 0)
+  assert.equal(Exit.isFailure(await round), true)
+})
+void test('a slow sign-in token still completes a request when nothing is quitting', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const signIn = slowSignIn()
+  const api = await slowSignInAccount(t, signIn)
+  const { client } = await api.desktopE2eeCloudClient()
+  const read = Effect.runPromise(client.history({ workspaceId: 'workspace' }))
+  await settle(() => signIn.pending.size === 1)
+  // Slower than the quit budget, inside the request's own deadline.
+  t.mock.timers.tick(20_000)
+  signIn.answerAll()
+  assert.equal((await read).position, 'p1:workspace:1:synthetic')
+})

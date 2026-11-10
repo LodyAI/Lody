@@ -1,9 +1,10 @@
 # Lody Security Whitepaper
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#same-origin-web-recovery)
+Previously approved baseline: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
 Translation: current
 
-Approved revision: 2026-11-07 execution freshness during a backend outage ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)); 2026-11-06 recovery whole-vault replacement; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement). Previous: 2026-11-06 ledger user ID ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ledger-user-id-is-the-account-id)), 2026-11-06 recovery passkey unlock and trust anchor ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)), 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
+Approved revision: 2026-11-10 iroh preferred route ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#iroh-preferred-route)); 2026-11-07 execution freshness during a backend outage ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)); 2026-11-06 recovery whole-vault replacement; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement). Previous: 2026-11-06 ledger user ID ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ledger-user-id-is-the-account-id)), 2026-11-06 recovery passkey unlock and trust anchor ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-passkey-unlock-and-trust-anchor)), 2026-11-01 account-wide pairing, 2026-10-31 audit alignment, 2026-10-28 recovery format alignment.
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
@@ -15,7 +16,7 @@ End-to-End Encryption, Device Trust, and Organization Collaboration
 
 Version 0.19 · 2026-10-31 · [中文](whitepaper.zh.md)
 
-> E2EE documentation · 22 accepted decisions. These choices are reflected here. The [recovery vault](recovery-vault.md) (approved as a whole on 2026-10-31, revised on 2026-11-06) and [desktop custody](desktop-custody.md) Specs are approved; approval is not implementation, deployment or real-device acceptance, and the recovery vault remains outside the MVP. This paper describes a proposed security architecture, not current product guarantees or an independent security audit. The [permission-ledger draft (Chinese)](permission-ledger.zh.md) distinguishes confirmed roles and interactions from proposals and open choices. Implementation status remains in the checklist.
+> E2EE documentation · 22 accepted decisions. These choices are reflected here. The [recovery vault](recovery-vault.md) (approved as a whole on 2026-10-31, revised on 2026-11-06) and [desktop custody](desktop-custody.md) Specs have approved baselines; zxch3n approved the 2026-11-10 RP/same-origin amendment on 2026-11-10. Approval is not implementation, deployment or real-device acceptance, and the recovery vault remains outside the MVP. This paper describes a proposed security architecture, not current product guarantees or an independent security audit. The [permission-ledger draft (Chinese)](permission-ledger.zh.md) distinguishes confirmed roles and interactions from proposals and open choices. Implementation status remains in the checklist.
 
 ## Abstract
 
@@ -180,7 +181,7 @@ Ordinary epoch rotation uses **R's public key** to encrypt and upload a new enve
 
 Recovery opens the vault on the new device, decrypts the target workspace's R, verifies trusted ledger state and current eligibility, opens the current envelope and follows history packages. The new personal device generates independent keys C, is enrolled by R, then uses C and clears temporary R secrets. No administrator needs to be online only if R is active and the required ciphertext is stored. Missing new keys cannot be reconstructed. C inherits the user's current role; recovery never expands it.
 
-**Passkeys.** Only actual [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) support with a verified recovery path can provide another entry to the same vault. Ordinary passkey login is not decryption. The vault-v1 wrapping format is specified above. Approved PRF paths are native AuthenticationServices modules on macOS 15+ and iOS 18.4+, then an isolated unlock-only Web surface on `vault.lody.ai`. Each must report a real 32-byte PRF result, with no fallback and no allow-list; Lody promises and tests only iCloud Keychain. Windows and Linux desktop apps use the file. This does not restore the former shared-R-across-workspaces design.
+**Passkeys.** Only actual [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) support with a verified recovery path can provide another entry to the same vault. Ordinary passkey login is not decryption. The vault-v1 wrapping format is specified above. Native PRF paths use AuthenticationServices modules on macOS 15+ and iOS 18.4+. **2026-11-10 approved revision:** Mac/iOS/Web use RP `lody.ai`, with recovery directly inside the ordinary Web client, superseding the 2026-11-06 dedicated `vault.lody.ai` surface. Root-site, marketing, analytics and subdomain scripts can attempt recovery ceremonies; system confirmation and user verification remain barriers, but the dedicated-host isolation guarantee is withdrawn. Future login credentials need a different RP; this prevents honest credential confusion, not compromised subdomains requesting the parent RP. See the [recovery-vault revision](recovery-vault.md#passkey-unlock) for the direction, trust cost and default-off rollout boundary. Each must report a real 32-byte PRF result, with no fallback and no allow-list; Lody promises and tests only iCloud Keychain. Windows and Linux desktop apps use the file. This does not restore the former shared-R-across-workspaces design.
 
 **Phones and onboarding.** An authorized phone can approve a new device without keeping R private keys resident. Every platform and the Owner may skip recovery setup after acknowledging the risk. Remind users on joining and show per-workspace setup and verification progress. Pairing, envelope receipt and actual recoverability are distinct states.
 
@@ -201,9 +202,10 @@ Execution requests include starting an Agent turn, saving a remote file and term
 Org execution permissions obey the same worst-case 15-minute revocation bound. Caches cannot outlive the original freshness proof, and forwarding, receipt, or restart does not start a new timer. Known revocation invalidates them immediately; failure to refresh by expiry blocks new execution, except that a read which gets no answer leaves the same member's requests inside the longer windows of [execution freshness during a backend outage](execution-freshness-outage.md). This bound depends on the server honestly supplying current control state: a local timer cannot prevent a malicious server from continually concealing revocation. Cancelling an already started command is a separate process; revocation does not automatically undo its effects.
 
 The [M5 realtime review draft](../e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
-sets the concrete bytes and MVP route order: encrypted Streams RPC, then encrypted
-history/Meta durable dispatch as the final fallback. The 2026-10-28 owner decision
-defers iroh to a later, non-MVP acceleration layer.
+sets the concrete bytes and route order: iroh where the host supports it, then
+encrypted Streams RPC, then encrypted history/Meta durable dispatch as the final
+fallback. The owner deferred iroh from the MVP on 2026-10-28 and made it the
+preferred route on 2026-11-10.
 All routes share current authorization and one durable actual-start claim;
 realtime retries retain the exact original ciphertext and ID. The merged ledger
 binds machineId in admission and possession; old developer ledgers are recreated
@@ -217,9 +219,9 @@ journal's persistent workspace expiry floor is not that grant. Execution evidenc
 is not automatically collected. The send-to-actual-start target is ≤1 second,
 with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizing
 (including 143 bytes) and canonical unpadded-base64url machine resources on
-2026-10-28. The later iroh identity still reuses the ledger device key; the reported
-domain-separation review found no signing-protocol confusion. Native key lifetime
-and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
+2026-10-28. Iroh reuses the ledger device key; the reported domain-separation
+review found no signing-protocol confusion, and the key signs only TLS and relay
+handshakes. Native key lifetime and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
 2026-10-28 through the owner-authorized coordinator review recorded above.
 
 **Presence option A — owner approved (2026-10-28):** encrypted workspaces use the
@@ -254,7 +256,7 @@ The pure verification layer checks ledger records sequentially from explicit sta
 - **Deletion:** distinguish logout, local cleanup, account deletion and workspace deletion; user-initiated permanent deletion needs explicit confirmation and an opportunity to export first. Never silently discard the only draft. Credential-confirmed member removal above, and credential-confirmed revocation of this device limited to that device's identity, are the explicit automatic local workspace cleanup exceptions.
 - **Compatibility and diagnostics:** reuse capability checks and request upgrades for unsupported encryption formats. Read-only access still requires an understood format and current reading permission. Default diagnostics contain minimal fixed fields; detailed reports are previewed locally and sent only at the user's request.
 - **Billing and legacy interfaces:** billing eligibility grants no content or device permission. Encrypted workspaces keep unprotected legacy interfaces disabled, including usage, GitHub, CLI tokens and prompt shortcuts.
-- **Release:** every platform must complete the agreed Beta capabilities and checks before Beta, with more features added later. The recovery vault Spec (approved as a whole on 2026-10-31) and desktop safeStorage-wrapped KEK custody are approved; approval is not implementation, deployment or real-device acceptance, and the recovery vault remains outside the MVP. Web/mobile/CLI custody and product enablement remain unavailable. Strict deadline B, remaining platform acceptance and release gates are separate. Accepted direction does not mean protocol completion or product acceptance.
+- **Release:** every platform must complete the agreed Beta capabilities and checks before Beta, with more features added later. The recovery vault Spec (approved as a whole on 2026-10-31) and desktop safeStorage-wrapped KEK custody have approved baselines; zxch3n approved the 2026-11-10 RP/same-origin amendment on 2026-11-10. Approval is not implementation, deployment or real-device acceptance, and the recovery vault remains outside the MVP. Web/mobile/CLI custody and product enablement remain unavailable. Strict deadline B, remaining platform acceptance and release gates are separate. Accepted direction does not mean protocol completion or product acceptance.
 
 ## References and Document Scope
 

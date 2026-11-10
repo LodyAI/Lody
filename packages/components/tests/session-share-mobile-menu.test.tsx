@@ -1,3 +1,5 @@
+import { initI18n } from '../src/i18n';
+import { MobileSessionMenuSheet } from '../src/components/mobile/mobile-session-menu-sheet';
 // @vitest-environment jsdom
 import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -11,8 +13,32 @@ import {
 import { PlatformContext } from '@lody/platform/react';
 import { SessionShareMobileMenu } from '../src/components/sharing/session-share-mobile-menu';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+vi.mock('../src/hooks/use-workspace-members', () => ({
+  useWorkspaceMembers: () => ({
+    members: [
+      { userId: 'author', name: 'Owner Alice' },
+      { userId: 'reader', name: 'Reader Bob' },
+    ],
+  }),
+}));
+vi.mock('../src/hooks/use-session-sharing', () => ({
+  useSessionSharing: () => ({
+    resolve: (session: SessionMeta) => ({
+      visibility: 'private',
+      access: 'read',
+      canManage: false,
+      ownerUserId: session.userId,
+      memberUserIds: ['reader'],
+      availableMembers: [
+        { userId: 'author', name: 'Owner Alice' },
+        { userId: 'reader', name: 'Reader Bob' },
+      ],
+      machineId: session.machineId,
+      localProjectId: null,
+      machineName: null,
+      projectName: null,
+    }),
+  }),
 }));
 vi.mock('../src/ui/drawer', () => {
   const Part = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
@@ -56,7 +82,13 @@ const child: SessionMeta = {
 };
 let root: Root;
 let container: HTMLDivElement;
-beforeEach(() => {
+beforeEach(async () => {
+  await initI18n('en');
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -117,4 +149,59 @@ it('does not substitute the root conversation for a draft or viewer', async () =
   await render(null);
   expect(container.textContent).not.toContain('Share');
   expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('shows an unavailable mobile owner candidate with its reason and never selects it', async () => {
+  let assigned = 'a';
+  await act(async () =>
+    root.render(
+      <MobileSessionMenuSheet
+        open
+        onOpenChange={() => {}}
+        infoRows={[]}
+        actions={[]}
+        owner={{
+          members: [
+            { userId: 'a', name: 'Alice' },
+            { userId: 'b', name: 'Bob' },
+            { userId: 'c', name: 'Carol' },
+          ],
+          ownerUserId: 'a',
+          getDisabledReason: (id) => (id === 'b' ? 'Local project is not shared' : null),
+          onSelect: (id) => {
+            assigned = id;
+          },
+        }}
+      />
+    )
+  );
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-expanded]')!.click());
+  const bob = [...container.querySelectorAll('button')].find((node) =>
+    node.textContent?.includes('Bob')
+  )!;
+  expect(bob.disabled).toBe(true);
+  expect(bob.textContent).toContain('Local project is not shared');
+  await act(async () => bob.click());
+  expect(assigned).toBe('a');
+  await act(async () =>
+    [...container.querySelectorAll('button')]
+      .find((node) => node.textContent?.includes('Carol'))!
+      .click()
+  );
+  expect(assigned).toBe('c');
+});
+
+it('opens the real team/member panel from the mobile menu without opening public publication', async () => {
+  await render(child);
+  const access = [...container.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('Team access')
+  );
+  expect(access).toBeDefined();
+  await act(async () => access!.click());
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.textContent).toContain('Team access');
+  expect(dialog?.textContent).toContain('Owner Alice');
+  expect(dialog?.textContent).toContain('Reader Bob');
+  expect(dialog?.querySelector('button[aria-label="Remove Reader Bob"]')).toBeNull();
+  expect(document.querySelector('[data-session]')).toBeNull();
 });

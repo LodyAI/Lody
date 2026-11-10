@@ -16,7 +16,8 @@ const documents={main:'DataRuntime.html',debug:'DebugRuntime.html',network:'Netw
 for (const variant of Object.keys(documents)) {
   const result = await build({entryPoints:[path.join(root,`src/${variant}.mjs`)], bundle:true,format:'esm',platform:'browser',target:'chrome100',write:false,
     define:{LODY_MOBILE_STORAGE_SUFFIX:JSON.stringify(backends.STORAGE_SUFFIX)},
-    plugins:[{name:'inline-loro-wasm',setup(b){b.onResolve({filter:/^loro-crdt$/},()=>b.resolve('loro-crdt/base64',{resolveDir:root,kind:'import-statement'}));}}]});
+    loader:{'.wasm':'binary'},
+    plugins:[{name:'inline-loro-wasm',setup(b){b.onResolve({filter:/^loro-crdt(?:\/base64)?$/},()=>({path:path.join(root,'src/loro-wasm.mjs')}));}}]});
   const dir=path.join(output,variant==='network'?'main':variant,'runtime');await mkdir(dir,{recursive:true});
   const script=result.outputFiles[0].text.replaceAll('</script','<\\/script');
   // Offline probe: no network access, external scripts or frames.

@@ -191,7 +191,8 @@
       "import": "./src/local-loro-writer/legacy.ts"
     },
     "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
-    "./e2ee-rpc": "./src/e2ee-rpc.ts"
+    "./e2ee-rpc": "./src/e2ee-rpc.ts",
+    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

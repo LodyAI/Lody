@@ -1,3 +1,14 @@
+import {
+  AgentProviderOperationParams,
+  AgentProviderOperationResult,
+  AgentProviderOperationProgress,
+  AgentProviderDetailParams,
+  AgentProviderDetail,
+  AgentProviderProbeParams,
+  AgentProviderProbeResult,
+  AgentProviderAuthParams,
+  AgentProviderAuthState,
+} from './provider-details.ts';
 import { z } from 'zod/v4';
 import {
   CatalogEvent,
@@ -40,6 +51,8 @@ import {
   StartParams,
 } from './lifecycle.ts';
 import {
+  AgentProvidersParams,
+  AgentProvidersResult,
   AgentRoleSnapshot,
   AgentRolesParams,
   RemoteSettingsParams,
@@ -174,6 +187,31 @@ export const runtimeCalls = {
     params: RemoteSettingsParams,
     result: RemoteSettingsResult,
     timeoutMs: 45_000,
+  },
+  agentProviderOperation: {
+    params: AgentProviderOperationParams,
+    result: AgentProviderOperationResult,
+    timeoutMs: 350000,
+  },
+  agentProviderDetail: {
+    params: AgentProviderDetailParams,
+    result: AgentProviderDetail,
+    timeoutMs: 45000,
+  },
+  agentProviderProbe: {
+    params: AgentProviderProbeParams,
+    result: AgentProviderProbeResult,
+    timeoutMs: 135000,
+  },
+  agentProviderAuth: {
+    params: AgentProviderAuthParams,
+    result: AgentProviderAuthState,
+    timeoutMs: 60000,
+  },
+  agentProviders: {
+    params: AgentProvidersParams,
+    result: AgentProvidersResult,
+    timeoutMs: 135_000,
   },
   agentRoles: {
     params: AgentRolesParams,
@@ -371,6 +409,11 @@ export const hostCalls = {
 } satisfies Record<string, CallSpec>;
 
 export const runtimeEvents = {
+  agentProviderAuthChanged: AgentProviderAuthState,
+  agentProviderOperationProgress: AgentProviderOperationProgress,
+  agentProvidersChanged: z
+    .object({ machineId: z.string() })
+    .meta({ id: 'AgentProvidersChangedEvent' }),
   catalog: CatalogEvent,
   shareProgress: ShareProgressEvent,
   creationOptionsChanged: Empty,

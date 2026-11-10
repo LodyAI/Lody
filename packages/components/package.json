@@ -61,7 +61,8 @@
     "./utils": "./src/utils.ts",
     "./window-globals": {
       "types": "./src/window-globals.d.ts"
-    }
+    },
+    "./lib/posthog-privacy": "./src/lib/posthog-privacy.ts"
   },
   "scripts": {
     "dev": "tsr generate && oxfmt src/routeTree.gen.ts",

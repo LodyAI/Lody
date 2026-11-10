@@ -69,7 +69,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -158,6 +157,7 @@ data class ChatListUiState(
     val workspaces: List<Workspace>,
     val workspaceId: String?,
     val members: Map<String, WorkspaceMember> = emptyMap(),
+    val accountEmail: String = "",
 )
 
 enum class HomeTab(@StringRes val label: Int) {
@@ -189,6 +189,9 @@ fun ChatListScreen(
     schedules: app.lody.android.schedules.ScheduleService? = null,
     /** Computers, agents, models and modes for the schedule editor. */
     creation: app.lody.android.create.CreationService? = null,
+    agentProviders: AgentProviderService? = null,
+    roleSettings: RoleSettingsService? = null,
+    shortcutSettings: ShortcutSettingsService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
     onOpenSession: (String) -> Unit = {},
@@ -213,6 +216,11 @@ fun ChatListScreen(
     val notice = { text: String -> notices.launch { snackbar.showSnackbar(text) }; Unit }
     // Schedules: the list for this workspace and the open editor (a schedule id or [NEW_SCHEDULE]).
     val scheduleList = app.lody.android.schedules.rememberSchedulesState(schedules, scope)
+    var agentsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var preferencesOpen by rememberSaveable { mutableStateOf(false) }
+    var rolesOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var shortcutsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
         if (tab == HomeTab.Schedules) scheduleList?.refresh()
@@ -233,6 +241,23 @@ fun ChatListScreen(
     val sections = remember(state.snapshot, grouping, owner) { state.snapshot?.let { ChatListModel.home(it, grouping, owner) }.orEmpty() }
 
     BackHandler(enabled = searching) { closeSearch() }
+
+    if (preferencesOpen) {
+        PreferencesScreen(onBack = { preferencesOpen = false })
+        return
+    }
+    if (shortcutsOpen) {
+        ShortcutsScreen(state, shortcutSettings, scope, onBack = { shortcutsOpen = false })
+        return
+    }
+    if (rolesOpen) {
+        RolesScreen(state, roleSettings, scope, onBack = { rolesOpen = false })
+        return
+    }
+    if (agentsOpen) {
+        AgentSettingsScreen(state, agentProviders, scope, onBack = { agentsOpen = false })
+        return
+    }
 
     val editing = scheduleEditor
     if (editing != null && scheduleList != null) {
@@ -307,7 +332,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            else -> SettingsList(state, padding, onSelectWorkspace, onSignOut)
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
     }
     }
@@ -915,51 +940,6 @@ private val ProjectSource.label: Int
         ProjectSource.GitHub -> R.string.home_projects_source_github
         ProjectSource.Local -> R.string.home_projects_source_local
     }
-
-@Composable
-private fun SettingsList(state: ChatListUiState, padding: PaddingValues, onSelectWorkspace: (Workspace) -> Unit, onSignOut: () -> Unit) {
-    val colors = LodyTheme.colors
-    val context = LocalContext.current
-    var developer by remember { mutableStateOf(app.lody.android.runtime.RoostPreferences.developer(context)) }
-    var roost by remember { mutableStateOf(app.lody.android.runtime.RoostPreferences.experiment(context)) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
-        item { SectionTitle(stringResource(R.string.home_settings_account)) }
-        item {
-            SettingsRow(state.accountName.ifEmpty { "—" }, null, colors.textPrimary, onClick = null) {
-                Avatar(state.accountImage, state.accountName.ifEmpty { "?" }, LodySize.avatarMd)
-            }
-        }
-        item { SectionTitle(stringResource(R.string.home_settings_workspace)) }
-        items(state.workspaces, key = { it.id }) { workspace ->
-            SettingsRow(
-                title = workspace.name,
-                icon = if (workspace.id == state.workspaceId) LodyIcons.Check else null,
-                tint = colors.textPrimary,
-                onClick = { if (workspace.id != state.workspaceId) onSelectWorkspace(workspace) },
-            ) { Avatar(workspace.image, workspace.name, LodyIconSize.lg) }
-        }
-        item { SectionTitle(stringResource(R.string.settings_developer)) }
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.settings_developer_mode), Modifier.weight(1f), style = LodyTheme.typography.body, color = colors.textPrimary)
-                Switch(checked = developer, onCheckedChange = { developer = it; app.lody.android.runtime.RoostPreferences.setDeveloper(context, it) })
-            }
-        }
-        if (developer) {
-            item {
-                Column(Modifier.fillMaxWidth().padding(horizontal = LodySpacing.lg)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.settings_roost_history), Modifier.weight(1f), style = LodyTheme.typography.body, color = colors.textPrimary)
-                        Switch(checked = roost, onCheckedChange = { roost = it; app.lody.android.runtime.RoostPreferences.setExperiment(context, it) })
-                    }
-                    Text(stringResource(R.string.settings_roost_history_hint), style = LodyTheme.typography.footnote, color = colors.textTertiary)
-                }
-            }
-        }
-        item { Spacer(Modifier.height(LodySpacing.xxl)) }
-        item { SettingsRow(stringResource(R.string.home_sign_out), LodyIcons.LogOut, colors.dangerDefault, onClick = onSignOut) }
-    }
-}
 
 // MARK: - Rows
 

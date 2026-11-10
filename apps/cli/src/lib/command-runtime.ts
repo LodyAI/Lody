@@ -5,7 +5,10 @@ import {
   getLoroStreamsShardUrls,
   LORO_STREAMS_BUCKET_ID,
   getServerNow,
+  sessionHistoryWriteIntentDigest,
   getMachineRoomId,
+  getSessionRoomId,
+  isContainedSession,
   resolveNewSessionHistoryBackend,
   machineSupportsSessionHistoryInspection,
   type MachineMeta,
@@ -56,10 +59,12 @@ import {
   createCloudE2eePort,
   createCloudStreamsTokenPort,
   createCloudSessionSharingPort,
+  mintCliSessionHistoryReadProof,
 } from '@/lib/cloud-cli-port';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
 import {
+  getSessionHistoryRequester,
   getDaemonWorkspace,
   getSessionCommandEnvironment,
   runWithEncryptedCommandAccess,
@@ -397,20 +402,66 @@ export function createCommandSessionHistoryFactory(
       | MachineMeta
       | undefined;
     resolveNewSessionHistoryBackend(machine, { requested: 'roost' });
+    const historyTarget = async () => {
+      const child = await doc.getMetaState();
+      if (!child?.machineId) throw new Error('Session history owner is unavailable');
+      const parent = child.parentSessionId
+        ? await manager.repo.getDocMeta(getSessionRoomId(child.parentSessionId))
+        : undefined;
+      const parentMeta = parent
+        ? { ...(parent.meta as SessionMeta), id: child.parentSessionId! }
+        : undefined;
+      const root =
+        parent && !parent.deleted && isContainedSession(child, parentMeta) ? parentMeta! : child;
+      return {
+        sourceMachineId: auth.machineId,
+        rootSessionId: root.id,
+        sessionOwnerUserId: root.userId,
+        localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
+      };
+    };
     return createRoostRpcSessionServices(doc, {
       coherentInspection: machineSupportsSessionHistoryInspection(machine),
       read: async (query) => {
+        const readProof = await mintCliSessionHistoryReadProof({
+          ...(await historyTarget()),
+          token: auth.token,
+          authBaseUrl: LODY_AUTH_URL,
+          authSiteUrl: LODY_AUTH_SITE_URL,
+          logger: getLogger('session'),
+          workspaceId,
+          machineId: meta.machineId,
+          sessionId: doc.sessionId,
+          requester: getSessionHistoryRequester(),
+        });
         const response = await withRpc(target, (client) =>
           client.requestSessionHistoryRead({
             sessionId: doc.sessionId,
             ownerSessionId: meta.id,
             query,
+            readProof,
           })
         );
         if (!response) throw new Error('Owner history read timed out');
         return response;
       },
       write: async (operation, payload) => {
+        const requestId = crypto.randomUUID();
+        const intentDigest = await sessionHistoryWriteIntentDigest(requestId, operation, payload);
+        const writeProof = await mintCliSessionHistoryReadProof({
+          ...(await historyTarget()),
+          token: auth.token,
+          authBaseUrl: LODY_AUTH_URL,
+          authSiteUrl: LODY_AUTH_SITE_URL,
+          logger: getLogger('session'),
+          workspaceId,
+          machineId: meta.machineId,
+          sessionId: doc.sessionId,
+          requester: getSessionHistoryRequester(),
+          edit: true,
+          requestId,
+          intentDigest,
+        });
         if (!(await manager.waitUntilMetaSynced({ timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS })))
           throw new Error('Session metadata has not reached its history owner');
         const response = await withRpc(target, (client) =>
@@ -419,6 +470,8 @@ export function createCommandSessionHistoryFactory(
             ownerSessionId: meta.id,
             operation,
             payload,
+            writeProof,
+            requestId,
           })
         );
         if (!response) throw new Error('Owner history write timed out');

@@ -43,6 +43,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var githubOperation: String?
   var githubScope = ""
   var githubUpdates = SessionPullRequestUpdates()
+  var githubSettle: Task<Void, Never>?
   private let initialChoice: ModelChoice?
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0
@@ -61,6 +62,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
   private var browsingVisible = false
+  private var navigationVisit = UUID()
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
@@ -106,6 +108,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   isolated deinit {
     memberTask?.cancel()
+    githubSettle?.cancel()
     feed?.finish()
     simulator?.finish()
     if sender != nil { environment.foreground(sessionId, false) }
@@ -176,6 +179,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     #endif
     browsingVisible = false
+    navigationVisit = UUID()
     PushNotifications.shared.visibleRoute = ""
     if SettingsPage.leaving(self) {
       permissionPage?.update(nil, ready: true)
@@ -581,7 +585,42 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   }
 
   func perform(_ action: String) {
-    actions.perform(action, row: sessionId, from: self)
+    let scope = source.state.key
+    let visit = navigationVisit
+    let returnToList: @MainActor () -> Void = { [weak self] in
+      guard let self, self.source.state.key == scope, self.navigationVisit == visit,
+        self.browsingVisible, self.viewIfLoaded?.window != nil,
+        let navigation = self.navigationController,
+        navigation.topViewController === (self.parent ?? self),
+        navigation.transitionCoordinator == nil,
+        (self.parent ?? self).presentedViewController == nil else { return }
+      if let home = HomeController.current, home.contains(self) {
+        home.returnToList(from: self)
+      } else {
+        LodyShell.shared.popToRoot()
+      }
+    }
+    guard action == "archive", let session = source.state.catalog.session(sessionId), !session.archived else {
+      actions.perform(action, row: sessionId, from: self)
+      return
+    }
+    let source = source
+    let workspace = source.state.workspaceId
+    let id = sessionId
+    let generation = LocalStore.shared.generation
+    weak var home = HomeController.current
+    let hadHome = home != nil
+    SessionArchive.start(
+      isCurrent: {
+        guard source.state.key == scope, !scope.isEmpty, LocalStore.shared.generation == generation else { return false }
+        return !hadHome || (home != nil && HomeController.current === home && home?.source.state.key == scope)
+      },
+      write: { try await source.write(workspace, id, .archive(true)) },
+      returnToList: returnToList,
+      failed: {
+        LodyToastOverlay.shared.show(message: String(localized: "session.toast.archiveFailed", bundle: .lody), kind: .warning)
+      }
+    )
   }
 
   func find(query: String, keyboard: Bool) {

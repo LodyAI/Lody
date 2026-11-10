@@ -1081,7 +1081,7 @@ describe('host-only E2EE realtime journal', () => {
       targetMachineId: 'synthetic-machine',
       requestId: 'agent-start:user-turn',
     };
-    const gate = (open: () => RealtimeJournal, expiresAt = 1000) =>
+    const gate = (open: () => RealtimeJournal) =>
       makeEncryptedAgentExecution({
         machineUserId: 'synthetic-machine-account',
         genesis: key.genesis,
@@ -1092,7 +1092,6 @@ describe('host-only E2EE realtime journal', () => {
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
             requesterCryptoUserId: '1e'.repeat(32),
-            expiresAt,
           }),
         authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
       });
@@ -1214,13 +1213,21 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)).toBeNull();
     });
 
-    it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
-      const first = gate(() => journal, 100);
-      expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });
+    it('starts a message once whatever the clock says, and never a retired one', async () => {
+      // No deadline and no clock: a far-future, then a rolled-back clock both start it once.
+      now = 4_102_444_800_000;
+      const first = gate(() => journal);
+      expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'claimed' });
       now = 1;
-      const retry = gate(() => new RealtimeJournal(filename, () => now));
-      expect(await Effect.runPromise(retry.claim(intent))).toMatchObject({ state: 'expired' });
-      expect(journal.read(key)).toMatchObject({ state: 'received', expiresAt: 100 });
+      const reopened = gate(() => new RealtimeJournal(filename, () => now));
+      expect(await Effect.runPromise(reopened.claim(intent))).toEqual({ state: 'uncertain' });
+      // A message cancelled before it started stays retired, even if its row is pending again.
+      const canceled = { ...intent, userTurnId: 'canceled-turn' };
+      await Effect.runPromise(reopened.retire(canceled));
+      expect(await Effect.runPromise(reopened.claim(canceled))).toEqual({ state: 'completed' });
+      // Retiring an already started message changes nothing.
+      await Effect.runPromise(reopened.retire(intent));
+      expect(journal.read(key)?.state).toBe('uncertain');
     });
 
     it('binds the business intent to its turn and session, independently of display account IDs', async () => {
@@ -1244,37 +1251,13 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)?.state).toBe('uncertain');
     });
 
-    it.each(['received', 'uncertain', 'completed'] as const)(
-      'preserves exact older %s evidence without binding display accounts',
-      async (state) => {
-        const frame = Buffer.from(
-          JSON.stringify([1, intent.sessionId, intent.userTurnId, 'earlier-display-account'])
-        );
-        const earlierRequest = { ...key, requester: 'ab'.repeat(32), expiresAt: 1000, frame };
-        journal.receive(earlierRequest);
-        if (state !== 'received') {
-          const result = journal.claim(earlierRequest);
-          if (result.state !== 'claimed') throw new Error('missing initial claim');
-          if (state === 'completed')
-            journal.finish(result.permit, Buffer.from('original settlement'));
-        }
-        const reopened = gate(() => new RealtimeJournal(filename, () => now));
-        expect(
-          await Effect.runPromise(
-            reopened.claim({ ...intent, requesterUserId: 'new-display-account' })
-          )
-        ).toMatchObject({ state: state === 'received' ? 'claimed' : state });
-        expect(Buffer.from(journal.read(key)?.frame ?? [])).toEqual(frame);
-        if (state === 'completed')
-          expect(journal.read(key)).toMatchObject({
-            state: 'completed',
-            outcome: Uint8Array.from(Buffer.from('original settlement')),
-          });
-        expect(
-          await Effect.runPromise(reopened.claim({ ...intent, requesterUserId: undefined }))
-        ).toEqual({ state: state === 'completed' ? 'completed' : 'uncertain' });
-      }
-    );
+    it('refuses other content under a message ID that already started', async () => {
+      const execution = gate(() => journal);
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
+      const edited = { ...intent, inputConfig: { prompt: 'edited after start' } };
+      expect(await Effect.runPromise(execution.claim(edited))).toEqual({ state: 'uncertain' });
+      expect(journal.read(key)?.state).toBe('uncertain');
+    });
 
     it('refuses a late authorization after the workspace closes without consuming a start', async () => {
       const entered = Promise.withResolvers<void>();
@@ -1405,7 +1388,7 @@ describe('host-only E2EE realtime journal', () => {
       expect(authorized.at(-1)).toEqual([member, 'private-project']);
     });
 
-    it('rejects forged, chained, unverifiable, expired and over-limit derivations', async () => {
+    it('rejects forged, chained, unverifiable and over-limit derivations', async () => {
       const deny = async (row: Original | undefined, rows = originals) => {
         const userTurnId = `turn-${rows.size}-${Math.random()}`;
         if (row) rows.set(`child-session/${userTurnId}`, row);
@@ -1423,13 +1406,7 @@ describe('host-only E2EE realtime journal', () => {
       // An origin that cannot be verified (absent, edited, other workspace) is refused.
       originals.delete('origin-session/origin-turn');
       expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'denied' });
-      // Started more than 15 minutes after the origin's signed deadline.
-      originals.set(
-        'origin-session/origin-turn',
-        signed(member, { expiresAt: Date.now() - 15 * 60_000 - 1_000 })
-      );
-      expect(await deny(signed(self, { derivedFrom: origin }))).toEqual({ state: 'expired' });
-      // At most twenty starts per origin.
+      // No time limit applies; at most twenty starts per origin do.
       originals.set('origin-session/origin-turn', signed(member));
       const execution = gate();
       for (let index = 0; index < 21; index++) {

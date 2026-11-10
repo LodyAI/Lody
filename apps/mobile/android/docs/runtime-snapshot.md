@@ -16,6 +16,15 @@ For an intentional update:
 3. Replace the snapshot only after reviewing the diff; update PROVENANCE and SHA256 together. Generate hashes with the exported `hashes()` function in `runtime/snapshot.mjs`, directed at the reviewed source directory. No build regenerates the manifest automatically.
 4. Run snapshot verification, `npm ci`, JS tests, asset build, JVM and Android bridge tests. Update `runtime/contract/fixtures.json` only for an intentional contract change. Capture actual WebView/WASM results and verify release assets contain no diagnostics.
 
+Android bundles Loro through `runtime/src/loro-wasm.mjs`: both `loro-crdt` and
+`loro-crdt/base64` resolve to the official `loro-crdt/web` entry, with its WASM bytes
+inlined by esbuild and initialized asynchronously before dependent modules run.
+This avoids the base64 entry's synchronous `new WebAssembly.Module`, which Android
+WebView can reject above 4 KiB on its main thread, including on supported devices.
+Flock's base64 entry already initializes asynchronously. No network fetch, vendor
+patch, dependency change or WebView upgrade is required. The real WebView suite
+checks production document readiness and actual Flock/Loro snapshot round trips.
+
 The production lockfile remains pinned. Phase 1 reported Zod advisory **GHSA-mrhx-c7xc-m3w5** against 3.25.76. Phase 2 pins **4.6.7** and verifies real shared schemas: accepted identities, strict extra-field rejection, shortcut variants, share object validation, and oversized constrained collections failing before per-item error allocation. The oversized-input test failed on v3 and passes on the patched version. `npm audit --omit=dev` reports zero known vulnerabilities for this lockfile. No source snapshot changes or v3 compatibility shim were needed.
 
 The Roost update in `PROVENANCE.json` records the upstream bridge, input
@@ -46,6 +55,13 @@ creation capabilities, so no bundle-time source adapters remain. A later differe
 belongs in the next re-snapshot, not in a patch over the snapshot. `catalog-budget.test.mjs`
 still runs the bundled watcher against a synthetic transport to pin the budget.
 
+The snapshot at `7f742986` gates the composer's prompt shortcuts by their saved project,
+computer and agent scope (as web) instead of dropping every scoped or referencing one,
+answers `cmd` mention reads from the runtime's last shortcut listing while reading a fresh
+one, and reports a listing with an unreadable or pending owner index as incomplete rather
+than empty. The `promptShortcuts` list action (Settings and `shortcutBody`) lists what is
+readable; send-time `/shortcut:` expansion keeps the strict listing.
+
 ## Android text creation
 
 `create-commands.mjs` exposes creation options and create-and-send using native scope identity. Presence is read through the grant origin; the UI only offers currently online agents. The adapter calls upstream creation, session bootstrap and text send in order, retaining IDs and never retrying writes. It deliberately uses plain text (no shortcut, attachment or mention expansion). The snapshot's creation carries the public local-project `useWorktree` field. Native and JavaScript network gates permit only the exact workspace stream kinds needed for persistence and dispatch. An accepted Machine RPC is not task completion. GitHub branches are entered by name in this first integration.
@@ -70,7 +86,7 @@ fields reach native UI, never launch environments or credentials.
 
 ## Schedules
 
-`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the `loro-crdt/base64` alias. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
+`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the asynchronous Loro wrapper. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
 
 ## Operation receipts
 
@@ -85,3 +101,34 @@ Its whole-package delta changes only `src/models/session.ts`,
 versions and license files are unchanged. Android's bundled projection test uses
 synthetic Loro history through `projectSession`, including reply text and a batch
 with suppressed success plus an error.
+
+## Agent settings
+
+The current snapshot adds canonical provider list/save/delete/setup operations,
+write-only advanced configuration, encrypted ACP authentication, binary operations,
+Pi extension discovery, quota refresh and target invalidation events. Android keeps
+its adapter and identity fencing outside the snapshot. Auth consent precedes opening
+URLs; final method menus start a fresh flow, while resumable interactions retain their
+flow. Native deadlines exceed the canonical 135-second probe, 60-second auth and
+350-second operation limits. Provider setup remains daemon-owned until published.
+
+MCP session selection remains supported. The upstream delta removes the unused
+`memorySettings` contract and its two implementation files; Android has no consumer
+and retains an explicit Memory placeholder. Dependencies and license files are unchanged.
+
+## Settings caching and Agent Roles
+
+The snapshot at `eff22abf` lets settings list reads keep an incremental per-runtime
+stream cache (cleared on account or workspace change; callers get private copies, and
+writes and turn-time Role reads still bootstrap fresh), lists `agentProviders` from the synced workspace
+replicas with online and own computers first, loads prompt-shortcut indexes in
+parallel, accepts a Role `emoji` on save and removes the project-history action.
+`role-commands.mjs` bridges `agentRoleSettings` (list / save / delete) with the native
+identity and a closed error vocabulary; both network gates permit read, create and
+append of `<workspace>:wf:workspace` only. Prompt shortcuts: the contract bridge forwards
+the runtime's allow-listed `shortcutCloud` host calls for the current workspace to native as
+`shortcutCloud` events and answers each once through `shortcutCloudReply` (`{value}` or
+null → `shortcut_unavailable`, 60-second native deadline); `shortcut-commands.mjs` bridges
+`shortcutSettings` (list / read / save). Both gates permit read, create and append of
+`shortcut-index:<workspace>:<owner>:<visibility>` and `shortcut-body:<id>`, whose
+stream-specific tokens come from `getStreamToken`.

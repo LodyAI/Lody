@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { LoroDoc } from 'loro-crdt/base64';
+import { SESSION_HISTORY_PROTOCOL_VERSION } from '../../../../packages/cloud-runtime/vendor/upstream-roost/packages/shared/src/machine-protocol-capabilities.ts';
 
 test('create a project session, open its empty history and dispatch the first turn; reject invalid targets and never replay an uncertain create', async () => {
   const meta = new Flock('meta'),
@@ -746,9 +747,9 @@ test('new sessions persist the upstream Roost preference only for compatible mac
     gatewayBaseUrl: 'https://example.invalid',
   });
   for (const [preference, capability, expected] of [
-    [false, 3, 'loro'],
-    [true, 2, 'loro'],
-    [true, 3, 'roost'],
+    [false, SESSION_HISTORY_PROTOCOL_VERSION, 'loro'],
+    [true, SESSION_HISTORY_PROTOCOL_VERSION - 1, 'loro'],
+    [true, SESSION_HISTORY_PROTOCOL_VERSION, 'roost'],
   ]) {
     flock.set(['m', 'machine-m'], {
       protocolCapabilities: { sessionHistory: capability },

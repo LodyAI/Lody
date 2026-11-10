@@ -13,3 +13,7 @@ configuration, or business-rule implementations.
   open packages. Do not import from a hosted implementation or private package.
 - Local OSS startup must not construct this client unless the selected platform
   provider explicitly enables the matching cloud capability.
+
+- Machine identity restoration requires server-verified ownership of both registrations
+  and an exact retained request. An installation ID is neither an encrypted device
+  identity nor permission to transfer encrypted custody.

@@ -131,7 +131,7 @@ export const readableRole = (role: StoredRole, userId: string) =>
 // Web `DEFAULT_AGENT_ROLE_EMOJI` / `normalizeAgentRoleEmoji`: one short glyph, no
 // whitespace or control characters; a Role without one reads as the default.
 export const DEFAULT_ROLE_EMOJI = '🪼';
-function roleEmoji(value: unknown): string | undefined {
+export function roleEmoji(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const glyph = Array.from(value.replace(/\p{Cc}/gu, '').replace(/\s+/gu, ''))
     .slice(0, 8)

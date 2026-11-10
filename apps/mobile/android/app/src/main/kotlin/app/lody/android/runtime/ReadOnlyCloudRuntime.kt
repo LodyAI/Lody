@@ -13,6 +13,7 @@ internal class ReadOnlyCloudRuntime(
     override val scope: RuntimeScope,
     initialGrant: ShortLivedGrant,
     private val provider: GrantProvider,
+    private val shortcutCloud: ShortcutCloudProvider? = null,
 ) : CloudRuntime {
     private val access = StreamAccess(scope.workspaceId, initialGrant.gatewayBaseUrl)
     private val runtime = WebViewRuntime(scope, WebViewCloudRuntime(context, "NetworkRuntime.html", access))
@@ -31,7 +32,9 @@ internal class ReadOnlyCloudRuntime(
         tasks.launch(start = CoroutineStart.UNDISPATCHED) {
             runtime.events.collect { event ->
                 if (event.generation != state.value.generation) return@collect
-                if (event.event == RuntimeEvent.GrantRequested) refresh()
+                val requested = event.event
+                if (requested == RuntimeEvent.GrantRequested) refresh()
+                else if (requested is RuntimeEvent.ShortcutCloudRequested) answer(requested, event.generation)
                 else mutableEvents.emit(event)
             }
         }
@@ -77,6 +80,19 @@ internal class ReadOnlyCloudRuntime(
             }
         }
     }
+    /** Answers a shortcutCloud request exactly once: `{value}` on success, null on any failure or deadline. */
+    private fun answer(request: RuntimeEvent.ShortcutCloudRequested, generation: Long) {
+        val calls = shortcutCloud
+        lifetime?.launch {
+            val value: JSONObject? = if (calls == null || request.operation !in ShortcutOperations) null else withTimeoutOrNull(60_000) {
+                try { JSONObject().put("value", calls.call(scope, request.operation, JSONObject(request.args)) ?: JSONObject.NULL) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            }
+            if (state.value.generation != generation) return@launch
+            runCatching { runtime.call("shortcutCloudReply", JSONArray().put(request.requestId).put(value ?: JSONObject.NULL)) }
+        }
+    }
     override suspend fun setActive(active: Boolean) = withContext(Dispatchers.Main.immediate) {
         foreground = active
         if (!active) { grantJob?.cancel(); grantJob = null }
@@ -88,3 +104,5 @@ internal class ReadOnlyCloudRuntime(
         runtime.stop()
     }
 }
+
+private val ShortcutOperations = setOf("listAccessibleDocuments", "getStreamToken", "stageDocument", "activateDocument")

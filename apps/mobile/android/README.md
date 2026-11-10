@@ -36,7 +36,7 @@ The native app supports OneSignal (default) and direct FCM. Only the backend
 FCM; confirmed `false` selects OneSignal. A failed query or malformed response
 reports `unavailable` and preserves the last provider selection; it never silently
 falls back. Build properties never override that choice. The OneSignal external
-identity is `lody-push-v2:<verified user ID>`.
+identity is the original verified user ID, unchanged.
 
 OneSignal uses public app ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`; override with
 Gradle property `LODY_ONESIGNAL_APP_ID` for a separately provisioned app. Its
@@ -202,11 +202,17 @@ their ordinary list behavior.
 
 ## Schedules
 
-The native Schedules tab shows search-scoped counts for Active, Attention, Paused
-and Ended. Tap a count to filter both task and message sections; tap it again to
-clear. Attention rows come first, with runtime order preserved within each state.
-Cards show the Agent mark and state badge, title, status, frequency and execution
-context. Existing row actions and delete confirmation remain available.
+The native Schedules tab shows flat rows grouped by Attention, Active, Paused and
+Ended, filtered by search. It restores the last successful list from an atomic
+display cache scoped to the account and workspace before refreshing. Failed live
+reads retain that display. The cache retains at most eight 8 MiB snapshots, prunes
+removed workspace access and clears with account data at logout or account change.
+Cached rows do not grant write authority.
+
+Pause and resume update the row and its group immediately, suppress further row
+commands while pending, and restore the prior row on failure (including unknown
+write outcomes). Reads begun before a command cannot overwrite its result. A fresh
+read reconciles after completion; optimistic state is never persisted or replayed.
 
 The editor presents stored status and quick actions above Task, When and Run with
 cards. Save is in the app bar; Delete is a separate confirmed action. Day selectors
@@ -214,6 +220,83 @@ adapt their column count to retain 48 dp touch targets. Run and resume retain th
 machine capability gate, writes remain owner-only, and read-only destinations and
 scheduled messages keep their existing restrictions. The original rule and unknown
 write retry identity handling are unchanged. Open last chat uses Home navigation.
+
+## Settings
+
+Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
+Agent settings, Agent Roles, prompt shortcuts and sign-out. There is no Machines or Agent conversation
+sync destination. Other unfinished settings destinations show an explicit placeholder.
+
+Preferences follows iOS: language and notifications open the system pages for this
+app, then the queued-message behaviour (`AppPreferences`). Steer applies only when
+the conversation's agent advertises `steer`; otherwise a message sent while it works
+queues. Android has no alternate app icon.
+
+Agent Roles (`RolesScreen`, runtime `agentRoleSettings`) list your Roles and those
+shared by teammates with their emoji, and create, edit and delete your own (emoji
+grid, name, description, target agent, sharing, instructions). The last list shows
+from process memory while a live read refreshes it; only a live list enables writes.
+Saves and deletes show at once and roll back on failure; unknown outcomes are never
+replayed. Canonical role settings validate ownership and conflicts.
+
+Prompt shortcuts (`ShortcutsScreen`, runtime `shortcutSettings`) list private and
+workspace shortcuts with their `/slug`, read a fresh body before editing, and create or
+edit simple ones (name, slug, prompt; visibility only when creating), as iOS: owner
+only, and shortcuts with a project / computer / provider scope or structured references
+stay view only. A save shows at once and rolls back on failure; an unknown outcome holds
+the same payload so the only next step is retrying that save. The runtime's
+`shortcutCloud` host calls (`listAccessibleDocuments`, `getStreamToken`, `stageDocument`,
+`activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
+with the verified account and the native workspace; mutations use a one-shot client.
+This also lets the composer's `/` shortcuts load their bodies.
+
+Agent settings select one machine above its provider list (online and own machines
+first); the top bar's "+" adds a provider to it, and the last list shows from process
+memory while refreshing. Deletions leave the list at once and return on failure. Native forms support
+catalog entries and presets, names/prompts/descriptions, custom commands, write-only
+environment changes, endpoints, Codex profiles, runtime paths and capability-derived
+title options. Stored credential values are never returned to forms; omitting an
+environment key preserves it, explicit removal sends null, and an empty replacement
+saves an empty string. Detail revisions fence advanced edits against concurrent changes.
+
+Providers offer edit, probe, refresh and confirmed deletion. Durable setup rows show
+progress, authentication needs and failures with retry/removal. Interactive ACP sign-in
+supports methods, browser authorization, codes, form inputs, consent, status and cancel.
+Final method menus start a new flow; resumable interactions submit to their existing
+flow. Consent must be acknowledged before opening the authorization URL, and verifying
+remains a nonterminal state.
+Runtime controls expose status/install with progress, Pi extension discovery/selection
+and active quota refresh. Sorbet connection/endpoint-store management remains unavailable
+because native encrypted feature transport is missing; ordinary ACP sign-in uses its
+public encrypted input protocol.
+
+Only a fresh snapshot enables owner/online writes. Mutation responses replace the
+target machine’s providers/setups while retaining other still-visible machines.
+`agentProvidersChanged` queues a target-only refresh behind any pending mutation, so
+setup transitions are reconciled without unrelated machine reads. Unknown outcomes
+disable editing until a successful refresh and never replay a write.
+Catalog `agentUsage` selects eligible, exact provider/config quotas and renders
+shared session usage meters and reset-time controls. Absent usage stays hidden.
+
+The native adapter uses canonical `agentProviders`, `agentProviderDetail`,
+`agentProviderProbe`, `agentProviderAuth` and `agentProviderOperation` with verified
+native identity. The reviewed runtime snapshot is fixed at
+`7f74298641f35b714c68752f3976e9b0ffaf6c52` with matching provenance and hashes.
+Native compilation and synthetic acceptance do not establish cloud integration.
+
+`ANDROID_SERIAL=<disposable-emulator> python3 verification/agent-settings.py` runs
+the debug-only synthetic fixture through the production Compose screens. It checks
+Settings without Machines, machine selection, creation on an empty machine,
+other-machine list retention and readonly/offline gates, then exercises synthetic
+sign-in and runtime controls. Screenshots are saved under ignored
+`verification/evidence/agent-settings`. No account login or real provider write occurs.
+[Agent acceptance results](verification/agent-settings-results.json) distinguish
+native synthetic UI, build checks and real WebView instrumentation. Loro uses its
+public asynchronous web initializer with bundled bytes: the base64 initializer's
+synchronous compilation exceeded Android WebView's main-thread 4 KiB limit. This
+is a startup implementation fix, verified on the same API 34 / WebView 113 engine;
+it does not require an engine upgrade or a modified vendor snapshot. Authenticated
+cloud integration remains unverified.
 
 ## Verification
 

@@ -46,6 +46,8 @@ are still filtered before this policy. The supported replay `blockSelector` hide
 images and elements with `alt`, `title` or `aria-label` as additional protection;
 this SDK does not expose replay attribute masking.
 
+A pairing approval can appear above an ordinary workspace. Each actually mounted private page or portal holds an independent private-surface lease; route commitment cannot override it. The UI releases its lease after React removes the DOM, including portal exit, so restarting the recorder cannot snapshot the closing approval. Nested surfaces release only themselves. The owning provider test verifies replay refusal and exception redaction while held, and the real pairing dialog test verifies Later/inbox transitions restore ordinary capture only after the private content leaves.
+
 ## Evidence and limits
 
 `pnpm --filter @lody/components test:posthog-browser` bundles actual product options

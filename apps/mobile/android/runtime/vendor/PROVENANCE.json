@@ -1,10 +1,10 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "2f55abadada37d5bf2fd348f20e7b5dbe39b93fa",
+  "commit": "7f74298641f35b714c68752f3976e9b0ffaf6c52",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 2f55abadada37d5bf2fd348f20e7b5dbe39b93fa apps/mobile/ios/packages/cloud-runtime",
-  "note": "Whole-package export of reviewed immutable local source commit retained at refs/heads/snapshot/mobile-operation-runtime; no local overlays. Relative to e0e7ddc076b998e404f973b2990994e29e85c805, only session ItemSummary, session projection, and operation-presentation change. Adds read-only operation progress/completion/batch cards and notices, preserving duplicate suppression and failure details. Dependencies and licenses are unchanged.",
+  "export": "git archive 7f74298641f35b714c68752f3976e9b0ffaf6c52 apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed runtime snapshot based on the recorded source commit, with the Roost integration described by roostHistory. Android carries the iOS runtime source and generated Roost browser module unchanged; the Roost authoring source and generator remain in iOS. Dependencies and licenses are unchanged.",
   "roostHistory": {
     "files": [
       "README.md",
@@ -25,34 +25,82 @@
       "src/contract/sessions.ts",
       "src/runtime/create-session.ts",
       "contract/fixtures/to-host.json",
-      "contract/fixtures/to-runtime.json"
+      "contract/fixtures/to-runtime.json",
+      "src/runtime/machine-rpc.ts"
     ],
     "note": "The iOS asset build verifies the Roost browser module against the pinned source and shared input refactor. Android snapshots the generated module and licenses verbatim. The authoring source and generator stay in iOS.",
     "upstream": {
       "repository": "https://github.com/LodyAI/Lody",
-      "commit": "8c27d5a2a5fdfb722ef84bf719dd889f5e5c79c7",
+      "commit": "57750dd60f972c6c76510d0191cfc8cfb74afe52",
       "sources": [
-        "packages/shared/src/session-data/history-patches.ts",
-        "packages/shared/src/message-schemas.ts",
-        "packages/components/src/lib/roost-session-bridge.ts",
+        "packages/components/src/lib/e2ee-local-data.ts",
+        "packages/components/src/lib/encrypted-dispatch-outcome.ts",
         "packages/components/src/lib/roost-history-cache.ts",
-        "packages/shared/src/history-write-schema.ts",
-        "packages/shared/src/session-input.ts",
-        "packages/shared/src/machine-protocol-capabilities.ts",
+        "packages/components/src/lib/roost-history-error.ts",
+        "packages/components/src/lib/roost-session-bridge.ts",
         "packages/components/src/lib/session-accepted-inputs.ts",
         "packages/components/src/lib/session-input-storage.ts",
-        "packages/components/src/lib/e2ee-local-data.ts",
         "packages/components/src/lib/session-send-delivery.ts",
         "packages/components/src/lib/session-send-resources.ts",
-        "packages/components/src/lib/encrypted-dispatch-outcome.ts",
-        "packages/shared/src/repo-doc-meta.ts",
-        "packages/shared/src/time-sync.ts"
-      ],
-      "sharedSourceChanges": [
         "packages/components/src/lib/workspace-accepted-inputs.ts",
-        "packages/components/src/lib/session-send-delivery.ts",
-        "packages/components/src/lib/session-send-resources.ts"
-      ]
+        "packages/shared/src/acp-authentication-limits.ts",
+        "packages/shared/src/acp-config-option-sensitivity.ts",
+        "packages/shared/src/acp-model-capabilities.ts",
+        "packages/shared/src/acp-run-config.ts",
+        "packages/shared/src/acp/claude-subagent-task.ts",
+        "packages/shared/src/agent-brand.ts",
+        "packages/shared/src/agent-role-proposal.ts",
+        "packages/shared/src/agent-role.ts",
+        "packages/shared/src/ai.ts",
+        "packages/shared/src/automations/contracts.ts",
+        "packages/shared/src/bug-report-client-log.ts",
+        "packages/shared/src/bug-report.ts",
+        "packages/shared/src/daemon-update.ts",
+        "packages/shared/src/deepseek-harness.ts",
+        "packages/shared/src/encrypted-attachment.ts",
+        "packages/shared/src/github-url.ts",
+        "packages/shared/src/goal.ts",
+        "packages/shared/src/history-write-schema.ts",
+        "packages/shared/src/incremental-sha256.ts",
+        "packages/shared/src/json-guards.ts",
+        "packages/shared/src/machine-protocol-capabilities.ts",
+        "packages/shared/src/magpie-import.ts",
+        "packages/shared/src/memory-provider.ts",
+        "packages/shared/src/message-author.ts",
+        "packages/shared/src/message-quote.ts",
+        "packages/shared/src/message-schemas.ts",
+        "packages/shared/src/message-text-spans.ts",
+        "packages/shared/src/notifications/presentation.ts",
+        "packages/shared/src/project-path.ts",
+        "packages/shared/src/project.ts",
+        "packages/shared/src/repo-doc-meta.ts",
+        "packages/shared/src/rpc-secret.ts",
+        "packages/shared/src/schema.ts",
+        "packages/shared/src/session-data/directory.ts",
+        "packages/shared/src/session-data/domain.ts",
+        "packages/shared/src/session-data/history-patches.ts",
+        "packages/shared/src/session-data/read.ts",
+        "packages/shared/src/session-data/roost.ts",
+        "packages/shared/src/session-data/snapshot.ts",
+        "packages/shared/src/session-data/token-usage.ts",
+        "packages/shared/src/session-data/types.ts",
+        "packages/shared/src/session-failure.ts",
+        "packages/shared/src/session-input.ts",
+        "packages/shared/src/session-orchestration.ts",
+        "packages/shared/src/session-pull-requests.ts",
+        "packages/shared/src/time-sync.ts",
+        "packages/shared/src/workspace-mcp.ts",
+        "packages/shared/src/workspace-project.ts"
+      ],
+      "sharedInputRefactor": {
+        "pullRequest": "https://github.com/LodyAI/Lody/pull/2536",
+        "commit": "57750dd60f972c6c76510d0191cfc8cfb74afe52",
+        "files": [
+          "packages/components/src/lib/workspace-accepted-inputs.ts",
+          "packages/components/src/lib/session-send-delivery.ts",
+          "packages/components/src/lib/session-send-resources.ts"
+        ]
+      }
     }
   }
 }

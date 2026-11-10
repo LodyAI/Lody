@@ -1,3 +1,4 @@
+import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -1312,6 +1313,7 @@ export function SessionProjectInfo({
  */
 export type SessionOwnerMenuState = {
   members: WorkspaceMember[];
+  getDisabledReason?: (userId: string) => string | null;
   /** Current `SessionMeta.userId`; may name someone who already left. */
   ownerUserId: string;
   onChangeOwner: (userId: string) => void | Promise<void>;
@@ -1862,18 +1864,24 @@ export function SessionHeaderMenu({
                   onValueChange={(userId) => {
                     // Guard in the handler, not just via `disabled`: the
                     // menu stays mounted while the write is in flight.
-                    if (userId === owner.ownerUserId || owner.pendingUserId != null) return;
+                    if (
+                      userId === owner.ownerUserId ||
+                      owner.pendingUserId != null ||
+                      owner.getDisabledReason?.(userId)
+                    )
+                      return;
                     void owner.onChangeOwner(userId);
                   }}
                 >
                   {owner.members.map((member) => {
                     const isPending = owner.pendingUserId === member.userId;
+                    const disabledReason = owner.getDisabledReason?.(member.userId);
                     return (
                       <Menu.RadioItem
                         key={member.userId}
                         value={member.userId}
-                        disabled={owner.pendingUserId != null}
-                        title={member.email ?? member.name}
+                        disabled={owner.pendingUserId != null || !!disabledReason}
+                        title={disabledReason ?? member.email ?? member.name}
                         indicator="check"
                         indicatorSide="end"
                         endContent={
@@ -1886,6 +1894,7 @@ export function SessionHeaderMenu({
                           className="shrink-0"
                         />
                         {member.name}
+                        {disabledReason ? <span>{disabledReason}</span> : null}
                       </Menu.RadioItem>
                     );
                   })}
@@ -3137,17 +3146,26 @@ export const SessionChatInterface = memo(
       },
       [session.id, t, transferSessionOwner, workspaceMembers]
     );
+    const getOwnerAccessReason = useSessionOwnerAccess();
     const ownerMenuState = useMemo<SessionOwnerMenuState | undefined>(
       () =>
         isMultiMember
           ? {
               members: workspaceMembers,
+              getDisabledReason: (userId) => getOwnerAccessReason(session, userId),
               ownerUserId: session.userId,
               onChangeOwner: handleChangeOwner,
               pendingUserId: pendingOwnerUserId,
             }
           : undefined,
-      [handleChangeOwner, isMultiMember, pendingOwnerUserId, session.userId, workspaceMembers]
+      [
+        handleChangeOwner,
+        isMultiMember,
+        pendingOwnerUserId,
+        session,
+        workspaceMembers,
+        getOwnerAccessReason,
+      ]
     );
     const [sendingMessageIds, setSendingMessageIds] = useState<ReadonlySet<string>>(new Set());
     const [dismissedProposedPlanDecisionKeys, setDismissedProposedPlanDecisionKeys] = useState<
@@ -5734,6 +5752,7 @@ export const SessionChatInterface = memo(
         if (!runtime) return null;
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
           protectedContent: runtime.contentMode === 'e2ee',
+          signDeclaration: runtime.signScheduleDeclaration,
         }).read(scheduleId);
       },
       [runtime]
@@ -5810,6 +5829,7 @@ export const SessionChatInterface = memo(
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
             }).setEnabled({
               scheduleId: item.scheduleId,
               actorId: currentUser.id,

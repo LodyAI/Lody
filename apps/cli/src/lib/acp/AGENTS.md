@@ -125,3 +125,9 @@ first `await awaitTurnHistoryGate(sessionId)` — see
 `../../session/turn-history-gate.ts`. Add the same await to any NEW code path that
 appends or positions history entries during a turn; map-keyed status/meta writes stay
 ungated.
+
+Pre-open assistant-entry callbacks check their gate's abort signal before issuing a write.
+Finalization disposes its captured gate before persisting `finish-assistant`, so pending
+metadata reads cannot reopen finished history; an old finalization never disposes a successor gate.
+The original gate deadline and disposal release waiters even if preparation remains pending;
+cancellation does not prove that an already-issued write was undone.

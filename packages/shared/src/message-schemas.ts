@@ -1,3 +1,7 @@
+import {
+  ManagedDaemonUpdateStatusSchema,
+  ManagedDaemonUpgradeOptionsSchema,
+} from './daemon-update';
 import { EncryptedAttachmentSchema } from './encrypted-attachment';
 import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
 import { automationOriginSchema } from './automations/contracts';
@@ -1173,6 +1177,7 @@ export const MachineStatusRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     /** Only for daemons advertising `machineDiskStatus`. */
     includeDisk: z.literal(true).optional(),
+    includeDaemonUpdate: z.literal(true).optional(),
   })
   .strict();
 
@@ -1215,6 +1220,7 @@ export const MachineStatusResponseSchema = z
     resources: MachineResourceInfoSchema.optional(),
     disk: MachineDiskInfoSchema.optional(),
     lifecycle: MachineLifecycleCapabilitySchema.optional(),
+    daemonUpdate: ManagedDaemonUpdateStatusSchema.nullable().optional(),
     error: SharedOptionalStringSchema,
   })
   .strict();
@@ -1262,6 +1268,7 @@ export const MachineLifecycleDispositionSchema = z.enum([
 export const MachineRestartRequestSchema = z
   .object({
     type: z.literal('machine/restart'),
+    restoreMachineId: MachineIdSchema.optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     requesterUserId: SharedTrimmedNonEmptyStringSchema,
@@ -1291,6 +1298,7 @@ export const MachineUpgradeRequestSchema = z
     requestToken: SharedTrimmedNonEmptyStringSchema,
     requestId: SharedTrimmedNonEmptyStringSchema,
     targetVersion: z.string().trim().min(1).optional(),
+    upgrade: ManagedDaemonUpgradeOptionsSchema.optional(),
   })
   .strict();
 

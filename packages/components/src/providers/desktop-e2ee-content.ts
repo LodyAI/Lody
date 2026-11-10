@@ -428,6 +428,19 @@ export function createE2eeContent(input: {
           input.runtime.prepareDispatch!(input.workspaceId, machineId, args)
         );
       },
+      signScheduleDeclaration: (
+        document: Pick<
+          import('@lody/shared').ScheduleDocument,
+          'definition' | 'prompt' | 'message'
+        >,
+        manualRunKey?: string
+      ) => {
+        if (!input.runtime.signScheduleDeclaration)
+          return Promise.reject(new Error('e2ee_signature_unavailable'));
+        return withinContent(() =>
+          input.runtime.signScheduleDeclaration!(input.workspaceId, document, manualRunKey)
+        );
+      },
       acceptDispatchResponse: (
         machineId: string,
         args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
@@ -439,6 +452,20 @@ export function createE2eeContent(input: {
           input.runtime.acceptDispatchResponse!(input.workspaceId, machineId, args, frame)
         );
       },
+      ...(input.runtime.irohReady && input.runtime.irohCall
+        ? {
+            irohReady: (machineId: string) =>
+              withinContent(() => input.runtime.irohReady!(input.workspaceId, machineId)),
+            irohCall: (
+              machineId: string,
+              envelope: { id: string; frame: string },
+              timeoutMs: number
+            ) =>
+              withinContent(() =>
+                input.runtime.irohCall!(input.workspaceId, machineId, envelope, timeoutMs)
+              ),
+          }
+        : {}),
       codeCollabRole: {
         get: codeCollabRole,
         subscribe: (listener: () => void) => {

@@ -1,5 +1,32 @@
 /** Import-free startup decisions, also consumed by the document's inline script. */
-export const BOOT_SHELL_SIDEBAR_WIDTH = { default: 280, min: 240, max: 420 } as const;
+export const BOOT_SHELL_SIDEBAR_WIDTH = {
+  default: 280,
+  min: 240,
+  mobileMin: 180,
+  max: 420,
+} as const;
+
+const MOBILE_USER_AGENT = /mobi|iphone|ipod|android|ipad|tablet|playbook|silk/i;
+
+export function isMobileSidebarDevice(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const nativeWindow = window as Window & { __LODY_ELECTRON__?: boolean };
+  const navigator = window.navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+  return (
+    !nativeWindow.__LODY_ELECTRON__ &&
+    (MOBILE_USER_AGENT.test(navigator.userAgent) ||
+      navigator.userAgentData?.mobile === true ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+  );
+}
+
+export function getNavigationSidebarMinWidth(): number {
+  return isMobileSidebarDevice()
+    ? BOOT_SHELL_SIDEBAR_WIDTH.mobileMin
+    : BOOT_SHELL_SIDEBAR_WIDTH.min;
+}
 
 export const BOOT_SHELL_STORAGE_KEYS = {
   theme: 'vite-ui-theme',
@@ -39,7 +66,7 @@ export function resolveBootShellLayout(path: string): BootShellLayout {
 export function createBootShellScript(): string {
   const keys = JSON.stringify(BOOT_SHELL_STORAGE_KEYS);
   const nonWorkspace = JSON.stringify(BOOT_SHELL_NON_WORKSPACE_SEGMENTS);
-  const { default: defaultWidth, min, max } = BOOT_SHELL_SIDEBAR_WIDTH;
+  const { default: defaultWidth, min, mobileMin, max } = BOOT_SHELL_SIDEBAR_WIDTH;
   return (
     '(function(){var d=document.documentElement;' +
     "d.style.setProperty('--lody-boot-elapsed',Math.round(performance.now())+'ms');" +
@@ -55,7 +82,8 @@ export function createBootShellScript(): string {
     "d.setAttribute('data-lody-boot-layout',v?'workspace':'plain');" +
     'var u=window.navigator.userAgent.toLowerCase(),m=!window.__LODY_ELECTRON__&&(/mobi|iphone|ipod|android|ipad|tablet|playbook|silk/.test(u)||window.navigator.userAgentData&&window.navigator.userAgentData.mobile===true)&&window.innerWidth<768;' +
     "d.setAttribute('data-lody-boot-mobile',m?'true':'false');" +
-    `var x=j(L,K.sidebarWidth);x=typeof x==='number'&&x>0?Math.min(${max},Math.max(${min},x)):${defaultWidth};` +
+    `var n=window.navigator,r=!window.__LODY_ELECTRON__&&(${MOBILE_USER_AGENT}.test(u)||n.userAgentData&&n.userAgentData.mobile===true||n.platform==='MacIntel'&&n.maxTouchPoints>1),b=r?${mobileMin}:${min};` +
+    `var x=j(L,K.sidebarWidth);x=typeof x==='number'&&x>0?Math.min(${max},Math.max(b,x)):${defaultWidth};` +
     "d.style.setProperty('--lody-boot-sidebar-width',x+'px');" +
     "if(v&&!c&&window.innerWidth>=768)d.setAttribute('data-lody-boot-sidebar','');" +
     '}catch(e){}})()'

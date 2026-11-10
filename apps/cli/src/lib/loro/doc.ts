@@ -376,8 +376,9 @@ export interface LoroDocumentManagerOptions {
     | 'close'
     | 'repositoryDirectory'
     | 'attachmentToken'
-    | 'retainQueuedInput'
+    | 'signMachineInput'
     | 'authorizeMachineTarget'
+    | 'authorizeSessionTarget'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -402,9 +403,27 @@ export type LoroRepoPersistReason =
  */
 export const TRANSIENT_DOC_ROOM_RETAIN_MS = 150_000;
 
+/**
+ * The first frame outside the manager in a stack captured synchronously on entry,
+ * so a cache-open log names the subsystem that adopted the doc.
+ */
+function describeDocOpener(stack: string | undefined): string {
+  const caller = stack
+    ?.split('\n')
+    .slice(1)
+    .find((frame) => !frame.includes('LoroDocumentManager.'));
+  return caller?.trim().replace(/^at /, '') ?? 'unknown';
+}
+
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
   sessions: Map<SessionId, SessionDocument> = new Map();
+  /**
+   * When each cached Session doc was last handed to a caller. Every opener, not
+   * only execution, adopts docs into `sessions`, so idle collection needs this
+   * to find docs that no turn ever tracked (see `cachedSessionDocLastAccessMs`).
+   */
+  private readonly sessionDocLastAccessMs = new Map<SessionId, number>();
   private readonly sessionDocCleanup = new Map<SessionId, Promise<void>>();
   machine: MachineDocument | null = null;
   private readonly workspaceId: WorkspaceId;
@@ -442,8 +461,9 @@ export class LoroDocumentManager {
     | 'close'
     | 'repositoryDirectory'
     | 'attachmentToken'
-    | 'retainQueuedInput'
+    | 'signMachineInput'
     | 'authorizeMachineTarget'
+    | 'authorizeSessionTarget'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -456,6 +476,14 @@ export class LoroDocumentManager {
     return this.encryptedWorkspace !== undefined;
   }
 
+  /** Exact-session read authority for the actual invoking human, with a fresh policy read. */
+  async authorizeEncryptedSessionRead(
+    target: Parameters<CliE2eeWorkspaceLegacy['authorizeSessionTarget']>[0]
+  ): Promise<boolean> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_access_unavailable');
+    return Effect.runPromise(this.encryptedWorkspace.authorizeSessionTarget(target));
+  }
+
   /** Encrypted workspaces: a one-shot command's machine access, from this process's ledger. */
   async authorizeEncryptedMachine(machineId: string, localProjectId?: string): Promise<boolean> {
     const e2ee = this.encryptedWorkspace;
@@ -463,9 +491,14 @@ export class LoroDocumentManager {
     return await Effect.runPromise(e2ee.authorizeMachineTarget(machineId, localProjectId));
   }
 
-  /** Encrypted workspaces: this machine's own queue write needs local evidence first. */
-  retainQueuedInput(input: Parameters<CliE2eeWorkspaceLegacy['retainQueuedInput']>[0]): void {
-    this.encryptedWorkspace?.retainQueuedInput(input);
+  /** Encrypted workspaces: the signed intent for an input this machine writes itself, to
+   * store with it in the same commit. Ordinary workspaces need none. */
+  async signMachineInput(
+    input: Parameters<CliE2eeWorkspaceLegacy['signMachineInput']>[0]
+  ): Promise<string | undefined> {
+    return this.encryptedWorkspace
+      ? await this.encryptedWorkspace.signMachineInput(input)
+      : undefined;
   }
 
   async getEncryptedAttachmentToken(): Promise<string> {
@@ -518,8 +551,9 @@ export class LoroDocumentManager {
         | 'close'
         | 'repositoryDirectory'
         | 'attachmentToken'
-        | 'retainQueuedInput'
+        | 'signMachineInput'
         | 'authorizeMachineTarget'
+        | 'authorizeSessionTarget'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -1588,12 +1622,15 @@ export class LoroDocumentManager {
       return this.getOrCreateSessionDoc(sessionId, options);
     }
     if (existing) {
+      this.sessionDocLastAccessMs.set(sessionId, Date.now());
       if (options.historyBackend) {
         await createSessionBackend(existing, { historyBackend: options.historyBackend });
       }
       return existing;
     }
 
+    // Captured before the first await, while the caller is still on the stack.
+    const openerStack = new Error().stack;
     // Guard against concurrent init for the same session
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
@@ -1637,6 +1674,10 @@ export class LoroDocumentManager {
         throw new Error(`Session doc ${sessionId} was destroyed during init`);
       }
       this.sessions.set(sessionId, sessionDoc);
+      this.sessionDocLastAccessMs.set(sessionId, Date.now());
+      this.logger.debug(
+        `[${sessionId}] Session doc cached (${this.sessions.size} cached, opened by ${describeDocOpener(openerStack)})`
+      );
       return sessionDoc;
     });
 
@@ -1651,6 +1692,7 @@ export class LoroDocumentManager {
   async getSessionHistorySnapshot(sessionId: SessionId): Promise<SessionHistoryInput[]> {
     const active = this.sessions.get(sessionId);
     if (active) {
+      this.sessionDocLastAccessMs.set(sessionId, Date.now());
       return await (await createSessionBackend(active)).readHistory();
     }
 
@@ -2263,6 +2305,7 @@ export class LoroDocumentManager {
     await attempt('Machine document', async () => this.machine?.destroy());
     this.machine = null;
     this.sessions.clear();
+    this.sessionDocLastAccessMs.clear();
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
@@ -2297,6 +2340,22 @@ export class LoroDocumentManager {
     this.machineMonitorRuntime?.clearProvider();
   }
 
+  /** Session ids whose doc is currently cached, whoever opened it. */
+  cachedSessionDocIds(): SessionId[] {
+    return Array.from(this.sessions.keys());
+  }
+
+  /** When a cached Session doc was last handed to a caller; `undefined` if it is not cached. */
+  cachedSessionDocLastAccessMs(sessionId: SessionId): number | undefined {
+    return this.sessions.has(sessionId) ? this.sessionDocLastAccessMs.get(sessionId) : undefined;
+  }
+
+  /** A cached, live Session doc without opening one or counting as an access. */
+  peekSessionDoc(sessionId: SessionId): SessionDocument | undefined {
+    const sessionDoc = this.sessions.get(sessionId);
+    return sessionDoc && !sessionDoc.isDestroyed ? sessionDoc : undefined;
+  }
+
   cleanSessionDoc(sessionId: SessionId, options: { preserveStatus?: boolean } = {}): Promise<void> {
     const active = this.sessionDocCleanup.get(sessionId);
     if (active) return active;
@@ -2306,7 +2365,11 @@ export class LoroDocumentManager {
       const sessionDoc = this.sessions.get(sessionId);
       if (sessionDoc) {
         await sessionDoc.destroy(options);
-        if (this.sessions.get(sessionId) === sessionDoc) this.sessions.delete(sessionId);
+        if (this.sessions.get(sessionId) === sessionDoc) {
+          this.sessions.delete(sessionId);
+          this.sessionDocLastAccessMs.delete(sessionId);
+          this.logger.debug(`[${sessionId}] Session doc released (${this.sessions.size} cached)`);
+        }
       }
     })();
     this.sessionDocCleanup.set(sessionId, cleanup);

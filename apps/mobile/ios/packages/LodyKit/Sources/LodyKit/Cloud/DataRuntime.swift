@@ -305,6 +305,12 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     case .catalog(let value):
       guard value.catalog.utf8.count <= 12 * 1024 * 1024 else { return }
       publish("live", reason: "catalog", catalog: value.catalog)
+    case .agentProvidersChanged(let value):
+      NotificationCenter.default.post(name: .lodyProvidersChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentProviderAuthChanged(let value):
+      NotificationCenter.default.post(name: .lodyProviderAuthChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentProviderOperationProgress(let value):
+      NotificationCenter.default.post(name: .lodyProviderOperationProgress, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .shareProgress(let value):
       NotificationCenter.default.post(name: .lodyShareProgress, object: value)
     case .machinePresence(let value):

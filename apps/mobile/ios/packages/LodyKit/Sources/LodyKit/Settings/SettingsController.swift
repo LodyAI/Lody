@@ -58,7 +58,7 @@ class SettingsController: UIViewController {
       "github-settings": "github-settings", "ai-usage": "ai-usage",
       "published-shares": "published-shares",
     ]
-    let remote = ["remote-machine": "machine", "remote-agent": "agent"]
+    let remote = ["remote-agent": "agent"]
     if let page = native[id] {
       push(page, title: title(id))
     } else if let page = workspacePages[id], workspace != nil {
@@ -77,8 +77,6 @@ class SettingsController: UIViewController {
       LodyShell.shared.pushNative(AccountController(source: source), title: String(localized: "account.title", bundle: .lody), from: self)
     } else if id == "archived", workspace != nil {
       push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
-    } else if id == "project-history", workspace != nil {
-      push("project-history", title: text("history.title"), params: state.scope)
     } else if id == "diagnostics" {
       push("diagnostics", title: String(localized: "diagnostics.title", bundle: .lody))
     } else if id == "connection", workspace != nil, state.connection.state == "offline" {

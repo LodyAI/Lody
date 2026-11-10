@@ -39,6 +39,38 @@ The application UI and native state run in Swift and UIKit. LodyKit owns navigat
 
 ---
 
+## Agent settings
+
+Settings → Agent follows the Web mobile provider page: select a machine in a native
+sheet, then manage that machine’s providers and setup requests. Forms support
+provider names and instructions, custom commands and arguments, preset credentials
+and endpoints, write-only environment patches, Codex authentication profiles,
+runtime paths, and capability-driven title options. Save and test persists changes
+before probing a persisted agent; newly queued setups continue through setup status
+and authentication. Managed-runtime status/install and Pi extension discovery are
+also available while creating a supported provider. Saved providers expose a separate usage refresh;
+quota and pace displays remain sourced from the catalog usage projection.
+
+ACP sign-in supports method selection, browser authorization, user codes, consent,
+and typed input requests through the public machine RPC. Pending setups awaiting
+authentication expose the same flow. Browser links stay disabled until any required
+consent is accepted by the machine. Auth events are scoped to the active flow, and
+provider-change events refresh and merge only the affected machine. Credentials stay on the selected machine;
+list data and local caches exclude environment values. Existing keys offer Keep,
+Replace, or Remove, and submitted secrets are cleared. Ownership, machine
+capabilities, offline state, and revision checks gate writes. Sorbet connection and
+endpoint-store management still require native encrypted feature transport and
+show their specific unavailable capability.
+
+`agents-settings`, `agents-presets`, `agents-pi`, and `agents-auth-methods` are
+independent offline UI verification cases for provider CRUD and failure recovery,
+preset/secret preservation, Pi runtime patches, and method-selection flow identity
+plus consent-before-browser behavior. They use production controllers with synthetic
+service boundaries and perform no external sign-in.
+
+Roles remain a separate setting. Settings home has no Machines entry; machine
+details and execution-machine selectors elsewhere remain available.
+
 ## How this was built
 
 Lody iOS started as a one-day prototype and became a usable TestFlight client in about a week, driven by coding agents under tight product constraints: iOS only, one native kit module, system UI when React Native cannot meet HIG, and an offscreen WebView for Flock/Loro because official Node/CRDT packages do not bundle in Metro.
@@ -168,10 +200,9 @@ deterministic linger cancellation and cached artwork.
 
 ### Native Schedules
 
-Schedules starts with filterable Active, Needs attention, Paused and Ended counts,
-followed by native inset-grouped task and scheduled-message lists. Each row
-separates its title and status from the recurrence and execution context; items
-needing attention appear first. Search and status filters work together.
+Schedules uses the Chats list layout, with task and scheduled-message rows grouped
+by Needs attention, Active, Paused and Ended. Each row separates its title and
+status from the recurrence and execution context; search filters by title.
 
 The editor places current status and quick actions above separate Task, When and
 Run with cards. Weekdays and month days are directly selectable; date and time
@@ -179,8 +210,12 @@ use native pickers in the computer's time zone. Owners can run, pause or resume
 supported tasks and open the last conversation. Teammates' tasks and scheduled
 messages retain their existing read-only rules, and deletion requires confirmation.
 
-Within the current Home page, list snapshots, opened details and editor choices
-stay in memory for the selected account/workspace. Returning to a loaded editor
+Successful list reads persist as bounded SQLite display snapshots per account and
+workspace. Cold starts restore the saved list before refreshing from the runtime;
+failed reads retain it. Logout clears these snapshots and fences late writes.
+Optimistic states are never persisted, and cached rows do not authorize mutations.
+Opened details and editor choices stay in memory within the current Home page.
+Returning to a loaded editor
 shows its snapshot immediately while detail and choices refresh independently;
 failed refreshes retain existing content, and refreshes preserve unsaved edits.
 Cached details can be edited immediately; Save waits for fresh detail validation
@@ -188,15 +223,14 @@ and blocks when the refresh detects changed remote content.
 Pause/resume preview their state immediately and roll back on failure, with the
 existing unknown-outcome warning when a reply is lost. Pending commands fence
 older reads; account/workspace changes discard snapshots and late responses.
-The runtime still re-reads current data before mutations. App restarts load afresh.
+The runtime still re-reads current data before mutations. A workspace without a
+saved list shows the loading state until its first successful read.
 
 ### Code Diffs & Workspace File Browsing
 
 - **Turn Changes Overview**: Automatically summarizes file changes for each conversation turn, with one-tap access to all modified files.
 - **Word-Level Diff Highlighting**: File, workspace and tool-detail diffs render natively in LodyKit.
 - **Remote Workspace File Tree**: Browse project directories and files on remote Macs or servers at any time, with previews via native code view `LodyCodeView` or system Quick Look.
-
-**Agent Conversation Sync** in Settings lists supported local projects and agents on your own computers. Refresh their history, select conversations to import, and explicitly confirm any conflict replacement. Imports run in batches and retain partial progress; this is a manual history import, not automatic device-to-device mirroring.
 
 ### Live Preview & Simulator Streaming
 
@@ -377,3 +411,11 @@ This supersedes the optional pure-black background described in the historical
 Home design and settings migration documents. Masks, scrims, shadows, media
 content and foreground colors remain unchanged. The native `design` check tests
 legacy values, both themes and increased contrast, including text readability.
+
+Conversation More → Archive returns to Home immediately while the write continues.
+Success is silent; a failed write shows a warning only while its original Home,
+account and workspace remain active. Unarchive stays on the conversation.
+The existing native session suite can isolate these menu actions with
+`LODY_VERIFY_SESSION_ARCHIVE_ONLY=1 pnpm verify:ui --case session-native --require-video --app /absolute/path/to/Lody.app`.
+The `session-info-bar` native check explicitly holds and releases archive writes
+to verify immediate navigation, silent delayed success and scoped delayed failure.

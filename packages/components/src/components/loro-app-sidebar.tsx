@@ -1,3 +1,9 @@
+import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
+import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
@@ -475,7 +481,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const lineBoxClassName = showMetaLine
     ? cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)
     : 'contents';
-  const showInlineArchive = !isMobile;
+  const readOnly = sharing?.access === 'read';
+  const showInlineArchive = !isMobile && !readOnly;
   const showWorktreeIcon = session.isWorktree === true;
   const isPinned = Boolean(session.isPinned);
   // Local-project sessions linked to a GitHub repo can carry a PR — the repo
@@ -486,7 +493,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const showPr = Boolean(prInfo.url);
   const prRepoFullName = resolveProjectGitHubRepo(session.project) ?? null;
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
-  const canRename = typeof onRename === 'function';
+  const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !hasUnreadMessages;
@@ -771,17 +778,19 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           shareMenuState ||
           openerSessionId ||
           isElectronRenderer()) &&
-        true ? (
+        !readOnly ? (
           <ContextMenu.Separator />
         ) : null}
-        <ContextMenu.Item
-          icon={Archive}
-          onClick={() => {
-            onArchive(session.id);
-          }}
-        >
-          {contextMenuLabels.archive}
-        </ContextMenu.Item>
+        {!readOnly ? (
+          <ContextMenu.Item
+            icon={Archive}
+            onClick={() => {
+              onArchive(session.id);
+            }}
+          >
+            {contextMenuLabels.archive}
+          </ContextMenu.Item>
+        ) : null}
       </ContextMenu.Content>
     </ContextMenu.Root>
   ) : (
@@ -1670,15 +1679,26 @@ export function LoroAppSidebar({
       workspaceId: scopedWorkspaceId,
       enabled: workspaceDataReady,
     });
+  const {
+    members: sharingMembers,
+    isLoading: sharingMembersLoading,
+    error: sharingMembersError,
+    retry: retrySharingMembers,
+  } = useWorkspaceMembers();
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
+    sessionAccessViews,
     projects: visibleLocalProjectMap,
     showSessionSharing,
     resolve: resolveSessionSharing,
     shareWithTeam: shareSessionWithTeam,
   } = useSessionSharing({
     includeLocalProjectDetails: true,
+    members: sharingMembers,
+    membersLoading: sharingMembersLoading,
+    membersError: sharingMembersError,
+    retryMembers: retrySharingMembers,
     workspaceId: scopedWorkspaceId,
     enabled: workspaceDataReady,
   });
@@ -1803,8 +1823,7 @@ export function LoroAppSidebar({
   const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
-      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
-        return false;
+      if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
       toast.info(t('sessions.historyMachineUnavailable'));
       return true;
     },
@@ -1830,22 +1849,20 @@ export function LoroAppSidebar({
 
   const handleTogglePinSession = useCallback(
     (sessionId: string, nextPinned: boolean) => {
-      if (rejectHistoryWrite([sessionId])) return;
       void setSessionPinned(sessionId as SessionId, nextPinned).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [rejectHistoryWrite, setSessionPinned]
+    [setSessionPinned]
   );
 
   const handleMarkSessionUnread = useCallback(
     (sessionId: string) => {
-      if (rejectHistoryWrite([sessionId])) return;
       void markSessionUnread(sessionId as SessionId).catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : String(error))
       );
     },
-    [markSessionUnread, rejectHistoryWrite]
+    [markSessionUnread]
   );
 
   const sessionById = useMemo(() => {
@@ -1857,12 +1874,12 @@ export function LoroAppSidebar({
   }, [allActiveSessions, sessions]);
   const sessionSharingById = useMemo(() => {
     const map = new Map<string, SessionSharingState>();
-    if (!showSessionSharing) return map;
     for (const [sessionId, session] of sessionById) {
-      map.set(sessionId, resolveSessionSharing(session));
+      if (showSessionSharing || historyOnlySessionIds.has(sessionId))
+        map.set(sessionId, resolveSessionSharing(session));
     }
     return map;
-  }, [resolveSessionSharing, sessionById, showSessionSharing]);
+  }, [resolveSessionSharing, sessionById, showSessionSharing, historyOnlySessionIds]);
 
   const copySessionUrl = useCallback(
     async (sessionId: string, successMessage: string) => {
@@ -2000,13 +2017,15 @@ export function LoroAppSidebar({
 
   // Shared by the task lists and the Workspace groups, which also render a
   // Local Project Session as a task row when it moves under its opener.
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const buildSidebarTaskRows = useCallback(
     (sourceSessions: SessionMeta[]) =>
       buildSessionListRows(
         sourceSessions,
         {
           scope,
-          currentUserId: userId,
+          currentUserId: myAccountId,
+          ownedMachineIds,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
           members: activeOrganization?.members,
@@ -2024,6 +2043,8 @@ export function LoroAppSidebar({
       })),
     [
       activeOrganization?.members,
+      ownedMachineIds,
+      myAccountId,
       allActiveSessions,
       onlineMachineIds,
       liveSessionStatuses,
@@ -2247,8 +2268,7 @@ export function LoroAppSidebar({
       // its legacy `project` projection names the first member's folder.
       if (session.projectRun) continue;
       if (scope === 'my') {
-        if (!userId) continue;
-        if (session.userId !== userId) continue;
+        if (!isSessionInMyScope(session, myAccountId, ownedMachineIds)) continue;
       }
 
       const key = `${session.machineId}:${project.localProjectId}`;
@@ -2269,7 +2289,7 @@ export function LoroAppSidebar({
     }
 
     return map;
-  }, [childSessionsByParent, scope, sessions, sessionsListLoading, userId]);
+  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId, ownedMachineIds]);
   // The ONE session-navigation callback for every sidebar surface (rows,
   // Updated items, keyboard nav). `tabSessionId` restores the precise child Tab
   // that "Go to Opener Session" points at.
@@ -3041,6 +3061,10 @@ export function LoroAppSidebar({
             section.machineId && machineMeta
               ? {
                   machineId: section.machineId,
+                  needsSharingReview: sessionAccessViews?.get(section.machineId)?.needsResign,
+                  onReviewSharing: sessionAccessViews?.get(section.machineId)?.canManage
+                    ? () => openSettings('machines', { machineId: section.machineId! })
+                    : undefined,
                   name: machineMeta.name,
                   owner: machineMeta.ownerUserId
                     ? (membersByUserId.get(machineMeta.ownerUserId) ?? null)
@@ -3136,6 +3160,11 @@ export function LoroAppSidebar({
                       <span className="min-w-0 truncate">{section.sectionLabel}</span>
                       {section.machineId && section.kind === 'remote' ? (
                         <SidebarMachineOfflinePill machineId={section.machineId} />
+                      ) : null}
+                      {/* Only an encrypted workspace's outage window has an entry, so this
+                          renders nothing for ordinary workspaces. */}
+                      {section.kind === 'local' ? (
+                        <E2eeMachineWindowPill workspaceId={scopedWorkspaceId} />
                       ) : null}
                     </span>
                   }
@@ -3344,6 +3373,7 @@ export function LoroAppSidebar({
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
         memberCount:
           org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
+        encrypted: isListedEncryptedWorkspace(org),
       }));
   }, [
     activeOrganization,
@@ -3917,13 +3947,19 @@ export function LoroAppSidebar({
         scrollStateKey={workspaceSlug}
         workspaceSwitcherEnabled={multiWorkspaceAvailable}
         connectionUiState={connectionUiState}
+        offlineDetail={<E2eeOfflineSummary workspaceId={resolvedWorkspaceId} />}
         workspaceSyncing={sessionsListLoading}
         isElectron={isElectron}
         // Traffic lights auto-hide in native fullscreen — drop the reserved
         // header inset so the sidebar's first row aligns with the top bar.
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
-        topContent={sidebarTopContent ?? undefined}
+        topContent={
+          <>
+            <E2eeDeviceRequestsButton className="mb-2 w-full justify-start" />
+            {sidebarTopContent}
+          </>
+        }
         desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}

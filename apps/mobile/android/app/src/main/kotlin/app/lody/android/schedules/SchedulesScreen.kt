@@ -73,24 +73,73 @@ class SchedulesState(private val service: ScheduleService, val scope: RuntimeSco
     var failure by mutableStateOf<String?>(null)
         private set
 
+    private val cache = service.displayCache
+    private val cacheGeneration = cache?.generation
+    private var revision = 0L
+    private var pending by mutableStateOf(setOf<String>())
+    fun isPending(id: String) = id in pending
+    private fun current() = cache == null || cache.generation == cacheGeneration
+
     suspend fun refresh(pull: Boolean = false) {
-        if (loading) return
+        if (pending.isNotEmpty() || !current()) return
+        val ticket = ++revision
         loading = true; pulling = pull
         try {
-            list = service.list(scope)
+            if (list == null) {
+                try {
+                    val saved = cache?.read(scope, cacheGeneration!!)
+                    if (ticket == revision && current() && list == null) list = saved
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Disk failure must not block live reads. */ }
+            }
+            val received = service.list(scope)
+            if (ticket != revision || !current()) return
+            list = received
             failure = null
+            if (pending.isEmpty()) try { cache?.write(scope, cacheGeneration!!, received) { ticket == revision && pending.isEmpty() } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Live display survives disk failure. */ }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: ScheduleFailure) { failure = error.code }
-        catch (_: Exception) { failure = "runtime_failed" }
-        finally { loading = false; pulling = false }
+        catch (error: Exception) {
+            if (ticket == revision && current()) failure = (error as? ScheduleFailure)?.code ?: "runtime_failed"
+        } finally {
+            if (ticket == revision) { loading = false; pulling = false }
+        }
     }
 
     suspend fun detail(scheduleId: String) = service.detail(scope, scheduleId)
 
-    /** One write; any failure comes back as a [ScheduleFailure]. Refreshes afterwards either way. */
-    suspend fun command(request: app.lody.android.runtime.ScheduleCommandRequest): String = try {
-        service.command(scope, request)
-    } finally { refresh() }
+    suspend fun command(request: app.lody.android.runtime.ScheduleCommandRequest): String {
+        if (!current()) throw ScheduleFailure("workspace_changed")
+        if (request.scheduleId in pending) throw ScheduleFailure("schedule_conflict")
+        val original = list?.items?.find { it.scheduleId == request.scheduleId }
+        val optimistic = original?.takeIf { request.action in rowActions(it) }?.let {
+            when (request.action) {
+                "pause" -> it.copy(enabled = false, state = app.lody.android.runtime.ScheduleState("paused", "paused"))
+                "resume" -> it.copy(enabled = true, state = app.lody.android.runtime.ScheduleState("running", "notScheduled"))
+                else -> null
+            }
+        }
+        ++revision
+        loading = false; pulling = false
+        pending = pending + request.scheduleId
+        if (optimistic != null) replace(optimistic)
+        try {
+            return service.command(scope, request)
+        } catch (error: Exception) {
+            if (optimistic != null && current()) replace(original)
+            throw error
+        } finally {
+            pending = pending - request.scheduleId
+            ++revision
+            if (current()) refresh()
+        }
+    }
+
+    private fun replace(item: ScheduleItem) {
+        list = list?.let { value -> value.copy(items = value.items.map { if (it.scheduleId == item.scheduleId) item else it }) }
+    }
+
 }
 
 @Composable
@@ -175,7 +224,7 @@ fun SchedulesList(
                     for ((group, rows) in groups) {
                         item(key = "group:$group") { SectionTitle(stringResource(groupTitle(group))) }
                         items(rows, key = { it.scheduleId }) { item ->
-                            ScheduleRow(item, onOpen = { onOpen(item) }, onAction = { run(item, it) }, onDelete = { deleting = item }, onOpenSession = onOpenSession)
+                            ScheduleRow(item, pending = state.isPending(item.scheduleId), onOpen = { onOpen(item) }, onAction = { run(item, it) }, onDelete = { deleting = item }, onOpenSession = onOpenSession)
                         }
                     }
                 }
@@ -249,6 +298,7 @@ private fun kindIcon(item: ScheduleItem) = when {
 @Composable
 private fun ScheduleRow(
     item: ScheduleItem,
+    pending: Boolean,
     onOpen: () -> Unit,
     onAction: (String) -> Unit,
     onDelete: () -> Unit,
@@ -262,7 +312,7 @@ private fun ScheduleRow(
     val status = statusText(item.state)
     val separator = stringResource(R.string.schedules_detail_separator)
     val summary = listOfNotNull(item.machineName ?: item.machineId, item.projectName).filter { it.isNotBlank() }.joinToString(separator)
-    val actions = rowActions(item)
+    val actions = if (pending) emptyList() else rowActions(item)
     val detail = listOf(ruleSummary(item.rule), summary).filter { it.isNotBlank() }.joinToString(separator)
     // A Chats row: flat, `listRow` tall, title and trailing status, then a footnote detail line.
     // Long press opens the row's actions where Chats opens its menu.

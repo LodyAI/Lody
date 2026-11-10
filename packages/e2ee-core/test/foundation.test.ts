@@ -12,6 +12,9 @@ import {
   deviceCredentialBindingBytes,
   signDeviceCredentialBinding,
   verifyDeviceCredentialBinding,
+  executionIntentBytes,
+  signExecutionIntent,
+  verifyExecutionIntent,
   decodeCbor,
   encodeCbor,
   encodeDocumentContext,
@@ -763,6 +766,80 @@ describe('device credential binding v1', () => {
     const badSignature = hex(signatureHex);
     badSignature[63] = 255;
     expect(Result.isFailure(verifyDeviceCredentialBinding(context, badSignature))).toBe(true);
+  });
+});
+
+describe('execution intent v1', () => {
+  const publicKey = ok(
+    Bytes.signingPublicKey(hex('d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'))
+  );
+  const privateKey = createPrivateKey({
+    format: 'der',
+    type: 'pkcs8',
+    key: Buffer.from(
+      '302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
+      'hex'
+    ),
+  });
+  const intent = {
+    kind: 1,
+    genesis: ok(Bytes.genesisHash(new Uint8Array(32).fill(0x11))),
+    workspaceId: 'workspace',
+    targetMachineId: 'machine',
+    scope: 'session',
+    messageId: 'turn',
+    contentDigest: new Uint8Array(32).fill(0x44),
+  };
+  const signatureHex =
+    '72a84795066233dc6e7a51d99c0108fb97fa33f852b2a9aa5b00afcdbfb12306c6abd3ca9f696d039f5cdd965ff40ebb6c230d265178f6c61d40bc2a8c5bd40b';
+  it('matches the fixed encoding and Ed25519 vector', async () => {
+    const field = (text: string) =>
+      Buffer.from([0, text.length]).toString('hex') + Buffer.from(text).toString('hex');
+    expect(toHex(ok(executionIntentBytes(intent)))).toBe(
+      Buffer.from('lody-e2ee/execution-intent/v1\0').toString('hex') +
+        '01' +
+        '11'.repeat(32) +
+        field('workspace') +
+        field('machine') +
+        field('session') +
+        field('turn') +
+        '44'.repeat(32)
+    );
+    const signature = await Effect.runPromise(
+      signExecutionIntent({
+        ...intent,
+        signer: {
+          publicKey,
+          sign: (message) => Effect.succeed(ok(Bytes.signature(sign(null, message, privateKey)))),
+        },
+      })
+    );
+    expect(toHex(signature.toBytes())).toBe(signatureHex);
+    expect(
+      Result.isSuccess(verifyExecutionIntent(intent, publicKey.toBytes(), hex(signatureHex)))
+    ).toBe(true);
+  });
+  it('rejects any other kind, scope, message, target, workspace, genesis or content', () => {
+    for (const altered of [
+      { ...intent, kind: 2 },
+      { ...intent, scope: 'other-session' },
+      { ...intent, messageId: 'other-turn' },
+      { ...intent, targetMachineId: 'other-machine' },
+      { ...intent, workspaceId: 'other-workspace' },
+      { ...intent, genesis: ok(Bytes.genesisHash(new Uint8Array(32).fill(0x12))) },
+      { ...intent, contentDigest: new Uint8Array(32).fill(0x45) },
+      // Field boundaries are length-prefixed, so moving bytes between fields changes the message.
+      { ...intent, workspaceId: 'workspacem', targetMachineId: 'achine' },
+    ])
+      expect(
+        Result.isFailure(verifyExecutionIntent(altered, publicKey.toBytes(), hex(signatureHex)))
+      ).toBe(true);
+    for (const malformed of [
+      { ...intent, kind: 4 },
+      { ...intent, contentDigest: new Uint8Array(31) },
+      { ...intent, messageId: 'x'.repeat(1025) },
+    ])
+      expect(Result.isFailure(executionIntentBytes(malformed))).toBe(true);
   });
 });
 

@@ -538,31 +538,36 @@ export class RealtimeJournal {
           const row = this.matching(db, request);
           if (row.state !== 'received')
             return { state: 'existing' as const, record: this.record(request, row) };
-          const current = timestamp.parse(this.now());
-          // Caller supplies a current independently authenticated reference,
-          // never a timestamp taken from this opaque request. No network here.
-          const reference = this.options.trustedNow?.();
-          if (reference !== undefined && current - timestamp.parse(reference) > 600_000)
-            throw new RealtimeJournalError('clock_skew');
-          const observed = db
-            .prepare(
-              'SELECT observed_at FROM realtime_clock WHERE genesis = ? AND workspace_id = ?'
-            )
-            .get(request.genesis, request.workspaceId);
-          const previous = observed
-            ? z.object({ observed_at: timestamp }).parse(observed).observed_at
-            : 0;
-          if (reference !== undefined && previous - reference > 600_000)
-            throw new RealtimeJournalError('clock_skew');
-          const now = Math.max(reference ?? current, previous);
-          db.prepare(`INSERT INTO realtime_clock (genesis, workspace_id, observed_at) VALUES (?, ?, ?)
-            ON CONFLICT(genesis, workspace_id) DO UPDATE SET observed_at = excluded.observed_at`).run(
-            request.genesis,
-            request.workspaceId,
-            now
-          );
-          if (request.expiresAt <= now)
-            return { state: 'expired' as const, record: this.record(request, row) };
+          // 0 is an execution input's "no deadline" (owner decision 2026-11-10): it never
+          // expires and no clock, skew check or floor applies to it. Its request ID still
+          // starts only once. Feature requests keep their real deadline and this clock.
+          if (request.expiresAt !== 0) {
+            const current = timestamp.parse(this.now());
+            // Caller supplies a current independently authenticated reference,
+            // never a timestamp taken from this opaque request. No network here.
+            const reference = this.options.trustedNow?.();
+            if (reference !== undefined && current - timestamp.parse(reference) > 600_000)
+              throw new RealtimeJournalError('clock_skew');
+            const observed = db
+              .prepare(
+                'SELECT observed_at FROM realtime_clock WHERE genesis = ? AND workspace_id = ?'
+              )
+              .get(request.genesis, request.workspaceId);
+            const previous = observed
+              ? z.object({ observed_at: timestamp }).parse(observed).observed_at
+              : 0;
+            if (reference !== undefined && previous - reference > 600_000)
+              throw new RealtimeJournalError('clock_skew');
+            const now = Math.max(reference ?? current, previous);
+            db.prepare(`INSERT INTO realtime_clock (genesis, workspace_id, observed_at) VALUES (?, ?, ?)
+              ON CONFLICT(genesis, workspace_id) DO UPDATE SET observed_at = excluded.observed_at`).run(
+              request.genesis,
+              request.workspaceId,
+              now
+            );
+            if (request.expiresAt <= now)
+              return { state: 'expired' as const, record: this.record(request, row) };
+          }
           const claim = randomUUID();
           const changed = db
             .prepare(`UPDATE realtime_requests SET state = 'started', claim = ?

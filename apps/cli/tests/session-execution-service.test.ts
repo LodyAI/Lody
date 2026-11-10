@@ -15,6 +15,7 @@ vi.hoisted(() => {
 });
 import { LodyOperationCoordinator } from '../src/orchestration/operation-coordinator';
 import { MessageHandler } from '../src/lib/message-handler';
+import { MessageProcessor } from '../src/lib/message-processor';
 import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
@@ -44,6 +45,7 @@ import {
   sealMachineSharingPolicy,
   verifyMachineSharingGeneration,
   machineSharingDigest,
+  signExecutionIntent,
 } from '@lody/e2ee-core/protocol';
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { createTestCloudPort } from './test-cloud-port';
@@ -93,6 +95,9 @@ import {
   type SessionMeta,
   type SessionStatus,
   type WorkspaceId,
+  E2EE_INTENT_KIND,
+  encodeE2eeIntentRecord,
+  turnExecutionDigest,
 } from '@lody/shared';
 import { pendingEventFromAgentEditEvidence } from '../src/lib/code-collab/code-collab-v2-diff-evidence';
 import { TurnPostProcessingService } from '../src/session/turn-post-processing-service';
@@ -2858,7 +2863,7 @@ describe('SessionExecutionService', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'encrypted-execution-'));
     const filename = path.join(directory, 'execution.sqlite');
     const gate = (
-      authorization: 'authorized' | 'denied' | 'expired' = 'authorized',
+      authorization: 'authorized' | 'denied' = 'authorized',
       file = filename,
       workspaceId = 'workspace-1'
     ) =>
@@ -2872,7 +2877,6 @@ describe('SessionExecutionService', () => {
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
             requesterCryptoUserId: 'user-1',
-            expiresAt: authorization === 'expired' ? 100 : 1000,
           }),
         authorizeExecution: () =>
           Effect.succeed(
@@ -2900,8 +2904,8 @@ describe('SessionExecutionService', () => {
     mode:
       | 'account'
       | 'snapshot'
-      | 'delayed'
-      | 'expired'
+      | 'late'
+      | 'unsigned'
       | 'revoked-device'
       | 'guest'
       | 'removed-member'
@@ -2909,9 +2913,6 @@ describe('SessionExecutionService', () => {
       | 'other-member'
       | 'other-member-shared'
       | 'other-member-closed'
-      | 'backfill-member-removed'
-      | 'backfill-device-revoked'
-      | 'backfill-network'
   ) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
     vi.stubEnv('LODY_DATA_DIR', directory);
@@ -2923,13 +2924,10 @@ describe('SessionExecutionService', () => {
     const sessionId = 'production-session' as SessionId;
     // The real encrypted UI writes runtime.accountId, not the ledger's crypto user ID.
     const user = accountId;
-    const backfillFailure = mode.startsWith('backfill-');
-    const terminalBackfill =
-      mode === 'backfill-member-removed' || mode === 'backfill-device-revoked';
     const removalReleased = Promise.withResolvers<void>();
-    const snapshotOnly =
-      mode === 'snapshot' || mode === 'delayed' || mode === 'expired' || backfillFailure;
+    const snapshotOnly = mode === 'snapshot' || mode === 'late';
     const deniedSigner =
+      mode === 'unsigned' ||
       mode === 'revoked-device' ||
       mode === 'guest' ||
       mode === 'removed-member' ||
@@ -3080,6 +3078,17 @@ describe('SessionExecutionService', () => {
             readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
           });
           const inputConfig = { prompt: 'hi', cliType: 'builtin', agentType: 'codex' };
+          // The sending device signs what will run, stored in the row itself.
+          const intentSignature = yield* signExecutionIntent({
+            kind: E2EE_INTENT_KIND.memberInput,
+            genesis: genesis.genesis,
+            workspaceId,
+            targetMachineId: 'machine-1',
+            scope: sessionId,
+            messageId: 'turn-user-1',
+            contentDigest: Buffer.from(turnExecutionDigest({ inputConfig })!, 'hex'),
+            signer: originalSigner,
+          });
           const row = source.getList('history').insertContainer(0, new LoroMap());
           row.set('id', 'turn-user-1');
           row.set('role', 'user');
@@ -3088,19 +3097,15 @@ describe('SessionExecutionService', () => {
           row.set('status', 'pending');
           row.set('inputConfig', inputConfig);
           row.set('items', [{ type: 'text', text: 'hi' }]);
-          if (backfillFailure) {
-            const next = source.getList('history').insertContainer(1, new LoroMap());
-            for (const [key, value] of Object.entries({
-              id: 'turn-user-2',
-              role: 'user',
-              userId: user,
-              timestamp: new Date().toISOString(),
-              status: 'pending',
-              inputConfig,
-              items: [{ type: 'text', text: 'hi' }],
-            }))
-              next.set(key, value);
-          }
+          if (mode !== 'unsigned')
+            row.set(
+              'e2eeIntent',
+              encodeE2eeIntentRecord({
+                kind: E2EE_INTENT_KIND.memberInput,
+                signer: originalSigner.publicKey.toBytes(),
+                signature: intentSignature.toBytes(),
+              })
+            );
           source.commit();
           const update = source.export({ mode: 'update' });
           const plaintext = new Uint8Array(update.length + 4);
@@ -3176,6 +3181,7 @@ describe('SessionExecutionService', () => {
             ...sharingScope,
             sharedWithTeam: mode === 'other-member-shared',
             projects: [],
+            sessions: [],
             revision: 1,
             previousDigest: null,
             requestId: '81'.repeat(16),
@@ -3252,7 +3258,6 @@ describe('SessionExecutionService', () => {
         })
       );
       const historyReads: string[] = [];
-      let originalAvailable = mode !== 'delayed' && !backfillFailure;
       const recoveredRooms: string[] = [];
       const cloud = {
         ...(mode === 'other-member-shared' || mode === 'other-member-closed'
@@ -3276,19 +3281,10 @@ describe('SessionExecutionService', () => {
               },
             }
           : {}),
+        // Execution never needs an original frame: no scan of the stream may happen.
         readExecutionOriginPage: async (input: { docId: string }) => {
           recoveredRooms.push(input.docId);
-          if (!originalAvailable && mode === 'backfill-member-removed')
-            throw new CloudE2eeMemberRemoved();
-          if (!originalAvailable && mode === 'backfill-device-revoked')
-            throw new CloudE2eeDeviceRevoked();
-          if (!originalAvailable && mode === 'backfill-network')
-            throw new Error('synthetic network failure');
-          return {
-            messages: originalAvailable ? [fixture.message] : [],
-            before: '0',
-            atStart: true,
-          };
+          return { messages: [], before: '0', atStart: true };
         },
         getHistory: async (request: { credential: string }) => {
           historyReads.push(request.credential);
@@ -3323,13 +3319,6 @@ describe('SessionExecutionService', () => {
         machineName: 'Synthetic',
         cloudPort: createTestCloudPort({ kind: 'cloud', e2ee: cloud as never }),
         memoryPressure: {} as never,
-        ...(terminalBackfill
-          ? {
-              onEncryptedAccessLost: async () => {
-                await removalReleased.promise;
-              },
-            }
-          : {}),
         machineLifecycleCapability: {
           launchMode: 'foreground',
           canRemoteRestart: false,
@@ -3385,47 +3374,8 @@ describe('SessionExecutionService', () => {
             );
           },
         });
-      if (backfillFailure) {
-        expect(
-          await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
-        ).toMatchObject({ _tag: 'Authorized' });
-        const waiting = await dispatch();
-        expect(submitted).toEqual([]);
-        expect([...new Set(recoveredRooms)]).toEqual(['session-production-session']);
-        expect(
-          await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
-        ).toMatchObject({ _tag: terminalBackfill ? 'Denied' : 'Authorized' });
-        if (terminalBackfill)
-          await expect(host.status()).rejects.toThrow(
-            mode === 'backfill-member-removed' ? 'e2ee_member_removed' : 'e2ee_device_revoked'
-          );
-        if (!terminalBackfill) {
-          expect(waiting.getHistory()[0]?.status).toBe('pending');
-          expect(waiting.failureMessages).toEqual([]);
-        }
-        originalAvailable = true;
-        await protection.config.provider
-          .open({ ...fixture.sealed, context: fixture.context, additionalData: fixture.aad })
-          .catch(() => undefined);
-        const later = await dispatch('turn-user-2');
-        expect(submitted).toEqual(terminalBackfill ? [] : ['hi']);
-        if (!terminalBackfill) expect(later.getHistory()[0]?.status).toBe('handled');
-        return;
-      }
-      if (mode === 'delayed' || mode === 'expired') {
-        if (mode === 'expired') vi.setSystemTime(Date.parse('2026-10-28T02:15:00Z'));
-        const waiting = await dispatch();
-        expect(submitted).toEqual([]);
-        if (mode === 'expired') {
-          expect(waiting.getHistory()[0]?.status).toBe('failed');
-          expect(waiting.failureMessages[0]).toContain('expired');
-          expect(recoveredRooms).toEqual([]);
-          return;
-        }
-        expect(waiting.getHistory()[0]?.status).toBe('pending');
-        expect(waiting.failureMessages).toEqual([]);
-        originalAvailable = true;
-      }
+      // A machine that was offline for days still starts a signed message once.
+      if (mode === 'late') vi.setSystemTime(Date.parse('2026-10-31T02:00:00Z'));
       const before = historyReads.length;
       const result = await dispatch();
       expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
@@ -3443,14 +3393,16 @@ describe('SessionExecutionService', () => {
       expect(result.failureMessages).toEqual(
         mode === 'other-member' || mode === 'other-member-closed'
           ? [expect.stringContaining('e2ee_machine_not_shared')]
-          : deniedSigner
-            ? [expect.stringContaining('not authorized')]
-            : []
+          : mode === 'unsigned'
+            ? [expect.stringContaining('e2ee_signature_missing')]
+            : deniedSigner
+              ? [expect.stringContaining('e2ee_sender_not_authorized')]
+              : []
       );
-      expect([...new Set(recoveredRooms)]).toEqual(
-        !snapshotOnly ? [] : ['session-production-session']
-      );
-      expect(historyReads.length).toBeGreaterThan(before);
+      expect(recoveredRooms).toEqual([]);
+      // A signed turn is authorized from a fresh ledger read; an unsigned one never reaches it.
+      if (mode === 'unsigned') expect(historyReads.length).toBe(before);
+      else expect(historyReads.length).toBeGreaterThan(before);
       expect(
         historyReads.every(
           (credential) => credential.length > 0 && credential !== 'synthetic-token'
@@ -3462,8 +3414,6 @@ describe('SessionExecutionService', () => {
         await (
           lody as unknown as { encryptedWorkspace: CliE2eeWorkspaceLegacy }
         ).encryptedWorkspace.removalCleanup();
-      if (mode === 'backfill-device-revoked')
-        expect(fs.existsSync(path.join(identity, 'custody'))).toBe(true);
       await lody?.documentManager.cleanUp();
       await presence.closeLegacy();
       source.free();
@@ -3477,8 +3427,8 @@ describe('SessionExecutionService', () => {
     runProductionSignedTurn('account'));
   it.each([
     'snapshot',
-    'delayed',
-    'expired',
+    'late',
+    'unsigned',
     'same-member',
     'other-member',
     'other-member-shared',
@@ -3486,9 +3436,6 @@ describe('SessionExecutionService', () => {
     'revoked-device',
     'guest',
     'removed-member',
-    'backfill-member-removed',
-    'backfill-device-revoked',
-    'backfill-network',
   ] as const)(
     'executes a signed durable turn through production Lody construction (%s)',
     runProductionSignedTurn
@@ -3810,7 +3757,7 @@ describe('SessionExecutionService', () => {
     }
   });
 
-  it.each(['denied', 'expired'] as const)(
+  it.each(['denied'] as const)(
     'does not start a %s encrypted turn from durable history',
     async (authorization) => {
       const f = encryptedExecutionFixture();
@@ -3827,9 +3774,7 @@ describe('SessionExecutionService', () => {
           },
         });
         expect(submissions).toEqual([]);
-        expect(result.failureMessages).toEqual([
-          expect.stringContaining(authorization === 'denied' ? 'not authorized' : 'expired'),
-        ]);
+        expect(result.failureMessages).toEqual([expect.stringContaining('not authorized')]);
         expect(result.getHistory()[0]?.status).toBe('failed');
         expect(
           result.service.getExecutionSnapshot('encrypted-session' as SessionId).hasActiveTurn
@@ -13042,7 +12987,7 @@ describe('Operation Inbox execution boundary', () => {
     const message = {
       type: 'session/chat' as const,
       sessionId,
-      machineId: 'machine-1',
+      machineId: 'machine-1' as MachineId,
       workspaceId: 'workspace-1' as WorkspaceId,
       acpSessionConfig: config,
       userTurnId: 'human-input',
@@ -13106,6 +13051,234 @@ describe('Operation Inbox execution boundary', () => {
       storePath: path.join(root, 'operations.sqlite3'),
     };
   }
+
+  describe('machine identity restore admission', () => {
+    const pendingState = async (f: ReturnType<typeof inboxExecutionFixture>) => ({
+      history: await (await createSessionBackend(f.doc)).readHistory(),
+      meta: await f.doc.getMetaState(),
+      pending: f.store.inbox.pending('workspace-1'),
+    });
+    const expectUnexecuted = async (
+      f: ReturnType<typeof inboxExecutionFixture>,
+      before: Awaited<ReturnType<typeof pendingState>>,
+      delivered: ContentBlock[][]
+    ) => {
+      expect(await pendingState(f)).toEqual(before);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+        false
+      );
+      expect(delivered).toEqual([]);
+    };
+
+    it('preserves a queued chat released after restore seals intake', async () => {
+      const delivered: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        delivered.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const processor = new MessageProcessor(createSilentLogger(), 1);
+      const entered = createDeferred();
+      const release = createDeferred();
+      try {
+        await f.accept();
+        const before = await pendingState(f);
+        processor.enqueue(
+          {
+            type: 'machine/status',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: f.message.workspaceId,
+          },
+          async () => {
+            entered.resolve();
+            await release.promise;
+          }
+        );
+        await entered.promise;
+        processor.enqueue(f.message, async () => f.service.continueSession(f.message));
+        f.service.stopNewIdentityRestoreExecutions();
+        processor.stop();
+        release.resolve();
+        await processor.drain();
+        await expectUnexecuted(f, before, delivered);
+      } finally {
+        release.resolve();
+        await processor.drain();
+        await f.close();
+      }
+    });
+
+    it.each(['create', 'chat'] as const)(
+      'preserves %s input when restore seals while its document opens',
+      async (mode) => {
+        const delivered: ContentBlock[][] = [];
+        const f = inboxExecutionFixture(async (blocks) => {
+          delivered.push(blocks);
+          return { stopReason: 'end_turn' };
+        });
+        const entered = createDeferred();
+        const release = createDeferred();
+        let running: Promise<void> | undefined;
+        try {
+          await f.accept();
+          const before = await pendingState(f);
+          const open = vi
+            .spyOn(f.deps.workspaceDocument, 'getOrCreateSessionDoc')
+            .mockImplementationOnce(async () => {
+              entered.resolve();
+              await release.promise;
+              return f.doc;
+            });
+          running =
+            mode === 'create'
+              ? f.service.startSession({ ...f.message, type: 'session/create' })
+              : f.service.continueSession(f.message);
+          await entered.promise;
+          f.service.stopNewIdentityRestoreExecutions();
+          release.resolve();
+          await running;
+          open.mockRestore();
+          await expectUnexecuted(f, before, delivered);
+        } finally {
+          release.resolve();
+          await running;
+          await f.close();
+        }
+      }
+    );
+
+    it('rechecks after Inbox preparation before registering a prepared Turn', async () => {
+      const delivered: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        delivered.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const entered = createDeferred();
+      const release = createDeferred();
+      let running: Promise<void> | undefined;
+      try {
+        await f.accept();
+        const before = await pendingState(f);
+        const read = f.doc.getDocState.bind(f.doc);
+        vi.spyOn(f.doc, 'getDocState').mockImplementationOnce(async () => {
+          entered.resolve();
+          await release.promise;
+          return read();
+        });
+        running = f.service.dispatchPreparedSessionTurn({
+          sessionId: f.message.sessionId,
+          sessionDoc: f.doc,
+          userTurnId: f.message.userTurnId,
+          invocation: {
+            sourceTurnId: f.message.userTurnId,
+            requesterUserId: 'user-1',
+            inputConfig: f.message.acpSessionConfig,
+          },
+          dispatchSource: 'rpc',
+          accessPromise: Promise.resolve({ outcome: 'allowed' }),
+          requestPromise: Promise.resolve({ mode: 'continue', request: f.message }),
+          onAccessAllowed: async () => {},
+          onAccessDenied: async () => {},
+          onAccessIndeterminate: async () => {},
+        });
+        await entered.promise;
+        f.service.stopNewIdentityRestoreExecutions();
+        release.resolve();
+        await running;
+        await expectUnexecuted(f, before, delivered);
+      } finally {
+        release.resolve();
+        await running;
+        await f.close();
+      }
+    });
+
+    it('refuses restore for a registered Turn before active presence is published', async () => {
+      const access = createDeferred<{
+        outcome: 'indeterminate';
+        cause: 'network';
+        error: string;
+      }>();
+      const deps = createBaseDeps({});
+      const service = new SessionExecutionService(deps);
+      // Exercise the real Handler recovery gate with an intentionally absent
+      // presence lease: the registered execution owner alone must refuse restore.
+      const handler: MessageHandler = Object.assign(Object.create(MessageHandler.prototype), {
+        executionService: service,
+        sessionActivePresence: { activeSessionCount: () => 0 },
+        machineLifecycleCapability: { canRemoteRestart: true },
+        onProcessLifecycleAction: () => {},
+        machineId: 'machine-1',
+        userId: 'owner-user',
+        isMachineIdentityRestoreIdle: (): boolean => handler.isIdentityRestoreExecutionIdle(),
+      });
+      const sessionId = 'restore-pre-presence' as SessionId;
+      const running = service.dispatchPreparedSessionTurn({
+        sessionId,
+        sessionDoc: {} as SessionDocument,
+        userTurnId: 'pending-input',
+        invocation: {
+          sourceTurnId: 'pending-input',
+          requesterUserId: 'owner-user',
+          inputConfig: {},
+        },
+        dispatchSource: 'rpc',
+        accessPromise: access.promise,
+        requestPromise: new Promise<never>(() => {}),
+        onAccessAllowed: async () => {},
+        onAccessDenied: async () => {},
+        onAccessIndeterminate: async () => {},
+      });
+      try {
+        expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(true);
+        expect(handler.isIdentityRestoreExecutionIdle()).toBe(false);
+        const response = await (
+          handler as unknown as {
+            prepareMachineRestart(args: {
+              restoreMachineId: string;
+              requesterUserId: string;
+              requestToken: string;
+              requestId: string;
+            }): Promise<{ accepted: boolean; error?: string }>;
+          }
+        ).prepareMachineRestart({
+          restoreMachineId: 'old-machine',
+          requesterUserId: 'owner-user',
+          requestToken: 'synthetic-unverified-request',
+          requestId: 'active-turn-recovery',
+        });
+        expect(response.accepted).toBe(false);
+        expect(response.error).toContain('Stop all tasks');
+        expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(true);
+      } finally {
+        access.resolve({ outcome: 'indeterminate', cause: 'network', error: 'offline' });
+        await running;
+      }
+      expect(handler.isIdentityRestoreExecutionIdle()).toBe(true);
+    });
+
+    it('executes and settles ordinary input when recovery is not sealed', async () => {
+      const delivered: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        delivered.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      try {
+        await f.accept();
+        expect(f.service.isMachineIdentityRestoreIdle()).toBe(true);
+        await f.service.continueSession(f.message);
+        expect(delivered).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }]]);
+        expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
+          true
+        );
+        const history = await (await createSessionBackend(f.doc)).readHistory();
+        expect(history.find((turn) => turn.id === 'human-input')?.status).toBe('handled');
+        expect(f.service.isMachineIdentityRestoreIdle()).toBe(true);
+      } finally {
+        await f.close();
+      }
+    });
+  });
 
   it.each([
     'automation-first',

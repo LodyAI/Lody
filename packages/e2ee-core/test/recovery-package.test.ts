@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { Effect, Result } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Result, Scope } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
 // Probe: record every CBOR decode input/output and encode output so the test can
@@ -110,6 +110,115 @@ const expectWiped = (seeds: readonly Uint8Array[]) => {
 };
 
 describe('recovery package plaintext ownership', () => {
+  it('reads another workspace while a package fetch is pending and drains the admitted read on close', async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stores = memoryStores();
+          const entered = Deferred.makeUnsafe<void>();
+          const release = Deferred.makeUnsafe<void>();
+          let blockedId = '';
+          const originalRead = stores.store.readEntry;
+          stores.store.readEntry = (vaultId, entryId) =>
+            Effect.gen(function* () {
+              if (entryId === blockedId) {
+                yield* Deferred.succeed(entered, undefined);
+                yield* Deferred.await(release);
+              }
+              return yield* originalRead(vaultId, entryId);
+            });
+          const scope = yield* Scope.make();
+          const { vault, recoveryFile } = yield* createRecoveryVault({
+            locator: 'abc',
+            ...stores,
+          }).pipe(Scope.provide(scope));
+          const refs = [];
+          for (const genesis of ['11', '22']) {
+            const bundle = yield* generateRecoveryPackage({
+              genesis: genesis.repeat(32),
+              membershipId: '33'.repeat(16),
+              generation: 0,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: new Uint8Array(64).fill(3),
+                head: '44'.repeat(32),
+                length: 1,
+              },
+            });
+            refs.push(yield* vault.upload(bundle));
+            wipeRecoveryPackage(bundle);
+          }
+          // Observe only synthetic V copies at the byte-buffer boundary. This
+          // supplies an explicit signal that close has stopped read admission.
+          const parsed = parseRecoveryFile(recoveryFile);
+          const wrapped = (yield* stores.store.readEntry(vault.vaultId, vault.vaultId))!;
+          const expectedMaster = decryptVault(parsed.unlock, vault.vaultId, wrapped, 'file-wrap');
+          parsed.unlock.fill(0);
+          const copies: Uint8Array[] = [];
+          let parentMaster: Uint8Array | undefined;
+          const closed = Deferred.makeUnsafe<void>();
+          const slice = Uint8Array.prototype.slice;
+          const fill = Uint8Array.prototype.fill;
+          const sliceProbe = vi
+            .spyOn(Uint8Array.prototype, 'slice')
+            .mockImplementation(function (this: Uint8Array, start, end) {
+              const copy = slice.call(this, start, end);
+              if (
+                this.length === expectedMaster.length &&
+                this.every((v, i) => v === expectedMaster[i])
+              ) {
+                parentMaster = this;
+                copies.push(copy);
+              }
+              return copy;
+            });
+          const fillProbe = vi
+            .spyOn(Uint8Array.prototype, 'fill')
+            .mockImplementation(function (this: Uint8Array, value, start, end) {
+              const result = fill.call(this, value, start, end);
+              if (this === parentMaster && value === 0) Deferred.doneUnsafe(closed, Effect.void);
+              return result;
+            });
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              sliceProbe.mockRestore();
+              fillProbe.mockRestore();
+              expectedMaster.fill(0);
+            })
+          );
+          blockedId = refs[0].entryId;
+          const first = yield* vault.readEntry(refs[0]).pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          // B must decrypt before A's network promise is allowed to settle.
+          const second = yield* vault.readEntry(refs[1]);
+          expect(second.genesis).toBe('22'.repeat(32));
+          wipeRecoveryPackage(second);
+          const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
+          yield* Deferred.await(closed);
+          expect(closing.pollUnsafe()).toBeUndefined();
+          expect(copies).toHaveLength(2);
+          expect(copies[0].some((v) => v !== 0)).toBe(true);
+          expect(copies[1].every((v) => v === 0)).toBe(true);
+          const duringClose = yield* Effect.result(vault.readEntry(refs[1]));
+          expect(Result.isFailure(duringClose) ? duringClose.failure : null).toMatchObject({
+            code: 'closed',
+          });
+          yield* Deferred.succeed(release, undefined);
+          const late = yield* Fiber.join(first);
+          expect(late.genesis).toBe('11'.repeat(32));
+          wipeRecoveryPackage(late);
+          yield* Fiber.join(closing);
+          expect(copies.every((copy) => copy.every((v) => v === 0))).toBe(true);
+          const refused = yield* Effect.result(vault.readEntry(refs[1]));
+          expect(Result.isFailure(refused) ? refused.failure : null).toMatchObject({
+            code: 'closed',
+          });
+          recoveryFile.fill(0);
+        })
+      )
+    );
+  });
+
   it('wipes decoded secrets when readEntry or readCandidate rejects an invalid package, and returns owned copies on success', async () => {
     await Effect.runPromise(
       Effect.scoped(

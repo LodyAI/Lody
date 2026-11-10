@@ -187,3 +187,21 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 ## 机器共享
 
 2026-11-02，owner Zixuan Chen（zxch3n）通过合入 [PR #2228](https://github.com/LodyAI/Lody/pull/2228)（merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`）批准[机器共享 Spec](../../../../specs/e2ee/machine-sharing.zh.md)。获批[英文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md)的 Git blob 为 `37ce21f8e5a3db433b38ac0d2701fcacf6408080`；获批[中文文本](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md)的 Git blob 为 `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`。之后仅记录本次批准的修改属于编辑性修改。范围包括 owner 的决定：撤回后不能启动新任务、不能做需要授权的后续动作，但不强制终止已在运行的命令；以及 2026-10-28 接受的风险：服务端持续扣住更新策略时，撤回生效没有严格上限。批准只记录意图，不代表部署或双成员产品验收。
+
+## 网页自助解锁
+
+2026-11-09，owner Zixuan Chen（zxch3n）在来源会话 `7feb7ec5-71fe-459f-a102-8f179831f131`、人类消息 `3ebc9d48-2c78-4265-a60e-a1581194216e` 批准 [#2489](https://github.com/LodyAI/Lody/pull/2489) 推荐项，确切 head 为 `07e231ceb86e20c8c849458e187639b0fbca16b6`。通过 Lody history 核对了人类作者及前文指向该 PR 的推荐表。批准包括 passkey PRF＋恢复文件、复用恢复库、隔离 C→普通网页 B、并存的设备批准入口及推荐限制；密码＋安全码未获选。首次登录可以创建空保险库，工作区恢复仍需已授权设备登记 R 与实际解密测试；这不授予网页创建工作区能力。批准不代表实现、部署或真机验收。
+
+## 同源网页恢复
+
+2026-11-10，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/7feb7ec5-71fe-459f-a102-8f179831f131?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)批准 [#2489](https://github.com/LodyAI/Lody/pull/2489) 的 RP／同源修订，对应确切 head `47a15a00e313085e43aac1d4668016dbf8319b44`。通过 Lody history 核实人类消息 `82150e0c-a3d6-4680-9193-75088329657b`，时间为 `2026-11-10T04:58:51.568Z`，完整原话为“批准”。前一条问题明确要求批准 #2489 从 `vault.lody.ai` 改为 `lody.ai`、在网页客户端内恢复，以及写明的信任代价。
+
+本次仅取代此前专用 RP／隔离网页方向：Mac／iOS／Web 使用 RP `lody.ai`；用 passkey 或恢复文件打开、首次创建文件、添加 passkey 均在网页客户端内完成，不再设置隔离页或跨页交接。接受的代价是主域、子域、官网及统计脚本可请求父 RP 的仪式，仍须系统确认与用户验证；未来登录 passkey 须使用不同 RP 及匹配 origin。不同登录 RP 不能阻止被入侵子域请求父 RP。原生关联仍仅限 webcredentials，不恢复 App Links。
+
+修订保留自己的电脑确认、空保险库与工作区备份的区别、不支持浏览器作为第一台设备创建加密工作区，以及上线前只认最新格式的限制。本提交仅更新批准元数据；功能默认关闭，其他 PR head／状态不变。本记录不批准实现验收、部署或真机验收。
+
+## iroh 首选通道
+
+2026-11-10，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/f30b51f2-390b-43b6-852d-76f4305015a4?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)批准 [PR #2517](https://github.com/LodyAI/Lody/pull/2517) 在确切 head `4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9` 的 iroh 修订。Lody 历史确认人类消息 `9dad904b-6ef4-4e56-bd63-63e1f896cee8`（`2026-11-10T14:25:58.868Z`），全文为“批准 spec 修订”；此前会话已说明该修订内容以及 `specs/e2ee-foundations.md` 处于 draft。该 head 上获批的 blob：`specs/e2ee-foundations.md` `bc7fb0d4644296e1b43f4d08e97bc5581415803c`、`specs/e2ee-foundations.zh.md` `52a657f085c0bcf3c50c08f7ad9d0418df5dbbb0`、`specs/e2ee/whitepaper.md` `b16c90a918f2c642a9eb9446a42b336e3a90fc2d`、`specs/e2ee/whitepaper.zh.md` `c8ca5e5062e112f30597f716671bf4302badb819`。
+
+范围：路径顺序 iroh → 加密 Streams RPC → 持久派发，沿用相同原件、授权和实际启动 claim；EndpointId 等于工作区账本设备密钥，只交给原生宿主，只签 TLS 与中继握手；拨号时写入全部已配置中继、不发布地址、Convex 不变；过渡期使用 n0 公共中继，接受 n0 能看到设备公钥、IP 地址和通信关系、有限流且无可用性保证；在所有支持的平台迁移前保留 Streams RPC，浏览器版 iroh 不在范围内。本提交只改批准元数据；实现验收、中继部署和下线 Streams 均不由本记录批准。

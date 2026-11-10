@@ -11,9 +11,11 @@ import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
 import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
+import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recovery-host';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
+import { E2eeSecurityPanel } from '../src/components/settings/e2ee/security-panel';
 const navigation = vi.hoisted(() => ({ target: null as unknown }));
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => async (target: unknown) => {
@@ -25,7 +27,20 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/settings/account-setting', () => ({
-  AccountSettingsComponent: () => <p>ordinary settings</p>,
+  AccountSettingsComponent: (props: {
+    encryptedTeamManagement?: boolean;
+    onOpenEncryptionConsole?: () => void;
+  }) => (
+    <p>
+      ordinary settings
+      {props.encryptedTeamManagement === false ? ' without team management' : ''}
+      {props.onOpenEncryptionConsole && (
+        <button type="button" onClick={props.onOpenEncryptionConsole}>
+          danger zone transfer
+        </button>
+      )}
+    </p>
+  ),
 }));
 describe('recovery vault settings', () => {
   it('asks the desktop for its recovery state once, not on every render', async () => {
@@ -76,18 +91,23 @@ describe('recovery vault settings', () => {
 
 describe('recovery vault settings actions', () => {
   // A plan given as a function is asked again on every load, so it can fail and then recover.
-  const mount = async (plan: unknown) => {
+  const mount = async (
+    plan: unknown,
+    handlers: Record<string, (...args: unknown[]) => unknown> = {}
+  ) => {
     const answers: Record<string, unknown> = {
       'e2ee.recentAccountSecurityEvents': [],
       'e2ee.recoveryPasskeyAvailable': true,
     };
     vi.stubGlobal('ipc', {
-      invoke: async (channel: string) =>
+      invoke: async (channel: string, ...args: unknown[]) =>
         channel === 'e2ee.recoveryReplacementPlan'
           ? typeof plan === 'function'
             ? plan()
             : plan
-          : answers[channel],
+          : handlers[channel]
+            ? handlers[channel](...args)
+            : answers[channel],
       on: () => () => {},
     });
     const store = createStore();
@@ -241,6 +261,77 @@ describe('recovery vault settings actions', () => {
     }
   });
 
+  it('sets up every unfinished workspace with one unlock and counts only verified setups as done', async () => {
+    const requests: unknown[][] = [];
+    const view = await mount(
+      {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [
+          workspace('a', { kind: 'notSet' }),
+          workspace('b', { kind: 'notSet' }),
+          // Saved but unverified: its setup still has to finish.
+          workspace('c', { kind: 'saved' }),
+          workspace('d', { kind: 'verified', update: 2 }),
+        ],
+        uncovered: [],
+      },
+      {
+        'e2ee.setupRecoveryForWorkspaces': (...args) => {
+          requests.push(args);
+          // b is still waiting for its envelope and c returned no result at all.
+          return {
+            outcome: 'settled',
+            results: [
+              { workspaceId: 'a', outcome: 'Committed', recoverable: true },
+              { workspaceId: 'b', outcome: 'Pending', recoverable: false },
+            ],
+          };
+        },
+      }
+    );
+    try {
+      expect(view.text).toContain('e2ee.recovery.uncoveredTitle');
+      expect(view.primary).toEqual(['e2ee.recovery.setupAll']);
+      // The saved workspace keeps its own way to continue.
+      expect(view.labels).toContain('e2ee.recovery.setupContinue');
+      await view.click('e2ee.recovery.setupAll');
+      expect(requests).toEqual([[['a', 'b', 'c'], 'file']]);
+      expect(view.text).toContain('e2ee.recovery.setupAllPartial');
+      expect(view.text).not.toContain('e2ee.recovery.setupAllDone');
+    } finally {
+      view.done();
+    }
+  });
+
+  it('shows when this device last checked the recovery file', async () => {
+    const view = await mount(
+      {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'verified', update: 1 })],
+        uncovered: [],
+      },
+      {
+        'e2ee.inspectRecoveryFile': () => ({
+          outcome: 'opened',
+          vaultId: 'v'.repeat(32),
+          workspaces: 1,
+        }),
+      }
+    );
+    try {
+      expect(view.text).toContain('e2ee.recovery.fileSaved');
+      expect(view.text).not.toContain('e2ee.recovery.fileSavedChecked');
+      await view.click('e2ee.recovery.check');
+      expect(view.text).toContain('e2ee.recovery.fileSavedChecked');
+    } finally {
+      view.done();
+    }
+  });
+
   it('keeps read-only actions and offers retry when the recovery state cannot be read', async () => {
     let fail = true;
     const view = await mount(async () => {
@@ -268,10 +359,58 @@ describe('recovery vault settings actions', () => {
       await view.click('common.retry');
       expect(view.text).not.toContain('e2ee.recovery.planFailed');
       expect(view.labels).not.toContain('common.retry');
-      expect(view.primary).toEqual(['e2ee.recovery.check']);
+      // The saved workspace is not verified yet, so finishing its setup leads.
+      expect(view.primary).toEqual(['e2ee.recovery.setupAll']);
       expect(view.text).toContain('e2ee.recovery.workspace.saved');
     } finally {
       view.done();
+    }
+  });
+});
+
+describe('encrypted workspace settings entry failures', () => {
+  it('states what happened and offers the one step that helps', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const opened: unknown[] = [];
+    const retried: unknown[] = [];
+    const render = (error: string) =>
+      act(async () =>
+        root.render(
+          <E2eeSecurityPanel
+            error={error}
+            onUpdate={() => {}}
+            onRetry={() => retried.push(error)}
+            onOpenConsole={(tab) => opened.push(tab)}
+          />
+        )
+      );
+    const button = (label: string) =>
+      [...container.querySelectorAll('button')].find((b) => b.textContent === label);
+    try {
+      // A lost identity is repaired from the console, with another authorized device.
+      await render('e2ee_missing-binding');
+      expect(container.textContent).toContain('e2ee.security.error.identity.title');
+      const consoleButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === 'e2ee.security.openConsole'
+      );
+      // One way into the console, in the card; the status row does not repeat it.
+      expect(consoleButtons).toHaveLength(1);
+      expect(container.textContent).not.toContain('e2ee.security.identityMissing');
+      await act(async () => consoleButtons[0]!.click());
+      expect(opened).toEqual([undefined]);
+      // A conflict only needs another look.
+      await render('e2ee_management_conflict');
+      await act(async () => button('e2ee.failure.action.refresh')!.click());
+      expect(retried).toEqual(['e2ee_management_conflict']);
+      // Restarting is the person's step; the card offers no button that cannot do it.
+      await render('e2ee_restart-required');
+      expect(container.textContent).toContain('e2ee.security.error.restart.title');
+      expect(button('e2ee.failure.action.refresh')).toBeUndefined();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
     }
   });
 });
@@ -363,12 +502,21 @@ describe('encrypted workspace settings', () => {
       )
     );
   const click = async (key: string) => {
-    const button = [...container.querySelectorAll('button')].find(
+    const button = [...document.body.querySelectorAll('button')].find(
       (node) => node.textContent === key
     );
     if (!button) throw new Error(`missing ${key}`);
     await act(async () => button.click());
   };
+  // Devices and recovery live in the encryption console the General card opens.
+  const openConsole = async (tab: 'devices' | 'recovery' | 'members') => {
+    await click('e2ee.security.openConsole');
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    const target = document.body.querySelector(`[data-console-tab="${tab}"]`);
+    if (!(target instanceof HTMLButtonElement)) throw new Error(`missing console tab ${tab}`);
+    await act(async () => target.click());
+  };
+  const page = () => document.body.textContent ?? '';
   it.each(['plan', 'failure'] as const)(
     'drops the previous account recovery %s as soon as the account changes',
     async (shown) => {
@@ -397,9 +545,10 @@ describe('encrypted workspace settings', () => {
       store.set(e2eeRecoveryVaultEnabledAtom, true);
       try {
         await render();
+        await openConsole('recovery');
         for (let tick = 0; tick < 5; tick++) await act(async () => {});
         const previous = shown === 'plan' ? 'Account A workspace' : 'e2ee.recovery.planFailed';
-        expect(container.textContent).toContain(previous);
+        expect(page()).toContain(previous);
 
         account = 'account-b';
         platform = {
@@ -416,12 +565,42 @@ describe('encrypted workspace settings', () => {
         store.set(workspaceContentModeAtom, { ...mode, accountId: 'account-b' });
         await render();
         for (let tick = 0; tick < 5; tick++) await act(async () => {});
-        expect(container.textContent).not.toContain(previous);
+        expect(page()).not.toContain(previous);
       } finally {
         vi.unstubAllGlobals();
       }
     }
   );
+
+  it('tells a host without recovery controls where to set recovery up instead of an empty tab', async () => {
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    await render();
+    await openConsole('recovery');
+    expect(page()).toContain('e2ee.console.recoveryElsewhere');
+  });
+
+  it("shows a browser-shaped host's own recovery section for the current account", async () => {
+    const host = {
+      Section: ({ accountId }: { accountId?: string | null }) => (
+        <p>host recovery for {accountId}</p>
+      ),
+    };
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <PlatformContext.Provider value={platform}>
+            <E2eeRecoveryHostContext.Provider value={host}>
+              <WorkspaceSettings />
+            </E2eeRecoveryHostContext.Provider>
+          </PlatformContext.Provider>
+        </Provider>
+      )
+    );
+    await openConsole('recovery');
+    expect(page()).toContain('host recovery for account');
+    expect(page()).not.toContain('e2ee.console.recoveryElsewhere');
+  });
 
   const renderSharing = () =>
     act(async () =>
@@ -598,11 +777,15 @@ describe('encrypted workspace settings', () => {
     expect(container.querySelector('[role=status]')).not.toBeNull();
     fail = true;
     await click('e2ee.security.complete');
-    expect(container.textContent).toContain('e2ee.security.retryHint');
-    expect(container.textContent).toContain('synthetic-machine');
+    expect(container.textContent).toContain('e2ee.security.error.retry.title');
+    await openConsole('devices');
+    expect(page()).toContain('synthetic-machine');
     expect(signed).toBe(false);
     fail = false;
-    await click('e2ee.security.complete');
+    const complete = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.security.complete'
+    )!;
+    await act(async () => complete.click());
     expect(signed).toBe(true);
     expect(container.textContent).toContain('e2ee.security.current');
     expect(container.querySelector('[role=status]')).toBeNull();
@@ -612,8 +795,9 @@ describe('encrypted workspace settings', () => {
     await render();
     expect(container.textContent).toContain('e2ee.security.useManager');
     expect(container.querySelector('[role=status]')).toBeNull();
+    await openConsole('devices');
     await click('e2ee.security.revoke');
-    expect(container.textContent).not.toContain('synthetic-machine');
+    expect(page()).not.toContain('synthetic-machine');
     expect(signed).toBe(false);
   });
   it('keeps a continuation action after the epoch committed but installation/ack is pending', async () => {
@@ -627,13 +811,48 @@ describe('encrypted workspace settings', () => {
     await render();
     expect(container.textContent).toContain('e2ee.security.updating');
     expect(container.textContent).not.toContain('e2ee.security.complete');
-    const buttons = [...container.querySelectorAll('button')];
-    const update = buttons.find((button) => button.textContent === 'e2ee.security.updating');
+    const update = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.security.updating'
+    );
     expect(update?.disabled).toBe(true);
-    const revoke = buttons.find((button) => button.textContent === 'e2ee.security.revoke');
+    await openConsole('devices');
+    const revoke = [...document.body.querySelectorAll('button')].find(
+      (button) => button.textContent === 'e2ee.security.revoke'
+    );
     expect(revoke?.disabled).toBe(true);
-    const refresh = buttons.find((button) => button.textContent === 'e2ee.security.refresh');
-    expect(refresh?.disabled).toBe(false);
+  });
+  it('keeps the ordinary General page and leaves encrypted team management to the console', async () => {
+    state = { ...state, rotationRequired: false };
+    await render();
+    expect(container.textContent).toContain('ordinary settings without team management');
+    expect(container.textContent).toContain('e2ee.security.current');
+    expect(container.textContent).not.toContain('e2ee.security.attention');
+    await click('e2ee.security.openConsole');
+    // The console opens over Settings instead of leaving the workspace.
+    expect(navigation.target).toBeNull();
+    expect(document.body.querySelector('[data-testid="e2ee-workspace-console"]')).not.toBeNull();
+  });
+  it('sends encrypted ownership transfer from the danger zone to the console members page', async () => {
+    state = { ...state, rotationRequired: false };
+    await render();
+    await click('danger zone transfer');
+    expect(navigation.target).toBeNull();
+    expect(
+      document.body.querySelector('[data-console-tab="members"]')?.getAttribute('aria-current')
+    ).toBe('page');
+  });
+  it('turns a waiting link request into a review item that opens the console', async () => {
+    state = { ...state, rotationRequired: false };
+    platform.e2eeWorkspaces!.runtime!.memberJoinRequests = async () =>
+      ({ items: [{ source: 'link', state: 'pending' }] }) as never;
+    await render();
+    for (let tick = 0; tick < 5; tick++) await act(async () => {});
+    expect(container.textContent).toContain('e2ee.security.joinRequests');
+    await click('e2ee.security.review');
+    expect(navigation.target).toBeNull();
+    expect(
+      document.body.querySelector('[data-console-tab="members"]')?.getAttribute('aria-current')
+    ).toBe('page');
   });
   it('reuses the settings badge for a pending link request and clears it after approval', async () => {
     vi.useFakeTimers();

@@ -1,0 +1,152 @@
+{
+  "system": "Session Inbox delivery, admission, submission and continuation scheduling",
+  "syncCommit": "55c88e70277942af8b3ebdaf0a0f8897413c7889",
+  "sources": [
+    {
+      "path": "apps/cli/src/session/session-dispatch-logic.ts",
+      "sha256": "48d6b9e27c085e2fe8b33512d7d1270c16c2b815d81783cc3749663d9a76576d"
+    },
+    {
+      "path": "apps/cli/src/session/session-dispatch-watcher.ts",
+      "sha256": "ba73be54b0998d9684a3b6618cb6ce4beff8a3011174665ceafa15fae8c12724"
+    },
+    {
+      "path": "apps/cli/src/session/session-execution-service.ts",
+      "sha256": "25316b3f435f24c4fd377b9995beb3fbae1e440f5cc518d6ba581a7e6e91ea2f"
+    },
+    {
+      "path": "apps/cli/src/session/turn-history-gate.ts",
+      "sha256": "db498ba1105df41c821350ba492327f4390f7cd49d45348668f15994f4b600d6"
+    },
+    {
+      "path": "apps/cli/src/lib/message-handler.ts",
+      "sha256": "cc6ea5508497ca78aedafb24c52d3a45114b0de3e3b9d882de3e83baa66b1803"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/sqlite.ts",
+      "sha256": "d3e86bbbdc8ddec51cd1b0e94870a2c48665f8dfe48f345248080d4719577ff0"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/rules.ts",
+      "sha256": "94f9808eb526a78720eb599bca5148e86ed3555307fea8af0d85a7fbdf10164d"
+    },
+    {
+      "path": "packages/shared/src/schema.ts",
+      "sha256": "369f25e6035a456dc19e6ca67896d841ec18baecb6b25a96f9b231ba241011c2"
+    },
+    {
+      "path": "packages/shared/src/session-control-plane.ts",
+      "sha256": "806fbf40cea7ad80ff51613bd21fbc2e4aef82149f2fb5251b8d0d0942769a8c"
+    },
+    {
+      "path": "packages/shared/src/session-status-machine.ts",
+      "sha256": "99f1b0622f87955fdc63d29d8f2ad2d29b4256fd6116c3db01960aeebcebb7f5"
+    },
+    {
+      "path": "packages/shared/src/time-sync.ts",
+      "sha256": "96a2cfccc07c95acd79e8f8cea25b47e489a523814b03b0a870c37daebcd353d"
+    },
+    {
+      "path": "packages/shared/src/project.ts",
+      "sha256": "88da9f1216387c74d4b7b637d7b807032f92f92537b166369642947adc8e6438"
+    },
+    {
+      "path": "packages/shared/src/index.ts",
+      "sha256": "389b29c786eb655ce50d1606f6e78d3c208fb7d7485f40426740a8039f5962c9"
+    },
+    {
+      "path": "packages/shared/src/repo-doc-meta.ts",
+      "sha256": "35988de9f1af551f228a440c1bc361ba1d3cc521e747670b35a6f20597c88b9c"
+    },
+    {
+      "path": "apps/cli/src/utils/format-error.ts",
+      "sha256": "fa0105cfeb0c1c39e80df2cdbff65bec680847811a5646964de1ee34424fcf65"
+    },
+    {
+      "path": "packages/components/src/lib/session-send-delivery.ts",
+      "sha256": "4a07b01b0dccf8456c480f071ab0d1d63e7e739fb98299b199c00f400812b3c1"
+    },
+    {
+      "path": "apps/cli/src/lib/prepared-session-input.ts",
+      "sha256": "5041160d376fb683fe1cef3a7150d8fde02c4bd1eaffa93924148f930a803ff4"
+    },
+    {
+      "path": "apps/cli/src/session/session-edit-and-resend-service.ts",
+      "sha256": "fb84a75f348b882a1b2aa4560570a7c0b5fd232744eebadbf1be14d16f9f91a7"
+    },
+    {
+      "path": "apps/cli/src/commands/session.ts",
+      "sha256": "da3fd5803a5febf8921c3199b9001ab47316bffa575d81b43180aaf0f781151e"
+    },
+    {
+      "path": "apps/cli/src/automations/compat/quota-schedule.ts",
+      "sha256": "266fed93000403cda310db47e78327afc773b111367776ca8762875885ea1d24"
+    },
+    {
+      "path": "packages/components/src/lib/undelivered-user-turn.ts",
+      "sha256": "0470998f5cd36b1164b49ad03f79e1d75ad68a405fea16ede597b42a8ae63de2"
+    },
+    {
+      "path": "packages/components/src/components/ai-gui/view.tsx",
+      "sha256": "b37f1597265d431782b84d2f908c17b7a3169d4bb14e86a0509f2eecdc82337b"
+    },
+    {
+      "path": "packages/shared/src/message-author.ts",
+      "sha256": "19d956f3709f9bd943feb935d5949bc33552b371472d4aa8f178267d67b78b90"
+    },
+    {
+      "path": "packages/shared/src/agent-brand.ts",
+      "sha256": "8e3ff6f4f4f7adb8c7e5c5944b54eab1fc0257f2a6b8612959eb61cecfc65e23"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/service.ts",
+      "sha256": "8eec4a37522b81a05c56cab7560112c87404f8ab5d0fbff9b99c232514a3aef3"
+    },
+    {
+      "path": "apps/cli/src/orchestration/storage-error.ts",
+      "sha256": "a0b1dc72d96a2530f67b25d3baaac670f5642a59a7fdc263940a2ebe5da6cbe8"
+    },
+    {
+      "path": "apps/cli/src/orchestration/platform/database.ts",
+      "sha256": "716870d42c7ea9c4f532c114849c508e06fd3dc883734786d87a3dd7a8d14165"
+    }
+  ],
+  "bounds": {
+    "delivery": "Two concurrent clients each publish one immutable input ID. Body, RPC offer, user receipt and activation reach one authorized execution host in arbitrary order. Latest activation has a fixed LWW winner (ID 2); reversing both IDs is symmetric. Each arrival is represented once; duplicate packet idempotence is an abstraction, not a network implementation proof. At most two missing-history timeouts; no host migration of storage.",
+    "sqlite": "All 336 orders of accept A < begin A < submit A < settle A < release A, interleaved with accept B, exact-target Stop, lease-safe epoch change. SQL transactions are real; the provider-start critical section is represented by consecutive synchronous canSubmit/fence. One preexisting result and one future result. Future new-ID input is admitted after each timeline.",
+    "outputGate": "One RPC turn with waiting/opening/open phases, original deadline retained during callback, disposal, callback completion/hang, output, abort and stale-write attempt. Signal guard prevents late writes; raw already-issued work is not modeled as canceled. No global Wait. Metadata creation remains eligible after timeout while the turn is live.",
+    "busyScan": "Two pending records, one shared writer lock, native attempts per scan, deferred retry, eventual unlock, explicit admission and scope closure; no numeric duration in TLA. TestClock/native SQLite checks real delay/cancellation. The original single-call busy_timeout remains 5000 ms."
+  },
+  "assumptions": [
+    "Execution host handoff occurs only after the prior physical host lease/process-exit barrier. This barrier is assumed, not produced by tests.",
+    "Fair delivery profiles assume enabled arrival and local processing steps eventually run. Permanent partition profile intentionally disables both payload sources for input 1; it checks input 2 progress, not impossible input 1 execution.",
+    "Receipt presence is not cryptographic authorization; execution still requires existing verified signer, principal, access and durable admission. These are outside this model and never bypassed.",
+    "Delivery and output are separate slices of the same system, not a proved full composition/refinement of the watcher, SQL, provider and frontend.",
+    "These slices describe an active workspace; daemon identity-restoration sealing/restart and cache GC remain outside the modeled lifecycle. The merged production changes retain the existing delivery selection, receipts and Stop/start fences."
+  ],
+  "limits": "Finite slices, not a proof of full implementation composition. No actual Loro/Roost replication/reconnect, E2EE/revocation, host-lease producer, real provider, OS disk exhaustion or UI/device acceptance. Declarations and recovery/RPC-selection methods are compiled unchanged with actual policy helpers and synthetic document ports. The complete assistant-entry writer is also compiled unchanged; its tested existing-author branch uses a synthetic SQLite history port and a diagnostic span stub. This is a cancellation-fence witness, not full HistoryWriter acceptance. Host epochs assume an already-safe handoff. Per-ID receipts grow with failed identities; only the serialized host appends them. The default checks current finite temporal properties; source-only and safety-only cannot replace that result. Full workspace checks require dependencies absent from this nested checkout.",
+  "properties": {
+    "ReceiptBeforeStart": "Receipt and usable payload precede modeled admission/start; does not validate signatures.",
+    "PayloadBeforeStart": "Either synchronized history or full RPC payload is present.",
+    "NoFailedReplay": "An input already surfaced as not delivered must not become an execution candidate when another timeout replaces the scalar marker. Source witness stops at candidate selection.",
+    "EveryInputOutcome": "Under eventual delivery and fair local steps, each of the two inputs reaches completion or explicit missing-history failure.",
+    "HealthySecondProgress": "Even if input 1 payload never arrives, input 2 eventually completes or gets an explicit delivery failure.",
+    "DisposeUnblocks": "Disposing an old RPC output gate eventually releases its already-waiting writers.",
+    "OutputEventuallyUnblocked": "Under the configured callback/disposal fairness, output gate waiters eventually release.",
+    "NoLateWrites": "Only disposal aborts later assistant-entry writes, including disposal after deadline already released waiters. Already-issued work is not canceled.",
+    "DeadlineUnblocks": "The original deadline releases output even if the pre-open callback remains pending; no disposal fairness is assumed.",
+    "LiveCallbackKeepsMetadata": "A completing callback on a still-live turn retains author/model metadata after the wait deadline.",
+    "NativeBusyWaitBound": "A shared SQLite writer lock incurs at most one native BUSY wait per scan pass. Explicit recovery also stops at its first shared BUSY, retaining untouched receipts."
+  },
+  "actions": {
+    "Body/Rpc/Receipt/Activation": "session-send-delivery.ts separate history/control/meta writes and dispatch-turn RPC; delivery order is abstracted, not real transport.",
+    "Expire": "markMissingUserTurnRecovery records the exact failed ID in missingHistoryUserMsgIds with the legacy scalar; source replay also rejects an old timeout after activation changes.",
+    "Accept/Start/Finish": "watcher source selection plus session-execution-service acceptInboxHumanInput and durable Inbox admission; start/retirement are abstract boundary conditions checked separately by real SQL permutations.",
+    "ObserveHistory/Deadline": "turn-history-gate.ts scheduleCheck/openGate synchronous prefix through hook await.",
+    "HookCompletes": "Callback resolution/caught rejection releases only its own gate; the writer checks its abort signal after asynchronous reads and before openAssistantTurn.",
+    "Dispose": "Aborts later callback steps even on an already-open gate, then releases waiters. Deadline only releases waiters.",
+    "sqlitePermutations": "InboxSqlite accept, begin, prepare, canSubmit, fence, settle, release, pause and activate; no handwritten SQL implementation of those transitions.",
+    "BUSY/Retry": "service.ts typed storage failure propagation, coalesced scope-owned deferBusyScan and scan wake guard. No replay of transport and no admission fence."
+  },
+  "syncWorkingTree": false
+}

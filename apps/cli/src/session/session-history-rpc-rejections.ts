@@ -80,7 +80,8 @@ export const putSessionHistoryRpcRejection = Effect.fn('putSessionHistoryRpcReje
     filename: string,
     request: SessionHistoryRpcRequest,
     rejection: SessionHistoryRpcRejection,
-    now: number
+    now: number,
+    retainUntil: number = request.expiresAt
   ) =>
     withDatabase(filename, (db) =>
       db
@@ -99,7 +100,7 @@ export const putSessionHistoryRpcRejection = Effect.fn('putSessionHistoryRpcReje
             request.machineId,
             request.id,
             validated.fingerprint,
-            request.expiresAt,
+            Math.max(request.expiresAt, retainUntil),
             validated.code,
             validated.message
           );

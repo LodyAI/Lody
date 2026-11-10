@@ -126,6 +126,11 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     for navigation in Set(tabNavigations.values).union([primary]) { navigation.popToRootViewController(animated: false) }
     clearSession()
   }
+  /// Clear only the initiating conversation when Archive optimistically returns to Home.
+  func returnToList(from controller: SessionController) {
+    guard session === controller, !panelOpen else { return }
+    clearSession()
+  }
   private func clearSession() {
     session = nil
     closePanel()

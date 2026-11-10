@@ -14,12 +14,14 @@ export type E2eeAccountPairingErrorCode =
   | 'pairing-expired'
   /** This host already used or finished this pairing secret. */
   | 'pairing-used'
-  /** Another tab of this browser owns the account pairing; it runs only there. */
+  /** Another unfinished request owns pairing on this device; continue or cancel it first. */
   | 'pairing-elsewhere'
   /** The service refuses account pairing: it is switched off on this deployment. */
   | 'pairing-unavailable'
   /** The service refuses new requests for this account until its hourly limit resets. */
-  | 'pairing-rate-limited';
+  | 'pairing-rate-limited'
+  /** The native host cannot preserve the automatic exchange's original deadline. */
+  | 'pairing-update-required';
 
 const ERROR_CODES: readonly E2eeAccountPairingErrorCode[] = [
   'pairing-tampered',
@@ -28,6 +30,7 @@ const ERROR_CODES: readonly E2eeAccountPairingErrorCode[] = [
   'pairing-elsewhere',
   'pairing-unavailable',
   'pairing-rate-limited',
+  'pairing-update-required',
 ];
 /** Reads the typed refusal from a host error; anything else is an ordinary failure. */
 export function accountPairingErrorCode(error: unknown): E2eeAccountPairingErrorCode | null {
@@ -42,6 +45,8 @@ export type E2eeAccountPairingWorkspace = { workspaceId: string; name: string };
 
 /** The new device's own retained request. */
 export type E2eeAccountPairingRequestState = {
+  /** Public request identity, supplied only by hosts supporting exact-ID cancellation. */
+  lookupId?: string;
   direction: 'requester-shows' | 'approver-shows';
   /** Grouped pairing string, only while this device displays the code and it is open. */
   pairingString: string | null;
@@ -80,11 +85,16 @@ export interface E2eeAccountPairingRuntime {
    * host draws a new secret and shows it; with one it answers the approver's code. */
   requestAccountPairing?(input: {
     pairingString?: string;
+    /** Optional shorter original deadline for a committed automatic exchange. */
+    expiresAt?: number;
+    /** Refuse replacing a different retained request in the native account owner. */
+    preserveExisting?: true;
+    workspace?: { workspaceId: string; name: string; genesisHash: string };
   }): Promise<E2eeAccountPairingRequestState>;
   /** The retained request and its latest verified progress; never creates one. */
   accountPairingRequest?(): Promise<E2eeAccountPairingRequestState | null>;
   /** Abandons and destroys the secret; a later request starts fresh. */
-  cancelAccountPairing?(): Promise<void>;
+  cancelAccountPairing?(input?: { expectedLookupId: string }): Promise<void>;
   /** Reverse direction: this approved device shows a code for a new device to scan. */
   accountPairingCode?(): Promise<{ pairingString: string; expiresAt: number }>;
   /** Fetches and verifies the request for a code. `null` means no request has been
@@ -97,4 +107,33 @@ export interface E2eeAccountPairingRuntime {
     workspaceIds: string[];
   }): Promise<E2eeAccountPairingApproval>;
   declineAccountPairing?(input: { pairingString: string; requestId: string }): Promise<void>;
+}
+
+/** Verified automatic channel state; no raw pairing secret crosses this UI port. */
+export type E2eeAutomaticPairingState = {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  deviceName: string;
+  expiresAt: number;
+  comparisonCode: string | null;
+  phase: 'preparing' | 'waiting' | 'syncing' | 'joined' | 'declined' | 'expired' | 'cancelled';
+};
+/** A host-authenticated, current-workspace-only approval preview. */
+export type E2eeAutomaticPairingReview = E2eeAutomaticPairingState & { requestId: string };
+/** Optional real runtime capability. Discovery alone never grants access. */
+export interface E2eeAutomaticPairingRuntime {
+  /** Optional push hints; verification still occurs through the ordinary runtime reads. */
+  subscribeAutomaticPairing?(changed: () => void): () => void;
+  startAutomaticPairing?(workspaceId: string): Promise<E2eeAutomaticPairingState>;
+  automaticPairingState?(workspaceId: string): Promise<E2eeAutomaticPairingState | null>;
+  cancelAutomaticPairing?(workspaceId: string): Promise<void>;
+  /** Explicitly end the displayed native request, never a concurrently replaced one. */
+  restartAutomaticPairing?(
+    workspaceId: string,
+    input: { expectedLookupId: string }
+  ): Promise<E2eeAutomaticPairingState>;
+  pendingAutomaticPairing?(): Promise<E2eeAutomaticPairingReview[]>;
+  approveAutomaticPairing?(id: string): Promise<void>;
+  declineAutomaticPairing?(id: string): Promise<void>;
 }

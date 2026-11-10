@@ -3,13 +3,37 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
+import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { AlertDialog } from '@/ui/dialog';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { CompactSection } from '../compact-layout';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+
+/** When this device last opened the account's recovery file successfully. Display only:
+ * it proves nothing about other devices and is cleared when the file is replaced. */
+const checkedKey = (accountId: string) => `lody:e2ee:recovery-checked:${accountId}`;
+function readChecked(accountId: string | null | undefined): number | null {
+  if (!accountId) return null;
+  try {
+    const value = Number(localStorage.getItem(checkedKey(accountId)));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+function writeChecked(accountId: string | null | undefined, at: number | null) {
+  if (!accountId) return;
+  try {
+    if (at === null) localStorage.removeItem(checkedKey(accountId));
+    else localStorage.setItem(checkedKey(accountId), String(at));
+  } catch {
+    // Storage can be unavailable; the date is only a convenience.
+  }
+}
+import { CompactRow, CompactSection } from '../compact-layout';
 
 const styles = stylex.create({
   body: {
@@ -20,7 +44,9 @@ const styles = stylex.create({
     padding: space[4],
     fontSize: text.subheadlineSize,
   },
-  actions: { display: 'flex', gap: space[2], flexWrap: 'wrap' },
+  actions: { display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
+  rowActions: { display: 'flex', gap: space[2], flexWrap: 'wrap', justifyContent: 'flex-end' },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[4] },
   line: { display: 'block' },
   // Name and status share one column so the buttons wrap below them at the same left edge.
   workspace: {
@@ -67,17 +93,67 @@ type Result =
         | 'e2ee.recovery.passkeyRemoveIncomplete';
     }
   | { kind: 'restored'; results: readonly { name: string; outcome: string }[] }
+  | { kind: 'setupAll'; done: number; failed: readonly string[] }
   | { kind: 'created'; vaultId: string }
   | { kind: 'opened'; vaultId: string; count: number }
   | { kind: 'error'; code: string };
+
+/** This workspace's recovery readiness for the console's getting-started list: true only
+ * when recovery is verified, false when it is not yet, undefined when off or unknown. */
+export function useWorkspaceRecoveryReady(
+  workspaceId: string | null | undefined,
+  accountId?: string | null
+) {
+  const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
+  const [e2ee] = useState(() => getIpcServices()?.e2ee);
+  const [ready, setReady] = useState<{ scope: string; value: boolean | undefined }>();
+  const scope = `${accountId ?? ''}:${workspaceId ?? ''}`;
+  useEffect(() => {
+    if (!enabled || !e2ee || !workspaceId) return;
+    let live = true;
+    void e2ee.recoveryReplacementPlan().then(
+      (plan) => {
+        if (!live) return;
+        const status = plan.covered.find((workspace) => workspace.id === workspaceId)?.status;
+        setReady({
+          scope,
+          value: !plan.hasVault
+            ? false
+            : status === undefined || status.kind === 'unknown'
+              ? undefined
+              : status.kind === 'verified',
+        });
+      },
+      () => {
+        if (live) setReady({ scope, value: undefined });
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, [enabled, e2ee, workspaceId, scope]);
+  return enabled && ready?.scope === scope ? ready.value : undefined;
+}
+
+const statusBadge: Record<WorkspaceStatus['kind'], { key: string; tone: BadgeTone }> = {
+  verified: { key: 'e2ee.recovery.workspace.verified', tone: 'success' },
+  saved: { key: 'e2ee.recovery.workspace.saved', tone: 'neutral' },
+  notSet: { key: 'e2ee.recovery.workspace.notSet', tone: 'warning' },
+  unknown: { key: 'e2ee.recovery.workspace.unknown', tone: 'neutral' },
+};
 
 /**
  * Post-MVP recovery file controls, hidden unless Developer mode and the beta
  * switch are on; main additionally refuses unless started with the env gate.
  * Main owns the file dialogs and bytes; this view receives only outcomes.
  */
-export function RecoveryVaultSection() {
-  const { t } = useTranslation();
+export function RecoveryVaultSection({ accountId }: { accountId?: string | null } = {}) {
+  const { t, i18n } = useTranslation();
+  const [checkedAt, setCheckedAt] = useState(() => readChecked(accountId));
+  const markChecked = (at: number | null) => {
+    writeChecked(accountId, at);
+    setCheckedAt(at);
+  };
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
   // The proxy is new on every call; keep one so the loading effect runs once.
   const [e2ee] = useState(() => getIpcServices()?.e2ee);
@@ -158,24 +234,67 @@ export function RecoveryVaultSection() {
   };
   const finishReplacement = async (compromised: boolean): Promise<Result | undefined> => {
     const finished = await e2ee.continueRecoveryReplacement({ compromised });
-    if (finished.outcome === 'Committed')
+    if (finished.outcome === 'Committed') {
+      // The old file stopped working; its check says nothing about the new one.
+      markChecked(null);
       return { kind: 'notice', key: 'e2ee.recovery.replaceFinished' };
+    }
     return finished.outcome === 'Pending'
       ? { kind: 'notice', key: 'e2ee.recovery.replacePending' }
       : undefined;
   };
   const short = (vaultId: string) => vaultId.slice(0, 12);
+  // Saved but not yet verified still needs its setup finished: a held receipt or an
+  // undelivered envelope continues from the journal's original submission.
+  const unfinished =
+    mode === 'ready'
+      ? (plan?.covered.filter(
+          (row) => row.status.kind === 'notSet' || row.status.kind === 'saved'
+        ) ?? [])
+      : [];
+  const setupAll = (method: 'file' | 'passkey') =>
+    void run(async () => {
+      const settled = await e2ee.setupRecoveryForWorkspaces(
+        unfinished.map((row) => row.id),
+        method
+      );
+      if (settled.outcome === 'cancelled') return undefined;
+      // Reconcile against what was asked: only a committed, verified setup is done.
+      // Pending, conflicting, unverified or missing results are listed as not finished.
+      const finished = new Set(
+        settled.results
+          .filter((row) => row.outcome === 'Committed' && row.recoverable)
+          .map((row) => row.workspaceId)
+      );
+      return {
+        kind: 'setupAll',
+        done: unfinished.filter((row) => finished.has(row.id)).length,
+        failed: unfinished.filter((row) => !finished.has(row.id)).map((row) => row.name),
+      };
+    });
+  const restoreButton = (method: 'file' | 'passkey') => (
+    <Button
+      size="small"
+      variant="secondary"
+      disabled={busy}
+      onClick={() =>
+        void run(async () => {
+          const restored = await e2ee.restoreFromRecoveryFile(method);
+          return restored.outcome === 'restored'
+            ? { kind: 'restored', results: restored.results }
+            : undefined;
+        })
+      }
+    >
+      {t(method === 'file' ? 'e2ee.recovery.restore' : 'e2ee.recovery.restorePasskey')}
+    </Button>
+  );
   return (
-    <CompactSection title={t('e2ee.recovery.title')}>
-      <div {...stylex.props(styles.body)}>
-        <p>{t('e2ee.recovery.lead')}</p>
-        {mode === 'failed' && (
-          <Alert.Root>
-            <Alert.Description>{t('e2ee.recovery.planFailed')}</Alert.Description>
-          </Alert.Root>
-        )}
-        <div {...stylex.props(styles.actions)}>
-          {mode === 'failed' && (
+    <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
+      {mode === 'failed' && (
+        <Alert.Root tone="danger">
+          <Alert.Description>{t('e2ee.recovery.planFailed')}</Alert.Description>
+          <Alert.Actions>
             <Button
               disabled={busy}
               onClick={() => {
@@ -185,203 +304,223 @@ export function RecoveryVaultSection() {
             >
               {t('common.retry')}
             </Button>
-          )}
-          {(mode === 'none' || mode === 'failed') && (
-            <Button
-              variant={mode === 'none' ? undefined : 'secondary'}
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const created = await e2ee.createRecoveryVault();
-                  return created.outcome === 'created'
-                    ? { kind: 'created', vaultId: created.vaultId }
-                    : undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.create')}
+          </Alert.Actions>
+        </Alert.Root>
+      )}
+      {mode === 'none' && (
+        <Alert.Root tone="warning" data-testid="e2ee-recovery-none">
+          <Alert.Title>{t('e2ee.recovery.noneTitle')}</Alert.Title>
+          <Alert.Description>{t('e2ee.recovery.noneBody')}</Alert.Description>
+        </Alert.Root>
+      )}
+      {unfinished.length > 0 && (
+        <Alert.Root tone="warning" data-testid="e2ee-recovery-uncovered">
+          <Alert.Title>
+            {t('e2ee.recovery.uncoveredTitle', { count: unfinished.length })}
+          </Alert.Title>
+          <Alert.Description>{t('e2ee.recovery.uncoveredBody')}</Alert.Description>
+          <Alert.Actions>
+            <Button disabled={busy} onClick={() => setupAll('file')}>
+              {t('e2ee.recovery.setupAll')}
             </Button>
-          )}
-          {(mode === 'ready' || mode === 'failed') && (
-            <Button
-              variant={mode === 'ready' ? undefined : 'secondary'}
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const opened = await e2ee.inspectRecoveryFile();
-                  return opened.outcome === 'opened'
-                    ? { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces }
-                    : undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.check')}
-            </Button>
-          )}
-          {mode === 'ready' && (
-            <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
-              {t('e2ee.recovery.replace')}
-            </Button>
-          )}
-          {canRestore && (
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const restored = await e2ee.restoreFromRecoveryFile();
-                  return restored.outcome === 'restored'
-                    ? { kind: 'restored', results: restored.results }
-                    : undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.restore')}
-            </Button>
-          )}
-          {canRestore && passkey && (
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const restored = await e2ee.restoreFromRecoveryFile('passkey');
-                  return restored.outcome === 'restored'
-                    ? { kind: 'restored', results: restored.results }
-                    : undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.restorePasskey')}
-            </Button>
-          )}
-          {mode === 'ready' && passkey && (
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() =>
-                void e2ee.recoveryPasskeyDefaultLabel().then(
-                  (label) => setNaming(label),
-                  () => setNaming('')
-                )
-              }
-            >
-              {t('e2ee.recovery.passkeyAdd')}
-            </Button>
-          )}
-          {mode === 'ready' && passkey && (
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const listed = await e2ee.listRecoveryPasskeys();
-                  if (listed.outcome === 'listed') {
-                    setPasskeys(listed.passkeys);
-                    setPending(listed.pending);
-                  }
-                  return undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.passkeyManage')}
-            </Button>
-          )}
-        </div>
-        {pending.length > 0 && (
-          <Alert.Root>
-            <Alert.Description>
-              {pending.map((row) => (
-                <span key={row.entryId} {...stylex.props(styles.actions)}>
-                  {t('e2ee.recovery.passkeyRemoveUnfinished', { name: row.label })}
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        const removed = await e2ee.removeRecoveryPasskey(row.entryId);
-                        if (removed.outcome === 'cancelled') return undefined;
-                        setPasskeys(removed.passkeys);
-                        setPending(removed.pending);
-                        return {
-                          kind: 'notice',
-                          key:
-                            removed.outcome === 'removed'
-                              ? 'e2ee.recovery.passkeyRemoved'
-                              : 'e2ee.recovery.passkeyRemoveIncomplete',
-                        };
-                      })
-                    }
-                  >
-                    {t('e2ee.recovery.passkeyRemoveRetry')}
-                  </Button>
-                </span>
-              ))}
-            </Alert.Description>
-          </Alert.Root>
-        )}
-        {passkeys !== undefined && (
-          <div {...stylex.props(styles.body)}>
-            {passkeys.length === 0 ? (
-              <p>{t('e2ee.recovery.passkeyNone')}</p>
-            ) : (
-              passkeys.map((row) => (
-                <div key={row.entryId} {...stylex.props(styles.actions)}>
-                  <span>{row.label}</span>
-                  <Button variant="secondary" disabled={busy} onClick={() => setRemoving(row)}>
-                    {t('e2ee.recovery.passkeyRemove')}
-                  </Button>
-                </div>
-              ))
+            {passkey && (
+              <Button variant="secondary" disabled={busy} onClick={() => setupAll('passkey')}>
+                {t('e2ee.recovery.setupAllPasskey')}
+              </Button>
             )}
+          </Alert.Actions>
+        </Alert.Root>
+      )}
+      <CompactSection title={t('e2ee.recovery.methods')} boxed>
+        <CompactRow
+          label={t('e2ee.recovery.file')}
+          helper={
+            mode === 'ready' || mode === 'replacing'
+              ? mode === 'replacing'
+                ? t('e2ee.recovery.fileReplacing')
+                : checkedAt
+                  ? t('e2ee.recovery.fileSavedChecked', {
+                      date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+                        month: 'short',
+                        day: 'numeric',
+                      }).format(new Date(checkedAt)),
+                    })
+                  : t('e2ee.recovery.fileSaved')
+              : mode === 'none'
+                ? t('e2ee.recovery.fileNone')
+                : t('e2ee.recovery.offlineHint')
+          }
+          alignTop
+        >
+          <div {...stylex.props(styles.rowActions)}>
+            {(mode === 'none' || mode === 'failed') && (
+              <Button
+                size="small"
+                variant={mode === 'none' ? 'primary' : 'secondary'}
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const created = await e2ee.createRecoveryVault();
+                    if (created.outcome !== 'created') return undefined;
+                    // Creation saves and reads the file back, so it counts as a check.
+                    markChecked(Date.now());
+                    return { kind: 'created', vaultId: created.vaultId };
+                  })
+                }
+              >
+                {t('e2ee.recovery.create')}
+              </Button>
+            )}
+            {(mode === 'ready' || mode === 'failed') && (
+              <Button
+                size="small"
+                // One primary action at a time: setting up uncovered workspaces leads when
+                // there are any; otherwise checking the saved file does.
+                variant={mode === 'ready' && unfinished.length === 0 ? 'primary' : 'secondary'}
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const opened = await e2ee.inspectRecoveryFile();
+                    if (opened.outcome !== 'opened') return undefined;
+                    markChecked(Date.now());
+                    return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
+                  })
+                }
+              >
+                {t('e2ee.recovery.check')}
+              </Button>
+            )}
+            {mode === 'ready' && (
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setDialog('begin')}
+              >
+                {t('e2ee.recovery.replace')}
+              </Button>
+            )}
+            {canRestore && restoreButton('file')}
           </div>
+        </CompactRow>
+        {passkey && (mode === 'ready' || mode === 'replacing' || canRestore) && (
+          <CompactRow
+            label={t('e2ee.recovery.passkey')}
+            helper={t('e2ee.recovery.passkeyHelp')}
+            alignTop
+          >
+            <div {...stylex.props(styles.rowActions)}>
+              {mode === 'ready' && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void e2ee.recoveryPasskeyDefaultLabel().then(
+                      (label) => setNaming(label),
+                      () => setNaming('')
+                    )
+                  }
+                >
+                  {t('e2ee.recovery.passkeyAdd')}
+                </Button>
+              )}
+              {mode === 'ready' && (
+                <Button
+                  size="small"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const listed = await e2ee.listRecoveryPasskeys();
+                      if (listed.outcome === 'listed') {
+                        setPasskeys(listed.passkeys);
+                        setPending(listed.pending);
+                      }
+                      return undefined;
+                    })
+                  }
+                >
+                  {t('e2ee.recovery.passkeyManage')}
+                </Button>
+              )}
+              {canRestore && restoreButton('passkey')}
+            </div>
+          </CompactRow>
         )}
-        {mode === 'ready' && !!plan?.covered.length && (
-          <div {...stylex.props(styles.body)}>
-            <p>{t('e2ee.recovery.workspaces')}</p>
-            {plan.covered.map((workspace) => (
-              <div key={workspace.id} {...stylex.props(styles.workspace)}>
-                <span {...stylex.props(styles.workspaceLabel)}>
-                  <span>{workspace.name}</span>
-                  <span>
-                    {workspace.status.kind === 'verified'
-                      ? t('e2ee.recovery.workspace.verified', { update: workspace.status.update })
-                      : t(
-                          workspace.status.kind === 'saved'
-                            ? 'e2ee.recovery.workspace.saved'
-                            : workspace.status.kind === 'unknown'
-                              ? 'e2ee.recovery.workspace.unknown'
-                              : 'e2ee.recovery.workspace.notSet'
-                        )}
-                  </span>
-                </span>
-                <span {...stylex.props(styles.actions)}>
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        const done = await e2ee.setupWorkspaceRecovery(workspace.id);
-                        if (done.outcome === 'cancelled') return undefined;
-                        return {
-                          kind: 'notice',
-                          key:
-                            done.outcome === 'Committed' && done.recoverable
-                              ? 'e2ee.recovery.setupDone'
-                              : 'e2ee.recovery.replacePending',
-                        };
-                      })
-                    }
-                  >
-                    {t('e2ee.recovery.setup')}
-                  </Button>
-                  {passkey && (
+      </CompactSection>
+      {pending.length > 0 && (
+        <Alert.Root tone="warning">
+          <Alert.Description>
+            {pending.map((row) => (
+              <span key={row.entryId} {...stylex.props(styles.actions)}>
+                {t('e2ee.recovery.passkeyRemoveUnfinished', { name: row.label })}
+                <Button
+                  size="small"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const removed = await e2ee.removeRecoveryPasskey(row.entryId);
+                      if (removed.outcome === 'cancelled') return undefined;
+                      setPasskeys(removed.passkeys);
+                      setPending(removed.pending);
+                      return {
+                        kind: 'notice',
+                        key:
+                          removed.outcome === 'removed'
+                            ? 'e2ee.recovery.passkeyRemoved'
+                            : 'e2ee.recovery.passkeyRemoveIncomplete',
+                      };
+                    })
+                  }
+                >
+                  {t('e2ee.recovery.passkeyRemoveRetry')}
+                </Button>
+              </span>
+            ))}
+          </Alert.Description>
+        </Alert.Root>
+      )}
+      {passkeys !== undefined && (
+        <CompactSection title={t('e2ee.recovery.passkeys')} boxed>
+          {passkeys.length === 0 ? (
+            <CompactRow label={t('e2ee.recovery.passkeyNone')} />
+          ) : (
+            passkeys.map((row) => (
+              <CompactRow key={row.entryId} label={row.label}>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  tone="destructive"
+                  disabled={busy}
+                  onClick={() => setRemoving(row)}
+                >
+                  {t('e2ee.recovery.passkeyRemove')}
+                </Button>
+              </CompactRow>
+            ))
+          )}
+        </CompactSection>
+      )}
+      {mode === 'ready' && !!plan?.covered.length && (
+        <CompactSection title={t('e2ee.recovery.workspaces')} boxed>
+          {plan.covered.map((workspace) => {
+            const badge = statusBadge[workspace.status.kind];
+            return (
+              <CompactRow key={workspace.id} label={workspace.name}>
+                <div data-recovery-workspace={workspace.id} {...stylex.props(styles.rowActions)}>
+                  <Badge tone={badge.tone} data-recovery-status={workspace.status.kind}>
+                    {t(badge.key)}
+                  </Badge>
+                  {(workspace.status.kind === 'notSet' || workspace.status.kind === 'saved') && (
                     <Button
+                      size="small"
                       variant="secondary"
                       disabled={busy}
                       onClick={() =>
                         void run(async () => {
-                          const done = await e2ee.setupWorkspaceRecovery(workspace.id, 'passkey');
+                          const done = await e2ee.setupWorkspaceRecovery(workspace.id);
                           if (done.outcome === 'cancelled') return undefined;
                           return {
                             kind: 'notice',
@@ -393,114 +532,136 @@ export function RecoveryVaultSection() {
                         })
                       }
                     >
-                      {t('e2ee.recovery.setupPasskey')}
+                      {t(
+                        workspace.status.kind === 'saved'
+                          ? 'e2ee.recovery.setupContinue'
+                          : 'e2ee.recovery.setup'
+                      )}
                     </Button>
                   )}
-                </span>
-              </div>
+                </div>
+              </CompactRow>
+            );
+          })}
+        </CompactSection>
+      )}
+      {result?.kind === 'restored' &&
+        (result.results.length === 0 ? (
+          <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
+        ) : (
+          <ul aria-live="polite">
+            {result.results.map((row) => (
+              <li key={row.name}>
+                {t(
+                  row.outcome === 'Committed'
+                    ? 'e2ee.recovery.restoreDone'
+                    : row.outcome === 'Pending'
+                      ? 'e2ee.recovery.restoreWaiting'
+                      : 'e2ee.recovery.restoreFailed',
+                  { name: row.name }
+                )}
+              </li>
             ))}
-          </div>
-        )}
-        {result?.kind === 'restored' &&
-          (result.results.length === 0 ? (
-            <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
-          ) : (
-            <ul aria-live="polite">
-              {result.results.map((row) => (
-                <li key={row.name}>
-                  {t(
-                    row.outcome === 'Committed'
-                      ? 'e2ee.recovery.restoreDone'
-                      : row.outcome === 'Pending'
-                        ? 'e2ee.recovery.restoreWaiting'
-                        : 'e2ee.recovery.restoreFailed',
-                    { name: row.name }
-                  )}
-                </li>
-              ))}
-            </ul>
+          </ul>
+        ))}
+      {result?.kind === 'setupAll' && (
+        <Alert.Root tone={result.failed.length ? 'warning' : 'success'} aria-live="polite">
+          <Alert.Description>
+            {result.failed.length
+              ? t('e2ee.recovery.setupAllPartial', {
+                  done: result.done,
+                  names: result.failed.join(t('e2ee.recovery.nameSeparator')),
+                })
+              : t('e2ee.recovery.setupAllDone')}
+          </Alert.Description>
+        </Alert.Root>
+      )}
+      {plan?.replacing && (
+        <Alert.Root tone="warning">
+          <Alert.Description aria-live="polite">{t('e2ee.recovery.replacing')}</Alert.Description>
+          <Alert.Actions>
+            <Button disabled={busy} onClick={() => setDialog('continue')}>
+              {t('e2ee.recovery.replaceContinue')}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const abandoned = await e2ee.abandonRecoveryReplacement();
+                  return {
+                    kind: 'notice',
+                    key:
+                      abandoned.outcome === 'Pending'
+                        ? 'e2ee.recovery.replacePending'
+                        : 'e2ee.recovery.replaceAbandoned',
+                  };
+                })
+              }
+            >
+              {t('e2ee.recovery.replaceAbandon')}
+            </Button>
+          </Alert.Actions>
+        </Alert.Root>
+      )}
+      {events.length > 0 && (
+        <CompactSection title={t('e2ee.recovery.securityEvents')} boxed>
+          {events.slice(0, 5).map((event) => (
+            <CompactRow
+              key={event.id}
+              label={t(
+                event.kind === 'personal_device_recovered'
+                  ? 'e2ee.recovery.eventRecovered'
+                  : event.kind === 'vault_replacement_finished'
+                    ? 'e2ee.recovery.eventReplaced'
+                    : 'e2ee.recovery.eventReplacing',
+                { time: new Date(event.occurredAt).toLocaleString() }
+              )}
+            />
           ))}
-        {plan?.replacing && (
-          <>
-            <p aria-live="polite">{t('e2ee.recovery.replacing')}</p>
-            <div {...stylex.props(styles.actions)}>
-              <Button disabled={busy} onClick={() => setDialog('continue')}>
-                {t('e2ee.recovery.replaceContinue')}
-              </Button>
+          {mode === 'ready' && (
+            <CompactRow label={t('e2ee.recovery.eventNotMeHelp')}>
               <Button
+                size="small"
                 variant="secondary"
+                tone="destructive"
                 disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const abandoned = await e2ee.abandonRecoveryReplacement();
-                    return {
-                      kind: 'notice',
-                      key:
-                        abandoned.outcome === 'Pending'
-                          ? 'e2ee.recovery.replacePending'
-                          : 'e2ee.recovery.replaceAbandoned',
-                    };
-                  })
-                }
+                onClick={() => setDialog('begin')}
               >
-                {t('e2ee.recovery.replaceAbandon')}
-              </Button>
-            </div>
-          </>
-        )}
-        {events.length > 0 && (
-          <div {...stylex.props(styles.body)}>
-            <p>{t('e2ee.recovery.securityEvents')}</p>
-            <ul>
-              {events.slice(0, 5).map((event) => (
-                <li key={event.id}>
-                  {t(
-                    event.kind === 'personal_device_recovered'
-                      ? 'e2ee.recovery.eventRecovered'
-                      : event.kind === 'vault_replacement_finished'
-                        ? 'e2ee.recovery.eventReplaced'
-                        : 'e2ee.recovery.eventReplacing',
-                    { time: new Date(event.occurredAt).toLocaleString() }
-                  )}
-                </li>
-              ))}
-            </ul>
-            {mode === 'ready' && (
-              <Button variant="secondary" disabled={busy} onClick={() => setDialog('begin')}>
                 {t('e2ee.recovery.eventNotMe')}
               </Button>
+            </CompactRow>
+          )}
+        </CompactSection>
+      )}
+      {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
+      {result?.kind === 'created' && (
+        <p aria-live="polite">{t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}</p>
+      )}
+      {result?.kind === 'opened' && (
+        <p aria-live="polite">
+          {t('e2ee.recovery.opened', { vaultId: short(result.vaultId), count: result.count })}
+        </p>
+      )}
+      {result?.kind === 'error' && (
+        <Alert.Root tone="danger">
+          <Alert.Description>
+            {t(
+              result.code.includes('e2ee_recovery_disabled')
+                ? 'e2ee.recovery.disabled'
+                : result.code.includes('e2ee_recovery_prf-unavailable')
+                  ? 'e2ee.recovery.passkeyUnsupported'
+                  : result.code.includes('e2ee_recovery_replacing')
+                    ? 'e2ee.recovery.replacingElsewhere'
+                    : result.code.includes('e2ee_recovery_exists')
+                      ? 'e2ee.recovery.exists'
+                      : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                        ? 'e2ee.recovery.wrongFile'
+                        : 'e2ee.recovery.failed'
             )}
-          </div>
-        )}
-        {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
-        {result?.kind === 'created' && (
-          <p aria-live="polite">{t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}</p>
-        )}
-        {result?.kind === 'opened' && (
-          <p aria-live="polite">
-            {t('e2ee.recovery.opened', { vaultId: short(result.vaultId), count: result.count })}
-          </p>
-        )}
-        {result?.kind === 'error' && (
-          <Alert.Root>
-            <Alert.Description>
-              {t(
-                result.code.includes('e2ee_recovery_disabled')
-                  ? 'e2ee.recovery.disabled'
-                  : result.code.includes('e2ee_recovery_prf-unavailable')
-                    ? 'e2ee.recovery.passkeyUnsupported'
-                    : result.code.includes('e2ee_recovery_replacing')
-                      ? 'e2ee.recovery.replacingElsewhere'
-                      : result.code.includes('e2ee_recovery_exists')
-                        ? 'e2ee.recovery.exists'
-                        : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                          ? 'e2ee.recovery.wrongFile'
-                          : 'e2ee.recovery.failed'
-              )}
-            </Alert.Description>
-          </Alert.Root>
-        )}
-      </div>
+          </Alert.Description>
+        </Alert.Root>
+      )}
       <AlertDialog.Root
         open={removing !== undefined}
         onOpenChange={(open) => {
@@ -654,6 +815,6 @@ export function RecoveryVaultSection() {
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>
-    </CompactSection>
+    </div>
   );
 }

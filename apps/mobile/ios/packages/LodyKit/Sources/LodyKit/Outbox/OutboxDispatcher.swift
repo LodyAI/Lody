@@ -54,12 +54,32 @@ final class OutboxDispatcher {
   private var released: [String: String] = [:]
   private var trigger: Trigger?
   private var scheduled = false
+  private var observer: NSObjectProtocol?
+  private var holding = Set<String>()
 
   init(services: OutboxServices, inflight: OutboxInflight, foreground: String? = nil, text: @escaping (String) -> String) {
     self.services = services
     self.inflight = inflight
     self.foreground = foreground
     self.text = text
+    // The page and background dispatchers share one inflight set. A dispatcher that saw a session
+    // held by the other one recorded its trigger and returned; nothing else wakes it once the hold
+    // ends, so a settled record (unknown, accepted, waiting) would keep its stale status.
+    observer = NotificationCenter.default.addObserver(forName: .lodyOutboxInflightReleased, object: inflight, queue: nil) {
+      [weak self] note in
+      let releaser = note.userInfo?["dispatcher"] as? ObjectIdentifier
+      MainActor.assumeIsolated {
+        guard let self, releaser != ObjectIdentifier(self) else { return }
+        self.trigger = nil
+        self.schedule()
+        // The page's composer reads the shared set for canSend; refresh it even if no record changes.
+        self.settled?()
+      }
+    }
+  }
+
+  isolated deinit {
+    if let observer { NotificationCenter.default.removeObserver(observer) }
   }
 
   func update(store: OutboxStore?, inputs: Inputs) {
@@ -143,17 +163,28 @@ final class OutboxDispatcher {
   private func start(_ record: OutboxRecord, store: OutboxStore, plan: Plan?) {
     let id = record.sessionId
     inflight.set(id, true)
+    holding.insert(id)
     let marked = record.with(phase: record.creation == nil ? "sending" : "creating")
     let marking = store.put(marked)
     let userId = inputs.userId
     Task { @MainActor in
       await self.dispatch(record, marked: marked, marking: marking, store: store, userId: userId, plan: plan)
-      self.inflight.set(id, false)
+      self.release(id)
       guard self.foreground != nil else { return }
       self.trigger = nil
       self.schedule()
       self.settled?()
     }
+  }
+
+  private func release(_ id: String) {
+    // A created session is released before its write settles; the page may claim it meanwhile.
+    guard holding.remove(id) != nil else { return }
+    inflight.set(id, false)
+    // Wake only the other dispatchers: rerunning this one would retry a session_not_ready
+    // background send at once instead of on the next catalog change.
+    NotificationCenter.default.post(name: .lodyOutboxInflightReleased, object: inflight,
+                                    userInfo: ["dispatcher": ObjectIdentifier(self)])
   }
 
   private func dispatch(_ record: OutboxRecord, marked: OutboxRecord, marking: Task<Void, Error>,
@@ -170,7 +201,7 @@ final class OutboxDispatcher {
         switch result["state"]?.string {
         case "created":
           guard let session = result["session"]?.object else { throw OutboxError.invalidRecord }
-          inflight.set(id, false)
+          release(id)
           var created = record.with(phase: "waiting", dropCreation: true)
           created.session = session
           try await store.put(created).value

@@ -1,9 +1,10 @@
 # Lody 安全白皮书
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#同源网页恢复)
+Previously approved baseline: [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
 Translation: current
 
-Approved revision: 2026-11-07 后端故障期间的执行新鲜度（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)）；2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-10 iroh 首选通道（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)）；2026-11-07 后端故障期间的执行新鲜度（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)）；2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
@@ -15,7 +16,7 @@ Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批�
 
 版本 0.19 · 2026-10-31 · [English](whitepaper.md)
 
-> E2EE 文档入口 · 22 项已定决策。本文已同步这些方案方向。[恢复保险库](recovery-vault.zh.md)（2026-10-31 整体批准，2026-11-06 修订）与[桌面密钥保管](desktop-custody.zh.md) Spec 已批准；批准不代表已实现、已部署或真机验收，恢复保险库仍不在 MVP 内。它描述拟采用的安全架构，非现有产品保证或独立安全审计。详细角色、签名及交互见[权限账本草案](permission-ledger.zh.md)，其中建议和待确认项不是已批准规则；实现进度见实施清单。
+> E2EE 文档入口 · 22 项已定决策。本文已同步这些方案方向。[恢复保险库](recovery-vault.zh.md)（2026-10-31 整体批准，2026-11-06 修订）与[桌面密钥保管](desktop-custody.zh.md) Spec 的此前基线已批准；2026-11-10 的 RP／同源修订已由 zxch3n 于 2026-11-10 批准。批准不代表已实现、已部署或真机验收，恢复保险库仍不在 MVP 内。它描述拟采用的安全架构，非现有产品保证或独立安全审计。详细角色、签名及交互见[权限账本草案](permission-ledger.zh.md)，其中建议和待确认项不是已批准规则；实现进度见实施清单。
 
 ## 摘要
 
@@ -176,7 +177,7 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 
 恢复时，用户在新设备打开恢复库，解出目标工作区 R，验证可信账本及其当前资格，领取并解开当前代信封，再沿历史包恢复旧钥。新设备生成独立密钥 C，由 R 授权入账，之后使用 C 并清理 R 的临时秘密。仅当 R 有效且所需密文已保存，才无需管理员此刻在线；缺失的新钥不能凭空恢复。C 按用户当前角色取得权限，恢复不扩大角色。
 
-**Passkey。** 仅在实际支持 [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) 且验证恢复成功时，才可作为同一恢复库的另一解锁入口。普通 Passkey 登录不等于解密。vault-v1 包装格式见上文。已批准的 PRF 路径是 macOS 15+ 和 iOS 18.4+ 上的原生 AuthenticationServices 模块，之后是 `vault.lody.ai` 上隔离的只解锁 Web 界面。每条路径都必须报告真实的 32 字节 PRF 结果，没有降级，也不设白名单；Lody 只承诺并测试 iCloud 钥匙串。Windows 和 Linux 桌面应用使用恢复文件。这不恢复“所有工作区共用 R”的旧方案。
+**Passkey。** 仅在实际支持 [WebAuthn PRF](https://www.w3.org/TR/webauthn-3/#prf-extension) 且验证恢复成功时，才可作为同一恢复库的另一解锁入口。普通 Passkey 登录不等于解密。vault-v1 包装格式见上文。原生 PRF 路径使用 macOS 15+ 和 iOS 18.4+ 上的 AuthenticationServices 模块。**2026-11-10 已批准修订：** Mac/iOS/Web 的 RP 统一为 `lody.ai`，恢复直接在普通网页版内完成，取代 2026-11-06 的 `vault.lody.ai` 专用界面。主站、官网营销页、统计脚本和子域都可尝试请求恢复仪式；系统确认与用户验证仍是屏障，但不再承诺专用主机隔离。未来登录凭据须使用不同 RP，这能防止正常代码误选恢复凭据，不能阻止被入侵子域请求父 RP。方向、信任代价与默认关闭边界见[恢复保险库修订](recovery-vault.zh.md#passkey-解锁)。每条路径都必须报告真实的 32 字节 PRF 结果，没有降级，也不设白名单；Lody 只承诺并测试 iCloud 钥匙串。Windows 和 Linux 桌面应用使用恢复文件。这不恢复“所有工作区共用 R”的旧方案。
 
 **手机与引导。** 获准手机本身可批准新设备，不必常驻 R 私钥。所有端及 Owner 都可确认风险后跳过恢复设置；加入时提醒，并逐工作区显示未设置、待验证或已验证等实际进度。配对完成、曾收到信封和已能恢复是不同状态。
 
@@ -197,16 +198,17 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 Org 执行权限使用同一最坏 15 分钟撤权上限。缓存不得晚于原新鲜度证明到期，转发、收到证明或重启不重新计时；已知撤权立即失效，到期无法刷新拒绝新执行；但读取没有得到答复时，同成员的请求适用[后端故障期间的执行新鲜度](execution-freshness-outage.zh.md)中更长的窗口。该时限依赖服务端诚实提供最新控制状态；本地计时无法阻止恶意服务端持续隐瞒撤权。已启动命令的取消是另一条流程，撤权不自动撤回既有副作用。
 
 [M5 实时评审草案](../e2ee-foundations.zh.md#实时-rpc-与-presencem5-评审草案)给出
-具体字节与 MVP 路由顺序：加密 Streams RPC 主路径、加密 history/Meta 持久派发
-最终回退。2026-10-28 的 owner 决定将 iroh 延后为非 MVP 加速层。各路共用当前
+具体字节与路由顺序：宿主支持时先走 iroh，再走加密 Streams RPC，最后由加密
+history/Meta 持久派发回退。Owner 于 2026-10-28 将 iroh 移出 MVP，又于 2026-11-10
+将其定为首选通道。各路共用当前
 授权和一个持久实际启动 claim；实时重试保留原密文及 ID。已
 合入账本在接纳与 possession 中绑定 machineId；旧开发账本 current-only 重建，
 不保留兼容路径。`rotationRequired` 只提示换钥，本身不阻断封装、发送或执行。机器
 执行新鲜度仅内存保存，从自己经认证拉最新账本前开始计最多 15 分钟（[后端故障](execution-freshness-outage.zh.md)期间机器所属成员的窗口更长），重启联网重查；
 journal 持久工作区过期下限不是该授权。执行证据不自动回收。发送到实际启动目标
 ≤1 秒，本次不声称测量通过。RPC 完整帧 1 MiB 包含 143 字节开销、机器资源规范
-无填充 base64url 两点已获 owner 批准（2026-10-28）。后续 iroh 仍复用账本设备钥；
-所报告的域隔离审查未发现签名协议混淆。原生密钥生命周期和产品验收仍须单独完成。
+无填充 base64url 两点已获 owner 批准（2026-10-28）。iroh 复用账本设备钥；
+所报告的域隔离审查未发现签名协议混淆，该密钥只签 TLS 与中继握手。原生密钥生命周期和产品验收仍须单独完成。
 完整 Spec revision `e4351fda` 已于 2026-10-28 经 owner 授权总调度审核后批准，
 记录见上。
 
@@ -239,7 +241,7 @@ RPC 加密、字节或授权规则。
 - **删除：**退出登录、清理本地、注销账号、删除工作区分别说明影响；主动永久删除须明确确认并提供事先导出的机会，不能静默丢弃唯一草稿；上述凭据确认的成员移除，以及仅限本设备身份的凭据确认本设备撤销，是自动清理本地工作区的明确例外。
 - **版本与诊断：**复用现有能力检查；不支持加密格式时提示升级。只读也须能验证格式且仍有读取权限。默认诊断只记必要固定字段，详细报告先在本机预览，再由用户主动提交。
 - **计费与旧接口：**计费资格不授予内容或设备权限。加密工作区继续禁用未受保护的旧接口，包括 usage、GitHub、CLI token 与 prompt shortcuts 等。
-- **发布：**所有平台完成约定 Beta 功能和检查后才可发 Beta；更完整功能逐步增加。恢复保险库 Spec（2026-10-31 整体批准）与桌面 safeStorage 包装 KEK 保管已批准；批准不代表已实现、已部署或真机验收，恢复保险库仍不在 MVP 内。Web／移动／CLI 保管及产品启用仍不可用。严格期限 B、平台实际验收及发布门槛另行核定。方案方向完整不等于协议细节或产品验收完整。
+- **发布：**所有平台完成约定 Beta 功能和检查后才可发 Beta；更完整功能逐步增加。恢复保险库 Spec（2026-10-31 整体批准）与桌面 safeStorage 包装 KEK 保管的此前基线已批准；2026-11-10 的 RP／同源修订已由 zxch3n 于 2026-11-10 批准。批准不代表已实现、已部署或真机验收，恢复保险库仍不在 MVP 内。Web／移动／CLI 保管及产品启用仍不可用。严格期限 B、平台实际验收及发布门槛另行核定。方案方向完整不等于协议细节或产品验收完整。
 
 ## 参考与文档范围
 

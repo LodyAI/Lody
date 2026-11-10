@@ -139,7 +139,7 @@ class HomeActivity : ComponentActivity() {
                         app.notifications.consumeClick()
                     }
                 }
-                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments) }
+                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches) }
                 val selectedSession = catalog.snapshot?.sessions?.firstOrNull { it.id == selectedId }
                 LaunchedEffect(selectedSession, activeScope, resumed) {
                     if (resumed && activeScope != null && selectedSession != null) {
@@ -191,6 +191,9 @@ class HomeActivity : ComponentActivity() {
                                 onNewChat = { creating = true },
                                 schedules = app.schedules,
                                 creation = creator,
+                                agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
+                                roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
+                                shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )
@@ -228,6 +231,7 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
         accountImage = user?.image,
         sync = sync,
         accountName = user?.name.orEmpty(),
+        accountEmail = user?.email.orEmpty(),
         timeline = snapshot?.let { ChatListModel.timeline(it) }.orEmpty(),
         snapshot = snapshot,
         userId = user?.id,

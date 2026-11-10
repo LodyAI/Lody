@@ -1,3 +1,5 @@
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { createCloudSessionAccess } from '@/providers/cloud-session-access';
 // @vitest-environment jsdom
 
 // @vitest-environment jsdom
@@ -64,7 +66,11 @@ vi.mock('@/atoms', async () => {
     currentWorkspaceSlugAtom: atom(null),
   };
 });
-vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
+vi.mock('@/atoms/runtime', async () => {
+  const { atom } = await import('jotai');
+  const runtime = atom(null);
+  return { activeWorkspaceRuntimeAtom: runtime, runtimeAtom: runtime };
+});
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
 vi.mock('@/lib/electron-ipc-client', async (importOriginal) => {
@@ -218,6 +224,54 @@ describe('CloudPlatformProvider', () => {
     ).toEqual(binding);
   });
 
+  it('admits ordinary session access only after the shared live mode verdict, and fences account switches', async () => {
+    refetch('A');
+    const atoms = getDefaultStore();
+    const previous = {
+      runtime: atoms.get(runtimeAtom),
+      mode: atoms.get(workspaceContentModeAtom),
+      user: atoms.get(userAtom),
+      workspace: atoms.get(currentWorkspaceIdAtom),
+      slug: atoms.get(currentWorkspaceSlugAtom),
+    };
+    const rows = [{ machineId: 'private', canManage: true, readSharedSessionIds: ['root'] }];
+    fixture.cloudClient.query = async () => rows;
+    try {
+      atoms.set(userAtom, { id: 'user-a' } as never);
+      atoms.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+      atoms.set(currentWorkspaceSlugAtom, 'a');
+      atoms.set(runtimeAtom, {
+        workspaceId: 'workspace-a',
+        workspaceSlug: 'a',
+        accountId: 'user-a',
+        contentMode: 'plaintext',
+      } as WorkspaceRuntime);
+      atoms.set(workspaceContentModeAtom, null);
+      await render();
+      const access = seen.at(-1)!.sessionAccess!;
+      await expect(access.list('workspace-a')).rejects.toMatchObject({
+        code: 'legacy_workspace_admission_pending',
+      });
+      atoms.set(workspaceContentModeAtom, {
+        accountId: 'user-a',
+        workspaceId: 'workspace-a',
+        workspaceSlug: 'a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      });
+      await expect(access.list('workspace-a')).resolves.toEqual(rows);
+      atoms.set(userAtom, { id: 'different-account' } as never);
+      await expect(access.read('workspace-a', 'private')).rejects.toThrow(
+        'session_access_scope_changed'
+      );
+    } finally {
+      atoms.set(runtimeAtom, previous.runtime);
+      atoms.set(workspaceContentModeAtom, previous.mode);
+      atoms.set(userAtom, previous.user);
+      atoms.set(currentWorkspaceIdAtom, previous.workspace);
+      atoms.set(currentWorkspaceSlugAtom, previous.slug);
+    }
+  });
+
   it('keeps cloud mode control available when the injected factory reports no runtime', async () => {
     refetch('A');
     fixture.cloudClient.query = async () => ({
@@ -357,6 +411,7 @@ describe('CloudPlatformProvider', () => {
     head: { revision: 1, digest: '33'.repeat(32) },
     sharedWithTeam: false,
     projects: [],
+    sessions: [],
     signer: '44'.repeat(32),
     canManage: true,
     needsResign: false,
@@ -470,37 +525,57 @@ describe('CloudPlatformProvider', () => {
     expect(container.textContent).toContain('v9');
   });
 
-  it('re-signs a revoked issuer policy without dropping undisplayed project choices', async () => {
-    let view = {
-      ...policyView(),
-      needsResign: true,
-      sharedWithTeam: true,
-      projects: ['project-a', 'retained-project'],
-    };
-    fixture.invoke = async (channel, ...args) => {
-      if (channel === 'e2ee.readMachineSharing') return view;
-      expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
-      expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
-      view = {
-        ...view,
-        needsResign: false,
-        head: { revision: 2, digest: '55'.repeat(32) },
-        signer: '66'.repeat(32),
+  it.each(['en', 'zh_CN'] as const)(
+    'keeps a revoked signer policy effective and re-signs without dropping choices (%s)',
+    async (language) => {
+      let view = {
+        ...policyView(),
+        needsResign: true,
+        sharedWithTeam: true,
+        projects: ['project-a', 'retained-project'],
       };
-      return { status: 'saved', requestId: args[3] };
-    };
-    await renderSharing();
-    expect(container.textContent).toContain('Re-sign required');
-    await clickSharing('Re-sign with this device');
-    expect(container.textContent).toContain('v2');
-    expect(container.textContent).toContain('666666666666');
-    expect(container.textContent).toContain('retained-project');
-    expect(
-      container
-        .querySelector('[aria-label="Share Lody with the team"]')
-        ?.getAttribute('aria-checked')
-    ).toBe('true');
-  });
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+        expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
+        view = {
+          ...view,
+          needsResign: false,
+          head: { revision: 2, digest: '55'.repeat(32) },
+          signer: '66'.repeat(32),
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      await act(async () => {
+        await initI18n(language);
+      });
+      expect(container.textContent).toContain(
+        language === 'en' ? 'Review recommended' : '建议检查'
+      );
+      expect(container.textContent).toContain(language === 'en' ? 'Effective version' : '生效版本');
+      expect(container.textContent).not.toContain(language === 'en' ? 'inactive' : '未生效');
+      const toggle = container.querySelector<HTMLButtonElement>(
+        '[data-testid=machine-sharing-toggle]'
+      )!;
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+      expect(toggle.disabled).toBe(false);
+      expect(container.textContent).toContain(language === 'en' ? 'Signing device' : '签名设备');
+      await clickSharing(language === 'en' ? 'Review and re-sign' : '检查并重新签名');
+      expect(container.textContent).toContain('v2');
+      expect(container.textContent).toContain('666666666666');
+      expect(container.textContent).toContain('retained-project');
+      expect(
+        container
+          .querySelector(
+            language === 'en'
+              ? '[aria-label="Share Lody with the team"]'
+              : '[aria-label="与团队共享 Lody"]'
+          )
+          ?.getAttribute('aria-checked')
+      ).toBe('true');
+    }
+  );
 
   it.each(['withdrawn', 'readmitted', 'pending'] as const)(
     'rechecks a stale re-sign surface before writing when the latest policy is %s',
@@ -532,7 +607,7 @@ describe('CloudPlatformProvider', () => {
           : latest === 'withdrawn'
             ? { ...policyView(), head: { revision: 2, digest: '88'.repeat(32) } }
             : { ...view, pendingRequest: { requestId: pendingId, change: pendingChange } };
-      await clickSharing('Re-sign with this device');
+      await clickSharing('Review and re-sign');
       expect(writes).toHaveLength(0);
       if (latest === 'pending') {
         expect(container.textContent).toContain('Retry change');
@@ -542,7 +617,7 @@ describe('CloudPlatformProvider', () => {
         ]);
         expect(container.textContent).toContain('v3');
       } else {
-        expect(container.textContent).not.toContain('Re-sign with this device');
+        expect(container.textContent).not.toContain('Review and re-sign');
         expect(
           container
             .querySelector('[aria-label="Share with the whole team"]')
@@ -968,4 +1043,76 @@ describe('cloud E2EE display directory ownership', () => {
       'e2ee_account_unavailable'
     );
   });
+});
+
+describe('authoritative session access cloud port', () => {
+  it('updates ordinary owner grants without changing machine sharing and rejects nonowners', async () => {
+    let canManage = true;
+    let shared = false;
+    const port = createCloudSessionAccess({
+      assertScope: () => ({ encrypted: false, accountId: 'owner', token }),
+      client: {
+        query: async () =>
+          [
+            { machineId: 'private', canManage, readSharedSessionIds: shared ? ['root'] : [] },
+          ] as never,
+        mutation: async (_operation, args) => {
+          shared = (args as { sharedWithTeam: boolean }).sharedWithTeam;
+          return { success: true } as never;
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const intent = {
+      workspaceId: 'workspace',
+      machineId: 'private',
+      sessionId: 'root',
+      level: 'read' as const,
+      requestId: 'request',
+    };
+    await port.set(intent);
+    expect(await port.read('workspace', 'private')).toEqual({
+      machineId: 'private',
+      canManage: true,
+      readSharedSessionIds: ['root'],
+    });
+    canManage = false;
+    await expect(port.set({ ...intent, level: null })).rejects.toThrow('session_access_not_owned');
+    expect((await port.list('workspace'))[0].readSharedSessionIds).toEqual(['root']);
+    canManage = true;
+    await port.set({ ...intent, level: null });
+    expect((await port.read('workspace', 'private')).readSharedSessionIds).toEqual([]);
+  });
+
+  it('treats E2EE versions only as hints and fences a changed account during policy reads', async () => {
+    let current = token;
+    let complete!: (value: import('@lody/platform').E2eeMachineSharingView) => void;
+    const runtime = {
+      readMachineSharing: () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const port = createCloudSessionAccess({
+      runtime,
+      assertScope: () => ({ encrypted: true, accountId: 'owner', token: current }),
+      client: {
+        query: async () =>
+          [{ machineId: 'private', generation: 'generation', revision: 42 }] as never,
+        mutation: async () => {
+          throw new Error('ordinary writes forbidden');
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const read = port.read('workspace', 'private');
+    current = {};
+    complete({
+      machineId: 'private',
+      sessions: [{ sessionId: 'root', audience: 'team', level: 'read' }],
+      canManage: false,
+    } as import('@lody/platform').E2eeMachineSharingView);
+    await expect(read).rejects.toThrow('session_access_scope_changed');
+  });
+  const token = {};
 });

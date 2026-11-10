@@ -1,3 +1,11 @@
+import type { MachineStatusResponse } from '@lody/shared';
+import { readManagedOperation } from './managed-daemon-release';
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import {
+  sessionHistoryWriteIntentDigest,
+  SessionHistoryReadResponseSchema,
+  isContainedSession,
+} from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
 import {
   storeLocalSessionImage,
@@ -265,7 +273,6 @@ import {
   type MachineProcessLifecycleAction,
   normalizeMachineUpgradeTargetVersion,
   verifyMachineLifecycleRequest,
-  writeDaemonUpgradeIntent,
 } from './machine-lifecycle';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
@@ -441,7 +448,11 @@ import { resolveSessionLiveStatus } from './session-live-status';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import { truncateToolTitleForHistory } from '@lody/shared';
 import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
-import type { MemoryPressureEvictionResult } from './session-gc-manager';
+import {
+  combineGCSessionSources,
+  type MemoryPressureEvictionResult,
+  type SessionGCDeps,
+} from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import { precheckLocalProjectHistoryRequest } from '@/lib/local-project-history-precheck';
@@ -680,6 +691,11 @@ export interface MessageHandlerConfig {
   machineName: string;
   cliVersion: string;
   machineLifecycleCapability?: MachineLifecycleCapability;
+  prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
@@ -699,6 +715,8 @@ export interface MessageHandlerConfig {
    * process boundary owns the actual exit/restart behavior.
    */
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   /** The fleet's access verdict for this workspace; cloud daemon commands resolve from it. */
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
@@ -792,7 +810,14 @@ export class MessageHandler {
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
+  private readonly prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
+  private readonly isMachineIdentityRestoreIdle?: () => boolean;
+  private readonly sealMachineIdentityRestore?: () => boolean;
   private readonly store = new SessionTransientStore();
   private readonly historyOwnerAbort = new AbortController();
   private readonly historyWatchAbort = new AbortController();
@@ -898,12 +923,19 @@ export class MessageHandler {
     expiresAt: number,
     signal: AbortSignal
   ) {
+    // Scoped history uses the feature receiver's exact-session authorization.
+    if (input.method === 'session/history-read') throw new Error('e2ee_query_method');
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
   }
   async readEncryptedMachineRequest(
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
-    context: { requestId: string; expiresAt: number; signal: AbortSignal }
+    context: {
+      requestId: string;
+      expiresAt: number;
+      signal: AbortSignal;
+      authority?: { isCurrent: () => boolean; signal: AbortSignal };
+    }
   ) {
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readFeatureQuery(request, context);
@@ -1072,8 +1104,10 @@ export class MessageHandler {
     sessionDoc: SessionDocument,
     turnId: string,
     modelInfo: ModelInfo | undefined,
-    userTurnId?: string
+    userTurnId?: string,
+    signal?: AbortSignal
   ): Promise<void> {
+    if (signal?.aborted) return;
     const span = startTraceSpan(this.logger, 'history.write_assistant_entry', {
       sessionId,
       turnId,
@@ -1097,6 +1131,10 @@ export class MessageHandler {
       let author = existing.state === 'ready' ? readMessageAuthor(existing.turn.author) : undefined;
       if (!author && userTurnId) {
         const input = await backend.history.readTurn(userTurnId);
+        if (signal?.aborted) {
+          span.end();
+          return;
+        }
         if (input.state === 'ready' && input.turn.role === 'user') {
           this.executionService.setTurnNotificationAudience(
             sessionId,
@@ -1116,6 +1154,10 @@ export class MessageHandler {
             modelInfo,
             this.workspaceId
           );
+      }
+      if (signal?.aborted) {
+        span.end();
+        return;
       }
       await backend.openAssistantTurn({
         turnId,
@@ -3212,13 +3254,23 @@ export class MessageHandler {
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
+    this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
+    this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
-    this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
-      launchMode: 'foreground',
-      canRemoteRestart: false,
-      canRemoteUpgrade: false,
-      reason: 'not_daemon',
-    };
+    this.prepareManagedUpgrade = config.prepareManagedUpgrade;
+    this.machineLifecycleCapability = config.encryptedWorkspace
+      ? {
+          launchMode: config.machineLifecycleCapability?.launchMode ?? 'unknown',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'unsupported_install',
+        }
+      : (config.machineLifecycleCapability ?? {
+          launchMode: 'foreground',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'not_daemon',
+        });
     this.logger.debug(
       `[machine-lifecycle] launchMode=${this.machineLifecycleCapability.launchMode} canRestart=${this.machineLifecycleCapability.canRemoteRestart} canUpgrade=${this.machineLifecycleCapability.canRemoteUpgrade}`
     );
@@ -3696,22 +3748,24 @@ export class MessageHandler {
                 getServerNow()
               )
             ),
-          put: (request, rejection) =>
+          put: (request, rejection, retainUntil) =>
             Effect.runPromise(
               putSessionHistoryRpcRejection(
                 path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
                 request,
                 rejection,
-                getServerNow()
+                getServerNow(),
+                retainUntil
               )
             ),
         },
         getMachineStatus: async (args) =>
-          await this.executionService.getMachineStatus({
+          await this.readMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
             ...(args?.includeDisk ? { includeDisk: true as const } : {}),
+            ...(args?.includeDaemonUpdate ? { includeDaemonUpdate: true as const } : {}),
           }),
         getPreviewControl: async () => ({
           type: 'machine/preview-control_response',
@@ -3728,18 +3782,26 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             requestId,
           }),
-        restartMachine: async ({ requesterUserId, requestToken, requestId }) =>
+        restartMachine: async ({ requesterUserId, requestToken, requestId, restoreMachineId }) =>
           await this.prepareMachineRestart({
+            restoreMachineId,
             requesterUserId,
             requestToken,
             requestId,
           }),
-        upgradeMachine: async ({ requesterUserId, requestToken, requestId, targetVersion }) =>
+        upgradeMachine: async ({
+          requesterUserId,
+          requestToken,
+          requestId,
+          targetVersion,
+          upgrade,
+        }) =>
           await this.prepareMachineUpgrade({
             requesterUserId,
             requestToken,
             requestId,
             targetVersion,
+            upgrade,
           }),
         onMachineLifecycleResponseSettled: ({ response }) => {
           if (response.accepted) {
@@ -3913,6 +3975,36 @@ export class MessageHandler {
         prepareSession: async (spec) => this.declineSessionPreparation(spec),
         cancelSessionPreparation: async (args) => this.declineSessionPreparationCancel(args),
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
+        authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
+          if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
+          const target = await this.resolveSessionHistoryAccessTarget(sessionId);
+          return await this.cloudPort.access.verifySessionHistoryRead({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            sessionId,
+            ...target,
+            requestToken: readProof,
+          });
+        },
+        authorizeSessionHistoryWrite: async ({
+          sessionId,
+          writeProof,
+          requestId,
+          operation,
+          payload,
+        }) => {
+          if (!writeProof || !this.cloudPort.access.verifySessionHistoryWrite) return null;
+          const target = await this.resolveSessionHistoryAccessTarget(sessionId);
+          return await this.cloudPort.access.verifySessionHistoryWrite({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            sessionId,
+            ...target,
+            requestToken: writeProof,
+            requestId,
+            intentDigest: await sessionHistoryWriteIntentDigest(requestId, operation, payload),
+          });
+        },
         readSessionHistory: async ({ sessionId, query, signal }) =>
           await this.readSessionHistoryForRpc(sessionId, query, signal),
         waitForSessionHistoryChanges: async (args) => await this.waitForSessionHistoryChanges(args),
@@ -4067,6 +4159,11 @@ export class MessageHandler {
               userTurnId: string;
               inputConfig?: unknown;
             }) => await Effect.runPromise(this.encryptedExecution!.resolveRequester(intent)),
+            ...(this.encryptedExecution.subscribeEvidence
+              ? { subscribeExecutionEvidence: this.encryptedExecution.subscribeEvidence }
+              : {}),
+            retireEncryptedInput: async (intent: { sessionId: string; userTurnId: string }) =>
+              await Effect.runPromise(this.encryptedExecution!.retire(intent)),
           }
         : {}),
       // P5/D11 snapshot bookkeeping for the watcher's background owner
@@ -6328,10 +6425,15 @@ export class MessageHandler {
   }
 
   private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+    const finalizesCurrentTurn = !turnId || this.store.getTurnId(sessionId) === turnId;
+    const gateToFinalize =
+      finalizesCurrentTurn && this.store.has(sessionId)
+        ? this.store.get(sessionId).turnHistoryGate
+        : null;
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
-    if (!turnId || this.store.getTurnId(sessionId) === turnId) {
+    if (finalizesCurrentTurn) {
       await this.awaitTurnHistoryGate(sessionId);
     }
     // Capture timing data and turnId before clearing state
@@ -6350,6 +6452,11 @@ export class MessageHandler {
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const backend = await this.getSessionBackend(sessionDoc);
+      // A deadline may have released output while its metadata callback is still
+      // reading. Fence that callback before marking history finished, rather
+      // than waiting for clearTurnState after the finalization tail. The captured
+      // gate belongs to this finalization, never to a successor turn.
+      gateToFinalize?.dispose();
       await backend.applyHistoryAction({
         kind: 'finish-assistant',
         turnId,
@@ -6530,13 +6637,14 @@ export class MessageHandler {
         );
       },
       subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
-      onBeforeOpen: async () => {
+      onBeforeOpen: async (_reason, signal) => {
         await this.writeAssistantEntryForTurn(
           sessionId,
           sessionDoc,
           turnId,
           this.sessionManager.getSession(sessionId)?.agentClient?.currentModel,
-          userTurnId
+          userTurnId,
+          signal
         );
       },
     });
@@ -7677,6 +7785,15 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'session/history-read':
+        return SessionHistoryReadResponseSchema.parse(
+          await this.readSessionHistoryForRpc(
+            request.params.sessionId,
+            request.params.query,
+            signal
+          )
+        );
+
       case 'machine/acp-interaction':
         throw new Error('e2ee_feature_unavailable');
       case 'machine/status':
@@ -8278,6 +8395,31 @@ export class MessageHandler {
         context.send(await this.previewService.getStatus(message));
         break;
     }
+  }
+
+  /** Synced ownership/containment is the accepted UI trust boundary, not a registry. */
+  async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
+    await this.resolveSessionHistoryOwnerSessionId(sessionId);
+    const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!entry || entry.meta.machineId !== this.machineId)
+      throw new Error('session_history_read_denied');
+    const child = { ...(entry.meta as SessionMeta), id: sessionId };
+    const parentId = typeof child.parentSessionId === 'string' ? child.parentSessionId : undefined;
+    const parent = parentId
+      ? await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(parentId as SessionId))
+      : undefined;
+    const root =
+      parent &&
+      !parent.deleted &&
+      isContainedSession(child, { ...(parent.meta as SessionMeta), id: parentId })
+        ? { ...(parent.meta as SessionMeta), id: parentId! }
+        : child;
+    const project = child.project as SessionMeta['project'];
+    return {
+      rootSessionId: root.id,
+      sessionOwnerUserId: typeof root.userId === 'string' ? root.userId : undefined,
+      localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
+    };
   }
 
   private readonly resolveSessionHistoryOwnerSessionId = async (
@@ -9895,11 +10037,41 @@ export class MessageHandler {
    * Handle machine status request.
    * Collects system resource info and container statuses.
    */
+  private async readMachineStatus(
+    message: MachineStatusRequestValidated
+  ): Promise<MachineStatusResponse> {
+    const response = await this.executionService.getMachineStatus(message);
+    if (!message.includeDaemonUpdate || this.encryptedAttachments) return response;
+    try {
+      const operation = await readManagedOperation();
+      if (!operation || operation.machineId !== this.machineId)
+        return { ...response, daemonUpdate: null };
+      const phase =
+        (operation.phase === 'applied' && this.cliVersion !== operation.targetVersion) ||
+        (operation.phase === 'rolled-back' && this.cliVersion !== operation.previousVersion)
+          ? 'unconfirmed'
+          : operation.phase;
+      return {
+        ...response,
+        daemonUpdate: {
+          requestId: operation.requestId,
+          serviceInstanceId: operation.serviceInstanceId,
+          phase,
+          targetVersion: operation.targetVersion,
+          previousVersion: operation.previousVersion,
+        },
+      };
+    } catch (error) {
+      this.logger.warn('Managed update outcome could not be read', error);
+      return response; // Secondary update diagnostics cannot fail machine health.
+    }
+  }
+
   private async handleMachineStatus(
     message: MachineStatusRequestValidated,
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
-    const response = await this.executionService.getMachineStatus(message);
+    const response = await this.readMachineStatus(message);
     dispatchContext.send(response);
   }
 
@@ -9977,6 +10149,7 @@ export class MessageHandler {
   }
 
   private async prepareMachineRestart(args: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -10003,11 +10176,26 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId && args.requesterUserId !== this.userId) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the signed-in daemon owner can restore its machine identity.'
+      );
+    }
+    if (args.restoreMachineId && !this.isMachineIdentityRestoreIdle?.()) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'error',
+        'Stop all tasks on this daemon before restoring its identity.'
+      );
+    }
     const verified = await verifyMachineLifecycleRequest({
       token: this.token,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       action: 'restart',
+      restoreMachineId: args.restoreMachineId,
       requesterUserId: args.requesterUserId,
       requestId: args.requestId,
       requestToken: args.requestToken,
@@ -10021,6 +10209,41 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId) {
+      if (!this.isMachineIdentityRestoreIdle?.()) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'Stop all tasks on this daemon before restoring its identity.'
+        );
+      }
+      const { prepareMachineIdentityRestore, cancelPreparedMachineIdentityRestore } =
+        await import('./machine-identity-restore');
+      const prepared = await prepareMachineIdentityRestore({
+        workspaceId: this.workspaceId,
+        sourceMachineId: this.machineId,
+        targetMachineId: args.restoreMachineId,
+        requestId: args.requestId,
+        requesterUserId: args.requesterUserId,
+      });
+      if (!prepared) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'already_pending',
+          'This identity restore is already pending.'
+        );
+      }
+      // Recheck after disk I/O and synchronously close every workspace's intake.
+      // No task can enter between this acceptance and the bounded restart ACK.
+      if (!this.sealMachineIdentityRestore?.()) {
+        await cancelPreparedMachineIdentityRestore(args.requestId);
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'The daemon started another task. Stop all tasks and retry recovery.'
+        );
+      }
+    }
     this.pendingProcessLifecycleAction = {
       action: 'restart',
       exitCode: EXIT_CODE_REMOTE_RESTART,
@@ -10042,7 +10265,14 @@ export class MessageHandler {
     requestToken: string;
     requestId: string;
     targetVersion?: string;
+    upgrade?: ManagedDaemonUpgradeOptions;
   }): Promise<MachineUpgradeResponse> {
+    if (args.requesterUserId !== this.userId)
+      return this.machineUpgradeFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the machine owner can update this daemon.'
+      );
     let targetVersion: string;
     try {
       targetVersion = normalizeMachineUpgradeTargetVersion(args.targetVersion);
@@ -10088,6 +10318,7 @@ export class MessageHandler {
       requestId: args.requestId,
       requestToken: args.requestToken,
       targetVersion,
+      upgrade: args.upgrade,
     });
     if (!verified.ok) {
       this.logger.warn(`[machine-lifecycle] upgrade verification failed: ${verified.error}`);
@@ -10100,14 +10331,9 @@ export class MessageHandler {
     }
 
     try {
-      await writeDaemonUpgradeIntent({
-        action: 'upgrade',
-        requestId: args.requestId,
-        requesterUserId: args.requesterUserId,
-        targetVersion,
-        currentVersion: this.cliVersion,
-        requestedAtMs: getServerNow(),
-      });
+      if (!this.prepareManagedUpgrade)
+        throw new Error('Managed updater is unavailable; run the explicit daemon installer.');
+      targetVersion = await this.prepareManagedUpgrade(args.requestId, targetVersion, args.upgrade);
     } catch (error) {
       return this.machineUpgradeFailure(
         args.requestId,
@@ -10121,6 +10347,26 @@ export class MessageHandler {
       action: 'upgrade',
       exitCode: EXIT_CODE_REMOTE_UPGRADE,
       requestId: args.requestId,
+      switchPolicy: args.upgrade?.switchPolicy ?? 'when-idle',
+      expiresAtMs: verified.executionExpiresAtMs ?? Date.now() + 120000,
+      onAbandoned: () => {
+        if (this.pendingProcessLifecycleAction?.requestId === args.requestId)
+          this.pendingProcessLifecycleAction = null;
+      },
+      revalidate: async () =>
+        (
+          await verifyMachineLifecycleRequest({
+            token: this.token,
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            action: 'upgrade',
+            requesterUserId: args.requesterUserId,
+            requestId: args.requestId,
+            requestToken: verified.executionToken ?? args.requestToken,
+            upgrade: args.upgrade,
+            targetVersion: normalizeMachineUpgradeTargetVersion(args.targetVersion),
+          })
+        ).ok,
     };
     this.logger.info(
       `[machine-lifecycle] upgrade accepted for request ${args.requestId} target=${targetVersion}`
@@ -10142,9 +10388,10 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
     const response = await this.prepareMachineRestart(message);
-    dispatchContext.send(response);
-    if (response.accepted) {
-      this.triggerPendingProcessLifecycleAction(response.requestId);
+    try {
+      dispatchContext.send(response);
+    } finally {
+      if (response.accepted) this.triggerPendingProcessLifecycleAction(response.requestId);
     }
   }
 
@@ -11603,9 +11850,18 @@ export class MessageHandler {
     };
   }
 
-  /**
-   * Flush pending ACP updates and tear down session resources.
-   */
+  /** Stop intake synchronously after the daemon-wide idle check wins. */
+  stopNewIdentityRestoreDispatch(): void {
+    this.executionService.stopNewIdentityRestoreExecutions();
+    this.sessionDispatchWatcher.stop();
+    void this.operationCoordinator
+      .stop()
+      .catch((cause) =>
+        this.logger.warn('Identity restore retains Inbox shutdown for cleanup', cause)
+      );
+  }
+
+  /** Flush pending ACP updates and tear down session resources. */
   async prepareForShutdown(): Promise<void> {
     this.acpInteractionStopping = true;
     await (await this.acpInteractionOwner)?.close();
@@ -11956,7 +12212,10 @@ export class MessageHandler {
    * ACP process would discard that resumable session state.
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
-    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    // Peek first: GC asks this of cached docs, and an open would count as an access.
+    const sessionDoc =
+      this.workspaceDocument.peekSessionDoc(sessionId) ??
+      (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
@@ -12015,6 +12274,22 @@ export class MessageHandler {
    */
   getTrackedSessionIds(): SessionId[] {
     return this.store.sessionIds();
+  }
+
+  /** GC candidates and idle clocks: tracked sessions plus every cached Session doc. */
+  getGCSessionSources(): Pick<SessionGCDeps, 'getSessionIds' | 'getSessionLastActivity'> {
+    return combineGCSessionSources(
+      {
+        sessionIds: () => this.store.sessionIds(),
+        has: (sessionId) => this.store.has(sessionId),
+        lastActivityMs: (sessionId) => this.getLastActivity(sessionId),
+      },
+      {
+        sessionIds: () => this.workspaceDocument.cachedSessionDocIds(),
+        lastActivityMs: (sessionId) =>
+          this.workspaceDocument.cachedSessionDocLastAccessMs(sessionId),
+      }
+    );
   }
 
   /** Host-local admission snapshot; durable pending input is checked by its caller. */
@@ -12086,6 +12361,10 @@ export class MessageHandler {
     return this.sessionActivePresence.activeSessionCount();
   }
 
+  isIdentityRestoreExecutionIdle(): boolean {
+    return this.getActiveTurnCount() === 0 && this.executionService.isMachineIdentityRestoreIdle();
+  }
+
   private logCodeCollabDebug(message: string): void {
     this.logger.debug(message);
   }
@@ -12096,6 +12375,8 @@ export class MessageHandler {
    */
   async cleanSessionForGC(sessionId: SessionId): Promise<void> {
     this.logger.debug(`[GC] Cleaning session ${sessionId}`);
+    // Read before cleanup: later steps may create tracking state lazily.
+    const tracked = this.store.has(sessionId);
 
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
@@ -12112,8 +12393,11 @@ export class MessageHandler {
       await this.sessionManager.terminateSession(sessionId, true);
     }
 
-    // 3. Clean Loro documents (main memory savings)
-    await this.workspaceDocument.cleanSessionDoc(sessionId);
+    // 3. Clean Loro documents (main memory savings). A doc that is only cached
+    //    never ran a turn here, so its synced status is not this machine's to reset.
+    await this.workspaceDocument.cleanSessionDoc(sessionId, {
+      preserveStatus: !tracked,
+    });
 
     // 4. Drop transient tracking last — only after all cleanup succeeded,
     //    so getTrackedSessionIds() can still see it for retry if steps above throw.

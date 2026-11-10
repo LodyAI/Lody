@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -65,4 +65,13 @@ await test('site-owned aliases and prose mentions are allowed', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+await test('published association grants recovery webcredentials only and keeps app links revoked', () => {
+  const read = (name) =>
+    JSON.parse(readFileSync(path.join(packageRoot, 'public/.well-known', name), 'utf8'));
+  assert.deepEqual(read('apple-app-site-association'), {
+    webcredentials: { apps: ['YTRMX32C99.ai.lody.desktop', 'YTRMX32C99.ai.lody.mobile'] },
+  });
+  assert.deepEqual(read('assetlinks.json'), []);
 });

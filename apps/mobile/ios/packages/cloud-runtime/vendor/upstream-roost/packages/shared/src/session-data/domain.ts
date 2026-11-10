@@ -49,6 +49,7 @@ export type SessionTurn = {
   readonly scheduleRun?: unknown;
   readonly derivedFrom?: unknown;
   readonly queuedInput?: boolean;
+  readonly e2eeIntent?: string;
   readonly fileDiff?: readonly unknown[];
   readonly status?: SessionTurnStatus;
   readonly cancellationReason?: 'user_stop';

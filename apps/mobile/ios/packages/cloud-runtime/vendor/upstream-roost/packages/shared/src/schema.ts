@@ -714,6 +714,9 @@ export const sessionHistorySchema = schema.LoroMap({
   /** Encrypted only: this machine wrote the row by promoting a queue item. The row's
    * signer is then not its author, so the start needs the input's own evidence. */
   queuedInput: schema.Boolean({ required: false }),
+  /** Encrypted only: the signed execution intent record, written in the same commit
+   * as the content it covers. See `e2ee-execution-intent.ts`. */
+  e2eeIntent: schema.String({ required: false }),
   cancellationReason: schema.String<'user_stop'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
@@ -1183,10 +1186,12 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** User history entry id currently being processed by the machine. */
   processingUserMsgId?: string;
   /**
-   * Exact dispatch activation negatively acknowledged because its history
-   * payload never synced. It suppresses only a matching producer pointer.
+   * Legacy latest missing-history acknowledgement. Read with the retained map;
+   * producers must not clear this receipt when publishing a fresh activation.
    */
   lastMissingHistoryUserMsgId?: string;
+  /** Host-owned append-only acknowledgements; a newer timeout must not revive an older input. */
+  missingHistoryUserMsgIds?: Record<string, true>;
   /**
    * Exact dispatch activation retired because its history entry is already
    * terminal — the turn ran, only the pointer was stale. Recorded beside the
@@ -1256,25 +1261,36 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   autoReview?: { runId: string; t: number };
 };
 
+/** Match a retained missing-payload acknowledgement, including legacy metadata. */
+export function isMissingHistoryUserTurn(
+  meta: Pick<SessionMeta, 'lastMissingHistoryUserMsgId' | 'missingHistoryUserMsgIds'> | undefined,
+  turnId: string | undefined
+): boolean {
+  return (
+    !!turnId &&
+    (meta?.lastMissingHistoryUserMsgId === turnId ||
+      meta?.missingHistoryUserMsgIds?.[turnId] === true)
+  );
+}
+
 /**
  * Resolve the dispatch activation a machine still owes work for.
  *
- * The pointer pair alone is NOT the answer: two suppression slots retire an
+ * The pointer pair alone is NOT the answer: the negative-ack ledger and terminal slot retire an
  * activation without rewriting the producer-owned pointers, so raw
  * `latestUserMsgId !== lastHandledUserMsgId` reports pending work forever once
- * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
- * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
+ * either fires. `missingHistoryUserMsgIds` preserves every failed identity (including the legacy
+ * `lastMissingHistoryUserMsgId` marker); `settledActivationUserMsgId` retires a turn
  * whose history entry is already terminal. Every consumer that asks "does this
  * session still owe a turn?" — dispatch, idle GC, MCP status —
  * must go through here, or they disagree with the watcher and hang.
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
-  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
   const settledUserTurnId = meta.settledActivationUserMsgId;
   if (
     typeof meta.processingUserMsgId === 'string' &&
     meta.processingUserMsgId.length > 0 &&
-    meta.processingUserMsgId !== missingUserTurnId &&
+    !isMissingHistoryUserTurn(meta, meta.processingUserMsgId) &&
     meta.processingUserMsgId !== settledUserTurnId
   ) {
     return meta.processingUserMsgId;
@@ -1283,7 +1299,7 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
     typeof meta.latestUserMsgId === 'string' &&
     meta.latestUserMsgId.length > 0 &&
     meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
-    meta.latestUserMsgId !== missingUserTurnId &&
+    !isMissingHistoryUserTurn(meta, meta.latestUserMsgId) &&
     meta.latestUserMsgId !== settledUserTurnId
   ) {
     return meta.latestUserMsgId;
@@ -1291,7 +1307,7 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
   return Object.keys(meta.steerTurnStatuses ?? {}).find(
     (id) =>
       meta.steerTurnStatuses?.[id] === 'pending' &&
-      id !== missingUserTurnId &&
+      !isMissingHistoryUserTurn(meta, id) &&
       id !== settledUserTurnId
   );
 }
@@ -1345,6 +1361,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   // killed tab). See `popMessageQueue` in `apps/cli/src/lib/loro/doc.ts`.
   editingStartedAt: schema.Number({ required: false }),
   acpSessionConfig: acpSessionConfigSchema,
+  /** Encrypted only: the author's signed execution intent; promotion copies it. */
+  e2eeIntent: schema.String({ required: false }),
 });
 
 export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'> & {
@@ -1443,11 +1461,6 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
-  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
-  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
-  /** Exact purpose-8 originals of queued input, written before the queue row. Separate from
-   * `rpcDispatchOriginals` because promotion adds `resume` to the input it signed. */
-  queueDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1552,13 +1565,7 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<
-  SessionDoc,
-  '$cid' | 'history' | 'rpcDispatchOriginals' | 'queueDispatchOriginals'
-> & {
-  /** Omitted by control-only readers; execution reads the selected original from the document. */
-  rpcDispatchOriginals?: Record<string, string>;
-  queueDispatchOriginals?: Record<string, string>;
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

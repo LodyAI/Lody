@@ -1,9 +1,21 @@
+import { useSessionSharing } from '@/hooks/use-session-sharing';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { useCallback, useEffect, useMemo, type ComponentProps } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
+import { userAtom } from '@/atoms';
+import { useSessionAccess } from '@/hooks/use-session-access';
+import { chatLandingSessionStateAtomFamily } from '@/atoms/local-storage-cache';
+import { buildChatLandingDraftKey } from '@/atoms/chat-landing-draft';
+import { buildSessionMentionSlug } from '../mentions/mention-session-source';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
+import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
+import { isSessionReadShared } from '@/lib/session-visibility';
+import { SessionAccessControl } from '../session-sharing';
+import type { SessionSharingState } from '@/lib/session-sharing';
 import { useRouter } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowLeft, Copy, Ellipsis } from 'lucide-react';
+import { ArrowLeft, AtSign, Copy, Ellipsis, Eye } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -77,6 +89,30 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
     fontSize: text.captionSize,
   },
+  footer: {
+    marginTop: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexWrap: 'wrap',
+    flexShrink: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    paddingBottom: `calc(${space[2]} + env(safe-area-inset-bottom, 0px))`,
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+  },
+  footerText: {
+    margin: 0,
+    flexGrow: 1,
+    minWidth: 0,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+    overflowWrap: 'anywhere',
+  },
+  footerIcon: { width: 14, height: 14, flexShrink: 0, color: colors.secondaryLabel },
+  buttonGlyph: { width: 14, height: 14, flexShrink: 0 },
   stream: { flexGrow: 1, minHeight: 0 },
 });
 const attachments = {
@@ -102,6 +138,12 @@ export function SessionHistoryView({
   nativeApp = false,
   reserveMacTrafficLightInset = false,
   requiresMachine = false,
+  machineName,
+  onReference,
+  onTogglePin,
+  pinned = false,
+  onMarkUnread,
+  sharing,
 }: {
   sessionId: SessionId;
   title: string;
@@ -114,6 +156,12 @@ export function SessionHistoryView({
   nativeApp?: boolean;
   reserveMacTrafficLightInset?: boolean;
   requiresMachine?: boolean;
+  machineName?: string;
+  onReference?: () => void;
+  onTogglePin?: () => void;
+  pinned?: boolean;
+  onMarkUnread?: () => void;
+  sharing?: SessionSharingState;
 }) {
   const { t } = useTranslation();
   const windowDragClass = useWindowDragRegionClass();
@@ -141,6 +189,7 @@ export function SessionHistoryView({
           </Button>
         )}
         <h1 {...stylex.props(styles.title)}>{title}</h1>
+        {sharing && <SessionAccessControl state={sharing} />}
         <Menu.Root>
           <Menu.Trigger
             render={
@@ -155,6 +204,14 @@ export function SessionHistoryView({
             }
           />
           <Menu.Content align="end">
+            {onTogglePin && (
+              <Menu.Item onClick={onTogglePin}>
+                {t(pinned ? 'sessions.contextMenu.unpin' : 'sessions.contextMenu.pin')}
+              </Menu.Item>
+            )}
+            {onMarkUnread && (
+              <Menu.Item onClick={onMarkUnread}>{t('sessions.contextMenu.markUnread')}</Menu.Item>
+            )}
             {conversations && conversations.length > 1 && onSelect && (
               <Menu.Submenu>
                 <Menu.SubmenuTrigger>{t('sessions.historyConversations')}</Menu.SubmenuTrigger>
@@ -178,9 +235,6 @@ export function SessionHistoryView({
           </Menu.Content>
         </Menu.Root>
       </header>
-      <p role="status" {...stylex.props(styles.notice)}>
-        {t('sessions.historyMachineUnavailable')}
-      </p>
       {ready && (
         <span
           hidden
@@ -207,6 +261,20 @@ export function SessionHistoryView({
           />
         </SessionReadonlyContext.Provider>
       )}
+      <footer {...stylex.props(styles.footer)}>
+        <Eye {...stylex.props(styles.footerIcon)} aria-hidden="true" />
+        <p role="status" {...stylex.props(styles.footerText)}>
+          {machineName
+            ? t('sessions.access.readonlyMachine', { machine: machineName })
+            : t('sessions.access.readonly')}
+        </p>
+        {onReference && (
+          <Button variant="secondary" size="small" onClick={onReference}>
+            <AtSign {...stylex.props(styles.buttonGlyph)} aria-hidden="true" />
+            {t('sessions.access.reference')}
+          </Button>
+        )}
+      </footer>
     </section>
   );
 }
@@ -223,6 +291,11 @@ export function SessionHistoryReader({
   onMobilePresented?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
+  const store = useStore();
+  const sessionAccess = useSessionAccess();
+  const { members, isLoading: membersLoading, error: membersError, retry: retryMembers } = useWorkspaceMembers();
+  const sharingResolver = useSessionSharing({ members, membersLoading, membersError, retryMembers });
+  const accountId = useWorkspaceLocalAccountId();
   const router = useRouter();
   const fullscreen = useElectronFullscreen();
   const nativeApp = isNativeAppShell();
@@ -231,10 +304,14 @@ export function SessionHistoryReader({
   const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const children = useAtomValue(childSessionsAtomFamily(rootSessionId));
   const backend = meta ? resolveSessionHistoryBackendKind(meta) : null;
-  // Machine-owned history readers must never be opened by this document-only surface.
-  const { history, ready, synced } = useSessionDoc(sessionId, { enabled: backend === 'loro' });
+  const onlineStatus = useMachineOnlineStatus(meta?.machineId);
+  const machineUnavailable = backend === 'roost' && onlineStatus === 'offline';
+  const { history, ready, synced, loadError } = useSessionDoc(sessionId, {
+    enabled: !!backend && !machineUnavailable,
+  });
   const ownedHistory = runtime?.peekSessionStore?.(sessionId)?.history === history ? history : null;
-  const historyReady = ready && ownedHistory !== null && (ownedHistory.turnCount > 0 || synced);
+  const historyReady =
+    ready && ownedHistory !== null && (backend === 'roost' || ownedHistory.turnCount > 0 || synced);
   useConversationVersion(ownedHistory);
   const exportAllowed = useWorkspaceFeature('export');
   const { run, confirmation } = usePlaintextCopy(runtime, sessionId, exportAllowed);
@@ -272,15 +349,134 @@ export function SessionHistoryReader({
       toast.success(describeCopiedConversation(stats, t));
     }).catch(() => toast.error(t('sessions.copyConversationHistoryFailed')));
   }, [runtime, ownedHistory, historyReady, exportAllowed, run, sessionId, meta, t]);
+  const preference = async (kind: 'pin' | 'unread') => {
+    if (!runtime) return;
+    try {
+      const entry = await runtime.repo.getDocMeta(getSessionRoomId(rootSessionId));
+      if (!entry || store.get(activeWorkspaceRuntimeAtom) !== runtime) return;
+      const source = { ...(entry.meta as SessionMeta), id: rootSessionId };
+      const assigned = !!accountId && source.userId === accountId;
+      const view = !assigned
+        ? await sessionAccess.port?.read(runtime.workspaceId, source.machineId)
+        : undefined;
+      const current = await runtime.repo.getDocMeta(getSessionRoomId(rootSessionId));
+      if (
+        !current ||
+        current.meta.machineId !== source.machineId ||
+        current.meta.parentSessionId !== source.parentSessionId
+      )
+        return;
+      if (
+        store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+        (!(!!accountId && current.meta.userId === accountId) &&
+          !(
+            view &&
+            isSessionReadShared(source, new Map([[view.machineId, view]]), undefined, accountId)
+          ))
+      )
+        return;
+      const patch =
+        kind === 'pin'
+          ? { isPinned: !source.isPinned }
+          : { lastReadAt: (source.lastMessageAt ?? 1) - 1 };
+      await runtime.writer.upsertDocMeta(getSessionRoomId(rootSessionId), patch);
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    }
+  };
+  const reference = async () => {
+    if (!runtime || !rootMeta) return;
+    try {
+      const view =
+        rootMeta.userId === accountId
+          ? undefined
+          : await sessionAccess.store?.read(rootMeta.machineId);
+      const current = await runtime.repo.getDocMeta(getSessionRoomId(rootSessionId));
+      if (
+        !current ||
+        current.meta.machineId !== rootMeta.machineId ||
+        current.meta.parentSessionId !== rootMeta.parentSessionId
+      )
+        return;
+      if (
+        store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+        (!(!!accountId && current.meta.userId === accountId) &&
+          !(
+            view &&
+            isSessionReadShared(
+              { ...rootMeta, id: rootSessionId },
+              new Map([[view.machineId, view]]),
+              undefined,
+              accountId
+            )
+          ))
+      )
+        return;
+      const draftAccountId = store.get(userAtom)?.id ?? runtime.accountId ?? null;
+      const draftAtom = chatLandingSessionStateAtomFamily(
+        buildChatLandingDraftKey(draftAccountId, runtime.workspaceSlug)
+      );
+      const draft = store.get(draftAtom);
+      const prefix = draft.prompt && !/\s$/.test(draft.prompt) ? ' ' : '';
+      const mention = `@${buildSessionMentionSlug(rootMeta.title, rootSessionId)}`;
+      const start = draft.prompt.length + prefix.length;
+      store.set(draftAtom, {
+        ...draft,
+        prompt: draft.prompt + prefix + mention + ' ',
+        mentionRanges: [
+          ...(draft.mentionRanges ?? []),
+          { start, end: start + mention.length, value: rootSessionId, kind: 'session' },
+        ],
+      });
+      await router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: runtime.workspaceSlug },
+      });
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    }
+  };
+  const sharing: SessionSharingState = rootMeta
+    ? sharingResolver.resolve(rootMeta)
+    : {
+        visibility: 'unknown',
+        access: 'read',
+        canManage: false,
+        machineId: null,
+        localProjectId: null,
+        machineName: null,
+        projectName: null,
+      };
+
   return (
     <>
       <SessionHistoryView
         sessionId={sessionId}
+        sharing={sharing}
+        pinned={rootMeta?.isPinned ?? false}
+        machineName={sharing.machineName ?? undefined}
+        onReference={() => {
+          void reference();
+        }}
+        onTogglePin={
+          sessionAccess.port || (!!accountId && rootMeta?.userId === accountId)
+            ? () => {
+                void preference('pin');
+              }
+            : undefined
+        }
+        onMarkUnread={
+          sessionAccess.port || (!!accountId && rootMeta?.userId === accountId)
+            ? () => {
+                void preference('unread');
+              }
+            : undefined
+        }
         title={meta?.title || t('sessions.untitled')}
         history={ownedHistory}
         ready={historyReady}
         onCopy={exportAllowed && historyReady && ownedHistory?.turnCount ? copy : undefined}
-        requiresMachine={backend === 'roost'}
+        requiresMachine={machineUnavailable || !!loadError}
         onBack={onMobileBack}
         nativeApp={nativeApp}
         reserveMacTrafficLightInset={!nativeApp && isMacOSElectronRenderer() && !fullscreen}

@@ -33,7 +33,8 @@ export function createWorkspaceAcceptedInputs(args: {
   workspaceId: string;
   localIdentity?: E2eeLocalDataIdentity;
   paused?: boolean;
-  validateLocalAttachments(send: PendingSessionSend): Promise<void>;
+  /** Additional host admission for device-local references, beyond shared preparation. */
+  validateLocalAttachments?(send: PendingSessionSend): Promise<void>;
   visible: InputPorts['visible'];
   diagnose?: InputPorts['diagnose'];
   onDelivered?(sessionId: SessionId, turnId: string): void;
@@ -56,7 +57,7 @@ export function createWorkspaceAcceptedInputs(args: {
         (block) => block.type === 'local_attachment'
       )
     )
-      await args.validateLocalAttachments(send);
+      await args.validateLocalAttachments?.(send);
     const found = await runtime.repo.getDocMeta(getSessionRoomId(send.sessionId));
     const meta = found?.meta as SessionMeta | undefined;
     if (isLoroRepoDocDeleted(found) || meta?.isArchived)

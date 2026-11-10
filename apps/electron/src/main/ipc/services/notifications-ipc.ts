@@ -29,6 +29,25 @@ export class NotificationsIpc extends IpcService {
     return await getIpcServiceDeps().notificationService.openSystemSettings()
   }
 
+  private readonly pairingHints = new Map<string, number>()
+
+  @IpcMethod()
+  async showDevicePairingRequest(input: { requestId: string; language: 'en' | 'zh' }) {
+    if (
+      !input ||
+      typeof input.requestId !== 'string' ||
+      !/^[0-9a-f]{32}$/.test(input.requestId) ||
+      !['en', 'zh'].includes(input.language)
+    )
+      return { shown: false }
+    const now = Date.now()
+    for (const [id, expiry] of this.pairingHints) if (expiry <= now) this.pairingHints.delete(id)
+    if (this.pairingHints.has(input.requestId) || this.pairingHints.size >= 10)
+      return { shown: false }
+    this.pairingHints.set(input.requestId, now + 600_000)
+    return getIpcServiceDeps().notificationService.showDevicePairingRequest(input.language)
+  }
+
   @IpcMethod()
   async showSessionCompletion(payload: ShowSessionCompletionNotificationInput) {
     if (!isShowSessionCompletionNotificationInput(payload)) {

@@ -53,3 +53,7 @@ slow-start case fails. No real slow device was exercised. The fix cannot change
 the limit inside watchdogs already running older releases; see the
 [CLI recovery steps](../../../../apps/cli/README.md#daemon-upgrades-and-autostart).
 Related decision: [verified upgrade installation](2026-10-03-daemon-upgrade-installation.md).
+
+## Current ownership
+
+The three-minute backstop remains on interactive daemon startup. The old runner-to-runner remote handoff described here is historical; managed SEA updates replace Workers beneath a fixed owner. Every legacy npm installation needs explicit migration, so publishing a new timeout cannot repair its already-running watchdog.

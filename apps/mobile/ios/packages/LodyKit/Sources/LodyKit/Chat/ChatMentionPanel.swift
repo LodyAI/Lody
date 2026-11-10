@@ -23,7 +23,8 @@ struct ChatMentionItem: Decodable, Equatable {
     guard let scoped else { return true }
     return category == scoped || (scoped == "cmd" && category == "shortcut")
   }
-  static let categories = ["file", "skill", "session", "role", "issue", "pr", "shortcut", "cmd"]
+  /// Root order: Agent Roles and prompt shortcuts lead, then the rest (agent commands last).
+  static let categories = ["role", "shortcut", "file", "skill", "session", "issue", "pr", "cmd"]
   static let labels = ["file": "files", "skill": "skills", "session": "sessions", "role": "roles", "issue": "issues", "pr": "prs", "shortcut": "shortcuts", "cmd": "commands"]
   static let glyphs = ["file": "doc.text", "directory": "folder", "skill": "sparkles", "session": "bubble.left.and.bubble.right", "role": "person.crop.rectangle", "issue": "exclamationmark.circle", "pr": "arrow.triangle.branch", "shortcut": "bolt", "cmd": "command"]
 
@@ -121,9 +122,16 @@ final class ChatMentionPanel: UIView {
       addSubview(view)
       view.translatesAutoresizingMaskIntoConstraints = false
     }
+    // A host that cannot fit the composer and the panel above the keyboard (the new-chat card
+    // on a short screen) lets the keyboard cover the panel's bottom edge. The panel never moves
+    // the composer; it only ends its lists at the keyboard so the last rows stay reachable.
+    let dockedBottom = navigation.view.bottomAnchor.constraint(equalTo: bottomAnchor)
+    dockedBottom.priority = .defaultHigh
+    let keyboardBottom = navigation.view.bottomAnchor.constraint(lessThanOrEqualTo: keyboardLayoutGuide.topAnchor)
+    keyboardBottom.priority = .required - 1
     NSLayoutConstraint.activate([
       navigation.view.topAnchor.constraint(equalTo: topAnchor),
-      navigation.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+      dockedBottom, keyboardBottom,
       navigation.view.leadingAnchor.constraint(equalTo: leadingAnchor),
       navigation.view.trailingAnchor.constraint(equalTo: trailingAnchor),
       separator.topAnchor.constraint(equalTo: topAnchor),

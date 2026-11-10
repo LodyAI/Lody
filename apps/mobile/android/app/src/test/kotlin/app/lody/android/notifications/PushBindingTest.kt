@@ -22,10 +22,10 @@ class PushBindingTest {
         }
         override suspend fun unregister() { registration = null }
     }
-    @Test fun `OneSignal uses v2 identity and switching providers retires direct registration`() = runTest {
+    @Test fun `OneSignal uses the verified user ID and switching providers retires direct registration`() = runTest {
         val device = Device(); val session = Session(false); val binding = PushBinding(device)
         binding.refresh("user", session)
-        assertEquals("lody-push-v2:user", device.identity)
+        assertEquals("user", device.identity)
         assertNull(session.registration)
         session.direct = true
         binding.refresh("user", session)
@@ -34,7 +34,7 @@ class PushBindingTest {
         session.direct = false
         binding.refresh("user", session)
         assertNull(session.registration)
-        assertEquals("lody-push-v2:user", device.identity)
+        assertEquals("user", device.identity)
         binding.clear()
         assertNull(device.identity)
     }
@@ -47,7 +47,7 @@ class PushBindingTest {
                 override suspend fun unregister(): Unit = if (timeout) withTimeout(15_000) { awaitCancellation() } else error("offline")
             }
             binding.refresh("user", session)
-            assertEquals("lody-push-v2:user", device.identity)
+            assertEquals("user", device.identity)
             assertFalse(binding.direct)
         }
     }
@@ -63,7 +63,7 @@ class PushBindingTest {
         assertFalse(binding.direct)
         device.tokenGate = null
         binding.refresh("new", Session(false))
-        assertEquals("lody-push-v2:new", device.identity)
+        assertEquals("new", device.identity)
     }
     @Test fun `logout cleans up a registration that committed before its response was lost`() = runTest {
         val device = Device(); val session = Session(true).apply { failRegister = true }

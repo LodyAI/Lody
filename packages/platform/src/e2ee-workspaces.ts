@@ -9,7 +9,10 @@ import type {
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
-import type { E2eeAccountPairingRuntime } from './e2ee-account-pairing';
+import type {
+  E2eeAccountPairingRuntime,
+  E2eeAutomaticPairingRuntime,
+} from './e2ee-account-pairing';
 import type { ReadonlyStore } from './store';
 import type { PlatformSessionState } from './provider';
 
@@ -158,7 +161,13 @@ export interface E2eeAccountApprovalSession {
 }
 
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
-export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
+export interface E2eeWorkspaceRuntime
+  extends E2eeAccountPairingRuntime, E2eeAutomaticPairingRuntime {
+  /** Explicit user gesture: open recovery inside this application. True means the requested workspace is ready. */
+  openBrowserRecovery?(workspaceId: string): Promise<boolean>;
+  /** Browser device admission requires explicit personal-computer consent even
+   * when opening through recovery or another device. */
+  requirePersonalComputer?: boolean;
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';
   /** Portable hosts that can sign an account-pairing admission from an already
@@ -187,6 +196,8 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     membershipId: string,
     role: 'admin' | 'member'
   ): Promise<void>;
+  /** Owner-only transfer to an existing member, checked against the latest verified ledger. */
+  transferOwnership?(workspaceId: string, membershipId: string): Promise<void>;
   /** Create public email/link pins using a current manager's native device. */
   createMemberInvitation?(input: {
     workspaceId: string;
@@ -309,6 +320,27 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     targetMachineId: string,
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Sign one schedule declaration with this device. The host computes the definition
+   * fingerprint from the document; it is never a general signing capability. */
+  signScheduleDeclaration?(
+    workspaceId: string,
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ): Promise<string>;
+  /**
+   * Optional iroh route (desktop main with relays and the native module). `irohReady`
+   * reports a live connection to the machine's ledger device and starts one when
+   * absent; `irohCall` carries one already prepared envelope and returns its reply
+   * frames, which the caller verifies with the accept methods. Neither prepares,
+   * signs nor authorizes anything; failures mean "use Streams RPC".
+   */
+  irohReady?(workspaceId: string, targetMachineId: string): Promise<boolean>;
+  irohCall?(
+    workspaceId: string,
+    targetMachineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ): Promise<string[]>;
   /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
   acceptDispatchResponse?(
     workspaceId: string,

@@ -14,6 +14,8 @@ export async function machineRpc(
   params: unknown,
   getGrant: Grant,
   signal: AbortSignal,
+  onProgress?: (progress: Record<string, unknown>) => void,
+  timeoutMs = 30000,
 ): Promise<RpcReply> {
   const grant = async () => {
     signal.throwIfAborted();
@@ -26,7 +28,7 @@ export async function machineRpc(
   signal.throwIfAborted();
   const created = await response.create({
     contentType: 'application/json',
-    ttlSeconds: 300,
+    ttlSeconds: Math.max(300, Math.ceil(timeoutMs / 1000) + 60),
   });
   if (!created.ok) throw new Error(created.result.code);
   signal.throwIfAborted();
@@ -34,6 +36,7 @@ export async function machineRpc(
   signal.throwIfAborted();
   const id = crypto.randomUUID(),
     now = Date.now();
+  signal.throwIfAborted();
   const sent = await client.append({
     part: {
       contentType: 'application/json',
@@ -45,7 +48,7 @@ export async function machineRpc(
         machineId,
         replyTo,
         sentAt: now,
-        expiresAt: now + 30000,
+        expiresAt: now + timeoutMs,
         method,
         params,
       }),
@@ -64,10 +67,18 @@ export async function machineRpc(
     for (const reply of Array.isArray(parsed) ? parsed : [parsed])
       if (reply.id === id) {
         if (
-          method === 'machine/acp-capabilities-refresh' &&
-          reply.result?.type === 'machine/acp-binary-progress'
-        )
+          (reply.result?.type === 'machine/acp-binary-progress' &&
+            [
+              'machine/acp-capabilities-refresh',
+              'machine/acp-binary-install',
+              'machine/acp-binary-status',
+            ].includes(method)) ||
+          (method === 'machine/acp-authenticate' &&
+            reply.result?.type === 'machine/acp-authentication-progress')
+        ) {
+          onProgress?.(reply.result);
           continue;
+        }
         return reply as RpcReply;
       }
   }

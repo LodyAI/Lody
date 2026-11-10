@@ -9,6 +9,10 @@ import type {
 } from '@lody/shared/local-machine-rpc';
 import type { AuthorizeEncryptedExecution } from './agent-execution';
 import { RealtimeJournal, type RealtimeStartPermit } from './realtime-journal';
+import type { EncryptedReplySink } from './realtime-rpc';
+
+/** A reply sink that owns its stream: `end` finishes it once no reply will follow. */
+export type EncryptedFeatureReplySink = EncryptedReplySink & { end(): Promise<void> };
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 export type EncryptedFeatureContext = {
@@ -33,16 +37,29 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   journal: () => RealtimeJournal;
   authorize: AuthorizeEncryptedExecution;
   authorizeRead: AuthorizeEncryptedExecution;
+  /** Storage-independent exact-session authority for the Roost session/history-read
+   * method, ready for future encrypted Roost support. Backend availability remains
+   * a separate gate; other methods never borrow this revocable authority. */
+  authorizeHistoryRead?: (
+    workspaceId: string,
+    requesterDevice: string,
+    sessionId: string
+  ) => ReturnType<AuthorizeEncryptedExecution>;
   authoritySignal?: () => AbortSignal;
   isOpen: () => boolean;
   handle: EncryptedFeatureHandler;
-  client: LoroStreamsJsonStreamClient;
+  /** Streams replies; absent for a receiver that only serves sink-carrying routes. */
+  client?: LoroStreamsJsonStreamClient;
 }) {
   const scope = yield* Effect.scope;
   const pending = new Map<string, { permit: RealtimeStartPermit; frames: Uint8Array[] }>();
   const reads = new Set<string>(),
     writes = new Set<string>();
-  return Effect.fnUntraced(function* (envelope: { id: string; frame: string }) {
+  const receive = Effect.fnUntraced(function* (
+    envelope: { id: string; frame: string },
+    sink: EncryptedFeatureReplySink | undefined,
+    state: { forked: boolean }
+  ) {
     if (!options.isOpen()) return true;
     const opened = yield* options.native.openFeature(options.machineId, envelope.frame);
     if (opened === null) return false;
@@ -53,7 +70,18 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const active = read ? reads : writes;
     if (active.has(envelope.id) || active.size >= 32) return true;
     active.add(envelope.id);
-    const authorize = read ? options.authorizeRead : options.authorize;
+    const historyRequest =
+      opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
+    const authorize: AuthorizeEncryptedExecution = historyRequest
+      ? (workspaceId, requesterDevice) =>
+          options.authorizeHistoryRead?.(
+            workspaceId,
+            requesterDevice,
+            historyRequest.params.sessionId
+          ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
+      : read
+        ? options.authorizeRead
+        : options.authorize;
     const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
       Effect.acquireUseRelease(
         Effect.sync(() => ({
@@ -95,11 +123,13 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           })
       );
     const task = Effect.gen(function* () {
+      const clock = yield* Clock.Clock;
       const authority = yield* authorize(options.workspaceId, opened.requesterDevice);
       const authoritySignal = options.authoritySignal?.();
       if (
         authority._tag !== 'Authorized' ||
-        (opened.input.request.method === 'machine/acp-interaction' &&
+        ((opened.input.request.method === 'machine/acp-interaction' ||
+          opened.input.request.method === 'session/history-read') &&
           (!authority.isCurrent ||
             !authoritySignal ||
             authoritySignal.aborted ||
@@ -112,6 +142,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
         authority.isCurrent && authoritySignal
           ? { isCurrent: authority.isCurrent, signal: authoritySignal }
           : undefined;
+      const currentAdmission = () =>
+        !admittedAuthority || (!admittedAuthority.signal.aborted && admittedAuthority.isCurrent());
       yield* options.native.retainFeatureRequest(options.machineId, opened);
       let frames: Uint8Array[];
       if (read) {
@@ -173,31 +205,78 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       const current = yield* authorize(options.workspaceId, opened.requesterDevice);
       if (
         current._tag !== 'Authorized' ||
+        !currentAdmission() ||
         !options.isOpen() ||
         (yield* Clock.currentTimeMillis) >= opened.expiresAt
       )
         return yield* Effect.void;
       yield* options.native.verifyFeatureRequest(opened);
-      yield* Effect.tryPromise({
-        try: async () => {
-          const stream = options.native.responseStream(opened.requesterDevice);
-          await options.client.ensureJsonStream(stream, 86400);
-          for (const frame of frames) {
-            if (!options.isOpen()) return;
-            await options.client.appendJson(
+      const client = options.client;
+      if (!sink && !client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+      const stream = options.native.responseStream(opened.requesterDevice);
+      if (!sink)
+        yield* Effect.tryPromise({
+          try: () => client!.ensureJsonStream(stream, 86400),
+          catch: (cause) => cause,
+        });
+      for (const frame of frames) {
+        // Metadata can change without a ledger/policy revision (for example an
+        // assigned owner transfer). Re-resolve actual target access after stream I/O.
+        const latest = historyRequest
+          ? yield* authorize(options.workspaceId, opened.requesterDevice)
+          : current;
+        if (
+          latest._tag !== 'Authorized' ||
+          (latest.isCurrent && !latest.isCurrent()) ||
+          !options.isOpen() ||
+          !currentAdmission() ||
+          (yield* Clock.currentTimeMillis) >= opened.expiresAt
+        )
+          return yield* Effect.void;
+        yield* Effect.tryPromise({
+          try: async () => {
+            if (
+              !options.isOpen() ||
+              !currentAdmission() ||
+              (latest.isCurrent && !latest.isCurrent()) ||
+              clock.currentTimeMillisUnsafe() >= opened.expiresAt
+            )
+              throw new Error('e2ee_history_authority_withdrawn');
+            if (sink) return await sink.deliver(opened.requestId, frame);
+            await client!.appendJson(
               stream,
               e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(frame).toString('hex') })
             );
-          }
-        },
-        catch: (cause) => cause,
-      });
+          },
+          catch: (cause) => cause,
+        });
+      }
       return yield* Effect.void;
     }).pipe(
       Effect.catch(() => Effect.void),
-      Effect.ensuring(Effect.sync(() => active.delete(envelope.id)))
+      Effect.ensuring(
+        Effect.sync(() => active.delete(envelope.id)).pipe(
+          Effect.andThen(
+            sink ? Effect.promise(() => sink.end().catch(() => undefined)) : Effect.void
+          )
+        )
+      )
     );
+    state.forked = true;
     yield* Effect.forkIn(task, scope);
     return true;
   });
+  // A claimed request's sink is always finished: by the forked task, or here when
+  // it ends without one (duplicate, refused or failed early). `false` hands the
+  // still-open sink back to the caller for the dispatch receiver.
+  return (envelope: { id: string; frame: string }, sink?: EncryptedFeatureReplySink) => {
+    const state = { forked: false };
+    return receive(envelope, sink, state).pipe(
+      Effect.onExit((exit) =>
+        sink && !state.forked && !(exit._tag === 'Success' && exit.value === false)
+          ? Effect.promise(() => sink.end().catch(() => undefined))
+          : Effect.void
+      )
+    );
+  };
 });

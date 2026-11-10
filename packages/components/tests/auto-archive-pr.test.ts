@@ -63,6 +63,11 @@ vi.mock('../src/hooks/use-visible-session-metas', async (importOriginal) => {
   const { sessionMetaCacheAtom: projectedSessionCacheAtom } = await import('../src/atoms/doc-meta');
   return {
     ...(await importOriginal<typeof import('../src/hooks/use-visible-session-metas')>()),
+    useVisibleMachineIdSet: () => ({
+      visibleMachineIds: new Set(['machine-1']),
+      ownedMachineIds: new Set(['machine-1']),
+      isLoading: false,
+    }),
     useVisibleSessionMetas: () => ({
       sessions: Object.values(useTestAtomValue(projectedSessionCacheAtom)).filter(
         (session) => !session.isArchived
@@ -79,7 +84,7 @@ vi.mock('../src/hooks/use-visible-session-metas', async (importOriginal) => {
 const testPlatform: PlatformProvider = {
   kind: 'cloud',
   identity: {
-    session: createStaticStore({ status: 'unauthenticated' }),
+    session: createStaticStore({ status: 'authenticated', user: { id: 'user-1' } }),
     signOut: async () => {},
   },
   workspaces: {

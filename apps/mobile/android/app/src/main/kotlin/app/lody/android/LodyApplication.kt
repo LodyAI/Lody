@@ -20,6 +20,8 @@ open class LodyApplication : Application() {
     lateinit var creation: app.lody.android.create.CreationService
     val submissions by lazy { app.lody.android.create.CreationSubmissions(applicationScope) { scope, request -> creation.create(scope, request) } }
     lateinit var pullRequests: app.lody.android.chat.PullRequestWriter
+    lateinit var mergeStates: app.lody.android.chat.PullRequestMergeReader
+    lateinit var branches: app.lody.android.chat.PullRequestBranches
     lateinit var attachments: app.lody.android.chat.AttachmentUploader
         private set
     lateinit var members: WorkspaceMembers
@@ -33,6 +35,7 @@ open class LodyApplication : Application() {
     lateinit var schedules: app.lody.android.schedules.ScheduleService
         private set
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
+    private val shortcutCloud by lazy { app.lody.android.cloud.PromptShortcutCloud() }
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
         if (ready != null) {
@@ -40,6 +43,8 @@ open class LodyApplication : Application() {
             return ReadOnlyCloudRuntime(this, scope, ready.second, GrantProvider { key ->
                 try { account.grant(key) }
                 catch (error: AuthFailure) { throw app.lody.android.runtime.RuntimeException(RuntimeFault(error.code, if (error.code == "network_unavailable") RuntimeErrorCategory.NETWORK else RuntimeErrorCategory.AUTH)) }
+            }, app.lody.android.runtime.ShortcutCloudProvider { key, operation, args ->
+                account.withVerifiedAccount(key) { credential -> shortcutCloud.call(credential, key.workspaceId, operation, args) }
             })
         }
         return createOfflineRuntime(scope)
@@ -50,6 +55,7 @@ open class LodyApplication : Application() {
         app.lody.android.home.AvatarImages.initialize(this)
         runtimeOwner = RuntimeOwner(::createRuntime, Dispatchers.Main.immediate)
         val cache = AtomicCatalogStore(this)
+        val scheduleCache = app.lody.android.schedules.ScheduleDisplayCache(cache)
         val branches = app.lody.android.create.GitHubBranches()
         creation = app.lody.android.create.CreateSessionRepository(runtimeOwner, cache) { scope, repo, page ->
             account.withVerifiedAccount(scope) { token -> branches.load(token, scope.workspaceId, repo, page) }
@@ -61,12 +67,22 @@ open class LodyApplication : Application() {
                 else writes.markReady(credential, scope.workspaceId, repo, number)
             }
         }
+        mergeStates = app.lody.android.chat.PullRequestMergeReader { scope, repo, number ->
+            account.withVerifiedAccount(scope) { credential -> writes.mergeState(credential, scope.workspaceId, repo, number) }
+        }
+        this.branches = object : app.lody.android.chat.PullRequestBranches {
+            override suspend fun exists(scope: RuntimeScope, repository: String, number: Int) =
+                account.withVerifiedAccount(scope) { credential -> writes.headBranchExists(credential, scope.workspaceId, repository, number) }
+            override suspend fun delete(scope: RuntimeScope, repository: String, number: Int) =
+                account.withVerifiedAccount(scope) { credential -> writes.deleteBranch(credential, scope.workspaceId, repository, number) }
+        }
         val uploads = app.lody.android.chat.SessionAttachmentUploads(contentResolver)
         attachments = app.lody.android.chat.AttachmentUploader { scope, sessionId, items ->
             account.withVerifiedAccount(scope) { credential -> uploads.upload(credential.token, scope.workspaceId, sessionId, items) }
         }
         account = AccountController(CloudAuthHttp(OkHttpAuthTransport()), KeystoreCredentialStore(this), applicationScope, cache) {
             if (::notifications.isInitialized) notifications.clear()
+            scheduleCache.invalidate()
             prepared = null
             submissions.activate(null)
             cloud.disconnect()
@@ -74,7 +90,7 @@ open class LodyApplication : Application() {
         account.browserStore = BrowserAuthStore(KeystoreCredentialStore(this, "browser-auth"))
         members = WorkspaceMembers(cache, account::members)
         projectAdding = app.lody.android.home.LiveProjectAdding(runtimeOwner, account, app.lody.android.chat.GitHubHttpClient())
-        schedules = app.lody.android.schedules.RuntimeScheduleService(runtimeOwner)
+        schedules = app.lody.android.schedules.RuntimeScheduleService(runtimeOwner, scheduleCache)
         cloud = CatalogRepository(account, runtimeOwner, applicationScope, cache) { scope, grant -> prepared = scope to grant }
         notifications = app.lody.android.notifications.PushNotifications(this, account, applicationScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(notifications)

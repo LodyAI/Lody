@@ -57,6 +57,8 @@ const formatErrorMessage = (error: unknown): string =>
  */
 export interface NodeProcessApi {
   readonly platform: NodeJS.Platform;
+  /** Application-owned observation; never grants signal authority by itself. */
+  readonly observeTree?: (tree: ProcessTree) => void;
   /** Synchronous like `child_process.spawn`: async failures arrive as `error`. */
   readonly spawn: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   /**
@@ -801,6 +803,11 @@ const acquireProcess = Effect.fnUntraced(function* (
     catch: spawnFailed,
   });
   const tree = yield* childProcessTree(child, { processGroup });
+  try {
+    np.observeTree?.(tree);
+  } catch (cause) {
+    setupFailure ??= spawnFailed(cause);
+  }
   return {
     child,
     tree,

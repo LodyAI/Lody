@@ -27,7 +27,9 @@
     "bench:turn-diff-store": "pnpm --filter @lody/turn-diff-store bench",
     "test:e2e": "LODY_E2E=1 vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:sea": "node --test scripts/sea/sea.test.mjs",
+    "test:sea:native": "node scripts/sea/native-acceptance.mjs"
   },
   "keywords": [
     "cli",
@@ -52,6 +54,7 @@
     "@lody/code-review-helper": "workspace:*",
     "@lody/e2ee-core": "workspace:*",
     "@lody/e2ee-machine-sharing": "workspace:*",
+    "@lody/iroh-native": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",

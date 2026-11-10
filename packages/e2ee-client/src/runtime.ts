@@ -1,5 +1,10 @@
 import { Cause, Clock, Effect, Exit, Result, Semaphore, type Layer } from 'effect';
-import type { E2eeWorkspaceRuntime, E2eeRuntimeStatus, E2eeContentRoom } from '@lody/platform';
+import type {
+  E2eeWorkspaceRuntime,
+  E2eeRuntimeStatus,
+  E2eeContentRoom,
+  E2eeMemberKeyDelivery,
+} from '@lody/platform';
 import { encryptedWorkspaceRoom } from '@lody/shared/workspace-streams-content';
 import {
   Bytes,
@@ -8,15 +13,34 @@ import {
   hashRecordBytes,
   type LedgerView,
 } from '@lody/e2ee-core/protocol';
-import { ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS } from './account-requester';
+import {
+  ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS,
+  personalHostAccountPairing,
+  type AccountPairingIdentityHost,
+} from './account-requester';
 import { makeOwnedPersonalDeviceHost, type PersonalHostPorts } from './owned-host';
 import { PersonalPairingOfferSchema, type PersonalPairingOffer } from './pairing';
 import { fail, PersonalRuntimeFailure } from './errors';
 import { fromHex, toHex } from './bytes';
+import { decodeMemberKeyPackage } from './member';
 import { captureSeal, captureOpen, capturePage } from './runtime-input';
+
+const requesters = new WeakMap<E2eeWorkspaceRuntime, AccountPairingIdentityHost>();
+/** Purpose-bound account-pairing operations on this runtime's existing owned host.
+ * Returns null for foreign runtimes; never constructs another identity owner. */
+export const personalRuntimeAccountRequester = (runtime: E2eeWorkspaceRuntime) =>
+  requesters.get(runtime) ?? null;
 
 type Host = Effect.Success<ReturnType<typeof makeOwnedPersonalDeviceHost>>;
 type Session = Effect.Success<ReturnType<Host['open']>>;
+/** Recovery uses the same identity owner as content and account approval. */
+export interface PersonalRuntimeRecovery {
+  restore(input: Parameters<Host['restoreRecovery']>[0]): ReturnType<Host['restoreRecovery']>;
+  setup(input: Parameters<Session['setupRecovery']>[0]): ReturnType<Session['setupRecovery']>;
+}
+const recoveries = new WeakMap<E2eeWorkspaceRuntime, PersonalRuntimeRecovery>();
+export const personalRuntimeRecovery = (runtime: E2eeWorkspaceRuntime) =>
+  recoveries.get(runtime) ?? null;
 /** Real application ports for one pinned workspace. No backend or identity creation is implicit. */
 export interface PersonalRuntimeOptions<E> {
   readonly accountId: string;
@@ -207,6 +231,161 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     if (result.outcome !== 'Committed') return yield* fail('conflict');
     return undefined;
   });
+  // Key delivery after a member admission. Delivery never holds or undoes the admission;
+  // its state is reason codes only, and a failed delivery can be retried from here.
+  const deliveries = new Map<
+    string,
+    { device: string } & Omit<E2eeMemberKeyDelivery, 'requestId'>
+  >();
+  const deliveryView = (requestId: string): E2eeMemberKeyDelivery => {
+    const entry = deliveries.get(requestId)!;
+    return { requestId, state: entry.state, ...(entry.code ? { code: entry.code } : {}) };
+  };
+  const deliver = (id: string, requestId: string) =>
+    withSession(id, (session) =>
+      Effect.gen(function* () {
+        const entry = deliveries.get(requestId);
+        if (!entry || entry.state === 'delivering' || entry.state === 'delivered') return;
+        entry.state = 'delivering';
+        delete entry.code;
+        const exit = yield* Effect.exit(
+          Effect.gen(function* () {
+            yield* session.keyRound();
+            return yield* session.keyDeliveryEvidence(entry.device);
+          })
+        );
+        if (Exit.isSuccess(exit) && exit.value === 'delivered') entry.state = 'delivered';
+        else {
+          entry.state = 'failed';
+          entry.code = Exit.isSuccess(exit) ? exit.value : 'e2ee_key_delivery_failed';
+        }
+      })
+    );
+  const startDelivery = (id: string, requestId: string) => {
+    void run(deliver(id, requestId)).catch(() => {
+      const entry = deliveries.get(requestId);
+      if (entry?.state === 'delivering') {
+        entry.state = 'failed';
+        entry.code = 'e2ee_key_delivery_failed';
+      }
+    });
+  };
+  /** Joining a team on this device. The application retains the identity offer
+   * `memberPairingOffer` derives before preparing, so pending and claim find the
+   * same identity; a personal pairing identity never reads as a member join. */
+  const joinRuntime = host.capabilities.memberJoin
+    ? ({
+        prepareMemberJoin: (supplied) =>
+          run(
+            Effect.gen(function* () {
+              yield* guard(supplied.workspaceId);
+              if (supplied.genesisHash !== genesisHash) return yield* fail('scope-mismatch');
+              const { request } = yield* host.prepareMember(supplied);
+              yield* guard(supplied.workspaceId);
+              return request;
+            })
+          ),
+        pendingMemberJoin: (id) =>
+          run(
+            Effect.gen(function* () {
+              yield* guard(id);
+              const saved = yield* retained();
+              if (!saved) return null;
+              const parsed = yield* Effect.try({
+                try: () => PersonalPairingOfferSchema.parse(saved),
+                catch: () => fail('corrupt'),
+              });
+              if (parsed.workspaceId !== workspaceId || parsed.genesisHash !== genesisHash)
+                return yield* fail('scope-mismatch');
+              return yield* host.memberJoin(parsed);
+            })
+          ),
+        claimMemberJoin: (id, requestId) =>
+          run(
+            Effect.gen(function* () {
+              const result = yield* host.claimMember(
+                yield* retainedRequest(id, requestId),
+                requestId
+              );
+              yield* guard(id);
+              return { ready: result.state === 'committed', state: result.state };
+            })
+          ),
+      } satisfies Pick<
+        E2eeWorkspaceRuntime,
+        'prepareMemberJoin' | 'pendingMemberJoin' | 'claimMemberJoin'
+      >)
+    : {};
+  const memberRuntime = host.capabilities.members
+    ? ({
+        createMemberInvitation: (input) =>
+          run(
+            withSession(input.workspaceId, (session) =>
+              input.mode === 'email' || input.mode === 'link'
+                ? session.members.invite(input.mode, input.email)
+                : Effect.fail(fail('invalid-input'))
+            )
+          ),
+        memberJoinRequests: (id) => run(withSession(id, (session) => session.members.pending())),
+        approveMemberJoin: (id, requestId, mode) =>
+          run(
+            withSession(id, (session) =>
+              Effect.gen(function* () {
+                if (mode !== 'automatic' && mode !== 'explicit')
+                  return yield* fail('invalid-input');
+                // An earlier approval whose reply was lost left its signed original in the
+                // journal: resubmit those exact bytes and settle them before anything new.
+                const resumed = yield* session.resume();
+                if (resumed) {
+                  yield* session.acknowledge(resumed);
+                  if (resumed.outcome !== 'Committed') return { admitted: false, keyPending: true };
+                }
+                // Decided against the verified ledger: an applicant the resumed original
+                // admitted needs no second signature.
+                const command = yield* session.members.admission(requestId, mode);
+                if (command) {
+                  // The session journals the signed original; a lost reply is settled from
+                  // the verified ledger and never signed again.
+                  const result = yield* session.execute(command);
+                  yield* session.acknowledge(result);
+                  if (result.outcome !== 'Committed') return { admitted: false, keyPending: true };
+                }
+                const material = yield* session.members.read(requestId);
+                if (material.state !== 'committed') return { admitted: false, keyPending: true };
+                const device = toHex(
+                  decodeMemberKeyPackage(material.keyPackageHex).request.signingPublicKey.toBytes()
+                );
+                if (!deliveries.has(requestId))
+                  deliveries.set(requestId, { device, state: 'pending' });
+                startDelivery(id, requestId);
+                return { admitted: true, keyPending: true, keyDelivery: 'delivering' as const };
+              })
+            )
+          ),
+        memberKeyDeliveries: async () => ({
+          items: [...deliveries.keys()].map(deliveryView),
+        }),
+        retryMemberKeyDelivery: async (id, requestId) => {
+          const entry = deliveries.get(requestId);
+          if (!entry) throw fail('invalid-input');
+          if (entry.state === 'failed') startDelivery(id, requestId);
+          return deliveryView(requestId);
+        },
+        rejectMemberJoin: (id, requestId) =>
+          run(withSession(id, (session) => session.members.reject(requestId))),
+        revokeMemberInvitation: (id, token) =>
+          run(withSession(id, (session) => session.members.revoke(token))),
+      } satisfies Pick<
+        E2eeWorkspaceRuntime,
+        | 'createMemberInvitation'
+        | 'memberJoinRequests'
+        | 'approveMemberJoin'
+        | 'memberKeyDeliveries'
+        | 'retryMemberKeyDelivery'
+        | 'rejectMemberJoin'
+        | 'revokeMemberInvitation'
+      >)
+    : {};
   const runtime: E2eeWorkspaceRuntime = {
     readerLeases: 'preallocated-v1',
     account: (input) => run(account(input)),
@@ -759,6 +938,30 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           })
         )
       ),
+    // Declarations need only this admitted device, not RPC transport: an encrypted
+    // schedule saved from any host carries its setter's signature.
+    signScheduleDeclaration: (id, document, manualRunKey) =>
+      run(withSession(id, (session) => session.signScheduleDeclaration(document, manualRunKey))),
+    /** Owner only, as on desktop: hands ownership to an existing non-guest member and
+     * this owner becomes an admin. Core authorizes the signed record again. */
+    transferOwnership: (id, membership) =>
+      run(
+        withSession(id, (session) =>
+          Effect.gen(function* () {
+            if (!/^[0-9a-f]{32}$/.test(membership)) return yield* fail('invalid-input');
+            const state = (yield* session.ledger()).inspectState();
+            const target = state.members.get(membership);
+            if (!target || target.role === 'guest') return yield* fail('invalid-input');
+            yield* finish(session, {
+              _tag: 'TransferOwner',
+              successorMembershipId: Result.getOrThrow(Bytes.membershipId(fromHex(membership))),
+            });
+            return undefined;
+          })
+        )
+      ),
+    ...memberRuntime,
+    ...joinRuntime,
     ...(host.capabilities.rpc
       ? ({
           prepareDispatch: (id, target, input) =>
@@ -790,5 +993,27 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         } satisfies Pick<E2eeWorkspaceRuntime, 'readMachineSharing' | 'updateMachineSharing'>)
       : {}),
   };
-  return Object.freeze(runtime);
+  const requester = personalHostAccountPairing(host);
+  const checked = <A>(work: Effect.Effect<A, unknown>) =>
+    Effect.gen(function* () {
+      yield* guard(workspaceId);
+      const result = yield* work;
+      yield* guard(workspaceId);
+      return result;
+    });
+  const accountRequester: AccountPairingIdentityHost = {
+    workspaceId,
+    genesisHash,
+    prepareAccountIdentity: (pin) => checked(requester.prepareAccountIdentity(pin)),
+    pendingPersonalJoin: () => checked(requester.pendingPersonalJoin()),
+    acceptAccountInvitation: (input) => checked(requester.acceptAccountInvitation(input)),
+    acceptAccountHistory: (input) => checked(requester.acceptAccountHistory!(input)),
+  };
+  const exposed = Object.assign(runtime, { accountRequester });
+  requesters.set(exposed, accountRequester);
+  recoveries.set(exposed, {
+    restore: (input) => checked(host.restoreRecovery(input)),
+    setup: (input) => withSession(workspaceId, (session) => session.setupRecovery(input)),
+  });
+  return Object.freeze(exposed);
 });

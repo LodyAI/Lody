@@ -95,7 +95,7 @@ class PushCloudTest {
         backend.queryFails = false
         binding.refresh("user", session)
         assertFalse(binding.direct)
-        assertEquals("lody-push-v2:user", identity)
+        assertEquals("user", identity)
         assertNull(backend.registered)
     }
 }

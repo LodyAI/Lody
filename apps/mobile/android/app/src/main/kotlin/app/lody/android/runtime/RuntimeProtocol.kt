@@ -13,6 +13,8 @@ internal object RuntimeProtocol {
         return result
     }
     fun event(message: JSONObject): RuntimeEvent? = when (message.getString("type")) {
+        "agentProvidersChanged" -> RuntimeEvent.ProvidersChanged(message.getString("machineId"))
+        "agentProviderOperationProgress" -> RuntimeEvent.ProviderProgress(message.getString("machineId"), message.getString("id"), message.getString("status"), (message.opt("percent") as? Number)?.toFloat()?.takeIf { it.isFinite() }?.coerceIn(0f, 100f))
         "machinePresence" -> RuntimeEvent.CreationChanged(message.optString("presence"))
         "creationOptionsChanged" -> RuntimeEvent.CreationChanged()
         "session" -> {
@@ -119,7 +121,7 @@ internal object RuntimeProtocol {
             val sessions = catalog.getJSONArray("sessions").objects().map {
                 CatalogJson.session(CatalogSession(it.text("id"), it.text("machineId"), it.text("projectId"), it.text("title"), it.text("status"), it.get("archived") as Boolean, it.get("pinned") as Boolean, it.text("createdAt")), it)
             }
-            RuntimeEvent.CatalogUpdated(CatalogSnapshot(message.nonnegative("revision"), projects, sessions, strings(catalog.getJSONArray("machineIds")), CatalogJson.machineNames(catalog), CatalogJson.machineOs(catalog)))
+            RuntimeEvent.CatalogUpdated(CatalogSnapshot(message.nonnegative("revision"), projects, sessions, strings(catalog.getJSONArray("machineIds")), CatalogJson.machineNames(catalog), CatalogJson.machineOs(catalog), ProviderUsageJson.parse(catalog)))
         }
         "synced" -> {
             val count = message.nonnegative("streams"); require(count <= Int.MAX_VALUE)
@@ -131,11 +133,12 @@ internal object RuntimeProtocol {
         }
         "networkStatus" -> RuntimeEvent.SyncFailed(if (message.optString("status") == "authorization_required") "grant_expired" else "network_unavailable")
         "grant" -> RuntimeEvent.GrantRequested
+        "shortcutCloud" -> RuntimeEvent.ShortcutCloudRequested(message.getString("requestId"), message.getString("operation"), message.getString("args"))
         else -> null
     }
     fun schema(message: JSONObject): RuntimeResult.Schema {
         val trials = message.getJSONObject("creationOptionsTrial")
-        return RuntimeResult.Schema(message.keys().asSequence().filter { it != "creationOptionsTrial" }.toSet(), trials.keys().asSequence().associateWith { trials.text(it) })
+        return RuntimeResult.Schema(message.getJSONObject("machines").keys().asSequence().toSet(), trials.keys().asSequence().associateWith { trials.text(it) })
     }
     /** Upstream `turnDiff`: `ok` with both sides, or `unavailable` with a reason. */
     fun diff(json: JSONObject): FileDiff {

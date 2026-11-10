@@ -7,6 +7,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
+import {
+  decodeE2eeIntentRecord,
+  scheduleDeclarationSubject
+} from '@lody/shared/e2ee-execution-intent'
 import { createDesktopE2eeContent } from '../../../../../packages/components/src/providers/desktop-e2ee-content.ts'
 import { Clock, Context, Effect, Layer, Result, Scope, Exit, Deferred, Fiber } from 'effect'
 import {
@@ -38,6 +42,7 @@ import {
   prepareEpochEnvelope,
   getCommittedEpochStagingKey,
   signDeviceCredentialBinding,
+  verifyExecutionIntent,
   prepareLedgerCommand,
   signLedgerRecord,
   extendLedger,
@@ -3822,6 +3827,72 @@ void test('member controls use ordinary durable records and keep the old epoch a
   )
 })
 
+void test('ownership transfer signs one ordinary record and leaves the former owner an admin', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const prepared = yield* bind(owner)
+      const records = yield* makeRecords(owner.custody, prepared, 2)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      const remote = () => ({
+        staging: () => ({
+          stageGroup: () => Effect.die('member commands must not stage a candidate'),
+          readGroup: () => Effect.die('member commands must not read a candidate'),
+          deleteGroup: () => Effect.die('member commands must not delete a candidate')
+        }),
+        mailbox: () => {
+          throw new Error('member commands must not receive a candidate')
+        },
+        log: {
+          read: () =>
+            Effect.sync(() => ({
+              records: records.map((x) => new Uint8Array(x)),
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            })),
+          appendCas: (_genesis, point, original) =>
+            Effect.sync(() => {
+              assert.equal(
+                hex(point.head.toBytes()),
+                hex(hashRecordBytes(records.at(-1)).toBytes())
+              )
+              records.push(new Uint8Array(original))
+            })
+        },
+        history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0))
+      })
+      const membershipId = '11'.repeat(16)
+      // A member that does not exist cannot receive ownership.
+      const missing = yield* Effect.result(
+        owner.host.manage(
+          workspaceId,
+          { type: 'transferOwner', membershipId: '99'.repeat(16) },
+          remote
+        )
+      )
+      assert.equal(missing._tag, 'Failure')
+      assert.equal(
+        yield* owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote),
+        'Committed'
+      )
+      assert.equal(
+        Result.getOrThrow(decodeRecord(records.at(-1))).body.operation.type,
+        'transferOwner'
+      )
+      const status = yield* owner.host.status(workspaceId)
+      assert.equal(status.memberRole, 'admin')
+      // Keys are unchanged: a transfer is not a removal.
+      assert.equal(status.rotationRequired, false)
+      // The former owner has no authority to transfer again.
+      const again = yield* Effect.result(
+        owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote)
+      )
+      assert.equal(again._tag, 'Failure')
+    })
+  )
+})
+
 void test('member removal reopens its uncertain original and never signs a replacement', async (t) => {
   const directory = await fixture(t)
   let records,
@@ -4212,6 +4283,69 @@ void test('sharing host retains an unknown owner original across reopen and pres
   assert.equal(commits, 1)
 })
 
+void test('signs a schedule declaration over the fingerprint it computes itself', async (t) => {
+  const directory = await fixture(t)
+  const document = {
+    definition: {
+      scheduleId: 'synthetic-schedule',
+      title: 'Synthetic',
+      ownerId: 'owner',
+      machineId: 'fixture-machine',
+      enabled: true,
+      activationId: 'activation',
+      activeFrom: 0,
+      trigger: { kind: 'interval', everyMs: 60_000, anchorAt: '2026-01-01T00:00:00Z' },
+      misfirePolicy: { kind: 'skip' },
+      overlapPolicy: 'queue_one',
+      agent: { agentConfigId: 'agent', modeId: 'safe' },
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      createdAt: 0,
+      updatedAt: 0,
+      createdBy: 'owner'
+    },
+    prompt: 'synthetic scheduled input'
+  }
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const status = yield* owner.host.status(workspaceId)
+      const manualRunKey = 'ab'.repeat(32)
+      const record = decodeE2eeIntentRecord(
+        yield* owner.host.signScheduleDeclaration(workspaceId, document, manualRunKey)
+      )
+      assert.equal(Buffer.from(record.signer).toString('hex'), status.signingPublicKey)
+      const subject = scheduleDeclarationSubject(document, manualRunKey)
+      const intent = {
+        ...subject,
+        genesis: Result.getOrThrow(Bytes.genesisHash(Buffer.from(status.genesisHash, 'hex'))),
+        workspaceId,
+        contentDigest: Buffer.from(subject.contentDigest, 'hex')
+      }
+      assert.equal(
+        Result.isSuccess(verifyExecutionIntent(intent, record.signer, record.signature)),
+        true
+      )
+      // It binds this definition and run only.
+      assert.equal(
+        Result.isFailure(
+          verifyExecutionIntent(
+            { ...intent, messageId: 'definition' },
+            record.signer,
+            record.signature
+          )
+        ),
+        true
+      )
+      const refused = yield* Effect.result(
+        owner.host.signScheduleDeclaration(workspaceId, { ...document, prompt: '' })
+      )
+      assert.equal(refused.failure.code, 'invalid-input')
+    })
+  )
+})
+
 void test('passive cache state never opens workspace custody or changes sibling entries', async (t) => {
   const directory = await fixture(t)
   await execute(
@@ -4456,3 +4590,28 @@ for (const advance of [false, true]) {
     )
   })
 }
+
+void test('an iroh call that outlives its budget is cancelled and rejects for Streams fallback', async (t) => {
+  const { makeIrohRoute } = await import('./e2ee-iroh.mts')
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let release
+  const call = {
+    // The machine accepted the stream but never replies or finishes it.
+    nextReply: () => new Promise((resolve) => (release = resolve)),
+    cancel: () => release?.(null)
+  }
+  const route = makeIrohRoute(
+    {
+      hasConnection: async () => true,
+      warm: async () => undefined,
+      call: async () => call
+    },
+    'aa'.repeat(32),
+    new Set()
+  )
+  assert.equal(await route.ready(), true)
+  const pending = route.call({ id: 'bb'.repeat(16), frame: 'cc'.repeat(200) }, 800)
+  await new Promise((resolve) => setImmediate(resolve))
+  t.mock.timers.tick(800)
+  await assert.rejects(pending, /iroh_timeout/)
+})

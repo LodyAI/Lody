@@ -240,31 +240,7 @@
     "payload": {
       "workspaceId": "workspace-1",
       "userId": "user-1",
-      "kind": "mcp",
-      "remove": {
-        "kind": "mcp",
-        "id": "mcp-1",
-        "name": "Docs",
-        "readOnly": false,
-        "detail": "http",
-        "enabledByDefault": false,
-        "configured": true,
-        "updatedAt": 1700000000000
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
-    "id": "req-memory",
-    "method": "memorySettings",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "userId": "user-1",
-      "machineId": "machine-1",
-      "action": "import",
-      "memoryId": "memory-1"
+      "kind": "machine"
     }
   },
   {
@@ -390,34 +366,6 @@
       "machineId": "machine-1",
       "path": "/Users/dev",
       "cursor": "cursor-1"
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
-    "id": "req-projects-history",
-    "method": "localProjects",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "browserId": "history-1",
-      "userId": "user-1",
-      "action": "history",
-      "history": {
-        "kind": "import",
-        "target": {
-          "machineId": "machine-1",
-          "machineName": "Studio",
-          "localProjectId": "p1",
-          "projectName": "App",
-          "rootPath": "/Users/dev/app",
-          "provider": {
-            "cliType": "builtin",
-            "agentType": "claude"
-          }
-        },
-        "acpSessionIds": ["acp-1", "acp-2"]
-      }
     }
   },
   {

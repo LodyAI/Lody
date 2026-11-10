@@ -19,6 +19,8 @@ import {
 } from '../lib/encrypted-dispatch-outcome';
 
 const PREPARE_DEADLINE_MS = 200;
+/** Longest wait for "is iroh connected?" before a send proceeds on Streams. */
+const IROH_READY_BUDGET_MS = 100;
 
 type Call =
   | { kind: 'dispatch'; input: E2eeDispatchInput }
@@ -48,6 +50,15 @@ export function createEncryptedDispatchLegacy(options: {
   ) => Promise<LocalMachineRpcResponse | null>;
   closeClient?: () => Promise<void>;
   client: (signal: AbortSignal) => Promise<LoroStreamsJsonStreamClient>;
+  /** Preferred route when the host has one; Streams RPC remains the fallback. */
+  iroh?: {
+    ready: (machineId: string) => Promise<boolean>;
+    call: (
+      machineId: string,
+      envelope: { id: string; frame: string },
+      timeoutMs: number
+    ) => Promise<string[]>;
+  };
 }) {
   const scope = Scope.makeUnsafe();
   const controller = new AbortController();
@@ -125,6 +136,70 @@ export function createEncryptedDispatchLegacy(options: {
         )
       );
     });
+  /**
+   * Route order iroh → Streams RPC (→ durable dispatch, owned by the caller). Iroh is
+   * used only with a live connection to the target device (asking for one starts a
+   * background dial) and only for single-frame originals: chunked feature requests
+   * keep Streams, whose receiver reassembles chunks across envelopes. Replies are
+   * verified exactly as Streams replies are. Any failure or missing reply returns
+   * `undefined`, and the caller sends the same original over Streams; the machine's
+   * journal and claim make the second arrival harmless.
+   */
+  const viaIroh = async (
+    original: E2eePreparedDispatch,
+    call: Call,
+    timeoutMs: number
+  ): Promise<Reply | undefined> => {
+    const iroh = options.iroh;
+    if (!iroh || closed || (original.frames && original.frames.length !== 1)) return undefined;
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    const ready = await Promise.race([
+      iroh.ready(original.targetMachineId).catch(() => false),
+      new Promise<false>((resolve) => {
+        budget = setTimeout(() => resolve(false), IROH_READY_BUDGET_MS);
+      }),
+    ]).finally(() => clearTimeout(budget));
+    if (!ready) return undefined;
+    const frames = await iroh
+      .call(
+        original.targetMachineId,
+        { id: original.requestId, frame: original.frames?.[0] ?? original.frameHex },
+        timeoutMs
+      )
+      .catch(() => undefined);
+    if (!frames) return undefined;
+    if (call.kind === 'dispatch') {
+      const dispatch = dispatches.get(original.requestId);
+      if (effects && dispatch && !dispatch.appended) {
+        dispatch.appended = true;
+        effects.turnDispatched();
+      }
+    }
+    for (const frame of frames) {
+      if (closed) return undefined;
+      const reply =
+        call.kind === 'dispatch'
+          ? await options.accept(original.targetMachineId, call.input, frame).catch(() => undefined)
+          : await options.acceptFeature?.(call.input, frame).catch(() => undefined);
+      if (reply) {
+        // Route evidence only: which transport answered, never the frame.
+        console.debug('[e2ee-rpc-timing]', {
+          stage: 'iroh-reply',
+          kind: call.kind,
+          requestId: original.requestId,
+          at: Date.now(),
+        });
+        return reply;
+      }
+    }
+    console.debug('[e2ee-rpc-timing]', {
+      stage: 'iroh-fallback',
+      kind: call.kind,
+      requestId: original.requestId,
+      at: Date.now(),
+    });
+    return undefined;
+  };
   const requestFeature = async (
     request: LocalMachineRpcRequest,
     optionsForRequest: {
@@ -152,6 +227,9 @@ export function createEncryptedDispatchLegacy(options: {
       throw new Error('e2ee_rpc_signer_mismatch');
     optionsForRequest.onPrepared?.(original.requesterDevice);
     if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
+    const fast = await viaIroh(original, { kind: 'feature', input }, request.timeoutMs ?? 30_000);
+    if (fast && 'ok' in fast) return fast;
+    if (optionsForRequest.signal?.aborted) throw new Error('e2ee_rpc_aborted');
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const client = yield* channel(original);
@@ -171,7 +249,12 @@ export function createEncryptedDispatchLegacy(options: {
   const prepared = (original: E2eePreparedDispatch, input: E2eeDispatchInput) => ({
     original,
     send: () => {
-      const send = () =>
+      const send = async () => {
+        const fast = await viaIroh(original, { kind: 'dispatch', input }, 800);
+        if (fast && 'type' in fast) return fast;
+        return streams();
+      };
+      const streams = () =>
         Effect.runPromise(
           Effect.gen(function* () {
             const client = yield* channel(original);

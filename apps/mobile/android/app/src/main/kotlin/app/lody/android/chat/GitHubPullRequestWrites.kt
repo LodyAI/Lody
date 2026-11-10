@@ -51,14 +51,76 @@ internal class GitHubPullRequestWrites(private val http: GitHubHttp = GitHubHttp
         if ((result.optJSONArray("errors")?.length() ?: 0) > 0) throw GitHubWriteFailure("request_failed")
     }
 
-    private suspend fun grant(credential: Credential, workspace: String, repo: String, number: Int): String {
+    /** GitHub's merge state for an open PR (`c`, `b`, `d`, `h`, `u`), or null while it is computed. A read grant. */
+    suspend fun mergeState(credential: Credential, workspace: String, repo: String, number: Int): String? {
+        val token = grant(credential, workspace, repo, number, operation = "read")
+        val pr = read("https://api.github.com/repos/$repo/pulls/$number", token)
+        if (pr.optString("state") != "open" || pr.optBoolean("merged")) return null
+        val mergeable = if (pr.has("mergeable") && !pr.isNull("mergeable")) pr.optBoolean("mergeable") else null
+        val state = if (pr.isNull("mergeable_state")) null else pr.optString("mergeable_state")
+        return PullRequestMergeSettle.code(state, mergeable, pr.optBoolean("draft"))
+    }
+
+    /**
+     * Web `githubBranchExists`: whether a merged PR's own head branch still exists, so Delete
+     * branch shows only while it lives. Null when it does not apply (open, a fork's head, the base
+     * branch itself). A read grant.
+     */
+    suspend fun headBranchExists(credential: Credential, workspace: String, repo: String, number: Int): Boolean? {
+        val token = grant(credential, workspace, repo, number, operation = "read")
+        val base = "https://api.github.com/repos/$repo"
+        val pr = read("$base/pulls/$number", token)
+        if (!pr.optBoolean("merged")) return null
+        val ref = deletableRef(pr, repo) ?: return null
+        val (status, _) = try { http.request("GET", "$base/branches/${branchPath(ref)}", token, null) }
+            catch (_: java.io.IOException) { throw GitHubWriteFailure("unavailable") }
+        return when (status) {
+            in 200..299 -> true
+            404 -> false
+            else -> null
+        }
+    }
+
+    /**
+     * Web `githubDeleteBranch` after a merge, with the write grant. Re-reads the PR so only a
+     * merged PR's own head branch can go; a branch already gone counts as deleted. Never retried.
+     */
+    suspend fun deleteBranch(credential: Credential, workspace: String, repo: String, number: Int) {
+        val token = grant(credential, workspace, repo, number)
+        val base = "https://api.github.com/repos/$repo"
+        val pr = read("$base/pulls/$number", token)
+        if (!pr.optBoolean("merged")) throw GitHubWriteFailure("not_merged")
+        val ref = deletableRef(pr, repo) ?: throw GitHubWriteFailure("branch_not_deletable")
+        val (status, body) = try { http.request("DELETE", "$base/git/refs/heads/${branchPath(ref)}", token, null) }
+            catch (_: java.io.IOException) { throw GitHubWriteFailure("delete_unknown") }
+        // 422: a protected or default branch, or one already gone (a success).
+        if (status == 422) {
+            if (body.contains("reference does not exist", ignoreCase = true)) return
+            throw GitHubWriteFailure("branch_protected")
+        }
+        expect(status to body, "delete_unknown")
+    }
+
+    /** The head branch when it lives in this same repository (never a fork's, whose name may collide) and is not the base. */
+    private fun deletableRef(pr: JSONObject, repo: String): String? {
+        val head = pr.optJSONObject("head") ?: return null
+        val ref = head.optString("ref").takeIf { it.isNotEmpty() } ?: return null
+        if (ref == pr.optJSONObject("base")?.optString("ref")) return null
+        val owner = head.optJSONObject("repo")?.optString("full_name").orEmpty()
+        return ref.takeIf { owner.equals(repo, ignoreCase = true) }
+    }
+
+    private fun branchPath(ref: String): String =
+        ref.split('/').filter { it.isNotEmpty() }.joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
+    private suspend fun grant(credential: Credential, workspace: String, repo: String, number: Int, operation: String = "write"): String {
         if (!repo.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) || repo.substringAfter('/') in listOf(".", "..") || number <= 0) {
             throw GitHubWriteFailure("invalid_request")
         }
         val auth = JSONObject(expect(http.request("GET", "${app.lody.android.BackendEnvironment.site}/api/auth/convex/token", credential.token, null), null))
         val broker = JSONObject(expect(http.request("POST", "${app.lody.android.BackendEnvironment.convex}/api/action", auth.getString("token"),
             JSONObject().put("path", "github:getOperationAccessTokenByRepoNameForClient").put("format", "convex_encoded_json")
-                .put("args", JSONArray().put(JSONObject().put("workspaceId", workspace).put("repoFullName", repo).put("operation", "write")))), null))
+                .put("args", JSONArray().put(JSONObject().put("workspaceId", workspace).put("repoFullName", repo).put("operation", operation)))), null))
         val value = broker.optJSONObject("value")
         if (broker.optString("status") != "success" || value?.optBoolean("success") != true) throw GitHubWriteFailure("authorization_required")
         return value.optString("token").ifEmpty { throw GitHubWriteFailure("authorization_required") }

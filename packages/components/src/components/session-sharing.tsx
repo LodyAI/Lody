@@ -1,3 +1,4 @@
+import { Menu } from '@lody/ui/menu';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -5,10 +6,13 @@ import {
   ChevronDown,
   ChevronLeft,
   Globe,
+  Eye,
   Link2,
   LockKeyhole,
-  Share2,
   Users,
+  Settings,
+  UserPlus,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -23,11 +27,12 @@ import {
 import { Tooltip } from '@lody/ui/tooltip';
 import { Popover } from '@lody/ui/popover';
 import { Separator } from '@lody/ui/separator';
-import { Tabs } from '@lody/ui/tabs';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { ease, space, text } from '@lody/ui/tokens/scales.stylex';
-import { AlertDialog } from '@/ui/dialog';
+import { AlertDialog, Dialog } from '@/ui/dialog';
+import { toast } from '@/lib/toast';
+import { Tabs } from '@lody/ui/tabs';
 import { shareSurface } from './sharing/surface';
 
 export type SessionSharingTranslator = (
@@ -40,9 +45,9 @@ export function getSessionSharingLabel(
   t: SessionSharingTranslator,
   state: SessionSharingState
 ): string {
-  if (state.visibility === 'team') {
-    return t('sessions.sharing.team', 'Team');
-  }
+  if (state.access === 'read' && state.visibility === 'team')
+    return t('sessions.access.read', 'Team read-only');
+  if (state.visibility === 'team') return t('sessions.access.edit', 'Team can edit');
   if (state.visibility === 'private') {
     return t('sessions.sharing.private', 'Private');
   }
@@ -93,36 +98,12 @@ export function getSessionSharingDescription(
 
 export function getSessionShareDialogDescription(
   t: SessionSharingTranslator,
-  state: SessionSharingState
+  _state: SessionSharingState
 ): string {
-  const machine = state.machineName ?? t('sessions.sharing.thisDevice', 'this device');
-  const project = state.projectName ?? t('sessions.sharing.thisProject', 'this project');
-
-  switch (state.privateReason) {
-    case 'project':
-      return t(
-        'sessions.sharing.confirmProject',
-        'This shares {{project}} with everyone in the workspace so they can open and continue its conversations.',
-        { project }
-      );
-    case 'machine-and-project':
-      return t(
-        'sessions.sharing.confirmMachineAndProject',
-        'This shares {{project}} and {{machine}} with everyone in the workspace. Other conversations on this device may also become visible.',
-        { machine, project }
-      );
-    case 'machine':
-      return t(
-        'sessions.sharing.confirmMachine',
-        'This shares {{machine}} with everyone in the workspace. Other conversations on this device may also become visible.',
-        { machine }
-      );
-    default:
-      return t(
-        'sessions.sharing.confirmGeneric',
-        'Everyone in this workspace will be able to open this conversation.'
-      );
-  }
+  return t(
+    'sessions.access.confirmRead',
+    'Teammates can read this conversation and reference it in their own sessions.'
+  );
 }
 
 export function SessionSharingIndicator({
@@ -134,7 +115,7 @@ export function SessionSharingIndicator({
 }) {
   const { t } = useTranslation();
 
-  if (!shouldShowPrivateSharingStatus(state)) {
+  if (!shouldShowPrivateSharingStatus(state) && state.access !== 'read') {
     return null;
   }
 
@@ -155,7 +136,11 @@ export function SessionSharingIndicator({
               className
             )}
           >
-            <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+            {state.access === 'read' ? (
+              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+            )}
           </span>
         }
       />
@@ -165,24 +150,6 @@ export function SessionSharingIndicator({
       </Tooltip.Content>
     </Tooltip.Root>
   );
-}
-
-function getSessionShareActionLabel(
-  t: SessionSharingTranslator,
-  state: SessionSharingState
-): string {
-  switch (state.privateReason) {
-    case 'project':
-      return t('sessions.sharing.shareProjectWithTeam', 'Share project with team…');
-    case 'machine-and-project':
-      return t('sessions.sharing.shareProjectAndDevice', 'Share project and device…');
-    case 'machine':
-      return t('sessions.sharing.shareDeviceWithTeam', 'Share device with team…');
-    case 'machine-not-registered':
-      return t('sessions.sharing.registerDeviceToShare', 'Register this device before sharing');
-    default:
-      return t('sessions.sharing.shareWithTeam', 'Share with team…');
-  }
 }
 
 /** Shared chrome for status pills in the session conversation header (Private, Archived).
@@ -325,6 +292,7 @@ const accessPanel = stylex.create({
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
+  ownerReason: { paddingInline: space[1], marginTop: space[2] },
   stops: { position: 'relative', marginTop: space[2] },
   /** The one rule: who can open it above, what to do with it below. */
   rule: { position: 'relative', marginBlock: space[2], marginInline: space[1] },
@@ -362,7 +330,6 @@ export type SessionAccessAction = {
   keepOpen?: boolean;
 };
 
-type AccessStop = 'you' | 'team' | 'web';
 type AccessView = 'home' | 'publish';
 
 /** Lets the panel's height follow whatever view or step is showing. */
@@ -384,25 +351,154 @@ function ElasticHeight({ children }: { children: ReactNode }) {
   );
 }
 
-/** The one conversation-access control in the desktop toolbar.
- *
- * A reader asks a header a single question — who can open this conversation —
- * so the panel leads with the answer, in a title and a faint watermark that name
- * how far it reaches, and makes the answer the control: a sliding strip of
- * audiences (you, team, web). The strip shows what IS; it never previews what
- * will be, because widening the audience is a decision the page confirms in its
- * own dialog, and a thumb that moved before that answer would lie. Audiences
- * that cannot be reached from here — narrowing, or a device the person does not
- * own — are disabled with the reason in the caption. Copy link and the copies
- * that leave the conversation (Markdown, image) sit below.
- *
- * Team visibility and a published link both pick the stop: published is "web",
- * otherwise a private conversation is "you" and anything else is "team". The
- * trigger's label follows the same rule, a published link being the wider
- * disclosure.
- *
- * `publicShare` is omitted when the build or workspace cannot publish, which is
- * also why a team-visible conversation can still render nothing at all. */
+/** Machine-owner team access and independent public-link publication share one panel. */
+function SessionAccessMembers({
+  state,
+  busy,
+  setBusy,
+}: {
+  state: SessionSharingState;
+  busy: boolean;
+  setBusy: (value: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const directory = new Map(
+    (state.availableMembers ?? []).map((member) => [member.userId, member])
+  );
+  const memberName = (userId: string) =>
+    directory.get(userId)?.name?.trim() ||
+    t(state.membersLoading ? 'common.loading' : 'sessions.access.unknownMember');
+  const ids = [
+    ...new Set([...(state.ownerUserId ? [state.ownerUserId] : []), ...(state.memberUserIds ?? [])]),
+  ];
+  const change = async (userId: string, shared: boolean) => {
+    if (!state.canManage || !state.setMemberReadAccess || busy || userId === state.ownerUserId)
+      return;
+    setBusy(true);
+    try {
+      await state.setMemberReadAccess(userId, shared);
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const available = [...directory.values()].filter((member) => !ids.includes(member.userId));
+  return (
+    <section {...stylex.props(memberStyles.section)}>
+      <Separator />
+      <p {...stylex.props(memberStyles.heading)}>{t('sessions.access.members')}</p>
+      {state.membersError && (
+        <div role="status" {...stylex.props(memberStyles.notice)}>
+          <span>{t('sessions.access.directoryFailed')}</span>
+          {state.retryMembers && (
+            <Button variant="ghost" size="small" onClick={state.retryMembers}>
+              {t('common.retry')}
+            </Button>
+          )}
+        </div>
+      )}
+      {ids.map((userId) => (
+        <div key={userId} {...stylex.props(memberStyles.row)}>
+          <span
+            {...stylex.props(memberStyles.name)}
+            aria-busy={!!state.membersLoading && !directory.has(userId)}
+          >
+            {memberName(userId)}
+          </span>
+          <span {...stylex.props(memberStyles.role)}>
+            {t(
+              userId === state.ownerUserId ? 'sessions.access.owner' : 'sessions.access.memberRead'
+            )}
+          </span>
+          {state.canManage &&
+            userId === state.ownerUserId && (
+              // Holds the remove button's width so every role label lines up.
+              <span aria-hidden="true" {...stylex.props(memberStyles.placeholder)}>
+                <Button variant="ghost" icon size="small" disabled tabIndex={-1}>
+                  <X {...stylex.props(shareSurface.glyphSmall)} />
+                </Button>
+              </span>
+            )}
+          {state.canManage && userId !== state.ownerUserId && (
+            <Button
+              variant="ghost"
+              icon
+              size="small"
+              disabled={busy}
+              aria-label={t('sessions.access.removeMember', {
+                name: memberName(userId),
+              })}
+              onClick={() => {
+                void change(userId, false);
+              }}
+            >
+              <X {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+      ))}
+      {state.canManage && (
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                variant="ghost"
+                size="small"
+                className="justify-start"
+                disabled={busy || !state.setMemberReadAccess || !available.length}
+              >
+                <UserPlus {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                {t('sessions.access.addMember')}
+              </Button>
+            }
+          />
+          <Menu.Content>
+            {available.map((member) => (
+              <Menu.Item
+                key={member.userId}
+                onClick={() => {
+                  void change(member.userId, true);
+                }}
+              >
+                {member.name}
+              </Menu.Item>
+            ))}
+          </Menu.Content>
+        </Menu.Root>
+      )}
+    </section>
+  );
+}
+const memberStyles = stylex.create({
+  notice: { display: 'flex', alignItems: 'center', gap: space[2], fontSize: text.captionSize, color: colors.secondaryLabel },
+  section: { display: 'flex', flexDirection: 'column', gap: space[1], marginTop: space[2] },
+  heading: {
+    margin: 0,
+    marginTop: space[2],
+    paddingInline: space[1],
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    minHeight: space[8],
+    paddingInline: space[1],
+  },
+  placeholder: { visibility: 'hidden', pointerEvents: 'none' },
+  name: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  role: { fontSize: text.captionSize, color: colors.secondaryLabel },
+});
+
 export function SessionAccessControl({
   state,
   onShareWithTeam,
@@ -410,6 +506,8 @@ export function SessionAccessControl({
   onCopyLink,
   exportActions,
   className,
+  presentation = 'popover',
+  onClose,
 }: {
   state?: SessionSharingState | null;
   onShareWithTeam?: () => void | Promise<void>;
@@ -417,282 +515,247 @@ export function SessionAccessControl({
   onCopyLink?: () => void | Promise<void>;
   exportActions?: SessionAccessAction[];
   className?: string;
+  presentation?: 'popover' | 'dialog';
+  onClose?: () => void;
 }) {
   const sharingAllowed = useWorkspaceFeature('sharing');
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(presentation === 'dialog');
   const [view, setView] = useState<AccessView>('home');
-  // True once the person has moved between views, so the first opening is not animated.
   const [moved, setMoved] = useState(false);
-  // A publication is under way: the panel stays open until it finishes.
   const [busy, setBusy] = useState(false);
-
-  if (!sharingAllowed) return null;
-  const isPrivate = shouldShowPrivateSharingStatus(state);
-  if (!isPrivate && !publicShare) {
-    return null;
-  }
-
-  // `unknown` reads as not-yet-shared: the label upgrades in place once the
-  // control plane answers, rather than a badge appearing and disappearing.
-  const isShared = publicShare?.status === 'shared';
-  const sharedLabel = t('sharing.header.shared', 'Shared');
-  const sharedDescription = t(
-    'sharing.header.sharedDescription',
-    'Anyone with the link can read a published copy of this conversation.'
-  );
-  const shareLabel = t('sharing.manager.title', 'Share');
-  const hasTeamScope = state?.visibility === 'private' || state?.visibility === 'team';
-  // Without a sharing state (a solo workspace) nobody else can open it, so "only
-  // you" is true; while the state is still being resolved it is not yet known, so
-  // that stop is withheld instead of claiming privacy the control plane has not
-  // confirmed.
-  const canSayOnlyYou = !state || hasTeamScope;
-
-  const current: AccessStop = isShared ? 'web' : state?.visibility === 'team' ? 'team' : 'you';
-  const privateTitle = t('sessions.sharing.privateToYou', 'Private to you');
-  const scopeTitle = !state
-    ? privateTitle
-    : isPrivate
-      ? privateTitle
-      : state.visibility === 'team'
-        ? t('sessions.sharing.sharedWithTeam', 'Shared with team')
-        : getSessionSharingLabel(t, state);
-  const scopeDescription = state
-    ? getSessionSharingDescription(t, state)
-    : t(
-        'sharing.header.shareDescription',
-        'Publish a read-only copy of this conversation as a link.'
-      );
-  const ariaLabel = isShared
-    ? `${sharedLabel}: ${sharedDescription}`
-    : isPrivate
-      ? `${scopeTitle}: ${scopeDescription}`
-      : shareLabel;
-
-  const notRegistered = isPrivate && state.privateReason === 'machine-not-registered';
-  const teamReachable = isPrivate && !!onShareWithTeam && !notRegistered && state.canManage;
-  const teamBlocked = isPrivate
-    ? !state.canManage
-      ? t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')
-      : notRegistered
-        ? t('sessions.sharing.registerDeviceToShare', 'Register this device before sharing')
-        : null
-    : null;
-  const teamActionLabel = isPrivate ? getSessionShareActionLabel(t, state) : undefined;
-
-  const heading = isShared
-    ? t('sharing.header.anyoneWithLink', 'Anyone with the link')
-    : scopeTitle;
-  const caption = isShared ? sharedDescription : (teamBlocked ?? scopeDescription);
-  const WatermarkIcon = { you: LockKeyhole, team: Users, web: Globe }[current];
-
-  const stops: Array<{ id: AccessStop; label: string; icon: LucideIcon; disabled: boolean }> = [
-    ...(canSayOnlyYou
-      ? [
-          {
-            id: 'you' as const,
-            label: t('sharing.header.audienceYou', 'Only you'),
-            icon: LockKeyhole,
-            // Narrowing is not offered from here; the current stop is never disabled.
-            disabled: current !== 'you',
-          },
-        ]
-      : []),
-    ...(hasTeamScope
-      ? [
-          {
-            id: 'team' as const,
-            label: t('sharing.header.audienceTeam', 'Team'),
-            icon: Users,
-            disabled: current !== 'team' && !teamReachable,
-          },
-        ]
-      : []),
-    ...(publicShare
-      ? [
-          {
-            id: 'web' as const,
-            label: t('sharing.header.audienceWeb', 'Web'),
-            icon: Globe,
-            disabled: false,
-          },
-        ]
-      : []),
-  ];
-
-  const act = (run: () => void | Promise<void>) => {
-    setOpen(false);
-    void run();
+  if (!state && (!sharingAllowed || !publicShare)) return null;
+  const level =
+    state?.visibility === 'private'
+      ? 'private'
+      : (state?.access ?? (state?.visibility === 'team' ? 'edit' : 'private'));
+  const individualCount = new Set(state?.memberUserIds ?? []).size;
+  const label =
+    level === 'private' && individualCount > 0
+      ? t('sessions.access.sharedMembers', { count: individualCount })
+      : state?.visibility === 'unknown'
+        ? t('sessions.sharing.checking')
+        : t(`sessions.access.${level}`);
+  const Icon =
+    level === 'edit' || individualCount > 0 ? Users : level === 'read' ? Eye : LockKeyhole;
+  const setLevel = async (next: 'read' | null) => {
+    if (!state?.canManage || level === 'edit' || busy) return;
+    if (!state.setReadAccess) {
+      if (next === 'read') await onShareWithTeam?.();
+      return;
+    }
+    setBusy(true);
+    try {
+      await state.setReadAccess(next);
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    } finally {
+      setBusy(false);
+    }
   };
-
   const goTo = (next: AccessView) => {
     setMoved(true);
     setView(next);
   };
-
-  const handleOpenChange = (next: boolean) => {
-    if (!next && busy) return;
-    setOpen(next);
-    if (!next) {
-      setView('home');
-      setMoved(false);
-    }
+  const act = (run: () => void | Promise<void>) => {
+    setOpen(false);
+    setView('home');
+    setMoved(false);
+    void run();
   };
-
-  const choose = (next: AccessStop) => {
-    if (next === current) return;
-    if (next === 'team') act(() => onShareWithTeam?.());
-    else if (next === 'web') goTo('publish');
-  };
-
+  const caption =
+    state?.visibility === 'unknown'
+      ? t('sessions.sharing.checkingDescription')
+      : level === 'edit'
+        ? t('sessions.access.machineShared')
+        : level === 'read'
+          ? t('sessions.access.confirmRead')
+          : t('sessions.sharing.privateDescription');
   const rows: SessionAccessAction[] = [
-    ...(isShared && publicShare
+    ...(publicShare
       ? [
           {
-            id: 'manage-link',
-            label: t('sharing.header.manageLink', 'Manage link'),
+            id: 'public-link',
+            label: t(
+              publicShare.status === 'shared'
+                ? 'sharing.header.manageLink'
+                : 'sharing.header.publishTitle'
+            ),
             icon: Globe,
-            keepOpen: true,
             onSelect: () => goTo('publish'),
+            keepOpen: true,
           },
         ]
       : []),
     ...(onCopyLink
-      ? [
-          {
-            id: 'copy-url',
-            label: t('sessions.copyUrl', 'Copy URL'),
-            icon: Link2,
-            onSelect: onCopyLink,
-          },
-        ]
+      ? [{ id: 'copy-url', label: t('sessions.copyUrl'), icon: Link2, onSelect: onCopyLink }]
       : []),
     ...(exportActions ?? []),
   ];
-
+  const content = (
+    <ElasticHeight>
+      <div
+        key={view}
+        {...stylex.props(
+          moved && (view === 'publish' ? accessPanel.enterRight : accessPanel.enterLeft)
+        )}
+      >
+        {view === 'publish' && publicShare ? (
+          <>
+            <div {...stylex.props(accessPanel.publishHead)}>
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                disabled={busy}
+                aria-label={t('common.back')}
+                onClick={() => goTo('home')}
+              >
+                <ChevronLeft />
+              </Button>
+              <p {...stylex.props(accessPanel.title)}>{t('sharing.header.publishTitle')}</p>
+            </div>
+            {publicShare.renderEditor({ onClose: () => goTo('home'), onBusyChange: setBusy })}
+          </>
+        ) : (
+          <div {...stylex.props(accessPanel.root)}>
+            <Icon key={level} {...stylex.props(accessPanel.watermark)} aria-hidden="true" />
+            <div {...stylex.props(accessPanel.head)}>
+              <p {...stylex.props(accessPanel.title)}>{t('sessions.access.teamAccess')}</p>
+              <p {...stylex.props(accessPanel.description)}>{caption}</p>
+              {level === 'edit' && state?.openMachineSettings && (
+                <Button
+                  variant="ghost"
+                  size="small"
+                  className="justify-start"
+                  onClick={() => act(() => state.openMachineSettings?.())}
+                >
+                  <Settings {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                  {t('sessions.access.machineSettings')}
+                </Button>
+              )}
+            </div>
+            {state && level !== 'edit' && (
+              <>
+                <div {...stylex.props(accessPanel.stops)}>
+                  <Tabs.Root
+                    value={level}
+                    onValueChange={(next) => {
+                      void setLevel(next === 'read' ? 'read' : null);
+                    }}
+                  >
+                    <Tabs.List size="small" stretch aria-label={t('sessions.access.teamAccess')}>
+                      <Tabs.Tab
+                        value="private"
+                        disabled={!state.canManage || busy || state.visibility === 'unknown'}
+                      >
+                        <LockKeyhole
+                          {...stylex.props(shareSurface.glyphSmall)}
+                          aria-hidden="true"
+                        />
+                        {t('sessions.access.private')}
+                      </Tabs.Tab>
+                      <Tabs.Tab
+                        value="read"
+                        disabled={!state.canManage || busy || state.visibility === 'unknown'}
+                      >
+                        <Eye {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                        {t('sessions.access.read')}
+                      </Tabs.Tab>
+                    </Tabs.List>
+                  </Tabs.Root>
+                </div>
+                {!state.canManage && (
+                  <p {...stylex.props(accessPanel.description, accessPanel.ownerReason)}>
+                    {t('sessions.sharing.onlyOwnerCanShare')}
+                  </p>
+                )}
+              </>
+            )}
+            {state &&
+              (state.ownerUserId || state.memberUserIds?.length || state.setMemberReadAccess) && (
+                <SessionAccessMembers state={state} busy={busy} setBusy={setBusy} />
+              )}
+            {rows.length > 0 && (
+              <>
+                <div {...stylex.props(accessPanel.rule)}>
+                  <Separator />
+                </div>
+                <div {...stylex.props(accessPanel.actions)}>
+                  {rows.map((row) => (
+                    <Button
+                      key={row.id}
+                      variant="ghost"
+                      size="small"
+                      className="justify-start"
+                      disabled={row.disabled}
+                      title={row.title}
+                      onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
+                    >
+                      <row.icon {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                      {row.label}
+                    </Button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </ElasticHeight>
+  );
+  if (presentation === 'dialog')
+    return (
+      <Dialog.Root
+        open={open}
+        onOpenChange={(next) => {
+          if (!busy) {
+            setOpen(next);
+            if (!next) onClose?.();
+          }
+        }}
+      >
+        <Dialog.Content>
+          <Dialog.Title>{t('sessions.sharing.panelTitle')}</Dialog.Title>
+          {content}
+        </Dialog.Content>
+      </Dialog.Root>
+    );
   return (
-    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) {
+          setOpen(next);
+          if (!next) {
+            setView('home');
+            setMoved(false);
+          }
+        }
+      }}
+    >
       <Popover.Trigger
         render={
           <button
             type="button"
-            aria-label={ariaLabel}
+            aria-label={label}
             className={cn(
               SESSION_HEADER_STATUS_PILL_CLASS,
               'data-[popup-open]:bg-foreground/[0.07] data-[popup-open]:text-foreground',
               className
             )}
           >
-            {isPrivate && !isShared ? (
-              <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            <span>{isShared ? sharedLabel : shareLabel}</span>
+            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{label}</span>
             <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
           </button>
         }
       />
       <Popover.Content align="end" sideOffset={6} className="w-[18.5rem] gap-0 p-2">
         <Popover.Title {...stylex.props(shareSurface.visuallyHidden)}>
-          {t('sessions.sharing.panelTitle', 'Share this conversation')}
+          {t('sessions.sharing.panelTitle')}
         </Popover.Title>
-        <ElasticHeight>
-          <div
-            key={view}
-            {...stylex.props(
-              moved && (view === 'publish' ? accessPanel.enterRight : accessPanel.enterLeft)
-            )}
-          >
-            {view === 'publish' && publicShare ? (
-              <>
-                <div {...stylex.props(accessPanel.publishHead)}>
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    icon
-                    disabled={busy}
-                    aria-label={t('common.back', 'Back')}
-                    onClick={() => goTo('home')}
-                  >
-                    <ChevronLeft {...stylex.props(shareSurface.glyph)} aria-hidden="true" />
-                  </Button>
-                  <p {...stylex.props(accessPanel.title)}>
-                    {t('sharing.header.publishTitle', 'Publish to the web')}
-                  </p>
-                </div>
-                {publicShare.renderEditor({
-                  onClose: () => goTo('home'),
-                  onBusyChange: setBusy,
-                })}
-              </>
-            ) : (
-              <div {...stylex.props(accessPanel.root)}>
-                <WatermarkIcon
-                  key={current}
-                  {...stylex.props(accessPanel.watermark)}
-                  aria-hidden="true"
-                />
-                <div {...stylex.props(accessPanel.head)}>
-                  <p {...stylex.props(accessPanel.title)}>{heading}</p>
-                  <p {...stylex.props(accessPanel.description)}>{caption}</p>
-                </div>
-                {stops.length > 1 ? (
-                  <div {...stylex.props(accessPanel.stops)}>
-                    <Tabs.Root value={current} onValueChange={(next) => choose(next as AccessStop)}>
-                      <Tabs.List
-                        size="small"
-                        stretch
-                        aria-label={t('sharing.header.whoCanOpen', 'Who can open this')}
-                      >
-                        {stops.map((stop) => (
-                          <Tabs.Tab
-                            key={stop.id}
-                            value={stop.id}
-                            disabled={stop.disabled}
-                            title={
-                              stop.id === 'team' && teamReachable ? teamActionLabel : undefined
-                            }
-                          >
-                            <stop.icon
-                              {...stylex.props(shareSurface.glyphSmall)}
-                              aria-hidden="true"
-                            />
-                            {stop.label}
-                          </Tabs.Tab>
-                        ))}
-                      </Tabs.List>
-                    </Tabs.Root>
-                  </div>
-                ) : null}
-                {rows.length > 0 ? (
-                  <div {...stylex.props(accessPanel.rule)}>
-                    <Separator />
-                  </div>
-                ) : null}
-                {rows.length > 0 ? (
-                  <div {...stylex.props(accessPanel.actions)}>
-                    {rows.map((row) => (
-                      <Button
-                        key={row.id}
-                        variant="ghost"
-                        size="small"
-                        className="justify-start"
-                        disabled={row.disabled}
-                        title={row.title}
-                        onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
-                      >
-                        <row.icon {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
-                        {row.label}
-                      </Button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </ElasticHeight>
+        {content}
       </Popover.Content>
     </Popover.Root>
   );

@@ -49,6 +49,12 @@ struct ScheduleService {
   var detail: (_ workspaceId: String, _ scheduleId: String) async throws -> RuntimeContract.ScheduleDetail
   var command: (_ params: RuntimeContract.ScheduleCommandParams) async throws -> RuntimeContract.ScheduleCommandResult
   var options: (_ workspaceId: String) async throws -> CreationOptions
+  var cachedList: (_ userId: String, _ workspaceId: String) async -> RuntimeContract.SchedulesResult? = { _, _ in nil }
+  var persistList: (_ userId: String, _ workspaceId: String, _ result: RuntimeContract.SchedulesResult, _ generation: Int) -> Void = { _, _, _, _ in }
+
+  static func cacheKey(userId: String, workspaceId: String) -> String {
+    "schedules:v1:" + CreateJSON.encode([userId, workspaceId])
+  }
 
   /// The offline Home fixture scripts schedules; everything else reads the live runtime.
   static var live: ScheduleService { NativeHomeFixture.active ? ScheduleFixture.shared.service : cloud }
@@ -72,7 +78,21 @@ struct ScheduleService {
           return scoped
         }
       },
-      options: { workspaceId in try await CreateSessionService.live.options(workspaceId, nil) }
+      options: { workspaceId in try await CreateSessionService.live.options(workspaceId, nil) },
+      cachedList: { userId, workspaceId in
+        guard !userId.isEmpty, !workspaceId.isEmpty else { return nil }
+        let key = cacheKey(userId: userId, workspaceId: workspaceId)
+        let raw: String? = await withCheckedContinuation { continuation in
+          LocalStore.queue.async { continuation.resume(returning: (try? LocalStore.shared.read(key)) ?? nil) }
+        }
+        return raw.flatMap { CreateJSON.decode(RuntimeContract.SchedulesResult.self, $0) }
+      },
+      persistList: { userId, workspaceId, result, generation in
+        guard !userId.isEmpty, !workspaceId.isEmpty else { return }
+        let key = cacheKey(userId: userId, workspaceId: workspaceId)
+        let raw = CreateJSON.encode(result)
+        LocalStore.queue.async { try? LocalStore.shared.write(key, raw, generation: generation) }
+      }
     )
   }
 

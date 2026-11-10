@@ -1,0 +1,32 @@
+{
+  "name": "@lody/iroh-native",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Native iroh transport for encrypted-workspace RPC frames (Electron main process and CLI). Loads an optional prebuilt Node-API module; absence means the host keeps its existing routes.",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:debug": "node scripts/build.mjs --debug",
+    "test": "vitest run",
+    "test:rust": "cargo test --locked -p lody-iroh",
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4"
+  }
+}

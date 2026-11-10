@@ -808,3 +808,70 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+it.each([
+  { options: {}, expected: { ok: true, outcome: 'Committed', sealed: true } },
+  {
+    options: { runtime: true },
+    expected: {
+      ok: true,
+      outcome: 'Committed',
+      sealed: true,
+      recoveryVerified: true,
+      sameIdentity: true,
+    },
+  },
+  { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
+  { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
+  { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
+  { options: { wrongAccount: true }, expected: { ok: false, phase: null } },
+  { options: { revokedRecovery: true }, expected: { ok: false } },
+  { options: { tamperedPackage: true }, expected: { ok: false, phase: null } },
+  { options: { failInstall: true }, expected: { ok: false } },
+  {
+    options: { failInstall: true, resume: true },
+    expected: { ok: true, sealed: true, noDuplicateAdmission: true },
+  },
+])(
+  'restores an authenticated vault with durable custody: $options',
+  async ({ options, expected }) => {
+    const browser = await chromium.launch();
+    try {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        platform: 'browser',
+        bundle: true,
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      await page.route('https://lody.ai/**', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body:
+            '<script>' +
+            output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+            '</script>',
+        })
+      );
+      await page.goto('https://lody.ai/');
+      expect(
+        await page.evaluate(
+          (input) => (globalThis as HostGlobal).HostFixture.recoverBrowser(input),
+          options
+        )
+      ).toMatchObject(expected);
+      if (expected.ok)
+        expect(
+          await page.evaluate(() => (globalThis as HostGlobal).HostFixture.reopenRecoveredBrowser())
+        ).toMatchObject({ usableEpoch: 0 });
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  }
+);

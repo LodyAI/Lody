@@ -1,3 +1,4 @@
+import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
@@ -5,12 +6,14 @@ import { ContextMenu } from '@lody/ui/context-menu';
 import { isNewWindowClick, openDesktopWindow } from '@/lib/desktop-window';
 import {
   type ComponentPropsWithoutRef,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   forwardRef,
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -19,6 +22,7 @@ import {
 } from 'react';
 import { useStore } from 'jotai';
 import { cn } from '@/lib/utils';
+import { BOOT_SHELL_SIDEBAR_WIDTH, isMobileSidebarDevice } from '@/lib/boot-shell-script';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
@@ -101,6 +105,8 @@ export type LoroSidebarWorkspace = {
   planTier?: 'plus' | 'enterprise' | null;
   /** Member count, when known (the active workspace). Shown in the switcher header. */
   memberCount?: number | null;
+  /** Listed as end-to-end encrypted: a lock beside the name, explained on hover. */
+  encrypted?: boolean;
 };
 
 export type LoroSidebarRepoItemDelta = {
@@ -172,6 +178,9 @@ export interface LoroSidebarProps {
    */
   workspaceSwitcherEnabled?: boolean;
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
+  /** Hover text for the Offline mark, supplied as a leaf so its clock never
+   * re-renders the sidebar. */
+  offlineDetail?: ReactNode;
   /**
    * The network may already be online while the target workspace runtime and
    * metadata are still converging. Keep that scoped readiness visible in the
@@ -305,10 +314,11 @@ export interface LoroSidebarProps {
 }
 
 /**
- * Drag the resize edge to the LEFT so the unclamped width drops below this
- * value -> the sidebar collapses. Matches VSCode's drag-to-collapse behavior.
+ * Dragging past this width collapses the sidebar. On wide mobile layouts, a
+ * finger drag stops at the minimum so it can safely make the sidebar narrower.
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
+const KEYBOARD_RESIZE_STEP = 16;
 
 const resizeStyles = stylex.create({
   handle: {
@@ -324,6 +334,7 @@ const resizeStyles = stylex.create({
     '--sidebar-resize-opacity': {
       default: 0,
       ':hover': 0.42,
+      ':focus-visible': 0.65,
     },
   },
   dragging: {
@@ -339,6 +350,23 @@ const resizeStyles = stylex.create({
     backgroundImage: 'linear-gradient(to bottom, transparent, currentColor, transparent)',
     pointerEvents: 'none',
     opacity: 'var(--sidebar-resize-opacity)',
+  },
+  touchTarget: {
+    display: 'grid',
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '44px',
+    height: '44px',
+    placeItems: 'center',
+  },
+  touchGrip: {
+    width: '3px',
+    height: space[6],
+    borderRadius: radius.full,
+    backgroundColor: 'currentColor',
+    opacity: 'max(0.46, var(--sidebar-resize-opacity))',
   },
 });
 
@@ -511,12 +539,15 @@ type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing
 function ConnectionPill({
   state,
   labels,
+  offlineDetail,
 }: {
   state: WorkspaceIdentityStatus;
   labels: Pick<
     LoroSidebarLabels,
     'connectionLoading' | 'connectionReconnecting' | 'connectionOffline' | 'workspaceSyncing'
   >;
+  /** Hover text for Offline: how long, and what this machine can still do. */
+  offlineDetail?: ReactNode;
 }) {
   const isLoading = state !== 'offline';
   const label =
@@ -527,7 +558,7 @@ function ConnectionPill({
         : state === 'loading'
           ? labels.connectionLoading
           : labels.connectionOffline;
-  return (
+  const badge = (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
       icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
@@ -536,6 +567,15 @@ function ConnectionPill({
     >
       {label}
     </Badge>
+  );
+  if (state !== 'offline' || !offlineDetail) return badge;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span className="inline-flex">{badge}</span>} />
+      <Tooltip.Content side="bottom" className="max-w-[280px]">
+        {offlineDetail}
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -817,8 +857,8 @@ export function getLoroSidebarFooterClassName(isMobile: boolean): string {
 }
 
 export const DEFAULT_DESKTOP_SIDEBAR_WIDTH = 300;
-export const MIN_DESKTOP_SIDEBAR_WIDTH = 240;
-export const MAX_DESKTOP_SIDEBAR_WIDTH = 420;
+export const MIN_DESKTOP_SIDEBAR_WIDTH = BOOT_SHELL_SIDEBAR_WIDTH.min;
+export const MAX_DESKTOP_SIDEBAR_WIDTH = BOOT_SHELL_SIDEBAR_WIDTH.max;
 
 export const LoroSidebar = memo(function LoroSidebar({
   className,
@@ -829,11 +869,12 @@ export const LoroSidebar = memo(function LoroSidebar({
   scrollStateKey,
   workspaceSwitcherEnabled = true,
   connectionUiState,
+  offlineDetail,
   workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS: _isElectronMacOS = false,
   defaultWidth = DEFAULT_DESKTOP_SIDEBAR_WIDTH,
-  minWidth = MIN_DESKTOP_SIDEBAR_WIDTH,
+  minWidth,
   maxWidth = MAX_DESKTOP_SIDEBAR_WIDTH,
   activeNav = null,
   topContent,
@@ -921,7 +962,11 @@ export const LoroSidebar = memo(function LoroSidebar({
     updated: { ...defaultLabels.updated, ...(labels?.updated ?? {}) },
   };
   const now = useStableNow();
-  const resolvedMinWidth = useMemo(() => Math.max(160, minWidth), [minWidth]);
+  const mobileResize = minWidth === undefined && isMobileSidebarDevice();
+  const resolvedMinWidth = Math.max(
+    160,
+    minWidth ?? (mobileResize ? BOOT_SHELL_SIDEBAR_WIDTH.mobileMin : MIN_DESKTOP_SIDEBAR_WIDTH)
+  );
   const resolvedMaxWidth = useMemo(
     () => Math.max(resolvedMinWidth + 40, maxWidth),
     [resolvedMinWidth, maxWidth]
@@ -931,15 +976,31 @@ export const LoroSidebar = memo(function LoroSidebar({
   );
   const [isResizing, setIsResizing] = useState(false);
   const resizeStateRef = useRef({ pointerId: -1, startX: 0, startWidth: 0 });
+  const sidebarContentId = useId();
+  const canResize = !isMobile && !overlay;
 
   useEffect(() => {
     setSidebarWidth(clamp(defaultWidth, resolvedMinWidth, resolvedMaxWidth));
   }, [defaultWidth, resolvedMinWidth, resolvedMaxWidth]);
 
+  useEffect(() => {
+    if (canResize) return;
+    resizeStateRef.current.pointerId = -1;
+    setIsResizing(false);
+  }, [canResize]);
+
+  const changeSidebarWidth = useCallback(
+    (width: number) => {
+      const nextWidth = clamp(width, resolvedMinWidth, resolvedMaxWidth);
+      setSidebarWidth(nextWidth);
+      onWidthChange?.(nextWidth);
+    },
+    [resolvedMinWidth, resolvedMaxWidth, onWidthChange]
+  );
+
   const handleResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isMobile) return;
-      if (event.button !== 0) return;
+      if (!event.isPrimary || event.button !== 0 || resizeStateRef.current.pointerId !== -1) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       resizeStateRef.current = {
@@ -949,49 +1010,53 @@ export const LoroSidebar = memo(function LoroSidebar({
       };
       setIsResizing(true);
     },
-    [isMobile, sidebarWidth]
+    [sidebarWidth]
   );
+
+  const handleResizeEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeStateRef.current.pointerId !== event.pointerId) return;
+    resizeStateRef.current.pointerId = -1;
+    setIsResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   const handleResizeMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isMobile) return;
       const { pointerId, startX, startWidth } = resizeStateRef.current;
       if (pointerId !== event.pointerId) return;
       const rawWidth = startWidth + (event.clientX - startX);
-      if (onRequestCollapse && rawWidth < COLLAPSE_DRAG_THRESHOLD) {
-        // VSCode-style: dragging past the threshold collapses immediately and ends drag.
-        resizeStateRef.current.pointerId = -1;
-        setIsResizing(false);
-        try {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch {
-          // Ignore release errors when pointer capture is already gone.
-        }
+      if (
+        onRequestCollapse &&
+        (!mobileResize || event.pointerType !== 'touch') &&
+        rawWidth < COLLAPSE_DRAG_THRESHOLD
+      ) {
+        handleResizeEnd(event);
         onRequestCollapse();
         return;
       }
-      const nextWidth = clamp(rawWidth, resolvedMinWidth, resolvedMaxWidth);
-      setSidebarWidth(nextWidth);
-      onWidthChange?.(nextWidth);
+      changeSidebarWidth(rawWidth);
     },
-    [isMobile, resolvedMinWidth, resolvedMaxWidth, onWidthChange, onRequestCollapse]
+    [changeSidebarWidth, mobileResize, handleResizeEnd, onRequestCollapse]
   );
 
-  const handleResizeEnd = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isMobile) return;
-      const { pointerId } = resizeStateRef.current;
-      if (pointerId !== event.pointerId) return;
-      resizeStateRef.current.pointerId = -1;
-      setIsResizing(false);
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Ignore release errors when pointer capture is already gone.
-      }
-    },
-    [isMobile]
-  );
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const nextWidth =
+      event.key === 'ArrowLeft'
+        ? sidebarWidth - KEYBOARD_RESIZE_STEP
+        : event.key === 'ArrowRight'
+          ? sidebarWidth + KEYBOARD_RESIZE_STEP
+          : event.key === 'Home'
+            ? resolvedMinWidth
+            : event.key === 'End'
+              ? resolvedMaxWidth
+              : null;
+    if (nextWidth === null) return;
+    event.preventDefault();
+    changeSidebarWidth(nextWidth);
+  };
   const fallbackChatSessions: SessionListRow[] = chats.map((chat) => ({
     sessionId: chat.id,
     title: chat.title,
@@ -1098,6 +1163,9 @@ export const LoroSidebar = memo(function LoroSidebar({
       : workspaceSyncing
         ? 'syncing'
         : null;
+  const currentWorkspaceEncrypted = workspaces.some(
+    (ws) => ws.id === currentWorkspaceId && ws.encrypted
+  );
   const workspaceIdentity = (
     <>
       <WorkspaceAvatar
@@ -1108,9 +1176,15 @@ export const LoroSidebar = memo(function LoroSidebar({
         size="small"
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
+        <span className="min-w-0 truncate font-medium">{workspaceName}</span>
+        {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
+        <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1129,9 +1203,15 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate">{workspaceName}</span>
+        <span className="min-w-0 truncate">{workspaceName}</span>
+        {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
+        <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1178,7 +1258,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1192,7 +1272,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1300,7 +1380,10 @@ export const LoroSidebar = memo(function LoroSidebar({
                           ) : null
                         }
                       >
-                        {ws.name}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate">{ws.name}</span>
+                          {ws.encrypted ? <EncryptedWorkspaceMark /> : null}
+                        </span>
                       </Menu.RadioItem>
                     );
 
@@ -1353,25 +1436,45 @@ export const LoroSidebar = memo(function LoroSidebar({
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
       style={
-        isMobile || overlay
-          ? undefined
-          : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
+        canResize
+          ? { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
+          : undefined
       }
     >
-      {!isMobile && !overlay && (
+      {canResize && (
         <div
           data-sidebar-resize-handle
+          {...(mobileResize && {
+            role: 'separator',
+            tabIndex: 0,
+            'aria-label': t('sidebar.resize', 'Resize navigation sidebar'),
+            'aria-orientation': 'vertical' as const,
+            'aria-controls': sidebarContentId,
+            'aria-valuemin': resolvedMinWidth,
+            'aria-valuemax': resolvedMaxWidth,
+            'aria-valuenow': Math.round(sidebarWidth),
+            onKeyDown: handleResizeKeyDown,
+          })}
           {...stylex.props(resizeStyles.handle, isResizing && resizeStyles.dragging)}
           onPointerDown={handleResizeStart}
           onPointerMove={handleResizeMove}
           onPointerUp={handleResizeEnd}
           onPointerCancel={handleResizeEnd}
+          onLostPointerCapture={handleResizeEnd}
         >
           <div aria-hidden="true" {...stylex.props(resizeStyles.feedback)} />
+          {mobileResize && (
+            <div aria-hidden="true" {...stylex.props(resizeStyles.touchTarget)}>
+              <div {...stylex.props(resizeStyles.touchGrip)} />
+            </div>
+          )}
         </div>
       )}
 
-      <div className="relative flex h-full flex-col overflow-hidden">
+      <div
+        id={mobileResize ? sidebarContentId : undefined}
+        className="relative flex h-full flex-col overflow-hidden"
+      >
         <div
           className={cn(
             'relative flex items-center justify-between gap-2',

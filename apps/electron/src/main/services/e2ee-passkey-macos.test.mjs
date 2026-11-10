@@ -4,7 +4,7 @@ import { E2eePasskeyCancelled } from '@lody/platform/e2ee-passkey'
 import { base64url, makeMacosPasskeyPort } from './e2ee-passkey-macos.mts'
 
 const request = {
-  rpId: 'vault.lody.ai',
+  rpId: 'lody.ai',
   prfInput: new Uint8Array([1]),
   allowCredentialIds: ['AQID']
 }
@@ -43,7 +43,7 @@ void test('registration passes exactly what the ceremony needs and reports PRF a
     window: () => Buffer.from('window')
   })
   const created = await port.register({
-    rpId: 'vault.lody.ai',
+    rpId: 'lody.ai',
     userHandle: new Uint8Array(32).fill(7),
     userName: 'Lody recovery vault',
     prfInput: new Uint8Array([9]),

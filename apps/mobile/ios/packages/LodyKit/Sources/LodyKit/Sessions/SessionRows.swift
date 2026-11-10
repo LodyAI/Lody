@@ -30,6 +30,8 @@ enum SessionState: String, Sendable {
 }
 
 enum SessionRows {
+  typealias Family = (session: SessionItem, children: [SessionItem])
+
   static func isChat(_ projectId: String) -> Bool { projectId.hasSuffix(":unassigned") }
 
   static func isUnread(_ session: SessionItem) -> Bool {
@@ -97,6 +99,10 @@ enum SessionRows {
   /// Display-only summary. Closed Tabs suppress unread, but may still have running work.
   static func conversationAttention(_ sessions: [SessionItem]) -> [String: ListAttention] {
     let indexed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return conversationAttention(sessions, indexed: indexed)
+  }
+
+  static func conversationAttention(_ sessions: [SessionItem], indexed: [String: SessionItem]) -> [String: ListAttention] {
     var result = Dictionary(sessions.filter { !isTab($0) }.map { ($0.id, ListAttention($0)) }, uniquingKeysWith: { first, _ in first })
     let priority: [SessionState] = [.failed, .attention, .live]
     for tab in sessions where isTab(tab) && !tab.archived && tab.childSessionPlacement != "side-panel" {
@@ -117,7 +123,14 @@ enum SessionRows {
   static func treeRows(
     _ sessions: [SessionItem], all: [SessionItem], maxRoots: Int = .max, row: (SessionItem) -> LodyListRow
   ) -> [LodyListRow] {
-    let attention = conversationAttention(all)
+    let indexed = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return treeRows(tree(sessions, indexed: indexed), attention: conversationAttention(all, indexed: indexed), maxRoots: maxRoots, row: row)
+  }
+
+  /// Render already partitioned families without rebuilding catalog-wide projections per section.
+  static func treeRows(
+    _ families: [Family], attention: [String: ListAttention], maxRoots: Int = .max, row: (SessionItem) -> LodyListRow
+  ) -> [LodyListRow] {
     func displayRow(_ session: SessionItem) -> LodyListRow {
       var result = row(session)
       if let summary = attention[session.id], !session.archived {
@@ -127,7 +140,7 @@ enum SessionRows {
       }
       return result
     }
-    return tree(sessions, all: all).prefix(maxRoots).flatMap { group -> [LodyListRow] in
+    return families.prefix(maxRoots).flatMap { group -> [LodyListRow] in
       var parent = displayRow(group.session)
       guard !group.children.isEmpty else { return [parent] }
       let members = group.children
@@ -157,10 +170,13 @@ enum SessionRows {
 
   // Input order is the list's ranking; a group takes its freshest member's place.
   // Only opened chats nest under their opener (web `buildOpenedBySessionTree`); Tabs never list.
-  static func tree(_ sessions: [SessionItem], all: [SessionItem]) -> [(session: SessionItem, children: [SessionItem])] {
+  static func tree(_ sessions: [SessionItem], all: [SessionItem]) -> [Family] {
+    tree(sessions, indexed: Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
+  }
+
+  static func tree(_ sessions: [SessionItem], indexed: [String: SessionItem]) -> [Family] {
     let sessions = sessions.filter { !isTab($0) }
     let visible = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    let indexed = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     /// The listed conversation an id stands for: a Tab resolves to the conversation it belongs to.
     func conversation(_ id: String) -> String {
       var current = id

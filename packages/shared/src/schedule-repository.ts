@@ -121,7 +121,14 @@ export class ScheduleRepository {
   constructor(
     readonly repo: ScheduleRepositoryPort,
     readonly workspaceId: WorkspaceId,
-    private readonly options: { protectedContent?: boolean } = {}
+    private readonly options: {
+      protectedContent?: boolean;
+      /** Encrypted only: this device's signed declaration for a definition or manual run. */
+      signDeclaration?: (
+        document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+        manualRunKey?: string
+      ) => Promise<string>;
+    } = {}
   ) {}
 
   async list() {
@@ -145,8 +152,16 @@ export class ScheduleRepository {
     }
   }
 
+  /** Encrypted declarations are signed before anything is written. */
+  private async declaration(document: ScheduleDocument, manualRunKey?: string) {
+    if (!this.options.protectedContent) return undefined;
+    if (!this.options.signDeclaration) throw new Error('e2ee_signature_unavailable');
+    return await this.options.signDeclaration(document, manualRunKey);
+  }
+
   private async write(document: ScheduleDocument): Promise<void> {
     const row = buildScheduleRegistryRow(document);
+    const e2eeIntent = await this.declaration(document);
     const handle = await this.repo.openPersistedDoc(getScheduleRoomId(row.scheduleId));
     const mirror = new Mirror({
       doc: handle.doc as LoroDoc,
@@ -170,7 +185,7 @@ export class ScheduleRepository {
         })),
       });
       if (this.options.protectedContent)
-        recordScheduleAuthorization(handle.doc as LoroDoc, document);
+        recordScheduleAuthorization(handle.doc as LoroDoc, document, undefined, e2eeIntent);
       await this.repo.flush();
       // This publication is the execution gate. An interrupted first flush
       // leaves an orphan definition; no discovery/repair may enable it.
@@ -443,12 +458,10 @@ export class ScheduleRepository {
       return;
     }
     if (this.options.protectedContent) {
+      const manualRunKey = manualScheduleRunKey(args.scheduleId, args.manualRunId);
+      const e2eeIntent = await this.declaration(document, manualRunKey);
       const handle = await this.repo.openPersistedDoc(getScheduleRoomId(args.scheduleId));
-      recordScheduleAuthorization(
-        handle.doc as LoroDoc,
-        document,
-        manualScheduleRunKey(args.scheduleId, args.manualRunId)
-      );
+      recordScheduleAuthorization(handle.doc as LoroDoc, document, manualRunKey, e2eeIntent);
       await this.repo.flush();
     }
     registry.flock.set(key, request as never);

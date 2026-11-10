@@ -3912,7 +3912,8 @@ const UserMessageRowView = ({
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const isUndelivered = isUndeliveredUserTurnEntry(
     sessionMeta?.lastMissingHistoryUserMsgId,
-    message
+    message,
+    sessionMeta?.missingHistoryUserMsgIds
   );
   const pinCtx = useSessionPin();
   const showSendingSpinner =
@@ -6575,6 +6576,7 @@ const ImagePreviewDialog = ({
     [entries, onActiveImageKeyChange]
   );
 
+  const readonlyPresentation = useContext(SessionReadonlyContext);
   const handleClose = useCallback(() => {
     markupRequest.current += 1;
     onOpenChange(false);
@@ -6583,6 +6585,7 @@ const ImagePreviewDialog = ({
   return (
     <>
       <ZoomableImageViewer
+        allowExport={!readonlyPresentation}
         open={open && !markupFile}
         onClose={handleClose}
         images={images}
@@ -7175,6 +7178,7 @@ export const WorkspaceSessionFileGroup = ({
   align?: 'start' | 'end';
 }) => {
   const { t } = useTranslation();
+  const readonlyPresentation = useContext(SessionReadonlyContext);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
   const attachmentRuntime = useAtomValue(runtimeAtom);
@@ -7284,7 +7288,7 @@ export const WorkspaceSessionFileGroup = ({
             key={`${file.sha256}-${index}`}
             file={file}
             onPreview={handlePreview}
-            onDownload={handleDownload}
+            onDownload={readonlyPresentation ? undefined : handleDownload}
             isDownloading={downloadingId === file.fileId}
           />
         ))}
@@ -7307,7 +7311,7 @@ export const WorkspaceSessionFileGroup = ({
           }}
           file={previewFile}
           status={previewStatus}
-          onDownload={handleDownload}
+          onDownload={readonlyPresentation ? undefined : handleDownload}
           isDownloading={downloadingId === previewFile.fileId}
         />
       ) : null}
@@ -7324,7 +7328,7 @@ const SessionFileBlockCard = ({
 }: {
   file: SessionFilePayload;
   onPreview: (file: SessionFilePayload) => void;
-  onDownload: (file: SessionFilePayload) => void;
+  onDownload?: (file: SessionFilePayload) => void;
   isDownloading: boolean;
 }) => {
   const machineMeta = useAtomValue(

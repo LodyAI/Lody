@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["core", "napi"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.91"
+publish = false
+license = "Apache-2.0"
+
+[workspace.dependencies]
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }
+hex = "0.4"
+zeroize = "1"
+url = "2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# No strip: on macOS Cargo shells out to the PATH `strip`, which produced a dylib
+# that Node and Electron refuse to load ("mis-aligned LINKEDIT string pool").
+strip = "none"

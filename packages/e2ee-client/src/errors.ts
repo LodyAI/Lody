@@ -16,7 +16,8 @@ export class PersonalHostError extends Data.TaggedError('PersonalHostError')<{
     | 'unsupported'
     | 'storage'
     | 'network'
-    | 'restart-required';
+    | 'restart-required'
+    | 'unauthorized';
   readonly cause?: unknown;
 }> {}
 export const fail = (code: PersonalHostError['code'], cause?: unknown) =>

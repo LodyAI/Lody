@@ -18,6 +18,15 @@ data class RuntimeScope(val accountId: String, val workspaceId: String) {
     init { require(accountId.isNotBlank() && workspaceId.isNotBlank()); require(accountId.length <= 128 && workspaceId.length <= 128) }
 }
 sealed interface RuntimeCommand {
+    data class ProviderDetail(val machineId: String, val id: String) : RuntimeCommand
+    data class ProviderProbe(val machineId: String, val id: String) : RuntimeCommand
+    data class ProviderOperation(val machineId: String, val id: String?, val action: String, val cliType: String? = null, val agentType: String? = null) : RuntimeCommand
+    data class ProviderAuth(val request: ProviderAuthRequest) : RuntimeCommand
+    data class AgentProviders(val action: ProviderAction) : RuntimeCommand
+    /** Agent Roles settings: list, save (with the listed base) or delete; writes are never replayed. */
+    data class AgentRoleSettings(val action: RoleSettingsAction) : RuntimeCommand
+    /** Prompt shortcut settings: list, read one body, or save (never replayed). */
+    data class ShortcutSettings(val action: ShortcutSettingsAction) : RuntimeCommand
     data class SetTabClosed(val id: String, val closed: Boolean) : RuntimeCommand
     data class CreateTab(val parentId: String, val id: String, val title: String) : RuntimeCommand
     data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
@@ -58,6 +67,13 @@ sealed interface RuntimeCommand {
     data object InspectSchema : RuntimeCommand
 }
 sealed interface RuntimeResult {
+    data class ProviderDetail(val value: app.lody.android.runtime.ProviderDetail) : RuntimeResult
+    data class ProviderProbe(val value: app.lody.android.runtime.ProviderProbe) : RuntimeResult
+    data class ProviderOperation(val value: app.lody.android.runtime.ProviderOperation) : RuntimeResult
+    data class ProviderAuth(val value: ProviderAuthState) : RuntimeResult
+    data class AgentProviders(val value: app.lody.android.runtime.AgentProviders) : RuntimeResult
+    data class RoleSettings(val value: RoleSettingsSnapshot) : RuntimeResult
+    data class ShortcutSettings(val value: ShortcutSettingsResult) : RuntimeResult
     data class MessageAction(val value: org.json.JSONObject) : RuntimeResult
     data class Options(val value: CreationOptions) : RuntimeResult
     data class Roles(val value: List<AgentRole>) : RuntimeResult
@@ -126,6 +142,7 @@ data class CatalogSnapshot(
     val machineNames: Map<String, String> = emptyMap(),
     /** Computer id to OS (`darwin` / `win32` / `linux`), for its icon. */
     val machineOs: Map<String, String> = emptyMap(),
+    val agentUsage: Map<String, ProviderUsage> = emptyMap(),
 )
 /**
  * One transcript turn. [timestamp] is ISO-8601; [status] is upstream's (`seen` once the agent
@@ -237,6 +254,8 @@ data class SendTextRequest(
     val agentConfigId: String? = null,
     /** Agent switches the reader changed (Plan, Fast); empty sends none. */
     val configOptionValues: Map<String, Any> = emptyMap(),
+    /** Steer the running reply instead of queueing (the "Guide" preference, when the agent can steer). */
+    val guide: Boolean = false,
 )
 /** What a turn says about its Agent Role: inherit the latest turn's, an explicit None, or a Role. */
 sealed interface RoleSend {
@@ -257,12 +276,16 @@ data class RunChoice(
 )
 data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null, val historyHasMore: Boolean = false, val historyLoading: Boolean = false)
 sealed interface RuntimeEvent {
+    data class ProvidersChanged(val machineId: String) : RuntimeEvent
+    data class ProviderProgress(val machineId: String, val id: String, val status: String, val percent: Float?) : RuntimeEvent
     data class CreationChanged(val key: String = "") : RuntimeEvent
     data class SessionUpdated(val snapshot: SessionSnapshot) : RuntimeEvent
     data class CatalogUpdated(val snapshot: CatalogSnapshot) : RuntimeEvent
     data class Synced(val revision: Long, val streams: Int) : RuntimeEvent
     data class SyncFailed(val reason: String) : RuntimeEvent
     data object GrantRequested : RuntimeEvent
+    /** The runtime asks the native host to make one prompt-shortcut Convex call (iOS `shortcutCloud`). */
+    data class ShortcutCloudRequested(val requestId: String, val operation: String, val args: String) : RuntimeEvent
 }
 /** Stamped at source receipt, before any coroutine buffering. */
 data class RuntimeEmission(val generation: Long, val event: RuntimeEvent)
@@ -271,6 +294,8 @@ data class OwnedRuntimeState(val scope: RuntimeScope? = null, val status: Runtim
 
 /** Stage-2 port. Phase 1 has no credential provider implementation or cloud capability. */
 fun interface GrantProvider { suspend fun request(scope: RuntimeScope): ShortLivedGrant }
+/** Makes one allow-listed `promptShortcuts:*` Convex call for [scope] with the verified account; throws on failure. */
+fun interface ShortcutCloudProvider { suspend fun call(scope: RuntimeScope, operation: String, args: org.json.JSONObject): Any? }
 class ShortLivedGrant(val token: String, val gatewayBaseUrl: String, val expiresIn: Int, private val receivedAtNanos: Long = System.nanoTime()) {
     init { require(token.isNotBlank()); require(expiresIn in 1..3600) }
     fun remainingSeconds(nowNanos: Long = System.nanoTime()): Int =

@@ -173,6 +173,10 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   presentation and settings navigation can still remount it: `LoroSidebar` saves
   its viewport offset by workspace in `atoms/sidebar-state.ts` and restores it
   before paint. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-content-width-animation.md).
+- On wide mobile Web layouts, the workspace shows a centered 44 px grab target at
+  the sidebar seam. Dragging it or focusing the separator and using Left/Right
+  changes the saved width within 180–420 px. The desktop sidebar minimum is
+  240 px. The boot shell uses the same limits.
 
 ## Provider readiness
 
@@ -216,7 +220,10 @@ records the preservation boundary.
 visibility copy (`getSessionSharingLabel` / `getSessionSharingDescription`), the
 list-row `SessionSharingIndicator`, the `SessionArchivedBadge`, the team-share
 confirmation dialogs, and `SessionAccessControl` — the one header control
-carrying both team visibility and static publication.
+showing Private / Team read-only / Team can edit. Machine owners manage independent
+read grants through the platform `sessionAccess` port in both workspace modes;
+public publication remains a separate section. Read-only targets mount the
+independent history reader. See the draft [session access Spec](../../../../specs/session-access.md).
 
 Team visibility is resolved by `hooks/use-session-sharing.ts` over
 `lib/session-sharing.ts`. Static publication lives in `sharing/`, with

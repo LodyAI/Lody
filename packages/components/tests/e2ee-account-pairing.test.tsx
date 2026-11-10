@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
+import {
+  postHogPrivacy,
+  installWorkspaceTelemetryScope,
+  setTelemetryRouteTarget,
+} from '../src/lib/posthog-privacy';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,7 +42,8 @@ const NOW = 1_800_000_000_000;
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  vi.setSystemTime(NOW);
   qr.payloads = [];
   container = document.createElement('div');
   document.body.append(container);
@@ -107,6 +112,31 @@ function requesterHost(initial: E2eeAccountPairingRequestState | null = null) {
 }
 
 describe('new device request', () => {
+  it('does not open a workspace from a retained requester result on an approver-only host', async () => {
+    let openedWorkspace = false;
+    const runtime = {
+      accountPairingRequest: async (): Promise<E2eeAccountPairingRequestState> => ({
+        direction: 'requester-shows',
+        pairingString: null,
+        expiresAt: NOW + 600_000,
+        status: 'joined',
+        workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'joined' }],
+      }),
+    };
+    await act(async () =>
+      root.render(
+        <E2eeAccountPairingRequest
+          runtime={runtime}
+          autoStart={false}
+          onJoined={() => {
+            openedWorkspace = true;
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toBe('');
+    expect(openedWorkspace).toBe(false);
+  });
   it('starts automatically on desktop and mobile, shows the code, and finishes once approved', async () => {
     const host = requesterHost();
     let joined = 0;
@@ -443,4 +473,486 @@ describe('account pairing relay operations', () => {
     );
     await expect(submit!({} as never)).rejects.toBeInstanceOf(CloudCapabilityUnavailableError);
   });
+});
+
+describe('automatic pairing product flow', () => {
+  it('restores from a backup when no other authorized device exists, and opens the result', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const cancelled: string[] = [];
+    const restores: string[] = [];
+    let recovered = 0;
+    const runtime = {
+      automaticPairingState: async () => ({
+        id: 'request',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Phone',
+        comparisonCode: '123456',
+        expiresAt: NOW + 300_000,
+        phase: 'waiting',
+      }),
+      cancelAutomaticPairing: async (workspaceId: string) => {
+        cancelled.push(workspaceId);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const page = (lostAll?: Parameters<typeof E2eeAutomaticPairingPage>[0]['lostAll']) =>
+      act(async () =>
+        root.render(
+          <E2eeAutomaticPairingPage
+            runtime={runtime}
+            workspaceId="w1"
+            onJoined={() => {}}
+            onBack={() => {}}
+            {...(lostAll ? { lostAll } : {})}
+          />
+        )
+      );
+    // Without a backup on this host, the entry explains where to go instead.
+    await page();
+    await tick(0);
+    expect(text()).toContain('e2ee.auto.waiting.help');
+    expect(text()).toContain('e2ee.auto.expiresIn {"time":"5:00"}');
+    expect(text()).toContain('e2ee.auto.noOtherDevice.elsewhere');
+    expect(text()).not.toContain('e2ee.auto.noOtherDevice.restore');
+
+    const inDialog = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((value) =>
+        (value.textContent ?? '').startsWith(label)
+      );
+    let restoreResults: { workspaceId: string; name: string; outcome: string }[] = [
+      // Another workspace restored, this one not covered by the backup.
+      { workspaceId: 'w2', name: 'Alpha', outcome: 'Committed' },
+    ];
+    await page({
+      passkeyAvailable: true,
+      restore: async (method) => {
+        restores.push(method);
+        return { outcome: 'restored', results: restoreResults };
+      },
+      onRecovered: () => {
+        recovered++;
+      },
+    });
+    await click('e2ee.auto.noOtherDevice.restore');
+    await act(async () => inDialog('e2ee.lostAll.continue')!.click());
+    // Another workspace's success never ends this workspace's pending approval,
+    // even when the names match.
+    expect(
+      document.body.querySelector('[data-testid="e2ee-lost-all-current-pending"]')
+    ).not.toBeNull();
+    expect(inDialog('e2ee.lostAll.open')).toBeUndefined();
+    expect(cancelled).toEqual([]);
+    expect(recovered).toBe(0);
+    await act(async () => inDialog('e2ee.lostAll.tryAnother')!.click());
+    restoreResults = [
+      { workspaceId: 'w1', name: 'Alpha', outcome: 'Committed' },
+      { workspaceId: 'w3', name: 'Design', outcome: 'Failed' },
+    ];
+    restores.length = 0;
+    // The passkey is the fastest way, so it leads when this device can use one.
+    expect(
+      document.body.querySelector('[data-lost-all-method="passkey"]')?.getAttribute('aria-checked')
+    ).toBe('true');
+    await act(async () => inDialog('e2ee.lostAll.continue')!.click());
+    expect(restores).toEqual(['passkey']);
+    const results = document.body.querySelector('[data-testid="e2ee-lost-all-results"]');
+    expect(results?.querySelector('[data-lost-all-result="Committed"]')?.textContent).toContain(
+      'Alpha'
+    );
+    expect(results?.querySelector('[data-lost-all-result="Failed"]')?.textContent).toContain(
+      'Design'
+    );
+    expect(results?.textContent).toContain('e2ee.lostAll.result.askAdmin');
+    expect(results?.textContent).toContain('e2ee.lostAll.result.revokeHint');
+    await act(async () => inDialog('e2ee.lostAll.open')!.click());
+    // The backup admitted this device, so the pending request ends and the host refreshes.
+    expect(cancelled).toEqual(['w1']);
+    expect(recovered).toBe(1);
+  });
+  it('discards a late recovery result after switching account runtime and workspace', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let release!: (state: import('@lody/platform').E2eeAutomaticPairingState) => void;
+    const pending = new Promise<import('@lody/platform').E2eeAutomaticPairingState>((resolve) => {
+      release = resolve;
+    });
+    let opened = false;
+    const host = (workspaceId: string, name: string) =>
+      ({
+        automaticPairingState: async () => {
+          throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+        },
+        accountPairingRequest: async () => ({
+          lookupId: (workspaceId === 'w1' ? 'a1' : 'b2').repeat(16),
+          direction: 'approver-shows',
+          pairingString: null,
+          status: 'waiting',
+          expiresAt: NOW + 600_000,
+          workspaces: [{ workspaceId, name, state: 'pending' }],
+        }),
+        restartAutomaticPairing: async () => pending,
+      }) as unknown as E2eeWorkspaceRuntime;
+    const first = host('w1', 'Old Alpha'),
+      second = host('w2', 'Current Beta');
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={first}
+          workspaceId="w1"
+          onJoined={() => {
+            opened = true;
+          }}
+          onBack={() => {}}
+        />
+      )
+    );
+    await click('e2ee.auto.previous.review');
+    await click('e2ee.auto.previous.endAndRestart');
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={second}
+          workspaceId="w2"
+          onJoined={() => {
+            opened = true;
+          }}
+          onBack={() => {}}
+        />
+      )
+    );
+    await act(async () =>
+      release({
+        id: 'old',
+        workspaceId: 'w1',
+        workspaceName: 'Old Alpha',
+        deviceName: 'Phone',
+        comparisonCode: '987654',
+        expiresAt: NOW + 600_000,
+        phase: 'joined',
+      })
+    );
+    expect(opened).toBe(false);
+    expect(text()).toContain('Current Beta');
+    expect(text()).not.toContain('Old Alpha');
+    expect(text()).not.toContain('987 654');
+    await click('e2ee.auto.previous.review');
+    expect(text()).toContain('e2ee.auto.previous.confirm');
+  });
+  it.each(['restart', 'replacement', 'during-confirmation', 'legacy'] as const)(
+    'requires explicit confirmation for an existing device request and preserves replacements: %s',
+    async (scenario) => {
+      const { E2eeAutomaticPairingPage } =
+        await import('../src/components/pages/e2ee-automatic-pairing');
+      let native: E2eeAccountPairingRequestState = {
+        lookupId: scenario === 'legacy' ? undefined : 'a1'.repeat(16),
+        direction: 'approver-shows',
+        pairingString: null,
+        status: 'waiting',
+        expiresAt: NOW + 600_000,
+        workspaces: [{ workspaceId: 'w1', name: 'Previous Alpha', state: 'pending' }],
+      };
+      let fresh: import('@lody/platform').E2eeAutomaticPairingState | null = null;
+      const ended: string[] = [];
+      const runtime = {
+        automaticPairingState: async () => {
+          if (fresh) return fresh;
+          throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+        },
+        accountPairingRequest: async () => structuredClone(native),
+        restartAutomaticPairing: async (
+          _workspaceId: string,
+          input: { expectedLookupId: string }
+        ) => {
+          if (input.expectedLookupId !== native.lookupId)
+            throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+          ended.push(input.expectedLookupId);
+          native = { ...native, status: 'expired' };
+          return (fresh = {
+            id: 'fresh',
+            workspaceId: 'w1',
+            workspaceName: 'Alpha',
+            deviceName: 'Phone',
+            comparisonCode: '654321',
+            expiresAt: NOW + 600_000,
+            phase: 'waiting',
+          });
+        },
+      } as unknown as E2eeWorkspaceRuntime;
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingPage
+            runtime={runtime}
+            workspaceId="w1"
+            onJoined={() => {}}
+            onBack={() => {}}
+          />
+        )
+      );
+      expect(native.status).toBe('waiting');
+      expect(fresh).toBeNull();
+      if (scenario === 'legacy') {
+        expect(text()).toContain('e2ee.accountPair.error.pairing-update-required');
+        expect(text()).not.toContain('e2ee.auto.previous.review');
+        expect(ended).toEqual([]);
+        return;
+      }
+      expect(text()).toContain('Previous Alpha');
+      await click('e2ee.auto.previous.review');
+      expect(text()).toContain('e2ee.auto.previous.confirm');
+      expect(ended).toEqual([]);
+      if (scenario === 'replacement' || scenario === 'during-confirmation') {
+        native = {
+          ...native,
+          lookupId: 'b2'.repeat(16),
+          workspaces: [{ workspaceId: 'w1', name: 'Replacement Beta', state: 'pending' }],
+        };
+        if (scenario === 'replacement') await tick(2000);
+        else await click('e2ee.auto.previous.endAndRestart');
+        expect(native.status).toBe('waiting');
+        expect(fresh).toBeNull();
+        expect(text()).toContain('Replacement Beta');
+        expect(text()).not.toContain('e2ee.auto.previous.confirm');
+        expect(ended).toEqual([]);
+        await click('e2ee.auto.previous.review');
+      }
+      await click('e2ee.auto.previous.endAndRestart');
+      expect(native.status).toBe('expired');
+      expect(ended).toEqual([
+        scenario === 'replacement' || scenario === 'during-confirmation'
+          ? 'b2'.repeat(16)
+          : 'a1'.repeat(16),
+      ]);
+      expect(text()).toContain('654 321');
+    }
+  );
+  it('shows the native request immediately and advances after verified admission without a check button', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let saved: import('@lody/platform').E2eeAutomaticPairingState | null = null;
+    let opened = false;
+    const waiting: import('@lody/platform').E2eeAutomaticPairingState = {
+      id: 'request',
+      workspaceId: 'w1',
+      workspaceName: 'Synthetic team',
+      deviceName: 'Phone',
+      expiresAt: NOW + 600_000,
+      comparisonCode: '123456',
+      phase: 'waiting',
+    };
+    const runtime = {
+      automaticPairingState: async () => saved,
+      startAutomaticPairing: async () => (saved = waiting),
+      cancelAutomaticPairing: async () => {
+        saved = { ...waiting, phase: 'cancelled' };
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={runtime}
+          workspaceId="w1"
+          onJoined={() => {
+            opened = true;
+          }}
+          onBack={() => {}}
+        />
+      )
+    );
+    expect(text()).toContain('123 456');
+    expect(text()).toContain('Synthetic team');
+    expect(text()).not.toContain('e2ee.pair.claim');
+    saved = { ...waiting, phase: 'syncing' };
+    await tick(2000);
+    expect(opened).toBe(true);
+    expect(text()).toContain('e2ee.auto.syncing.title');
+  });
+  it('retains a deferred approval behind the visible device requests entry and reopens the same code', async () => {
+    const { E2eeAutomaticPairingInbox, E2eeDeviceRequestsButton } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const removeTelemetryScope = installWorkspaceTelemetryScope(() => 'ordinary-under-approval');
+    setTelemetryRouteTarget('ordinary-under-approval', true);
+    const replay = () =>
+      postHogPrivacy.beforeSend({
+        event: '$snapshot',
+        properties: { $snapshot_data: ['synthetic private surface'] },
+      });
+    let authorized = false;
+    const review = {
+      id: 'request',
+      requestId: 'native-request',
+      workspaceId: 'w1',
+      workspaceName: 'Synthetic team',
+      deviceName: 'Phone',
+      expiresAt: Date.now() + 600_000,
+      comparisonCode: '123456',
+      phase: 'waiting' as const,
+    };
+    const runtime = {
+      pendingAutomaticPairing: async () => (authorized ? [] : [review]),
+      approveAutomaticPairing: async (id: string) => {
+        if (id !== review.id) throw Error('wrong request');
+        authorized = true;
+      },
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    const find = (label: string) =>
+      [...document.querySelectorAll('button')].find((element) =>
+        element.textContent?.includes(label)
+      )!;
+    try {
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingInbox runtime={runtime}>
+            <E2eeDeviceRequestsButton />
+          </E2eeAutomaticPairingInbox>
+        )
+      );
+      expect(document.body.textContent).toContain('123 456');
+      expect(replay()).toBeNull();
+      await act(async () => find('e2ee.auto.later').click());
+      expect(container.textContent).toContain('e2ee.auto.inbox');
+      expect(document.body.textContent).not.toContain('123 456');
+      expect(replay()).not.toBeNull();
+      await act(async () => find('e2ee.auto.inbox').click());
+      expect(document.body.textContent).toContain('Synthetic team');
+      expect(replay()).toBeNull();
+      await act(async () => find('e2ee.auto.review').click());
+      expect(document.body.textContent).toContain('123 456');
+      await act(async () => find('e2ee.auto.authorize').click());
+      await tick(2000);
+      expect(authorized).toBe(true);
+      expect(container.textContent).toBe('');
+      expect(replay()).not.toBeNull();
+    } finally {
+      removeTelemetryScope();
+      focus.mockRestore();
+    }
+  });
+});
+
+it('in-app recovery requires consent and never starts pairing; only a completed workspace resumes content', async () => {
+  const host = requesterHost();
+  const opened: string[] = [];
+  let joined = false;
+  const runtime = {
+    ...host.runtime,
+    openBrowserRecovery: async (id: string) => {
+      opened.push(id);
+      return true;
+    },
+  };
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={runtime}
+        autoStart={false}
+        workspaceId="workspace-A"
+        onJoined={() => {
+          joined = true;
+        }}
+      />
+    )
+  );
+  expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
+  expect(host.state).toBeNull();
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(opened).toEqual(['workspace-A']);
+  expect(joined).toBe(true);
+  expect(host.state).toBeNull();
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')).toBeNull();
+});
+
+it('cancelled recovery keeps the device approval choice usable without creating a request', async () => {
+  const host = requesterHost();
+  let joined = false;
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={{ ...host.runtime, openBrowserRecovery: async () => false }}
+        autoStart={false}
+        workspaceId="workspace-A"
+        onJoined={() => {
+          joined = true;
+        }}
+      />
+    )
+  );
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(joined).toBe(false);
+  expect(host.state).toBeNull();
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('browser device requests retain personal-computer consent while automatic opening is unavailable', async () => {
+  const host = requesterHost();
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={{ ...host.runtime, requirePersonalComputer: true }}
+        autoStart={false}
+        onJoined={() => {}}
+      />
+    )
+  );
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(true);
+  expect(host.state).toBeNull();
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.accountPair.request.start');
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
+    CODE
+  );
+});
+
+it('automatic-capable browsers choose recovery without pairing, or consent before the existing six-digit approval flow', async () => {
+  const { E2eeAutomaticPairingPage } =
+    await import('../src/components/pages/e2ee-automatic-pairing');
+  const host = requesterHost();
+  let requested = false;
+  let opened = false;
+  const runtime = {
+    ...host.runtime,
+    requirePersonalComputer: true,
+    openBrowserRecovery: async () => {
+      opened = true;
+      return false;
+    },
+    automaticPairingState: async () => null,
+    startAutomaticPairing: async () => {
+      requested = true;
+      return {
+        id: 'a1'.repeat(16),
+        phase: 'waiting',
+        workspaceId: 'workspace-A',
+        workspaceName: 'Alpha',
+        deviceName: 'Web',
+        comparisonCode: '123456',
+        expiresAt: NOW + 600_000,
+      };
+    },
+  } as unknown as E2eeWorkspaceRuntime;
+  await act(async () =>
+    root.render(
+      <E2eeAutomaticPairingPage
+        runtime={runtime}
+        workspaceId="workspace-A"
+        onJoined={() => {}}
+        onBack={() => {}}
+      />
+    )
+  );
+  expect(requested).toBe(false);
+  expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(opened).toBe(true);
+  expect(requested).toBe(false);
+  expect(host.state).toBeNull();
+  await click('e2ee.accountPair.request.start');
+  expect(requested).toBe(true);
+  expect(container.textContent).toContain('123 456');
+  expect(host.state).toBeNull();
 });

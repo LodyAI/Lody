@@ -22,6 +22,7 @@ import { Logger } from '@/utils/logger';
 import { traceAsync } from '@/utils/trace-span';
 import { CliResourceMonitor } from '@/monitor/cli-resource-monitor';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
+import { readLoroWasmHeapBytes } from '@/lib/loro/wasm-runtime-health';
 
 export interface MachineRuntimeOptions {
   sessionManagerFactory: () => SessionManager;
@@ -73,6 +74,9 @@ export class MachineRuntime {
     }
     return this.dispatchLocalMachineRpc(request, context?.signal);
   }
+  resolveSessionHistoryAccessTarget(sessionId: string) {
+    return this.requireHandler().resolveSessionHistoryAccessTarget(sessionId as SessionId);
+  }
   private handler: MessageHandler | null = null;
   private clientLossHandler: MessageHandler | null = null;
   inspectClientLoss() {
@@ -103,7 +107,6 @@ export class MachineRuntime {
   // interleave. Attach bodies are short (no meta catch-up wait), so a queued
   // detach/revoke stays prompt without any preemption machinery.
   private bridgeTransitionQueue: Promise<unknown> = Promise.resolve();
-  private readonly sessionTerminatedHandlers = new Set<(sessionId: SessionId) => void>();
 
   constructor(private readonly options: MachineRuntimeOptions) {
     this.messageProcessor = new MessageProcessor(
@@ -128,11 +131,6 @@ export class MachineRuntime {
     await traceAsync(this.options.logger, 'startup.session_manager', undefined, async () =>
       this.sessionManager!.initialize()
     );
-    this.sessionManager.on('terminated', (event) => {
-      for (const handler of this.sessionTerminatedHandlers) {
-        handler(event.sessionId);
-      }
-    });
     this.options.logger.debug('Session manager initialized');
 
     this.handler = new MessageHandler(
@@ -197,15 +195,12 @@ export class MachineRuntime {
     return sessionManager.getSession(sessionId)?.getWorkdir() ?? null;
   }
 
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    this.sessionTerminatedHandlers.add(handler);
-    return () => {
-      this.sessionTerminatedHandlers.delete(handler);
-    };
-  }
-
   getActiveSessionCount(): number {
     return this.handler?.getActiveTurnCount() ?? 0;
+  }
+
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.handler?.isIdentityRestoreExecutionIdle() ?? false;
   }
 
   isRemoteBridgeAttached(): boolean {
@@ -285,6 +280,11 @@ export class MachineRuntime {
       await handler.cancelActiveTurnsForRemoteRevocation();
       handler.recheckPendingSessionAccess('remote-access-revoked');
     });
+  }
+
+  stopNewIdentityRestoreDispatch(): void {
+    this.messageProcessor.stop();
+    this.handler?.stopNewIdentityRestoreDispatch();
   }
 
   async prepareForShutdown(): Promise<void> {
@@ -424,7 +424,7 @@ export class MachineRuntime {
     const gcConfig = loadGCConfig();
 
     this.gcManager = new SessionGCManager(gcConfig, {
-      getSessionLastActivity: (sessionId) => handler.getLastActivity(sessionId),
+      ...handler.getGCSessionSources(),
       getNativeWork: (sessionId) => handler.getNativeWork(sessionId),
       hasActiveTurn: (sessionId) => handler.hasActiveTurn(sessionId),
       hasActiveGoal: async (sessionId) => await handler.hasActiveGoal(sessionId),
@@ -432,8 +432,8 @@ export class MachineRuntime {
       hasPendingUserWork: async (sessionId) => await handler.hasPendingUserWork(sessionId),
       isArchiveInFlight: (sessionId) => handler.isArchiveInFlight(sessionId),
       cleanSession: (sessionId) => handler.cleanSessionForGC(sessionId),
-      getSessionIds: () => handler.getTrackedSessionIds(),
       memoryPressure: this.options.memoryPressure,
+      readWasmHeapBytes: readLoroWasmHeapBytes,
       logger: this.options.logger,
     });
 

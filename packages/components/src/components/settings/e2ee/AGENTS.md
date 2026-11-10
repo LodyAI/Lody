@@ -6,7 +6,8 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   rechecks every action; the renderer never receives keys or arbitrary signing.
 - Rotation is manual only. Keep installation/ACK continuation visible after the
   ledger flag clears. Failures retain old sends and local data; never clear queues.
-- Ordinary settings never open management ports. Scope probes and late results by
+- Ordinary settings never open management ports. The encryption console dialog opens
+  only on an explicit click and owns its own control reader (route rules apply). Scope probes and late results by
   account/workspace; notify only the corresponding provider after verified refresh.
 - Pure panel stories use synthetic states; the hook/wrapper own the real entry.
   [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-manual-key-management.md).
@@ -14,10 +15,23 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   workspace, machine and verified generation. Render native ownership hints;
   main rechecks authority. Retry an unknown result with its original requestId
   and change; only explicit retry after confirmed conflict creates a new intent.
-  Historical signer-revoked state is display/re-sign input, never execution evidence.
+  Signer revocation preserves accepted grants; review/re-sign is nonblocking and preserves the list.
   [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 
 - Remote device pages retain the protected sharing panel without a local agent;
   this never enables general machine RPC or ordinary machine-sharing controls. Team management requires the current
   host's verified personal-device role and credential; replacement runtimes must
   qualify again before showing retained management controls.
+
+- The recovery tab sets up every uncovered workspace through
+  `setupRecoveryForWorkspaces`, which unlocks the vault once and reports each
+  workspace separately; one failed workspace never stops or rolls back the others.
+  Only a committed, verified setup counts as done: pending, conflicting, unverified
+  or missing results stay unfinished, and a saved but unverified workspace keeps its
+  continue action.
+  Keep exactly one primary action on the tab, and give every failure card one next
+  step that does something, with diagnostics secondary.
+- The console's Recovery tab comes from `useE2eeRecoverySection`: a browser-shaped
+  host (Web, the mobile webview) supplies its own section through
+  `E2eeRecoveryHostContext`, desktop uses its main-process vault, and a host with
+  neither shows where recovery can be set up instead of an empty tab.

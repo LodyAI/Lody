@@ -306,6 +306,18 @@ rebuild from originals or read a suffix to prove the existing pin; never lower i
 `InstalledEpochKeys.check(epoch)` verifies a stored key's current eligibility and
 commitment, disposing its temporary material instead of returning a secret to a status reader.
 
+## Execution intent
+
+`executionIntentBytes`, `signExecutionIntent` and `verifyExecutionIntent` sign what an
+encrypted input will run (owner decision 2026-11-10). The bytes are UTF-8
+`lody-e2ee/execution-intent/v1` followed by a zero byte, then the kind (1 member input,
+2 machine input, 3 schedule declaration), the pinned genesis (32 bytes), four
+u16be-length-prefixed UTF-8 fields (workspace ID, target machine ID, scope, message ID,
+each at most 1,024 bytes) and the 32-byte SHA-256 of the canonical content. Nothing
+depends on a document operation, frame or epoch. A valid signature proves authorship
+only; the verifier still checks the signer's current membership and permissions, and
+the execution journal still starts each message ID once.
+
 ## Device credential binding
 
 `deviceCredentialBindingBytes`, `signDeviceCredentialBinding` and
@@ -320,3 +332,9 @@ does not need this proof. `test/foundation.test.ts` retains a fixed signing vect
 and checks substitution of every context field.
 
 Desktop error classification, independent paging and terminal acknowledgement are described in [key maintenance availability](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.md). `MailboxInstallError.cryptographicRejection` marks only a deterministic rejection at envelope verification; local writes, report signing and unknown native errors never authorize rejecting an envelope.
+
+A recovery restore may repair a currently admitted personal identity that has lost
+its installed keys. After verifying the recovery device, package checkpoint and
+current epoch envelope, it requires the exact current personal signing/encryption
+keys and membership. It installs through the caller's normal installed-key boundary
+without another admission; a revoked or mismatched identity gains no authority.

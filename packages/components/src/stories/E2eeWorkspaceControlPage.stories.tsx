@@ -61,6 +61,10 @@ export const VerifiedLocalGenesis: Story = {
     }),
   },
 };
+// Right after creation on the creating device: the getting-started list leads the overview.
+export const GettingStarted: Story = {
+  args: { ...VerifiedLocalGenesis.args, workspaceName: 'Cipher Lab', recoveryReady: false },
+};
 export const UnconfirmedGenesis: Story = {
   args: {
     history: appendLedgerHistory(null, page, {
@@ -186,6 +190,37 @@ export const OwnerMemberControls: Story = {
 export const CustodyLocked: Story = {
   args: { failure: { kind: 'custody-locked', code: 'locked' } },
 };
+export const IdentityLost: Story = {
+  args: { failure: { kind: 'local-identity', code: 'missing' } },
+};
+export const UpdateRequired: Story = {
+  args: { failure: { kind: 'upgrade', code: 'capability' }, onCheckForUpdates: fn() },
+};
 export const CustodyIndeterminate: Story = {
   args: { failure: { kind: 'custody-indeterminate', code: 'indeterminate' } },
+};
+
+// The console as Settings opens it: the same frame inside a 1000×760 dialog.
+export const ConsoleInSettings: Story = {
+  args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', presentation: 'modal' },
+  render: (args) => (
+    <div style={{ width: 1000, height: 760, margin: 24, borderRadius: 16, overflow: 'hidden' }}>
+      <E2eeWorkspaceControlPage {...args} />
+    </div>
+  ),
+};
+// A member without administrator permission: same tabs, one sentence instead of controls.
+export const MemberView: Story = {
+  args: {
+    ...TeamHistory.args,
+    workspaceName: 'Cipher Lab',
+    memberRole: 'member',
+    initialTab: 'members',
+  },
+};
+export const OwnerMembersTab: Story = {
+  args: { ...OwnerMemberControls.args, workspaceName: 'Cipher Lab', initialTab: 'members' },
+};
+export const SecurityCodeTab: Story = {
+  args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', initialTab: 'security' },
 };

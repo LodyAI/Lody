@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import { createRouter as createTanstackRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 import type { E2eeRuntimeFactory, PlatformE2eeWorkspaces } from '@lody/platform';
@@ -6,6 +7,7 @@ import { setTelemetryRouteTarget } from './lib/posthog-privacy';
 
 export type RouterContext = {
   authClient: LodyAuthClient;
+  recoveryPage?: ComponentType;
   /** Optional application-owned browser/native-shell host; local and Electron keep their owners. */
   createE2eeRuntime?: E2eeRuntimeFactory;
   /** Optional protected device-creation capability for a portable host. */
@@ -14,6 +16,7 @@ export type RouterContext = {
 
 type CreateRouterOptions = {
   authClient: LodyAuthClient;
+  recoveryPage?: ComponentType;
   /** Optional application-owned browser/native-shell host; local and Electron keep their owners. */
   createE2eeRuntime?: E2eeRuntimeFactory;
   prepareE2eeCreation?: PlatformE2eeWorkspaces['prepareCreation'];
@@ -43,6 +46,7 @@ export const createRouter = (options: CreateRouterOptions) => {
     scrollRestoration: ({ location }) => shouldRouterRestoreScroll(location.pathname),
     context: {
       authClient: options.authClient,
+      recoveryPage: options.recoveryPage,
       createE2eeRuntime: options.createE2eeRuntime,
       prepareE2eeCreation: options.prepareE2eeCreation,
     },

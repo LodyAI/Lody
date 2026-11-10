@@ -25,6 +25,8 @@
 
 - The Chats view-menu toggles are built when the menu opens (uncached) and close it on tap; a kept-open menu (`keepsMenuPresented`) never redrew the checkmark.
 
+- Presence and connection-only catalog notifications update Home chrome and empty-state text without rebuilding unchanged conversation content. Account/workspace changes, read watermarks, search results, members, preferences, traits and foreground refreshes must still invalidate content. Build Home's session index, attention summary and families once per projection, and carry whole families through pinning and grouping.
+
 ## Project index
 
 - The compact Chats project index appears while scrolling over the full-width list, accepts direct tap/scrub only inside its visible opaque rail, and resolves jumps against committed rendered sections. Never attach an index long-press recognizer to the list. Linger dismissal must be invalidated by renewed scrolling/touch, snapshot replacement, backgrounding and detachment; search and other groupings retain their existing behavior.
@@ -38,3 +40,5 @@
 - The composer relations capsule opens a catalog-backed tree. Containment owns Tabs: keep them in their conversation’s horizontal row, with hidden scrollbars and directional overflow fades. Only precise opened-by links add depth and curved rails between conversations. Require the precise opener and its root to exist, never route through `openedByRootSessionId` alone, exclude archived and side-panel targets, and guard cycles. Scope changes clear the tree and disable old navigation.
 
 - Relation and receipt rows express containment through layout, without auxiliary Tab/current/directory labels. Mark only the current exact target with a subtle background and accessible selection. Keep status descriptions accessible, use icons instead of redundant visible status words, and preserve reply text, truncation/error notices and action labels.
+
+- Archiving from conversation More immediately returns to the list while its write outlives the page. Success is silent; failure warns only in the original active Home/account/workspace scope, fenced by logout generation. Home clears only that conversation’s detail. Unarchive retains its page and feedback.

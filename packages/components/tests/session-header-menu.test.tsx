@@ -125,6 +125,41 @@ describe('SessionHeaderMenu', () => {
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
 
+  it('disables owner candidates without machine access and keeps an accessible candidate selectable', async () => {
+    let assigned = 'a';
+    await act(async () =>
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={() => {}}
+          onRename={() => {}}
+          t={translate}
+          owner={{
+            members: [
+              { userId: 'a', name: 'Alice' },
+              { userId: 'b', name: 'Bob' },
+              { userId: 'c', name: 'Carol' },
+            ],
+            ownerUserId: 'a',
+            getDisabledReason: (id) => (id === 'b' ? 'Machine is not shared' : null),
+            onChangeOwner: (id) => {
+              assigned = id;
+            },
+          }}
+        />
+      )
+    );
+    await openMenu();
+    await act(async () => menuItem('Change owner').click());
+    const bob = menuItem('Bob');
+    expect(bob.getAttribute('aria-disabled')).toBe('true');
+    expect(bob.textContent).toContain('Machine is not shared');
+    await act(async () => bob.click());
+    expect(assigned).toBe('a');
+    await act(async () => menuItem('Carol').click());
+    expect(assigned).toBe('c');
+  });
+
   it('disables native destinations while pending but still allows copying', async () => {
     await act(async () =>
       root?.render(<ForkMenuHarness isForking forkWorktreeAvailability="available" />)
