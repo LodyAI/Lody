@@ -394,7 +394,10 @@ describe('encrypted workspace settings entry failures', () => {
       const consoleButtons = [...container.querySelectorAll('button')].filter(
         (b) => b.textContent === 'e2ee.security.openConsole'
       );
-      await act(async () => consoleButtons.at(-1)!.click());
+      // One way into the console, in the card; the status row does not repeat it.
+      expect(consoleButtons).toHaveLength(1);
+      expect(container.textContent).not.toContain('e2ee.security.identityMissing');
+      await act(async () => consoleButtons[0]!.click());
       expect(opened).toEqual([undefined]);
       // A conflict only needs another look.
       await render('e2ee_management_conflict');

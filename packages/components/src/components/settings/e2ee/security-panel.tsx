@@ -190,6 +190,9 @@ export function E2eeSecurityPanel({
 }) {
   const { t } = useTranslation();
   const error = effectiveError(state, actionError);
+  // When the failure card's one step is the console, the status row neither repeats
+  // the explanation nor offers a second console button.
+  const cardOpensConsole = !!error && errorCard(error).action === 'console' && !!onOpenConsole;
   return (
     <div {...stylex.props(styles.panel)}>
       <CompactSection title={t('e2ee.security.title')}>
@@ -199,7 +202,9 @@ export function E2eeSecurityPanel({
               {state ? <ShieldCheck size={16} /> : <ShieldQuestion size={16} />}
             </Glyph>
           }
-          label={t(state ? 'e2ee.security.current' : 'e2ee.security.identityMissing')}
+          label={t(
+            state || cardOpensConsole ? 'e2ee.security.current' : 'e2ee.security.identityMissing'
+          )}
         >
           {state && (
             <Tooltip.Root>
@@ -213,7 +218,7 @@ export function E2eeSecurityPanel({
               <Tooltip.Content side="left">{t('e2ee.security.aboutHelp')}</Tooltip.Content>
             </Tooltip.Root>
           )}
-          {onOpenConsole && (
+          {onOpenConsole && !cardOpensConsole && (
             <Button disabled={busy} onClick={() => onOpenConsole()}>
               {t('e2ee.security.openConsole')}
             </Button>
