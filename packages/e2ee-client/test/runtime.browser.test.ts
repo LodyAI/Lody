@@ -1218,12 +1218,18 @@ it.each(['chromium', 'webkit'] as const)(
  * repository asks the host to sign the declaration it writes beside the definition,
  * and the stored record verifies as this device's signature over that definition.
  */
-async function savesSignedSchedule(page: Page) {
-  const status = (await good(page, 'status')) as {
-    workspaceId: string;
-    genesisHash: string;
-    signingPublicKey: string;
-  };
+type SignedStatus = { workspaceId: string; genesisHash: string; signingPublicKey: string };
+async function savesSignedSchedule(
+  page: Page,
+  host: {
+    status: () => Promise<SignedStatus>;
+    sign: 'runtimeSignDeclaration' | 'joinerSignDeclaration';
+  } = {
+    status: async () => (await good(page, 'status')) as SignedStatus,
+    sign: 'runtimeSignDeclaration',
+  }
+) {
+  const status = await host.status();
   const docs = new Map<string, LoroDoc>();
   const rows = new Map<string, unknown>();
   const port: ScheduleRepositoryPort = {
@@ -1244,9 +1250,9 @@ async function savesSignedSchedule(page: Page) {
     protectedContent: true,
     signDeclaration: async (document, manualRunKey) => {
       const signed = await page.evaluate(
-        ({ document, manualRunKey }) =>
-          (globalThis as Surface).HostFixture.runtimeSignDeclaration(document, manualRunKey),
-        { document, manualRunKey }
+        ({ document, manualRunKey, sign }) =>
+          (globalThis as Surface).HostFixture[sign](document, manualRunKey),
+        { document, manualRunKey, sign: host.sign }
       );
       if (!signed.ok || typeof signed.value !== 'string')
         throw new Error(String('reason' in signed ? signed.reason : 'unsigned'));
@@ -1368,6 +1374,13 @@ it.each(['chromium', 'webkit'] as const)(
         deviceKind: 'personal',
         memberRole: 'member',
         membershipId: request.requestId,
+      });
+      // The joined member signs its schedule declarations as its own device.
+      const joined = (await ok('status')) as SignedStatus;
+      expect(joined.signingPublicKey).toBe(await ok('signingKey'));
+      await savesSignedSchedule(page, {
+        status: async () => joined,
+        sign: 'joinerSignDeclaration',
       });
       // Accepted once; a later claim reuses the retained approval.
       expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });

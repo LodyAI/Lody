@@ -1685,6 +1685,22 @@ export async function bootJoiner(accountId: string) {
     }).pipe(Scope.provide(scope), Effect.provideService(Clock.Clock, fixedClock))
   );
 }
+/** The joined member's schedule save through its own portable runtime. */
+export async function joinerSignDeclaration(
+  document: Parameters<NonNullable<E2eeWorkspaceRuntime['signScheduleDeclaration']>>[1],
+  manualRunKey?: string
+) {
+  try {
+    if (!joiner.signScheduleDeclaration) return { ok: false, reason: 'unsupported' };
+    return {
+      ok: true,
+      value: await joiner.signScheduleDeclaration(offer.workspaceId, document, manualRunKey),
+    };
+  } catch (error) {
+    const e = error as { code?: unknown; reason?: unknown; message?: unknown };
+    return { ok: false, reason: e.code ?? e.reason ?? e.message };
+  }
+}
 export async function joinInvoke(action: string, accountId: string) {
   try {
     let value: unknown;
@@ -1746,6 +1762,9 @@ export async function joinInvoke(action: string, accountId: string) {
         value = records.length;
         break;
       }
+      case 'status':
+        value = await joiner.status(offer.workspaceId);
+        break;
       case 'open': {
         const status = await joiner.open(offer.workspaceId, undefined, accountId);
         value = {
