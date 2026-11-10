@@ -28,6 +28,10 @@ type Runtime = Pick<
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  // The address and its send button stay on one line.
+  inviteRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  inviteField: { flexGrow: 1, minWidth: 0 },
+  approveCost: { fontSize: text.footnoteSize, color: colors.warning },
   identity: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' },
   label: { fontSize: text.subheadlineSize, color: colors.secondaryLabel },
   item: {
@@ -192,6 +196,19 @@ function TeamSession({
       }
       await refresh();
     });
+  // Approval adds a paid seat: say so beside the approve button, not only at the top.
+  const seat = data?.seatPreview;
+  const approvalCost =
+    seat?.status === 'billed'
+      ? seat.proratedAmount === null
+        ? t('e2ee.team.approveCostUnknown')
+        : t('e2ee.team.approveCost', {
+            amount: new Intl.NumberFormat(toIntlLocaleOrEn(i18n?.language), {
+              style: 'currency',
+              currency: seat.currency ?? 'usd',
+            }).format(seat.proratedAmount / 100),
+          })
+      : null;
   return (
     <Card.Root data-testid="e2ee-team-settings">
       <Card.Header>
@@ -201,21 +218,23 @@ function TeamSession({
       <div {...stylex.props(styles.stack)}>
         {message && <p role="status">{message}</p>}
         <form
-          {...stylex.props(styles.row)}
+          {...stylex.props(styles.inviteRow)}
           onSubmit={(event) => {
             event.preventDefault();
             void create('email');
           }}
         >
-          <Input
-            type="email"
-            required
-            aria-label={t('e2ee.team.email')}
-            placeholder={t('e2ee.team.email')}
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            disabled={busy}
-          />
+          <div {...stylex.props(styles.inviteField)}>
+            <Input
+              type="email"
+              required
+              aria-label={t('e2ee.team.email')}
+              placeholder={t('e2ee.team.email')}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              disabled={busy}
+            />
+          </div>
           <Button
             variant={isSeatAdmissionReady(data?.seatPreview) ? 'primary' : 'secondary'}
             data-testid="e2ee-invite-email"
@@ -295,6 +314,11 @@ function TeamSession({
                 {deviceFingerprint(request.signingPublicKey)}
               </code>
             </span>
+            {request.state === 'pending' && approvalCost && (
+              <span data-testid="e2ee-join-approve-cost" {...stylex.props(styles.approveCost)}>
+                {approvalCost}
+              </span>
+            )}
             <div {...stylex.props(styles.row)}>
               <Button
                 data-testid="e2ee-join-approve"

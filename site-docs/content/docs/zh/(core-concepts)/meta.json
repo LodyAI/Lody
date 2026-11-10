@@ -1,4 +1,12 @@
 {
   "title": "核心概念",
-  "pages": ["concepts", "session", "session-tabs", "local-project", "github", "worktrees"]
+  "pages": [
+    "concepts",
+    "session",
+    "session-tabs",
+    "local-project",
+    "github",
+    "worktrees",
+    "encrypted-workspaces"
+  ]
 }

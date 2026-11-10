@@ -8,6 +8,7 @@ import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { openExternalUrl } from '@/lib/native-browser';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, ScanLine, X } from 'lucide-react';
 import type { VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
@@ -58,6 +59,16 @@ const styles = stylex.create({
     userSelect: 'all',
   },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
+  lead: { margin: 0, color: colors.secondaryLabel, fontSize: type.footnoteSize, maxWidth: 420 },
+  learnMore: {
+    padding: 0,
+    borderWidth: 0,
+    background: 'none',
+    font: 'inherit',
+    color: colors.accent,
+    textDecoration: 'underline',
+    cursor: 'pointer',
+  },
   footnote: { color: colors.tertiaryLabel, fontSize: type.footnoteSize },
   dialogBody: { display: 'flex', flexDirection: 'column', gap: space[4] },
   sides: {
@@ -379,9 +390,17 @@ function VerifyDialog(props: {
   );
 }
 
+/** Public docs section that explains how the security code works. */
+export function securityCodeDocsUrl(language: string | undefined): string {
+  const path = language?.toLowerCase().startsWith('zh')
+    ? '/zh/docs/encrypted-workspaces'
+    : '/docs/encrypted-workspaces';
+  return `https://lody.ai${path}#security-code`;
+}
+
 /** The ledger's verification code: what members compare out of band. */
 export function LedgerVerificationCard(props: { history: VerifiedLedgerHistory }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const code = useMemo(() => ledgerVerificationCode(props.history), [props.history]);
   const groups = groupHash(code.stateDigest);
   const [copied, setCopied] = useState(false);
@@ -401,6 +420,16 @@ export function LedgerVerificationCard(props: { history: VerifiedLedgerHistory }
           <div {...stylex.props(styles.label)}>
             <span>{t('e2ee.verify.codeTitle')}</span>
           </div>
+          <p {...stylex.props(styles.lead)}>
+            {t('e2ee.verify.lead')}{' '}
+            <button
+              type="button"
+              onClick={() => void openExternalUrl(securityCodeDocsUrl(i18n?.language))}
+              {...stylex.props(styles.learnMore)}
+            >
+              {t('e2ee.verify.learnMore')}
+            </button>
+          </p>
           <div aria-label={t('e2ee.verify.codeLabel')} {...stylex.props(styles.code)}>
             {groups.map((group, index) => (
               <span key={index}>{group}</span>

@@ -259,6 +259,38 @@ describe('encrypted team joining', () => {
     );
     expect(button('e2ee.team.submit')).toBeUndefined();
   });
+  it('states the added seat cost beside approve when the workspace is billed', async () => {
+    await render(
+      <E2eeTeamSettings
+        workspaceId="team"
+        runtime={{
+          createMemberInvitation: async () => offer,
+          memberJoinRequests: async () => ({
+            ...empty,
+            items: [application('applicant', 'link')],
+            seatPreview: {
+              status: 'billed',
+              interval: 'month',
+              unitAmount: 1000,
+              proratedAmount: 973,
+              currentPeriodEnd: null,
+              seatCount: 2,
+              nextSeatCount: 3,
+              nextRenewalAmount: 3000,
+            },
+          }),
+          approveMemberJoin: async () => ({ admitted: true, keyPending: false }),
+          memberKeyDeliveries: async () => ({ items: [] }),
+          retryMemberKeyDelivery: async () => ({ requestId: 'applicant', state: 'pending' }),
+          rejectMemberJoin: async () => ({ state: 'rejected' }),
+          revokeMemberInvitation: async () => ({ revoked: true }),
+        }}
+      />
+    );
+    await settle();
+    const cost = container.querySelector('[data-testid="e2ee-join-approve-cost"]');
+    expect(cost?.textContent).toBe('e2ee.team.approveCost');
+  });
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');
     let state = 'pending';
