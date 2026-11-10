@@ -15,6 +15,13 @@ import type { E2eeRpcStore } from './e2ee-store';
 import { makeE2eeFeatureRpcClient } from './e2ee-feature-client';
 import { e2eeRpcResource, e2eeRpcResponseStream } from './e2ee-resource';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import {
+  decodeE2eeIntentRecord,
+  E2EE_INTENT_KIND,
+  E2EE_INTENT_RECORD_PATTERN,
+  encodeE2eeIntentRecord,
+  turnExecutionDigest,
+} from '@lody/shared';
 import type {
   E2eeDispatchInput,
   E2eePreparedDispatch,
@@ -33,6 +40,19 @@ const inputSchema = z.object({
 // the already signed original without regenerating its ID or ciphertext.
 const normalizeInput = (input: unknown) =>
   inputSchema.parse(JSON.parse(JSON.stringify(inputSchema.parse(input))));
+/** Signed params: the input plus its execution intent, which the doc row repeats. */
+const paramsSchema = inputSchema.extend({
+  e2eeIntent: z.string().regex(E2EE_INTENT_RECORD_PATTERN),
+});
+/** What a host signs for one input; the host adds its pinned genesis and device. */
+export type E2eeIntentSigningRequest = {
+  kind: number;
+  workspaceId: string;
+  targetMachineId: string;
+  scope: string;
+  messageId: string;
+  contentDigest: Uint8Array;
+};
 const ackSchema = z.object({
   type: z.literal('session/dispatch-turn_response'),
   sessionId: z.string(),
@@ -62,6 +82,8 @@ export function makeE2eeRpcClient(options: {
   authorizeTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
   ledger: () => Effect.Effect<LedgerView, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
+  /** This device's execution intent signature (64 bytes) over one input. */
+  signIntent: (request: E2eeIntentSigningRequest) => Effect.Effect<Uint8Array, unknown>;
 }) {
   options = Object.freeze({
     ...options,
@@ -106,11 +128,15 @@ export function makeE2eeRpcClient(options: {
       try {
         if (body.method !== 'session/dispatch-turn')
           return yield* Effect.fail(new Error('e2ee_rpc_method'));
-        const args = yield* attempt(() =>
-          inputSchema.parse(
+        const { e2eeIntent, ...args } = yield* attempt(() =>
+          paramsSchema.parse(
             JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body.params))
           )
         );
+        // The transport signer must be the intent's signer; the machine verifies the
+        // intent itself against the content it runs.
+        if (hex(decodeE2eeIntentRecord(e2eeIntent)?.signer ?? new Uint8Array()) !== opened.signer)
+          return yield* Effect.fail(new Error('e2ee_rpc_invalid'));
         const timestamp = Date.parse(args.timestamp);
         // A dispatch original has no deadline (owner decision 2026-11-10): a machine
         // that was offline for days still starts it once. Only 0 is accepted.
@@ -126,6 +152,7 @@ export function makeE2eeRpcClient(options: {
           epoch: opened.epoch,
           requestId: hex(body.requestId),
           expiresAt: body.expiresAt,
+          e2eeIntent,
         };
       } finally {
         body.params.fill(0);
@@ -197,12 +224,29 @@ export function makeE2eeRpcClient(options: {
         if (!saved) {
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
+              const digest = turnExecutionDigest({ inputConfig: args.inputConfig });
+              if (!digest) return yield* Effect.fail(new Error('e2ee_rpc_invalid'));
+              const signature = yield* options.signIntent({
+                kind: E2EE_INTENT_KIND.memberInput,
+                workspaceId: options.workspaceId,
+                targetMachineId: machineId,
+                scope: args.sessionId,
+                messageId: args.userTurnId,
+                contentDigest: yield* attempt(() => unhex(digest)),
+              });
+              const e2eeIntent = yield* attempt(() =>
+                encodeE2eeIntentRecord({
+                  kind: E2EE_INTENT_KIND.memberInput,
+                  signer: unhex(options.requesterDevice),
+                  signature,
+                })
+              );
               const body = yield* attempt(() =>
                 encodeE2eeRpcRequestBody({
                   requestId: crypto.getRandomValues(new Uint8Array(16)),
                   expiresAt: E2EE_DISPATCH_NO_DEADLINE,
                   method: 'session/dispatch-turn',
-                  params: new TextEncoder().encode(JSON.stringify(args)),
+                  params: new TextEncoder().encode(JSON.stringify({ ...args, e2eeIntent })),
                 })
               );
               yield* Effect.addFinalizer(() => Effect.sync(() => body.fill(0)));
@@ -236,6 +280,7 @@ export function makeE2eeRpcClient(options: {
           frameHex: hex(saved.frame),
           requesterDevice: checked.requesterDevice,
           expiresAt: checked.expiresAt,
+          e2eeIntent: checked.e2eeIntent,
         } satisfies E2eePreparedDispatch;
       })
     );

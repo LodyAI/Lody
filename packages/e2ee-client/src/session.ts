@@ -29,6 +29,7 @@ import {
   prepareLedgerCommand,
   signLedgerRecord,
   signLedgerSnapshot,
+  signExecutionIntent,
   type LedgerCommand,
   Bytes,
 } from '@lody/e2ee-core/protocol';
@@ -457,6 +458,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             requesterDevice: toHex(device.publicKey.toBytes()),
             originals: store,
             ledger: admitted,
+            signIntent: (request) =>
+              signExecutionIntent({
+                ...request,
+                genesis: prepared.binding.genesis,
+                signer: device,
+              }).pipe(Effect.map((signature) => signature.toBytes())),
             binding: (resource) =>
               makeRealtimeContentBinding({
                 genesis: prepared.binding.genesis,

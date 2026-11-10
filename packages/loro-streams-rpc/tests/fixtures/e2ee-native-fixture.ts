@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Effect, Result } from 'effect';
-import { Bytes } from '@lody/e2ee-core/protocol';
+import { Bytes, signExecutionIntent } from '@lody/e2ee-core/protocol';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { copyEpochKeyBytes } from '../../../e2ee-core/src/internal/foundation/epoch-key';
 import { envelopeFixture } from '../../../e2ee-core/test/keys/fixture';
@@ -62,6 +62,12 @@ export function encryptedRpcFixture(options: { guest?: boolean; teammate?: boole
       originals: new E2eeRpcOriginals(join(directory, `${filename}.sqlite`)),
       ...(authorizeTarget ? { authorizeTarget } : {}),
       ledger: ledger.ledger,
+      signIntent: (request) =>
+        signExecutionIntent({
+          ...request,
+          genesis: ledger.context.genesis,
+          signer: (who === 'teammate' ? teammate : ledger[who]).signer,
+        }).pipe(Effect.map((signature) => signature.toBytes())),
       binding: (resource) =>
         makeRealtimeContentBinding({
           genesis: ledger.context.genesis,
@@ -77,7 +83,7 @@ export function encryptedRpcFixture(options: { guest?: boolean; teammate?: boole
     userTurnId: 'synthetic-turn',
     userId: 'display-account',
     timestamp: new Date(1000).toISOString(),
-    inputConfig: { prompt: 'SYNTHETIC_PRIVATE_CANARY', cliType: 'codex' },
+    inputConfig: { prompt: 'SYNTHETIC_PRIVATE_CANARY', cliType: 'builtin', agentType: 'codex' },
   };
   const ack = {
     type: 'session/dispatch-turn_response',
