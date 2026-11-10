@@ -279,7 +279,7 @@ export function RecoveryVaultSection() {
       {mode === 'none' && (
         <Alert.Root tone="warning" data-testid="e2ee-recovery-none">
           <Alert.Title>{t('e2ee.recovery.noneTitle')}</Alert.Title>
-          <Alert.Description>{t('e2ee.recovery.lead')}</Alert.Description>
+          <Alert.Description>{t('e2ee.recovery.noneBody')}</Alert.Description>
         </Alert.Root>
       )}
       {unfinished.length > 0 && (
