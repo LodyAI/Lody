@@ -20,6 +20,16 @@ precondition(own.valueSymbol == "lock" && foreign.valueSymbol == "person.2")
 precondition(own.subtitle == "/first" && own.subtitleMono && own.image == "folder")
 let unknown = rows.first { $0.title == "Unknown" }!
 precondition(unknown.id == "unknown:m1:local:unknown" && unknown.options.isEmpty && unknown.valueSymbol == "questionmark.circle")
+// With the user's machines known, an unregistered project on an owned machine is private and
+// editable (desktop); one on another member's machine stays hidden.
+var ownedSnapshot = snapshot
+ownedSnapshot.ownedMachineIds = ["m1"]
+let ownedRows = ProjectVisibilitySections.make(ownedSnapshot, catalog: SettingsCatalog(projects: catalog.projects + [
+  SettingsProject(id: "m2:local:hidden", machineId: "m2", name: "Hidden", rootPath: "/hidden"),
+]), enabled: true).flatMap(\.rows)
+let unregistered = ownedRows.first { $0.id == "visibility:m1:unknown" }!
+precondition(unregistered.options.count == 2 && unregistered.action && unregistered.valueSymbol == "lock", "Owned unregistered projects are private")
+precondition(!ownedRows.contains { $0.title == "Hidden" || $0.id.hasPrefix("unknown:") }, "Others' unregistered projects stay hidden")
 precondition(ProjectVisibilitySections.make(snapshot, catalog: catalog, enabled: false).flatMap(\.rows).allSatisfy { !$0.action })
 precondition(VisibilityRow(machineId: "a b/é", localProjectId: "x:y", ownerUserId: "o", sharedWithTeam: true, updatedAt: 0).id
   == "visibility:a%20b%2F%C3%A9:x%3Ay", "Ids match encodeURIComponent")
