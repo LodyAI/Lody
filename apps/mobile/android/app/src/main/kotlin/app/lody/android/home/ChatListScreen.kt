@@ -157,6 +157,7 @@ data class ChatListUiState(
     val workspaces: List<Workspace>,
     val workspaceId: String?,
     val members: Map<String, WorkspaceMember> = emptyMap(),
+    val accountEmail: String = "",
 )
 
 enum class HomeTab(@StringRes val label: Int) {
@@ -188,6 +189,7 @@ fun ChatListScreen(
     schedules: app.lody.android.schedules.ScheduleService? = null,
     /** Computers, agents, models and modes for the schedule editor. */
     creation: app.lody.android.create.CreationService? = null,
+    agentProviders: AgentProviderService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
     onOpenSession: (String) -> Unit = {},
@@ -212,6 +214,8 @@ fun ChatListScreen(
     val notice = { text: String -> notices.launch { snackbar.showSnackbar(text) }; Unit }
     // Schedules: the list for this workspace and the open editor (a schedule id or [NEW_SCHEDULE]).
     val scheduleList = app.lody.android.schedules.rememberSchedulesState(schedules, scope)
+    var agentsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
         if (tab == HomeTab.Schedules) scheduleList?.refresh()
@@ -232,6 +236,11 @@ fun ChatListScreen(
     val sections = remember(state.snapshot, grouping, owner) { state.snapshot?.let { ChatListModel.home(it, grouping, owner) }.orEmpty() }
 
     BackHandler(enabled = searching) { closeSearch() }
+
+    if (agentsOpen) {
+        AgentSettingsScreen(state, agentProviders, scope, onBack = { agentsOpen = false })
+        return
+    }
 
     val editing = scheduleEditor
     if (editing != null && scheduleList != null) {
@@ -306,7 +315,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            else -> SettingsList(state, padding, onSelectWorkspace, onSignOut)
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
     }
     }
@@ -914,30 +923,6 @@ private val ProjectSource.label: Int
         ProjectSource.GitHub -> R.string.home_projects_source_github
         ProjectSource.Local -> R.string.home_projects_source_local
     }
-
-@Composable
-private fun SettingsList(state: ChatListUiState, padding: PaddingValues, onSelectWorkspace: (Workspace) -> Unit, onSignOut: () -> Unit) {
-    val colors = LodyTheme.colors
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
-        item { SectionTitle(stringResource(R.string.home_settings_account)) }
-        item {
-            SettingsRow(state.accountName.ifEmpty { "—" }, null, colors.textPrimary, onClick = null) {
-                Avatar(state.accountImage, state.accountName.ifEmpty { "?" }, LodySize.avatarMd)
-            }
-        }
-        item { SectionTitle(stringResource(R.string.home_settings_workspace)) }
-        items(state.workspaces, key = { it.id }) { workspace ->
-            SettingsRow(
-                title = workspace.name,
-                icon = if (workspace.id == state.workspaceId) LodyIcons.Check else null,
-                tint = colors.textPrimary,
-                onClick = { if (workspace.id != state.workspaceId) onSelectWorkspace(workspace) },
-            ) { Avatar(workspace.image, workspace.name, LodyIconSize.lg) }
-        }
-        item { Spacer(Modifier.height(LodySpacing.xxl)) }
-        item { SettingsRow(stringResource(R.string.home_sign_out), LodyIcons.LogOut, colors.dangerDefault, onClick = onSignOut) }
-    }
-}
 
 // MARK: - Rows
 

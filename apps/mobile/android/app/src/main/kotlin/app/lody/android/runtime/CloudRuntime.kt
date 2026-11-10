@@ -18,6 +18,11 @@ data class RuntimeScope(val accountId: String, val workspaceId: String) {
     init { require(accountId.isNotBlank() && workspaceId.isNotBlank()); require(accountId.length <= 128 && workspaceId.length <= 128) }
 }
 sealed interface RuntimeCommand {
+    data class ProviderDetail(val machineId: String, val id: String) : RuntimeCommand
+    data class ProviderProbe(val machineId: String, val id: String) : RuntimeCommand
+    data class ProviderOperation(val machineId: String, val id: String?, val action: String, val cliType: String? = null, val agentType: String? = null) : RuntimeCommand
+    data class ProviderAuth(val request: ProviderAuthRequest) : RuntimeCommand
+    data class AgentProviders(val action: ProviderAction) : RuntimeCommand
     data class SetTabClosed(val id: String, val closed: Boolean) : RuntimeCommand
     data class CreateTab(val parentId: String, val id: String, val title: String) : RuntimeCommand
     data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
@@ -55,6 +60,11 @@ sealed interface RuntimeCommand {
     data object InspectSchema : RuntimeCommand
 }
 sealed interface RuntimeResult {
+    data class ProviderDetail(val value: app.lody.android.runtime.ProviderDetail) : RuntimeResult
+    data class ProviderProbe(val value: app.lody.android.runtime.ProviderProbe) : RuntimeResult
+    data class ProviderOperation(val value: app.lody.android.runtime.ProviderOperation) : RuntimeResult
+    data class ProviderAuth(val value: ProviderAuthState) : RuntimeResult
+    data class AgentProviders(val value: app.lody.android.runtime.AgentProviders) : RuntimeResult
     data class MessageAction(val value: org.json.JSONObject) : RuntimeResult
     data class Options(val value: CreationOptions) : RuntimeResult
     data class Roles(val value: List<AgentRole>) : RuntimeResult
@@ -123,6 +133,7 @@ data class CatalogSnapshot(
     val machineNames: Map<String, String> = emptyMap(),
     /** Computer id to OS (`darwin` / `win32` / `linux`), for its icon. */
     val machineOs: Map<String, String> = emptyMap(),
+    val agentUsage: Map<String, ProviderUsage> = emptyMap(),
 )
 /**
  * One transcript turn. [timestamp] is ISO-8601; [status] is upstream's (`seen` once the agent
@@ -253,6 +264,8 @@ data class RunChoice(
 )
 data class SessionSnapshot(val id: String, val status: String, val messages: List<SessionMessage>, val composer: RunChoice? = null, val usage: SessionUsage? = null)
 sealed interface RuntimeEvent {
+    data class ProvidersChanged(val machineId: String) : RuntimeEvent
+    data class ProviderProgress(val machineId: String, val id: String, val status: String, val percent: Float?) : RuntimeEvent
     data class CreationChanged(val key: String = "") : RuntimeEvent
     data class SessionUpdated(val snapshot: SessionSnapshot) : RuntimeEvent
     data class CatalogUpdated(val snapshot: CatalogSnapshot) : RuntimeEvent

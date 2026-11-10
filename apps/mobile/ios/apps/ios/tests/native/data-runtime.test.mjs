@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
+import { runtimeCalls } from '../../../../packages/cloud-runtime/src/contract/methods.ts';
 
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
   const flock = new Flock('synthetic');
@@ -88,6 +89,7 @@ test('persistent runtime applies live increments to the existing replica and adv
     },
   };
   const bundle = await build({
+    absWorkingDir: new URL('../../../../', import.meta.url).pathname,
     entryPoints: ['packages/cloud-runtime/src/runtime/index.ts'],
     bundle: true,
     format: 'esm',
@@ -97,6 +99,13 @@ test('persistent runtime applies live increments to the existing replica and adv
       {
         name: 'synthetic-stream',
         setup(build) {
+          // Match the production runtime's inline-WASM resolution for loro-mirror.
+          build.onResolve({ filter: /^loro-crdt$/ }, () =>
+            build.resolve('loro-crdt/base64', {
+              resolveDir: new URL('../../../../', import.meta.url).pathname,
+              kind: 'import-statement',
+            }),
+          );
           build.onResolve(
             { filter: /^@loro-dev\/streams-crdt\/loro$/ },
             () => ({ path: 'presence', namespace: 'presence-test' }),
@@ -160,70 +169,22 @@ test('persistent runtime applies live increments to the existing replica and adv
   await import(
     `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
   );
-  globalThis.dataRuntime.receive(
-    JSON.stringify({
+  const hello = await call('hello', { protocol: 1, gen: 1 });
+  assert.deepEqual(envelopes.shift(), hello);
+  assert.deepEqual(
+    {
+      ...hello,
+      payload: { ...hello.payload, methods: [...hello.payload.methods].sort() },
+    },
+    {
       v: 1,
       gen: 1,
-      kind: 'request',
-      id: 'hello',
+      kind: 'result',
+      id: 'call-1',
       method: 'hello',
-      payload: { protocol: 1, gen: 1 },
-    }),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(envelopes.shift(), {
-    v: 1,
-    gen: 1,
-    kind: 'result',
-    id: 'hello',
-    method: 'hello',
-    payload: {
-      protocol: 1,
-      methods: [
-        'hello',
-        'ensureSession',
-        'start',
-        'setActive',
-        'ping',
-        'openSession',
-        'closeSession',
-        'releaseReserve',
-        'restoreSessions',
-        'publishedShares',
-        'promptShortcuts',
-        'remoteSettings',
-        'agentRoles',
-        'mentionCatalog',
-        'creationOptions',
-        'projectGroups',
-        'localProjects',
-        'sessionSharing',
-        'sessionPreview',
-        'iosSimulatorControl',
-        'itemDetail',
-        'turnDiff',
-        'workspaceChanges',
-        'fileDiff',
-        'readFile',
-        'listDir',
-        'forkSession',
-        'createTab',
-        'createSession',
-        'deleteSession',
-        'archiveSession',
-        'setTabClosed',
-        'pinSession',
-        'markSessionRead',
-        'renameSession',
-        'respondPermission',
-        'controlTurn',
-        'checkTurnQuota',
-        'editSession',
-        'sendTurn',
-        'probeSchema',
-      ],
+      payload: { protocol: 1, methods: Object.keys(runtimeCalls).sort() },
     },
-  });
+  );
   const turn = {
     sessionId: 's1',
     machineId: 'm1',
@@ -452,4 +413,305 @@ test('persistent runtime applies live increments to the existing replica and adv
   delete globalThis.webkit;
   delete globalThis.__runtimeTestClient;
   delete globalThis.dataRuntime;
+});
+
+// Exercise the production contract channel and handlers. Only remote provider
+// work is replaced: explicit promises model a daemon cancellation still pending.
+async function providerHandlerFixture(t) {
+  const bundle = await build({
+    stdin: {
+      contents: `
+        export {createChannel} from './packages/cloud-runtime/src/runtime/channel.ts';
+        export {registerSettings} from './packages/cloud-runtime/src/runtime/handlers/settings.ts';
+        export {registerLifecycle} from './packages/cloud-runtime/src/runtime/handlers/lifecycle.ts';
+      `,
+      resolveDir: new URL('../../../../', import.meta.url).pathname,
+      loader: 'ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    plugins: [
+      {
+        name: 'provider-boundary',
+        setup(build) {
+          build.onResolve({ filter: /^loro-crdt$/ }, () =>
+            build.resolve('loro-crdt/base64', {
+              resolveDir: new URL('../../../../', import.meta.url).pathname,
+              kind: 'import-statement',
+            }),
+          );
+          build.onResolve({ filter: /\/provider-rpc$/ }, () => ({
+            path: 'provider-rpc',
+            namespace: 'provider-boundary',
+          }));
+          build.onLoad(
+            { filter: /.*/, namespace: 'provider-boundary' },
+            () => ({
+              contents:
+                'export const createProviderRpc = options => globalThis.__providerBoundaryFactory(options);',
+            }),
+          );
+        },
+      },
+    ],
+  });
+  const { createChannel, registerSettings, registerLifecycle } = await import(
+    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+  );
+  const state = {
+    workspace: 'workspace-a',
+    userId: 'user-a',
+    metaReplica: { flock: new Flock('synthetic-old') },
+    presence: { state: 'live', onlineMachineIds: ['machine'] },
+    knownProjects: [],
+    machineReplicas: new Map(),
+    catalogs: new Map(),
+    unhealthy: new Set(),
+  };
+  const events = [],
+    replies = new Map(),
+    services = [],
+    transitions = [];
+  let sequence = 0,
+    cleanup;
+  const channel = createChannel((text) => {
+    const message = JSON.parse(text);
+    if (message.kind === 'event') events.push(message);
+    else {
+      replies.get(message.id)?.(message);
+      replies.delete(message.id);
+    }
+  });
+  const ctx = {
+    channel,
+    state,
+    getGrant: async () => ({
+      token: 'synthetic',
+      gatewayBaseUrl: 'https://example.invalid',
+      expiresIn: 3600,
+    }),
+    watch: () => {
+      transitions.push([state.workspace, state.userId]);
+      state.metaReplica = { flock: new Flock('synthetic-new') };
+    },
+    startPresence() {},
+    stopPresence() {},
+    publish() {},
+    publishSubscriptions() {},
+    emitSession() {},
+    markDispatch: async () => {},
+    broker: async () => {
+      throw new Error('unexpected_broker');
+    },
+  };
+  globalThis.__providerBoundaryFactory = (options) => {
+    let disposed = false;
+    const flows = new Set();
+    const usable = () => {
+      options.check();
+      if (disposed) throw new Error('provider_disposed');
+    };
+    const service = {
+      check: options.check,
+      operation: async (args) => {
+        usable();
+        return {
+          action: args.action,
+          success: true,
+          status: 'installed',
+          version: `${state.workspace}/${state.userId}`,
+        };
+      },
+      auth: async (args) => {
+        usable();
+        if (args.action === 'start') flows.add(args.flowId);
+        if (!flows.has(args.flowId))
+          throw new Error('provider_auth_flow_unknown');
+        return {
+          flowId: args.flowId,
+          status: 'verifying',
+          methods: [],
+          fields: [],
+          acceptsAuthorizationCode: false,
+          requiresAuthorizationConsent: false,
+        };
+      },
+      dispose: async () => {
+        disposed = true;
+        if (!cleanup) return { unconfirmedFlowIds: [] };
+        const pending = cleanup;
+        cleanup = undefined;
+        pending.entered.resolve([state.workspace, state.userId]);
+        return pending.result.promise;
+      },
+    };
+    services.push(service);
+    return service;
+  };
+  t.after(() => {
+    delete globalThis.__providerBoundaryFactory;
+  });
+  registerSettings(ctx);
+  registerLifecycle(ctx);
+  const call = (method, payload) => {
+    const id = `provider-boundary-${++sequence}`;
+    const result = new Promise((resolve) => replies.set(id, resolve));
+    channel.receive(
+      JSON.stringify({ v: 1, gen: 0, kind: 'request', id, method, payload }),
+    );
+    return result;
+  };
+  const blockCleanup = () => {
+    cleanup = {
+      entered: Promise.withResolvers(),
+      result: Promise.withResolvers(),
+    };
+    return cleanup;
+  };
+  return { state, call, events, services, transitions, blockCleanup };
+}
+
+const providerScope = {
+  workspaceId: 'workspace-a',
+  userId: 'user-a',
+  machineId: 'machine',
+  id: 'codex',
+};
+
+test('provider handler recovers after same-scope Meta Flock replacement and fences the old flow', async (t) => {
+  const f = await providerHandlerFixture(t),
+    flowId = crypto.randomUUID();
+  const auth = { ...providerScope, flowId, action: 'start' };
+  assert.equal(
+    (await f.call('agentProviderAuth', auth)).payload.status,
+    'verifying',
+  );
+  const old = f.services[0];
+  // Replacing only the replica wrapper must not invalidate its Flock identity.
+  f.state.metaReplica = { ...f.state.metaReplica };
+  assert.equal(
+    (await f.call('agentProviderAuth', { ...auth, action: 'status' })).payload
+      .status,
+    'verifying',
+  );
+  f.state.metaReplica = { flock: new Flock('synthetic-recovered') };
+  assert.throws(old.check, /workspace_changed/);
+  const pending = f.blockCleanup();
+  const operation = f.call('agentProviderOperation', {
+    ...providerScope,
+    action: 'binary-status',
+  });
+  assert.deepEqual(await pending.entered.promise, ['workspace-a', 'user-a']);
+  pending.result.resolve({ unconfirmedFlowIds: [flowId] });
+  assert.deepEqual((await operation).payload, {
+    action: 'binary-status',
+    success: true,
+    status: 'installed',
+    version: 'workspace-a/user-a',
+  });
+  assert.equal(
+    (await f.call('agentProviderAuth', { ...auth, action: 'status' })).error
+      .code,
+    'provider_auth_flow_unknown',
+  );
+  const errors = f.events
+    .filter((e) => e.method === 'agentProviderAuthChanged')
+    .map((e) => e.payload);
+  assert.deepEqual(errors, [
+    {
+      flowId,
+      status: 'error',
+      errorCode: 'provider_auth_cancel_unknown',
+      methods: [],
+      fields: [],
+      acceptsAuthorizationCode: false,
+      requiresAuthorizationConsent: false,
+    },
+  ]);
+  assert.equal(
+    (
+      await f.call('agentProviderAuth', {
+        ...auth,
+        flowId: crypto.randomUUID(),
+      })
+    ).payload.status,
+    'verifying',
+  );
+});
+
+test('overlapping starts preserve the old scope until provider cleanup completes and only latest scope becomes usable', async (t) => {
+  const f = await providerHandlerFixture(t);
+  assert.equal(
+    (
+      await f.call('agentProviderOperation', {
+        ...providerScope,
+        action: 'binary-status',
+      })
+    ).payload.success,
+    true,
+  );
+  const pending = f.blockCleanup();
+  const first = f.call('start', {
+    workspaceId: 'workspace-b',
+    userId: 'user-b',
+    active: false,
+  });
+  assert.deepEqual(await pending.entered.promise, ['workspace-a', 'user-a']);
+  assert.deepEqual(
+    [f.state.workspace, f.state.userId],
+    ['workspace-a', 'user-a'],
+  );
+  assert.equal(
+    (
+      await f.call('agentProviderOperation', {
+        ...providerScope,
+        workspaceId: 'workspace-b',
+        userId: 'user-b',
+        action: 'binary-status',
+      })
+    ).error.code,
+    'workspace_changed',
+  );
+  const latest = f.call('start', {
+    workspaceId: 'workspace-c',
+    userId: 'user-c',
+    active: false,
+  });
+  // receive invokes each handler synchronously up to its first await, so both
+  // starts are now waiting on the same explicitly controlled cleanup promise.
+  assert.deepEqual(
+    [f.state.workspace, f.state.userId],
+    ['workspace-a', 'user-a'],
+  );
+  pending.result.resolve({ unconfirmedFlowIds: [] });
+  assert.equal((await first).kind, 'result');
+  assert.equal((await latest).kind, 'result');
+  assert.deepEqual(f.transitions, [['workspace-c', 'user-c']]);
+  assert.deepEqual(
+    (
+      await f.call('agentProviderOperation', {
+        ...providerScope,
+        workspaceId: 'workspace-c',
+        userId: 'user-c',
+        action: 'binary-status',
+      })
+    ).payload,
+    {
+      action: 'binary-status',
+      success: true,
+      status: 'installed',
+      version: 'workspace-c/user-c',
+    },
+  );
+  assert.equal(
+    (
+      await f.call('agentProviderOperation', {
+        ...providerScope,
+        action: 'binary-status',
+      })
+    ).error.code,
+    'workspace_changed',
+  );
 });

@@ -16,7 +16,7 @@ def open_general():
     tap_label(settings)
     row = ui.element('workspace-general')
     assert row['frame']['height'] >= 44
-    assert row['frame']['y'] < ui.element('remote-machine')['frame']['y']
+    assert row['frame']['y'] < ui.element('remote-agent')['frame']['y']
     ui.capture('settings-general-entry')
     ui.axe('tap', '--id', 'workspace-general', '--post-delay', '.6')
     return ui.element('workspace-name')

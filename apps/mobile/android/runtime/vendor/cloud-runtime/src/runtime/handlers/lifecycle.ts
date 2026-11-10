@@ -22,16 +22,24 @@ export function registerLifecycle(ctx: RuntimeContext) {
     await result;
     return {};
   });
-  channel.handle('start', ({ workspaceId, userId, active, knownRepos }) => {
-    state.workspace = workspaceId;
-    state.userId = userId;
-    state.knownProjects = Object.entries(knownRepos ?? {}).map(
-      ([id, repoFullName]) => ({ id, repoFullName }),
-    );
-    ctx.watch('meta');
-    if (active) ctx.startPresence();
-    return {};
-  });
+  let scopeStartVersion = 0;
+  channel.handle(
+    'start',
+    async ({ workspaceId, userId, active, knownRepos }) => {
+      const version = ++scopeStartVersion;
+      if (workspaceId !== state.workspace || userId !== state.userId)
+        await ctx.disposeProviderOperations?.();
+      if (version !== scopeStartVersion) return {};
+      state.workspace = workspaceId;
+      state.userId = userId;
+      state.knownProjects = Object.entries(knownRepos ?? {}).map(
+        ([id, repoFullName]) => ({ id, repoFullName }),
+      );
+      ctx.watch('meta');
+      if (active) ctx.startPresence();
+      return {};
+    },
+  );
   channel.handle('setActive', ({ active }) => {
     if (!state.workspace) return {};
     if (active) {

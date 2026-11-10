@@ -58,7 +58,7 @@ class AccountControllerTest {
    val logout=controller.logout();runCurrent();entered.await()
    val intermediate=controller.cancel()
    if(startIntermediate) runCurrent()
-   val successor=controller.login()
+   val successor=controller.login("successor@example.test", "fixture-password")
    // Let a broken successor overtake the suspended logout, including Device Flow polling.
    runCurrent();advanceTimeBy(1001);runCurrent()
    release.complete(Unit)

@@ -70,3 +70,27 @@ def assert_section_gap(ui, last_id, next_id, limit=56):
 
 def section_gap(last, following):
     return following['y'] - (last['y'] + last['height'])
+
+
+def assert_chat_rows(ui, name, upper_id, lower_id):
+    """Settings home uses Chats metrics; inner Settings retain assert_flat."""
+    ui.capture(name)
+    window = ui.state()[0]['frame']
+    upper, lower = ui.element(upper_id)['frame'], ui.element(lower_id)['frame']
+    assert abs(lower['y'] - upper['y'] - upper['height']) < 1, 'Expected adjacent Settings home rows'
+    for frame in (upper, lower):
+        assert abs(frame['x'] - window['x']) < 1 and abs(frame['width'] - window['width']) < 1
+        assert frame['height'] >= 44
+    width, _, data = _pixels(ui.output / f'{name}.png')
+    scale = width / window['width']
+    seam = round((upper['y'] + upper['height']) * scale)
+    ground = data[round((upper['y'] + upper['height'] / 2) * scale) * width + round(8 * scale)]
+    for frame in (upper, lower):
+        card = data[round((frame['y'] + frame['height'] / 2) * scale) * width + round(220 * scale)]
+        assert abs(card - ground) < 3, f'{name}: Settings home rows must sit on the ground without a card'
+    for x in (8, 30, 110, 220, window['width'] - 8):
+        assert all(abs(data[(seam + dy) * width + round(x * scale)] - ground) < 3 for dy in range(-3, 4)), \
+            f'{name}: Settings home must have no card or separator at x={x}'
+    icon, text = ink_runs(data, width, scale, upper, ground)[:2]
+    assert abs((icon[0] + icon[1]) / 2 - 30) <= 2, f'{name}: Chats icon rail moved: {icon}'
+    assert 51 <= text[0] <= 55, f'{name}: Chats text column moved: {text}'

@@ -1,0 +1,262 @@
+[
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-0",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "list"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-1",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "save",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "base": null,
+      "fields": {
+        "name": "Codex",
+        "prompt": "",
+        "cliType": "builtin",
+        "agentType": "codex",
+        "command": "",
+        "args": []
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-2",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "save",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "base": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "machineId": "machine-1",
+        "readOnly": false,
+        "name": "Codex",
+        "prompt": "",
+        "cliType": "builtin",
+        "agentType": "codex",
+        "command": "",
+        "args": []
+      },
+      "fields": {
+        "name": "Codex",
+        "prompt": "",
+        "cliType": "builtin",
+        "agentType": "codex",
+        "command": "",
+        "args": []
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-3",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "delete",
+      "base": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "machineId": "machine-1",
+        "readOnly": false,
+        "name": "Codex",
+        "prompt": "",
+        "cliType": "builtin",
+        "agentType": "codex",
+        "command": "",
+        "args": []
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-4",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "refresh",
+      "base": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "machineId": "machine-1",
+        "readOnly": false,
+        "name": "Codex",
+        "prompt": "",
+        "cliType": "builtin",
+        "agentType": "codex",
+        "command": "",
+        "args": []
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-5",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "retrySetup",
+      "setup": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "machineId": "machine-1",
+        "name": "Codex",
+        "agentType": "codex",
+        "status": "failed",
+        "attempt": 1,
+        "canRetry": true,
+        "canDelete": true,
+        "failureCode": "verification-failed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "provider-6",
+    "method": "agentProviders",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "action": "deleteSetup",
+      "setup": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "machineId": "machine-1",
+        "name": "Codex",
+        "agentType": "codex",
+        "status": "failed",
+        "attempt": 1,
+        "canRetry": true,
+        "canDelete": true,
+        "failureCode": "verification-failed"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-detail",
+    "method": "agentProviderDetail",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-probe",
+    "method": "agentProviderProbe",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-auth",
+    "method": "agentProviderAuth",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "action": "start",
+      "flowId": "20000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-consent",
+    "method": "agentProviderAuth",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "action": "submit",
+      "flowId": "20000000-0000-4000-8000-000000000001",
+      "interactionId": "synthetic-interaction",
+      "responseAction": "accept"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-binary",
+    "method": "agentProviderOperation",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "action": "binary-status"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-draft-pi",
+    "method": "agentProviderOperation",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "action": "pi-extension-scan"
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "advanced-draft-binary",
+    "method": "agentProviderOperation",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "userId": "user-1",
+      "machineId": "machine-1",
+      "action": "binary-install",
+      "cliType": "builtin",
+      "agentType": "codex"
+    }
+  }
+]

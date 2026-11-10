@@ -191,6 +191,7 @@ class HomeActivity : ComponentActivity() {
                                 onNewChat = { creating = true },
                                 schedules = app.schedules,
                                 creation = creator,
+                                agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )
@@ -228,6 +229,7 @@ private fun uiState(auth: AuthState, catalog: CatalogState): ChatListUiState {
         accountImage = user?.image,
         sync = sync,
         accountName = user?.name.orEmpty(),
+        accountEmail = user?.email.orEmpty(),
         timeline = snapshot?.let { ChatListModel.timeline(it) }.orEmpty(),
         snapshot = snapshot,
         userId = user?.id,

@@ -17,7 +17,7 @@ export function createReadAccess(fetch, emit=()=>{}) {
   const read=['GET','HEAD'].includes(request.method);
   if(parts.length===2 && !read)return false;
   if(stream===config.workspace+':meta')return read || request.method==='POST';
-  if(new RegExp('^'+config.workspace+':mf:[a-zA-Z0-9_-]{1,128}$').test(stream))return read;
+  if(new RegExp('^'+config.workspace+':mf:[a-zA-Z0-9_-]{1,128}$').test(stream))return read || request.method==='POST';
   // Schedules: the Flock registry and one schedule's Loro doc are each created, read and appended.
   if(stream===config.workspace+':sr')return true;
   if(new RegExp('^'+config.workspace+':schedule:[a-zA-Z0-9_-]{1,128}$').test(stream))return true;

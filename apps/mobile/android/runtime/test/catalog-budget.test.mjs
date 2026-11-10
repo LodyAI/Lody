@@ -27,7 +27,7 @@ async function runWatcher(snapshotBytes, updateBytes=0, liveBytes=0) {
     return {ok:true,result:{nextOffset:'2',upToDate:true}};
    }
   },
-  apply(){},decompress:bytes=>bytes,projectRows:()=>({projects:[],sessions:[]}),
+  apply(){},providerRows:()=>({providers:[],setups:[]}),decompress:bytes=>bytes,projectRows:()=>({projects:[],sessions:[]}),
   publish(){events.push({type:'published'});},send:event=>{events.push(event);if(event.type==='syncError')finish();},
   channel:{emit(type,payload){events.push({type,...payload});if(type==='syncError')finish();}},
   delay:async()=>{},grant:{},
