@@ -1853,11 +1853,14 @@ describe('LoroStreamsMachineRpcServer', () => {
       const machineId = 'machine-1' as MachineId;
       const fake = createFakeStreamClient();
       const appendedAtHook: unknown[] = [];
-      const settled = Promise.withResolvers<void>();
+      let resolveSettled!: () => void;
+      const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve;
+      });
       let restoredIdentity: string | undefined;
       const onMachineLifecycleResponseSettled = () => {
         appendedAtHook.push(...fake.appended.map((entry) => entry.value));
-        settled.resolve();
+        resolveSettled();
       };
       const restartMachine = async (request: { restoreMachineId?: string }) => {
         restoredIdentity = request.restoreMachineId;
@@ -1910,7 +1913,7 @@ describe('LoroStreamsMachineRpcServer', () => {
 
       await server.start();
 
-      await settled.promise;
+      await settled;
       expect(restoredIdentity).toBe(restoreMachineId);
       expect(appendedAtHook).toEqual([
         expect.objectContaining({
