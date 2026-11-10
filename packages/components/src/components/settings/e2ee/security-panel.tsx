@@ -206,6 +206,13 @@ export function E2eeSecurityPanel({
             state || cardOpensConsole ? 'e2ee.security.current' : 'e2ee.security.identityMissing'
           )}
         >
+          {/* The primary step leads, so a wrapped row on a phone never strands the
+              help icon in the glyph column. */}
+          {onOpenConsole && !cardOpensConsole && (
+            <Button disabled={busy} onClick={() => onOpenConsole()}>
+              {t('e2ee.security.openConsole')}
+            </Button>
+          )}
           {state && (
             <Tooltip.Root>
               <Tooltip.Trigger
@@ -217,11 +224,6 @@ export function E2eeSecurityPanel({
               />
               <Tooltip.Content side="left">{t('e2ee.security.aboutHelp')}</Tooltip.Content>
             </Tooltip.Root>
-          )}
-          {onOpenConsole && !cardOpensConsole && (
-            <Button disabled={busy} onClick={() => onOpenConsole()}>
-              {t('e2ee.security.openConsole')}
-            </Button>
           )}
         </CompactRow>
         <E2eeAttentionRows
