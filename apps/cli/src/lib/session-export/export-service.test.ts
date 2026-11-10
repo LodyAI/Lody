@@ -27,6 +27,8 @@ it('writes decrypted sessions and encrypted Schedule definitions to the local ex
   await repo.upsertDocMeta('session-synthetic', session);
   const repository = new ScheduleRepository(repo, 'protected' as WorkspaceId, {
     protectedContent: true,
+    // Export never verifies declarations; a well-formed placeholder record suffices.
+    signDeclaration: async () => 'A'.repeat(131),
   });
   await repository.save({
     scheduleId: 'synthetic-schedule',

@@ -146,6 +146,13 @@ let offer: PersonalPairingOffer,
   foreign = false;
 let databasePrefix = 'personal';
 const FIXED_NOW = 1_800_000_000_000;
+/** A complete composer input: members sign only inputs whose agent is chosen. */
+const syntheticComposerInput = (text: string) => ({
+  prompt: text,
+  inputBlocks: [{ type: 'text', text }],
+  cliType: 'builtin',
+  agentType: 'codex',
+});
 let fixedClock: Clock.Clock;
 let graceElapsed = 0;
 let controlledClock:
@@ -1305,7 +1312,9 @@ export async function invoke(action: string) {
               userTurnId: 'synthetic-turn',
               userId: 'synthetic-user',
               timestamp: new Date(FIXED_NOW).toISOString(),
-              inputConfig: action === 'rpcChanged' ? { changed: true } : {},
+              // `rpcChanged` names no agent, so it is not a member's input and is never signed.
+              inputConfig:
+                action === 'rpcChanged' ? { changed: true } : syntheticComposerInput('synthetic'),
             });
           case 'candidate':
             return yield* host.prepare({ ...offer, pairingSessionId: '22'.repeat(16) }, true);
@@ -1621,6 +1630,27 @@ const runtimeContext = {
 } as const;
 let heldApproval: Awaited<ReturnType<NonNullable<typeof runtime.accountApproval>>> | undefined;
 let approvalReleaseResult: Promise<{ state: string; code?: string }> | undefined;
+/**
+ * The shared UI's schedule save through this real portable runtime: the content bridge
+ * hands the host the document, and the host signs its declaration. Absent support is a
+ * result, so the caller sees why a save cannot be signed.
+ */
+export async function runtimeSignDeclaration(
+  document: Parameters<NonNullable<E2eeWorkspaceRuntime['signScheduleDeclaration']>>[1],
+  manualRunKey?: string
+) {
+  try {
+    if (!runtime.signScheduleDeclaration) return { ok: false, reason: 'unsupported' };
+    return {
+      ok: true,
+      value: await runtime.signScheduleDeclaration(offer.workspaceId, document, manualRunKey),
+    };
+  } catch (error) {
+    const e = error as { code?: unknown; reason?: unknown; message?: unknown };
+    return { ok: false, reason: e.code ?? e.reason ?? e.message };
+  }
+}
+
 /** A teammate's portable runtime joining from a link invitation the genesis owner
  * endorsed. Call after `boot` with this account as the device account. */
 let joiner: E2eeWorkspaceRuntime;
@@ -1654,6 +1684,22 @@ export async function bootJoiner(accountId: string) {
         Effect.runPromise(program.pipe(Effect.provideService(Clock.Clock, fixedClock))),
     }).pipe(Scope.provide(scope), Effect.provideService(Clock.Clock, fixedClock))
   );
+}
+/** The joined member's schedule save through its own portable runtime. */
+export async function joinerSignDeclaration(
+  document: Parameters<NonNullable<E2eeWorkspaceRuntime['signScheduleDeclaration']>>[1],
+  manualRunKey?: string
+) {
+  try {
+    if (!joiner.signScheduleDeclaration) return { ok: false, reason: 'unsupported' };
+    return {
+      ok: true,
+      value: await joiner.signScheduleDeclaration(offer.workspaceId, document, manualRunKey),
+    };
+  } catch (error) {
+    const e = error as { code?: unknown; reason?: unknown; message?: unknown };
+    return { ok: false, reason: e.code ?? e.reason ?? e.message };
+  }
 }
 export async function joinInvoke(action: string, accountId: string) {
   try {
@@ -1716,6 +1762,9 @@ export async function joinInvoke(action: string, accountId: string) {
         value = records.length;
         break;
       }
+      case 'status':
+        value = await joiner.status(offer.workspaceId);
+        break;
       case 'open': {
         const status = await joiner.open(offer.workspaceId, undefined, accountId);
         value = {
@@ -2029,7 +2078,7 @@ export async function runtimeInvoke(action: string) {
           userTurnId: 'runtime-turn',
           userId: 'synthetic-user',
           timestamp: new Date(FIXED_NOW).toISOString(),
-          inputConfig: {},
+          inputConfig: syntheticComposerInput('synthetic'),
         });
         break;
       case 'startOpen':

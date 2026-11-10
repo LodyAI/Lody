@@ -27,7 +27,8 @@
   signer and machine against that ledger; a later ingest fails `isCurrent()`.
   Claims record the principal; history `userId` is display data. A shared member's
   derivation is written with signed `derivedFrom`, same-machine only, and starts with
-  that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)). Origins use signed history.
+  that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)). Origins are signed execution intents
+  stored with their content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup must fail closed.
 - The iroh listener (`iroh-listener.ts`) runs beside the Streams listener with its own receivers,
@@ -38,13 +39,14 @@
   Retire readable current keys before intact archive; unreadable keys refuse reset.
   No auto-replace/GC/archive replay/import. Exact originals/first outcome;
   uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
-  Before writes reject local >10min ahead of authenticated now, never frame
-  time; no reference: scoped max/reset. Reset: stop owners, archive/new ID;
+  Feature writes reject local >10min ahead of authenticated now, never frame
+  time; no reference: scoped max/reset. Execution records (`expiresAt` 0) skip that clock. Reset: stop owners, archive/new ID;
   keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
   failed main close. Bound permits/cleanup; reply before send; exact retries.
   `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host
   authority. UI accounts are display-only. No capability: deny.
-  Missing origin: backfill/retry pending to original expiry. No snapshot-author
+  Unreadable ledger: pending, rechecked on events. Missing or invalid intents refuse with
+  their reason; no time window. No snapshot-author
   substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
@@ -98,14 +100,14 @@
   before custody init; stale hints never probe keyrings. Other errors retain Fleet
   retry; never cache transient I/O as missing pairing.
 - Ingest failure fences new seals until verified refresh; keep the last verified view
-  and healthy readers. Retry at most three times per failure episode; explicit refresh
-  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  and healthy readers. Retries double up to five minutes and never stop while open;
+  explicit refresh restarts the backoff. Seal may request retry but never await it in the SDK save queue.
   Never skip rejected records or reset pins. Close cancels pending retry timers.
 - An encrypted workspace keeps one bounded background authority check: credential
   plus verified-ledger refresh, joined to the existing single-flight owner. Exact
   member/device refusal stops that owner through the durable receipt; a generic failure
   keeps the last verified view. Inbound machine-control frames request it; transient
-  history retries 1/5/30 s without fencing seals. Never depend on token expiry, and
+  history retries double from 1 s to 5 min without fencing seals. Never depend on token expiry, and
   keep the read-only client-loss probe from triggering I/O.
 
 ## Local machine pairing

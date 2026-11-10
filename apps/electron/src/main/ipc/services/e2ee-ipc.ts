@@ -2766,6 +2766,25 @@ export class E2eeIpc extends IpcService {
       )
     )
   }
+  /** Sign a schedule declaration this window is writing; the host derives the digest. */
+  @IpcMethod()
+  async signScheduleDeclaration(
+    workspaceId: string,
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ) {
+    const id = sender()
+    return observeClientLossOperation('seal', workspaceId, id, () =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.signScheduleDeclaration(workspaceId, document, manualRunKey)
+            : refuseUnopened(owner, workspaceId),
+        workspaceId,
+        false
+      )
+    )
+  }
   @IpcMethod()
   async openContent(
     workspaceId: string,

@@ -242,6 +242,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
           call(raw.acknowledgeRotation(...args)),
         prepareDispatch: (...args: Parameters<RawSession['prepareDispatch']>) =>
           call(raw.prepareDispatch(...args)),
+        signScheduleDeclaration: (...args: Parameters<RawSession['signScheduleDeclaration']>) =>
+          call(raw.signScheduleDeclaration(...args)),
         acceptResponse: (...args: Parameters<RawSession['acceptResponse']>) =>
           call(raw.acceptResponse(...args)),
         prepareFeature: (...args: Parameters<RawSession['prepareFeature']>) =>

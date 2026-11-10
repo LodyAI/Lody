@@ -44,6 +44,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "esbuild": "0.28.2",
+    "loro-crdt": "catalog:",
     "@playwright/test": "1.58.2"
   }
 }

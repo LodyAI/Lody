@@ -3,13 +3,13 @@
   "files": {
     ".agents/notes/AGENTS.md": 1400,
     "apps/cli/src/lib/AGENTS.md": 1340,
-    "apps/cli/src/lib/e2ee/AGENTS.md": 1280,
+    "apps/cli/src/lib/e2ee/AGENTS.md": 1320,
     "packages/components/src/providers/AGENTS.md": 1250,
     "packages/ui/AGENTS.md": 1380,
     "apps/mobile/ios/AGENTS.md": 7100,
     "apps/mobile/ios/packages/LodyKit/Sources/LodyKit/Sessions/AGENTS.md": 1400,
     "apps/mobile/android/AGENTS.md": 7100,
-    "apps/cli/src/session/AGENTS.md": 1280,
+    "apps/cli/src/session/AGENTS.md": 1320,
     "packages/components/src/hooks/AGENTS.md": 1280
   }
 }

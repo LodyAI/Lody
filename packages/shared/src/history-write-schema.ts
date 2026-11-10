@@ -43,6 +43,10 @@ export const HistoryEntryWriteSchema = z.object({
     .strict()
     .optional(),
   queuedInput: z.literal(true).optional(),
+  e2eeIntent: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{131}$/)
+    .optional(),
   cancellationReason: z.literal('user_stop').optional(),
   inputConfig: z
     .preprocess(normalizeLegacyAcpSessionConfig, SessionHistoryInputConfigSchema)

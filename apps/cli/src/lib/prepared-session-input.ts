@@ -88,7 +88,30 @@ export async function materializePreparedSessionInput(
     session,
     (existing?.meta as SessionMeta | undefined) ?? prepared.meta
   );
-  for (const entry of [prepared.source, prepared.userTurn]) {
+  // Encrypted: an input this machine prepares carries the machine's signed intent,
+  // written with it in the same commit (owner decision 2026-11-10).
+  const userTurn =
+    manager.isEncryptedWorkspace() &&
+    prepared.userTurn.role === 'user' &&
+    !prepared.userTurn.e2eeIntent
+      ? {
+          ...prepared.userTurn,
+          e2eeIntent: await manager.signMachineInput({
+            sessionId: prepared.sessionId,
+            targetMachineId: prepared.meta.machineId,
+            userTurnId: prepared.userTurn.id,
+            inputConfig: prepared.userTurn.inputConfig,
+            ...(prepared.userTurn.derivedFrom
+              ? { derivedFrom: prepared.userTurn.derivedFrom }
+              : {}),
+            ...(prepared.userTurn.scheduleRun
+              ? { scheduleRun: prepared.userTurn.scheduleRun }
+              : {}),
+          }),
+        }
+      : prepared.userTurn;
+  if (userTurn.e2eeIntent === undefined) delete userTurn.e2eeIntent;
+  for (const entry of [prepared.source, userTurn]) {
     if (!entry) continue;
     const prior = await readHistoryEntry(backend, entry.id);
     if (prior) {

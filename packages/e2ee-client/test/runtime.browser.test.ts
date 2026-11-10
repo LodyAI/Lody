@@ -2,6 +2,19 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { chromium, webkit, type BrowserContext, type Page } from '@playwright/test';
 import { expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import { Result } from 'effect';
+import {
+  decodeE2eeIntentRecord,
+  E2EE_INTENT_KIND,
+  getScheduleRoomId,
+  readScheduleAuthorization,
+  scheduleDeclarationSubject,
+  ScheduleRepository,
+  type ScheduleRepositoryPort,
+  type WorkspaceId,
+} from '@lody/shared';
+import { Bytes, verifyExecutionIntent } from '@lody/e2ee-core/protocol';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -313,6 +326,7 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'refresh');
       const rpc = await good(page, 'rpc');
       expect(await good(page, 'rpc')).toEqual(rpc);
+      await savesSignedSchedule(page);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
       expect(await good(page, 'refresh')).toMatchObject({
         epoch: 1,
@@ -1199,6 +1213,90 @@ it.each(['chromium', 'webkit'] as const)(
   }
 );
 
+/**
+ * The shared UI's encrypted schedule save on this real portable host: the real
+ * repository asks the host to sign the declaration it writes beside the definition,
+ * and the stored record verifies as this device's signature over that definition.
+ */
+type SignedStatus = { workspaceId: string; genesisHash: string; signingPublicKey: string };
+async function savesSignedSchedule(
+  page: Page,
+  host: {
+    status: () => Promise<SignedStatus>;
+    sign: 'runtimeSignDeclaration' | 'joinerSignDeclaration';
+  } = {
+    status: async () => (await good(page, 'status')) as SignedStatus,
+    sign: 'runtimeSignDeclaration',
+  }
+) {
+  const status = await host.status();
+  const docs = new Map<string, LoroDoc>();
+  const rows = new Map<string, unknown>();
+  const port: ScheduleRepositoryPort = {
+    openPersistedDoc: async (id) => {
+      if (!docs.has(id)) docs.set(id, new LoroDoc());
+      return { doc: docs.get(id)! };
+    },
+    openFlockDoc: async () => ({
+      flock: {
+        scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+        get: (key) => rows.get(JSON.stringify(key)),
+        set: (key, value) => rows.set(JSON.stringify(key), value),
+      },
+    }),
+    flush: async () => {},
+  };
+  const repository = new ScheduleRepository(port, status.workspaceId as WorkspaceId, {
+    protectedContent: true,
+    signDeclaration: async (document, manualRunKey) => {
+      const signed = await page.evaluate(
+        ({ document, manualRunKey, sign }) =>
+          (globalThis as Surface).HostFixture[sign](document, manualRunKey),
+        { document, manualRunKey, sign: host.sign }
+      );
+      if (!signed.ok || typeof signed.value !== 'string')
+        throw new Error(String('reason' in signed ? signed.reason : 'unsigned'));
+      return signed.value;
+    },
+  });
+  const saved = repository.save({
+    scheduleId: 'portable-schedule',
+    draft: {
+      title: 'Synthetic schedule',
+      machineId: 'fixture-machine',
+      trigger: { kind: 'interval', everyMs: 60_000, anchorAt: '2026-01-01T00:00:00Z' },
+      agent: { agentConfigId: 'synthetic-agent' },
+      misfirePolicy: { kind: 'skip' },
+      overlapPolicy: 'queue_one',
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      prompt: 'synthetic prompt',
+    },
+    actorId: 'owner',
+    now: 1,
+    activationId: 'activation',
+    activityId: 'created',
+    create: true,
+  });
+  await expect(saved).resolves.toMatchObject({ prompt: 'synthetic prompt' });
+  const document = await saved;
+  const declared = readScheduleAuthorization(docs.get(getScheduleRoomId('portable-schedule'))!);
+  const record = decodeE2eeIntentRecord((declared?.value as { e2eeIntent?: string })?.e2eeIntent);
+  expect(record?.kind).toBe(E2EE_INTENT_KIND.scheduleDeclaration);
+  expect(Buffer.from(record!.signer).toString('hex')).toBe(status.signingPublicKey);
+  const subject = scheduleDeclarationSubject(document);
+  const verified = verifyExecutionIntent(
+    {
+      ...subject,
+      genesis: Result.getOrThrow(Bytes.genesisHash(Buffer.from(status.genesisHash, 'hex'))),
+      workspaceId: status.workspaceId,
+      contentDigest: Buffer.from(subject.contentDigest, 'hex'),
+    },
+    record!.signer,
+    record!.signature
+  );
+  expect(Result.isSuccess(verified)).toBe(true);
+}
+
 it.each(['chromium', 'webkit'] as const)(
   'a teammate joins from a link invitation on the portable runtime in %s',
   async (engine) => {
@@ -1276,6 +1374,13 @@ it.each(['chromium', 'webkit'] as const)(
         deviceKind: 'personal',
         memberRole: 'member',
         membershipId: request.requestId,
+      });
+      // The joined member signs its schedule declarations as its own device.
+      const joined = (await ok('status')) as SignedStatus;
+      expect(joined.signingPublicKey).toBe(await ok('signingKey'));
+      await savesSignedSchedule(page, {
+        status: async () => joined,
+        sign: 'joinerSignDeclaration',
       });
       // Accepted once; a later claim reuses the retained approval.
       expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });

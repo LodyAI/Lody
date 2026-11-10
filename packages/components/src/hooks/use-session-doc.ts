@@ -1,7 +1,7 @@
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
-import { removeQueuedOriginal, replaceQueueItem } from '../lib/session-send-delivery';
+import { replaceQueueItem } from '../lib/session-send-delivery';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
@@ -35,8 +35,16 @@ declare global {
 
 export type PushMessageQueueInput = Omit<
   MessageQueueItemInput,
-  '$cid' | 'timestamp' | 'userTurnId' | 'operationId' | 'isEditing' | 'editingStartedAt'
+  | '$cid'
+  | 'timestamp'
+  | 'userTurnId'
+  | 'operationId'
+  | 'isEditing'
+  | 'editingStartedAt'
+  | 'e2eeIntent'
 > & {
+  /** Signed by the send path itself in encrypted workspaces, never by the composer. */
+  e2eeIntent?: string;
   isEditing?: boolean;
   editingStartedAt?: number;
   timestamp?: string;
@@ -346,6 +354,7 @@ export function useSessionDoc(
         userTurnId,
         operationId: item.operationId ?? `queue:${userTurnId}`,
         timestamp: item.timestamp ?? new Date(getServerNow()).toISOString(),
+        e2eeIntent: item.e2eeIntent,
       };
 
       const inputConfig = normalizeSessionTurnInputConfig(entry.acpSessionConfig);
@@ -383,12 +392,9 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const mq = await withStore((store) => (store.getState().mq ?? []) as MessageQueueItem[]);
-      const userTurnId = mq.find((item) => item.$cid === cid)?.userTurnId;
       await runtime.writer.removeSessionMessage(sessionId, cid);
-      if (userTurnId) await removeQueuedOriginal(runtime, sessionId, userTurnId);
     },
-    [withStore, runtime, sessionId]
+    [runtime, sessionId]
   );
 
   const updateMessageQueueItem = useCallback(

@@ -376,7 +376,7 @@ export interface LoroDocumentManagerOptions {
     | 'close'
     | 'repositoryDirectory'
     | 'attachmentToken'
-    | 'retainQueuedInput'
+    | 'signMachineInput'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
   >;
@@ -461,7 +461,7 @@ export class LoroDocumentManager {
     | 'close'
     | 'repositoryDirectory'
     | 'attachmentToken'
-    | 'retainQueuedInput'
+    | 'signMachineInput'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
   >;
@@ -491,9 +491,14 @@ export class LoroDocumentManager {
     return await Effect.runPromise(e2ee.authorizeMachineTarget(machineId, localProjectId));
   }
 
-  /** Encrypted workspaces: this machine's own queue write needs local evidence first. */
-  retainQueuedInput(input: Parameters<CliE2eeWorkspaceLegacy['retainQueuedInput']>[0]): void {
-    this.encryptedWorkspace?.retainQueuedInput(input);
+  /** Encrypted workspaces: the signed intent for an input this machine writes itself, to
+   * store with it in the same commit. Ordinary workspaces need none. */
+  async signMachineInput(
+    input: Parameters<CliE2eeWorkspaceLegacy['signMachineInput']>[0]
+  ): Promise<string | undefined> {
+    return this.encryptedWorkspace
+      ? await this.encryptedWorkspace.signMachineInput(input)
+      : undefined;
   }
 
   async getEncryptedAttachmentToken(): Promise<string> {
@@ -546,7 +551,7 @@ export class LoroDocumentManager {
         | 'close'
         | 'repositoryDirectory'
         | 'attachmentToken'
-        | 'retainQueuedInput'
+        | 'signMachineInput'
         | 'authorizeMachineTarget'
         | 'authorizeSessionTarget'
       >;

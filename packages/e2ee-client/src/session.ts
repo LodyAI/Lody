@@ -31,6 +31,7 @@ import {
   prepareLedgerCommand,
   signLedgerRecord,
   signLedgerSnapshot,
+  signExecutionIntent,
   verifyDeviceCredentialBinding,
   type LedgerCommand,
   Bytes,
@@ -76,6 +77,12 @@ import { assertPersonalAdmission } from './admission';
 import { fail } from './errors';
 import type { PersonalRecoverySetupInput } from './recovery-restore';
 import { fromHex, toHex } from './bytes';
+// The subpath, never the package index: this host runs in browsers.
+import {
+  encodeE2eeIntentRecord,
+  scheduleDeclarationSubject,
+} from '@lody/shared/e2ee-execution-intent';
+import type { ScheduleDocument } from '@lody/shared';
 import { encodePersonalInvitation } from './pairing';
 import { decodeMemberKeyPackage } from './member';
 
@@ -463,6 +470,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             requesterDevice: toHex(device.publicKey.toBytes()),
             originals: store,
             ledger: admitted,
+            signIntent: (request) =>
+              signExecutionIntent({
+                ...request,
+                genesis: prepared.binding.genesis,
+                signer: device,
+              }).pipe(Effect.map((signature) => signature.toBytes())),
             binding: (resource) =>
               makeRealtimeContentBinding({
                 genesis: prepared.binding.genesis,
@@ -1010,6 +1023,33 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       prepareDispatch: (
         ...args: Parameters<ReturnType<typeof makeE2eeRpcClient>['prepareDispatch']>
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.prepareDispatch(...args))),
+      /** Sign one schedule declaration with this admitted device. The host computes the
+       * definition fingerprint from the document; callers never supply a digest. */
+      signScheduleDeclaration: (
+        document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+        manualRunKey?: string
+      ) =>
+        run(
+          Effect.gen(function* () {
+            yield* admitted();
+            const subject = yield* Effect.try({
+              try: () => scheduleDeclarationSubject(document, manualRunKey),
+              catch: () => fail('invalid-input'),
+            });
+            const signature = yield* signExecutionIntent({
+              ...subject,
+              genesis: prepared.binding.genesis,
+              workspaceId: prepared.binding.workspaceId,
+              contentDigest: fromHex(subject.contentDigest),
+              signer: device,
+            });
+            return encodeE2eeIntentRecord({
+              kind: subject.kind,
+              signer: device.publicKey.toBytes(),
+              signature: signature.toBytes(),
+            });
+          })
+        ),
       acceptResponse: (
         ...args: Parameters<ReturnType<typeof makeE2eeRpcClient>['acceptResponse']>
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.acceptResponse(...args))),
