@@ -2431,7 +2431,7 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
             localProjectId:
               session.project?.kind === 'local' ? session.project.localProjectId : undefined,
           })
-        : workspace.slug === 'local'
+        : getSessionCommandEnvironment() !== undefined
           ? requester.userId === auth.userId && session.machineId === auth.machineId
           : !!LODY_AUTH_URL &&
             (await canReadSessionForCliRequester({

@@ -903,47 +903,56 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     );
   });
 
-  it('reads individual grants as the active human, never as the daemon owner, and denies revoked grants before opening history', async () => {
-    stubCreateOptionsReaders();
-    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
-    await backend.appendHistoryTurn({
-      id: 'private-context',
-      role: 'user',
-      timestamp: '2026-11-10T00:00:00.000Z',
-      items: [{ type: 'text', text: 'individual context' }],
-      fileDiff: [],
-    } as never);
-    let recipient = 'synthetic-collaborator';
-    vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockImplementation(
-      async (input) =>
-        input.requester.userId === recipient &&
-        input.machineId === machineId &&
-        input.rootSessionId === sessionId
-    );
-    const read = () =>
-      runWithDaemonWorkspace(daemon, () =>
-        executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+  it.each(['synthetic', 'local'])(
+    'reads individual grants as the active human in a cloud workspace named %s, never as the daemon owner',
+    async (slug) => {
+      stubCreateOptionsReaders();
+      vi.mocked(commandRuntime.resolveWorkspaceOrThrow).mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug,
+        role: 'owner',
+      });
+      const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+      await backend.appendHistoryTurn({
+        id: 'private-context',
+        role: 'user',
+        timestamp: '2026-11-10T00:00:00.000Z',
+        items: [{ type: 'text', text: 'individual context' }],
+        fileDiff: [],
+      } as never);
+      let recipient = 'synthetic-collaborator';
+      vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockImplementation(
+        async (input) =>
+          input.requester.userId === recipient &&
+          input.machineId === machineId &&
+          input.rootSessionId === sessionId
       );
-    const granted = await read();
-    expect(granted.isError, JSON.stringify(granted)).not.toBe(true);
-    expect(JSON.parse(granted.content[0]?.text ?? '{}').items).toContainEqual(
-      expect.objectContaining({ id: 'private-context' })
-    );
-    recipient = ownerUserId;
-    const denied = await read();
-    expect(denied.isError).toBe(true);
-    expect(denied.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
-    expect(denied.content[0]?.text).not.toContain('individual context');
-    daemon.readInvocation = (id) => ({
-      type: 'session/active-invocation-context',
-      active: true,
-      sessionId: id,
-      requesterUserId: ownerUserId,
-      sourceTurnId: 'owner-turn',
-      inputConfig: {},
-    });
-    expect((await read()).isError).not.toBe(true);
-  });
+      const read = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+        );
+      const granted = await read();
+      expect(granted.isError, JSON.stringify(granted)).not.toBe(true);
+      expect(JSON.parse(granted.content[0]?.text ?? '{}').items).toContainEqual(
+        expect.objectContaining({ id: 'private-context' })
+      );
+      recipient = ownerUserId;
+      const denied = await read();
+      expect(denied.isError).toBe(true);
+      expect(denied.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+      expect(denied.content[0]?.text).not.toContain('individual context');
+      daemon.readInvocation = (id) => ({
+        type: 'session/active-invocation-context',
+        active: true,
+        sessionId: id,
+        requesterUserId: ownerUserId,
+        sourceTurnId: 'owner-turn',
+        inputConfig: {},
+      });
+      expect((await read()).isError).not.toBe(true);
+    }
+  );
 
   async function createRemoteSession() {
     const otherMachineId = 'synthetic-other-machine' as MachineId;

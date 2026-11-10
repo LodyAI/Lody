@@ -430,7 +430,8 @@ export const authorizeCliE2eeSessionTarget = (
     if (generation !== options.runtime.executionGeneration() || view.removed || view.unavailable)
       return false;
     return (
-      (view.sharedWithTeam &&
+      (member[1].role !== 'guest' &&
+        view.sharedWithTeam &&
         (!target.localProjectId || view.projects.includes(target.localProjectId))) ||
       view.sessions.some(
         (row) =>

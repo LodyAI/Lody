@@ -8539,6 +8539,8 @@ describe('machine execution authorization freshness', () => {
           });
           yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
           let remove = false;
+          let teamRead = false;
+          let individualRead = true;
           const options = {
             runtime,
             readPolicy: () =>
@@ -8548,11 +8550,11 @@ describe('machine execution authorization freshness', () => {
                 }
                 return {
                   machineId: 'machine',
-                  sharedWithTeam: false,
+                  sharedWithTeam: teamRead,
                   projects: [],
-                  sessions: [
-                    { sessionId: 'shared-root', audience: { userId: 'reader' }, level: 'read' },
-                  ],
+                  sessions: individualRead
+                    ? [{ sessionId: 'shared-root', audience: { userId: 'reader' }, level: 'read' }]
+                    : [],
                   canManage: false,
                 } as import('@lody/platform').E2eeMachineSharingView;
               }),
@@ -8572,6 +8574,16 @@ describe('machine execution authorization freshness', () => {
               rootSessionId: 'unshared-root',
             })
           ).toBe(false);
+          yield* append({
+            _tag: 'SetRole',
+            membershipId: memberDevice.membershipId,
+            role: 'guest',
+          });
+          teamRead = true;
+          individualRead = false;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+          individualRead = true;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(true);
           remove = true;
           expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
           expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
