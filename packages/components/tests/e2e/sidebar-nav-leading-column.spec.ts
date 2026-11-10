@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { devices, expect, test } from '@playwright/test';
 
 test('sidebar footer controls share one desktop height and inset across identity states', async ({
   page,
@@ -229,6 +229,158 @@ test('nav icons sit on the sidebar leading column', async ({ page }) => {
       .evaluate((el) => el.getBoundingClientRect().left);
     // 16px icon + the row's gap lands the label on the shared text column.
     expect(Math.abs(labelLeft - (axis + 24))).toBeLessThanOrEqual(1);
+  }
+});
+
+const narrowWorkspaceStory =
+  '/iframe.html?id=components-lodysidebar--narrow-three-column&viewMode=story';
+
+for (const { name, userAgent, viewport } of [
+  {
+    name: 'iPhone Duo',
+    userAgent: devices['iPhone 13 landscape'].userAgent,
+    viewport: { width: 867, height: 669 },
+  },
+  {
+    name: 'iPad',
+    userAgent: devices['iPad Mini landscape'].userAgent,
+    viewport: { width: 1024, height: 768 },
+  },
+]) {
+  test.describe(`wide mobile workspace on ${name}`, () => {
+    test.use({ userAgent, viewport, isMobile: true, hasTouch: true });
+
+    test.beforeEach(async ({ page }) => {
+      await page.goto(narrowWorkspaceStory);
+    });
+
+    test('touch drag gives the conversation more space and remembers the narrower width', async ({
+      page,
+      context,
+      browserName,
+    }) => {
+      test.skip(browserName !== 'chromium', 'Touch drag uses Chromium input dispatch');
+      const separator = page.getByRole('separator', { name: 'Resize navigation sidebar' });
+      const chat = page.getByRole('region', { name: 'Conversation' });
+      const simulator = page.getByRole('region', { name: 'iOS Simulator' });
+      await expect(separator).toHaveAttribute('aria-valuenow', '300', { timeout: 15_000 });
+      const chatWidth = (await chat.boundingBox())!.width;
+      const seam = (await separator.boundingBox())!;
+      const touch = { x: seam.x + seam.width / 2 + 18, y: seam.y + seam.height / 2 };
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch] });
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: touch.x - 160, y: touch.y }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+      await expect(separator).toHaveAttribute('aria-valuenow', '180', { timeout: 15_000 });
+      await expect
+        .poll(async () => (await chat.boundingBox())!.width)
+        .toBeGreaterThan(chatWidth + 40);
+      await expect(simulator).toBeInViewport({ ratio: 1 });
+      await page.reload();
+      await expect(separator).toHaveAttribute('aria-valuenow', '180', { timeout: 15_000 });
+    });
+
+    test('focus and arrow keys resize the navigation sidebar', async ({ page }) => {
+      const separator = page.getByRole('separator', { name: 'Resize navigation sidebar' });
+      await separator.press('Home');
+      await expect(separator).toHaveAttribute('aria-valuenow', '180');
+      await separator.press('ArrowRight');
+      await expect(separator).toHaveAttribute('aria-valuenow', '196');
+      await expect(separator).toBeFocused();
+    });
+  });
+}
+
+test('wide mobile workspace supports an iPad using the desktop Safari user agent', async ({
+  browser,
+  baseURL,
+}) => {
+  const page = await browser.newPage({
+    userAgent: devices['Desktop Safari'].userAgent,
+    hasTouch: true,
+    isMobile: true,
+    baseURL,
+    viewport: { width: 1024, height: 768 },
+  });
+  try {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' });
+      Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+    });
+    await page.goto(narrowWorkspaceStory);
+    await expect(page.getByRole('separator', { name: 'Resize navigation sidebar' })).toBeVisible({
+      timeout: 15_000,
+    });
+  } finally {
+    await page.close();
+  }
+});
+
+test('wide mobile workspace supports Android tablets', async ({ browser, baseURL }) => {
+  const page = await browser.newPage({
+    userAgent: devices['Galaxy Tab S4 landscape'].userAgent,
+    hasTouch: true,
+    isMobile: true,
+    baseURL,
+    viewport: { width: 1024, height: 768 },
+  });
+  try {
+    await page.goto(narrowWorkspaceStory);
+    const separator = page.getByRole('separator', { name: 'Resize navigation sidebar' });
+    await expect(separator).toBeVisible({ timeout: 15_000 });
+    await separator.press('Home');
+    await expect(separator).toHaveAttribute('aria-valuenow', '180');
+  } finally {
+    await page.close();
+  }
+});
+
+test('desktop workspace keeps the regular sidebar on a touchscreen', async ({
+  browser,
+  baseURL,
+}) => {
+  const page = await browser.newPage({
+    userAgent: devices['Desktop Chrome'].userAgent,
+    hasTouch: true,
+    baseURL,
+    viewport: { width: 867, height: 669 },
+  });
+  try {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+      Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+      localStorage.setItem('lody-sidebar-last-width', '180');
+    });
+    await page.goto(narrowWorkspaceStory);
+    const sash = page.locator('[data-sidebar-resize-handle]');
+    await expect(sash).toBeVisible();
+    await expect(page.getByRole('separator', { name: 'Resize navigation sidebar' })).toHaveCount(0);
+    await expect
+      .poll(() => sash.evaluate((element) => element.parentElement!.getBoundingClientRect().width))
+      .toBe(240);
+  } finally {
+    await page.close();
+  }
+});
+
+test('narrow mobile workspace uses its ordinary navigation', async ({ browser, baseURL }) => {
+  const page = await browser.newPage({
+    userAgent: devices['iPhone 13'].userAgent,
+    hasTouch: true,
+    isMobile: true,
+    baseURL,
+    viewport: { width: 390, height: 844 },
+  });
+  try {
+    await page.goto(narrowWorkspaceStory);
+    await expect(page.locator('[data-sidebar-footer]')).toBeVisible();
+    await expect(page.getByRole('separator', { name: 'Resize navigation sidebar' })).toHaveCount(0);
+  } finally {
+    await page.close();
   }
 });
 

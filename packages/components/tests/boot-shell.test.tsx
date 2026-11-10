@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BootShell, BootShellProvider } from '../src/components/boot-shell';
 
 import { BOOT_SHELL_MARKUP } from '../src/lib/boot-shell';
-import { createBootShellScript } from '../src/lib/boot-shell-script';
+import { createBootShellScript, getNavigationSidebarMinWidth } from '../src/lib/boot-shell-script';
 
 import {
   BOOT_SHELL_HEAD_MARKER,
@@ -61,6 +61,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+  Reflect.deleteProperty(window, '__LODY_ELECTRON__');
   localStorage.clear();
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -92,6 +94,59 @@ describe('boot shell script', () => {
     });
     expect(boot('/acme/chat')).toEqual({ theme: null, sidebarWidth: null });
     expect(html.style.getPropertyValue('--lody-boot-elapsed')).toMatch(/^\d+ms$/);
+  });
+
+  it.each([
+    {
+      device: 'iPhone',
+      userAgent: 'Mozilla/5.0 (iPhone)',
+      platform: 'iPhone',
+      touches: 5,
+      min: 180,
+    },
+    { device: 'iPad', userAgent: 'Mozilla/5.0 (iPad)', platform: 'iPad', touches: 5, min: 180 },
+    {
+      device: 'Android tablet',
+      userAgent: 'Mozilla/5.0 (Linux; Android 14)',
+      platform: 'Linux armv8l',
+      touches: 5,
+      min: 180,
+    },
+    {
+      device: 'iPad desktop mode',
+      userAgent: 'Mozilla/5.0 (Macintosh)',
+      platform: 'MacIntel',
+      touches: 5,
+      min: 180,
+    },
+    {
+      device: 'touchscreen desktop',
+      userAgent: 'Mozilla/5.0 (Windows NT)',
+      platform: 'Win32',
+      touches: 5,
+      min: 240,
+    },
+  ])(
+    'uses the same sidebar minimum before and after boot on $device',
+    ({ userAgent, platform, touches, min }) => {
+      vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+      vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue(platform);
+      Object.defineProperty(window.navigator, 'maxTouchPoints', {
+        configurable: true,
+        value: touches,
+      });
+      expect(boot('/acme/chat', { 'lody-sidebar-last-width': '180' }).sidebarWidth).toBe(
+        `${min}px`
+      );
+      expect(getNavigationSidebarMinWidth()).toBe(min);
+    }
+  );
+
+  it('uses the desktop minimum in Electron even with a mobile user agent', () => {
+    vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPad)');
+    Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
+    expect(boot('/acme/chat', { 'lody-sidebar-last-width': '180' }).sidebarWidth).toBe('240px');
+    expect(getNavigationSidebarMinWidth()).toBe(240);
   });
 });
 

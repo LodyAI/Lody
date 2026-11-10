@@ -4141,6 +4141,7 @@
   "sidebar.filter.trigger": "Filter sidebar",
   "sidebar.githubWorktrees": "GitHub Worktrees",
   "sidebar.pinned": "Pinned",
+  "sidebar.resize": "Resize navigation sidebar",
   "sidebar.workspace.syncing": "Syncing workspace…",
   "sidebar.home": "New chat",
   "sidebar.joinCommunity": "Join community",
