@@ -213,8 +213,8 @@ class CreateSessionHostController: UIViewController {
       workspaceId: form.workspaceId, projectId: page.chat ? nil : page.projectId.nilIfEmpty, machineId: machineId,
       agentConfigId: page.agent?.id, cliType: page.agent?.cliType, agentType: page.agent?.agentType
     )
-    guard mentions?.source != source else { return }
-    let store = MentionCatalogStore(source: source)
+    guard mentions?.source != source || mentions?.userId != form.userId else { return }
+    let store = MentionCatalogStore(source: source, userId: form.userId)
     store.changed = { [weak self, weak store] in
       guard let self, let store, mentions === store else { return }
       input.composer.setMentionItems(store.composerItemsJSON())
