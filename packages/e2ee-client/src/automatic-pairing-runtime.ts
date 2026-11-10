@@ -449,6 +449,76 @@ export function makeAutomaticPairingRuntime(options: {
         }
       : {}),
     startAutomaticPairing: (workspaceId: string) => options.run(start(workspaceId)),
+    restartAutomaticPairing: (workspaceId: string, input: { expectedLookupId: string }) =>
+      options.run(
+        Effect.gen(function* () {
+          yield* check();
+          if (!workspace(workspaceId) || !/^[0-9a-f]{32}$/.test(input.expectedLookupId))
+            return yield* Effect.fail(refuse('invalid-input'));
+          const admitted = yield* setup.withPermit(
+            Effect.suspend(() => {
+              const previous = requesting.get(workspaceId);
+              const recovery = Effect.gen(function* () {
+                const current = yield* promise(() => runtime.accountPairingRequest!());
+                yield* check();
+                const joined = (state: typeof current) =>
+                  state?.workspaces.some(
+                    (row) => row.workspaceId === workspaceId && row.state === 'joined'
+                  ) === true;
+                if (current?.status === 'waiting' && !joined(current)) {
+                  if (!current.lookupId || !runtime.cancelAccountPairing)
+                    return yield* Effect.fail(refuse('pairing-update-required'));
+                  if (current.lookupId !== input.expectedLookupId)
+                    return yield* Effect.fail(refuse('pairing-elsewhere'));
+                  yield* promise(() =>
+                    runtime.cancelAccountPairing!({ expectedLookupId: input.expectedLookupId })
+                  );
+                  yield* check();
+                }
+                // Cancellation is compare-and-set: another window may already have
+                // replaced the displayed request. Never authorize cancelling that one.
+                const after = yield* promise(() => runtime.accountPairingRequest!());
+                yield* check();
+                const completed = joined(current) || joined(after);
+                if (after?.status === 'waiting' && !completed)
+                  return yield* Effect.fail(refuse('pairing-elsewhere'));
+                if (previous) {
+                  previous.phase = 'cancelled';
+                  dispose(previous);
+                  if (requesting.get(workspaceId) === previous) requesting.delete(workspaceId);
+                }
+                // Discovery is advisory. Its old row expires naturally and indexed
+                // server cleanup owns erasure; no cleanup write can undo native cancel.
+                if (completed) {
+                  const hint = workspace(workspaceId)!;
+                  const value = entry(
+                    {
+                      version: 1,
+                      id: id(options.crypto),
+                      accountId: account!,
+                      workspaceId,
+                      genesisHash: hint.genesisHash,
+                      deviceName: options.deviceName,
+                      expiresAt: (yield* now) + 600_000,
+                    },
+                    'requester'
+                  );
+                  value.admitted = true;
+                  value.phase = 'syncing';
+                  requesting.set(workspaceId, value);
+                  return value;
+                }
+              });
+              return previous ? previous.gate.withPermit(recovery) : recovery;
+            })
+          );
+          if (admitted) {
+            yield* admitted.gate.withPermit(updateKeys(admitted));
+            return snapshot(admitted);
+          }
+          return yield* start(workspaceId);
+        })
+      ),
     automaticPairingState: (workspaceId: string) => {
       const value = requesting.get(workspaceId);
       return value

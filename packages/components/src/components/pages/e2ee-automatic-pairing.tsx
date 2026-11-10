@@ -14,6 +14,7 @@ import { accountPairingErrorCode } from '@lody/platform';
 import type {
   E2eeAutomaticPairingReview,
   E2eeAutomaticPairingState,
+  E2eeAccountPairingRequestState,
   E2eeWorkspaceRuntime,
 } from '@lody/platform';
 import { Dialog } from '@/ui/dialog';
@@ -74,6 +75,9 @@ export function E2eeAutomaticPairingPage({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [generation, setGeneration] = useState(0);
+  const [blocked, setBlocked] = useState<E2eeAccountPairingRequestState | null>(null);
+  const blockedRef = useRef(blocked);
+  const [confirmRestart, setConfirmRestart] = useState<E2eeAccountPairingRequestState | null>(null);
   const admitted = useRef(false);
   const completed = useRef(false);
   const joinedRef = useRef(onJoined);
@@ -81,6 +85,11 @@ export function E2eeAutomaticPairingPage({
   useEffect(() => {
     let alive = true,
       running = false;
+    setBusy(false);
+    setError(null);
+    blockedRef.current = null;
+    setBlocked(null);
+    setConfirmRestart(null);
     const accept = (next: E2eeAutomaticPairingState | null) => {
       if (!alive || !next || next.workspaceId !== workspaceId) return;
       setState(next);
@@ -107,6 +116,24 @@ export function E2eeAutomaticPairingPage({
         if (alive) {
           const code = accountPairingErrorCode(cause);
           setError(code ? `e2ee.accountPair.error.${code}` : 'e2ee.auto.connectionRetry');
+          if (code === 'pairing-elsewhere') {
+            try {
+              const retained = await runtime.accountPairingRequest?.();
+              if (!alive) return;
+              if (
+                retained?.status === 'waiting' &&
+                retained.lookupId &&
+                /^[0-9a-f]{32}$/.test(retained.lookupId) &&
+                runtime.restartAutomaticPairing
+              ) {
+                if (blockedRef.current?.lookupId !== retained.lookupId) setConfirmRestart(null);
+                blockedRef.current = retained;
+                setBlocked(retained);
+              } else setError('e2ee.accountPair.error.pairing-update-required');
+            } catch {
+              // Retain the original refusal; a failed inspection authorizes no cancellation.
+            }
+          }
         }
       } finally {
         running = false;
@@ -138,6 +165,46 @@ export function E2eeAutomaticPairingPage({
     },
     []
   );
+  const restartPrevious = async (confirmed: E2eeAccountPairingRequestState) => {
+    const owner = ownerRef.current;
+    const expectedLookupId = confirmed.lookupId;
+    if (busy || !expectedLookupId || !runtime.restartAutomaticPairing) return;
+    setBusy(true);
+    try {
+      const next = await runtime.restartAutomaticPairing(workspaceId, { expectedLookupId });
+      if (sameOwner(owner)) {
+        blockedRef.current = null;
+        setBlocked(null);
+        setConfirmRestart(null);
+        setState(next);
+        setError(null);
+        setGeneration((g) => g + 1);
+      }
+    } catch (cause) {
+      if (!sameOwner(owner)) return;
+      setConfirmRestart(null);
+      setError(`e2ee.accountPair.error.${accountPairingErrorCode(cause) ?? 'failed'}`);
+      try {
+        const retained = await runtime.accountPairingRequest?.();
+        if (!sameOwner(owner)) return;
+        if (
+          retained?.status === 'waiting' &&
+          retained.lookupId &&
+          /^[0-9a-f]{32}$/.test(retained.lookupId)
+        ) {
+          blockedRef.current = retained;
+          setBlocked(retained);
+        } else {
+          blockedRef.current = null;
+          setBlocked(null);
+        }
+      } catch {
+        // The captured original remains visible; retry still uses only its exact ID.
+      }
+    } finally {
+      if (sameOwner(owner)) setBusy(false);
+    }
+  };
   const restart = async (replace = false) => {
     const owner = ownerRef.current;
     if (busy) return;
@@ -246,6 +313,38 @@ export function E2eeAutomaticPairingPage({
           <p role="alert" className="mt-5 text-sm text-muted-foreground">
             {t(error)}
           </p>
+        )}
+        {blocked && !receiving && (
+          <section aria-label={t('e2ee.auto.previous.title')}>
+            <p>
+              {t('e2ee.auto.previous.help', {
+                names: blocked.workspaces.map((w) => w.name).join(', '),
+                time: new Date(blocked.expiresAt).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+              })}
+            </p>
+            {confirmRestart ? (
+              <>
+                <p>{t('e2ee.auto.previous.confirm')}</p>
+                <Button disabled={busy} onClick={() => void restartPrevious(confirmRestart)}>
+                  {t('e2ee.auto.previous.endAndRestart')}
+                </Button>
+                <Button variant="ghost" disabled={busy} onClick={() => setConfirmRestart(null)}>
+                  {t('e2ee.auto.previous.keep')}
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setConfirmRestart(blocked)}
+              >
+                {t('e2ee.auto.previous.review')}
+              </Button>
+            )}
+          </section>
         )}
         {!terminal && !receiving && (
           <div className="mt-auto pt-10 text-xs text-muted-foreground">

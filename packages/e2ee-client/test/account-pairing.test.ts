@@ -73,7 +73,99 @@ describe('account pairing store contract (reference)', () => {
 });
 
 describe('portable account pairing workflow', () => {
-  it.each(['cancel', 'expiry'] as const)(
+  it.each(['before-confirmation', 'during-cancellation', 'other-workspace'] as const)(
+    'preserves verified admission during explicit pairing recovery: %s',
+    async (timing) => {
+      const lookupId = 'a1'.repeat(16);
+      const waiting = {
+        lookupId,
+        status: 'waiting' as const,
+        direction: 'approver-shows' as const,
+        pairingString: null,
+        expiresAt: 600_000,
+        workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'pending' as const }],
+      };
+      let state: import('@lody/platform').E2eeAccountPairingRequestState =
+        timing === 'before-confirmation'
+          ? {
+              ...waiting,
+              status: 'joined',
+              workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'joined' }],
+            }
+          : timing === 'other-workspace'
+            ? {
+                ...waiting,
+                status: 'joined',
+                workspaces: [{ workspaceId: 'w2', name: 'Beta', state: 'joined' }],
+              }
+            : waiting;
+      let entered!: () => void, release!: () => void;
+      const cancelling = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const resumed = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const recovered = makeAutomaticPairingRuntime({
+        account: () => 'synthetic-account',
+        workspaces: () => [{ workspaceId: 'w1', name: 'Alpha', genesisHash: '11'.repeat(32) }],
+        deviceName: 'Phone',
+        canPresent: () => true,
+        crypto,
+        now: () => 0,
+        run: Effect.runPromise,
+        relay: {
+          pending: () => Effect.succeed([]),
+          read: () => Effect.succeed(null),
+          exchange: (command) =>
+            command.context
+              ? Effect.succeed({ context: command.context, state: 'pending' })
+              : Effect.fail(new Error('advisory cleanup offline')),
+        },
+        runtime: {
+          accountPairingRequest: async () => structuredClone(state),
+          cancelAccountPairing: async (input?: { expectedLookupId: string }) => {
+            expect(input).toEqual({ expectedLookupId: lookupId });
+            entered();
+            await resumed;
+            // Actual native cancellation preserves an already settled admission.
+            if (state.status === 'waiting') state = { ...state, status: 'expired' };
+          },
+          status: async () => ({
+            deviceKind: 'personal',
+            hasDeviceCredential: true,
+            hasCurrentKey: true,
+          }),
+        } as unknown as E2eeWorkspaceRuntime,
+      });
+      try {
+        const result = recovered.restartAutomaticPairing('w1', { expectedLookupId: lookupId });
+        if (timing === 'during-cancellation') {
+          await cancelling;
+          state = {
+            ...waiting,
+            status: 'joined',
+            workspaces: [{ workspaceId: 'w1', name: 'Alpha', state: 'joined' }],
+          };
+          release();
+        }
+        expect((await result).phase).toBe(timing === 'other-workspace' ? 'preparing' : 'joined');
+        expect(state.status).toBe('joined');
+        expect(state.lookupId).toBe(lookupId);
+      } finally {
+        release();
+        recovered.disposeAutomaticPairing();
+      }
+    }
+  );
+  it.each([
+    'cancel',
+    'expiry',
+    'renderer-recovery',
+    'replacement',
+    'old-host',
+    'concurrent-poll',
+  ] as const)(
     'preserves the first native request and workspace when another window is refused, then %s',
     async (cleanup) => {
       let time = 0;
@@ -247,6 +339,121 @@ describe('portable account pairing workflow', () => {
           _tag: 'Success',
           success: { rows: [expect.objectContaining({ genesis: new Uint8Array(32).fill(0x11) })] },
         });
+        if (
+          cleanup === 'renderer-recovery' ||
+          cleanup === 'replacement' ||
+          cleanup === 'old-host' ||
+          cleanup === 'concurrent-poll'
+        ) {
+          first.disposeAutomaticPairing();
+          let suspendSubmission = false;
+          let submissionEntered!: () => void, releaseSubmission!: () => void;
+          const enteredSubmission = new Promise<void>((resolve) => {
+            submissionEntered = resolve;
+          });
+          const submissionReady = new Promise<void>((resolve) => {
+            releaseSubmission = resolve;
+          });
+          const recoveringHost = {
+            ...host,
+            requestAccountPairing: async (
+              input: Parameters<NonNullable<E2eeWorkspaceRuntime['requestAccountPairing']>>[0]
+            ) => {
+              if (suspendSubmission) {
+                suspendSubmission = false;
+                submissionEntered();
+                await submissionReady;
+              }
+              return host.requestAccountPairing!(input);
+            },
+            accountPairingRequest: async () => {
+              const state = await host.accountPairingRequest!();
+              if (state && cleanup === 'old-host') {
+                const { lookupId: _lookupId, ...legacy } = state;
+                return legacy;
+              }
+              return state;
+            },
+            cancelAccountPairing: async (input?: { expectedLookupId: string }) => {
+              await host.cancelAccountPairing!(input);
+              if (cleanup === 'replacement')
+                await Effect.runPromise(native.requestAccountPairing({}));
+            },
+          } as E2eeWorkspaceRuntime;
+          const reopened = makeAutomaticPairingRuntime({ ...common, runtime: recoveringHost });
+          try {
+            await reopened.startAutomaticPairing('w1');
+            await desktop.pendingAutomaticPairing();
+            await reopened.automaticPairingState('w1');
+            await desktop.pendingAutomaticPairing();
+            await expect(reopened.automaticPairingState('w1')).rejects.toThrow(
+              'e2ee_pairing-elsewhere'
+            );
+            if (cleanup === 'concurrent-poll') {
+              await Effect.runPromise(
+                native.cancelAccountPairing({ expectedLookupId: original.lookupId })
+              );
+              suspendSubmission = true;
+              const polling = reopened.automaticPairingState('w1');
+              await enteredSubmission;
+              const recovering = reopened.restartAutomaticPairing('w1', {
+                expectedLookupId: original.lookupId,
+              });
+              const settled = Promise.allSettled([polling, recovering]);
+              releaseSubmission();
+              const results = await settled;
+              expect(results[0]).toMatchObject({
+                status: 'fulfilled',
+                value: { phase: 'waiting' },
+              });
+              expect(results[1]).toMatchObject({
+                status: 'rejected',
+                reason: { message: 'e2ee_pairing-elsewhere' },
+              });
+              const pending = await Effect.runPromise(native.accountPairingRequest());
+              expect(pending?.lookupId).not.toBe(original.lookupId);
+              expect(pending?.status).toBe('waiting');
+              // Recovery cannot retire a still-valid local exchange after a late submit.
+              expect((await reopened.automaticPairingState('w1'))?.phase).toBe('waiting');
+            } else if (cleanup === 'old-host') {
+              await expect(
+                reopened.restartAutomaticPairing('w1', { expectedLookupId: original.lookupId })
+              ).rejects.toThrow('e2ee_pairing-update-required');
+              expect(await Effect.runPromise(store.terminal(original.lookupId))).toBeNull();
+            } else if (cleanup === 'replacement') {
+              await expect(
+                reopened.restartAutomaticPairing('w1', { expectedLookupId: original.lookupId })
+              ).rejects.toThrow('e2ee_pairing-elsewhere');
+              const replacement = await Effect.runPromise(native.accountPairingRequest());
+              expect(replacement?.status).toBe('waiting');
+              expect(replacement?.lookupId).not.toBe(original.lookupId);
+              await expect(
+                reopened.restartAutomaticPairing('w1', { expectedLookupId: original.lookupId })
+              ).rejects.toThrow('e2ee_pairing-elsewhere');
+              expect(await Effect.runPromise(native.accountPairingRequest())).toEqual(replacement);
+            } else {
+              expect(
+                (
+                  await reopened.restartAutomaticPairing('w1', {
+                    expectedLookupId: original.lookupId,
+                  })
+                ).phase
+              ).toBe('preparing');
+              await desktop.pendingAutomaticPairing();
+              await reopened.automaticPairingState('w1');
+              await desktop.pendingAutomaticPairing();
+              expect((await reopened.automaticPairingState('w1'))?.phase).toBe('waiting');
+              expect((await Effect.runPromise(native.accountPairingRequest()))?.lookupId).not.toBe(
+                original.lookupId
+              );
+              expect(await Effect.runPromise(store.terminal(original.lookupId))).toBe('cancelled');
+            }
+          } finally {
+            releaseSubmission();
+            reopened.disposeAutomaticPairing();
+          }
+          return;
+        }
         if (cleanup === 'cancel') await second.cancelAutomaticPairing('w2');
         else {
           time = 600_001;

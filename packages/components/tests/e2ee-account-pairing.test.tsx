@@ -476,6 +476,162 @@ describe('account pairing relay operations', () => {
 });
 
 describe('automatic pairing product flow', () => {
+  it('discards a late recovery result after switching account runtime and workspace', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let release!: (state: import('@lody/platform').E2eeAutomaticPairingState) => void;
+    const pending = new Promise<import('@lody/platform').E2eeAutomaticPairingState>((resolve) => {
+      release = resolve;
+    });
+    let opened = false;
+    const host = (workspaceId: string, name: string) =>
+      ({
+        automaticPairingState: async () => {
+          throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+        },
+        accountPairingRequest: async () => ({
+          lookupId: (workspaceId === 'w1' ? 'a1' : 'b2').repeat(16),
+          direction: 'approver-shows',
+          pairingString: null,
+          status: 'waiting',
+          expiresAt: NOW + 600_000,
+          workspaces: [{ workspaceId, name, state: 'pending' }],
+        }),
+        restartAutomaticPairing: async () => pending,
+      }) as unknown as E2eeWorkspaceRuntime;
+    const first = host('w1', 'Old Alpha'),
+      second = host('w2', 'Current Beta');
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={first}
+          workspaceId="w1"
+          onJoined={() => {
+            opened = true;
+          }}
+          onBack={() => {}}
+        />
+      )
+    );
+    await click('e2ee.auto.previous.review');
+    await click('e2ee.auto.previous.endAndRestart');
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={second}
+          workspaceId="w2"
+          onJoined={() => {
+            opened = true;
+          }}
+          onBack={() => {}}
+        />
+      )
+    );
+    await act(async () =>
+      release({
+        id: 'old',
+        workspaceId: 'w1',
+        workspaceName: 'Old Alpha',
+        deviceName: 'Phone',
+        comparisonCode: '987654',
+        expiresAt: NOW + 600_000,
+        phase: 'joined',
+      })
+    );
+    expect(opened).toBe(false);
+    expect(text()).toContain('Current Beta');
+    expect(text()).not.toContain('Old Alpha');
+    expect(text()).not.toContain('987 654');
+    await click('e2ee.auto.previous.review');
+    expect(text()).toContain('e2ee.auto.previous.confirm');
+  });
+  it.each(['restart', 'replacement', 'during-confirmation', 'legacy'] as const)(
+    'requires explicit confirmation for an existing device request and preserves replacements: %s',
+    async (scenario) => {
+      const { E2eeAutomaticPairingPage } =
+        await import('../src/components/pages/e2ee-automatic-pairing');
+      let native: E2eeAccountPairingRequestState = {
+        lookupId: scenario === 'legacy' ? undefined : 'a1'.repeat(16),
+        direction: 'approver-shows',
+        pairingString: null,
+        status: 'waiting',
+        expiresAt: NOW + 600_000,
+        workspaces: [{ workspaceId: 'w1', name: 'Previous Alpha', state: 'pending' }],
+      };
+      let fresh: import('@lody/platform').E2eeAutomaticPairingState | null = null;
+      const ended: string[] = [];
+      const runtime = {
+        automaticPairingState: async () => {
+          if (fresh) return fresh;
+          throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+        },
+        accountPairingRequest: async () => structuredClone(native),
+        restartAutomaticPairing: async (
+          _workspaceId: string,
+          input: { expectedLookupId: string }
+        ) => {
+          if (input.expectedLookupId !== native.lookupId)
+            throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+          ended.push(input.expectedLookupId);
+          native = { ...native, status: 'expired' };
+          return (fresh = {
+            id: 'fresh',
+            workspaceId: 'w1',
+            workspaceName: 'Alpha',
+            deviceName: 'Phone',
+            comparisonCode: '654321',
+            expiresAt: NOW + 600_000,
+            phase: 'waiting',
+          });
+        },
+      } as unknown as E2eeWorkspaceRuntime;
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingPage
+            runtime={runtime}
+            workspaceId="w1"
+            onJoined={() => {}}
+            onBack={() => {}}
+          />
+        )
+      );
+      expect(native.status).toBe('waiting');
+      expect(fresh).toBeNull();
+      if (scenario === 'legacy') {
+        expect(text()).toContain('e2ee.accountPair.error.pairing-update-required');
+        expect(text()).not.toContain('e2ee.auto.previous.review');
+        expect(ended).toEqual([]);
+        return;
+      }
+      expect(text()).toContain('Previous Alpha');
+      await click('e2ee.auto.previous.review');
+      expect(text()).toContain('e2ee.auto.previous.confirm');
+      expect(ended).toEqual([]);
+      if (scenario === 'replacement' || scenario === 'during-confirmation') {
+        native = {
+          ...native,
+          lookupId: 'b2'.repeat(16),
+          workspaces: [{ workspaceId: 'w1', name: 'Replacement Beta', state: 'pending' }],
+        };
+        if (scenario === 'replacement') await tick(2000);
+        else await click('e2ee.auto.previous.endAndRestart');
+        expect(native.status).toBe('waiting');
+        expect(fresh).toBeNull();
+        expect(text()).toContain('Replacement Beta');
+        expect(text()).not.toContain('e2ee.auto.previous.confirm');
+        expect(ended).toEqual([]);
+        await click('e2ee.auto.previous.review');
+      }
+      await click('e2ee.auto.previous.endAndRestart');
+      expect(native.status).toBe('expired');
+      expect(ended).toEqual([
+        scenario === 'replacement' || scenario === 'during-confirmation'
+          ? 'b2'.repeat(16)
+          : 'a1'.repeat(16),
+      ]);
+      expect(text()).toContain('654 321');
+    }
+  );
   it('shows the native request immediately and advances after verified admission without a check button', async () => {
     const { E2eeAutomaticPairingPage } =
       await import('../src/components/pages/e2ee-automatic-pairing');

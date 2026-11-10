@@ -234,6 +234,8 @@ export interface AccountPairingStore {
 }
 
 export interface AccountPairingState {
+  /** Public identity for hosts with exact-ID cancellation support. */
+  lookupId?: string;
   direction: 'requester-shows' | 'approver-shows';
   pairingString: string | null;
   expiresAt: number;
@@ -365,6 +367,7 @@ export function makeAccountPairing(input: {
             ? 'expired'
             : 'waiting';
     return {
+      lookupId: row.lookup_id,
       direction: request.direction,
       pairingString:
         status === 'waiting' && secret && request.direction === 'requester-shows'

@@ -45,6 +45,8 @@ export type E2eeAccountPairingWorkspace = { workspaceId: string; name: string };
 
 /** The new device's own retained request. */
 export type E2eeAccountPairingRequestState = {
+  /** Public request identity, supplied only by hosts supporting exact-ID cancellation. */
+  lookupId?: string;
   direction: 'requester-shows' | 'approver-shows';
   /** Grouped pairing string, only while this device displays the code and it is open. */
   pairingString: string | null;
@@ -126,6 +128,11 @@ export interface E2eeAutomaticPairingRuntime {
   startAutomaticPairing?(workspaceId: string): Promise<E2eeAutomaticPairingState>;
   automaticPairingState?(workspaceId: string): Promise<E2eeAutomaticPairingState | null>;
   cancelAutomaticPairing?(workspaceId: string): Promise<void>;
+  /** Explicitly end the displayed native request, never a concurrently replaced one. */
+  restartAutomaticPairing?(
+    workspaceId: string,
+    input: { expectedLookupId: string }
+  ): Promise<E2eeAutomaticPairingState>;
   pendingAutomaticPairing?(): Promise<E2eeAutomaticPairingReview[]>;
   approveAutomaticPairing?(id: string): Promise<void>;
   declineAutomaticPairing?(id: string): Promise<void>;

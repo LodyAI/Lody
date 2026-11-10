@@ -269,6 +269,17 @@ device if that responder quits. Transient errors retry exact originals. Approval
 means verified admission; the content route still opens its reader and installs the
 current key before use. Public relay terminal state cannot grant access.
 
+A renderer reload can lose its automatic exchange while the native account owner
+still holds the previous request. Recovery shows that request's workspace names
+and expiry, then requires a separate confirmation to end it. Hosts expose the
+public `lookupId` only with exact-ID cancellation support. Recovery cancels only
+that displayed original, rechecks for a replacement, and requires fresh consent
+if another window created one. A completed admission is kept. Older hosts without
+this capability require an update or the existing manual route; automatic recovery
+never calls unscoped cancellation. Retired advisory discovery rows expire naturally;
+the server's indexed cleanup owns erasure, so an unavailable cleanup write cannot
+undo native cancellation or prevent a fresh safe request.
+
 See the [pairing decision and protocol review limit](../../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10).
 
 ## Restore from a vault

@@ -8,7 +8,7 @@ import {
 } from '@/components/pages/e2ee-automatic-pairing';
 
 /** Production components over a synthetic capability; never performs cryptographic approval. */
-function Preview({ mode }: { mode: 'waiting' | 'expired' | 'syncing' | 'approval' }) {
+function Preview({ mode }: { mode: 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous' }) {
   const runtime = useMemo(() => {
     const state: E2eeAutomaticPairingReview = {
       id: 'synthetic-only',
@@ -17,12 +17,29 @@ function Preview({ mode }: { mode: 'waiting' | 'expired' | 'syncing' | 'approval
       deviceName: 'Zixuan 的 iPhone',
       requestId: 'synthetic-request',
       comparisonCode: '528193',
-      phase: mode === 'approval' ? 'waiting' : mode,
+      phase: mode === 'approval' || mode === 'previous' ? 'waiting' : mode,
       expiresAt: Date.now() + 600_000,
     };
     let terminal = false;
+    let previous = mode === 'previous';
     return {
-      automaticPairingState: async () => ({ ...state }),
+      automaticPairingState: async () => {
+        if (previous)
+          throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+        return { ...state };
+      },
+      accountPairingRequest: async () => ({
+        lookupId: 'a1'.repeat(16),
+        direction: 'approver-shows',
+        pairingString: null,
+        status: previous ? 'waiting' : 'expired',
+        expiresAt: state.expiresAt,
+        workspaces: [{ workspaceId: 'preview', name: 'Lody Design', state: 'pending' }],
+      }),
+      restartAutomaticPairing: async () => {
+        previous = false;
+        return { ...state };
+      },
       startAutomaticPairing: async () => {
         state.phase = 'waiting';
         return { ...state };
@@ -75,4 +92,6 @@ type Story = StoryObj<typeof meta>;
 export const PhoneWaiting: Story = { args: { mode: 'waiting' } };
 export const PhoneExpired: Story = { args: { mode: 'expired' } };
 export const PhoneSyncing: Story = { args: { mode: 'syncing' } };
+/** Open “Restart this device’s previous pairing” to inspect its confirmation. */
+export const PhonePreviousRequest: Story = { args: { mode: 'previous' } };
 export const DeviceApproval: Story = { args: { mode: 'approval' } };
