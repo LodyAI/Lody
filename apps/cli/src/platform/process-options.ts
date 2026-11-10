@@ -1,3 +1,4 @@
+import { observeManagedProcessTree } from '@/lib/managed-process-observation';
 import type { Layer } from 'effect';
 import type { ChildProcessSpawner } from 'effect/process';
 import {
@@ -23,7 +24,10 @@ export interface PlatformFacadeOptions {
 // diagnostics, such as a tree that survived termination. Exported for shared
 // helpers that run commands themselves (the login-shell probe).
 export const toShared = (options: PlatformFacadeOptions = {}): ProcessFacadeOptions => ({
-  nodeProcess: options.nodeProcess,
+  nodeProcess: options.nodeProcess ?? {
+    ...nodeProcessLive,
+    observeTree: observeManagedProcessTree,
+  },
   signal: options.signal,
   loggerLayer: lodyLoggerLayer(options.logger ?? getLogger(), options.logPrefix),
 });

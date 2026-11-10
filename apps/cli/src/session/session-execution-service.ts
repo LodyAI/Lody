@@ -1,3 +1,4 @@
+import { reserveMachineTurn } from './machine-turn-admission';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -4624,12 +4625,15 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
+    const releaseAdmission = reserveMachineTurn();
+    if (!releaseAdmission) return 'execution-deferred';
     const owned = this.runVisibleSessionTurnOwned(options, body);
     this.ownedWork.add(owned);
     try {
       return await owned;
     } finally {
       this.ownedWork.delete(owned);
+      releaseAdmission();
       daemonLossObserver.changed();
     }
   }

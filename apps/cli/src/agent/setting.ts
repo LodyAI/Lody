@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { existsSync } from 'node:fs';
 import { prepareMagpieRuntime } from './magpie-runtime';
 import { createHash } from 'node:crypto';
@@ -673,7 +674,7 @@ async function resolveBuiltinACPProcessLaunch(
     // unset, so do not revert to a conditional undefined env.
     const piPath = trimRuntimeOverride(input.runtimeOverrides?.piPath);
     return {
-      command: process.execPath,
+      command: getCliNodeExecutable(),
       args: [
         runtime.command,
         ...extensions.flatMap((path) => ['-e', path]),
@@ -689,7 +690,7 @@ async function resolveBuiltinACPProcessLaunch(
       ? { command: overridePath, version: undefined }
       : await resolveManagedRuntimeForLaunch('kimi-code', input);
     return {
-      command: overridePath ? runtime.command : process.execPath,
+      command: overridePath ? runtime.command : getCliNodeExecutable(),
       args: overridePath
         ? ['acp', ...(input.extraArgs ?? [])]
         : [runtime.command, 'acp', ...(input.extraArgs ?? [])],
@@ -714,7 +715,7 @@ async function resolveBuiltinACPProcessLaunch(
     ? { command: overridePath, version: undefined }
     : await resolveManagedRuntimeForLaunch(runtimeName, input);
   return {
-    command: process.execPath,
+    command: getCliNodeExecutable(),
     args: [
       ...resolveCliAdapterEntry(`${agentType}-acp`),
       ...(BuiltinACPSetting[agentType].args ?? []),

@@ -1,3 +1,5 @@
+import { observeManagedProcessTree } from './managed-process-observation';
+import { nodeProcessLive } from '@lody/shared/node/process';
 import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -219,6 +221,8 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
         env: buildTerminalEnv(params.sessionId),
       });
 
+      if (process.platform !== 'win32')
+        observeManagedProcessTree(posixGroupTree(nodeProcessLive, terminal.pid));
       const record: TerminalRecord = {
         sessionId: params.sessionId,
         terminalId,

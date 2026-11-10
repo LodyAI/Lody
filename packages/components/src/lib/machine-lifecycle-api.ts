@@ -1,3 +1,6 @@
+import { DaemonReleaseSchema } from '@lody/shared';
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import { DEFAULT_RUNTIME_ARTIFACTS_BASE_URL } from '@lody/platform';
 import { z } from 'zod';
 import { requireCloudAuthBaseUrl } from './cloud-http-port';
 
@@ -88,6 +91,7 @@ export async function mintMachineLifecycleRequestToken({
   action,
   requestId,
   targetVersion,
+  upgrade,
   restoreMachineId,
   sessionToken,
   authBaseUrl,
@@ -98,6 +102,7 @@ export async function mintMachineLifecycleRequestToken({
   restoreMachineId?: string;
   requestId: string;
   targetVersion?: string;
+  upgrade?: ManagedDaemonUpgradeOptions;
   sessionToken: string;
   authBaseUrl?: string;
 }): Promise<MintMachineLifecycleRequestTokenResult> {
@@ -125,6 +130,7 @@ export async function mintMachineLifecycleRequestToken({
           action,
           requestId,
           ...(action === 'upgrade' && targetVersion ? { targetVersion } : {}),
+          ...(action === 'upgrade' && upgrade ? { upgrade } : {}),
           ...(restoreMachineId ? { restoreMachineId } : {}),
         }),
       }
@@ -179,6 +185,35 @@ export async function fetchLatestCliVersion({
       latestVersion: parsed.data.latestVersion,
       cacheTtlMs: parsed.data.cacheTtlMs,
     };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Public release hint only. The target daemon independently checks the release manifest and artifacts. */
+export async function fetchLatestDaemonVersion(
+  channel: 'stable' | 'next' | 'nightly'
+): Promise<FetchLatestCliVersionResult> {
+  if (!requireCloudAuthBaseUrl('remoteMachines'))
+    return { ok: false, error: 'missing_cloud_capability' };
+  try {
+    // Every channel moves only after all platform assets exist. This representative
+    // checksummed platform manifest supplies the common version, not execution authority.
+    const response = await fetch(
+      `${DEFAULT_RUNTIME_ARTIFACTS_BASE_URL}/api/runtimes/${channel === 'next' ? 'lody-cloud-next-daemon' : 'lody-cloud-daemon'}/channels/darwin-arm64/${channel}.json`,
+      { signal: AbortSignal.timeout(15000), cache: 'no-store' }
+    );
+    if (!response.ok) throw new Error(`Daemon channel unavailable: ${response.status}`);
+    const manifest = DaemonReleaseSchema.parse(await response.json());
+    const distribution = channel === 'next' ? 'lody-cloud-next-daemon' : 'lody-cloud-daemon';
+    if (
+      manifest.product !== 'lody-cloud' ||
+      manifest.distribution !== distribution ||
+      manifest.channel !== channel ||
+      manifest.platform !== 'darwin-arm64'
+    )
+      throw new Error('Daemon channel identity mismatch');
+    return { ok: true, latestVersion: manifest.version, cacheTtlMs: 60000 };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

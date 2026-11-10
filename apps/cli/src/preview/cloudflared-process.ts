@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -61,7 +62,7 @@ export async function startCloudflaredProcess(options: {
   // so the worker can reap cloudflared and remove its config first.
   const worker = startProcessLegacy(
     {
-      command: process.execPath,
+      command: getCliNodeExecutable(),
       args: [
         options.workerPath ?? fileURLToPath(new URL('./cloudflared-worker.js', import.meta.url)),
         options.binary,

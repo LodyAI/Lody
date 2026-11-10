@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { daemonLossObserver } from '@/lib/e2ee/client-loss-observer';
 import type {
   LodyClientExtensionCapabilities,
@@ -762,7 +763,7 @@ export class AgentClient implements acp.Client {
     return [
       {
         name: 'lody',
-        command: process.execPath,
+        command: getCliNodeExecutable(),
         args: [cliEntrypoint, '__internal', 'lody-mcp-server'],
         env,
       },

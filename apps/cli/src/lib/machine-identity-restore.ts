@@ -127,12 +127,16 @@ export async function applyPendingMachineIdentityRestore(
     root?: string;
     siteUrl?: string;
     fetchImpl?: typeof fetch;
+    /** Candidate health checks must never commit an identity change. */
+    readOnly?: boolean;
   } = {}
 ): Promise<void> {
   const root = options.root ?? getLodyDataDir();
   const file = path.join(root, 'machine-identity-restore.json');
   const original = await readOptional(file);
   if (original === null) return;
+  if (options.readOnly)
+    throw new Error('A pending machine identity restore must finish before a managed update.');
   const intent = IntentSchema.parse(JSON.parse(original));
   const credentialsPath = path.join(root, 'credentials.json');
   const credentials = CredentialsSchema.parse(

@@ -1,3 +1,6 @@
+import type { MachineStatusResponse } from '@lody/shared';
+import { readManagedOperation } from './managed-daemon-release';
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
 import {
   storeLocalSessionImage,
@@ -265,7 +268,6 @@ import {
   type MachineProcessLifecycleAction,
   normalizeMachineUpgradeTargetVersion,
   verifyMachineLifecycleRequest,
-  writeDaemonUpgradeIntent,
 } from './machine-lifecycle';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
@@ -684,6 +686,11 @@ export interface MessageHandlerConfig {
   machineName: string;
   cliVersion: string;
   machineLifecycleCapability?: MachineLifecycleCapability;
+  prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
@@ -798,6 +805,11 @@ export class MessageHandler {
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
+  private readonly prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly isMachineIdentityRestoreIdle?: () => boolean;
   private readonly sealMachineIdentityRestore?: () => boolean;
@@ -3223,12 +3235,20 @@ export class MessageHandler {
     this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
     this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
-    this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
-      launchMode: 'foreground',
-      canRemoteRestart: false,
-      canRemoteUpgrade: false,
-      reason: 'not_daemon',
-    };
+    this.prepareManagedUpgrade = config.prepareManagedUpgrade;
+    this.machineLifecycleCapability = config.encryptedWorkspace
+      ? {
+          launchMode: config.machineLifecycleCapability?.launchMode ?? 'unknown',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'unsupported_install',
+        }
+      : (config.machineLifecycleCapability ?? {
+          launchMode: 'foreground',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'not_daemon',
+        });
     this.logger.debug(
       `[machine-lifecycle] launchMode=${this.machineLifecycleCapability.launchMode} canRestart=${this.machineLifecycleCapability.canRemoteRestart} canUpgrade=${this.machineLifecycleCapability.canRemoteUpgrade}`
     );
@@ -3717,11 +3737,12 @@ export class MessageHandler {
             ),
         },
         getMachineStatus: async (args) =>
-          await this.executionService.getMachineStatus({
+          await this.readMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
             ...(args?.includeDisk ? { includeDisk: true as const } : {}),
+            ...(args?.includeDaemonUpdate ? { includeDaemonUpdate: true as const } : {}),
           }),
         getPreviewControl: async () => ({
           type: 'machine/preview-control_response',
@@ -3745,12 +3766,19 @@ export class MessageHandler {
             requestToken,
             requestId,
           }),
-        upgradeMachine: async ({ requesterUserId, requestToken, requestId, targetVersion }) =>
+        upgradeMachine: async ({
+          requesterUserId,
+          requestToken,
+          requestId,
+          targetVersion,
+          upgrade,
+        }) =>
           await this.prepareMachineUpgrade({
             requesterUserId,
             requestToken,
             requestId,
             targetVersion,
+            upgrade,
           }),
         onMachineLifecycleResponseSettled: ({ response }) => {
           if (response.accepted) {
@@ -9906,11 +9934,41 @@ export class MessageHandler {
    * Handle machine status request.
    * Collects system resource info and container statuses.
    */
+  private async readMachineStatus(
+    message: MachineStatusRequestValidated
+  ): Promise<MachineStatusResponse> {
+    const response = await this.executionService.getMachineStatus(message);
+    if (!message.includeDaemonUpdate || this.encryptedAttachments) return response;
+    try {
+      const operation = await readManagedOperation();
+      if (!operation || operation.machineId !== this.machineId)
+        return { ...response, daemonUpdate: null };
+      const phase =
+        (operation.phase === 'applied' && this.cliVersion !== operation.targetVersion) ||
+        (operation.phase === 'rolled-back' && this.cliVersion !== operation.previousVersion)
+          ? 'unconfirmed'
+          : operation.phase;
+      return {
+        ...response,
+        daemonUpdate: {
+          requestId: operation.requestId,
+          serviceInstanceId: operation.serviceInstanceId,
+          phase,
+          targetVersion: operation.targetVersion,
+          previousVersion: operation.previousVersion,
+        },
+      };
+    } catch (error) {
+      this.logger.warn('Managed update outcome could not be read', error);
+      return response; // Secondary update diagnostics cannot fail machine health.
+    }
+  }
+
   private async handleMachineStatus(
     message: MachineStatusRequestValidated,
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
-    const response = await this.executionService.getMachineStatus(message);
+    const response = await this.readMachineStatus(message);
     dispatchContext.send(response);
   }
 
@@ -10104,7 +10162,14 @@ export class MessageHandler {
     requestToken: string;
     requestId: string;
     targetVersion?: string;
+    upgrade?: ManagedDaemonUpgradeOptions;
   }): Promise<MachineUpgradeResponse> {
+    if (args.requesterUserId !== this.userId)
+      return this.machineUpgradeFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the machine owner can update this daemon.'
+      );
     let targetVersion: string;
     try {
       targetVersion = normalizeMachineUpgradeTargetVersion(args.targetVersion);
@@ -10150,6 +10215,7 @@ export class MessageHandler {
       requestId: args.requestId,
       requestToken: args.requestToken,
       targetVersion,
+      upgrade: args.upgrade,
     });
     if (!verified.ok) {
       this.logger.warn(`[machine-lifecycle] upgrade verification failed: ${verified.error}`);
@@ -10162,14 +10228,9 @@ export class MessageHandler {
     }
 
     try {
-      await writeDaemonUpgradeIntent({
-        action: 'upgrade',
-        requestId: args.requestId,
-        requesterUserId: args.requesterUserId,
-        targetVersion,
-        currentVersion: this.cliVersion,
-        requestedAtMs: getServerNow(),
-      });
+      if (!this.prepareManagedUpgrade)
+        throw new Error('Managed updater is unavailable; run the explicit daemon installer.');
+      targetVersion = await this.prepareManagedUpgrade(args.requestId, targetVersion, args.upgrade);
     } catch (error) {
       return this.machineUpgradeFailure(
         args.requestId,
@@ -10183,6 +10244,26 @@ export class MessageHandler {
       action: 'upgrade',
       exitCode: EXIT_CODE_REMOTE_UPGRADE,
       requestId: args.requestId,
+      switchPolicy: args.upgrade?.switchPolicy ?? 'when-idle',
+      expiresAtMs: verified.executionExpiresAtMs ?? Date.now() + 120000,
+      onAbandoned: () => {
+        if (this.pendingProcessLifecycleAction?.requestId === args.requestId)
+          this.pendingProcessLifecycleAction = null;
+      },
+      revalidate: async () =>
+        (
+          await verifyMachineLifecycleRequest({
+            token: this.token,
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            action: 'upgrade',
+            requesterUserId: args.requesterUserId,
+            requestId: args.requestId,
+            requestToken: verified.executionToken ?? args.requestToken,
+            upgrade: args.upgrade,
+            targetVersion: normalizeMachineUpgradeTargetVersion(args.targetVersion),
+          })
+        ).ok,
     };
     this.logger.info(
       `[machine-lifecycle] upgrade accepted for request ${args.requestId} target=${targetVersion}`

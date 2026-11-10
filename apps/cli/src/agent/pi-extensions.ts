@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import { PiExtensionDiscoverySchema, type PiExtensionDiscovery } from '@lody/shared';
 import { runCommandTextLegacy } from '@lody/shared/node/process';
@@ -56,7 +57,7 @@ export async function discoverManagedPiExtensions(
   try {
     const { stdout } = await runCommandTextLegacy(
       {
-        command: process.execPath,
+        command: getCliNodeExecutable(),
         args: [runtime.command, '--list-extensions'],
         timeout: 30_000,
         maxOutputBytes: 2 * 1024 * 1024,

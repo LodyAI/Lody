@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -70,6 +71,11 @@ interface LodyOptions {
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   memoryPressure: MemoryPressureSnapshotSource;
   machineLifecycleCapability: MachineLifecycleCapability;
+  prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   closeSessionTerminals?: (sessionId: SessionId) => void;
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -352,6 +358,7 @@ export class Lody {
         machineName: this.machineName,
         cliVersion: pkg.version,
         machineLifecycleCapability: options.machineLifecycleCapability,
+        prepareManagedUpgrade: options.prepareManagedUpgrade,
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         ...(options.localWorkspaceCatalog
           ? { localWorkspaceCatalog: options.localWorkspaceCatalog }
