@@ -54,7 +54,11 @@ const NO_INVITATION_DIGEST = new Uint8Array(32);
 const NO_INVITATION = new Uint8Array([0]);
 const isHistoryRow = (digest: Uint8Array) => digest.every((byte) => byte === 0);
 /** Typed refusals the UI explains (`@lody/platform` `E2eeAccountPairingErrorCode`). */
-export type AccountPairingRefusal = 'pairing-tampered' | 'pairing-expired' | 'pairing-used';
+export type AccountPairingRefusal =
+  | 'pairing-tampered'
+  | 'pairing-expired'
+  | 'pairing-used'
+  | 'pairing-elsewhere';
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
   Object.assign(new Error(`e2ee_${code}`), { code });
 /** Failures that refuse the whole approval rather than one workspace: the signed-in
@@ -293,6 +297,12 @@ export function makeAccountPairing(input: {
   });
   /** Secrets of this device's own open requests, in memory only. */
   const secrets = new Map<string, Uint8Array>();
+  // A lost IPC response may repeat a completed call. This receipt returns only the
+  // exact result; it never revives a used secret or executes signing again.
+  const completedApprovals = new Map<
+    string,
+    { requestId: string; scope: string; expiresAt: number; result: AccountPairingApproval }
+  >();
   /** Workspaces whose last install attempt found an unrelated unfinished
    * per-workspace pairing on this device; recomputed on every poll. */
   const blocked = new Map<string, Set<string>>();
@@ -408,15 +418,38 @@ export function makeAccountPairing(input: {
     return row;
   });
 
-  const requestAccountPairing = Effect.fnUntraced(function* (options: { pairingString?: string }) {
+  const requestAccountPairing = Effect.fnUntraced(function* (options: {
+    pairingString?: string;
+    expiresAt?: number;
+    /** Automatic discovery must never replace another window's retained request. */
+    preserveExisting?: true;
+    workspaceId?: string;
+  }) {
+    if (
+      options.expiresAt !== undefined &&
+      (!Number.isSafeInteger(options.expiresAt) ||
+        options.expiresAt <= now() ||
+        options.expiresAt > now() + PAIRING_REQUEST_MAX_LIFETIME_MS)
+    )
+      return yield* Effect.fail(fail('pairing-expired'));
     const current = yield* expireStale();
     const open = current && !(yield* terminal(current.lookup_id));
-    if (current && open && options.pairingString === undefined) {
+    const sameCode =
+      current && open && options.pairingString !== undefined
+        ? yield* usingCode(options.pairingString, (secret) =>
+            withKeys(secret, (keys) => Effect.succeed(hex(keys.lookupId) === current.lookup_id))
+          )
+        : false;
+    if (current && open && (options.pairingString === undefined || sameCode)) {
+      if (options.expiresAt !== undefined && current.expires_at !== options.expiresAt)
+        return yield* Effect.fail(fail('pairing-tampered'));
       // Retry the exact original; a retry never extends the request.
       const request = yield* fromResult(decodePairingRequest(current.request), 'corrupt');
       yield* submitExact(current, request);
       return yield* stateOf(current);
     }
+    if (current && open && options.preserveExisting)
+      return yield* Effect.fail(fail('pairing-elsewhere'));
     if (current && open) yield* settle(current.lookup_id, 'requester', 'cancelled');
     const secret =
       options.pairingString === undefined ? random(16) : yield* parseCode(options.pairingString);
@@ -426,7 +459,10 @@ export function makeAccountPairing(input: {
           const lookupId = hex(keys.lookupId);
           const used = yield* sql(store.hasRequest(lookupId));
           if (used || (yield* terminal(lookupId))) return yield* Effect.fail(fail('pairing-used'));
-          const workspaces = yield* requesterWorkspaces();
+          const available = yield* requesterWorkspaces();
+          const workspaces = options.workspaceId
+            ? available.filter((workspace) => workspace.workspaceId === options.workspaceId)
+            : available;
           if (workspaces.length === 0) return yield* Effect.fail(fail('invalid-input'));
           const rows: PairingRequestRow[] = [];
           // Each workspace stands alone: one that cannot prepare an identity now
@@ -438,12 +474,14 @@ export function makeAccountPairing(input: {
             else rememberDesktopE2eeFailure('account-pairing-identity', identity.failure);
           }
           if (rows.length === 0) return yield* Effect.fail(fail('invalid-input'));
+          const expiresAt = options.expiresAt ?? now() + PAIRING_REQUEST_MAX_LIFETIME_MS;
+          if (expiresAt <= now()) return yield* Effect.fail(fail('pairing-expired'));
           const request: PairingRequest = {
             account: input.account,
             lookupId: keys.lookupId,
             direction: options.pairingString === undefined ? 'requester-shows' : 'approver-shows',
             deviceName: input.deviceName,
-            expiresAt: now() + PAIRING_REQUEST_MAX_LIFETIME_MS,
+            expiresAt,
             rows,
           };
           const bytes = yield* fromResult(encodePairingRequest(request), 'invalid-input');
@@ -566,9 +604,17 @@ export function makeAccountPairing(input: {
     return yield* stateOf(row);
   });
 
-  const cancelAccountPairing = Effect.fnUntraced(function* () {
+  const cancelAccountPairing = Effect.fnUntraced(function* (options?: {
+    expectedLookupId: string;
+  }) {
+    if (options && !/^[0-9a-f]{32}$/.test(options.expectedLookupId))
+      return yield* Effect.fail(fail('invalid-input'));
     const row = yield* sql(latestRequest());
-    if (row && !(yield* terminal(row.lookup_id)))
+    if (
+      row &&
+      (!options || row.lookup_id === options.expectedLookupId) &&
+      !(yield* terminal(row.lookup_id))
+    )
       yield* settle(row.lookup_id, 'requester', 'cancelled');
   });
 
@@ -734,6 +780,14 @@ export function makeAccountPairing(input: {
       usingCode(options.pairingString, (secret) =>
         withKeys(secret, (keys) =>
           Effect.gen(function* () {
+            const cached = completedApprovals.get(hex(keys.lookupId));
+            const scope = JSON.stringify([...options.workspaceIds].sort());
+            if (cached) {
+              if (cached.expiresAt <= now()) return yield* Effect.fail(fail('pairing-expired'));
+              if (cached.requestId !== options.requestId || cached.scope !== scope)
+                return yield* Effect.fail(fail('pairing-used'));
+              return structuredClone(cached.result);
+            }
             const found = yield* authenticate(keys);
             if (!found) return yield* Effect.fail(fail('pairing-expired'));
             if (found.relayed && found.relayed.requestId !== options.requestId)
@@ -927,8 +981,17 @@ export function makeAccountPairing(input: {
               workspaceId: item!.workspace.workspaceId,
               outcome: outcomes.get(item!.workspace.workspaceId) ?? ('not-admitted' as const),
             }));
-            if (result.every((item) => item.outcome === 'admitted'))
+            if (result.every((item) => item.outcome === 'admitted')) {
               yield* settle(lookupId, 'approver', 'approved');
+              if (completedApprovals.size >= 32)
+                completedApprovals.delete(completedApprovals.keys().next().value!);
+              completedApprovals.set(lookupId, {
+                requestId: options.requestId,
+                scope,
+                expiresAt: request.expiresAt,
+                result: structuredClone({ workspaces: result }),
+              });
+            }
             return { workspaces: result } satisfies AccountPairingApproval;
           })
         )

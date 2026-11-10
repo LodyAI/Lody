@@ -2,6 +2,11 @@ export type {
   MachineIdentityRestoreIntent,
   MachineIdentityRestoreResult,
 } from './machine-identity-restore';
+import type {
+  E2eeAutomaticPairingRecord,
+  E2eeAutomaticPairingCommand,
+} from './e2ee-automatic-pairing';
+export type * from './e2ee-automatic-pairing';
 export type SubscriptionPaymentStatus = {
   billingInterval: BillingInterval;
   effectiveAt: number | null;
@@ -470,6 +475,11 @@ export type CloudApi = {
     claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
   };
   /** Account-wide personal device pairing relay; relays and notifies, never approves. */
+  e2eeAutomaticPairing: {
+    pending: Query<Record<string, never>, E2eeAutomaticPairingRecord[]>;
+    read: Query<{ id: string }, E2eeAutomaticPairingRecord | null>;
+    exchange: Mutation<E2eeAutomaticPairingCommand, E2eeAutomaticPairingRecord>;
+  };
   e2eeAccountPairing: {
     submit: Mutation<E2eeAccountPairingRequests['submit'], E2eeAccountPairingReplies['submit']>;
     pending: Query<E2eeAccountPairingRequests['pending'], E2eeAccountPairingReplies['pending']>;

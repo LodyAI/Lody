@@ -1,3 +1,4 @@
+import { E2eeAutomaticPairingPage } from '@/components/pages/e2ee-automatic-pairing';
 import { E2eeRemoteMachinePairing } from '@/components/pages/e2ee-remote-machine-pairing';
 import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
 
@@ -64,7 +65,7 @@ const retiredReaders = createWorkspaceRuntimeRetirements();
 // Account-pairing joins by account and workspace, across control-page remounts, so a
 // remount neither forgets the join nor asks the host for keys again. A failed key
 // request waits for the user's retry. Cleared when the account changes.
-type AccountPairingJoin = { request?: Promise<boolean>; failed?: boolean };
+type AccountPairingJoin = { request?: Promise<boolean>; failed?: boolean; automatic?: boolean };
 const accountPairingJoins = new Map<string, AccountPairingJoin>();
 let accountPairingAccount: string | null | undefined;
 
@@ -540,7 +541,7 @@ export function E2eeWorkspaceConsole({
     const runtime = port?.runtime;
     if (!runtime) return;
     join.failed = false;
-    join.request = runtime.refresh(workspaceId).then(
+    join.request = runtime.refresh(workspaceId, { installKeys: true }).then(
       () => true,
       (error: unknown) => {
         const failure = classifyE2eeControlFailure(error);
@@ -551,8 +552,9 @@ export function E2eeWorkspaceConsole({
     );
     observeKeyRequest(join.request);
   };
-  const onAccountPairingJoined = () => {
+  const onAccountPairingJoined = (automatic = false) => {
     if (!accountPairingJoins.has(identity)) accountPairingJoins.set(identity, {});
+    if (automatic) accountPairingJoins.get(identity)!.automatic = true;
     refresh();
   };
   const retryAccountPairingKey = () => {
@@ -642,6 +644,28 @@ export function E2eeWorkspaceConsole({
     !current.history?.locallyPinned &&
     current.nativeStatus?.deviceKind !== 'personal'
   );
+  if (
+    (awaitingApproval ||
+      (accountPairingJoins.get(identity)?.automatic &&
+        !joinedKey &&
+        !current?.failure &&
+        !current?.custodyFailure)) &&
+    !showDetails &&
+    port?.runtime?.startAutomaticPairing &&
+    accountId
+  )
+    return (
+      <E2eeAutomaticPairingPage
+        key={identity}
+        runtime={port.runtime}
+        workspaceId={workspaceId}
+        onJoined={() => onAccountPairingJoined(true)}
+        keyFailure={accountPairingKeyFailed}
+        onRetryKeys={retryAccountPairingKey}
+        onBack={backToWorkspaces}
+        onManual={() => setShowDetails(true)}
+      />
+    );
   if (awaitingApproval && !showDetails && port?.runtime && accountId)
     return (
       <E2eeDeviceApprovalGuide

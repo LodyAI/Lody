@@ -8,6 +8,7 @@
     "./pairing": "./src/pairing.ts",
     "./account-pairing": "./src/account-pairing.ts",
     "./account-pairing/browser": "./src/account-pairing-browser.ts",
+    "./automatic-pairing": "./src/automatic-pairing.ts",
     "./account-requester": "./src/account-requester.ts",
     "./history": "./src/admission.ts",
     "./errors": "./src/errors.ts",

@@ -2,7 +2,6 @@ vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
 // The security-code card links to public docs; the route never opens it here.
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => true }));
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -51,7 +50,8 @@ vi.mock('@lody/platform/react', () => ({
   usePlatformSession: () => fixture.session,
   usePlatformWorkspaces: () => fixture.workspaces,
 }));
-vi.mock('jotai', () => ({
+vi.mock('jotai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('jotai')>()),
   useSetAtom: () => fixture.clear,
   useAtomValue: () => fixture.cachedUser,
 }));
@@ -917,6 +917,9 @@ it('opens the workspace by itself once account pairing joins this device to it, 
       throw new PersonalHostError({ code: 'unsupported' });
     },
     close: async () => {},
+    requestAccountPairing: async () => {
+      throw new Error('retained request must not be replaced');
+    },
     accountPairingRequest: async () => {
       joined = true;
       return {
@@ -970,6 +973,8 @@ it('waits for the current key after account pairing joins this device, and opens
     },
     refresh: async (_: string, options?: { installKeys?: boolean }) => {
       keyRefreshes.push(options);
+      if (options?.installKeys !== true)
+        throw new Error('native key installation was not requested');
       await keyInstall;
       keyInstalled = true;
       return status();
@@ -981,6 +986,9 @@ it('waits for the current key after account pairing joins this device, and opens
       throw new PersonalHostError({ code: 'unsupported' });
     },
     close: async () => {},
+    requestAccountPairing: async () => {
+      throw new Error('retained request must not be replaced');
+    },
     accountPairingRequest: async () => {
       joined = true;
       return {
@@ -996,13 +1004,95 @@ it('waits for the current key after account pairing joins this device, and opens
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
   expect(fixture.navigation).toEqual([]);
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ installKeys: true }]);
   await act(async () => installKey());
   await act(async () => {});
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ]);
 });
+
+it.each(['held-native-round', 'late-key-notification'])(
+  'keeps automatic syncing until the key arrives, then navigates without another click (%s)',
+  async (mode) => {
+    fixture.session.user.id = 'automatic-native-key-' + mode;
+    fixture.workspaces = {
+      status: 'ready',
+      activeWorkspaceId: workspaceId,
+      workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+    };
+    fixture.port = displayPort(async () => [] as never);
+    const key = Promise.withResolvers<void>();
+    let updated: (() => void) | undefined;
+    let joined = false,
+      installed = false;
+    const status = () => ({
+      ...local.status,
+      hasDeviceCredential: true,
+      hasCurrentKey: installed,
+      writeEpoch: installed ? 0 : null,
+    });
+    fixture.port.runtime = {
+      open: async () => {
+        if (!joined) throw new Error('e2ee_missing-binding');
+        return status();
+      },
+      status: async () => status(),
+      ledgerView: async () => ({ ...local, status: status() }),
+      ingestLedgerRecords: async () => status(),
+      recordCreated: async () => {
+        throw new PersonalHostError({ code: 'unsupported' });
+      },
+      close: async () => {},
+      refresh: async (_id: string, options?: { installKeys?: boolean }) => {
+        if (options?.installKeys !== true) throw new Error('keys were not requested');
+        if (mode === 'held-native-round') {
+          await key.promise;
+          installed = true;
+        }
+        return status();
+      },
+      subscribeAutomaticPairing: (listener: () => void) => {
+        updated = listener;
+        return () => {
+          updated = undefined;
+        };
+      },
+      startAutomaticPairing: async () => {
+        throw new Error('must resume retained attempt');
+      },
+      automaticPairingState: async () => {
+        joined = true;
+        return {
+          id: 'synthetic-auto',
+          workspaceId,
+          workspaceName: 'Protected',
+          deviceName: 'Synthetic phone',
+          expiresAt: Date.now() + 600_000,
+          comparisonCode: '528193',
+          phase: installed ? 'joined' : 'syncing',
+        };
+      },
+    } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    await act(async () => {});
+    expect(fixture.navigation).toEqual([]);
+    expect(container.textContent).toContain('e2ee.auto.syncing.title');
+    expect(container.querySelector('[data-control-state]')).toBeNull();
+    await act(async () => {
+      if (mode === 'held-native-round') key.resolve();
+      else {
+        installed = true;
+        updated?.();
+      }
+    });
+    await act(async () => {});
+    expect(fixture.navigation).toEqual([
+      { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+    ]);
+  }
+);
 
 const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promise<void>) => {
   fixture.workspaces = {
@@ -1037,6 +1127,9 @@ const keyRequestPort = (refresh: (options?: { installKeys?: boolean }) => Promis
       throw new PersonalHostError({ code: 'unsupported' });
     },
     close: async () => {},
+    requestAccountPairing: async () => {
+      throw new Error('retained request must not be replaced');
+    },
     accountPairingRequest: async () => {
       joined = true;
       return {
@@ -1100,16 +1193,16 @@ it('asks for the key once across a remount of the same account and workspace, th
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ installKeys: true }]);
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(createElement(Component)));
   await act(async () => {});
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ installKeys: true }]);
   expect(fixture.navigation).toEqual([]);
   await act(async () => keyInstall.resolve());
   await act(async () => {});
-  expect(keyRefreshes).toEqual([undefined]);
+  expect(keyRefreshes).toEqual([{ installKeys: true }]);
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ]);

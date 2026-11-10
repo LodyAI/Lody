@@ -96,6 +96,7 @@ function capabilityForOperation(name: string): PlatformCapability {
     name.startsWith('e2eeMembers:') ||
     // Personal device pairing relays: account-scoped, never on local composition.
     name.startsWith('e2eeAccountPairing:') ||
+    name.startsWith('e2eeAutomaticPairing:') ||
     name.startsWith('e2eeJoinMailbox:')
   )
     return 'multiWorkspace';
@@ -170,6 +171,13 @@ export const cloudOperations = {
       import('@lody/cloud-api').E2eeMemberRequests['preview'],
       import('@lody/cloud-api').E2eeMemberReplies['preview']
     >('teamSharing', 'e2eeMembers:preview'),
+  },
+  e2eeAutomaticPairing: {
+    pending: query<ConvexApi['e2eeAutomaticPairing']['pending']>('e2eeAutomaticPairing:pending'),
+    read: query<ConvexApi['e2eeAutomaticPairing']['read']>('e2eeAutomaticPairing:read'),
+    exchange: mutation<ConvexApi['e2eeAutomaticPairing']['exchange']>(
+      'e2eeAutomaticPairing:exchange'
+    ),
   },
   e2eeWorkspaces: {
     memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(

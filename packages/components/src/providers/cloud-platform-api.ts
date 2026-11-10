@@ -65,6 +65,12 @@ export function useCloudPlatformClient() {
   const client = useConvex();
   return useMemo(
     () => ({
+      /** Keep an optional app-owned query live; imperative reads then reuse its cache. */
+      subscribe: <Args, Result>(
+        operation: CloudQuery<Args, Result>,
+        args: Args,
+        changed: () => void
+      ) => client.watchQuery(queryReference(operation), args as never).onUpdate(changed),
       query: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args): Promise<Result> =>
         client.query(queryReference(operation), args as never) as Promise<Result>,
       mutation: <Args, Result>(

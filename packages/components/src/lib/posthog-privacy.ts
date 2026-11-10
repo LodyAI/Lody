@@ -174,8 +174,9 @@ let readWorkspaceScope: () => string | null = () => null;
 let routeTarget: string | null | undefined;
 let routeCommitted = false;
 let routeRevision = 0;
+const privateSurfaces = new Set<object>();
 export const postHogPrivacy = createPostHogPrivacy(() =>
-  routeCommitted ? readWorkspaceScope() : null
+  routeCommitted && privateSurfaces.size === 0 ? readWorkspaceScope() : null
 );
 
 export function getTelemetryRouteTarget(): string | null | undefined {
@@ -188,6 +189,17 @@ export function setTelemetryRouteTarget(slug: string | null, committed: boolean)
   routeTarget = slug;
   if (committed) routeCommitted = true;
   postHogPrivacy.sync();
+}
+
+/** Private overlays can appear above an ordinary workspace. Each mounted surface
+ * owns a lease; a route commit or another surface's release cannot revive capture. */
+export function holdPrivateTelemetrySurface(): () => void {
+  const owner = {};
+  privateSurfaces.add(owner);
+  postHogPrivacy.sync();
+  return () => {
+    if (privateSurfaces.delete(owner)) postHogPrivacy.sync();
+  };
 }
 
 export function suspendWorkspaceTelemetry(): () => void {
