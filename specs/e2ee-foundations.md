@@ -8,6 +8,9 @@ Approval: 2026-11-10, the owner approved this revision: retain the latest policy
 and remind the user to review and re-sign after signer revocation; verify only the
 latest signed version. [Revision and approval record](https://github.com/LodyAI/Lody/pull/2487).
 
+Approval: 2026-11-10, the owner approved the signed execution intent revision.
+[Revision and approval record](https://github.com/LodyAI/Lody/pull/2510).
+
 Original approval: 2026-10-28, reviewed and approved by the owner-authorized
 coordinator (session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894),
 [original approved revision](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862).
@@ -174,8 +177,7 @@ Request IDs are host-generated secure random 16-byte values. RPC timestamps are
 nonnegative Unix UTC milliseconds. Expired means `now >= expiresAt`. The RPC body
 codec does not check current time, replay state, permissions or request freshness.
 
-**Signed execution intents (proposed revision, draft; per the owner decision of
-2026-11-10).** Every encrypted input that may run carries one signature stored beside its
+**Signed execution intents (approved by the owner on 2026-11-10; [approval record](https://github.com/LodyAI/Lody/pull/2510)).** Every encrypted input that may run carries one signature stored beside its
 content in the same commit: a sent turn row, a queue item (which promotion copies) and a
 schedule declaration. The signing device signs a domain-separated message
 (`lody-e2ee/execution-intent/v1`) over the kind (member input, machine input or
@@ -218,7 +220,7 @@ explicitly part of that DTO.
 
 `requestDigest` is SHA-256 of the **entire original signed encrypted request**. It
 correlates one transport exchange only; execution identity is the signed intent above
-(draft).
+(approved).
 Sequence starts at zero and strictly increases per request without u32 wrapping;
 exact duplicate frames are ignored, different bytes at the same sequence
 conflict. A terminal frame ends progress; gaps allow lost progress but never
@@ -328,7 +330,7 @@ writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the si
 row, only while that origin turn is active and only for this machine. At start, the
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
 the member's rights ∩ the owner's sharing policy ∩ every reached project. Per the owner
-decision of 2026-11-10 (draft), no start deadline applies; only the active-turn and
+decision of 2026-11-10 (approved), no start deadline applies; only the active-turn and
 per-origin bounds do. Derivation is one level deep,
 with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
 not implemented and fails closed; a future version would use a user-approved signature
@@ -362,7 +364,7 @@ blocks new remote execution, not unrelated local work. Revalidation never restar
 an uncertain operation.
 
 The journal's **persistent expiry clock is a different mechanism**, not an
-execution grant. Per the owner decision of 2026-11-10 (draft), it applies only to
+execution grant. Per the owner decision of 2026-11-10 (approved), it applies only to
 feature requests: execution records carry no deadline, so no clock, skew check or floor
 applies to them. Current schema 3 retains a nondecreasing floor per
 `(genesis, workspaceId)` across reopen. With an independently authenticated current
@@ -379,7 +381,7 @@ restores freshness or replay authority. Follow the public
 The MVP uses encrypted Streams RPC as its realtime path. If it is unusable, retain
 **encrypted history/Meta durable dispatch as the final fallback**. A transport retry
 reuses the original ID and exact signed ciphertext. Both routes carry the same signed
-execution intent (draft, above) for the same message ID, pass the same actual-start
+execution intent (approved, above) for the same message ID, pass the same actual-start
 claim and current authorization, and a durable arrival never starts a second operation.
 MVP delivery and acceptance must not depend on an iroh connection or SDK.
 
@@ -388,7 +390,7 @@ from sender acceptance of the send to the machine's actual-start boundary, not
 to a receipt ACK or business completion. Measure ordinary/encrypted paths and
 transport/fallback selection separately under stated conditions. Offline durable
 catch-up has no one-second delivery guarantee; per the owner decision of 2026-11-10
-(draft), no deadline applies to an execution input, however late it arrives. No latency
+(approved), no deadline applies to an execution input, however late it arrives. No latency
 result is claimed by this documentation revision.
 
 ### Later acceleration: iroh (outside the MVP)
@@ -411,7 +413,7 @@ receipt ACK, save the original in the shared journal. Identity is
 `(genesis, workspace, targetMachineId, requestId)`; requester, original bytes and
 original expiry are immutable. Another requester or another original at that
 identity is a conflict, not another execution. Forwarding never renews expiry. The
-actual start is keyed by message ID with its content digest (draft, above).
+actual start is keyed by message ID with its content digest (approved, above).
 
 The journal retains received, started, completed and uncertain outcomes. Atomically
 claim received **immediately before the first business side effect**; one winner
