@@ -12,6 +12,8 @@ import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
+import { TurnHistoryGate } from '../src/session/turn-history-gate';
+import type { SessionTransientStore } from '../src/lib/session-transient-store';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -28,6 +30,15 @@ const createSilentLogger = (): Logger => ({
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
 type MessageHandlerHost = {
+  store: SessionTransientStore;
+  writeAssistantEntryForTurn(
+    sessionId: SessionId,
+    doc: SessionDocument,
+    turnId: string,
+    modelInfo: undefined,
+    userTurnId: string,
+    signal: AbortSignal
+  ): Promise<void>;
   finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
   beginConversationTurn(sessionId: SessionId): string;
   markACPNotificationsUnread(
@@ -110,6 +121,85 @@ describe('MessageHandler turn duration (finalize stamps)', () => {
       process.env.LODY_SERVER_URL = originalLodyServerUrl;
     }
     loadEnv();
+  });
+
+  it('does not let a timed-out assistant callback reopen history during finalization', async () => {
+    const sessionId = 's-finalize-gate' as SessionId;
+    const { repo, doc, handler } = await createHandlerHarness(sessionId);
+    const entered = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    const releaseFinalize = Promise.withResolvers<void>();
+    let callback: Promise<void> | undefined;
+    let finalizing: Promise<void> | undefined;
+    try {
+      const turnId = handler.beginConversationTurn(sessionId);
+      await updateTestHistory(doc, () => [
+        {
+          ...assistantEntry(),
+          id: turnId,
+          author: { v: 1, kind: 'agent', sessionId, turnId, name: 'Fixture Agent' },
+        },
+      ]);
+      const backend = await createSessionBackend(doc);
+      const read = backend.history.readTurn.bind(backend.history);
+      vi.spyOn(backend.history, 'readTurn').mockImplementation(async (id) => {
+        const result = await read(id);
+        if (id === turnId) {
+          entered.resolve();
+          await releaseRead.promise;
+        }
+        return result;
+      });
+      const apply = backend.applyHistoryAction.bind(backend);
+      vi.spyOn(backend, 'applyHistoryAction').mockImplementation(async (action) => {
+        const result = await apply(action);
+        if (action.kind === 'finish-assistant') {
+          finished.resolve();
+          await releaseFinalize.promise;
+        }
+        return result;
+      });
+      vi.useFakeTimers();
+      const gate = TurnHistoryGate.waitForUserTurn({
+        logger: createSilentLogger(),
+        sessionId,
+        userTurnId: 'user-1',
+        timeoutMs: 1_000,
+        hasUserTurn: async () => true,
+        subscribeHistory: () => undefined,
+        onBeforeOpen: (_reason, signal) => {
+          callback = handler.writeAssistantEntryForTurn(
+            sessionId,
+            doc,
+            turnId,
+            undefined,
+            'user-1',
+            signal
+          );
+          return callback;
+        },
+      });
+      handler.store.get(sessionId).turnHistoryGate = gate;
+      await entered.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      await gate.waitUntilOpen();
+      vi.useRealTimers();
+      finalizing = handler.finalizeACPState(sessionId, turnId);
+      await finished.promise;
+      releaseRead.resolve();
+      await callback;
+      expect((await backend.readHistory()).find((row) => row.id === turnId)?.finished).toBe(true);
+      releaseFinalize.resolve();
+      await finalizing;
+    } finally {
+      releaseRead.resolve();
+      releaseFinalize.resolve();
+      await callback;
+      await finalizing;
+      vi.useRealTimers();
+      await repo.destroy();
+    }
   });
 
   it('does not publish unread while the history finalizer is pending or during teardown', async () => {

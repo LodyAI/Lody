@@ -230,7 +230,8 @@ writes are never gated; some sit on the prompt critical path. The original 20-se
 also bounds its pre-open assistant-entry callback. Disposal releases existing waiters immediately.
 The deadline keeps the live callback eligible to add author/model metadata. Only disposal aborts
 later callback steps, even if timeout already opened the gate; already-issued writes remain
-owned and observed, and a late completion cannot release a successor gate.
+owned and observed, and a late completion cannot release a successor gate. Finalization disposes
+its captured gate before persisting `finish-assistant`, closing the gap before turn-state cleanup.
 
 ### Why the pointer write is bundled with the history append
 
