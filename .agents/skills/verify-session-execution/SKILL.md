@@ -5,7 +5,7 @@ description: Model-check Session Inbox multi-client delivery, Stop, submission, 
 
 # Verify Session Inbox availability and execution
 
-Use for the covered delivery, dispatch recovery, Inbox service, SQLite, execution owner and reply-ordering gate. This is one subsystem with scheduling, delivery, output and shared-writer retry slices, not a proof of their entire composition. Follow [coverage.json](coverage.json), [expanded-coverage.json](expanded-coverage.json) and [requirements.md](requirements.md). Source mapping pins the verified product commit and exact source hashes. The separate verification commit follows that product commit.
+Use for the covered delivery, dispatch recovery, Inbox service, SQLite, execution owner and reply-ordering gate. This is one subsystem with scheduling, delivery, output and shared-writer retry slices, not a proof of their entire composition. Follow [coverage.json](coverage.json), [expanded-coverage.json](expanded-coverage.json) and [requirements.md](requirements.md). Source mapping pins the verified product commit and exact source hashes. Git tracks model and verifier revisions; their hashes are not duplicated in the mapping. The separate verification commit follows that product commit.
 
 ## Run
 

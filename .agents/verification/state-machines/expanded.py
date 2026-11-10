@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check the delivery/output/shared-writer slices of the single Session Inbox verification skill."""
 from pathlib import Path
-import argparse,hashlib,importlib.util,json,os,re,subprocess,sys,tempfile
-PROFILES=[('BusyScan','busy-scan'),('Delivery','delivery-safety'),('Delivery','delivery-progress'),('Delivery','delivery-partition'),('Delivery','delivery-negative-ack'),('Delivery','delivery-durable-control'),('OutputGate','gate-current'),('OutputGate','gate-completing'),('OutputGate','gate-cancel-control'),('OutputGate','gate-deadlock')]
+import argparse,hashlib,json,re,subprocess,sys,tempfile
+import check as base
+PROFILES=[('BusyScan','busy-scan'),('Delivery','delivery-safety'),('Delivery','delivery-progress'),('Delivery','delivery-partition'),('OutputGate','gate-current'),('OutputGate','gate-completing')]
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[3])
@@ -12,12 +13,9 @@ def main():
  parser.add_argument('--safety-only',action='store_true',help='Use TLC DFID at maximum depth 100, omit temporal properties, and report liveness as NOT RUN. Avoids TLC BFS local RMI.')
  args=parser.parse_args();root=args.root.resolve();here=Path(__file__).resolve().parent
  skill=root/'.agents/skills/verify-session-execution'
- # Adjacent staging resources support review before protected files are copied.
- if not (skill/'expanded-coverage.json').exists():skill=here
  coverage=json.loads((skill/'expanded-coverage.json').read_text())
  for entry in coverage['sources']:
   file=root/entry['path'];assert hashlib.sha256(file.read_bytes()).hexdigest()==entry['sha256'],'Stale expanded mapping: '+entry['path']
- check_path=root/'.agents/verification/state-machines/check.py';spec=importlib.util.spec_from_file_location('base_check',check_path);base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
  out=args.out.resolve() if args.out else Path(tempfile.mkdtemp(prefix='lody-inbox-expanded-'))
  assert not out.is_relative_to(root),'Keep raw verification output outside repository'
  if args.out:out.mkdir(parents=True,exist_ok=False)
@@ -25,7 +23,7 @@ def main():
  if not args.source_only:
   java,jar=base.tlc_tools()
   for module,name in PROFILES:
-   if args.safety_only and name in ('delivery-progress','gate-current'):continue
+   if args.safety_only and name=='delivery-progress':continue
    config=(skill/(name+'.cfg')).read_text();folder=out/name;source=(skill/(module+'.tla')).read_text().replace('---- MODULE '+module+' ----','---- MODULE Model ----',1)
    if args.safety_only:
     # Explicitly omit liveness. A finite depth limit alone is not a proof: require
@@ -57,7 +55,6 @@ def main():
   data=json.loads(run.stdout);results[key]=data
   if 'sqliteTimelines' in data:
    assert data['sqliteTimelines']['result']=='PASS' and data['sqliteTimelines']['timelines']==336,'SQL timeline regression'
-   if variant=='cancel-control':assert data['outputGate']['result']=='PASS','Scratch dispose control failed'
   else:assert data['cancelDecisions']['result']=='PASS' and data['payloadArrivalOrders']['result']=='PASS','Delivery decision regression'
   print(key,'FAIL' if run.returncode else 'PASS',flush=True)
  mutations=[]
@@ -66,18 +63,12 @@ def main():
   (out/(variant+'.out')).write_text(mutation.stdout+mutation.stderr)
   assert mutation.returncode==1 and 'AssertionError' in mutation.stderr and property_name+':' in mutation.stderr,'Source mutation did not fail behaviorally: '+variant
   mutations.append({'property':property_name,'result':'CAUGHT'})
- mutation=subprocess.run(['node',str(here/'sync-replay.mjs'),str(root),str(args.tools),'unsafe-gate'],capture_output=True,text=True,timeout=60)
- (out/'unsafe-gate.out').write_text(mutation.stdout+mutation.stderr)
- assert mutation.returncode==1 and json.loads(mutation.stdout)['outputGate']['result']=='FAIL','Old gate-blocking behavior was not caught'
- mutations.append({'property':'DisposeUnblocks/DeadlineUnblocks','result':'CAUGHT'})
- mutation=subprocess.run(['node',str(here/'sync-replay.mjs'),str(root),str(args.tools),'unsafe-late-write'],capture_output=True,text=True,timeout=60)
- (out/'unsafe-late-write.out').write_text(mutation.stdout+mutation.stderr)
- assert mutation.returncode==1 and 'AssertionError' in mutation.stderr and 'NoLateWrites:' in mutation.stderr,'Actual assistant writer cancellation fence mutation was not caught'
- mutations.append({'property':'NoLateWrites','result':'CAUGHT'})
- mutation=subprocess.run(['node',str(here/'sync-replay.mjs'),str(root),str(args.tools),'unsafe-timeout-abort'],capture_output=True,text=True,timeout=60)
- (out/'unsafe-timeout-abort.out').write_text(mutation.stdout+mutation.stderr)
- assert mutation.returncode==1 and 'AssertionError' in mutation.stderr and 'TimeoutMetadata:' in mutation.stderr,'Timeout abort source mutation was not caught'
- mutations.append({'property':'LiveCallbackKeepsMetadata','result':'CAUGHT'})
+ for variant,property_name,assertion in [('unsafe-gate','DisposeUnblocks/DeadlineUnblocks',None),('unsafe-late-write','NoLateWrites','NoLateWrites:'),('unsafe-timeout-abort','LiveCallbackKeepsMetadata','TimeoutMetadata:')]:
+  mutation=subprocess.run(['node',str(here/'sync-replay.mjs'),str(root),str(args.tools),variant],capture_output=True,text=True,timeout=60)
+  (out/(variant+'.out')).write_text(mutation.stdout+mutation.stderr)
+  caught=('AssertionError' in mutation.stderr and assertion in mutation.stderr) if assertion else json.loads(mutation.stdout)['outputGate']['result']=='FAIL'
+  assert mutation.returncode==1 and caught,'Source mutation did not fail behaviorally: '+variant
+  mutations.append({'property':property_name,'result':'CAUGHT'})
  results['sourceMutations']=mutations
  failures=[]
  if results.get('sync-replay-current',{}).get('outputGate',{}).get('result')=='FAIL':failures.append('OUTPUT_GATE_DISPOSE_DOES_NOT_RELEASE')

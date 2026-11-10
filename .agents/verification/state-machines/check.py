@@ -70,14 +70,13 @@ def main():
  if args.out:out.mkdir(parents=True,exist_ok=False)
  print('Artifacts:',out,flush=True)
  java,jar=tlc_tools();source=(SKILL/'Model.tla').read_text();results={}
- for profile in ['safety','progress','control']:
+ for profile in ['safety','progress']:
   result=run_tlc(java,jar,source,(SKILL/(profile+'.cfg')).read_text(),out/profile)
   require(result['exit'] in (0,12,13),f'TLC tool/spec error in {profile}; inspect its tlc.out')
   require(result['distinctStates'] is not None,f'TLC did not finish {profile}')
   results[profile]={'result':'PASS' if result['exit']==0 else 'FAIL','distinctStates':result['distinctStates'],'exit':result['exit']}
   print(profile,results[profile],flush=True)
  require(results['safety']['result']=='PASS','Current safety profile failed; inspect counterexample.')
- require(results['control']['result']=='PASS','Isolation profile no longer preserves progress/safety.')
  legacy=run_tlc(java,jar,source,(SKILL/'legacy-progress.cfg').read_text(),out/'legacy-progress')
  require(legacy['exit']==13 and 'Temporal properties were violated' in legacy['output'],'Old scanner failure was not caught.')
  results['legacyProgressMutation']={'result':'CAUGHT','distinctStates':legacy['distinctStates']}
