@@ -44,6 +44,27 @@ The cloud response binds the product workspace ID to `contentMode=e2ee`, version
 
 ## History and runtime boundary
 
+Desktop workspace-specific device approval reads and verifies one immutable join
+request, signs its admission, and confirms the admitted record through ledger-only
+refresh before publishing the invitation. The approval does not wait for a full
+key-maintenance round. The existing account/workspace-bound main delivery owner
+tracks the original admission request and recipient, retains its own reader, and
+retries distribution independently of the approving window. Invitation publication
+is not proof of key receipt or content readiness; an unconfirmed ledger cannot
+publish an invitation or start that delivery.
+
+Each explicit approval captures its account generation before its first await and
+its native owner on first access. An in-flight operation ticket is invalidated by
+matching workspace/account reset even before any delivery slot exists. Registration
+rechecks that ticket and original owner under the account lock; same-account login
+cannot reuse an earlier generation. Tickets are released when the call settles and
+never gate unrelated workspaces. A control-only sender receives its missing current
+key before distribution. Existing main retries retain admission, back off from ten
+seconds to five minutes for at most eight automatic retries, and stop on revoked or
+removed access. Delivery slots also retain their login generation, so an already
+registered retry cannot borrow a later same-account login. Explicit retry accepts
+the original `personal-device-<UUID>` id.
+
 History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. Creation starts at genesis; later accepted records appear through the same reader, without invented events.
 
 Verified history checkpoints are retained per account and workspace, with independent storage keys so concurrent windows cannot overwrite a newer observation. Only a prefix actually verified by the core is recorded. Later pages and refreshes must agree with every retained checkpoint; a failed or incomplete refresh keeps the previous history visible and never accepts a shorter or conflicting chain.
