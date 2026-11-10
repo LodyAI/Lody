@@ -1,6 +1,6 @@
 # Web 与移动端个人设备保管
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#同源网页恢复)
 Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#网页自助解锁)
 
 此前批准的基线： [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#client-custody-修订批准)
@@ -137,11 +137,11 @@ NUL 结尾 domain、规范文本/字节串 AAD 和本地版本 1 包装字节，
 
 **两者通用。** 同一用户的任意一台活跃个人设备都可以批准；机器和恢复设备不可以。其余各行和规则不变：残留、已退役、缺失或不确定的状态，仍须依据精确证据对账，绝不在其上生成新身份。
 
-## 网页内用 passkey 或恢复文件打开（2026-11-10 draft 修订）
+## 网页内用 passkey 或恢复文件打开（2026-11-10 已批准修订）
 
-增量状态：draft。2026-11-09 已批准的 passkey＋恢复文件选择保留；专用隔离源与
+增量状态：2026-11-10 由 zxch3n 批准。2026-11-09 已批准的 passkey＋恢复文件选择保留；专用隔离源与
 跨页配对由 owner 于 2026-11-10 选择的同源方向取代，见[恢复保险库修订](recovery-vault.zh.md#passkey-解锁)。
-本节的安全边界变化等待修订审阅，不据此批准上线。
+本节的安全边界变化已获上述批准记录确认，不据此批准上线。
 
 ```mermaid
 flowchart LR

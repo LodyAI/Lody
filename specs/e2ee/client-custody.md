@@ -1,6 +1,6 @@
 # Web and mobile personal-device custody
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#same-origin-web-recovery)
 Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#browser-self-unlock)
 
 Previously approved baseline: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
@@ -176,12 +176,12 @@ recovery devices may not. Every other row and rule is unchanged: residual, retir
 missing or uncertain state still reconciles from exact evidence and never generates an
 identity over it.
 
-## Open with passkey or recovery file in Web (2026-11-10 draft revision)
+## Open with passkey or recovery file in Web (2026-11-10 approved revision)
 
-Increment status: draft. Keep the passkey/file choice approved on 2026-11-09;
+Increment status: approved by zxch3n on 2026-11-10. Keep the passkey/file choice approved on 2026-11-09;
 the owner selected same-origin Web on 2026-11-10, superseding the dedicated origin
 and cross-page pairing direction. See the [recovery vault revision](recovery-vault.md#passkey-unlock).
-The changed security boundary awaits revision review; this is not rollout approval.
+The changed security boundary is covered by the approval record above; this is not rollout approval.
 
 ```mermaid
 flowchart LR

@@ -169,7 +169,7 @@ Owner's 2026-11-10 direction supersedes the dedicated-host plan: recovery runs i
 ordinary `lody.ai` client, with RP `lody.ai`, no device C, cross-page channel or manual
 copy fallback. This expands ceremony trust to the parent domain and subdomains,
 including marketing/analytics code. System verification remains required. The
-[revised Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock) stays draft.
+[revised Spec](../../../../specs/e2ee/recovery-vault.md#passkey-unlock) was approved by zxch3n on 2026-11-10; this does not enable rollout.
 Temporary plaintext is wiped after settlement; encrypted journals remain durable.
 Existing application ownership is reused: setup borrows only its own reader and
 restore uses the same retained device identity. Failure must not close content readers.

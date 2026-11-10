@@ -130,7 +130,7 @@ electron-builder 的 `mac.provisioningProfile` 能否嵌入 Developer ID profile
 
 ## 同源网页恢复修订
 
-owner 于 2026-11-10 指示取代专用主机方案：恢复直接在普通 `lody.ai` 客户端中完成，RP 为 `lody.ai`，不再创建设备 C、跨页通道或手动复制备用步骤。这把系统仪式的信任范围扩大到父域及子域，包括官网与统计脚本。仍须系统验证。[修订后的 Spec](../../../../specs/e2ee/recovery-vault.zh.md#passkey-解锁) 保持 draft。临时明文等实际操作结束后清理，加密重试记录保留。复用现有应用负责人：备份只租借并释放自己的 reader，恢复沿用原设备身份，失败不得关闭内容 reader。
+owner 于 2026-11-10 指示取代专用主机方案：恢复直接在普通 `lody.ai` 客户端中完成，RP 为 `lody.ai`，不再创建设备 C、跨页通道或手动复制备用步骤。这把系统仪式的信任范围扩大到父域及子域，包括官网与统计脚本。仍须系统验证。[修订后的 Spec](../../../../specs/e2ee/recovery-vault.zh.md#passkey-解锁) 已由 zxch3n 于 2026-11-10 批准，但不据此启用功能。临时明文等实际操作结束后清理，加密重试记录保留。复用现有应用负责人：备份只租借并释放自己的 reader，恢复沿用原设备身份，失败不得关闭内容 reader。
 
 ## 后果与局限
 

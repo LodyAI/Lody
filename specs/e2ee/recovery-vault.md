@@ -1,6 +1,6 @@
 # Recovery vault
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#same-origin-web-recovery)
 Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
 Translation: current
 
@@ -200,10 +200,9 @@ restore works there; both are built in parallel, behind default-off gates. The r
 still created with every vault. It remains the fallback when a passkey is lost, the
 iCloud account is lost, or the platform has no PRF.
 
-**One RP in the Web client — draft revision, 2026-11-10.** The proposed RP ID
+**One RP in the Web client — approved revision, 2026-11-10.** The approved RP ID
 is `lody.ai` on macOS, iOS and Web. This supersedes the 2026-11-06 dedicated
-`vault.lody.ai` direction, but this changed security boundary remains draft pending
-review of the revision. The owner said: “我可以改到 lody.ai 然后 lody 网页版就和它一致，这样可以吗”
+`vault.lody.ai` direction. Owner zxch3n approved this revision on 2026-11-10 (see the approval record above). The owner said: “我可以改到 lody.ai 然后 lody 网页版就和它一致，这样可以吗”
 and “然后就都在网页端里面做就好了”. Web opens with a passkey or recovery file,
 creates its first empty recovery file, and adds passkeys directly in the existing
 Web client. There is no isolated origin, second-device browser identity, cross-page
@@ -280,7 +279,7 @@ restores in the first phase. V is never retained, and the app must not gain
 over-the-air JavaScript updates while this path exists, or it falls under the Web
 risk below.
 
-**Web — draft revision, 2026-11-10.** Web ships after macOS and iPhone. The ordinary
+**Web — approved revision, 2026-11-10.** Web ships after macOS and iPhone. The ordinary
 Web client at `lody.ai` directly creates/opens the vault and restores its existing
 browser identity. There is no isolated build, intermediary device C or cross-page
 transfer. A real ceremony decides PRF support; recovery files use the same page when
@@ -300,7 +299,7 @@ This also affects passkeys registered in native apps: synchronized credentials c
 requested from Web even if the user ordinarily uses only native apps. A separate login
 RP prevents honest login code from selecting the recovery credential, but cannot prevent
 a compromised login subdomain from requesting its parent `lody.ai` RP. The dedicated-host
-isolation guarantee from 2026-11-06 is withdrawn by this draft revision.
+isolation guarantee from 2026-11-06 is withdrawn by this approved revision.
 
 **Other authenticators.** There is no allow-list and no attestation requirement: any
 provider works if its real ceremonies return a PRF result that meets the contract. When
@@ -326,9 +325,9 @@ and rotation unchanged.
 ### Owner decisions
 
 The 2026-11-06 dedicated-host/isolated-Web direction is superseded by the
-**draft 2026-11-10 revision above**, based on the owner's quoted direction to
-`lody.ai` and in-client operation. This does not mark the changed security guarantee
-approved. Unchanged: passkey capability requires iOS 18.4 and recovery/passkey work
+**approved 2026-11-10 revision above**, based on the owner's quoted direction to
+`lody.ai` and in-client operation, followed by the explicit approval recorded above.
+This does not authorize rollout. Unchanged: passkey capability requires iOS 18.4 and recovery/passkey work
 runs behind default-off gates in parallel with the MVP.
 
 On the same date the owner decided two more. Authenticators use standard WebAuthn with

@@ -191,3 +191,11 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 ## 网页自助解锁
 
 2026-11-09，owner Zixuan Chen（zxch3n）在来源会话 `7feb7ec5-71fe-459f-a102-8f179831f131`、人类消息 `3ebc9d48-2c78-4265-a60e-a1581194216e` 批准 [#2489](https://github.com/LodyAI/Lody/pull/2489) 推荐项，确切 head 为 `07e231ceb86e20c8c849458e187639b0fbca16b6`。通过 Lody history 核对了人类作者及前文指向该 PR 的推荐表。批准包括 passkey PRF＋恢复文件、复用恢复库、隔离 C→普通网页 B、并存的设备批准入口及推荐限制；密码＋安全码未获选。首次登录可以创建空保险库，工作区恢复仍需已授权设备登记 R 与实际解密测试；这不授予网页创建工作区能力。批准不代表实现、部署或真机验收。
+
+## 同源网页恢复
+
+2026-11-10，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/7feb7ec5-71fe-459f-a102-8f179831f131?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)批准 [#2489](https://github.com/LodyAI/Lody/pull/2489) 的 RP／同源修订，对应确切 head `47a15a00e313085e43aac1d4668016dbf8319b44`。通过 Lody history 核实人类消息 `82150e0c-a3d6-4680-9193-75088329657b`，时间为 `2026-11-10T04:58:51.568Z`，完整原话为“批准”。前一条问题明确要求批准 #2489 从 `vault.lody.ai` 改为 `lody.ai`、在网页客户端内恢复，以及写明的信任代价。
+
+本次仅取代此前专用 RP／隔离网页方向：Mac／iOS／Web 使用 RP `lody.ai`；用 passkey 或恢复文件打开、首次创建文件、添加 passkey 均在网页客户端内完成，不再设置隔离页或跨页交接。接受的代价是主域、子域、官网及统计脚本可请求父 RP 的仪式，仍须系统确认与用户验证；未来登录 passkey 须使用不同 RP 及匹配 origin。不同登录 RP 不能阻止被入侵子域请求父 RP。原生关联仍仅限 webcredentials，不恢复 App Links。
+
+修订保留自己的电脑确认、空保险库与工作区备份的区别、不支持浏览器作为第一台设备创建加密工作区，以及上线前只认最新格式的限制。本提交仅更新批准元数据；功能默认关闭，其他 PR head／状态不变。本记录不批准实现验收、部署或真机验收。
