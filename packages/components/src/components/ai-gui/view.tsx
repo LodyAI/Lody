@@ -3912,7 +3912,8 @@ const UserMessageRowView = ({
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const isUndelivered = isUndeliveredUserTurnEntry(
     sessionMeta?.lastMissingHistoryUserMsgId,
-    message
+    message,
+    sessionMeta?.missingHistoryUserMsgIds
   );
   const pinCtx = useSessionPin();
   const showSendingSpinner =

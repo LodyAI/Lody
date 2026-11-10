@@ -1080,8 +1080,10 @@ export class MessageHandler {
     sessionDoc: SessionDocument,
     turnId: string,
     modelInfo: ModelInfo | undefined,
-    userTurnId?: string
+    userTurnId?: string,
+    signal?: AbortSignal
   ): Promise<void> {
+    if (signal?.aborted) return;
     const span = startTraceSpan(this.logger, 'history.write_assistant_entry', {
       sessionId,
       turnId,
@@ -1105,6 +1107,10 @@ export class MessageHandler {
       let author = existing.state === 'ready' ? readMessageAuthor(existing.turn.author) : undefined;
       if (!author && userTurnId) {
         const input = await backend.history.readTurn(userTurnId);
+        if (signal?.aborted) {
+          span.end();
+          return;
+        }
         if (input.state === 'ready' && input.turn.role === 'user') {
           this.executionService.setTurnNotificationAudience(
             sessionId,
@@ -1124,6 +1130,10 @@ export class MessageHandler {
             modelInfo,
             this.workspaceId
           );
+      }
+      if (signal?.aborted) {
+        span.end();
+        return;
       }
       await backend.openAssistantTurn({
         turnId,
@@ -6339,10 +6349,15 @@ export class MessageHandler {
   }
 
   private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+    const finalizesCurrentTurn = !turnId || this.store.getTurnId(sessionId) === turnId;
+    const gateToFinalize =
+      finalizesCurrentTurn && this.store.has(sessionId)
+        ? this.store.get(sessionId).turnHistoryGate
+        : null;
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
-    if (!turnId || this.store.getTurnId(sessionId) === turnId) {
+    if (finalizesCurrentTurn) {
       await this.awaitTurnHistoryGate(sessionId);
     }
     // Capture timing data and turnId before clearing state
@@ -6361,6 +6376,11 @@ export class MessageHandler {
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const backend = await this.getSessionBackend(sessionDoc);
+      // A deadline may have released output while its metadata callback is still
+      // reading. Fence that callback before marking history finished, rather
+      // than waiting for clearTurnState after the finalization tail. The captured
+      // gate belongs to this finalization, never to a successor turn.
+      gateToFinalize?.dispose();
       await backend.applyHistoryAction({
         kind: 'finish-assistant',
         turnId,
@@ -6541,13 +6561,14 @@ export class MessageHandler {
         );
       },
       subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
-      onBeforeOpen: async () => {
+      onBeforeOpen: async (_reason, signal) => {
         await this.writeAssistantEntryForTurn(
           sessionId,
           sessionDoc,
           turnId,
           this.sessionManager.getSession(sessionId)?.agentClient?.currentModel,
-          userTurnId
+          userTurnId,
+          signal
         );
       },
     });
