@@ -39,10 +39,16 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   关闭时擦除自己的副本；不暴露签名或导出接口，也不经过 IPC。种子只签 TLS 1.3 和
   iroh 中继握手（`iroh-relay handshake v1` 域分隔）；不使用 Pkarr 记录。进程级
   注册表保证每把设备密钥最多一个存活的 Endpoint。
-- **可达性。** Lody 自营 `iroh-relay`，用共享 token 做访问控制。每次拨号把全部
-  已配置中继 URL 加入目标的 `EndpointAddr`；iroh 会把 QUIC Initial 包发到所有已知
-  路径，于是首包到达对端选作主中继的那一个。不配置 DNS、Pkarr 或 Convex 地址查找，
-  不使用 n0 公共中继。
+- **可达性。** 每次拨号把全部已配置中继 URL 加入目标的 `EndpointAddr`；iroh 会把
+  QUIC Initial 包发到所有已知路径，于是首包到达对端选作主中继的那一个。不配置 DNS、
+  Pkarr 或 Convex 地址查找。目标形态是 Lody 自营、用共享 token 做访问控制的
+  `iroh-relay`（部署包在私有仓）。
+- **过渡期中继。** 2026-11-10 owner 决定，在 Lody 中继部署之前使用 n0 的 4 个公共
+  中继（`relay.n0.iroh.link` 下的 `use1-1`、`usw1-1`、`euc1-1`、`aps1-1`，见 v1.4.1
+  的 `iroh/src/defaults.rs`；无需 token）。切换只改配置（`VITE_IROH_RELAYS`）。接受
+  的代价：n0 能看到设备公钥、IP 地址以及谁在和谁通信（内容仍是端到端加密）；公共
+  中继有限流、没有可用性保证；n0 会按版本线下线公共中继，例如已宣布 0.35 线于
+  2026-12-31 下线。
 - **能力边界。** 中继 URL 和 token 只来自官方发布构建的组合。仅本地运行的桌面版和
   没有原生模块的宿主没有 iroh 能力，继续使用现有路径。
 - **生命周期。** 机器端 Endpoint 是 `apps/cli/src/lib/e2ee/workspace-legacy.ts` 中

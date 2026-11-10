@@ -17,7 +17,8 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
 - A process holds at most one live endpoint per device key; the core registry
   enforces it because two endpoints with one key make relays evict each other.
 - Relays come only from the official build composition and every dial names all of
-  them. Do not add DNS, Pkarr or control-plane address lookup, or n0 public relays.
+  them. Do not add DNS, Pkarr or control-plane address lookup. n0's public relays are
+  the interim configuration until Lody relays exist; never hard-code either set here.
 - Absence of the module, relays or a live connection means "use Streams RPC". Never
   let opening, dialing or a failed call delay an available later route, and retry
   only with the same original envelope.

@@ -49,11 +49,19 @@ encrypted workspaces once all platforms can use a device-to-device route.
   signing or export API and never crosses IPC. The seed signs only TLS 1.3 and iroh
   relay handshakes (`iroh-relay handshake v1` domain-separated); Pkarr records are
   not used. A process-wide registry allows one live endpoint per device key.
-- **Reachability.** Lody runs its own `iroh-relay` servers with shared-token access
-  control. Every dial adds all configured relay URLs to the target's
+- **Reachability.** Every dial adds all configured relay URLs to the target's
   `EndpointAddr`; iroh sends QUIC Initial packets to all known paths, so the packet
   reaches the peer on whichever relay it chose as home. No DNS, Pkarr or Convex
-  address lookup is configured. Public n0 relays are not used.
+  address lookup is configured. The target is Lody-run `iroh-relay` servers with
+  shared-token access control (deployment package in the private repository).
+- **Interim relays.** On 2026-11-10 the owner chose n0's four public relays
+  (`use1-1`, `usw1-1`, `euc1-1`, `aps1-1` under `relay.n0.iroh.link`, as listed in
+  `iroh/src/defaults.rs` at v1.4.1; no token) until Lody relays are deployed. The
+  switch is configuration only (`VITE_IROH_RELAYS`). Accepted costs: n0 can observe
+  device public keys, IP addresses and who communicates with whom (content stays
+  end-to-end encrypted); public relays are rate limited with no availability
+  guarantee; and n0 retires public relays per release line, as it announced for
+  0.35 on 2026-12-31.
 - **Capability boundary.** Relay URLs and the token come only from the official
   build composition. The local-only desktop and hosts without the native module
   have no iroh capability and keep the existing routes.

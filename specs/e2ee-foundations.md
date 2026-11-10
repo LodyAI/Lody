@@ -369,10 +369,14 @@ Transport authentication is never authority.
   export and no arbitrary-sign interface. One device key has at most one live
   endpoint per process. The key signs only TLS 1.3 handshakes and relay handshakes,
   both domain-separated; address-lookup records are not used.
-- **Reachability without the control plane.** Lody operates its own relays. A dialer
-  addresses the target with every configured relay, so the first packets reach the
-  peer on whichever relay it chose as home; no address is published to the backend.
-  Direct paths follow from hole punching. Public third-party relays are not used.
+- **Reachability without the control plane.** A dialer addresses the target with
+  every configured relay, so the first packets reach the peer on whichever relay it
+  chose as home; no address is published to the backend. Direct paths follow from
+  hole punching. Until Lody operates its own relays, the official build configures
+  n0's public relays (owner decision, 2026-11-10). They carry only end-to-end
+  encrypted traffic but can observe device public keys, IP addresses and which
+  devices communicate; they are rate limited and carry no availability guarantee,
+  so Streams RPC and durable dispatch remain the fallback.
 - **Optional capability.** Hosts without the native transport or relay configuration,
   including the local-only desktop, keep encrypted Streams RPC and durable dispatch.
   Establishing an iroh connection never delays a usable later route: without a live
