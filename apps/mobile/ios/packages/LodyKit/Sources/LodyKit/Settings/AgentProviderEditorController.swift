@@ -26,7 +26,7 @@ final class AgentProviderEditorController: LodyFormController {
   var willSave: ((AgentProviderItem) -> Void)?
   var saveFailed: (() -> Void)?
   var deleteRequested: ((AgentProviderItem) -> Void)?
-  private let header = AgentProviderHeaderView()
+  private let providerHeader = AgentProviderHeaderView()
   private let usage = AgentProviderUsageView()
   private var usageGroup: LodyFormGroup?
   private var actionsGroup: LodyFormGroup?
@@ -108,7 +108,7 @@ final class AgentProviderEditorController: LodyFormController {
         self.render()
       }
     })
-    stack.addArrangedSubview(header)
+    stack.addArrangedSubview(providerHeader)
     stack.addArrangedSubview(LodyFormGroup(LodyFormRow(label: text("provider"), content: provider, picker: true), name))
     let custom = LodyFormGroup(header: text("custom"), footer: text("argsHint"), command, args)
     commandGroup = custom
@@ -194,7 +194,7 @@ final class AgentProviderEditorController: LodyFormController {
     args.isEditable = editable
     provider.isEnabled = editable && item == nil
     provider.setTitle(selected?.name ?? text("provider"), for: .normal)
-    header.update(
+    providerHeader.update(
       name: name.trimmed.isEmpty ? (selected?.name ?? text("provider")) : name.trimmed,
       detail: [selected?.name ?? "", machine.name.isEmpty ? machine.id : machine.name].filter { !$0.isEmpty }.joined(separator: " · "),
       asset: LodyAgentIcon.asset(cliType: selected?.cliType ?? "builtin", agentType: selected?.agentType ?? "") ?? "",

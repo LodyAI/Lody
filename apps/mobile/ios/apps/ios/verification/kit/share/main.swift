@@ -74,3 +74,133 @@ check(!ShareStore.pending().contains { $0.id == broken.id }, "failed enqueue is 
 ShareStore.clear()
 check(ShareStore.catalog() == nil && ShareStore.pending().isEmpty, "logout clears snapshot and inbox")
 print("PASS: share store")
+
+// Offline application boundaries. The coordinator, sorting and App Group persistence
+// below are production code; delivery/network/UI must never run in snapshot checks.
+struct SessionListState {
+  var key: String
+  var userId: String
+  var workspaceId: String
+  var catalog: SessionCatalog
+  var loading = true
+  var connected = false
+}
+@MainActor final class SessionSource {
+  static let live = SessionSource()
+  var state = SessionListState(key: "", userId: "", workspaceId: "", catalog: SessionCatalog())
+}
+struct ShareCheckAccount {
+  struct Identity { var id: String }
+  var user: Identity
+  var workspaces: [Identity]
+}
+@MainActor enum AuthSession {
+  struct Snapshot { var account: ShareCheckAccount? }
+  static var shared: AuthSession.Type { Self.self }
+  static let snapshot = Snapshot()
+}
+@MainActor enum CatalogSession {
+  static var shared: CatalogSession.Type { Self.self }
+  static func selectWorkspace(_ id: String) { fatalError("Unexpected workspace routing") }
+}
+@MainActor final class LodyPageController { var onClose: (() -> Void)? }
+@MainActor enum LodyShell {
+  static var shared: LodyShell.Type { Self.self }
+  static func close(from: LodyPageController) { fatalError("Unexpected form") }
+  static func openSessionFromExternal(_ id: String) { fatalError("Unexpected navigation") }
+}
+@MainActor enum SessionNavigation {
+  static func handle(_ name: String, _ fields: [String: Any]) throws -> LodyPageController? { fatalError("Unexpected form") }
+}
+@MainActor enum CreateSessionService {
+  static var live: CreateSessionService.Type { Self.self }
+  static func options(_ workspace: String, _ project: String?) async throws -> CreationOptions { fatalError("Unexpected network") }
+}
+struct CreateDraftRecord {
+  let recordJSON: String
+  init(draft: CreateSessionDraft, payload: [String: Any]) { fatalError("Unexpected delivery") }
+}
+@MainActor enum OutboxSession {
+  static var shared: OutboxSession.Type { Self.self }
+  static func put(user: String, workspace: String, json: String) throws -> Task<Void, Error> { fatalError("Unexpected delivery") }
+}
+@MainActor enum LodyToastOverlay {
+  enum Kind { case error }
+  static var shared: LodyToastOverlay.Type { Self.self }
+  static func show(message: String, kind: Kind) { fatalError("Unexpected delivery toast") }
+}
+@MainActor enum DiagnosticsStore {
+  static var shared: DiagnosticsStore.Type { Self.self }
+  static func record(_ category: String, _ event: String, fields: [String: String]) {}
+}
+
+let savedSort = UserDefaults.standard.object(forKey: "inboxProjectSort")
+defer {
+  if let savedSort { UserDefaults.standard.set(savedSort, forKey: "inboxProjectSort") }
+  else { UserDefaults.standard.removeObject(forKey: "inboxProjectSort") }
+}
+let coordinator = NativeShareCoordinator()
+defer { coordinator.stop() }
+SessionSource.live.state = SessionListState(key: "u1:w1", userId: "u1", workspaceId: "w1", catalog: SessionCatalog(
+  projects: [SessionProject(id: "p1", name: "Alpha"), SessionProject(id: "p2", name: "Beta")],
+  sessions: [SessionItem(id: "s1", projectId: "p1", lastMessageAt: 10), SessionItem(id: "s2", projectId: "p2", lastMessageAt: 20)],
+  machineNames: ["m1": "Mac"]
+))
+UserDefaults.standard.set(InboxSort.allCases.firstIndex(of: .name)!, forKey: "inboxProjectSort")
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.map(\.id) == ["p1", "p2"], "coordinator persists name order")
+// A connection-only delivery may reuse the projection and must keep its disk result.
+SessionSource.live.state.connected = true
+coordinator.reconcile()
+check(ShareStore.catalog()?.machineNames == ["m1": "Mac"], "connection refresh preserves catalog")
+UserDefaults.standard.set(InboxSort.allCases.firstIndex(of: .activity)!, forKey: "inboxProjectSort")
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.map(\.id) == ["p2", "p1"], "sort-only change updates persisted order")
+SessionSource.live.state.catalog.sessions[0].lastMessageAt = 30
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.map(\.id) == ["p1", "p2"], "activity change invalidates projection")
+UserDefaults.standard.set(InboxSort.allCases.firstIndex(of: .urgency)!, forKey: "inboxProjectSort")
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.map(\.id) == ["p1", "p2"], "equal urgency falls back to activity")
+SessionSource.live.state.catalog.sessions[1].status = "waiting"
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.map(\.id) == ["p2", "p1"], "status change updates urgency order")
+SessionSource.live.state.catalog.sessions[1].archived = true
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.map(\.id) == ["p1", "p2"], "archive removes urgency contribution")
+SessionSource.live.state.catalog.machineNames["m1"] = "Renamed Mac"
+coordinator.reconcile()
+check(ShareStore.catalog()?.machineNames?["m1"] == "Renamed Mac", "machine label changes reach extension")
+try ShareStore.writeOptions(options, target: "p1")
+try ShareStore.writePrefs(CreatePrefs(projectId: "p1", context: "project"))
+SessionSource.live.state.key = "u1:w2"
+SessionSource.live.state.workspaceId = "w2"
+coordinator.reconcile()
+check(ShareStore.catalog()?.workspaceId == "w2" && ShareStore.options("p1") == nil && ShareStore.prefs() == nil,
+  "workspace switch persists new identity and clears old scoped choices")
+SessionSource.live.state.key = "u2:w2"
+SessionSource.live.state.userId = "u2"
+coordinator.reconcile()
+check(ShareStore.catalog()?.userId == "u2", "account switch cannot reuse previous account snapshot")
+
+// Fail the actual atomic write, then recover without changing projection inputs.
+let catalogFile = root.appendingPathComponent("catalog.json")
+try FileManager.default.removeItem(at: catalogFile)
+try FileManager.default.createDirectory(at: catalogFile, withIntermediateDirectories: false)
+try Data("block replacement".utf8).write(to: catalogFile.appendingPathComponent("blocker"))
+SessionSource.live.state.catalog.projects[0].name = "Updated Alpha"
+coordinator.reconcile()
+check(ShareStore.catalog() == nil, "failed write must not claim a persisted catalog")
+coordinator.reconcile()
+check(ShareStore.catalog() == nil, "persistent failure remains recoverable")
+try FileManager.default.removeItem(at: catalogFile)
+coordinator.reconcile()
+check(ShareStore.catalog()?.projects.first?.name == "Updated Alpha", "identical projection retries after failed persistence")
+
+// Stop is the logout/reset boundary; an equal next snapshot must be persisted anew.
+coordinator.stop()
+ShareStore.clear()
+coordinator.reconcile()
+check(ShareStore.catalog()?.userId == "u2", "stop allows the same scope to restore its cleared persisted catalog")
+coordinator.stop()
+print("PASS: production share coordinator scope, sorting, status, archive, labels, persistence retry and reset")

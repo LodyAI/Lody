@@ -393,3 +393,37 @@ relationRoot.openedBySessionId = relationGrandchild.id
 let cycle = SessionRelations.tree(sessions: [relationRoot, relationTab, relationChild, relationGrandchild], current: relationChild.id)
 precondition(cycle.rows.count == 3 && Set(cycle.rows.flatMap { $0.sessions.map(\.id) }).count == 4)
 print("Related conversations: precise opener, containment, exact Tab targets, missing/archived roots and cycles passed")
+
+// A refresh rebuilds the projection, retaining whole families at the idle root limit.
+var idleCatalog = SessionCatalog(sessions: (0..<21).map {
+  SessionItem(id: "idle-root-\($0)", projectId: "p", lastMessageAt: Double(100 - $0), lastReadAt: 100)
+})
+idleCatalog.sessions.append(SessionItem(id: "idle-child", projectId: "other", openedBySessionId: "idle-root-19", lastMessageAt: 1, lastReadAt: 100))
+let limitedIdle = InboxSections.home(idleCatalog, grouping: .status, now: now).flatMap(\.rows)
+precondition(limitedIdle.count == 22 && limitedIdle.suffix(2).map(\.id) == ["idle-child", InboxSections.idleMoreId])
+precondition(limitedIdle.first { $0.id == "idle-child" }?.parentId == "idle-root-19")
+precondition(!limitedIdle.contains { $0.id == "idle-root-20" })
+precondition(InboxSections.home(idleCatalog, grouping: .status, idleExpanded: true, now: now).flatMap(\.rows).count == 23)
+idleCatalog.sessions[20].pinned = true
+idleCatalog.sessions[20].title = "Updated title"
+let refreshedIdle = InboxSections.home(idleCatalog, grouping: .status, now: now)
+precondition(refreshedIdle.first?.id == "pinned" && refreshedIdle.first?.rows.first?.title == "Updated title")
+precondition(!refreshedIdle.flatMap(\.rows).contains { $0.id == InboxSections.idleMoreId })
+for grouping in [HomeGrouping.time, .project, .status] {
+  let cycleRows = InboxSections.home(SessionCatalog(sessions: [cycleA, cycleB]), grouping: grouping, now: now).flatMap(\.rows)
+  precondition(cycleRows.map(\.id) == ["a", "b"] && cycleRows.allSatisfy { $0.parentId.isEmpty })
+}
+
+// Share/project ordering includes contained Tabs, ignores archives, and breaks ties by name.
+let sortProjects = [SessionProject(id: "b", name: "Beta"), SessionProject(id: "a", name: "Alpha"), SessionProject(id: "empty", name: "Empty"), SessionProject(id: "m:unassigned", name: "Chat")]
+var sortSessions = [
+  SessionItem(id: "sort-a", status: "idle", projectId: "a", lastMessageAt: 10),
+  SessionItem(id: "sort-b", status: "idle", projectId: "b", lastMessageAt: 10),
+  SessionItem(id: "sort-archive", status: "waiting", archived: true, projectId: "empty", lastMessageAt: 100),
+]
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .activity).map(\.id) == ["a", "b", "empty"])
+sortSessions.append(SessionItem(id: "sort-tab", status: "waiting", projectId: "b", parentSessionId: "sort-b", lastMessageAt: 20))
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .urgency).map(\.id) == ["b", "a", "empty"])
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .activity).map(\.id) == ["b", "a", "empty"])
+precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .name).map(\.id) == ["a", "b", "empty"])
+print("PASS: Home refresh, complete idle families, cycles and project sorting retain projection semantics")
