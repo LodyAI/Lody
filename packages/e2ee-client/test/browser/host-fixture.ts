@@ -174,6 +174,8 @@ let memberRelay: {
   submitted?: string[];
   /** The relay reports `committed` before the ledger shows the admission. */
   claimLies?: boolean;
+  /** Request ids an approver rejected. */
+  rejected?: Set<string>;
 } = { calls: [], others: [] };
 let loseNextAppendReply = false;
 /** The relay authenticates the admitted device's own credential, as the real one does. */
@@ -199,7 +201,12 @@ function memberRequestFor(keyPackageHex: string, accountId: string): E2eeMemberR
     signingPublicKey,
     requestId: toHex(request.requestId.toBytes()),
     source: 'link',
-    state: admitted || memberRelay.claimLies ? 'committed' : 'pending',
+    state:
+      admitted || memberRelay.claimLies
+        ? 'committed'
+        : memberRelay.rejected?.has(toHex(request.requestId.toBytes()))
+          ? 'rejected'
+          : 'pending',
     expiresAt: request.expiresAt ?? 0,
   };
 }
@@ -442,6 +449,16 @@ export async function boot(
               if (!keyPackageHex || input.workspaceId !== offer.workspaceId)
                 throw new Error('unknown request');
               return memberRequestFor(keyPackageHex, recoveryAccount ?? 'account');
+            }),
+          retire: (input) =>
+            Effect.sync(() => {
+              memberRelay.calls.push('retire');
+              // Like the real relay: only an ended request is cancelled; a live one stays.
+              const state = memberRequestFor(
+                input.keyPackageHex,
+                recoveryAccount ?? 'account'
+              ).state;
+              return { state: state === 'rejected' ? ('cancelled' as const) : state };
             }),
         },
         contentToken: (binding, credential, request) =>
@@ -1608,6 +1625,7 @@ let approvalReleaseResult: Promise<{ state: string; code?: string }> | undefined
  * endorsed. Call after `boot` with this account as the device account. */
 let joiner: E2eeWorkspaceRuntime;
 let joinInvite: import('@lody/cloud-api').E2eeMemberOffer;
+let retainedJoin: PersonalPairingOffer;
 export async function bootJoiner(accountId: string) {
   memberRelay = { calls: [], others: [] };
   joinInvite = {
@@ -1621,14 +1639,14 @@ export async function bootJoiner(accountId: string) {
     expiresAt: FIXED_NOW + 3_600_000,
   };
   // The application retains the derived identity offer before preparing the join.
-  const retainedJoin = memberPairingOffer(accountId, joinInvite);
+  retainedJoin = memberPairingOffer(accountId, joinInvite);
   joiner = await Effect.runPromise(
     makePersonalWorkspaceRuntime({
       accountId,
       workspaceId: offer.workspaceId,
       genesisHash: offer.genesisHash,
       ports: runtimePorts,
-      retainedOffer: () => Effect.succeed(retainedJoin),
+      retainedOffer: () => Effect.sync(() => retainedJoin),
       account: () => Effect.succeed({ userId: accountId, source: 'network' as const }),
       ledgerRecords: () =>
         Effect.succeed(records.map((record, position) => ({ record, position }))),
@@ -1658,6 +1676,26 @@ export async function joinInvoke(action: string, accountId: string) {
       case 'relayClaimsEarly':
         memberRelay.claimLies = true;
         value = true;
+        break;
+      case 'relayRejects': {
+        const { request } = decodeMemberKeyPackage(memberRelay.submitted!.at(-1)!);
+        (memberRelay.rejected ??= new Set()).add(toHex(request.requestId.toBytes()));
+        value = true;
+        break;
+      }
+      case 'secondInvite':
+        // A new link from the admin; the application re-pins its derived identity offer.
+        joinInvite = { ...joinInvite, token: 'ef'.repeat(32) };
+        retainedJoin = memberPairingOffer(accountId, joinInvite);
+        value = true;
+        break;
+      case 'retires':
+        value = memberRelay.calls.filter((call) => call === 'retire').length;
+        break;
+      case 'signingKey':
+        value = toHex(
+          decodeMemberKeyPackage(memberRelay.submitted!.at(-1)!).request.signingPublicKey.toBytes()
+        );
         break;
       case 'relayHonest':
         memberRelay.claimLies = false;
