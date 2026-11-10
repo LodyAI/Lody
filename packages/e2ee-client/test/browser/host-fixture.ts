@@ -109,6 +109,11 @@ const irohFixture = {
   connected: false,
   requests: [] as string[],
   machine: undefined as string | undefined,
+  // Explicit signals for holding the native open in flight.
+  gate: undefined as Promise<void> | undefined,
+  release: undefined as (() => void) | undefined,
+  entered: undefined as (() => void) | undefined,
+  closed: 0,
 };
 import {
   decodeMemberKeyPackage,
@@ -706,6 +711,8 @@ export async function boot(
           indexedDbClientRpcOriginals({ databaseName: `${databasePrefix}-custody`, binding, mode }),
         iroh: {
           open: async (seed) => {
+            irohFixture.entered?.();
+            if (irohFixture.gate) await irohFixture.gate;
             // Derive the public key the native endpoint would use from this exact seed.
             irohFixture.openedKey = await Effect.runPromise(
               Effect.scoped(
@@ -740,7 +747,9 @@ export async function boot(
                   cancel: () => {},
                 };
               },
-              close: async () => {},
+              close: async () => {
+                irohFixture.closed++;
+              },
             };
           },
         },
@@ -1906,6 +1915,30 @@ export async function runtimeInvoke(action: string) {
           1000
         );
         break;
+      case 'irohCloseDuringOpen': {
+        // Session closes while the first native open is still in flight.
+        irohFixture.closed = 0;
+        irohFixture.gate = new Promise((resolve) => (irohFixture.release = resolve));
+        const entered = new Promise<void>((resolve) => (irohFixture.entered = resolve));
+        const ready = runtime.irohReady!(offer.workspaceId, 'fixture-machine').then(
+          () => 'ready',
+          () => 'failed'
+        );
+        await entered;
+        let closeSettled = false;
+        const closing = runtime
+          .close(offer.workspaceId, 'account', runtimeLease)
+          .finally(() => (closeSettled = true));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const beforeRelease = { closeSettled, closed: irohFixture.closed };
+        irohFixture.release!();
+        await closing;
+        await ready;
+        irohFixture.gate = undefined;
+        irohFixture.entered = undefined;
+        value = { beforeRelease, closed: irohFixture.closed };
+        break;
+      }
       case 'irohEvidence':
         value = {
           opener: irohFixture.openedKey,

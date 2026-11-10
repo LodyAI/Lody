@@ -389,6 +389,14 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'close');
       await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
       await good(page, 'open');
+      // Closing while the first native open is in flight waits for it, and the late
+      // endpoint is still closed instead of keeping the device key's endpoint alive.
+      expect(await good(page, 'irohCloseDuringOpen')).toEqual({
+        beforeRelease: { closeSettled: false, closed: 0 },
+        closed: 1,
+      });
+      await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
+      await good(page, 'open');
       expect(await good(page, 'capabilities')).toMatchObject({ sharing: true });
       expect(await good(page, 'sharingRead')).toMatchObject({
         sharedWithTeam: false,

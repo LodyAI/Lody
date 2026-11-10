@@ -135,10 +135,15 @@ export const importBrowserDevice = Effect.fnUntraced(function* (input: {
                     settle = resolve;
                   });
                   state.active.add(settled);
-                  return Effect.tryPromise({
-                    try: () => open(copy),
-                    catch: () => fail('transport-open-failed'),
-                  }).pipe(
+                  // Uninterruptible: the native opener cannot be cancelled, so the wipe
+                  // and close's drain wait for its actual settlement, and a caller's
+                  // acquireRelease always receives the opened resource.
+                  return Effect.uninterruptible(
+                    Effect.tryPromise({
+                      try: () => open(copy),
+                      catch: () => fail('transport-open-failed'),
+                    })
+                  ).pipe(
                     Effect.ensuring(
                       Effect.sync(() => {
                         copy.fill(0);

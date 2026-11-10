@@ -459,12 +459,16 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           if (irohEndpoint) return irohEndpoint;
           const port = platform.iroh;
           if (!port || !platform.rpc) return yield* fail('unsupported');
-          const opened = yield* device.withTransportSeed((seed) => port.open(seed));
-          irohEndpoint = opened;
-          yield* Scope.provide(
-            Effect.addFinalizer(() => Effect.promise(() => opened.close().catch(() => undefined))),
+          // Acquisition and its close registration are one uninterruptible step:
+          // an endpoint that settles after the session starts closing still closes.
+          const opened = yield* Scope.provide(
+            Effect.acquireRelease(
+              device.withTransportSeed((seed) => port.open(seed)),
+              (endpoint) => Effect.promise(() => endpoint.close().catch(() => undefined))
+            ),
             owner
           );
+          irohEndpoint = opened;
           return opened;
         })
       );

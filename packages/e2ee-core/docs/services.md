@@ -137,7 +137,8 @@ This crypto adapter provides neither durable protection nor admission.
 `withTransportSeed(open)` is the one purpose-limited seed handoff: it passes a copy
 of the Ed25519 seed to the mobile shell's native iroh opener (its EndpointId is
 this signing key), wipes the copy when `open` settles, refuses after close, and
-makes close wait for an admitted handoff. Hosts pass no other consumer.
+makes close wait for an admitted handoff. The opener runs uninterruptibly, so
+callers acquire its resource with `acquireRelease`. Hosts pass no other consumer.
 
 ### KeyProtector / CandidateProtector
 

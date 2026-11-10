@@ -88,6 +88,42 @@ describe('opt-in browser curve capabilities', () => {
     );
   });
 
+  it('an interrupted handoff still waits for the opener before wiping and closing', async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const d = yield* device();
+          let handed: Uint8Array | undefined;
+          let release!: (value: string) => void;
+          const opening = new Promise<string>((resolve) => (release = resolve));
+          let entered!: () => void;
+          const started = new Promise<void>((resolve) => (entered = resolve));
+          const fiber = yield* Effect.forkChild(
+            d.withTransportSeed((seed) => {
+              handed = seed;
+              entered();
+              return opening;
+            })
+          );
+          yield* Effect.promise(() => started);
+          const interrupted = yield* Effect.forkChild(Fiber.interrupt(fiber));
+          const closing = yield* Effect.forkChild(d.close);
+          yield* Effect.yieldNow;
+          // Native open is still in flight: the copy is intact and close has not drained.
+          expect(handed?.some((byte) => byte !== 0)).toBe(true);
+          expect(closing.pollUnsafe()).toBeUndefined();
+          release('endpoint');
+          const exit = yield* Fiber.await(fiber);
+          yield* Fiber.join(interrupted);
+          yield* Fiber.join(closing);
+          // Interruption lands only after actual settlement; then the copy is wiped.
+          expect(Exit.hasInterrupts(exit)).toBe(true);
+          expect(handed?.every((byte) => byte === 0)).toBe(true);
+        })
+      )
+    );
+  });
+
   it('owns independent imported private bytes, matches RFC Ed25519 and exposes no raw private handle', async () => {
     const signing = seed(),
       encryption = bytes(v.skR);

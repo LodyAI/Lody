@@ -197,7 +197,8 @@ WebCrypto。close 立即拒绝新操作，等待已准入 HPKE 真正完成后�
 释放会自动 close。此适配不提供持久保护、设备批准或主机准入。
 `withTransportSeed(open)` 是唯一一个用途受限的种子交接：把 Ed25519 种子的副本交给
 移动端原生 iroh 打开函数（其 EndpointId 就是这把签名公钥），`open` 结束后擦除副本，
-close 之后拒绝，close 会等待已准入的交接完成。宿主不得交给任何其他调用方。
+close 之后拒绝，close 会等待已准入的交接完成。打开函数不可中断，调用方用
+`acquireRelease` 获取其资源。宿主不得交给任何其他调用方。
 
 ## 浏览器账本与原件存储
 
