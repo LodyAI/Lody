@@ -33,7 +33,9 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   journal: () => RealtimeJournal;
   authorize: AuthorizeEncryptedExecution;
   authorizeRead: AuthorizeEncryptedExecution;
-  /** Exact-session history admission; never reused for other read or write methods. */
+  /** Storage-independent exact-session authority for the Roost session/history-read
+   * method, ready for future encrypted Roost support. Backend availability remains
+   * a separate gate; other methods never borrow this revocable authority. */
   authorizeHistoryRead?: (
     workspaceId: string,
     requesterDevice: string,

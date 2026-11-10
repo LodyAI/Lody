@@ -92,6 +92,9 @@ Roost 使用单独的精确会话读取准入：普通请求只转交短期、�
 上线顺序：后端 #4253 合入（自动部署 staging）→ 双账号实测 → 合入 #2487 → owner 部署生产。
 本地组合不请求产品云。自动化测试不代表已部署、双账号或原生设备验收；Spec 保持 draft。
 
-当前实现缺口（待 owner 确认范围）：加密工作区在 CLI 文档管理器及发送准入处仍明确拒绝
-Roost 存储。精确历史读取 RPC 不等于已经补齐加密 Roost 后端；补齐之前该历史不可用，
-完整的 Roost 需求尚未完成。
+历史后端范围（owner 于 2026-11-10 决定）：普通工作区已支持 Roost 历史的团队只读及按人分享。
+E2EE 工作区当前整体不支持 Roost，因此本阶段暂无 Roost 分享，保留
+`e2ee_history_backend_unavailable` 存储门槛。Roost 预计成为默认历史后端；E2EE 支持
+Roost 时，必须沿用本 Spec 的同一授权语义和可失效的 session-read 准入，不另立分享规则。
+session-read 授权与历史后端无关。Roost 的 `session/history-read` feature 方法使用同一
+授权及可失效许可；存储是否受支持由独立检查决定。

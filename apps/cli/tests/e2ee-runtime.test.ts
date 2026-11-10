@@ -22,7 +22,7 @@ import {
 import { ScheduleEngine, type ScheduleEnginePorts } from '../src/lib/schedules/schedule-engine';
 import { ScheduleStore } from '../src/lib/schedules/schedule-store';
 import { LoroRepo } from 'loro-repo';
-import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { SessionDocument, LoroDocumentManager } from '../src/lib/loro/doc';
 import { prepareSessionInput, resolveTurnDispatchConfig } from '../src/commands/session';
 import {
   materializePreparedSessionInput,
@@ -9264,5 +9264,148 @@ it.each([false, true])(
       })
     );
     expect(sent).toEqual([]);
+  }
+);
+
+it.each(['team', 'individual', 'private'] as const)(
+  'uses the same expiring session-read admission for the Roost history method (%s)',
+  async (audience) => {
+    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+    const { E2eeFeatureInputSchema } = await import('@lody/shared/e2ee-rpc');
+    const directory = await mkdtemp(join(tmpdir(), 'backend-neutral-history-'));
+    const outcome = Promise.withResolvers<'published' | 'denied'>();
+    const replies: unknown[] = [];
+    const bodies: unknown[] = [];
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3, true);
+          const member = [...fixture.current.inspectState().members].find(
+            ([, entry]) => entry.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const requester = [...fixture.current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === member[0]
+          );
+          if (!requester) throw new Error('missing requester');
+          const sessions = [
+            {
+              sessionId: 'roost-root',
+              audience:
+                audience === 'team'
+                  ? ('team' as const)
+                  : { userId: audience === 'private' ? 'acct' : 'reader' },
+              level: 'read' as const,
+            },
+          ];
+          const gate = yield* makeGate(undefined, undefined, (reader, session) =>
+            authorizeCliE2eeSessionTarget(
+              {
+                runtime,
+                sourceDevice: hex(fixture.owner.publicKey.toBytes()),
+                readPolicy: () =>
+                  Effect.succeed({
+                    machineId: 'machine',
+                    sharedWithTeam: false,
+                    projects: [],
+                    sessions,
+                    canManage: false,
+                  } as import('@lody/platform').E2eeMachineSharingView),
+              },
+              {
+                machineId: 'machine',
+                rootSessionId: session,
+                requesterUserId: reader === requester[0] ? 'reader' : 'other',
+              }
+            ).pipe(Effect.map((allowed) => ({ allowed, isCurrent: () => true })))
+          );
+          // This is the same wire method the Roost adapter uses, without a storage-kind flag.
+          const input = E2eeFeatureInputSchema.parse({
+            requestId: 'a'.repeat(32),
+            request: {
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              method: 'session/history-read',
+              params: { sessionId: 'roost-root', query: { kind: 'count' } },
+            },
+          });
+          const opened = {
+            requestId: input.requestId,
+            requesterDevice: requester[0],
+            expiresAt: Date.now() + 60_000,
+            input,
+          };
+          const native = {
+            openFeature: () => Effect.succeed(opened),
+            retainFeatureRequest: () => Effect.void,
+            readFeatureResponse: () => Effect.succeed([]),
+            sealFeatureResult: (_machine: unknown, _opened: unknown, result: unknown) =>
+              Effect.sync(() => {
+                replies.push(result);
+                return [new Uint8Array(143).fill(1)];
+              }),
+            verifyFeatureRequest: () => Effect.void,
+            responseStream: () => 'history-response',
+          } as unknown as ReturnType<typeof makeE2eeRpcNative>;
+          const feature = yield* makeEncryptedFeatureReceiver({
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            genesis: 'genesis',
+            native,
+            journal: () => {
+              throw new Error('history must not enter the execution journal');
+            },
+            // No general read/execution permission: only exact-session admission may pass.
+            authorize: gate.authorizeOwnedExecution,
+            authorizeRead: gate.authorizeRead,
+            authorizeHistoryRead: (workspace, device, session) =>
+              gate.authorizeSessionRead(workspace, device, session).pipe(
+                Effect.tap((verdict) =>
+                  Effect.sync(() => {
+                    if (verdict._tag === 'Denied') outcome.resolve('denied');
+                  })
+                )
+              ),
+            authoritySignal: () => new AbortController().signal,
+            isOpen: () => true,
+            handle: async (request, context) => {
+              if (request.method !== 'session/history-read' || !context.authority?.isCurrent())
+                throw new Error('missing exact-session authority');
+              const result = { backend: 'roost', count: 7 };
+              bodies.push(result);
+              return { ok: true, result };
+            },
+            client: {
+              ensureJsonStream: async () => {},
+              appendJson: async () => {
+                outcome.resolve('published');
+                return '1';
+              },
+              readJsonLive: async () => {
+                throw new Error('unused');
+              },
+            },
+          });
+          yield* feature({ id: input.requestId, frame: 'synthetic' });
+          expect(yield* Effect.promise(() => outcome.promise)).toBe(
+            audience === 'private' ? 'denied' : 'published'
+          );
+        })
+      );
+      if (audience === 'private') expect(bodies).toEqual([]);
+      else expect(bodies).toEqual([{ backend: 'roost', count: 7 }]);
+      if (audience === 'team' || audience === 'individual')
+        expect(replies).toEqual([{ ok: true, result: { backend: 'roost', count: 7 } }]);
+      // Admission readiness does not enable the currently unsupported storage backend.
+      await expect(
+        LoroDocumentManager.prototype.getOrCreateSessionDoc.call(
+          { encryptedWorkspace: true } as LoroDocumentManager,
+          'roost-root' as SessionId,
+          { historyBackend: 'roost' }
+        )
+      ).rejects.toThrow('e2ee_history_backend_unavailable');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 );

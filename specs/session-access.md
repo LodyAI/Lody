@@ -116,7 +116,15 @@ Owners: [platform port](../packages/platform/src/session-access.ts),
 [visibility](../packages/components/src/lib/session-visibility.ts),
 [decision note](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 
-**Implementation gap pending owner scope confirmation:** the encrypted workspace currently rejects Roost storage in the CLI document manager and send-admission gate. The scoped read RPC alone does not implement encrypted Roost storage/reading. Until that backend is supplied, E2EE Roost history is unavailable and the full Roost requirement is unfulfilled.
+**History-backend scope (owner decision, 2026-11-10):** ordinary workspaces support
+read-only team and individual sharing of Roost history. E2EE workspaces currently do
+not support Roost at all, so they offer no Roost sharing in this phase. The existing
+`e2ee_history_backend_unavailable` storage gate remains. Roost is expected to become
+the default history backend. When E2EE adds Roost support, it must reuse this Spec's
+same authorization semantics and revocable session-read admission, with no separate
+sharing rules. Session-read authority is backend-independent. The Roost
+`session/history-read` feature method uses this same authority and revocable permit;
+storage support remains a separate check.
 
 Rollout: merge backend #4253 (automatically deploys staging), run a two-account
 product check, merge #2487, then the owner deploys production. Local-only composition
