@@ -221,6 +221,58 @@ machine capability gate, writes remain owner-only, and read-only destinations an
 scheduled messages keep their existing restrictions. The original rule and unknown
 write retry identity handling are unchanged. Open last chat uses Home navigation.
 
+## Settings
+
+Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
+Agent settings and sign-out. There is no Machines destination. Other unfinished
+settings destinations show an explicit placeholder.
+
+Agent settings select one machine above its provider list. Native forms support
+catalog entries and presets, names/prompts/descriptions, custom commands, write-only
+environment changes, endpoints, Codex profiles, runtime paths and capability-derived
+title options. Stored credential values are never returned to forms; omitting an
+environment key preserves it, explicit removal sends null, and an empty replacement
+saves an empty string. Detail revisions fence advanced edits against concurrent changes.
+
+Providers offer edit, probe, refresh and confirmed deletion. Durable setup rows show
+progress, authentication needs and failures with retry/removal. Interactive ACP sign-in
+supports methods, browser authorization, codes, form inputs, consent, status and cancel.
+Final method menus start a new flow; resumable interactions submit to their existing
+flow. Consent must be acknowledged before opening the authorization URL, and verifying
+remains a nonterminal state.
+Runtime controls expose status/install with progress, Pi extension discovery/selection
+and active quota refresh. Sorbet connection/endpoint-store management remains unavailable
+because native encrypted feature transport is missing; ordinary ACP sign-in uses its
+public encrypted input protocol.
+
+Only a fresh snapshot enables owner/online writes. Mutation responses replace the
+target machine’s providers/setups while retaining other still-visible machines.
+`agentProvidersChanged` queues a target-only refresh behind any pending mutation, so
+setup transitions are reconciled without unrelated machine reads. Unknown outcomes
+disable editing until a successful refresh and never replay a write.
+Catalog `agentUsage` selects eligible, exact provider/config quotas and renders
+shared session usage meters and reset-time controls. Absent usage stays hidden.
+
+The native adapter uses canonical `agentProviders`, `agentProviderDetail`,
+`agentProviderProbe`, `agentProviderAuth` and `agentProviderOperation` with verified
+native identity. The reviewed runtime snapshot is fixed at
+`82e848b8e01937bec9768c64d342b81f1d44bd6e` with matching provenance and hashes.
+Native compilation and synthetic acceptance do not establish cloud integration.
+
+`ANDROID_SERIAL=<disposable-emulator> python3 verification/agent-settings.py` runs
+the debug-only synthetic fixture through the production Compose screens. It checks
+Settings without Machines, machine selection, creation on an empty machine,
+other-machine list retention and readonly/offline gates, then exercises synthetic
+sign-in and runtime controls. Screenshots are saved under ignored
+`verification/evidence/agent-settings`. No account login or real provider write occurs.
+[Agent acceptance results](verification/agent-settings-results.json) distinguish
+native synthetic UI, build checks and real WebView instrumentation. Loro uses its
+public asynchronous web initializer with bundled bytes: the base64 initializer's
+synchronous compilation exceeded Android WebView's main-thread 4 KiB limit. This
+is a startup implementation fix, verified on the same API 34 / WebView 113 engine;
+it does not require an engine upgrade or a modified vendor snapshot. Authenticated
+cloud integration remains unverified.
+
 ## Verification
 
 With an emulator or device connected:

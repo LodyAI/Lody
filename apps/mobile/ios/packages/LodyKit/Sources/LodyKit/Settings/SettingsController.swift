@@ -58,7 +58,7 @@ class SettingsController: UIViewController {
       "github-settings": "github-settings", "ai-usage": "ai-usage",
       "published-shares": "published-shares",
     ]
-    let remote = ["remote-machine": "machine", "remote-agent": "agent"]
+    let remote = ["remote-agent": "agent"]
     if let page = native[id] {
       push(page, title: title(id))
     } else if let page = workspacePages[id], workspace != nil {

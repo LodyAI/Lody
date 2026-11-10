@@ -13,6 +13,7 @@ import {
   refreshSessionUsage,
 } from './session';
 import { machineRpc } from './machine-rpc';
+import { providerRows } from './provider-settings';
 import { decodeFrames, encodeFrame } from '../frames';
 import { watchMachinePresence } from './machine-presence';
 import { unknownPresence } from '../models/machines.ts';
@@ -300,6 +301,7 @@ function watch(mode: string) {
   const { signal } = controller;
   void (async () => {
     let failures = 0;
+    let providerSignature = '';
     while (!signal.aborted) {
       try {
         const authorization = await getGrant();
@@ -362,6 +364,15 @@ function watch(mode: string) {
             unhealthy.delete(mode);
             catalogs.set(mode, projectRows(flock.scan(), mode));
             publish();
+            if (mode !== 'meta') {
+              const nextSignature = JSON.stringify(
+                providerRows(flock, mode, false),
+              );
+              if (nextSignature !== providerSignature) {
+                providerSignature = nextSignature;
+                channel.emit('agentProvidersChanged', { machineId: mode });
+              }
+            }
             failures = 0;
             pages = 0;
           }

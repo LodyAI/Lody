@@ -1,6 +1,6 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 111-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `2f55abadada37d5bf2fd348f20e7b5dbe39b93fa` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 119-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `82e848b8e01937bec9768c64d342b81f1d44bd6e` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
@@ -8,6 +8,15 @@ For an intentional update:
 2. Compare that export against the current snapshot. Review protocol changes, licensing and browser dependencies. Preserve Android adaptation in `runtime/src`, outside the snapshot.
 3. Replace the snapshot only after reviewing the diff; update PROVENANCE and SHA256 together. Generate hashes with the exported `hashes()` function in `runtime/snapshot.mjs`, directed at the reviewed source directory. No build regenerates the manifest automatically.
 4. Run snapshot verification, `npm ci`, JS tests, asset build, JVM and Android bridge tests. Update `runtime/contract/fixtures.json` only for an intentional contract change. Capture actual WebView/WASM results and verify release assets contain no diagnostics.
+
+Android bundles Loro through `runtime/src/loro-wasm.mjs`: both `loro-crdt` and
+`loro-crdt/base64` resolve to the official `loro-crdt/web` entry, with its WASM bytes
+inlined by esbuild and initialized asynchronously before dependent modules run.
+This avoids the base64 entry's synchronous `new WebAssembly.Module`, which Android
+WebView can reject above 4 KiB on its main thread, including on supported devices.
+Flock's base64 entry already initializes asynchronously. No network fetch, vendor
+patch, dependency change or WebView upgrade is required. The real WebView suite
+checks production document readiness and actual Flock/Loro snapshot round trips.
 
 The production lockfile remains pinned. Phase 1 reported Zod advisory **GHSA-mrhx-c7xc-m3w5** against 3.25.76. Phase 2 pins **4.6.7** and verifies real shared schemas: accepted identities, strict extra-field rejection, shortcut variants, share object validation, and oversized constrained collections failing before per-item error allocation. The oversized-input test failed on v3 and passes on the patched version. `npm audit --omit=dev` reports zero known vulnerabilities for this lockfile. No source snapshot changes or v3 compatibility shim were needed.
 
@@ -45,7 +54,7 @@ fields reach native UI, never launch environments or credentials.
 
 ## Schedules
 
-`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the `loro-crdt/base64` alias. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
+`schedule-commands.mjs` bridges the shared `schedules`, `scheduleDetail` and `scheduleCommand` calls with the native workspace identity. The dispatcher reduces thrown errors to one code, so schedule failures return in-band as `{error}`: the runtime's schedule codes pass through for localized copy, and any other write failure is `schedule_write_unknown`, because the write may have landed. Writes carry the caller's idempotency `requestId` and are never retried. Both network gates allow `<workspace>:sr` (the Flock registry) and `<workspace>:schedule:<id>` (one schedule's Loro document) to be created, read and appended; deletes stay denied. The handler depends on `loro-mirror` 2.3.2, which shares the asynchronous Loro wrapper. It ships no license text, only `"license": "MIT"` in its package.json, so `build.mjs` accepts that declaration for this one reviewed package and records it in the license inventory.
 
 ## Operation receipts
 
@@ -60,3 +69,17 @@ Its whole-package delta changes only `src/models/session.ts`,
 versions and license files are unchanged. Android's bundled projection test uses
 synthetic Loro history through `projectSession`, including reply text and a batch
 with suppressed success plus an error.
+
+## Agent settings
+
+The current snapshot adds canonical provider list/save/delete/setup operations,
+write-only advanced configuration, encrypted ACP authentication, binary operations,
+Pi extension discovery, quota refresh and target invalidation events. Android keeps
+its adapter and identity fencing outside the snapshot. Auth consent precedes opening
+URLs; final method menus start a fresh flow, while resumable interactions retain their
+flow. Native deadlines exceed the canonical 135-second probe, 60-second auth and
+350-second operation limits. Provider setup remains daemon-owned until published.
+
+MCP session selection remains supported. The upstream delta removes the unused
+`memorySettings` contract and its two implementation files; Android has no consumer
+and retains an explicit Memory placeholder. Dependencies and license files are unchanged.

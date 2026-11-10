@@ -15,10 +15,12 @@ it hides after scrolling and interaction stop. An opaque capsule keeps the icons
 legible over conversation rows. Time/status grouping, search, and conversation
 pages keep their existing scrolling.
 
-iOS keeps application icon selection under Settings → Preferences. Android
-currently offers account information, workspace switching, and sign out.
-Neither native client exposes MCP server management, Memory, or a separate
-Appearance page in settings.
+iOS keeps application icon selection under Settings → Preferences. Android's
+settings home follows iOS's account, personal, workspace, conversation and
+additional sections; unfinished detail pages remain explicitly unavailable.
+Neither native client exposes a standalone Machines entry, MCP server management,
+Memory, or a separate Appearance page in settings. Agents keeps machine selection
+inside its own page, above the selected machine's provider list.
 
 The clients are under active development. This source import does not establish
 an App Store, Play Store, or TestFlight release for this repository. The mobile

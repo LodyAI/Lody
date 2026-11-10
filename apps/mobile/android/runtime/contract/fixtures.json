@@ -25,9 +25,11 @@
     "creationOptionsTrial": {
       "p": "ok agents=1 capabilities=1"
     },
-    "m": {
-      "otherKeys": [],
-      "capabilities": []
+    "machines": {
+      "m": {
+        "otherKeys": [],
+        "capabilities": []
+      }
     }
   },
   "sessionUsage": {

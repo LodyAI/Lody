@@ -46,7 +46,6 @@ enum SettingsSections {
     general.navigates = false
     var rows = [
       general,
-      row("remote-machine", text("remote.machine"), image: "desktopcomputer"),
       row("remote-agent", text("remote.agent"), image: "sparkles"),
       row("agent-roles", text("roles.title"), image: "person.crop.square"),
       row("prompt-shortcuts", text("shortcuts.title"), image: "doc.text"),

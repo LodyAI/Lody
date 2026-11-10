@@ -10,7 +10,7 @@ class Credential(val token: String) {
 data class WorkspaceMember(val id: String, val name: String, val image: String? = null)
 data class Workspace(val id: String, val name: String, val image: String? = null, val slug: String? = null)
 /** [image] is the user's avatar (HTTPS only), null when they have none. */
-data class Account(val id: String, val name: String, val workspaces: List<Workspace>, val image: String? = null)
+data class Account(val id: String, val name: String, val workspaces: List<Workspace>, val image: String? = null, val email: String = "")
 
 /** Avatar URLs are display data: keep only HTTPS, as iOS `AuthAPI.optionalHTTPS`. */
 internal fun httpsImage(value: String?): String? =

@@ -19,7 +19,7 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 @Composable
-private fun locale(): Locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+private fun locale(): Locale = LocalConfiguration.current.locales[0] ?: Locale.ROOT
 
 /** A time of day in the reader's 12/24-hour preference. */
 @Composable

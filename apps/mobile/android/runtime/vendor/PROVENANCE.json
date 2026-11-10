@@ -1,8 +1,8 @@
 {
   "source": "Lody monorepo apps/mobile/ios/packages/cloud-runtime",
-  "commit": "2f55abadada37d5bf2fd348f20e7b5dbe39b93fa",
+  "commit": "82e848b8e01937bec9768c64d342b81f1d44bd6e",
   "license": "AGPL-3.0-only",
   "path": "apps/mobile/ios/packages/cloud-runtime",
-  "export": "git archive 2f55abadada37d5bf2fd348f20e7b5dbe39b93fa apps/mobile/ios/packages/cloud-runtime",
-  "note": "Whole-package export of reviewed immutable local source commit retained at refs/heads/snapshot/mobile-operation-runtime; no local overlays. Relative to e0e7ddc076b998e404f973b2990994e29e85c805, only session ItemSummary, session projection, and operation-presentation change. Adds read-only operation progress/completion/batch cards and notices, preserving duplicate suppression and failure details. Dependencies and licenses are unchanged."
+  "export": "git archive 82e848b8e01937bec9768c64d342b81f1d44bd6e apps/mobile/ios/packages/cloud-runtime",
+  "note": "Reviewed immutable whole-package Agent settings contract snapshot; no local overlays. Adds provider CRUD/detail/probe, interactive encrypted authentication, runtime operations, Pi discovery, quota refresh and target invalidation events. Preserves MCP session selection. Removes unused native memorySettings contract; Android Memory remains an explicit placeholder. Dependencies and licenses unchanged."
 }
