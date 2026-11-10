@@ -79,3 +79,26 @@ export function irohRelaysFromBuild(buildEnv: object): E2eeIrohRelays | undefine
     typeof env.VITE_IROH_RELAY_TOKEN === 'string' ? env.VITE_IROH_RELAY_TOKEN.trim() : undefined
   return { urls, ...(token ? { token } : {}) }
 }
+
+/** The first http(s) proxy among HTTPS_PROXY, HTTP_PROXY and ALL_PROXY (either case);
+ * mirrors `@lody/iroh-native`'s helper for the CJS main bundle. */
+export function proxyUrlFromEnv(env: Readonly<Record<string, string | undefined>>) {
+  for (const key of [
+    'HTTPS_PROXY',
+    'https_proxy',
+    'HTTP_PROXY',
+    'http_proxy',
+    'ALL_PROXY',
+    'all_proxy'
+  ]) {
+    const value = env[key]?.trim()
+    if (!value) continue
+    try {
+      const url = new URL(value)
+      if (url.protocol === 'http:' || url.protocol === 'https:') return value
+    } catch {
+      /* Not a URL; try the next variable. */
+    }
+  }
+  return undefined
+}

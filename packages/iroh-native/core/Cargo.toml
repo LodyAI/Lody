@@ -12,6 +12,7 @@ iroh.workspace = true
 tokio.workspace = true
 hex.workspace = true
 zeroize.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper", "test-utils"] }

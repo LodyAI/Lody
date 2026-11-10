@@ -241,6 +241,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     readonly iroh?: {
       readonly native: IrohNative
       readonly relays: import('@lody/platform').E2eeIrohRelays
+      readonly proxyUrl?: string
     }
   }) {
     const serial = yield* Semaphore.make(1)
@@ -1149,6 +1150,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           ? yield* makeDesktopIrohClient({
               native: options.iroh.native,
               relays: options.iroh.relays,
+              ...(options.iroh.proxyUrl ? { proxyUrl: options.iroh.proxyUrl } : {}),
               withSeed: (open) =>
                 options.custody.withTransportSeed(genesis, device.publicKey, open),
               ledger: () => verified.current()

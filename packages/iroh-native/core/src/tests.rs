@@ -13,6 +13,7 @@ fn config(seed: u8, accept: bool, relays: Vec<String>) -> EndpointConfig {
         relay_token: None,
         accept,
         portmapper: false,
+        proxy_url: None,
         insecure_relay_tls: true,
     }
 }

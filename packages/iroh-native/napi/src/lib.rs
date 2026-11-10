@@ -28,6 +28,8 @@ pub struct OpenOptions {
     pub accept: bool,
     /// UPnP/NAT-PMP/PCP port mapping; defaults to enabled.
     pub portmapper: Option<bool>,
+    /// HTTP(S) proxy for relay connections, e.g. `http://127.0.0.1:7890`.
+    pub proxy_url: Option<String>,
 }
 
 /// A remote ledger device.
@@ -84,6 +86,7 @@ pub fn open_endpoint<'env>(
         relay_token: options.relay_token,
         accept: options.accept,
         portmapper: options.portmapper.unwrap_or(true),
+        proxy_url: options.proxy_url,
         insecure_relay_tls: false,
     };
     env.spawn_future(async move {

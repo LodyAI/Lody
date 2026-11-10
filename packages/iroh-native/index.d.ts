@@ -8,6 +8,8 @@ export interface OpenOptions {
   accept: boolean;
   /** UPnP/NAT-PMP/PCP port mapping; defaults to enabled. Mobile hosts disable it. */
   portmapper?: boolean;
+  /** HTTP(S) proxy for relay connections; see {@link proxyUrlFromEnv}. */
+  proxyUrl?: string;
 }
 
 /** A remote ledger device. */
@@ -64,3 +66,7 @@ export declare function developmentNativePath(): string;
 export declare function loadIrohNative(file: string | undefined): IrohNative | undefined;
 export declare function loadError(file: string | undefined): string | undefined;
 export declare const IROH_RPC_ALPN: 'lody/e2ee-rpc/1';
+/** The first http(s) proxy among HTTPS_PROXY, HTTP_PROXY and ALL_PROXY (either case). */
+export declare function proxyUrlFromEnv(
+  env: Readonly<Record<string, string | undefined>>
+): string | undefined;

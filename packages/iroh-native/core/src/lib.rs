@@ -103,6 +103,10 @@ pub struct EndpointConfig {
     /// UPnP/NAT-PMP/PCP port mapping. Mobile hosts must disable it: on iOS it
     /// raises the Local Network permission prompt.
     pub portmapper: bool,
+    /// HTTP(S) proxy for relay connections (`http://host:port`). Networks that
+    /// reach the internet only through a proxy cannot connect to relays without it;
+    /// direct UDP paths never use it.
+    pub proxy_url: Option<String>,
     /// Tests only: trust self-signed relay certificates.
     pub insecure_relay_tls: bool,
 }
@@ -234,6 +238,12 @@ impl LodyEndpoint {
         };
         if !config.portmapper {
             builder = builder.portmapper_config(PortmapperConfig::Disabled);
+        }
+        if let Some(proxy) = &config.proxy_url {
+            let proxy = proxy
+                .parse::<url::Url>()
+                .map_err(|e| EndpointError::InvalidRelay(format!("proxy: {e}")))?;
+            builder = builder.proxy_url(proxy);
         }
         builder = with_test_tls(builder, config.insecure_relay_tls);
         let endpoint = builder

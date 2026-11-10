@@ -13,6 +13,7 @@ iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "p
 tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }
 hex = "0.4"
 zeroize = "1"
+url = "2"
 
 [profile.release]
 opt-level = 3

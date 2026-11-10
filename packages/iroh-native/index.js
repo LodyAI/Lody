@@ -48,3 +48,29 @@ export function loadError(file) {
 
 /** ALPN of the Lody encrypted RPC protocol carried by this module. */
 export const IROH_RPC_ALPN = 'lody/e2ee-rpc/1';
+
+/**
+ * The first http(s) proxy among HTTPS_PROXY, HTTP_PROXY and ALL_PROXY (either case).
+ * Relays are https URLs, so an HTTPS proxy is preferred. SOCKS proxies are not
+ * supported by iroh's relay client and are ignored.
+ */
+export function proxyUrlFromEnv(env) {
+  for (const key of [
+    'HTTPS_PROXY',
+    'https_proxy',
+    'HTTP_PROXY',
+    'http_proxy',
+    'ALL_PROXY',
+    'all_proxy',
+  ]) {
+    const value = env[key]?.trim();
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'http:' || url.protocol === 'https:') return value;
+    } catch {
+      /* Not a URL; try the next variable. */
+    }
+  }
+  return undefined;
+}

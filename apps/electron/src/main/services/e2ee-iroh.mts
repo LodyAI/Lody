@@ -39,6 +39,8 @@ export function irohTargetDevice(view: LedgerView, machineId: string): string | 
 export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
   native: IrohNative
   relays: E2eeIrohRelays
+  /** HTTP(S) proxy for relay connections (environment or system proxy). */
+  proxyUrl?: string
   withSeed: <A>(open: (seed: Uint8Array) => Promise<A>) => Effect.Effect<A, unknown>
   ledger: () => Effect.Effect<LedgerView, unknown>
 }) {
@@ -65,11 +67,24 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
         options.native.openEndpoint(Buffer.from(seed.buffer, seed.byteOffset, seed.byteLength), {
           relayUrls: [...options.relays.urls],
           ...(options.relays.token ? { relayToken: options.relays.token } : {}),
+          ...(options.proxyUrl ? { proxyUrl: options.proxyUrl } : {}),
           accept: false
         })
       )
     )
     if (Exit.isFailure(opened) && opening === deferred) opening = undefined
+    if (Exit.isSuccess(opened)) {
+      const live = opened.value
+      // Observation only: whether a home relay connected within 15 seconds.
+      yield* Effect.forkIn(
+        Effect.promise(() => live.online(15_000).catch(() => false)).pipe(
+          Effect.tap((online) =>
+            Effect.sync(() => console.debug('[e2ee-iroh] desktop relay online', { online }))
+          )
+        ),
+        scope
+      )
+    }
     yield* Deferred.done(deferred, opened)
     return yield* opened
   })

@@ -16,7 +16,7 @@ import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { runMachineIrohListener } from './iroh-listener';
-import { loadIrohNative } from '@lody/iroh-native';
+import { loadIrohNative, proxyUrlFromEnv } from '@lody/iroh-native';
 import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
 import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
 import { getLogger } from '../../utils/logger';
@@ -1760,6 +1760,8 @@ async function openWorkspaceOwned(
                   native: iroh,
                   relays,
                   withSeed: (open) => opened.custody.withTransportSeed(genesis, key, open),
+                  proxyUrl: proxyUrlFromEnv(process.env),
+                  onOnline: (online) => console.debug('[e2ee-iroh] relay online', { online }),
                   // Route evidence only: ids and timestamps, never frames or content.
                   onOpen: (endpoint) =>
                     console.debug('[e2ee-iroh] listening', {

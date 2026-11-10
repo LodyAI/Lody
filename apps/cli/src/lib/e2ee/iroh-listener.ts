@@ -30,6 +30,8 @@ export type WithTransportSeed = <A>(
 export const runMachineIrohListener = Effect.fnUntraced(function* (options: {
   native: IrohNative;
   relays: E2eeIrohRelays;
+  /** HTTP(S) proxy for relay connections, from the process environment. */
+  proxyUrl?: string;
   withSeed: WithTransportSeed;
   handle: (
     envelope: { id: string; frame: string },
@@ -37,12 +39,15 @@ export const runMachineIrohListener = Effect.fnUntraced(function* (options: {
   ) => Effect.Effect<void, unknown>;
   /** Observation only: the opened endpoint's id and current direct addresses. */
   onOpen?: (endpoint: { endpointId: string; directAddrs(): string[] }) => void;
+  /** Observation only: whether a home relay connected within 15 seconds. */
+  onOnline?: (online: boolean) => void;
 }) {
   const endpoint = yield* Effect.acquireRelease(
     options.withSeed((seed) =>
       options.native.openEndpoint(Buffer.from(seed.buffer, seed.byteOffset, seed.byteLength), {
         relayUrls: [...options.relays.urls],
         ...(options.relays.token ? { relayToken: options.relays.token } : {}),
+        ...(options.proxyUrl ? { proxyUrl: options.proxyUrl } : {}),
         accept: true,
       })
     ),
@@ -51,6 +56,15 @@ export const runMachineIrohListener = Effect.fnUntraced(function* (options: {
   options.onOpen?.(endpoint);
   const permits = yield* Semaphore.make(HANDLERS);
   const scope = yield* Effect.scope;
+  if (options.onOnline) {
+    const report = options.onOnline;
+    yield* Effect.forkIn(
+      Effect.promise(() => endpoint.online(15_000).catch(() => false)).pipe(
+        Effect.tap((online) => Effect.sync(() => report(online)))
+      ),
+      scope
+    );
+  }
   while (true) {
     yield* Semaphore.take(permits, 1);
     const request = yield* Effect.tryPromise({

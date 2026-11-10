@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { developmentNativePath, loadError, loadIrohNative, type IrohEndpoint } from '../index.js';
+import {
+  developmentNativePath,
+  loadError,
+  loadIrohNative,
+  proxyUrlFromEnv,
+  type IrohEndpoint,
+} from '../index.js';
 
 // Built by `pnpm --filter @lody/iroh-native build`. Without a module the suite
 // skips locally; LODY_IROH_REQUIRE=1 (CI) turns a missing or unloadable module
@@ -67,5 +73,29 @@ describe.skipIf(!native)('@lody/iroh-native', () => {
     const pending = listener.nextRequest();
     await listener.close();
     expect(await pending).toBeNull();
+  });
+});
+
+describe('proxy configuration', () => {
+  it('picks the first http(s) proxy and ignores SOCKS or malformed values', () => {
+    expect(proxyUrlFromEnv({})).toBeUndefined();
+    expect(
+      proxyUrlFromEnv({ ALL_PROXY: 'socks5://127.0.0.1:7891', https_proxy: 'not a url' })
+    ).toBeUndefined();
+    expect(
+      proxyUrlFromEnv({ HTTP_PROXY: 'http://127.0.0.1:7890', HTTPS_PROXY: 'http://proxy:8080' })
+    ).toBe('http://proxy:8080');
+  });
+
+  it.skipIf(!native)('opens an endpoint with a proxy and rejects a malformed one', async () => {
+    const endpoint = await native!.openEndpoint(randomBytes(32), {
+      relayUrls: [],
+      accept: false,
+      proxyUrl: 'http://127.0.0.1:9',
+    });
+    await endpoint.close();
+    await expect(
+      native!.openEndpoint(randomBytes(32), { relayUrls: [], accept: false, proxyUrl: '::' })
+    ).rejects.toThrow(/iroh_invalid_relay/);
   });
 });

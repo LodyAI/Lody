@@ -281,12 +281,33 @@ export function withDesktopE2eeAccount<A>(
                       irohConfig.file
                     )
                   : undefined
+                // Relays need the same proxy the embedded CLI receives: the inherited
+                // environment first, else the system proxy for the first relay URL.
+                const irohProxy = irohNative
+                  ? yield* Effect.promise(async () => {
+                      const { proxyUrlFromEnv } = await import('./e2ee-iroh-config')
+                      const inherited = proxyUrlFromEnv(process.env)
+                      if (inherited) return inherited
+                      const { resolveSystemProxyEnv } = await import('./system-proxy-env')
+                      return proxyUrlFromEnv(
+                        await resolveSystemProxyEnv(irohConfig!.relays.urls.slice(0, 1)).catch(
+                          () => ({})
+                        )
+                      )
+                    })
+                  : undefined
                 const host = yield* runtime.makeDesktopE2eeRuntimeHost({
                   directory,
                   custody,
                   bootstrap,
                   ...(irohConfig && irohNative
-                    ? { iroh: { native: irohNative, relays: irohConfig.relays } }
+                    ? {
+                        iroh: {
+                          native: irohNative,
+                          relays: irohConfig.relays,
+                          ...(irohProxy ? { proxyUrl: irohProxy } : {})
+                        }
+                      }
                     : {})
                 })
                 const owned: Account = {
