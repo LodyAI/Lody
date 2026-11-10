@@ -153,6 +153,13 @@ export function turnExecutionContent(input: {
   });
 }
 
+/**
+ * Whether a member may sign this input: only a complete composer input, whose agent
+ * is chosen. Inputs that leave their agent to the Session are machine-authored.
+ */
+export const isMemberSignableInput = (inputConfig: unknown): boolean =>
+  queuedInputEvidence(inputConfig) !== undefined;
+
 export function turnExecutionDigest(input: Parameters<typeof turnExecutionContent>[0]) {
   const content = turnExecutionContent(input);
   return content === undefined ? undefined : sha256Hex(new TextEncoder().encode(content));

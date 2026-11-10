@@ -15,13 +15,15 @@ import type { E2eeRpcStore } from './e2ee-store';
 import { makeE2eeFeatureRpcClient } from './e2ee-feature-client';
 import { e2eeRpcResource, e2eeRpcResponseStream } from './e2ee-resource';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+// The subpath, never the package index: this module runs in browser hosts.
 import {
   decodeE2eeIntentRecord,
   E2EE_INTENT_KIND,
   E2EE_INTENT_RECORD_PATTERN,
   encodeE2eeIntentRecord,
+  isMemberSignableInput,
   turnExecutionDigest,
-} from '@lody/shared';
+} from '@lody/shared/e2ee-execution-intent';
 import type {
   E2eeDispatchInput,
   E2eePreparedDispatch,
@@ -230,7 +232,11 @@ export function makeE2eeRpcClient(options: {
         if (!saved) {
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
-              const digest = turnExecutionDigest({ inputConfig: args.inputConfig });
+              // A member signs only a complete composer input. Inputs that leave their
+              // agent to the Session are machine-authored and signed by the host.
+              const digest = isMemberSignableInput(args.inputConfig)
+                ? turnExecutionDigest({ inputConfig: args.inputConfig })
+                : undefined;
               if (!digest) return yield* Effect.fail(new Error('e2ee_rpc_invalid'));
               const signature = yield* options.signIntent({
                 kind: E2EE_INTENT_KIND.memberInput,

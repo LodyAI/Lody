@@ -40,6 +40,9 @@ import {
 import {
   getSessionRoomId,
   normalizeSessionTurnInputConfig,
+  extractPromptPreviewFromInputBlocks,
+  resolveSessionExecutionInputBlocks,
+  type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
   type MachineMeta,
@@ -5837,7 +5840,37 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     doc.commit();
     return { id: turnId, inputConfig, userId };
   });
+  /**
+   * The production start: the watcher builds the request from the stored row, the
+   * gate claims that request's input, and the agent runs that request's blocks.
+   */
+  const startFromHistory = Effect.fnUntraced(function* (turnId: string) {
+    const entry = historyRow(turnId).toJSON() as SessionHistoryInput;
+    const request = yield* Effect.promise(() =>
+      (
+        watcher as unknown as {
+          buildChatRequestFromHistoryEntry: (
+            currentMeta: SessionMeta,
+            historyEntry: SessionHistoryInput,
+            launchConfig: undefined,
+            user: { name: string; email: string }
+          ) => Promise<{ acpSessionConfig: Record<string, unknown> }>;
+        }
+      ).buildChatRequestFromHistoryEntry(meta, entry, undefined, { name: 'n', email: 'e' })
+    );
+    const claimed = yield* claim({ id: turnId, inputConfig: request.acpSessionConfig });
+    const runs = extractPromptPreviewFromInputBlocks(
+      resolveSessionExecutionInputBlocks(request.acpSessionConfig)
+    );
+    return { claimed, runs };
+  });
+  /** Another writer replaces a row's displayed items, outside the signed input. */
+  const replaceItems = (turnId: string, text: string) => {
+    historyRow(turnId).set('items', [{ type: 'text', text }]);
+  };
   return {
+    replaceItems,
+    startFromHistory,
     memberCryptoUser: Buffer.from(new Uint8Array(32).fill(73)).toString('hex'),
     memberRequester: `e2ee-member:${Buffer.from(new Uint8Array(32).fill(73)).toString('hex')}`,
     fixture,
@@ -5922,6 +5955,37 @@ describe('encrypted queued input evidence', () => {
           state: 'claimed',
           principal: 'owner',
         });
+      })
+    ));
+
+  // The signature covers the input config, never the displayed items, so a start
+  // runs exactly that signed input whatever another writer does to the items.
+  it('runs the signed input, not rewritten items, under the owner signature', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('owner-items', h.ownerRpc);
+        yield* h.promote();
+        h.replaceItems('owner-items', 'replaced by another writer');
+        h.doc.commit();
+        const started = yield* h.startFromHistory('owner-items');
+        expect(started.claimed).toMatchObject({ state: 'claimed', principal: 'owner' });
+        expect(started.runs).toBe('owner-items');
+      })
+    ));
+
+  it('runs the signed prompt when a composer row loses its blocks and items are rewritten', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('owner-blocks', h.ownerRpc);
+        yield* h.promote();
+        h.rewriteRow('owner-blocks', (config) => {
+          delete config.inputBlocks;
+        });
+        h.replaceItems('owner-blocks', 'replaced by another writer');
+        h.doc.commit();
+        const started = yield* h.startFromHistory('owner-blocks');
+        expect(started.claimed).toMatchObject({ state: 'claimed', principal: 'owner' });
+        expect(started.runs).toBe('owner-blocks');
       })
     ));
 

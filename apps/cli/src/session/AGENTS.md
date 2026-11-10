@@ -2,8 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
-The 1,280-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
-existing authorization and execution boundaries; the default ceiling had no room for those rules.
+The 1,320-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
+existing authorization and execution boundaries, including the rule that an encrypted start runs
+only its signed input; the default ceiling had no room for those rules.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -30,7 +31,8 @@ existing authorization and execution boundaries; the default ceiling had no room
   undefined fields must not make an unchanged encrypted original fail equality.
 - Encrypted promotion marks the row `queuedInput` and copies the queue item's signed
   `e2eeIntent`; start verifies that signature, never the row's writer, and encrypted rows
-  take their resume target from Session metadata. Only the owner principal may name the
+  take their resume target from Session metadata. An encrypted start runs only its signed
+  input config, never the row's unsigned items. Only the owner principal may name the
   machine account as requester
   ([evidence](../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
 - Encrypted requesters come from the verified signer; access is decided locally; row

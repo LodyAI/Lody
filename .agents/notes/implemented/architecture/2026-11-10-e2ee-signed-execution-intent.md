@@ -43,6 +43,12 @@ the same meaning. The cost is one more signing step before an encrypted send is 
   Each definite refusal has its own reason; only `e2ee_sender_not_authorized` reads as a
   sender without rights. A row's display account never chooses the requester, and an
   encrypted row never chooses its resume target: the watcher takes it from Session metadata.
+  The input a start runs comes only from the signed input config: the watcher never builds
+  an encrypted row's body from its displayed items, which no signature covers, so another
+  writer can neither substitute a body under the owner's signature nor block it by
+  dropping the stored blocks. A member's host signs only a complete composer input (an
+  agent is chosen and the body is not empty); an input that leaves its agent to the
+  Session is machine-authored and host-signed.
 - **Journal.** An `agent-start` record holds message ID and digest. An ID starts once; other
   content under a started ID is refused. A turn the machine sees cancelled before it started
   is retired. Execution records carry `expiresAt` 0, which no clock, skew check or floor
@@ -90,7 +96,7 @@ the same meaning. The cost is one more signing step before an encrypted send is 
 pin the digest, record and signature vectors. `apps/cli/tests/e2ee-execution-intent.test.ts`
 verifies real signatures from a document and its snapshot, each refusal reason and the
 unknown-signer read. `apps/cli/tests/e2ee-runtime.test.ts` covers queued inputs (late, removed,
-replayed, edited, machine-signed), rotation, scheduled runs and declarations, and background
+replayed, edited, machine-signed, rewritten items, dropped blocks), rotation, scheduled runs and declarations, and background
 retries. `apps/cli/src/lib/e2ee/realtime-journal.test.ts` covers one start and retirement;
 `apps/cli/tests/session-dispatch-watcher.test.ts` covers wake-ups and the capped fallback;
 `packages/components/tests/legacy-session-send-migration.test.ts` covers client ordering.

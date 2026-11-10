@@ -16,7 +16,7 @@ Supersedes: [排队输入证据](../../archived/bug-fix/2026-11-05-e2ee-queued-i
 - **签名消息。** `lody-e2ee/execution-intent/v1`、类型（成员输入、机器输入、定时任务声明）、genesis、工作区、目标机器、作用域、消息 ID 和内容摘要（`packages/e2ee-core/src/internal/foundation/execution-intent.ts`）。
 - **内容摘要。** 共享一份规范化形式（`packages/shared/src/e2ee-execution-intent.ts`）：历史写入层实际存储的输入配置（经过它自己的旧格式规范化和 schema），去掉 `resume`，机器输入另加 `derivedFrom` 或 `scheduleRun`。定时任务声明签定义指纹。两者都有固定测试向量。
 - **写入方。** 客户端先签名再写入：桌面宿主通过 `prepareDispatch` 签名，turn 或排队条目和记录在一次提交里写入；宿主签不了的输入不发送。改变内容的排队编辑沿用消息 ID，由编辑者重新签名。提升时原样拷贝排队条目的记录。这台机器自己写入的输入（预备会话、agent 消息、自动化、定时任务运行）由这台机器签名。定时任务的设定人通过 `signScheduleDeclaration` 签名：这个宿主能力自己计算指纹，不签任何其他内容。
-- **启动。** `execution-intent-verification.ts` 用将要执行的内容重算摘要，按本工作区、这台机器、本会话和本消息验签，再在当前账本里检查签名者；找不到的签名者只在一次认证读取后仍找不到才拒绝。每种确定的拒绝都有自己的原因，只有 `e2ee_sender_not_authorized` 表示发送者没有权限。行里的显示账户不能决定请求者，加密行也不能自行指定要恢复的会话：watcher 从会话元数据取。
+- **启动。** `execution-intent-verification.ts` 用将要执行的内容重算摘要，按本工作区、这台机器、本会话和本消息验签，再在当前账本里检查签名者；找不到的签名者只在一次认证读取后仍找不到才拒绝。每种确定的拒绝都有自己的原因，只有 `e2ee_sender_not_authorized` 表示发送者没有权限。行里的显示账户不能决定请求者，加密行也不能自行指定要恢复的会话：watcher 从会话元数据取。启动时执行的输入只来自签过名的输入配置：watcher 不会用加密行里显示的 items 拼出正文，因为 items 不在签名覆盖范围内。这样其他写入者既不能借 owner 的签名换掉正文，也不能删掉存储的 blocks 来拦下这条消息。成员的宿主只签完整的 composer 输入（选定了 agent，正文不为空）；把 agent 留给会话决定的输入属于机器写入，由宿主签名。
 - **执行日志。** `agent-start` 记录保存消息 ID 和摘要。一个 ID 只启动一次；已启动 ID 下的不同内容被拒绝。机器看到启动前就被取消的 turn 会把它记为已退役。执行记录的 `expiresAt` 为 0，不受任何时钟、偏差检查或下限影响；功能请求保留各自的期限。
 - **等待。** 只有账本读不到才等待。收到该文档的新帧、账本读取确认、密钥装好、RPC 重新连上都会唤醒等待中的 turn；兜底定时器从 1 秒翻倍，最长 5 分钟。工作区打开期间，后台账本重试不会停止，上限同样是 5 分钟。
 
@@ -40,4 +40,4 @@ Supersedes: [排队输入证据](../../archived/bug-fix/2026-11-05-e2ee-queued-i
 
 ## 验证
 
-`packages/shared/tests/e2ee-execution-intent.test.ts` 和 `packages/e2ee-core/test/foundation.test.ts` 固定摘要、记录和签名向量。`apps/cli/tests/e2ee-execution-intent.test.ts` 用真实签名验证文档及其快照、每种拒绝原因和未知签名者的读取。`apps/cli/tests/e2ee-runtime.test.ts` 覆盖排队输入（晚到、已移除、重放、编辑、机器签名）、epoch 轮换、定时任务运行和声明，以及后台重试。`apps/cli/src/lib/e2ee/realtime-journal.test.ts` 覆盖只启动一次和退役；`apps/cli/tests/session-dispatch-watcher.test.ts` 覆盖唤醒和兜底上限；`packages/components/tests/legacy-session-send-migration.test.ts` 覆盖客户端顺序。没有在真实后端、设备或移动端上运行。
+`packages/shared/tests/e2ee-execution-intent.test.ts` 和 `packages/e2ee-core/test/foundation.test.ts` 固定摘要、记录和签名向量。`apps/cli/tests/e2ee-execution-intent.test.ts` 用真实签名验证文档及其快照、每种拒绝原因和未知签名者的读取。`apps/cli/tests/e2ee-runtime.test.ts` 覆盖排队输入（晚到、已移除、重放、编辑、机器签名、items 被改写、blocks 被删）、epoch 轮换、定时任务运行和声明，以及后台重试。`apps/cli/src/lib/e2ee/realtime-journal.test.ts` 覆盖只启动一次和退役；`apps/cli/tests/session-dispatch-watcher.test.ts` 覆盖唤醒和兜底上限；`packages/components/tests/legacy-session-send-migration.test.ts` 覆盖客户端顺序。没有在真实后端、设备或移动端上运行。

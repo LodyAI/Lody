@@ -129,6 +129,13 @@ let offer: PersonalPairingOffer,
   foreign = false;
 let databasePrefix = 'personal';
 const FIXED_NOW = 1_800_000_000_000;
+/** A complete composer input: members sign only inputs whose agent is chosen. */
+const syntheticComposerInput = (text: string) => ({
+  prompt: text,
+  inputBlocks: [{ type: 'text', text }],
+  cliType: 'builtin',
+  agentType: 'codex',
+});
 let fixedClock: Clock.Clock;
 let graceElapsed = 0;
 let controlledClock:
@@ -1108,7 +1115,9 @@ export async function invoke(action: string) {
               userTurnId: 'synthetic-turn',
               userId: 'synthetic-user',
               timestamp: new Date(FIXED_NOW).toISOString(),
-              inputConfig: action === 'rpcChanged' ? { changed: true } : {},
+              // `rpcChanged` names no agent, so it is not a member's input and is never signed.
+              inputConfig:
+                action === 'rpcChanged' ? { changed: true } : syntheticComposerInput('synthetic'),
             });
           case 'candidate':
             return yield* host.prepare({ ...offer, pairingSessionId: '22'.repeat(16) }, true);
@@ -1631,7 +1640,7 @@ export async function runtimeInvoke(action: string) {
           userTurnId: 'runtime-turn',
           userId: 'synthetic-user',
           timestamp: new Date(FIXED_NOW).toISOString(),
-          inputConfig: {},
+          inputConfig: syntheticComposerInput('synthetic'),
         });
         break;
       case 'startOpen':

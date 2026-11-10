@@ -2356,7 +2356,7 @@ export class SessionDispatchWatcher {
     inputBlocks: ReturnType<typeof resolveDispatchTurnInput>['inputBlocks'];
     prompt: string;
   } {
-    return resolveDispatchTurnInput(entry);
+    return resolveDispatchTurnInput(entry, { signedInputOnly: this.deps.encryptedWorkspace });
   }
 
   private buildQueuedMessageEntry(

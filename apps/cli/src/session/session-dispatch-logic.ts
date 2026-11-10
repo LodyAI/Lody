@@ -384,10 +384,25 @@ export function findNextDispatchableUserTurn<T extends SessionDispatchEntry>(
   return null;
 }
 
-export function resolveDispatchTurnInput(entry: SessionHistoryInput): DispatchTurnInput {
-  const historyBlocks = historyItemsToInputBlocks(entry.items);
+/**
+ * The input a start runs. An encrypted row's signature covers its input config and
+ * never its displayed items, so its input comes from that config alone, exactly as
+ * the signer and verifier normalize it; another writer's items never become its body.
+ */
+export function resolveDispatchTurnInput(
+  entry: SessionHistoryInput,
+  options: { readonly signedInputOnly?: boolean } = {}
+): DispatchTurnInput {
   const configuredBlocks = normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, '');
   const fallbackBlocks = normalizeSessionInputBlocks(undefined, entry.inputConfig?.prompt ?? '');
+  if (options.signedInputOnly) {
+    const inputBlocks = configuredBlocks.length > 0 ? configuredBlocks : fallbackBlocks;
+    return {
+      inputBlocks,
+      prompt: entry.inputConfig?.prompt ?? extractPromptPreviewFromInputBlocks(inputBlocks),
+    };
+  }
+  const historyBlocks = historyItemsToInputBlocks(entry.items);
   const inputBlocks =
     configuredBlocks.length > 0
       ? configuredBlocks
