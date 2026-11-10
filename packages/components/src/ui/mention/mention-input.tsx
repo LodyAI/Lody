@@ -151,7 +151,10 @@ function isEmptyRect(rect: DOMRect | null | undefined) {
 
 /** A zero-width, one-line rect at the laid-out caret position for `offset`. */
 function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: number): DOMRect {
-  const lineHeight = lineHeightOf(element);
+  // Client rects are scaled by ancestor transforms and zoom; the CSS line height is not.
+  const box = element.getBoundingClientRect();
+  const scale = element.offsetHeight > 0 ? box.height / element.offsetHeight : 1;
+  const lineHeight = lineHeightOf(element) * scale;
   let rect: DOMRect | null = null;
   const range = createDomRange(editor, offset, offset);
   // jsdom and some embedded engines lack Range geometry; fall back to the box.
@@ -168,21 +171,32 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
     if (last && last.height > 0) rect = new DOMRect(last.right, last.top, 0, last.height);
   }
   if (!rect) {
-    const box = element.getBoundingClientRect();
     const style = window.getComputedStyle(element);
     rect = new DOMRect(
       box.left +
-        (Number.parseFloat(style.paddingLeft) || 0) +
-        (Number.parseFloat(style.borderLeftWidth) || 0),
+        ((Number.parseFloat(style.paddingLeft) || 0) +
+          (Number.parseFloat(style.borderLeftWidth) || 0)) *
+          scale,
       box.top +
-        (Number.parseFloat(style.paddingTop) || 0) +
-        (Number.parseFloat(style.borderTopWidth) || 0) -
-        element.scrollTop,
+        ((Number.parseFloat(style.paddingTop) || 0) +
+          (Number.parseFloat(style.borderTopWidth) || 0) -
+          element.scrollTop) *
+          scale,
       0,
       lineHeight
     );
   }
-  const top = rect.top + (rect.height - lineHeight) / 2;
+  // Snap onto the line grid, as a textarea's caret sits on whole line boxes:
+  // glyph boxes vary with font metrics and chips, line boxes do not.
+  const style = window.getComputedStyle(element);
+  const contentTop =
+    box.top +
+    ((Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.borderTopWidth) || 0)) *
+      scale;
+  const scroll = element.scrollTop * scale;
+  const center = rect.top + rect.height / 2;
+  const line = Math.max(0, Math.floor((center - contentTop + scroll) / lineHeight));
+  const top = contentTop - scroll + line * lineHeight;
   return new DOMRect(rect.left, top, 0, lineHeight);
 }
 
@@ -263,13 +277,14 @@ function MentionDecorations({
   const [decorators, setDecorators] = React.useState<Record<string, MentionDecoration>>(() => ({
     ...editor.getDecorators<MentionDecoration>(),
   }));
-  React.useLayoutEffect(
-    () =>
-      editor.registerDecoratorListener<MentionDecoration>((next) => {
-        setDecorators({ ...next });
-      }),
-    [editor]
-  );
+  React.useLayoutEffect(() => {
+    const unregister = editor.registerDecoratorListener<MentionDecoration>((next) => {
+      setDecorators({ ...next });
+    });
+    // Content written before this subscription (the first fill) is picked up here.
+    setDecorators({ ...editor.getDecorators<MentionDecoration>() });
+    return unregister;
+  }, [editor]);
   return (
     <>
       {Object.entries(decorators).map(([key, decoration]) => {
@@ -348,11 +363,6 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const onBeforeInputRef = React.useRef(onBeforeInput);
   onBeforeInputRef.current = onBeforeInput;
   const [element, setElement] = React.useState<InputElement | null>(null);
-  const composedRef = useComposedRefs(
-    forwardedRef,
-    context.inputRef as React.Ref<InputElement>,
-    setElement
-  );
 
   const [editor] = React.useState(() =>
     createEditor({
@@ -377,6 +387,36 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const selectionRef = React.useRef<ComposerSelection | null>(null);
   const pendingSelectionRef = React.useRef<PendingSelection | null>(null);
   const virtualAnchorSnapshotRef = React.useRef<VirtualAnchorSnapshot | null>(null);
+  const ownerValueRef = React.useRef('');
+  ownerValueRef.current = valueProp ?? context.inputValue ?? '';
+  // Mount and fill the editor as its element attaches, before any parent layout
+  // effect runs: a textarea has its value (and height) from its first commit, and
+  // composers measure it in their own layout effects.
+  const mountRoot = React.useCallback(
+    (node: InputElement | null) => {
+      if (!node || editor.getRootElement() === node) return;
+      editor.setRootElement(node);
+      // Lexical writes wrapping styles inline; the CSS rule states the textarea's.
+      node.style.whiteSpace = '';
+      node.style.wordBreak = '';
+      node.contentEditable = editor.isEditable() ? 'true' : 'false';
+      if (documentRef.current !== EMPTY_DOCUMENT) return;
+      const text = ownerValueRef.current;
+      const mentions = sanitizeComposerMentions(text, contextRef.current.mentions);
+      editor.update(() => $writeComposerValue(text, mentions), {
+        discrete: true,
+        tag: [SYNC_TAG, HISTORY_MERGE_TAG, SKIP_DOM_SELECTION_TAG],
+      });
+      documentRef.current = editor.getEditorState().read(() => $readComposerValue<Mention>());
+    },
+    [editor]
+  );
+  const composedRef = useComposedRefs(
+    forwardedRef,
+    context.inputRef as React.Ref<InputElement>,
+    setElement,
+    mountRoot
+  );
   const [paint, setPaint] = React.useState<{
     empty: boolean;
     offsets: Record<string, ComposerSelection>;
@@ -644,7 +684,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   // primitive and caller handlers, which run first and may prevent them.
   React.useLayoutEffect(() => {
     if (!element || !controller) return undefined;
-    editor.setRootElement(element);
+    if (editor.getRootElement() !== element) mountRoot(element);
     const syncEditable = (editable: boolean) => {
       element.contentEditable = editable ? 'true' : 'false';
     };
@@ -699,7 +739,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         BEFORE_INPUT_COMMAND,
         (event) => {
           const handler = onBeforeInputRef.current;
-          if (!handler) return false;
+          // Script-dispatched input events never edit a textarea; nor here.
+          if (!handler) return !event.isTrusted;
           handler({
             nativeEvent: event,
             currentTarget: element,
@@ -711,7 +752,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
             isDefaultPrevented: () => event.defaultPrevented,
             stopPropagation: () => event.stopPropagation(),
           } as unknown as Parameters<NonNullable<typeof handler>>[0]);
-          return event.defaultPrevented;
+          return event.defaultPrevented || !event.isTrusted;
         },
         COMMAND_PRIORITY_CRITICAL
       ),
@@ -754,17 +795,41 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         const caret = selection?.end ?? document.text.length;
         if (changed || !isPublished()) {
           publish(document, caret);
-        } else if (!isSameSelection(previousSelection, selection) && selection) {
+        } else if (
+          selection &&
+          selection.start === selection.end &&
+          !isSameSelection(previousSelection, selection)
+        ) {
+          // Only a caret decides triggers; selecting a range (select-all before
+          // retyping, a drag) must not close an open menu and reset its state.
           onMentionUpdate(document.text, selection.start);
         }
       }),
       registerComposerController(element, controller)
     );
+    // The first content was written before this listener existed.
+    editor.getEditorState().read(() => {
+      const document = $readComposerValue<Mention>();
+      setPaint({
+        empty: document.text.length === 0,
+        offsets: $readMentionOffsets(),
+        selection: $readSelectionOffsets(),
+      });
+    });
     return () => {
       unregister();
       editor.setRootElement(null);
     };
-  }, [controller, deleteMentionCharacter, editor, element, isPublished, onMentionUpdate, publish]);
+  }, [
+    controller,
+    deleteMentionCharacter,
+    editor,
+    element,
+    isPublished,
+    mountRoot,
+    onMentionUpdate,
+    publish,
+  ]);
 
   React.useEffect(() => {
     editor.setEditable(!readOnly && !disabled);
@@ -801,14 +866,14 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
 
     if (!isSameDocument(documentRef.current, incoming) || isInitial) {
       const focusedNow = isFocused();
-      const keep = pendingApplies ? pending : (selectionRef.current ?? null);
+      // As when a textarea's value is assigned, a new value puts the caret at
+      // its end unless the primitive asked for a particular caret.
+      const end = incoming.text.length;
+      const keep = pendingApplies ? pending! : { start: end, end };
       editor.update(
         () => {
           $writeComposerValue(incoming.text, incoming.mentions);
-          if (keep && (focusedNow || pendingApplies)) {
-            const max = incoming.text.length;
-            $setSelectionOffsets(Math.min(keep.start, max), Math.min(keep.end, max));
-          }
+          $setSelectionOffsets(Math.min(keep.start, end), Math.min(keep.end, end));
         },
         {
           discrete: true,

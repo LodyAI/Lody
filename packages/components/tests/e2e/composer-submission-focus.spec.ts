@@ -1,3 +1,4 @@
+import { expectComposerText, composerText } from './composer-text';
 import { expect, test } from '@playwright/test';
 
 test.describe('permission option wrapping', () => {
@@ -430,7 +431,7 @@ test.describe('queued editor footer', () => {
 for (const state of ['running-dark', 'idle-dark'] as const) {
   test(`desktop ${state} composer bottom space focuses the prompt`, async ({ page }) => {
     await page.goto(`/iframe.html?id=sessions-sessionchatinputarea--${state}&viewMode=story`);
-    const input = page.locator('textarea[data-lody-composer-input]');
+    const input = page.locator('[data-lody-composer-input]');
     await expect(input).toBeVisible();
     const shell = page.locator('div.relative.shrink-0').filter({ has: input });
     const bounds = await shell.boundingBox();
@@ -439,7 +440,7 @@ for (const state of ['running-dark', 'idle-dark'] as const) {
     await page.mouse.click(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height - 4);
     await expect(input).toBeFocused();
     await page.keyboard.type('Continue with this clarification');
-    await expect(input).toHaveValue('Continue with this clarification');
+    await expectComposerText(input, 'Continue with this clarification');
   });
 }
 
@@ -449,14 +450,14 @@ for (const source of ['keyboard', 'button'] as const) {
       await page.goto(
         '/iframe.html?id=sessions-sessionchatinputarea--deferred-submission&viewMode=story'
       );
-      const input = page.locator('textarea[data-lody-composer-input]');
+      const input = page.locator('[data-lody-composer-input]');
       await input.fill('Synthetic focus regression draft');
       const original = await input.elementHandle();
       if (source === 'keyboard') await input.press('Enter');
       else await page.getByRole('button', { name: 'Send', exact: true }).click();
 
       await expect(input).toBeDisabled();
-      await expect(input).toHaveValue('');
+      await expectComposerText(input, '');
       await expect(input).not.toBeFocused();
       await page.evaluate((result) => {
         window.dispatchEvent(new CustomEvent('storybook:submission-result', { detail: result }));
@@ -464,10 +465,11 @@ for (const source of ['keyboard', 'button'] as const) {
 
       await expect(input).toBeEnabled();
       await expect(input).toBeFocused();
-      await expect(input).toHaveValue(accepted ? '' : 'Synthetic focus regression draft');
+      await expectComposerText(input, accepted ? '' : 'Synthetic focus regression draft');
       expect(await original!.evaluate((node) => node === document.activeElement)).toBe(true);
       await page.keyboard.type(' Next message');
-      await expect(input).toHaveValue(
+      await expectComposerText(
+        input,
         accepted ? ' Next message' : 'Synthetic focus regression draft Next message'
       );
     });
@@ -481,7 +483,7 @@ for (const stopPropagation of [false, true]) {
     await page.goto(
       '/iframe.html?id=sessions-sessionchatinputarea--deferred-submission&viewMode=story'
     );
-    const input = page.locator('textarea[data-lody-composer-input]');
+    const input = page.locator('[data-lody-composer-input]');
     await input.fill('Synthetic focus regression draft');
     await input.press('Enter');
     await expect(input).toBeDisabled();
@@ -511,7 +513,7 @@ for (const platform of ['desktop', 'narrow-browser', 'wide-native'] as const) {
     await page.goto(
       '/iframe.html?id=sessions-sessionchatinputarea--landing-navigation&viewMode=story'
     );
-    const input = page.locator('textarea[data-lody-composer-input]');
+    const input = page.locator('[data-lody-composer-input]');
     await input.fill('Synthetic new conversation');
     await input.press('Enter');
     await expect(page.getByText('Preparing session')).toBeVisible();
@@ -520,7 +522,7 @@ for (const platform of ['desktop', 'narrow-browser', 'wide-native'] as const) {
     if (platform === 'desktop') {
       await expect(input).toBeFocused();
       await page.keyboard.type('Continue conversation');
-      await expect(input).toHaveValue('Continue conversation');
+      await expectComposerText(input, 'Continue conversation');
     } else {
       await expect(input).not.toBeFocused();
     }
@@ -587,7 +589,7 @@ test.describe('attachment upload submission', () => {
           await page.goto(
             '/iframe.html?id=sessions-sessionchatinputarea--uploading-attachments-pending-acceptance&viewMode=story'
           );
-          const input = page.locator('textarea');
+          const input = page.locator('[data-lody-composer-input]');
           await input.fill('Inspect this image');
           await page.locator('input[type="file"]').setInputFiles({
             name: 'sample.png',
@@ -615,7 +617,7 @@ test.describe('attachment upload submission', () => {
               page.getByRole('img', { name: 'sample.png', exact: true })
             ).not.toHaveClass(/grayscale/);
           if (action === 'cancel' || action === 'failure') {
-            await expect(input).toHaveValue('Inspect this image');
+            await expectComposerText(input, 'Inspect this image');
             expect(await submissions()).toEqual([]);
           } else {
             await expect.poll(submissions).toHaveLength(1);
@@ -639,7 +641,7 @@ test.describe('attachment upload submission', () => {
               window.dispatchEvent(new Event('storybook:accept-attachments'))
             );
             await expect(input).toBeEnabled();
-            await expect(input).toHaveValue('');
+            await expectComposerText(input, '');
             await expect(
               page.getByRole('button', { name: 'Run configuration', exact: true })
             ).toBeEnabled();
@@ -978,6 +980,16 @@ test.describe('mobile first-send continuity', () => {
           })
           .toBe(scenario.height - scenario.keyboard - 8);
       }
+      // Send enables once the draft is in; the sheet may still be sliding in.
+      let settled = '';
+      await expect
+        .poll(async () => {
+          const box = JSON.stringify(await composer.boundingBox());
+          const stable = box === settled;
+          settled = box;
+          return stable;
+        })
+        .toBe(true);
       const before = await composer.boundingBox();
       const model = page.getByRole('button', { name: 'Run configuration', exact: true });
       const modelLabel = await model.innerText();
@@ -1099,7 +1111,7 @@ test('mobile new-chat composer stays below a fold and retains its draft', async 
   const lower = page.locator('[data-new-chat-fold-lower]');
   const draft = lower.getByRole('combobox', { name: 'Message' });
   await expect(draft).toBeVisible({ timeout: 30_000 });
-  const text = await draft.inputValue();
+  const text = await composerText(draft);
   await page.evaluate(() => {
     window.__LODY_HORIZONTAL_DIVISION__ = { top: 422, height: 30, viewportHeight: 844 };
     window.dispatchEvent(new Event('lody:division-change'));
@@ -1113,7 +1125,7 @@ test('mobile new-chat composer stays below a fold and retains its draft', async 
     window.dispatchEvent(new Event('lody:keyboard-resize'));
   });
   await expect(lower).toHaveCSS('display', 'contents');
-  await expect(draft).toHaveValue(text);
+  await expectComposerText(draft, text);
 });
 
 test('mobile project choices mix sources by recency and render their icons', async ({ page }) => {
@@ -1299,7 +1311,7 @@ for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
       const sync = () =>
         document.documentElement.style.setProperty(
           '--native-keyboard-height',
-          document.activeElement?.matches('textarea[data-lody-composer-input]') ? '300px' : '0px'
+          document.activeElement?.matches('[data-lody-composer-input]') ? '300px' : '0px'
         );
       document.addEventListener('focusin', sync);
       document.addEventListener('focusout', () => queueMicrotask(sync));
@@ -1308,9 +1320,9 @@ for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(source).toBeFocused();
     await expect(source).not.toHaveAttribute('disabled');
-    await expect(source).toHaveValue('');
+    await expectComposerText(source, '');
     await page.keyboard.type('must not replace the submitted draft');
-    await expect(source).toHaveValue('');
+    await expectComposerText(source, '');
     if (dismiss === 'blur') await source.evaluate((node: HTMLTextAreaElement) => node.blur());
     if (dismiss === 'native-hide') {
       await page.evaluate(() =>
@@ -1319,7 +1331,7 @@ for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
       await expect(source).toBeFocused();
     }
     await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
-    const destination = page.locator('textarea[data-lody-composer-input]');
+    const destination = page.locator('[data-lody-composer-input]');
     await expect(destination).toHaveCount(1);
     await expect(destination).not.toBeFocused();
     await expect(page.locator('html')).toHaveCSS('--native-keyboard-height', '0px');
@@ -1333,7 +1345,7 @@ test('mobile composer animates keyboard inset and safe-area padding together', a
   );
   await page.getByRole('button', { name: 'Send', exact: true }).waitFor();
   const samples = await page.evaluate(() => {
-    const input = document.querySelector('textarea')!;
+    const input = document.querySelector<HTMLElement>('[data-lody-composer-input]')!;
     let shell: HTMLElement | null = input.parentElement;
     while (shell && !getComputedStyle(shell).transitionProperty.includes('margin-bottom'))
       shell = shell.parentElement;
@@ -1378,7 +1390,11 @@ test('mobile first send keeps the keyboard if the user starts the next draft bef
     document.documentElement.style.setProperty('--native-keyboard-height', '300px');
     document.addEventListener('focusin', (event) => {
       const input = event.target;
-      if (input instanceof HTMLTextAreaElement && input.id !== 'chat-prompt-mobile-sheet')
+      if (
+        input instanceof HTMLElement &&
+        input.matches('[data-lody-composer-input]') &&
+        input.id !== 'chat-prompt-mobile-sheet'
+      )
         queueMicrotask(() =>
           input.dispatchEvent(
             new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: 'a' })
@@ -1388,7 +1404,7 @@ test('mobile first send keeps the keyboard if the user starts the next draft bef
   });
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
-  const destination = page.locator('textarea[data-lody-composer-input]');
+  const destination = page.locator('[data-lody-composer-input]');
   await expect(destination).toHaveCount(1);
   await page.evaluate(
     () =>
@@ -1398,7 +1414,7 @@ test('mobile first send keeps the keyboard if the user starts the next draft bef
   );
   await expect(destination).toBeFocused();
   await page.keyboard.type('A new draft');
-  await expect(destination).toHaveValue('A new draft');
+  await expectComposerText(destination, 'A new draft');
 });
 
 for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project selected']) {
@@ -1415,9 +1431,7 @@ for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project select
       .filter({ has: page.getByText(project, { exact: true }) })
       .getByRole('button')
       .click();
-    await page
-      .locator('textarea[data-lody-composer-input]')
-      .fill('Synthetic project restoration test');
+    await page.locator('[data-lody-composer-input]').fill('Synthetic project restoration test');
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await page.getByRole('button', { name: 'New conversation', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);

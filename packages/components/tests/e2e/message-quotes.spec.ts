@@ -1,3 +1,4 @@
+import { composerText, expectComposerText } from './composer-text';
 import { expect, test, type Page } from '@playwright/test';
 
 const story = (name = 'inline') => `/iframe.html?id=chat-messagequotes--${name}&viewMode=story`;
@@ -49,13 +50,13 @@ test('native selection action does not resize or scroll the conversation, and qu
   const second = await selectPassage(page, 10);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   await page.keyboard.insertText(' Question B? ');
-  const value = await input(page).inputValue();
+  const value = await composerText(input(page));
   expect(value.match(/\[Quote:/g)).toHaveLength(2);
   expect(value.indexOf('Question A?')).toBeLessThan(value.lastIndexOf('[Quote:'));
   expect(value.lastIndexOf('[Quote:')).toBeLessThan(value.indexOf('Question B?'));
   // A translucent cover leaks the native placeholder brackets through the icon.
   const coverAlpha = await page
-    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .locator('[data-composer-editor] [data-mention-value]')
     .filter({ has: page.locator('svg') })
     .evaluateAll((chips) =>
       chips.map((chip) => {
@@ -68,7 +69,7 @@ test('native selection action does not resize or scroll the conversation, and qu
   expect(coverAlpha).toEqual([255, 255]);
   await page.screenshot({ path: testInfo.outputPath('inline-quotes.png') });
   await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(input(page)).toHaveValue('');
+  await expectComposerText(input(page), '');
   const bubble = page.locator('[data-user-message-bubble]').last();
   await expect(bubble).toContainText('Question A?');
   await expect(bubble).toContainText('Question B?');
@@ -108,18 +109,18 @@ test('a quote has read-only preview, explicit removal and atomic undo/redo', asy
   await page.goto(story());
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
-  const quoted = await input(page).inputValue();
+  const quoted = await composerText(input(page));
   await input(page).press('End');
   await input(page).press('Backspace');
-  await expect(input(page)).not.toHaveValue(quoted);
+  await expect.poll(() => composerText(input(page))).not.toBe(quoted);
   await input(page).press('ControlOrMeta+z');
-  await expect(input(page)).toHaveValue(quoted);
+  await expectComposerText(input(page), quoted);
   await input(page).press('ControlOrMeta+Shift+z');
-  await expect(input(page)).not.toHaveValue(quoted);
+  await expect.poll(() => composerText(input(page))).not.toBe(quoted);
   await input(page).press('ControlOrMeta+z');
-  // A click inside the painted quote is handled by the real textarea's chip hit testing.
+  // A click inside the painted quote opens it, through the editor's chip hit testing.
   const chip = page
-    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .locator('[data-composer-editor] [data-mention-value]')
     .filter({ hasText: 'Quote:' })
     .first();
   const box = (await chip.boundingBox())!;
@@ -128,7 +129,7 @@ test('a quote has read-only preview, explicit removal and atomic undo/redo', asy
   await expect(page.getByLabel('Original quote', { exact: true })).toHaveAttribute('readonly', '');
   await page.getByRole('button', { name: 'Remove quote', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await expect(input(page)).toHaveValue('Explain this passage: ');
+  await expectComposerText(input(page), 'Explain this passage: ');
 });
 
 test('rejected sends preserve the narrow-screen quote draft', async ({ page }) => {
@@ -136,9 +137,9 @@ test('rejected sends preserve the narrow-screen quote draft', async ({ page }) =
   await page.goto(story('rejected'));
   await selectPassage(page, 11);
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
-  const draft = await input(page).inputValue();
+  const draft = await composerText(input(page));
   await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(input(page)).toHaveValue(draft);
+  await expectComposerText(input(page), draft);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -157,7 +158,7 @@ test('a continuous selection across text rows in one response is quoted in full'
   });
   await page.getByRole('button', { name: 'Quote', exact: true }).click();
   const chip = page
-    .locator('[data-mention-highlighter="true"] [data-mention-value]')
+    .locator('[data-composer-editor] [data-mention-value]')
     .filter({ hasText: 'Quote:' })
     .first();
   const box = (await chip.boundingBox())!;
@@ -184,7 +185,7 @@ test('a selection across separate message regions explains the boundary without 
 }) => {
   await page.goto(story());
   await expect(input(page)).toBeVisible();
-  const draft = await input(page).inputValue();
+  const draft = await composerText(input(page));
   await page.evaluate(() => {
     const start = document.querySelector(
       '[data-conversation-turn-id="quote-source-10"] p'
@@ -197,5 +198,5 @@ test('a selection across separate message regions explains the boundary without 
   const action = page.getByRole('button', { name: 'Quote passages separately', exact: true });
   await expect(action).toBeVisible();
   await action.click();
-  await expect(input(page)).toHaveValue(draft);
+  await expectComposerText(input(page), draft);
 });
