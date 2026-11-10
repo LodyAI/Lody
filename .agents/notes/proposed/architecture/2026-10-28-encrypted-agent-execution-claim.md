@@ -49,17 +49,12 @@ type AuthorizeEncryptedExecution = (
 ```
 
 The production turn origin resolver is supplied by the encrypted workspace host,
-not by history author fields. The Streams binding exposes `openAuthenticated`,
-returning historical device/member identity only after signature and AEAD checks;
-its SDK-facing `open` still returns plaintext alone. For Loro updates, the host
-retains original ciphertext/AAD and signed operation ranges in a workspace-local
-`execution-origins.sqlite`. At dispatch it reopens and verifies that original,
-forks the local document at the update's dependencies, imports the **exact signed
-update bytes**, and matches the selected turn's creation operation, timestamp,
-input configuration and items. It also matches the frozen invocation configuration
-and checks the live projection again after asynchronous verification. An operation
-number alone is not proof: another valid frame can reuse its peer/counter with
-different operations, so inspecting the live document at matching counters is unsafe.
+not by history author fields. Since the owner decision of 2026-11-10 it verifies the
+signed execution intent stored with the turn row
+([signed execution intents](../../implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)):
+it recomputes the content digest from the invocation configuration that will run and
+checks the signature for this workspace, machine, session and message. No original
+frame, reconstruction or `forkAt` is involved, so a snapshot carries the same evidence.
 
 Execution identity is the verified signing device and its ledger actor, returned
 as `requesterCryptoUserId`. The native `host.authorizeExecution` resolves that
@@ -82,29 +77,18 @@ not read or publish account-based authority snapshots; it still must pass the
 execution service's verified-device and same-member ownership gate. Ordinary
 workspace visibility and project-sharing admission is unchanged.
 Thus revoking one device denies its pending turns even while its user and another
-device stay active. Missing originals, conflicting signer attestations and modified execution input
-prevent a new start. A snapshot signer never becomes the origin of every old turn
-inside that snapshot. A snapshot-only turn triggers a backward read of retained
-Streams updates using
-this workspace's device credential. The host decodes released update framing,
-reconstructs exact logical-room AAD, reopens the original signature/AEAD and retains
-its ciphertext before resolving the turn. The snapshot signer never supplies the
-turn's origin. Local receipt hits do no backfill I/O.
+device stay active. A missing or invalid signature and modified execution input
+prevent a new start with their own refusal reasons. A snapshot signer never becomes
+the origin of every old turn inside that snapshot.
 
-Missing originals remain pending without a journal start, failure marker, handled
-pointer or completed Inbox input. The watcher reuses its per-session admission
-retry owner. Since the owner decision of 2026-11-10, new evidence wakes it at once:
-the host reports each received frame for its document and each confirmed ledger read.
-The timer is only a fallback, doubling from one second up to five minutes. Stop,
-unwatch and ownership changes cancel that owner. Each backfill attempt is limited to eight backward pages and three
-seconds of cooperative I/O, retaining only its scan continuation in memory.
-Another attempt resumes an incomplete scan; a retained-start miss is not cached.
-Expired snapshot turns stop retrying at their timestamp's original window, and a
-recovered signature must still prove its own unchanged deadline before claiming.
+Only an unreadable ledger leaves a turn pending, without a journal start, failure
+marker, handled pointer or completed Inbox input. The watcher reuses its per-session
+admission retry owner. New evidence wakes it at once: the host reports each received
+frame for its document and each confirmed ledger read. The timer is only a fallback,
+doubling from one second up to five minutes. Stop, unwatch and ownership changes
+cancel that owner. No time window applies to an execution input.
 
-For durable history, the original window ends 15 minutes after the authenticated
-turn timestamp. Reopening proofs and refreshing the authorization cache do not
-change it; the host's 15-minute ledger-read cache is independent. A fresh realtime
+A fresh realtime
 entry must supply equally verified origin/intent evidence through the same execution
 boundary. Errors remain errors; cancellation belongs to the caller's Effect fiber.
 Production `Lody.create` defaults to the same owned host's `authorizeExecution`;
@@ -113,11 +97,11 @@ A missing capability denies new starts; omitting the override uses native host
 authorization rather than denying every encrypted turn.
 
 The execution key is `(genesis, workspaceId, targetMachineId,
-agent-start:<userTurnId>)`. Its immutable bytes encode only the intent version,
-session and turn. Transport request IDs and signed/encrypted frames
+agent-start:<userTurnId>)`. Its immutable bytes encode the intent version, session,
+turn and content digest. Transport request IDs and signed/encrypted frames
 retain independent journal records; they must not become business execution IDs.
-The first received execution deadline survives reauthorization and clock rollback;
-a shorter replacement deadline is denied. An identical completed request does not
+Other content under a started ID is refused, and an input cancelled before it started
+is retired. An identical completed request does not
 run again; already terminal history is preserved. Stale pending history receives a
 visible refusal. A retained start without confirmed completion displays "Result
 unknown" and is never taken over.

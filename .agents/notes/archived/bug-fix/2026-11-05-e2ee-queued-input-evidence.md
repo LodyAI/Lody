@@ -1,6 +1,7 @@
 # Queued input evidence in encrypted workspaces
 
 Status: implemented
+Archived: 2026-11-10
 Translation: current
 
 [中文](2026-11-05-e2ee-queued-input-evidence.zh.md)

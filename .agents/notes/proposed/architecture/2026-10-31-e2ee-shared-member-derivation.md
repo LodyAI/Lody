@@ -33,9 +33,9 @@ The owner settled these points on 2026-10-31, relayed by the E2EE coordinator.
 - **Lifetime.**
   - A derivation is created only while the origin turn is active. The daemon checks the
     live runtime and then the signed origin when the input is written.
-  - It must start no later than 15 minutes after the origin's signed deadline. Since the
-    owner decision of 2026-11-10 a dispatch original has no deadline, so this bound no
-    longer applies and only the active-turn and per-origin limits remain.
+  - Since the owner decision of 2026-11-10 no start deadline applies; only the active-turn
+    and per-origin limits do. The machine signs the derived input, `derivedFrom` included, in
+    the same commit ([signed execution intents](../../implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
 - **Depth and count.**
   - One level. A derived turn exposes no invocation identity and cannot steer.
   - At most 20 derived inputs per origin turn, matching the largest single Agent batch

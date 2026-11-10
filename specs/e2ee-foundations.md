@@ -169,18 +169,39 @@ Request IDs are host-generated secure random 16-byte values. RPC timestamps are
 nonnegative Unix UTC milliseconds. Expired means `now >= expiresAt`. The RPC body
 codec does not check current time, replay state, permissions or request freshness.
 
-**Dispatch originals without a deadline (proposed revision, draft).** Per the owner
-decision of 2026-11-10, a `session/dispatch-turn` original is always signed with
-`expiresAt = 0`, which means no deadline, and its opener rejects any other value. Every
-other method still requires a real deadline and rejects 0. A machine that was offline
-for days still starts such a message once: the journal's retired request ID keeps
-replay to one start, and the signer is checked against the machine's current verified
-ledger at start, so a removed member's or revoked device's message is refused with
-`e2ee_sender_not_authorized`. A machine-authored queued input keeps its local
-receipt's 15-minute window. Open questions for the owner: binding the original to the
-target machine's device key, how a waiting input is retried and when it stops, and
-whether the further consequences listed in the PR are acceptable. E2EE has no
-production data, so the format has no compatibility path.
+**Signed execution intents (proposed revision, draft; per the owner decision of
+2026-11-10).** Every encrypted input that may run carries one signature stored beside its
+content in the same commit: a sent turn row, a queue item (which promotion copies) and a
+schedule declaration. The signing device signs a domain-separated message
+(`lody-e2ee/execution-intent/v1`) over the kind (member input, machine input or
+schedule declaration), genesis, workspace, target machine, scope (session or schedule),
+message ID and the SHA-256 of the canonical content: the whole input configuration as
+the history writer stores it, without the `resume` that promotion supplies, plus
+`derivedFrom` or `scheduleRun` for machine inputs; a declaration signs its definition
+fingerprint. The signed bytes depend on no document operation, frame or epoch, so a
+snapshot, a trimmed stream or a key rotation cannot invalidate them, and a different
+document engine can keep the same meaning. The session document stores no exact
+encrypted request originals.
+
+At start the machine recomputes the digest from what will run and verifies the
+signature for this workspace, machine, session and message. It then checks the signer
+against its current verified ledger; an unknown signer is refused only after an
+authenticated latest read, and waits while no read can complete. Refusals carry their
+reason: `e2ee_signature_missing`, `e2ee_signature_invalid`, `e2ee_scope_mismatch`,
+`e2ee_sender_not_authorized` (the only one shown as a sender without rights),
+`e2ee_machine_not_member` and `e2ee_machine_not_shared`. A row's display account never
+selects the requester, and an encrypted row never chooses its resume target. Nothing on
+the execution path judges a message by time: a dispatch request's `expiresAt` is always
+0 (its opener rejects any other value; every other method still requires a real
+deadline and rejects 0), and a machine that was offline for days still starts a message
+once. The execution journal identifies a start by message ID and content digest: an ID
+starts at most once, a different content under a started ID is refused, and an input
+cancelled before it started is retired so that it never starts later. An edit keeps the
+message ID and is signed again by the editor. Accepted consequences, also per the owner:
+an empty journal (for example after reinstalling) does not know earlier IDs, the server
+can delay delivery, revocation takes effect through this machine's ledger reads, and
+waiting inputs persist with event-driven rechecks and a fallback of at most five
+minutes. E2EE has no production data, so this format has no compatibility path.
 
 Method params, success/progress and error details remain exact opaque bytes for
 the authorized method codec; JSON methods use their explicit UTF-8 JSON codec,
@@ -190,7 +211,9 @@ Error detail is an explicitly permitted encrypted method DTO; raw exceptions,
 paths, stacks and provider output stay in the trusted host's diagnostics unless
 explicitly part of that DTO.
 
-`requestDigest` is SHA-256 of the **entire original signed encrypted request**.
+`requestDigest` is SHA-256 of the **entire original signed encrypted request**. It
+correlates one transport exchange only; execution identity is the signed intent above
+(draft).
 Sequence starts at zero and strictly increases per request without u32 wrapping;
 exact duplicate frames are ignored, different bytes at the same sequence
 conflict. A terminal frame ends progress; gaps allow lost progress but never
@@ -292,9 +315,9 @@ Roles, continuations, agent control) by reusing the signed-original chain. The m
 writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the signed
 row, only while that origin turn is active and only for this machine. At start, the
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
-the member's rights ∩ the owner's sharing policy ∩ every reached project. The start
-deadline is the origin's signed deadline plus 15 minutes; an origin without a deadline
-(see above, draft) leaves only the active-turn and per-origin bounds. Derivation is one level deep,
+the member's rights ∩ the owner's sharing policy ∩ every reached project. Per the owner
+decision of 2026-11-10 (draft), no start deadline applies; only the active-turn and
+per-origin bounds do. Derivation is one level deep,
 with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
 not implemented and fails closed; a future version would use a user-approved signature
 from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
@@ -327,7 +350,9 @@ blocks new remote execution, not unrelated local work. Revalidation never restar
 an uncertain operation.
 
 The journal's **persistent expiry clock is a different mechanism**, not an
-execution grant. Current schema 3 retains a nondecreasing floor per
+execution grant. Per the owner decision of 2026-11-10 (draft), it applies only to
+feature requests: execution records carry no deadline, so no clock, skew check or floor
+applies to them. Current schema 3 retains a nondecreasing floor per
 `(genesis, workspaceId)` across reopen. With an independently authenticated current
 reference, claim rejects local time or the retained floor more than 600,000 ms
 ahead; accepted claims use `max(reference, retainedFloor)`. Without a reference,
@@ -340,19 +365,19 @@ restores freshness or replay authority. Follow the public
 ### MVP routes and latency acceptance
 
 The MVP uses encrypted Streams RPC as its realtime path. If it is unusable, retain
-**encrypted history/Meta durable dispatch as the final fallback**. Retry the
-original ID and exact signed ciphertext. Durable dispatch retains the same
-business identity (`userTurnId` where applicable) and original request correlation;
-both routes pass the same actual-start claim and current authorization. A durable
-arrival does not refresh the original deadline or start a second operation.
+**encrypted history/Meta durable dispatch as the final fallback**. A transport retry
+reuses the original ID and exact signed ciphertext. Both routes carry the same signed
+execution intent (draft, above) for the same message ID, pass the same actual-start
+claim and current authorization, and a durable arrival never starts a second operation.
 MVP delivery and acceptance must not depend on an iroh connection or SDK.
 
 The acceptance target is **send-to-actual-execution-start ≤1 second**, measured
 from sender acceptance of the send to the machine's actual-start boundary, not
 to a receipt ACK or business completion. Measure ordinary/encrypted paths and
 transport/fallback selection separately under stated conditions. Offline durable
-catch-up has no one-second delivery guarantee; a passed deadline still forbids
-a new start, and a dispatch original without a deadline (draft, above) has none to pass. No latency result is claimed by this documentation revision.
+catch-up has no one-second delivery guarantee; per the owner decision of 2026-11-10
+(draft), no deadline applies to an execution input, however late it arrives. No latency
+result is claimed by this documentation revision.
 
 ### Later acceleration: iroh (outside the MVP)
 
@@ -373,7 +398,8 @@ Before a realtime send, retain the exact signed ciphertext and fixed ID. Before
 receipt ACK, save the original in the shared journal. Identity is
 `(genesis, workspace, targetMachineId, requestId)`; requester, original bytes and
 original expiry are immutable. Another requester or another original at that
-identity is a conflict, not another execution. Forwarding never renews expiry.
+identity is a conflict, not another execution. Forwarding never renews expiry. The
+actual start is keyed by message ID with its content digest (draft, above).
 
 The journal retains received, started, completed and uncertain outcomes. Atomically
 claim received **immediately before the first business side effect**; one winner

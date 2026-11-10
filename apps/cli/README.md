@@ -103,24 +103,21 @@ This maintenance command is available by its explicit name and hidden from gener
 CLI help. Encrypted agent starts, including Meta/history dispatch and RPC offers,
 share a `userTurnId` execution claim in `execution.sqlite` under the active encrypted
 workspace's `repositoryDirectory`. Stop the daemon before reset. There is no desktop
-reset button. The execution gate resolves the turn's original signed update, checks its verified
-signer, then calls the same host's `authorizeExecution(workspaceId, requesterDevice)`
-by default. `LodyOptions.authorizeEncryptedExecution` can override this capability
-with the same signature. Missing signer or authorization denies new starts;
-revoking a device cannot borrow another device's authority from the same user.
-Original ciphertext receipts live in `execution-origins.sqlite`; snapshot authors
-cannot substitute for the original turn signer. Snapshot recovery backfills retained
-signed updates from Streams. Missing originals keep the turn pending and retryable
-until its original window expires; they never grant a start. Each backfill attempt
-has a three-second/eight-page bound. A received frame for the session, or a confirmed
-ledger read, rechecks a waiting turn at once; a fallback timer doubles from one second
-to at most five minutes. Stop cancels the watcher's delayed retry.
-Confirmed whole-member removal or machine-device revocation during backfill is
-terminal: it immediately fences new execution and invalidates cached grants before
-the existing owner drain. Late authorization results cannot claim a journal start.
+reset button. The execution gate verifies the signed execution intent stored with the
+turn row against the content that will run, checks its signer in the current ledger, then
+calls the same host's `authorizeExecution(workspaceId, requesterDevice)` by default.
+`LodyOptions.authorizeEncryptedExecution` can override this capability with the same
+signature. A missing or invalid signature, an unknown signer after an authenticated read,
+or missing authorization refuses the start with its reason; revoking a device cannot borrow
+another device's authority from the same user. No original frame, Streams backfill or time
+window is involved, so a snapshot or a late arrival carries the same evidence
+([decision](../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+Only an unreadable ledger leaves a turn pending. A received frame for the session, a
+confirmed ledger read, a key installation or an RPC reconnect rechecks a waiting turn at
+once; a fallback timer doubles from one second to at most five minutes. Stop cancels the
+watcher's delayed retry. A cancelled input that never started is retired in the journal.
 Member removal retains its identity-verified receipt/erasure path; single-device
-revocation closes the workspace while retaining local originals. Ordinary transport
-failures continue to leave missing-origin turns pending.
+revocation closes the workspace while retaining local state.
 Ordinary workspaces do not open this log.
 Transport frames keep their own original request/response receipts; execution evidence
 contains intent identities and a settlement marker, never prompt or response plaintext.

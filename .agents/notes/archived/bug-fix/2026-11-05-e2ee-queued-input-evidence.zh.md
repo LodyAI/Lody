@@ -1,6 +1,7 @@
 # 加密工作区排队输入的执行证据
 
 Status: implemented
+Archived: 2026-11-10
 Translation: current
 
 [English](2026-11-05-e2ee-queued-input-evidence.md)
