@@ -51,9 +51,11 @@ platform/version/digest, independently of SEA releases. Each new SEA still trans
 its embedded Node again. The earlier 55 MiB gzip sample is not a complete install
 budget; measure the capsule, additional Node, extracted files and retained releases.
 
-Sign owned native modules before embedding them, preserve their bytes, then sign
-the final executable and generate the SHA-256 manifest from final bytes. Platform
-signatures remain required. Update manifests are trusted through the configured
+macOS requires platform signing. Windows Authenticode signing is optional: missing
+a certificate must not block building or publishing a Windows executable. When
+signing is enabled, sign owned native modules before embedding them, preserve their
+bytes, then sign the final executable. Configured signing failures stop publication.
+Generate the SHA-256 manifest from final bytes. Update manifests are trusted through the configured
 HTTPS artifact service; compressed and extracted files must match their SHA-256
 values. There is no separate release key pair or manifest signature. Replacing
 both the manifest and artifacts at that service is outside this integrity check.

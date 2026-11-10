@@ -19,14 +19,17 @@ Build the CLI first, then run the scripts with JSON configuration paths:
 pnpm --dir apps/cli build
 node apps/cli/scripts/sea/stage.mjs stage.json
 node apps/cli/scripts/sea/build.mjs build.json
-# Sign native code before build; sign/notarize the completed SEA before finalize.
+# When signing, sign native code before build and the completed SEA before finalize.
+# macOS signing is required; Windows Authenticode signing is optional.
 node apps/cli/scripts/sea/finalize.mjs finalize.json
 ```
 
 Stage configuration contains `staging`, `dist`, `cliRoot`. Build configuration adds
 `output`, `node`, `product` (`lody-oss` or `lody-cloud`), `distribution`, `version`,
 `channel` and `platform`. Build on the native target
-using the pinned Node. Finalize configuration contains `capsule`, `node`,
+using the pinned Node. Windows can publish unsigned SEA binaries when no certificate
+is configured; macOS still requires platform signing. If signing is configured,
+signing failures must stop publication. Finalize configuration contains `capsule`, `node`,
 `outputDir`, `source` (full publishing source SHA). Finalize freezes `manifest.json`,
 `daemon.gz` and `node.gz` after platform signing. Do not rebuild same-version bytes
 on publication retry. The updater trusts the configured HTTPS artifact service for manifests and checks

@@ -143,7 +143,8 @@ Existing npm daemons require one explicit local migration:
 
 1. Stop the identified old service and disable its autostart registration.
 2. Download the matching product/platform SEA from a trusted release source and
-   verify its platform signature. Run `/absolute/path/to/daemon daemon install`.
+   verify its SHA-256 and any supplied platform signature (required on macOS, optional
+   on Windows). Run `/absolute/path/to/daemon daemon install`.
    This downloads the exact additional Node pinned in the executable; offline
    installations can first run `__sea-install-node /absolute/path/to/node.gz`.
 3. Register the printed fixed executable with `daemon-runner` in your user service,
