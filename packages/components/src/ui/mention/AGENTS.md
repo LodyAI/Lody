@@ -2,6 +2,10 @@
 
 Shared mention primitive used by composer autocomplete surfaces.
 
+A proposed replacement of the textarea and mirror with one Lexical editor is
+recorded in the [composer editor PRD](../../../../../.agents/notes/proposed/architecture/2026-11-10-composer-lexical-editor.md);
+until it lands, the invariants below describe current behaviour.
+
 ## Invariants
 
 - `onMentionAdd` rejects disabled registered items before any text/range mutation;
