@@ -72,8 +72,10 @@ Encrypted presence is outside the MVP: purpose 7 and the merged #1990 presence
 body codec remain reserved/unused, including their 64 KiB/60-second limits.
 This explicit metadata choice does not relax RPC/content encryption or authority.
 
-For the later, non-MVP iroh layer, EndpointId remains the workspace device signing
-public key, supplied only inside trusted hosts. The 2026-10-28 owner decision
+For the iroh layer, EndpointId remains the workspace device signing public key,
+supplied only inside trusted hosts. On 2026-11-10 the owner made iroh the preferred
+route ahead of Streams RPC; the [iroh transport decision](2026-11-10-e2ee-iroh-transport.md)
+owns that route, its wire format and its reachability. The 2026-10-28 owner decision
 records that the domain-separation review found no signing-protocol confusion;
 this is not native key-lifetime or installed-platform acceptance. The
 send-to-actual-start acceptance target is ≤1 second, not ACK or

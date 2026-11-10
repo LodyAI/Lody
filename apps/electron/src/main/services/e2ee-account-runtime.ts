@@ -265,10 +265,50 @@ export function withDesktopE2eeAccount<A>(
                 )
                 const bootstrap = yield* makeDesktopE2eeBootstrap({ directory, accountId, custody })
                 const runtime = yield* Effect.promise(() => import('./e2ee-runtime.mjs'))
+                // Only cloud builds that carry relays load the iroh route at all.
+                const irohConfigModule =
+                  import.meta.env.VITE_LODY_PLATFORM === 'cloud' && import.meta.env.VITE_IROH_RELAYS
+                    ? yield* Effect.promise(() => import('./e2ee-iroh-config'))
+                    : undefined
+                const irohConfig = irohConfigModule?.desktopIrohConfig({
+                  packaged: app.isPackaged,
+                  resourcesPath: process.resourcesPath,
+                  appPath: app.getAppPath(),
+                  env: import.meta.env
+                })
+                const irohNative = irohConfig
+                  ? (yield* Effect.promise(() => import('./e2ee-iroh.mjs'))).loadIrohNative(
+                      irohConfig.file
+                    )
+                  : undefined
+                // Relays need the same proxy the embedded CLI receives: the inherited
+                // environment first, else the system proxy for the first relay URL.
+                const irohProxy = irohNative
+                  ? yield* Effect.promise(async () => {
+                      const { proxyUrlFromEnv } = await import('./e2ee-iroh-config')
+                      const inherited = proxyUrlFromEnv(process.env)
+                      if (inherited) return inherited
+                      const { resolveSystemProxyEnv } = await import('./system-proxy-env')
+                      return proxyUrlFromEnv(
+                        await resolveSystemProxyEnv(irohConfig!.relays.urls.slice(0, 1)).catch(
+                          () => ({})
+                        )
+                      )
+                    })
+                  : undefined
                 const host = yield* runtime.makeDesktopE2eeRuntimeHost({
                   directory,
                   custody,
-                  bootstrap
+                  bootstrap,
+                  ...(irohConfig && irohNative
+                    ? {
+                        iroh: {
+                          native: irohNative,
+                          relays: irohConfig.relays,
+                          ...(irohProxy ? { proxyUrl: irohProxy } : {})
+                        }
+                      }
+                    : {})
                 })
                 const owned: Account = {
                   accountId,

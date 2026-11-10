@@ -333,6 +333,9 @@ importers:
       '@lody/e2ee-machine-sharing':
         specifier: workspace:*
         version: link:../../packages/e2ee-machine-sharing
+      '@lody/iroh-native':
+        specifier: workspace:*
+        version: link:../../packages/iroh-native
       '@lody/loro-streams-rpc':
         specifier: workspace:*
         version: link:../../packages/loro-streams-rpc
@@ -691,6 +694,9 @@ importers:
       '@lody/e2ee-machine-sharing':
         specifier: workspace:*
         version: link:../../packages/e2ee-machine-sharing
+      '@lody/iroh-native':
+        specifier: workspace:*
+        version: link:../../packages/iroh-native
       '@lody/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -1829,6 +1835,18 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.2
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
+
+  packages/iroh-native:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

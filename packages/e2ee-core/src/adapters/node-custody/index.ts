@@ -46,6 +46,10 @@ export class NodeE2eeCustodyError extends Data.TaggedError('NodeE2eeCustodyError
     return `e2ee_${this.code}`;
   }
 }
+/** DER header of a PKCS#8 v1 Ed25519 private key; the 32-byte seed follows it. */
+const ed25519Pkcs8Prefix = new Uint8Array([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
 const fail = (code: NodeE2eeCustodyError['code']) => new NodeE2eeCustodyError({ code });
 const domain = Buffer.from('lody-e2ee/desktop-custody/v1\0');
 const installedPurpose = Buffer.from('lody-e2ee/local-epoch-key/v1\0');
@@ -774,6 +778,44 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           if (!validKind(kind)) throw fail('invalid-input');
           const genesis = ownGenesis(inputGenesis);
           return decodeDevice(genesis, kind, await readOwned(pathFor(genesis, kind), 32768));
+        })
+      ),
+    /**
+     * Hands this retained device's 32-byte Ed25519 seed to one native transport
+     * opener (the iroh endpoint, whose EndpointId is the ledger signing key) and
+     * wipes it after `open` settles. Purpose-limited: never expose it through IPC,
+     * return it, or pass any other consumer. `key` must equal the retained identity;
+     * a different or missing identity fails without opening anything.
+     */
+    withTransportSeed: <A>(
+      inputGenesis: Bytes.GenesisHash,
+      key: Bytes.SigningPublicKey,
+      open: (seed: Uint8Array) => Promise<A>,
+      kind: 'personal' | 'machine' = 'personal'
+    ) =>
+      native(() =>
+        track(async () => {
+          if (!validKind(kind)) throw fail('invalid-input');
+          const genesis = ownGenesis(inputGenesis);
+          const opened = unseal(await readOwned(pathFor(genesis, kind), 32768));
+          const seed = new Uint8Array(32);
+          try {
+            const at = devicePurpose.length + 32;
+            const retainedKey = opened.aad.slice(at, at + 32);
+            const enc = opened.aad.slice(at + 32, at + 64);
+            if (
+              !equal(opened.aad, deviceContext(genesis, retainedKey, enc, kind)) ||
+              opened.body.length !== 96 ||
+              !equal(opened.body.subarray(0, 16), ed25519Pkcs8Prefix)
+            )
+              throw fail('corrupt');
+            if (!equal(retainedKey, key.toBytes())) throw fail('invalid-input');
+            seed.set(opened.body.subarray(16, 48));
+            return await open(seed);
+          } finally {
+            seed.fill(0);
+            opened.body.fill(0);
+          }
         })
       ),
     /** Terminal host-confirmed removal only, after all workspace users drain. Deletes

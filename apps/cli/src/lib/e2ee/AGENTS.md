@@ -30,6 +30,8 @@
   that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)). Origins use signed history.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup must fail closed.
+- The iroh listener (`iroh-listener.ts`) runs beside the Streams listener with its own receivers,
+  sharing their journal and claim; see [iroh rules](../../../../../packages/iroh-native/AGENTS.md).
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
   plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
 - `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.

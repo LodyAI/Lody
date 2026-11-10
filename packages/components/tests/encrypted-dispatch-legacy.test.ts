@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { createEncryptedDispatchLegacy } from '../src/providers/encrypted-dispatch-legacy';
 
@@ -134,3 +134,153 @@ it.each([
     }
   }
 );
+
+describe('iroh route', () => {
+  const ack = {
+    type: 'session/dispatch-turn_response' as const,
+    sessionId: 'session-1',
+    userTurnId: 'one',
+    accepted: true,
+    disposition: 'accepted' as const,
+  };
+  const setup = (options: {
+    ready: boolean;
+    call?: () => Promise<string[]>;
+    frames?: string[];
+  }) => {
+    const appended = Promise.withResolvers<{ id: string; frame: string }>();
+    const appendedFrames: { id: string; frame: string }[] = [];
+    const calls: { machineId: string; envelope: { id: string; frame: string } }[] = [];
+    const accepted: string[] = [];
+    const client = {
+      ensureJsonStream: async () => undefined,
+      readJsonLive: (
+        _stream: string,
+        _state: unknown,
+        _batch: unknown,
+        options: { signal: AbortSignal }
+      ) =>
+        new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+      appendJson: async (_stream: string, value: { id: string; frame: string }) => {
+        appendedFrames.push(value);
+        appended.resolve(value);
+      },
+    } as unknown as LoroStreamsJsonStreamClient;
+    const dispatcher = createEncryptedDispatchLegacy({
+      workspaceId: `iroh-${Math.random()}`,
+      prepare: async () => ({
+        ...original('44'.repeat(16)),
+        ...(options.frames ? { frames: options.frames } : {}),
+      }),
+      accept: async (_machineId, _input, frame) => {
+        accepted.push(frame);
+        if (frame !== 'ef'.repeat(150)) throw new Error('e2ee_rpc_response_invalid');
+        return ack;
+      },
+      client: async () => client,
+      iroh: {
+        ready: async () => options.ready,
+        call: async (machineId, envelope) => {
+          calls.push({ machineId, envelope });
+          return options.call ? options.call() : ['00'.repeat(150), 'ef'.repeat(150)];
+        },
+      },
+    });
+    return { dispatcher, appended, appendedFrames, calls, accepted };
+  };
+
+  it('sends the exact original over a live iroh connection and verifies its reply', async () => {
+    const t = setup({ ready: true });
+    try {
+      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+      expect(await prepared.send()).toEqual(ack);
+      expect(t.calls).toEqual([
+        { machineId: 'machine-1', envelope: { id: '44'.repeat(16), frame: 'ab'.repeat(200) } },
+      ]);
+      // An unverifiable reply is skipped; only the verified ACK is returned.
+      expect(t.accepted).toEqual(['00'.repeat(150), 'ef'.repeat(150)]);
+      expect(t.appendedFrames).toEqual([]);
+    } finally {
+      await t.dispatcher.close();
+    }
+  });
+
+  it.each([
+    { name: 'no live connection', ready: false, call: undefined },
+    {
+      name: 'a failed iroh call',
+      ready: true,
+      call: () => Promise.reject(new Error('iroh_call')),
+    },
+    { name: 'no verifiable reply', ready: true, call: async () => [] },
+  ])('falls back to Streams with the same original after $name', async ({ ready, call }) => {
+    const t = setup({ ready, ...(call ? { call } : {}) });
+    try {
+      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+      void prepared.send().catch(() => null);
+      expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: 'ab'.repeat(200) });
+      expect(t.calls.length).toBe(ready ? 1 : 0);
+    } finally {
+      await t.dispatcher.close();
+    }
+  });
+
+  it('keeps chunked originals on Streams', async () => {
+    const frames = ['ab'.repeat(200), 'cd'.repeat(200)];
+    const t = setup({ ready: true, frames });
+    try {
+      const prepared = await t.dispatcher.prepare('machine-1', input('one'));
+      void prepared.send().catch(() => null);
+      expect(await t.appended.promise).toEqual({ id: '44'.repeat(16), frame: frames[0] });
+      expect(t.calls).toEqual([]);
+    } finally {
+      await t.dispatcher.close();
+    }
+  });
+});
+
+it('does not wait for a slow iroh readiness answer before sending on Streams', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const appended = Promise.withResolvers<{ id: string; frame: string }>();
+    const client = {
+      ensureJsonStream: async () => undefined,
+      readJsonLive: (
+        _stream: string,
+        _state: unknown,
+        _batch: unknown,
+        options: { signal: AbortSignal }
+      ) =>
+        new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+      appendJson: async (_stream: string, value: { id: string; frame: string }) => {
+        appended.resolve(value);
+      },
+    } as unknown as LoroStreamsJsonStreamClient;
+    let calls = 0;
+    const dispatcher = createEncryptedDispatchLegacy({
+      workspaceId: 'iroh-slow-ready',
+      prepare: async () => original('55'.repeat(16)),
+      accept: async () => ({}) as never,
+      client: async () => client,
+      iroh: {
+        // Never answers: a busy host lock or a stalled check.
+        ready: () => new Promise<boolean>(() => {}),
+        call: async () => {
+          calls++;
+          return [];
+        },
+      },
+    });
+    try {
+      const prepared = await dispatcher.prepare('machine-1', input('slow'));
+      void prepared.send().catch(() => null);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await appended.promise).toEqual({ id: '55'.repeat(16), frame: 'ab'.repeat(200) });
+      expect(calls).toBe(0);
+    } finally {
+      await dispatcher.close();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});

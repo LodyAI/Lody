@@ -10,6 +10,9 @@
 - An explicit Scope owns the KEK and native promises. Stop admission, await actual
   in-flight operations, then release stores and wipe owned buffers. No timers/PID lock takeover.
 - No arbitrary signing or secret export in IPC. Expose only purpose-limited product operations.
+  The one seed handoff is `withTransportSeed`: it passes the retained device seed only to
+  the native iroh opener in the same host and wipes it after the opener settles
+  ([transport rules](../../../../iroh-native/AGENTS.md)).
   Missing/corrupt originals are not permission to replace a device or key.
 
 Device access credentials are independent 32-byte random values, protected with the

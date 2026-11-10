@@ -22,6 +22,9 @@ export default async function releaseConfig(context) {
             LODY_AUTH_SITE_URL: r.env.VITE_CONVEX_SITE_URL,
             LODY_SERVER_URL: r.env.VITE_SERVER_URL,
             SITE_URL: r.env.VITE_SITE_URL,
+            // Optional Lody iroh relays; absent keeps encrypted RPC on Streams.
+            LODY_IROH_RELAYS: r.env.VITE_IROH_RELAYS ?? '',
+            LODY_IROH_RELAY_TOKEN: r.env.VITE_IROH_RELAY_TOKEN ?? '',
           }).map(([key, value]) => [`process.env.${key}`, JSON.stringify(value)])
         )
       : {}),

@@ -1,0 +1,19 @@
+[package]
+name = "lody-iroh"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Lody encrypted-workspace RPC transport over iroh: endpoint lifecycle, ALPN framing and the one-endpoint-per-device-key rule. Carries opaque signed frames only; it never decides authority."
+
+[dependencies]
+iroh.workspace = true
+tokio.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper", "test-utils"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }

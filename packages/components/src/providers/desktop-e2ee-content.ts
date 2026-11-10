@@ -439,6 +439,20 @@ export function createE2eeContent(input: {
           input.runtime.acceptDispatchResponse!(input.workspaceId, machineId, args, frame)
         );
       },
+      ...(input.runtime.irohReady && input.runtime.irohCall
+        ? {
+            irohReady: (machineId: string) =>
+              withinContent(() => input.runtime.irohReady!(input.workspaceId, machineId)),
+            irohCall: (
+              machineId: string,
+              envelope: { id: string; frame: string },
+              timeoutMs: number
+            ) =>
+              withinContent(() =>
+                input.runtime.irohCall!(input.workspaceId, machineId, envelope, timeoutMs)
+              ),
+          }
+        : {}),
       codeCollabRole: {
         get: codeCollabRole,
         subscribe: (listener: () => void) => {

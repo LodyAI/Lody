@@ -320,6 +320,20 @@ export interface E2eeWorkspaceRuntime
     targetMachineId: string,
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /**
+   * Optional iroh route (desktop main with relays and the native module). `irohReady`
+   * reports a live connection to the machine's ledger device and starts one when
+   * absent; `irohCall` carries one already prepared envelope and returns its reply
+   * frames, which the caller verifies with the accept methods. Neither prepares,
+   * signs nor authorizes anything; failures mean "use Streams RPC".
+   */
+  irohReady?(workspaceId: string, targetMachineId: string): Promise<boolean>;
+  irohCall?(
+    workspaceId: string,
+    targetMachineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ): Promise<string[]>;
   /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
   acceptDispatchResponse?(
     workspaceId: string,

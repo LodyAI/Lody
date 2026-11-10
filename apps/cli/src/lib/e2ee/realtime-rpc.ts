@@ -7,6 +7,11 @@ import type { AuthorizeEncryptedExecution } from './agent-execution';
 import { RealtimeJournal, type RealtimeStartPermit } from './realtime-journal';
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
+/** Where a receiver writes response frames for one request. Streams appends to the
+ * requester's response stream; iroh writes on the request's own QUIC stream. */
+export type EncryptedReplySink = {
+  deliver(id: string, frame: Uint8Array): Promise<void>;
+};
 /** Delivery receipt owner only. Actual execution always enters agent-start:userTurnId
  * through SessionExecutionService, including when history beats this offer. */
 export function makeEncryptedRpcReceiver(options: {
@@ -18,12 +23,16 @@ export function makeEncryptedRpcReceiver(options: {
   authorize: AuthorizeEncryptedExecution;
   isOpen: () => boolean;
   offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>;
-  client: LoroStreamsJsonStreamClient;
+  /** Streams replies; absent for a receiver that only serves sink-carrying routes. */
+  client?: LoroStreamsJsonStreamClient;
   trace?: (event: E2eeRpcTiming) => void;
 }) {
   const pendingResponses = new Map<string, { permit: RealtimeStartPermit; frame: Uint8Array }>();
   const responseStreams = new Set<string>();
-  return Effect.fnUntraced(function* (envelope: { id: string; frame: string }) {
+  return Effect.fnUntraced(function* (
+    envelope: { id: string; frame: string },
+    sink?: EncryptedReplySink
+  ) {
     const mark = (stage: E2eeRpcTiming['stage'], userTurnId?: string) =>
       Effect.gen(function* () {
         const at = yield* Clock.currentTimeMillis;
@@ -86,17 +95,26 @@ export function makeEncryptedRpcReceiver(options: {
       // ACK remains progress. Never finish the distinct agent-start execution claim here.
     }
     if (!options.isOpen()) return;
-    const stream = options.native.responseStream(opened.requesterDevice);
     const saved = response;
+    if (sink) {
+      yield* Effect.tryPromise({
+        try: () => sink.deliver(opened.requestId, saved),
+        catch: (cause) => cause,
+      });
+      return;
+    }
+    const client = options.client;
+    if (!client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+    const stream = options.native.responseStream(opened.requesterDevice);
     yield* Effect.tryPromise({
       try: async () => {
         if (!responseStreams.has(stream)) {
-          await options.client.ensureJsonStream(stream, 86400);
+          await client.ensureJsonStream(stream, 86400);
           if (responseStreams.size >= 128) responseStreams.clear();
           responseStreams.add(stream);
         }
         try {
-          await options.client.appendJson(
+          await client.appendJson(
             stream,
             e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(saved).toString('hex') })
           );

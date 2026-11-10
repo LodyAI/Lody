@@ -16,6 +16,7 @@ import {
   E2eeMemberRemovedError
 } from '../../services/e2ee-cloud-errors.mjs'
 import { Effect, Exit } from 'effect'
+import { z } from 'zod'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
 import type { RecoveryVaultStore } from '@lody/e2ee-core/services'
@@ -83,6 +84,22 @@ import type {
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
 import { MemberOfferSchema, decodeMemberKeyPackage } from '../../services/e2ee-member-join.mjs'
+
+const irohTargetSchema = z.object({
+  workspaceId: z.string().min(1).max(256),
+  targetMachineId: z.string().min(1).max(256)
+})
+const irohCallSchema = irohTargetSchema.extend({
+  envelope: z.object({
+    id: z.string().regex(/^[0-9a-f]{32}$/),
+    frame: z
+      .string()
+      .min(286)
+      .max(2 * 1024 * 1024)
+      .regex(/^(?:[0-9a-f]{2})+$/)
+  }),
+  timeoutMs: z.number().int().min(1).max(60_000)
+})
 
 /** Only the typed, credential-authenticated cloud results are terminal access loss. */
 type AccessLoss = 'member_removed' | 'device_revoked'
@@ -201,6 +218,23 @@ const PAIRING_REFUSALS = new Set([
   'pairing-rate-limited',
   'invalid-input'
 ])
+/** Resolves an iroh route under the account lock; no network wait happens here. */
+async function irohRoute(
+  id: ReturnType<typeof sender>,
+  workspaceId: string,
+  targetMachineId: string
+) {
+  const target = irohTargetSchema.parse({ workspaceId, targetMachineId })
+  return withDesktopE2eeAccount(
+    (owner) =>
+      owner.readers.get(target.workspaceId)?.has(id)
+        ? owner.host.irohPrepare(target.workspaceId, target.targetMachineId)
+        : refuseUnopened(owner, target.workspaceId),
+    target.workspaceId,
+    false
+  ).catch(() => undefined)
+}
+
 function sender() {
   const { event } = getIpcContext()
   assertProductWindowSender(event)
@@ -2853,6 +2887,28 @@ export class E2eeIpc extends IpcService {
       workspaceId,
       false
     )
+  }
+  /** Whether an iroh connection to the machine is live; starts one when not.
+   * Only route resolution runs under the account lock; the check runs after it. */
+  @IpcMethod()
+  async irohReady(workspaceId: string, targetMachineId: string) {
+    const route = await irohRoute(sender(), workspaceId, targetMachineId)
+    return route ? route.ready() : false
+  }
+  /** Carries one prepared `{id, frame}` envelope; returns reply frames for the
+   * renderer to verify with the existing accept methods. Never prepares or signs.
+   * The network wait runs after the account lock is released. */
+  @IpcMethod()
+  async irohCall(
+    workspaceId: string,
+    targetMachineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ) {
+    const input = irohCallSchema.parse({ workspaceId, targetMachineId, envelope, timeoutMs })
+    const route = await irohRoute(sender(), input.workspaceId, input.targetMachineId)
+    if (!route) throw new Error('iroh_unavailable')
+    return route.call(input.envelope, input.timeoutMs)
   }
   @IpcMethod()
   async prepareDispatch(

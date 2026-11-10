@@ -15,6 +15,8 @@ import {
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { runMachineIrohListener } from './iroh-listener';
+import { loadIrohNative, proxyUrlFromEnv } from '@lody/iroh-native';
 import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
 import { e2eeRpcResource } from '@lody/loro-streams-rpc/e2ee-resource';
 import { getLogger } from '../../utils/logger';
@@ -926,8 +928,17 @@ async function openWorkspaceOwned(
   });
   const dispatchNative = withLedgerCatchUp(rpc, catchUpLedger);
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
+  let irohFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
-    rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
+    run(
+      Effect.all(
+        [rpcFiber, irohFiber].flatMap((fiber) => (fiber ? [Fiber.interrupt(fiber)] : [])),
+        {
+          concurrency: 'unbounded',
+          discard: true,
+        }
+      )
+    );
   const readExecutionOriginPage = options.cloud.readExecutionOriginPage?.bind(options.cloud);
   const originRecovery = readExecutionOriginPage
     ? makeExecutionOriginRecovery(
@@ -1702,6 +1713,85 @@ async function openWorkspaceOwned(
                 return yield* Effect.never;
               })
             ).pipe(Effect.retry(Schedule.spaced('1 second'))),
+            scope
+          );
+          // Iroh is independent of the Streams listener above: either may fail or
+          // restart without the other. Both feed the same receivers' journal and claim.
+          const relays = options.cloud.irohRelays;
+          const iroh = relays ? loadIrohNative(process.env.LODY_IROH_NATIVE_PATH) : undefined;
+          if (!relays || !iroh || irohFiber) return;
+          irohFiber = yield* Effect.forkIn(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
+                const genesis = yield* Effect.fromResult(
+                  Bytes.genesisHash(bytes(binding.genesisHash))
+                );
+                const key = yield* Effect.fromResult(
+                  Bytes.signingPublicKey(bytes(opened.signingPublicKey))
+                );
+                const receive = makeEncryptedRpcReceiver({
+                  workspaceId: options.workspaceId,
+                  genesis: binding.genesisHash,
+                  machineId,
+                  native: dispatchNative,
+                  journal: rpcJournal,
+                  authorize: opened.executionAuthorization.authorizeExecution,
+                  isOpen: () => !closed,
+                  offer,
+                  trace,
+                });
+                const receiveFeature = handleFeature
+                  ? yield* makeEncryptedFeatureReceiver({
+                      workspaceId: options.workspaceId,
+                      genesis: binding.genesisHash,
+                      machineId,
+                      native: dispatchNative,
+                      journal: rpcJournal,
+                      authorize: opened.executionAuthorization.authorizeOwnedExecution,
+                      authorizeRead: opened.executionAuthorization.authorizeRead,
+                      authoritySignal: () =>
+                        AbortSignal.any([
+                          opened.runtime.executionAuthoritySignal(),
+                          opened.executionAuthorization.authoritySignal,
+                        ]),
+                      isOpen: () => !closed,
+                      handle: handleFeature,
+                    })
+                  : undefined;
+                return yield* runMachineIrohListener({
+                  native: iroh,
+                  relays,
+                  withSeed: (open) => opened.custody.withTransportSeed(genesis, key, open),
+                  proxyUrl: proxyUrlFromEnv(process.env),
+                  onOnline: (online) => console.debug('[e2ee-iroh] relay online', { online }),
+                  // Route evidence only: ids and timestamps, never frames or content.
+                  onOpen: (endpoint) =>
+                    console.debug('[e2ee-iroh] listening', {
+                      endpoint: endpoint.endpointId.slice(0, 12),
+                    }),
+                  handle: (envelope, sink) =>
+                    Effect.gen(function* () {
+                      console.debug('[e2ee-iroh] request', {
+                        requestId: envelope.id,
+                        at: Date.now(),
+                      });
+                      if (receiveFeature && (yield* receiveFeature(envelope, sink))) return;
+                      yield* receive(envelope, sink).pipe(
+                        Effect.ensuring(Effect.promise(() => sink.end().catch(() => undefined))),
+                        Effect.tap(() => Effect.sync(requestAuthorityCheck))
+                      );
+                    }),
+                });
+              })
+            ).pipe(
+              Effect.tapError(() =>
+                Effect.sync(() =>
+                  console.debug('[e2ee] iroh listener unavailable; Streams RPC remains active')
+                )
+              ),
+              Effect.retry(Schedule.spaced('30 seconds'))
+            ),
             scope
           );
         })
