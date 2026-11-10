@@ -26,10 +26,8 @@ on compatible owners and Loro on other owners. Session metadata stores the choic
 Roost sessions use the owner machine's encrypted v3 history RPC while Loro carries
 the control document and queue. The upstream coordinator persists pending inputs
 in IndexedDB under the account and workspace, recovers the original input after
-restart, and serializes inputs for a session. Pending-input writes use strict
-IndexedDB durability because they can contain the only copy before owner
-acceptance. Sign-out does not clear the pending input database. Queue-to-guide
-conversion preserves the queue item when local input
+restart, and serializes inputs for a session. Sign-out does not clear the pending
+input database. Queue-to-guide conversion preserves the queue item when local input
 saving fails. Archiving or deleting a Roost session cancels its pending inputs before changing metadata.
 A user can retry the original input after a failure, or cancel a pending
 input while its session is syncing,

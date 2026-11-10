@@ -245,11 +245,9 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 
 Loro ready messages commit to the live local history document. A ready Roost
 input instead appears from the workspace's immutable input projection and saves
-to account/workspace-scoped IndexedDB without waiting for owner RPC. Its write
-transactions request strict durability because the pending record can hold the
-only copy until the owner accepts the input. Normal rows reuse `UserChatBubble`,
-including ready media and mention spans, with the ordinary pending delivery
-circle and no separate acceptance badge. The circle remains
+to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
+reuse `UserChatBubble`, including ready media and mention spans, with the ordinary
+pending delivery circle and no separate acceptance badge. The circle remains
 through local saving and unconfirmed owner work. A positive active owner receipt
 publishes the existing delivery overlay; both the local row and authoritative row
 use it, so history handoff cannot flash back to sending. A persisted `confirmed`
