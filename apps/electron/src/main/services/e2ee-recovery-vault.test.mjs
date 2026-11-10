@@ -35,7 +35,8 @@ import {
   recoveryVaultFailure,
   restoreAccountWorkspaces,
   saveRecoveryFile,
-  setupWorkspaceRecovery
+  setupWorkspaceRecovery,
+  setupWorkspacesRecovery
 } from './e2ee-recovery-vault.mts'
 
 const response = (value) => Response.json({ status: 'success', value })
@@ -919,6 +920,61 @@ void test('a passkey enrolled with the file then sets up a workspace without it'
     )
     assert.deepEqual(result, { outcome: 'Committed', recoverable: true })
     assert.deepEqual(log, ['setup'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+void test('several workspaces set up after one passkey prompt, and one failure leaves the rest', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lody-recovery-vault-'))
+  try {
+    const service = syntheticService()
+    const { file, vaultId } = await createdVault(dir, service)
+    service.replacement.current = vaultId
+    const port = syntheticAuthenticator()
+    await withClient(service, (store) =>
+      Effect.runPromise(
+        enrollRecoveryPasskey({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          file,
+          port,
+          label: 'iCloud Keychain'
+        })
+      )
+    )
+    let prompts = 0
+    const counted = {
+      ...port,
+      authenticate: async (request) => {
+        prompts += 1
+        return port.authenticate(request)
+      }
+    }
+    const log = []
+    const broken = {
+      ...fakeTarget(log),
+      id: 'broken',
+      owner: () => Effect.fail({ code: 'missing' })
+    }
+    const results = await withClient(service, (store, client) =>
+      Effect.runPromise(
+        setupWorkspacesRecovery({
+          journalPath: join(dir, 'recovery-vault.sqlite'),
+          store,
+          unlock: { passkey: counted, locator: 'https://synthetic.convex.cloud' },
+          replacement: client.recoveryVaultReplacement(),
+          targets: [{ ...fakeTarget(log), id: 'first' }, broken, { ...fakeTarget(log), id: 'last' }]
+        })
+      )
+    )
+    assert.equal(prompts, 1)
+    assert.deepEqual(results, [
+      { workspaceId: 'first', outcome: 'Committed', recoverable: true },
+      { workspaceId: 'broken', outcome: 'Failed', recoverable: false },
+      { workspaceId: 'last', outcome: 'Committed', recoverable: true }
+    ])
+    assert.deepEqual(log, ['setup', 'setup'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

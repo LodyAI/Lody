@@ -22,3 +22,12 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   this never enables general machine RPC or ordinary machine-sharing controls. Team management requires the current
   host's verified personal-device role and credential; replacement runtimes must
   qualify again before showing retained management controls.
+
+- The recovery tab sets up every uncovered workspace through
+  `setupRecoveryForWorkspaces`, which unlocks the vault once and reports each
+  workspace separately; one failed workspace never stops or rolls back the others.
+  Only a committed, verified setup counts as done: pending, conflicting, unverified
+  or missing results stay unfinished, and a saved but unverified workspace keeps its
+  continue action.
+  Keep exactly one primary action on the tab, and give every failure card one next
+  step that does something, with diagnostics secondary.

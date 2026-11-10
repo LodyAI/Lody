@@ -81,6 +81,22 @@ export const Ready: Story = {
   },
 };
 
+// Every workspace covered: no warning, checking the saved file is the one primary action.
+export const AllCovered: Story = {
+  args: {
+    plan: {
+      hasVault: true,
+      replaceable: true,
+      replacing: false,
+      covered: [
+        workspace('b', 'Platform', { kind: 'saved' }),
+        workspace('c', 'Research', { kind: 'verified', update: 3 }),
+      ],
+      uncovered: [],
+    },
+  },
+};
+
 export const Replacing: Story = {
   args: {
     plan: {

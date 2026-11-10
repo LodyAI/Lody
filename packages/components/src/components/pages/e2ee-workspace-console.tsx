@@ -80,6 +80,10 @@ export interface E2eeWorkspaceConsoleProps {
   initialTab?: E2eeConsoleTab;
   /** Host-owned content for console tabs, wrapped in `E2eeConsoleSection`. */
   sections?: ReactNode;
+  /** Host app-update check, shown on failures that an update resolves. */
+  onCheckForUpdates?: () => void;
+  /** Host-known recovery state for the getting-started list; see the control page. */
+  recoveryReady?: boolean;
 }
 
 /** The encryption console. It owns its account/workspace control reader and the
@@ -90,6 +94,8 @@ export function E2eeWorkspaceConsole({
   onClose,
   initialTab,
   sections,
+  onCheckForUpdates,
+  recoveryReady,
 }: E2eeWorkspaceConsoleProps) {
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -750,6 +756,8 @@ export function E2eeWorkspaceConsole({
         }
         presentation={presentation}
         initialTab={initialTab}
+        {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
+        {...(recoveryReady === undefined ? {} : { recoveryReady })}
         memberRole={
           current?.scope === scope && !current.failure
             ? current.nativeStatus?.memberRole
