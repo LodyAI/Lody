@@ -198,8 +198,8 @@ extension SessionController {
     let source = MentionSource(
       workspaceId: state.workspaceId, sessionId: sessionId, cliType: session.cliType, agentType: session.agentType
     )
-    guard mentions?.source != source else { return }
-    let store = MentionCatalogStore(source: source)
+    guard mentions?.source != source || mentions?.userId != state.userId else { return }
+    let store = MentionCatalogStore(source: source, userId: state.userId)
     store.changed = { [weak self, weak store] in
       guard let self, let store, mentions === store else { return }
       chat.composer.setMentionItems(store.composerItemsJSON())
