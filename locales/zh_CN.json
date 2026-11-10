@@ -6480,7 +6480,7 @@
   "sessions.access.reference": "在新会话中引用",
   "e2ee.machineSharing.pendingSession": "待确认更改：{{action}} {{name}} 的只读授权",
   "sessions.access.members": "成员",
-  "sessions.access.owner": "owner",
+  "sessions.access.owner": "所有者",
   "sessions.access.memberRead": "只读",
   "sessions.access.addMember": "添加成员",
   "sessions.access.removeMember": "移除 {{name}}",

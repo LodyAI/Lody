@@ -393,6 +393,14 @@ function SessionAccessMembers({
               userId === state.ownerUserId ? 'sessions.access.owner' : 'sessions.access.memberRead'
             )}
           </span>
+          {state.canManage && userId === state.ownerUserId && (
+            // Holds the remove button's width so every role label lines up.
+            <span aria-hidden="true" {...stylex.props(memberStyles.placeholder)}>
+              <Button variant="ghost" icon size="small" disabled tabIndex={-1}>
+                <X {...stylex.props(shareSurface.glyphSmall)} />
+              </Button>
+            </span>
+          )}
           {state.canManage && userId !== state.ownerUserId && (
             <Button
               variant="ghost"
@@ -406,7 +414,7 @@ function SessionAccessMembers({
                 void change(userId, false);
               }}
             >
-              <X />
+              <X {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
             </Button>
           )}
         </div>
@@ -418,9 +426,10 @@ function SessionAccessMembers({
               <Button
                 variant="ghost"
                 size="small"
+                className="justify-start"
                 disabled={busy || !state.setMemberReadAccess || !available.length}
               >
-                <UserPlus />
+                <UserPlus {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
                 {t('sessions.access.addMember')}
               </Button>
             }
@@ -443,9 +452,23 @@ function SessionAccessMembers({
   );
 }
 const memberStyles = stylex.create({
-  section: { display: 'flex', flexDirection: 'column', gap: space[2], padding: space[2] },
-  heading: { margin: 0, fontSize: text.captionSize, color: colors.secondaryLabel },
-  row: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  section: { display: 'flex', flexDirection: 'column', gap: space[1], marginTop: space[2] },
+  heading: {
+    margin: 0,
+    marginTop: space[2],
+    paddingInline: space[1],
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    minHeight: space[8],
+    paddingInline: space[1],
+  },
+  placeholder: { visibility: 'hidden', pointerEvents: 'none' },
   name: {
     flexGrow: 1,
     minWidth: 0,
@@ -673,7 +696,7 @@ export function SessionAccessControl({
         }}
       >
         <Dialog.Content>
-          <Dialog.Title>{t('sessions.access.teamAccess')}</Dialog.Title>
+          <Dialog.Title>{t('sessions.sharing.panelTitle')}</Dialog.Title>
           {content}
         </Dialog.Content>
       </Dialog.Root>
