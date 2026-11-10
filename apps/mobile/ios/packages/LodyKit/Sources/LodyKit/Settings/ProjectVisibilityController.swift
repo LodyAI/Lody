@@ -14,8 +14,15 @@ class ProjectVisibilityController: UIViewController {
   private var pulled = false
   private var mutating = false
   private var loadedAt: Double?
+  /// Whether `snapshot` came from a live read; a cached snapshot only displays, never authorizes writes.
+  private var live = false
   private var version = 0
   private var observer: NSObjectProtocol?
+  /// The account/workspace-scoped last accepted registrations; previews with a fixed workspace keep none.
+  private var store: SettingsSnapshotStore<VisibilitySnapshot>? {
+    guard fixed == nil else { return nil }
+    return SettingsSnapshotStore(kind: "project-visibility", userId: workspace.userId, workspaceId: workspace.workspaceId)
+  }
 
   init(
     workspace: SettingsWorkspace? = nil,
@@ -61,7 +68,17 @@ class ProjectVisibilityController: UIViewController {
     unconfirmed = false
     pulled = false
     loadedAt = nil
-    read()
+    live = false
+    version += 1
+    let id = version, store = store
+    render()
+    Task { [weak self] in
+      // The last accepted registrations show at once; the live read replaces them.
+      let cached = await store?.read()
+      guard let self, self.version == id else { return }
+      if let cached, cached.userId == self.workspace.userId, self.snapshot == nil { self.snapshot = cached }
+      self.read()
+    }
   }
 
   private func read() {
@@ -77,12 +94,11 @@ class ProjectVisibilityController: UIViewController {
     failed = false
     render()
     Task { [weak self, service, workspace] in
-      let next = try? await service(.list(workspace.workspaceId))
+      let next = try? await service(.list(workspace.workspaceId), workspace.userId)
       guard let self, self.version == id else { return }
       if let next {
-        self.snapshot = next
+        self.accept(next)
         self.unconfirmed = false
-        self.loadedAt = LodyRelativeTime.now()
       } else {
         self.failed = true
       }
@@ -99,12 +115,12 @@ class ProjectVisibilityController: UIViewController {
     let id = version
     render()
     Task { [weak self, service, workspace] in
-      let next = try? await service(.set(workspace.workspaceId, row: row, shared: shared))
+      let next = try? await service(.set(workspace.workspaceId, row: row, shared: shared), workspace.userId)
       guard let self else { return }
       self.mutating = false
       guard self.version == id else { return }
       if let next {
-        self.snapshot = next
+        self.accept(next)
         self.failed = false
         self.changed()
       } else {
@@ -115,11 +131,20 @@ class ProjectVisibilityController: UIViewController {
     }
   }
 
+  private func accept(_ next: VisibilitySnapshot) {
+    snapshot = next
+    live = true
+    loadedAt = LodyRelativeTime.now()
+    store?.write(next)
+  }
+
+  // The local project catalog is shown at once; registrations (cached, then live) only add
+  // each project's sharing state, so a slow, failed or empty registration read never blanks the page.
   private func render() {
     let catalog = workspace.catalog
     let hasData = snapshot?.rows.isEmpty == false || !catalog.projects.isEmpty
     let state = LodyListState.make(
-      title: String(localized: "settings.unavailable.projects", bundle: .lody), hasData: snapshot != nil, loading: busy, failed: failed,
+      title: String(localized: "settings.unavailable.projects", bundle: .lody), hasData: hasData, loading: busy, failed: failed,
       offline: !workspace.connected, unconfirmed: unconfirmed, syncedAt: loadedAt
     )
     list.setRefreshing(pulled && busy)
@@ -127,9 +152,9 @@ class ProjectVisibilityController: UIViewController {
     list.setNotice(state.notice)
     list.setUnavailable(state.unavailable)
     list.setPlaceholder(snapshot != nil && !busy && !hasData ? ProjectVisibilitySections.text("empty") : "")
-    guard let snapshot, hasData else { return list.setSections([]) }
+    guard hasData else { return list.setSections([]) }
     let rows = ProjectVisibilitySections.make(
-      snapshot, catalog: catalog, enabled: !busy && !failed && !unconfirmed,
+      snapshot, catalog: catalog, enabled: live && !busy && !failed && !unconfirmed,
       presence: workspace.connected ? workspace.presence : .unknown
     )
     list.setSections(
@@ -147,7 +172,7 @@ class ProjectVisibilityController: UIViewController {
       read()
     case "rowAction":
       guard let id = body["id"] as? String, let action = body["actionId"] as? String,
-            ["shared", "private"].contains(action), !busy, !failed, !unconfirmed, !mutating,
+            ["shared", "private"].contains(action), live, !busy, !failed, !unconfirmed, !mutating,
             let row = snapshot?.rows.first(where: { $0.id == id }), row.ownerUserId == snapshot?.userId,
             row.sharedWithTeam != (action == "shared") else { return }
       write(row, shared: action == "shared")
@@ -156,10 +181,10 @@ class ProjectVisibilityController: UIViewController {
     }
   }
 
-  static func cloud(_ request: VisibilityRequest) async throws -> VisibilitySnapshot {
+  static func cloud(_ request: VisibilityRequest, userId: String) async throws -> VisibilitySnapshot {
     let payload = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
     let snapshot = try JSONDecoder().decode(
-      VisibilitySnapshot.self, from: Data(try await WorkspaceSettingsCloud.run(payload).utf8)
+      VisibilitySnapshot.self, from: Data(try await WorkspaceSettingsCloud.run(payload, userId: userId).utf8)
     )
     guard snapshot.valid else { throw CocoaError(.coderInvalidValue) }
     return snapshot

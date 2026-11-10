@@ -4,14 +4,22 @@ import Foundation
 @MainActor enum WorkspaceSettingsCloud {
   typealias Call = (String, String, [String: Any]) async throws -> Any
 
-  static func run(_ payload: String) async throws -> String {
+  /// `userId` is the signed-in account the caller already holds (the catalog's verified account);
+  /// with it the call skips the session lookup. The backend still authorizes every function.
+  static func run(_ payload: String, userId: String? = nil) async throws -> String {
     guard let token = try AuthKeychain.read(), !token.isEmpty,
           let data = payload.data(using: .utf8), data.count <= 16 * 1024,
           let args = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let workspace = args["workspaceId"] as? String, !workspace.isEmpty, workspace.count <= 200 else { throw GitHubCloud.failure() }
-    let session = try await GitHubCloud.request("\(BackendEnvironment.site)/api/auth/get-session", token: token) as? [String: Any]
-    guard try AuthKeychain.read() == token,
-          let user = (session?["user"] as? [String: Any])?["id"] as? String, !user.isEmpty else { throw GitHubCloud.failure() }
+    let user: String
+    if let userId, !userId.isEmpty {
+      user = userId
+    } else {
+      let session = try await GitHubCloud.request("\(BackendEnvironment.site)/api/auth/get-session", token: token) as? [String: Any]
+      guard try AuthKeychain.read() == token,
+            let id = (session?["user"] as? [String: Any])?["id"] as? String, !id.isEmpty else { throw GitHubCloud.failure() }
+      user = id
+    }
     var role: String?
     if args["page"] as? String == "github" {
       var url = URLComponents(string: "\(BackendEnvironment.site)/api/auth/organization/get-full-organization")!
