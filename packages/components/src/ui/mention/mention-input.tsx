@@ -4,6 +4,7 @@ import { createEmptyHistoryState, registerHistory } from '@lexical/history';
 import { registerPlainText } from '@lexical/plain-text';
 import { mergeRegister } from '@lexical/utils';
 import {
+  BEFORE_INPUT_COMMAND,
   COMMAND_PRIORITY_CRITICAL,
   COPY_COMMAND,
   CUT_COMMAND,
@@ -24,6 +25,7 @@ import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import {
+  $domPointToOffset,
   $offsetToPoint,
   $readComposerValue,
   $readMentionOffsets,
@@ -152,14 +154,15 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
   const lineHeight = lineHeightOf(element);
   let rect: DOMRect | null = null;
   const range = createDomRange(editor, offset, offset);
-  if (range) {
+  // jsdom and some embedded engines lack Range geometry; fall back to the box.
+  if (range && typeof range.getClientRects === 'function') {
     const rects = range.getClientRects();
     rect = rects.length > 0 ? rects[0]! : range.getBoundingClientRect();
     if (isEmptyRect(rect)) rect = null;
   }
   // A collapsed range between element children (beside a chip, on an empty
   // line) has no box of its own: measure the character before it instead.
-  if (!rect && offset > 0) {
+  if (!rect && offset > 0 && range && typeof range.getClientRects === 'function') {
     const previous = createDomRange(editor, offset - 1, offset)?.getClientRects();
     const last = previous && previous.length > 0 ? previous[previous.length - 1] : null;
     if (last && last.height > 0) rect = new DOMRect(last.right, last.top, 0, last.height);
@@ -293,11 +296,10 @@ function MentionDecorations({
   );
 }
 
-interface MentionInputProps
-  extends Omit<
-    React.HTMLAttributes<InputElement>,
-    'onChange' | 'defaultValue' | 'children' | 'contentEditable'
-  > {
+interface MentionInputProps extends Omit<
+  React.HTMLAttributes<InputElement>,
+  'onChange' | 'defaultValue' | 'children' | 'contentEditable'
+> {
   /** The owner's text. Defaults to the Mention root's `inputValue`. */
   value?: string | null;
   /** Kept for call sites; edits reach the owner through the Mention root. */
@@ -336,8 +338,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     onBlur,
     onCompositionStart,
     onCompositionEnd,
+    onBeforeInput,
     ...elementProps
   } = props;
+  const onBeforeInputRef = React.useRef(onBeforeInput);
+  onBeforeInputRef.current = onBeforeInput;
   const [element, setElement] = React.useState<InputElement | null>(null);
   const composedRef = useComposedRefs(forwardedRef, context.inputRef, setElement);
 
@@ -365,6 +370,24 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const [focused, setFocused] = React.useState(false);
 
   const readSelection = React.useCallback((): ComposerSelection => {
+    const root = editor.getRootElement();
+    const dom = root?.ownerDocument.getSelection();
+    if (
+      root &&
+      dom &&
+      dom.rangeCount > 0 &&
+      dom.anchorNode &&
+      dom.focusNode &&
+      root.contains(dom.anchorNode)
+    ) {
+      const offsets = editor.read(() => [
+        $domPointToOffset(editor, dom.anchorNode!, dom.anchorOffset),
+        $domPointToOffset(editor, dom.focusNode!, dom.focusOffset),
+      ]);
+      if (offsets[0] !== null && offsets[1] !== null) {
+        return { start: Math.min(offsets[0], offsets[1]), end: Math.max(offsets[0], offsets[1]) };
+      }
+    }
     const selection = editor.getEditorState().read(() => $readSelectionOffsets());
     if (selection) return selection;
     const end = documentRef.current.text.length;
@@ -586,7 +609,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
             getCaretRect: (offset) => measureCaretRect(editor, element, offset),
             getRangeRects: (start, end) => {
               const range = createDomRange(editor, start, end);
-              return range ? Array.from(range.getClientRects()) : [];
+              return range && typeof range.getClientRects === 'function'
+                ? Array.from(range.getClientRects())
+                : [];
             },
           }
         : null,
@@ -598,7 +623,15 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   React.useLayoutEffect(() => {
     if (!element || !controller) return undefined;
     editor.setRootElement(element);
+    const syncEditable = (editable: boolean) => {
+      element.contentEditable = editable ? 'true' : 'false';
+    };
+    syncEditable(editor.isEditable());
+    const onNativeClick = (event: MouseEvent) => onClickPrimitiveRef.current(event);
+    element.addEventListener('click', onNativeClick);
     const unregister = mergeRegister(
+      () => element.removeEventListener('click', onNativeClick),
+      editor.registerEditableListener(syncEditable),
       registerPlainText(editor),
       registerHistory(editor, createEmptyHistoryState(), 300),
       editor.registerCommand(
@@ -625,6 +658,28 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       editor.registerCommand(
         DROP_COMMAND,
         (event) => event.defaultPrevented || hasFiles(event.dataTransfer),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      // A caller may refuse input (a composer that is sending keeps focus but
+      // takes no text); Lexical must not apply what the caller prevented.
+      editor.registerCommand(
+        BEFORE_INPUT_COMMAND,
+        (event) => {
+          const handler = onBeforeInputRef.current;
+          if (!handler) return false;
+          handler({
+            nativeEvent: event,
+            currentTarget: element,
+            target: event.target,
+            type: event.type,
+            data: event.data,
+            inputType: event.inputType,
+            preventDefault: () => event.preventDefault(),
+            isDefaultPrevented: () => event.defaultPrevented,
+            stopPropagation: () => event.stopPropagation(),
+          } as unknown as Parameters<NonNullable<typeof handler>>[0]);
+          return event.defaultPrevented;
+        },
         COMMAND_PRIORITY_CRITICAL
       ),
       editor.registerCommand(
@@ -675,15 +730,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       unregister();
       editor.setRootElement(null);
     };
-  }, [
-    controller,
-    deleteMentionCharacter,
-    editor,
-    element,
-    isPublished,
-    onMentionUpdate,
-    publish,
-  ]);
+  }, [controller, deleteMentionCharacter, editor, element, isPublished, onMentionUpdate, publish]);
 
   React.useEffect(() => {
     editor.setEditable(!readOnly && !disabled);
@@ -1024,8 +1071,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     [applyInputValue, readSelection, writeSelection]
   );
 
+  // Native, not React: chips render through portals, and React routes a
+  // portal's events through its React parent instead of the editor element.
   const onClickPrimitive = React.useCallback(
-    (event: React.MouseEvent<InputElement>) => {
+    (event: MouseEvent) => {
       if (editor.isComposing()) return;
       const ctx = contextRef.current;
       const target = event.target instanceof Element ? event.target : null;
@@ -1054,6 +1103,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     },
     [editor, element, onMentionUpdate, readSelection, writeSelection]
   );
+
+  const onClickPrimitiveRef = React.useRef(onClickPrimitive);
+  onClickPrimitiveRef.current = onClickPrimitive;
 
   const onFocusPrimitive = React.useCallback(() => {
     setFocused(true);
@@ -1098,6 +1150,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         data-placeholder={placeholder}
         data-empty={paint.empty ? '' : undefined}
         data-system-selection={mirrorSelection ? '' : undefined}
+        data-disabled={disabled ? '' : undefined}
         className={cn('relative', 'z-10', className, 'bg-transparent')}
         style={{ '--composer-rows': rows, ...style } as React.CSSProperties}
         // Chip glyphs repaint under native spelling decorations.
@@ -1106,7 +1159,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         onPasteCapture={onPaste}
         onCopyCapture={onCopy}
         onCutCapture={onCut}
-        onClick={composeEventHandlers(onClick, onClickPrimitive)}
+        onClick={onClick}
         onFocus={composeEventHandlers(onFocus, onFocusPrimitive)}
         onBlur={composeEventHandlers(onBlur, () => setFocused(false))}
         onCompositionStart={composeEventHandlers(onCompositionStart, onCompositionStartPrimitive)}

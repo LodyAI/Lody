@@ -167,6 +167,22 @@ test('IME composition reaches the owner only when committed', async ({ page, bro
   ]);
 });
 
+test('IME composition right before a chip keeps the chip whole', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'IME is driven through the Chromium DevTools protocol');
+  await open(page);
+  await insertSkill(page);
+  await page.keyboard.press('Home');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'zhong', selectionStart: 5, selectionEnd: 5 });
+  // The chip stays painted whole while the preedit grows in front of it.
+  await expect(chip(page)).toHaveText(SKILL_TEXT);
+  await cdp.send('Input.insertText', { text: '中' });
+  await expect.poll(async () => (await state(page)).value).toBe(`中${SKILL_TEXT} `);
+  expect((await state(page)).mentions).toEqual([
+    { start: 1, end: 1 + SKILL_TEXT.length, value: 'kill-ai-slop', kind: 'skill' },
+  ]);
+});
+
 test('the composer exposes a labelled, expandable combobox', async ({ page }) => {
   const input = await open(page);
   await expect(input).toHaveAttribute('aria-expanded', 'false');

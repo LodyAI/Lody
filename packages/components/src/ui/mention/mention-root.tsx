@@ -24,7 +24,11 @@ import {
   resolveMentionInsertPrefix,
   type MentionSplice,
 } from './mention-input-core';
-import { getComposerSelection, getComposerText, type ComposerInputElement as InputElement } from './composer-input';
+import {
+  getComposerSelection,
+  getComposerText,
+  type ComposerInputElement as InputElement,
+} from './composer-input';
 import type { ItemElement } from './mention-item';
 
 function getDataState(open: boolean) {

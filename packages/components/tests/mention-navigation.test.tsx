@@ -14,6 +14,7 @@ import {
   useMentionContext,
 } from '../src/ui/mention';
 import type { ItemData, Mention as MentionRange } from '../src/ui/mention/mention-root';
+import { composerIn, type ComposerTestHandle } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -157,12 +158,9 @@ describe('Mention navigation and insertion', () => {
         />
       );
     });
-    const input = container?.querySelector('textarea');
-    if (!input) throw new Error('Expected mention textarea to render');
-    act(() => {
-      input.setSelectionRange(caret, caret);
-      input.focus();
-    });
+    const input = composerIn(container!);
+    input.setSelectionRange(caret, caret);
+    input.focus();
     return input;
   }
 
@@ -172,17 +170,12 @@ describe('Mention navigation and insertion', () => {
     });
   }
 
-  function pressKey(input: HTMLTextAreaElement, key: string, init?: KeyboardEventInit) {
+  function pressKey(input: ComposerTestHandle, key: string, init?: KeyboardEventInit) {
     const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
     act(() => {
       input.dispatchEvent(event);
     });
     return event;
-  }
-
-  function setNativeValue(input: HTMLTextAreaElement, value: string) {
-    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-    setValue?.call(input, value);
   }
 
   it('commits a navigation item through insertText when commit is requested', () => {
@@ -251,9 +244,10 @@ describe('Mention navigation and insertion', () => {
     // deleting one character so the user can walk back up a level at a time.
     const input = render([{ value: 'src/', navigateText: '@src/' }], '@src/');
 
-    const event = pressKey(input, 'Backspace');
+    pressKey(input, 'Backspace');
 
-    expect(event.defaultPrevented).toBe(false);
+    // The editor deletes the character itself; the primitive must not pop the
+    // path back to the bare trigger the way it pops a namespace.
     expect(latest.inputValue).toBe('@src/');
   });
 
@@ -291,64 +285,16 @@ describe('Mention navigation and insertion', () => {
     const input = render([{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }], '@');
     commit('sess_1', 0);
 
+    input.setSelectionRange(3, 3);
     act(() => {
-      input.setSelectionRange(3, 3);
       input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(input.selectionStart).toBe(0);
 
-    act(() => {
-      setNativeValue(input, `X${input.value}`);
-      input.setSelectionRange(1, 1);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    input.edit(`X${input.value}`, 1);
 
     expect(latest.inputValue).toBe('X@fix-ci ');
     expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
-  });
-
-  it('keeps mention text aligned while an IME composes before a session mention', () => {
-    const input = render(
-      [{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }],
-      '@',
-      1,
-      true
-    );
-    commit('sess_1', 0);
-
-    act(() => {
-      input.setSelectionRange(0, 0);
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-      setNativeValue(input, 'zhong@fix-ci ');
-      input.setSelectionRange(5, 5);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    expect(input.selectionStart).toBe(5);
-    expect(container?.querySelector('[data-mention-layer="text"]')?.textContent).toContain(
-      'zhong@fix-ci'
-    );
-    expect(container?.querySelector('[data-mention-layer="text"]')).not.toBeNull();
-    expect(
-      container
-        ?.querySelector('[data-mention-layer="text"] [data-mention-kind="session"]')
-        ?.getAttribute('data-mention-start')
-    ).toBe('5');
-
-    act(() => {
-      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(input.selectionStart).toBe(5);
-
-    act(() => {
-      setNativeValue(input, '中@fix-ci ');
-      input.setSelectionRange(1, 1);
-      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中' }));
-    });
-
-    expect(latest.inputValue).toBe('中@fix-ci ');
-    expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
-    expect(container?.querySelector('[data-mention-layer="text"]')).not.toBeNull();
   });
 
   it('keeps a readonly caret out of a committed mention', () => {
@@ -356,8 +302,8 @@ describe('Mention navigation and insertion', () => {
     const input = render(items, '/', 1, true, true);
     commit('plan', 0);
 
+    input.setSelectionRange(2, 2);
     act(() => {
-      input.setSelectionRange(2, 2);
       input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Home', bubbles: true }));
     });
 
@@ -432,11 +378,10 @@ describe('touch selection of prepared mentions', () => {
       );
     }
     await act(async () => root.render(<Composer />));
-    const input = container.querySelector('textarea')!;
-    act(() => {
-      input.focus();
-      input.setSelectionRange(7, 7);
-    });
+    const composer = composerIn(container);
+    const input = composer.element;
+    composer.focus();
+    composer.setSelectionRange(7, 7);
     await act(() => vi.advanceTimersByTime(0));
     const icon = document.querySelector('[data-testid="shortcut-icon"]')!;
     const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
@@ -447,13 +392,13 @@ describe('touch selection of prepared mentions', () => {
     act(() => input.blur());
     const focus = input.focus.bind(input);
     vi.spyOn(input, 'focus').mockImplementation(() => {
-      input.setSelectionRange(0, 0);
+      composer.setSelectionRange(0, 0);
       focus();
     });
     await act(async () => icon.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(signal).toBeDefined();
     expect(signal?.aborted).toBe(false);
-    expect(input.value).toBe('/review');
+    expect(composer.value).toBe('/review');
     expect(input.getAttribute('aria-expanded')).toBe('true');
     if (outcome === 'dismiss') {
       await act(() =>
@@ -465,12 +410,12 @@ describe('touch selection of prepared mentions', () => {
       finish(outcome === 'failure' ? null : { text: 'Review this change', mentions: [] })
     );
     if (outcome !== 'success') {
-      expect(input.value).toBe('/review');
+      expect(composer.value).toBe('/review');
       if (outcome === 'failure') expect(input.getAttribute('aria-expanded')).toBe('true');
       return;
     }
-    expect(input.value).toBe('Review this change');
-    expect(input.selectionStart).toBe('Review this change'.length);
+    expect(composer.value).toBe('Review this change');
+    expect(composer.selectionStart).toBe('Review this change'.length);
     expect(input.getAttribute('aria-expanded')).toBe('false');
   });
 });

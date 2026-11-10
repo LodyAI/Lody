@@ -3,6 +3,7 @@ import {
   $createParagraphNode,
   $createRangeSelection,
   $createTextNode,
+  $getNearestNodeFromDOMNode,
   $getRoot,
   $getSelection,
   $isElementNode,
@@ -12,6 +13,7 @@ import {
   $isTextNode,
   $setSelection,
   type ElementNode,
+  type LexicalEditor,
   type LexicalNode,
   type PointType,
 } from 'lexical';
@@ -271,4 +273,56 @@ export function $readMentionOffsets(): Record<string, SelectionOffsets> {
     }
   });
   return offsets;
+}
+
+/**
+ * Map a live DOM selection point inside the editor to a composer-string offset.
+ * The browser moves the DOM caret before Lexical hears `selectionchange`, so a
+ * key handler that needs today's caret, as a textarea's `selectionStart` gave
+ * it, reads the DOM rather than the last editor state.
+ */
+export function $domPointToOffset(
+  editor: LexicalEditor,
+  domNode: Node,
+  domOffset: number
+): number | null {
+  const root = editor.getRootElement();
+  if (!root || !root.contains(domNode)) return null;
+  if (domNode === root) {
+    const paragraphs = $paragraphs();
+    let offset = 0;
+    for (let index = 0; index < domOffset && index < paragraphs.length; index += 1) {
+      offset += (index > 0 ? 1 : 0) + paragraphLength(paragraphs[index]!);
+    }
+    return offset;
+  }
+  const node = $getNearestNodeFromDOMNode(domNode);
+  if (!node) return null;
+  if ($isMentionNode(node)) {
+    // A point inside a chip's own DOM sits on one of its edges.
+    const start = $nodeStartOffset(node);
+    const chip = editor.getElementByKey(node.getKey());
+    const atStart =
+      !!chip && domOffset === 0 && (domNode === chip || chip.firstChild?.contains(domNode));
+    return atStart ? start : start + nodeLength(node);
+  }
+  if ($isTextNode(node)) {
+    return $nodeStartOffset(node) + Math.min(domOffset, node.getTextContentSize());
+  }
+  if ($isLineBreakNode(node)) return $nodeStartOffset(node) + (domOffset > 0 ? 1 : 0);
+  if ($isElementNode(node)) {
+    const element = editor.getElementByKey(node.getKey());
+    let offset = $paragraphStartOffset(node);
+    if (!element) return offset;
+    const children = node.getChildren();
+    for (let index = 0; index < domOffset && index < element.childNodes.length; index += 1) {
+      const childNode = element.childNodes[index]!;
+      const child = children.find(
+        (candidate) => editor.getElementByKey(candidate.getKey()) === childNode
+      );
+      if (child) offset += nodeLength(child);
+    }
+    return offset;
+  }
+  return null;
 }
