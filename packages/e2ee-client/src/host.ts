@@ -11,7 +11,9 @@ import {
   Result,
 } from 'effect';
 import { VerifiedLedger, makeWorkspaceRecovery, memoryRecoveryEpochKeys } from '@lody/e2ee-core';
-import { wipeRecoveryPackage, accountUserId } from '@lody/e2ee-core/protocol';
+import { wipeRecoveryPackage, accountUserId, prepareJoinRequest } from '@lody/e2ee-core/protocol';
+import type { E2eeMemberOffer } from '@lody/cloud-api';
+import { encodeMemberKeyPackage, memberPairingOffer, MemberOfferSchema } from './member';
 import { prepareVaultRestore, type PersonalHostRecoveryInput } from './recovery-restore';
 import { Bytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
 import {
@@ -656,8 +658,166 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         );
       })
     );
+  /** The member join retained for this identity: the exact invitation and its public
+   * key package, written once before any network and reused on every retry. */
+  type MemberOriginal = {
+    version: 1;
+    kind: 'member';
+    offer: E2eeMemberOffer;
+    keyPackageHex: string;
+  };
+  const memberOriginal = (p: PreparedPersonalIdentity) =>
+    Effect.gen(function* () {
+      const row = yield* pairings.load(key(p, 'claim'));
+      if (!row) return null;
+      const saved = yield* parse<MemberOriginal>(row.original);
+      if (saved.version !== 1 || saved.kind !== 'member') return yield* fail('conflict');
+      return saved;
+    });
+  const memberIdentity = (source: E2eeMemberOffer) =>
+    Effect.gen(function* () {
+      const offer = yield* Effect.try({
+        try: () => MemberOfferSchema.parse(source),
+        catch: (cause) => fail('invalid-input', cause),
+      });
+      if (
+        offer.workspaceId !== platform.scope.workspaceId ||
+        offer.genesisHash !== toHex(platform.scope.genesis.toBytes())
+      )
+        return yield* fail('scope-mismatch');
+      const pairingOffer = yield* Effect.try({
+        try: () => memberPairingOffer(platform.scope.accountId, offer),
+        catch: (cause) => fail('invalid-input', cause),
+      });
+      return { offer, pairingOffer, p: yield* prepare(pairingOffer) };
+    });
+  const relay = () => {
+    const port = platform.members;
+    return port?.submit && port.claim
+      ? Effect.succeed({ submit: port.submit.bind(port), claim: port.claim.bind(port) })
+      : Effect.fail(fail('unsupported'));
+  };
+  /** Joining a team: sign a core JoinRequest with this workspace's prepared device and
+   * submit its key package. The original is retained before the network; a retry of the
+   * same invitation resubmits it and never signs another. */
+  const prepareMember = (source: E2eeMemberOffer) =>
+    Effect.gen(function* () {
+      const ports = yield* relay();
+      const { offer, pairingOffer, p } = yield* memberIdentity(source);
+      let saved = yield* memberOriginal(p);
+      if (saved && JSON.stringify(saved.offer) !== JSON.stringify(offer))
+        return yield* fail('conflict');
+      if (!saved) {
+        const keyPackageHex = yield* withIdentity(p, (identity) =>
+          Effect.gen(function* () {
+            const request = yield* prepareJoinRequest({
+              genesis: p.binding.genesis,
+              requestId: Result.getOrThrow(Bytes.requestId(fromHex(pairingOffer.pairingSessionId))),
+              userId: yield* Effect.fromResult(accountUserId(platform.scope.accountId)),
+              encryptionPublicKey: identity.device.enc,
+              expiresAt: offer.expiresAt,
+              signer: identity.device,
+            });
+            // The identity already bound its credential to this request id.
+            return encodeMemberKeyPackage({
+              request,
+              credentialHash: identity.request.credentialHash,
+              bindingSignature: fromHex(identity.request.bindingSignature),
+            });
+          })
+        );
+        const original: MemberOriginal = { version: 1, kind: 'member', offer, keyPackageHex };
+        yield* pairings.compareAndSet(key(p, 'claim'), null, {
+          revision: 1,
+          original: encode(original),
+          receipt: null,
+        });
+        saved = yield* memberOriginal(p);
+        if (!saved || saved.keyPackageHex !== keyPackageHex) return yield* fail('conflict');
+      }
+      yield* guard;
+      const reply = yield* ports.submit({ token: offer.token, keyPackageHex: saved.keyPackageHex });
+      yield* guard;
+      if (
+        reply.accountId !== platform.scope.accountId ||
+        reply.workspaceId !== offer.workspaceId ||
+        reply.keyPackageHex !== saved.keyPackageHex ||
+        reply.requestId !== pairingOffer.pairingSessionId
+      )
+        return yield* fail('scope-mismatch');
+      return { request: reply, offer: pairingOffer };
+    });
+  /** The join retained behind an identity offer: only an offer this account derived from
+   * the retained invitation qualifies, so a personal pairing identity never reads as one. */
+  const retainedMember = (pairingOffer: PersonalPairingOffer) =>
+    Effect.gen(function* () {
+      const p = yield* prepare(pairingOffer, false, true);
+      const saved = yield* memberOriginal(p);
+      if (!saved) return null;
+      const derived = yield* Effect.try({
+        try: () => memberPairingOffer(platform.scope.accountId, saved.offer),
+        catch: (cause) => fail('corrupt', cause),
+      });
+      if (JSON.stringify(derived) !== JSON.stringify(p.offer)) return yield* fail('conflict');
+      return { p, saved };
+    });
+  /** The relay's `committed` is only a hint: admission is accepted from this device's
+   * own verified full signed history, through the same approval original as pairing. */
+  const claimMember = (pairingOffer: PersonalPairingOffer, requestId: string) =>
+    Effect.gen(function* () {
+      const ports = yield* relay();
+      const found = yield* retainedMember(pairingOffer);
+      if (!found || found.p.offer.pairingSessionId !== requestId)
+        return yield* fail('approval-required');
+      const { p, saved } = found;
+      if (yield* pairings.load(key(p, 'approval'))) {
+        yield* loadApproval(p);
+        return { state: 'committed' as const };
+      }
+      yield* guard;
+      const reply = yield* ports.claim({ workspaceId: p.binding.workspaceId, requestId });
+      yield* guard;
+      if (
+        reply.accountId !== platform.scope.accountId ||
+        reply.workspaceId !== p.binding.workspaceId ||
+        reply.requestId !== requestId ||
+        reply.keyPackageHex !== saved.keyPackageHex
+      )
+        return yield* fail('scope-mismatch');
+      if (reply.state !== 'committed') return { state: reply.state };
+      if (!history) return yield* fail('unsupported');
+      const pages = yield* withIdentity(p, (identity) =>
+        Effect.gen(function* () {
+          yield* guard;
+          const pages = yield* history(identity.credential);
+          yield* guard;
+          return pages;
+        })
+      );
+      yield* acceptAccountHistory({
+        genesisRecordHex: p.offer.genesisRecordHex,
+        membershipId: p.offer.membershipId,
+        offer: p.offer,
+        pages,
+      });
+      return { state: 'committed' as const };
+    });
   return Object.freeze({
     close: () => close,
+    /** Join a team from an independently transferred member invitation. Returns the
+     * relay's request and the identity offer to retain for this workspace. */
+    prepareMember: (offer: E2eeMemberOffer) => run(prepareMember(offer)),
+    /** Accept this device's admission once its signed history shows it; the retained
+     * identity offer then opens the workspace like any approved pairing. */
+    claimMember: (pairingOffer: PersonalPairingOffer, requestId: string) =>
+      run(claimMember(pairingOffer, requestId)),
+    /** The retained invitation behind an identity offer, or null for a personal pairing. */
+    memberJoin: (pairingOffer: PersonalPairingOffer) =>
+      run(
+        Effect.map(retainedMember(pairingOffer), (found) =>
+          found ? { offer: found.saved.offer, requestId: found.p.offer.pairingSessionId } : null
+        )
+      ),
     /** Recover this pinned workspace from an authenticated vault; no private key escapes. */
     restoreRecovery: (input: PersonalHostRecoveryInput) => run(restoreRecovery(input)),
     /** Account pairing: create or reuse this workspace's identity for a verified
@@ -694,6 +854,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       contentToken: !!platform.contentToken,
       machineSharing: !!platform.machineSharing,
       members: !!platform.members,
+      memberJoin: !!(platform.members?.submit && platform.members.claim && history),
     }),
     open: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
       run(

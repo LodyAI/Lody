@@ -270,6 +270,52 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       }
     });
   };
+  /** Joining a team on this device. The application retains the identity offer
+   * `memberPairingOffer` derives before preparing, so pending and claim find the
+   * same identity; a personal pairing identity never reads as a member join. */
+  const joinRuntime = host.capabilities.memberJoin
+    ? ({
+        prepareMemberJoin: (supplied) =>
+          run(
+            Effect.gen(function* () {
+              yield* guard(supplied.workspaceId);
+              if (supplied.genesisHash !== genesisHash) return yield* fail('scope-mismatch');
+              const { request } = yield* host.prepareMember(supplied);
+              yield* guard(supplied.workspaceId);
+              return request;
+            })
+          ),
+        pendingMemberJoin: (id) =>
+          run(
+            Effect.gen(function* () {
+              yield* guard(id);
+              const saved = yield* retained();
+              if (!saved) return null;
+              const parsed = yield* Effect.try({
+                try: () => PersonalPairingOfferSchema.parse(saved),
+                catch: () => fail('corrupt'),
+              });
+              if (parsed.workspaceId !== workspaceId || parsed.genesisHash !== genesisHash)
+                return yield* fail('scope-mismatch');
+              return yield* host.memberJoin(parsed);
+            })
+          ),
+        claimMemberJoin: (id, requestId) =>
+          run(
+            Effect.gen(function* () {
+              const result = yield* host.claimMember(
+                yield* retainedRequest(id, requestId),
+                requestId
+              );
+              yield* guard(id);
+              return { ready: result.state === 'committed', state: result.state };
+            })
+          ),
+      } satisfies Pick<
+        E2eeWorkspaceRuntime,
+        'prepareMemberJoin' | 'pendingMemberJoin' | 'claimMemberJoin'
+      >)
+    : {};
   const memberRuntime = host.capabilities.members
     ? ({
         createMemberInvitation: (input) =>
@@ -911,6 +957,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         )
       ),
     ...memberRuntime,
+    ...joinRuntime,
     ...(host.capabilities.rpc
       ? ({
           prepareDispatch: (id, target, input) =>

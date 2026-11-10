@@ -1,7 +1,10 @@
 import { Result } from 'effect';
 import { z } from 'zod';
 import { Bytes, decodeCbor, encodeCbor, type JoinRequest } from '@lody/e2ee-core/protocol';
+import { sha256 } from '@noble/hashes/sha2.js';
+import type { E2eeMemberOffer } from '@lody/cloud-api';
 import { fromHex, toHex } from './bytes';
+import type { PersonalPairingOffer } from './pairing';
 
 /** Member invitations and their key packages, shared by the desktop host and the
  * portable runtime so both decode one public format with the same checks. */
@@ -80,4 +83,33 @@ export function encodeMemberKeyPackage(input: {
       })
     )
   );
+}
+
+/** The joining device's identity offer for a member invitation on the portable host.
+ * The request id is derived from the account, workspace and invitation token, so a
+ * reopen finds the same identity and its retained request. Core admits the member under
+ * `membershipId = requestId`, and the device-credential binding is signed for that id,
+ * so both the membership and the pairing session are the request id. The inviter's
+ * endorsement key comes from the independently transferred offer, never the relay. */
+export function memberPairingOffer(
+  accountId: string,
+  offer: E2eeMemberOffer
+): PersonalPairingOffer {
+  const parsed = MemberOfferSchema.parse(offer);
+  const requestId = toHex(
+    sha256(
+      new TextEncoder().encode(
+        `lody-e2ee/member-join-request/v1\0${accountId}\0${parsed.workspaceId}\0${parsed.token}`
+      )
+    )
+  ).slice(0, 32);
+  return {
+    version: 1,
+    workspaceId: parsed.workspaceId,
+    genesisHash: parsed.genesisHash,
+    genesisRecordHex: parsed.genesisRecordHex,
+    endorser: parsed.endorser,
+    membershipId: requestId,
+    pairingSessionId: requestId,
+  };
 }
