@@ -21,6 +21,7 @@ open class LodyApplication : Application() {
     val submissions by lazy { app.lody.android.create.CreationSubmissions(applicationScope) { scope, request -> creation.create(scope, request) } }
     lateinit var pullRequests: app.lody.android.chat.PullRequestWriter
     lateinit var mergeStates: app.lody.android.chat.PullRequestMergeReader
+    lateinit var branches: app.lody.android.chat.PullRequestBranches
     lateinit var attachments: app.lody.android.chat.AttachmentUploader
         private set
     lateinit var members: WorkspaceMembers
@@ -68,6 +69,12 @@ open class LodyApplication : Application() {
         }
         mergeStates = app.lody.android.chat.PullRequestMergeReader { scope, repo, number ->
             account.withVerifiedAccount(scope) { credential -> writes.mergeState(credential, scope.workspaceId, repo, number) }
+        }
+        branches = object : app.lody.android.chat.PullRequestBranches {
+            override suspend fun exists(scope: RuntimeScope, repository: String, number: Int) =
+                account.withVerifiedAccount(scope) { credential -> writes.headBranchExists(credential, scope.workspaceId, repository, number) }
+            override suspend fun delete(scope: RuntimeScope, repository: String, number: Int) =
+                account.withVerifiedAccount(scope) { credential -> writes.deleteBranch(credential, scope.workspaceId, repository, number) }
         }
         val uploads = app.lody.android.chat.SessionAttachmentUploads(contentResolver)
         attachments = app.lody.android.chat.AttachmentUploader { scope, sessionId, items ->

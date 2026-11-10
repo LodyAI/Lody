@@ -137,19 +137,15 @@ extension SessionController {
   /// chosen leads (web `usePreferredPrMergeMethod`, default merge commit).
   private func chooseMergeMethod() {
     guard let pr = infoBar?.pullRequest else { return }
-    let preferred = UserDefaults.standard.string(forKey: Self.mergeMethodKey) ?? "merge"
     let anchor = chat.composer.primaryActionAnchor
     let sheet = MergeOptionsController(
-      title: "\(pr.repository) #\(pr.number)", preferred: preferred,
+      title: "\(pr.repository) #\(pr.number)", preferred: MergeOptionsController.preferred,
       source: anchor.view, rect: anchor.rect
     ) { [weak self] method in
-      UserDefaults.standard.set(method, forKey: Self.mergeMethodKey)
       self?.writePullRequest("merge", method: method)
     }
     present(sheet, animated: true)
   }
-
-  private static let mergeMethodKey = "lody.prMergeMethod"
 
   /// One GitHub write at a time, scoped to the account and workspace that started it. Never
   /// retried: an unknown result says so instead of claiming failure.
