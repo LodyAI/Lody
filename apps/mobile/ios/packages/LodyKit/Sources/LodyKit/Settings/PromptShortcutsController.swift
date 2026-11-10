@@ -85,7 +85,7 @@ class PromptShortcutsController: UIViewController {
     failed = false
     render()
     Task { [weak self, service] in
-      let result = try? await service(.list)
+      let result = try? await service(.refresh)
       guard let self, self.version == id else { return }
       if case .list(let value)? = result {
         self.items = value.entries
@@ -139,38 +139,41 @@ class PromptShortcutsController: UIViewController {
     }
   }
 
+  // The sheet opens at once on the listed entry; an existing shortcut's body fills it when
+  // the read returns, and Save stays off until then.
   private func edit(_ entry: PromptShortcutEntry?) {
-    let id = version
-    Task { [weak self, service, workspace] in
-      var value: PromptShortcutValue?
-      if let entry {
-        guard case .read(let read)? = try? await service(.read(entry)) else {
-          LodyToastOverlay.shared.show(message: PromptShortcutSections.text("changed"), kind: .warning)
-          self?.refresh()
-          return
-        }
-        value = read.shortcut
+    let workspace = workspace
+    let editor = PromptShortcutEditorController(workspace: workspace, entry: entry, value: nil, service: service)
+    var previous: [PromptShortcutEntry]?
+    editor.willSave = { [weak self] next in
+      guard let self, self.workspace.key == workspace.key else { return }
+      previous = self.items
+      self.version += 1
+      self.loading = false
+      self.items.removeAll { $0.id == next.id }
+      self.items.append(next)
+      self.items.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+      self.render()
+    }
+    editor.failed = { [weak self] in
+      guard let self, self.workspace.key == workspace.key else { return }
+      if let previous { self.items = previous }
+      self.render()
+    }
+    editor.saved = { [weak self] _ in self?.refresh() }
+    LodyShell.shared.presentNative(editor, title: PromptShortcutSections.text("title"))
+    guard let entry else { return }
+    Task { [weak self, weak editor, service] in
+      let result = try? await service(.read(entry))
+      // A sheet closed while its body loaded needs neither the body nor a warning.
+      guard let editor, editor.viewIfLoaded?.window != nil else { return }
+      if case .read(let read)? = result {
+        editor.load(read.shortcut)
+      } else {
+        LodyToastOverlay.shared.show(message: PromptShortcutSections.text("changed"), kind: .warning)
+        editor.closeForm()
+        self?.refresh()
       }
-      guard let self, self.version == id else { return }
-      let editor = PromptShortcutEditorController(workspace: workspace, entry: entry, value: value, service: service)
-      var previous: [PromptShortcutEntry]?
-      editor.willSave = { [weak self] next in
-        guard let self, self.workspace.key == workspace.key else { return }
-        previous = self.items
-        self.version += 1
-        self.loading = false
-        self.items.removeAll { $0.id == next.id }
-        self.items.append(next)
-        self.items.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        self.render()
-      }
-      editor.failed = { [weak self] in
-        guard let self, self.workspace.key == workspace.key else { return }
-        if let previous { self.items = previous }
-        self.render()
-      }
-      editor.saved = { [weak self] _ in self?.refresh() }
-      LodyShell.shared.presentNative(editor, title: PromptShortcutSections.text("title"))
     }
   }
 
@@ -191,6 +194,8 @@ class PromptShortcutsController: UIViewController {
       switch request {
       case .list:
         .list(.init(workspaceId: workspaceId, userId: userId))
+      case .refresh:
+        .list(.init(workspaceId: workspaceId, userId: userId, fresh: true))
       case .read(let entry):
         .read(.init(workspaceId: workspaceId, userId: userId, entry: entry))
       case .save(let entry, let value, let bodyDocId):

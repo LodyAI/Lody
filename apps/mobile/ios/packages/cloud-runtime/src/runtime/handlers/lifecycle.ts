@@ -1,4 +1,5 @@
 import { forgetSettings } from '../settings';
+import { forgetShortcuts } from '../prompt-shortcuts';
 import {
   closeSession,
   ensureSession,
@@ -123,6 +124,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       const version = ++scopeStartVersion;
       if (workspaceId !== state.workspace || userId !== state.userId) {
         forgetSettings();
+        forgetShortcuts();
         await ctx.disposeProviderOperations?.();
       }
       if (version !== scopeStartVersion) return {};

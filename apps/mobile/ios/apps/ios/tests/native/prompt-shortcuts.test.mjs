@@ -5,7 +5,7 @@ import { Flock } from '@loro-dev/flock-wasm/base64';
 import { LoroDoc } from 'loro-crdt/base64';
 const bundle = await build({
   stdin: {
-    contents: `export * from './packages/cloud-runtime/src/runtime/prompt-shortcuts.ts'; export * from './packages/cloud-runtime/src/protocol/prompt-shortcuts/compiler.ts'; export * from './packages/cloud-runtime/src/protocol/prompt-shortcuts/document.ts';`,
+    contents: `export * from './packages/cloud-runtime/src/runtime/prompt-shortcuts.ts'; export * from './packages/cloud-runtime/src/protocol/prompt-shortcuts/compiler.ts'; export * from './packages/cloud-runtime/src/protocol/prompt-shortcuts/document.ts'; export * from './packages/cloud-runtime/src/protocol/prompt-shortcuts/catalog.ts'; export * from './packages/cloud-runtime/src/frames.ts'; export { forgetSettings } from './packages/cloud-runtime/src/runtime/settings.ts';`,
     resolveDir: new URL('../../../../', import.meta.url).pathname,
   },
   bundle: true,
@@ -29,11 +29,15 @@ const bundle = await build({
   ],
 });
 const {
+  forgetShortcuts,
   promptShortcuts,
   shortcutAccess,
   expandShortcuts,
   parsePromptShortcut,
   PromptShortcutDocument,
+  PromptShortcutCatalog,
+  encodeFrame,
+  forgetSettings,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
 );
@@ -271,6 +275,8 @@ test('publication readback, owner fences, revoked access and explicit repair aft
   await assert.rejects(access.read(saved), /changed/);
   directory = [];
   await assert.rejects(access.read(saved), /changed/);
+  // Grants are remembered per runtime scope; a fetched grant must still name its stream.
+  forgetShortcuts();
   const mismatch = shortcutAccess(
     'w',
     'owner',
@@ -289,4 +295,103 @@ test('publication readback, owner fences, revoked access and explicit repair aft
       false,
     )(),
   );
+});
+
+test('opening a listed shortcut reuses the directory, grants and prefetched body', async () => {
+  forgetShortcuts();
+  forgetSettings();
+  const body = new LoroDoc();
+  new PromptShortcutDocument(body).save(value, []);
+  const catalog = new Flock('fixture-index');
+  new PromptShortcutCatalog(catalog).put(entry);
+  const parts = {
+    'shortcut-body:body': [body.export({ mode: 'snapshot' })],
+    'shortcut-index:w:owner:private': [
+      new TextEncoder().encode(JSON.stringify(catalog.exportJson())),
+    ],
+  };
+  let bootstraps = 0;
+  globalThis.__shortcutClient = class {
+    constructor({ url }) {
+      this.id = decodeURIComponent(url.split('/').at(-1));
+    }
+    async bootstrap() {
+      bootstraps++;
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '-1',
+          updates: (parts[this.id] ?? []).map((bytes) => ({
+            body: encodeFrame(bytes),
+          })),
+          nextOffset: '1',
+          upToDate: true,
+        },
+      };
+    }
+    async readOnce() {
+      return { ok: true, result: { nextOffset: '1', upToDate: true } };
+    }
+  };
+  const row = {
+    shortcutId: entry.id,
+    bodyDocId: entry.bodyDocId,
+    ownerUserId: 'owner',
+    visibility: 'private',
+    revision: entry.revision,
+  };
+  let directory = [row];
+  const calls = [];
+  const cloud = async (op, args) => {
+    calls.push(op);
+    if (op === 'listAccessibleDocuments') return directory;
+    const t = args.target;
+    return {
+      token: 'fixture-only',
+      expiresIn: 600,
+      gatewayBaseUrl: 'https://example.com',
+      streamId:
+        t.kind === 'body'
+          ? `shortcut-body:${t.bodyDocId}`
+          : `shortcut-index:w:${t.ownerUserId}:${t.visibility}`,
+    };
+  };
+  const run = (request) =>
+    promptShortcuts(
+      { workspaceId: 'w', ...request },
+      'owner',
+      cloud,
+      AbortSignal.timeout(5000),
+    );
+  const [listed] = await run({ action: 'list', fresh: true });
+  assert.deepEqual(listed, entry);
+  // The listing prefetches the body; the open joins that download instead of starting one.
+  assert.equal(
+    (await run({ action: 'read', entry: listed })).prompt,
+    value.prompt,
+  );
+  assert.equal(bootstraps, 2, 'one index and one body bootstrap');
+  const before = calls.length;
+  assert.equal(
+    (await run({ action: 'read', entry: listed })).prompt,
+    value.prompt,
+  );
+  assert.equal(calls.length, before, 'a second open makes no cloud call');
+  assert.equal(bootstraps, 2, 'a second open downloads nothing');
+  // A recent directory is reused, so a revocation shows on the next fresh listing.
+  directory = [];
+  assert.equal(
+    (await run({ action: 'read', entry: listed })).prompt,
+    value.prompt,
+  );
+  assert.deepEqual(await run({ action: 'list', fresh: true }), []);
+  await assert.rejects(run({ action: 'read', entry: listed }), /changed/);
+  // A new scope starts empty.
+  forgetShortcuts();
+  directory = [row];
+  assert.equal(
+    (await run({ action: 'read', entry: listed })).prompt,
+    value.prompt,
+  );
+  assert.equal(bootstraps, 3);
 });

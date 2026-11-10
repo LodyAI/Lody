@@ -92,16 +92,54 @@ import Foundation
   }
 
   static func call(_ kind: String, path: String, args: [String: Any]) async throws -> Any {
-    guard let token = try AuthKeychain.read(), !token.isEmpty else { throw failure() }
-    let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", token: token) as? [String: Any]
-    guard let jwt = auth?["token"] as? String, !jwt.isEmpty else { throw failure() }
-    let response = try await request(
-      "\(BackendEnvironment.convex)/api/\(kind)", token: jwt,
-      body: ["path": path, "format": "convex_encoded_json", "args": [args]]
-    ) as? [String: Any]
-    guard try AuthKeychain.read() == token,
-          response?["status"] as? String == "success", let value = response?["value"] else { throw failure() }
-    return value
+    guard let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure() }
+    for attempt in 0..<2 {
+      let jwt = try await convexToken(credential)
+      do {
+        let response = try await request(
+          "\(BackendEnvironment.convex)/api/\(kind)", token: jwt,
+          body: ["path": path, "format": "convex_encoded_json", "args": [args]]
+        ) as? [String: Any]
+        guard try AuthKeychain.read() == credential,
+              response?["status"] as? String == "success", let value = response?["value"] else { throw failure() }
+        return value
+      } catch where (error as NSError).code == 401 && attempt == 0 {
+        // Convex rejected the reused token before running the function; mint one and retry once.
+        if convexJWT?.token == jwt { convexJWT = nil }
+      }
+    }
+    throw failure()
+  }
+
+  private static var convexJWT: (credential: String, token: String, until: Date)?
+  private static var convexJWTPending: (credential: String, task: Task<String, Error>)?
+
+  /// The Convex token for this credential, reused until a minute before it expires, so a
+  /// Convex call is one round trip instead of a token exchange plus the call.
+  static func convexToken(_ credential: String) async throws -> String {
+    if let cached = convexJWT, cached.credential == credential, cached.until > Date() { return cached.token }
+    if let pending = convexJWTPending, pending.credential == credential { return try await pending.task.value }
+    let task = Task { () throws -> String in
+      let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", token: credential) as? [String: Any]
+      guard let jwt = auth?["token"] as? String, !jwt.isEmpty else { throw failure() }
+      return jwt
+    }
+    convexJWTPending = (credential, task)
+    defer { if convexJWTPending?.task == task { convexJWTPending = nil } }
+    let jwt = try await task.value
+    if try AuthKeychain.read() == credential { convexJWT = (credential, jwt, expiry(jwt)) }
+    return jwt
+  }
+
+  /// A JWT's `exp` less a minute; a token without one is reused for a minute.
+  static func expiry(_ jwt: String, now: Date = Date()) -> Date {
+    let parts = jwt.split(separator: ".", omittingEmptySubsequences: false)
+    var payload = parts.count == 3 ? parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") : ""
+    while payload.count % 4 != 0 { payload += "=" }
+    guard let data = Data(base64Encoded: payload),
+          let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let exp = (claims["exp"] as? NSNumber)?.doubleValue else { return now.addingTimeInterval(60) }
+    return Date(timeIntervalSince1970: exp - 60)
   }
 
   static func failure() -> NSError {
@@ -118,7 +156,9 @@ import Foundation
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
     }
     let (data, response) = try await URLSession.shared.data(for: request)
-    guard let response = response as? HTTPURLResponse, response.statusCode == 200, data.count <= 8 * 1024 * 1024 else { throw failure() }
+    guard let response = response as? HTTPURLResponse else { throw failure() }
+    if response.statusCode == 401 { throw NSError(domain: "LodyKit.GitHubCloud", code: 401, userInfo: [NSLocalizedDescriptionKey: "github_unavailable"]) }
+    guard response.statusCode == 200, data.count <= 8 * 1024 * 1024 else { throw failure() }
     return try JSONSerialization.jsonObject(with: data)
   }
 }

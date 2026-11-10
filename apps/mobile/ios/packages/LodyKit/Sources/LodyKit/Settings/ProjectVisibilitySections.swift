@@ -44,7 +44,8 @@ struct VisibilityRequest: Encodable, Equatable, Sendable {
   }
 }
 
-typealias VisibilityService = @MainActor (VisibilityRequest) async throws -> VisibilitySnapshot
+/// The request and the signed-in account the page already holds (so the list skips a session lookup).
+typealias VisibilityService = @MainActor (VisibilityRequest, String) async throws -> VisibilitySnapshot
 
 enum ProjectVisibilitySections {
   private static let unreserved = CharacterSet(
@@ -95,6 +96,24 @@ enum ProjectVisibilitySections {
         ]
       }
       append(row, to: item.machineId)
+    }
+    // The local catalog is the list's source: a project without a cloud registration (or
+    // before the registration read returns) still shows, with an unknown, read-only state.
+    for project in catalog.projects {
+      let prefix = "\(project.machineId):local:"
+      guard project.id.hasPrefix(prefix) else { continue }
+      let local = String(project.id.dropFirst(prefix.count))
+      if snapshot?.rows.contains(where: { $0.machineId == project.machineId && $0.localProjectId == local }) == true { continue }
+      var row = LodyListRow()
+      row.id = "unknown:\(project.id)"
+      row.title = project.name.isEmpty ? local : project.name
+      row.subtitle = project.rootPath
+      row.subtitleMono = true
+      row.image = "folder"
+      row.value = text("unknownShort")
+      row.valueSymbol = "questionmark.circle"
+      row.accessibilityValue = text("unknown")
+      append(row, to: project.machineId)
     }
     return order.compactMap { groups[$0] }
   }
