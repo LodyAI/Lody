@@ -190,6 +190,7 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
   }
 }
 const PAIRING_REFUSALS = new Set([
+  'pairing-elsewhere',
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
@@ -1933,7 +1934,16 @@ export class E2eeIpc extends IpcService {
       })
       this.accountPairings.set(cloud.accountId, current)
     }
-    if (hints) current.hints = hints
+    if (hints) {
+      const retained = new Map(current.hints.map((hint) => [hint.workspaceId, hint]))
+      for (const hint of hints) {
+        const previous = retained.get(hint.workspaceId)
+        if (previous && previous.genesisHash !== hint.genesisHash)
+          throw new Error('e2ee_pairing-tampered')
+        if (!previous) retained.set(hint.workspaceId, { ...hint })
+      }
+      current.hints = [...retained.values()]
+    }
     return current.pairing
   }
   /** Only the typed refusals the UI explains leave main; causes stay here. */
@@ -1952,17 +1962,31 @@ export class E2eeIpc extends IpcService {
     }
   }
   @IpcMethod()
-  async requestAccountPairing(input: { pairingString?: string }, workspaces: unknown) {
+  async requestAccountPairing(
+    input: { pairingString?: string; expiresAt?: number; preserveExisting?: true },
+    workspaces: unknown
+  ) {
     sender()
     const hints = pairingHints(workspaces)
     if (input?.pairingString !== undefined && typeof input.pairingString !== 'string')
       throw new Error('e2ee_invalid-input')
+    if (input?.expiresAt !== undefined && !Number.isSafeInteger(input.expiresAt))
+      throw new Error('e2ee_invalid-input')
+    if (
+      input?.preserveExisting !== undefined &&
+      (input.preserveExisting !== true || hints.length !== 1)
+    )
+      throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing(hints)
     return this.pairingCall(() =>
       Effect.runPromise(
-        pairing.requestAccountPairing(
-          input?.pairingString === undefined ? {} : { pairingString: input.pairingString }
-        )
+        pairing.requestAccountPairing({
+          ...(input?.pairingString === undefined ? {} : { pairingString: input.pairingString }),
+          ...(input?.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+          ...(input?.preserveExisting
+            ? { preserveExisting: true as const, workspaceId: hints[0]!.workspaceId }
+            : {})
+        })
       )
     )
   }
@@ -1973,10 +1997,12 @@ export class E2eeIpc extends IpcService {
     return this.pairingCall(() => Effect.runPromise(pairing.accountPairingRequest()))
   }
   @IpcMethod()
-  async cancelAccountPairing() {
+  async cancelAccountPairing(input?: { expectedLookupId: string }) {
     sender()
+    if (input && !/^[0-9a-f]{32}$/.test(input.expectedLookupId))
+      throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing()
-    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing()))
+    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing(input)))
   }
   @IpcMethod()
   async accountPairingCode() {

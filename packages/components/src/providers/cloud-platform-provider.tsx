@@ -1,3 +1,7 @@
+import i18next from 'i18next';
+import { Effect } from 'effect';
+import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing';
+import { E2eeAutomaticPairingInbox } from '@/components/pages/e2ee-automatic-pairing';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { assertLegacyWorkspaceAccess } from '@/lib/legacy-workspace-admission';
 import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
@@ -22,6 +26,7 @@ import {
 } from '@/lib/posthog-privacy';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
+  accountPairingErrorCode,
   createStore,
   type PlatformProvider,
   type MutableStore,
@@ -250,7 +255,7 @@ export function CloudPlatformProvider({
     });
   }, [createE2eeRuntime, electron, hasAuthenticatedConvex, sessionStore]);
 
-  const e2eeWorkspaces = useMemo(() => {
+  const baseE2eeWorkspaces = useMemo(() => {
     const native = electron ? getIpcServices()?.e2ee : undefined;
     return createCloudE2eeWorkspaces({
       session: () => sessionStore.get(),
@@ -287,13 +292,21 @@ export function CloudPlatformProvider({
                 native.cancelPersonalJoin(workspaceId, pairingSessionId),
               requestAccountPairing: (input) =>
                 withAccountPairingCode(
-                  native.requestAccountPairing(input, accountPairingHints(workspacesStore.get()))
+                  native.requestAccountPairing(
+                    {
+                      pairingString: input.pairingString,
+                      expiresAt: input.expiresAt,
+                      preserveExisting: input.preserveExisting,
+                    },
+                    input.workspace ? [input.workspace] : accountPairingHints(workspacesStore.get())
+                  )
                 ),
               accountPairingRequest: () =>
                 withAccountPairingCode(
                   native.accountPairingRequest(accountPairingHints(workspacesStore.get()))
                 ),
-              cancelAccountPairing: () => withAccountPairingCode(native.cancelAccountPairing()),
+              cancelAccountPairing: (input) =>
+                withAccountPairingCode(native.cancelAccountPairing(input)),
               accountPairingCode: () => withAccountPairingCode(native.accountPairingCode()),
               inspectAccountPairing: (pairingString) =>
                 withAccountPairingCode(
@@ -388,6 +401,75 @@ export function CloudPlatformProvider({
     workspacesStore,
   ]);
 
+  const automaticPairing = useMemo(() => {
+    const runtime = baseE2eeWorkspaces.runtime;
+    if (!runtime?.requestAccountPairing || !runtime.accountPairingRequest) return undefined;
+    const io = <A,>(work: () => Promise<A>) =>
+      Effect.tryPromise({
+        try: work,
+        catch: (cause) => {
+          const data = cause && typeof cause === 'object' && 'data' in cause ? cause.data : null;
+          const remote = data && typeof data === 'object' && 'code' in data ? data.code : null;
+          const code =
+            remote === 'e2ee_account_pairing_disabled'
+              ? 'pairing-unavailable'
+              : typeof remote === 'string'
+                ? remote.replace(/^e2ee_/, '')
+                : null;
+          const known = accountPairingErrorCode({ code });
+          return known
+            ? Object.assign(new Error(`e2ee_${known}`, { cause }), { code: known })
+            : cause;
+        },
+      });
+    return makeAutomaticPairingRuntime({
+      runtime,
+      account: () => {
+        const state = sessionStore.get();
+        return state.status === 'authenticated' ? state.user.id : null;
+      },
+      workspaces: () => accountPairingHints(workspacesStore.get()),
+      deviceName: electron ? 'Lody desktop' : 'Lody mobile',
+      canPresent: () => document.visibilityState === 'visible' && document.hasFocus(),
+      notifyPending: (id) => {
+        if (!electron) return;
+        void getIpcServices()
+          ?.notifications.showDevicePairingRequest({
+            requestId: id,
+            language: i18next.resolvedLanguage?.startsWith('zh') ? 'zh' : 'en',
+          })
+          .catch(() => {});
+      },
+      crypto: globalThis.crypto,
+      run: (work) => Effect.runPromise(work),
+      relay: {
+        subscribe: (changed) =>
+          cloudClient.subscribe(cloudOperations.e2eeAutomaticPairing.pending, {}, changed),
+        pending: () =>
+          io(() => cloudClient.query(cloudOperations.e2eeAutomaticPairing.pending, {})),
+        read: (id) =>
+          io(() => cloudClient.query(cloudOperations.e2eeAutomaticPairing.read, { id })),
+        exchange: (command) =>
+          io(() => cloudClient.mutation(cloudOperations.e2eeAutomaticPairing.exchange, command)),
+      },
+    });
+  }, [
+    baseE2eeWorkspaces,
+    cloudClient,
+    electron,
+    sessionStore,
+    workspacesStore,
+    session.data?.user.id,
+  ]);
+  useEffect(() => () => automaticPairing?.disposeAutomaticPairing(), [automaticPairing]);
+  const e2eeWorkspaces = useMemo(
+    () =>
+      automaticPairing && baseE2eeWorkspaces.runtime
+        ? { ...baseE2eeWorkspaces, runtime: { ...baseE2eeWorkspaces.runtime, ...automaticPairing } }
+        : baseE2eeWorkspaces,
+    [automaticPairing, baseE2eeWorkspaces]
+  );
+
   const provider = useMemo<PlatformProvider>(
     () => ({
       kind: 'cloud',
@@ -456,7 +538,12 @@ export function CloudPlatformProvider({
         runtime={e2eeWorkspaces.runtime}
         accountId={session.data?.user.id}
       />
-      {children}
+      <E2eeAutomaticPairingInbox
+        key={session.data?.user.id ?? 'signed-out'}
+        runtime={e2eeWorkspaces.runtime}
+      >
+        {children}
+      </E2eeAutomaticPairingInbox>
     </PlatformContext.Provider>
   );
 }

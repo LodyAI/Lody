@@ -7,19 +7,7 @@ Translation: current
 
 ## Abstract
 
-Adding a second device for the same account today takes a copy-and-paste exchange in
-every workspace, a comparison of full hexadecimal public keys and four manual steps. On
-2026-11-01 the owner chose a scan-or-paste flow, modeled on Signal linked devices and
-Keybase kex2.
-
-The new device shows a QR code and a 28-character pairing string that carries a
-one-time 128-bit secret. The secret authenticates the device's request with an HMAC and
-never reaches the service. The user scans or pastes the string on any of their personal
-devices, which verifies the request before showing its details. One approval covers every
-encrypted workspace of the account.
-
-The protocol statement is in the [foundations increment](../../../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)
-and was approved by the owner on 2026-11-01. Only the core primitives are implemented.
+Repeated manual exchanges made second-device access cumbersome. The 128-bit secret-transfer protocol is implemented; the owner now chose automatic requests, a comparison code and one approval for the current workspace. The automatic implementation adds a committed ephemeral channel while retaining the existing admission journals, MACs and custody. Its approximately 20-bit visual comparison has a different security bound from manual secret transfer, so the protocol increment remains draft and native rollout is tracked separately from fixture verification.
 
 ## Problem
 
@@ -129,7 +117,7 @@ credential hash)` row.
   channel with a shared secret phrase. This design follows kex2's shared-secret MAC in a
   shorter form.
 
-## Other decisions (unchanged)
+## Other decisions (manual flow)
 
 - **Starting a request.** Desktop and mobile start automatically. Web starts only after
   "Request access", because browsers are often public or shared; the
@@ -150,9 +138,7 @@ credential hash)` row.
 
 - **CPace with a 6-digit code typed on the new device.** No audited JavaScript CPace
   implementation exists, and it adds a protocol that needs its own vetting.
-- **Comparing a short authentication string on both screens**, with commit-reveal. This
-  needs an additional security argument and extra interaction, and comparison is easy to
-  click through.
+- **Comparing a short authentication string on both screens** was rejected in the original flow: it needs an additional security argument and users may click through comparison. The 2026-11-10 UI decision revisits this trade-off; its security bound differs from manual secret transfer.
 - **Typing a short authentication string.** A short code needs a PAKE or a commitment
   protocol to be safe, plus extra interaction.
 - **Putting full public keys in the QR code**, as Signal does. Too long to paste, and Lody
@@ -198,15 +184,14 @@ preference could not stop the flow fleet-wide, so none is kept.
   and signing. The UI checks a typed code locally only to name a typo before any network
   request, and wipes the decoded bytes at once.
 - **Visibility.** A host without the methods shows nothing, and the existing
-  per-workspace pairing stays below. The desktop implements the methods over IPC; Web
-  and mobile hosts do not yet.
+  per-workspace pairing stays below. The desktop implements the methods over IPC; Portable hosts can approve; native requester assembly now uses verified history. Browser requester assembly stays capability-gated.
 
 ## Verification limits
 
 - The string format, key derivation, canonical request and approval bytes and both tags
   are pinned by `packages/e2ee-core/test/pairing-vector.json`. An independent
   standard-library Python generator (`test/generate-pairing-vector.py`) produces it.
-- The relay backend is private and default off. Notifications and location are not done.
+- The private account-pairing relay defaults on with an emergency off switch. Suspended-app notifications and location are not established by the automatic increment.
 - One end-to-end test runs on real desktop custody, bootstrap, ledger hosts and SQLite,
   with an in-memory relay. No packaged, native or live-backend run exists.
 
@@ -281,3 +266,19 @@ mobile and Web new-device side, and the personal device host implements it.
   Keystore on mobile, web-crypto on Web.
 - **Known limit.** Portable hosts do not report an unfinished per-workspace join yet, so
   such a workspace is not shown as blocked.
+
+## Automatic current-workspace verification (2026-11-10)
+
+The owner approved the Ryugi flow in session `318781d5`: a phone opens the workspace, displays a code, and continues automatically after one approval on an existing device. Only the current workspace is granted. Later preserves an inbox count and the same request. This is UI approval, not independent cryptographic review; the automatic foundations increment remains draft. The existing manual protocol and per-workspace fallback remain.
+
+The committed P-256 ECDH exchange binds account, workspace, genesis, request ID, name and original expiry. Before seeing the requester public key, the responder commits SHA-256 over this canonical domain-separated context, a random peer ID, its public key and a 256-bit random nonce. Both freeze their peer’s first message. HKDF-SHA256 over the shared key and complete transcript derives separate comparison and 128-bit pairing-secret outputs. The relay transports only public messages. The existing request/approval HMACs still authenticate admissions. Users must compare both six-digit codes: this is approximately 20 bits of comparison, not the manual scheme’s 128-bit out-of-band authentication. Commitment ordering prevents selecting the responder key/nonce after observing the requester key. This is not a PAKE or a completed independent protocol audit.
+
+A responder first reads its verified local personal identity; service metadata and an approved relay status grant nothing. Native preparation and reopen use the fixed account offer, placeholder endorser and workspace-derived session ID. The real signer is retained in the authenticated approval descriptor. Replacing those journal keys after approval loses the original identity on reopen.
+
+The first foreground responder is fixed for an attempt. If it exits, help explicitly cancels and starts a fresh attempt with another device, retaining the device identity. Remount and Later resume within the same application owner; process restart loses the memory-only secret. The coordinator is separate from content readers and never overrides their close method. Expiry, refusal and cancellation dispose ephemeral material. Discovery records retain the hourly rate window, then indexed bounded cleanup removes them; account purge removes them too. Both relay protocols honor the existing emergency switch.
+
+The real coordinator/HMAC workflow tests and native-host fixture cover admission, key installation and offline reopen. UI tests cover automatic advancement and Later/inbox resumption. These do not establish packaged iOS/desktop acceptance, suspended-app push receipt or independent protocol review.
+
+Running desktop apps can show one generic OS notification per locally verified request while backgrounded; only clicking it focuses Lody. Discovery uses a live query subscription, with scoped polling on subscription failure and while waiting for native progress. No new APNs/FCM path wakes a suspended mobile app.
+
+Approvals and their inbox hold [private telemetry surface leases](../../implemented/bug-fix/2026-10-29-workspace-telemetry-privacy.md) even above an ordinary workspace. Disposal occurs once admission is verified; waiting for a delayed content key does not retain the temporary pairing secret.

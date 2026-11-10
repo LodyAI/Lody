@@ -250,6 +250,38 @@ workflow's.
 
 Identity protection comes from each host's platform (`PersonalHostPlatform.protection`).
 
+## Automatic device verification
+
+`./automatic-pairing` owns a ten-minute, current-workspace verification attempt.
+A personal device first verifies its retained local identity, then commits its
+P-256 ephemeral key and nonce before the new device reveals its own key. Both
+screens compare the resulting six-digit SAS. Separate HKDF labels derive the
+128-bit secret used by the existing account request/approval HMAC workflow;
+neither private ephemeral keys nor the secret reach the relay. The short code is
+for comparison, never a login token or a truncated pairing secret.
+
+The application owns this coordinator independently of content readers. Leaving a
+page or choosing Later retains the attempt in that owner; account replacement or
+shutdown disposes it. Restart loses the ephemeral secret and requires a new attempt,
+while retaining the device identity. The first responding foreground device is
+frozen for the attempt; use the help action to cancel and start again with another
+device if that responder quits. Transient errors retry exact originals. Approval
+means verified admission; the content route still opens its reader and installs the
+current key before use. Public relay terminal state cannot grant access.
+
+A renderer reload can lose its automatic exchange while the native account owner
+still holds the previous request. Recovery shows that request's workspace names
+and expiry, then requires a separate confirmation to end it. Hosts expose the
+public `lookupId` only with exact-ID cancellation support. Recovery cancels only
+that displayed original, rechecks for a replacement, and requires fresh consent
+if another window created one. A completed admission is kept. Older hosts without
+this capability require an update or the existing manual route; automatic recovery
+never calls unscoped cancellation. Retired advisory discovery rows expire naturally;
+the server's indexed cleanup owns erasure, so an unavailable cleanup write cannot
+undo native cancellation or prevent a fresh safe request.
+
+See the [pairing decision and protocol review limit](../../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10).
+
 ## Restore from a vault
 
 `prepareVaultRestore` builds a restore plan from an unlocked vault on a device that knows
@@ -285,3 +317,5 @@ establish iOS 16.4 device, native plugin, hardware or power-loss acceptance.
 IndexedDB `strict` is a durability hint. Web trusts the code served to the page
 with private-key use, as the [approved custody Spec](../../specs/e2ee/client-custody.md)
 requires. The runtime factory is opt-in; no product composition is enabled by its export. [Ownership rationale](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md#personal-device-product-composition).
+
+Automatic requests never replace another window's pending native request. Each request fixes its workspace before identity preparation; automatic cancellation and expiry cleanup carry the original lookup ID, so a refused or stale window cannot cancel a different request. Explicit manual cancellation keeps its existing account-wide behavior.

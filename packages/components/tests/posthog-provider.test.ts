@@ -4,6 +4,7 @@ import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
 
 import {
   postHogPrivacy,
+  holdPrivateTelemetrySurface,
   installWorkspaceTelemetryScope,
   setTelemetryRouteTarget,
   suspendWorkspaceTelemetry,
@@ -29,6 +30,40 @@ describe('PostHog provider options', () => {
   afterEach(() => {
     uninstall();
     vi.unstubAllGlobals();
+  });
+
+  it('keeps an encrypted approval private above ordinary workspaces until all actual surfaces retire', () => {
+    let current = 'ordinary-A';
+    const removeScope = installWorkspaceTelemetryScope(() => current);
+    const first = holdPrivateTelemetrySurface(),
+      nested = holdPrivateTelemetrySurface();
+    const frame = {
+      event: '$snapshot',
+      properties: { $snapshot_data: ['synthetic pairing code'] },
+    };
+    try {
+      expect(runBeforeSend(frame)).toBeNull();
+      first();
+      first();
+      expect(runBeforeSend(frame)).toBeNull();
+      current = 'ordinary-B';
+      setTelemetryRouteTarget('B', true);
+      expect(runBeforeSend(frame)).toBeNull();
+      expect(
+        runBeforeSend({
+          event: '$exception',
+          properties: { message: 'synthetic device name', error_code: 'e2ee_pairing_expired' },
+        })?.properties
+      ).not.toHaveProperty('message');
+      nested();
+      expect(
+        runBeforeSend({ event: '$snapshot', properties: { $snapshot_data: ['ordinary-B'] } })
+      ).not.toBeNull();
+    } finally {
+      first();
+      nested();
+      removeScope();
+    }
   });
 
   it('drops snapshots and redacts exceptions across an unknown workspace transition', () => {

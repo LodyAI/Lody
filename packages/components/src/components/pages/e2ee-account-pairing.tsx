@@ -146,6 +146,8 @@ export function E2eeAccountPairingRequest(props: {
   const start = (pairingString?: string) =>
     run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
   useEffect(() => {
+    // Approver-only portable hosts must not start an unsupported requester.
+    if (!runtime.requestAccountPairing) return undefined;
     let cancelled = false;
     void (async () => {
       try {

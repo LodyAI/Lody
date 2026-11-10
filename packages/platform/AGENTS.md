@@ -38,6 +38,9 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   matching account, route, workspace and verified plaintext descriptor may enable
   it; an ordinary provisional runtime or listing is not plaintext proof. Pause
   before switching targets and discard buffered work across that boundary.
+- Encrypted approval overlays on ordinary workspaces hold a private-surface lease
+  through actual DOM removal. Nested surfaces release only their own lease, and
+  a route commit cannot override an outstanding lease.
 - Automatic exceptions in those scopes use a fixed diagnostic vocabulary. Shared
   main/daemon processes cannot infer one workspace mode and always use that
   vocabulary. Preserve detailed local, user-submitted support reports.
