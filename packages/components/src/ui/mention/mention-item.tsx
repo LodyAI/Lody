@@ -8,6 +8,7 @@ import {
   useIsomorphicLayoutEffect,
 } from "@diceui/shared";
 import * as React from "react";
+import { getComposerSelection, getComposerText, setComposerSelection } from "./composer-input";
 import { type ItemData, useMentionContext } from "./mention-root";
 
 const ITEM_NAME = "MentionItem";
@@ -172,14 +173,14 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
             const inputElement = context.inputRef.current;
             if (!inputElement) return;
 
-            const selectionStart = inputElement.selectionStart ?? 0;
-            const selectionEnd = inputElement.selectionEnd ?? selectionStart;
+            const { start: selectionStart, end: selectionEnd } =
+              getComposerSelection(inputElement);
             // WebKit can temporarily reset the caret on focus. Finish that
             // focus/update cycle before starting an asynchronous preparation,
             // otherwise the transient empty query cancels the selected item.
             inputElement.focus();
-            inputElement.setSelectionRange(selectionStart, selectionEnd);
-            const lastTriggerIndex = inputElement.value.lastIndexOf(
+            setComposerSelection(inputElement, selectionStart, selectionEnd);
+            const lastTriggerIndex = getComposerText(inputElement).lastIndexOf(
               context.trigger,
               selectionStart
             );

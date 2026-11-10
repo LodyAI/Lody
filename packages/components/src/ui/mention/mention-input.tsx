@@ -1,35 +1,62 @@
-import { composeEventHandlers, Primitive, useComposedRefs } from '@diceui/shared';
+import { composeEventHandlers, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
+import { createEmptyHistoryState, registerHistory } from '@lexical/history';
+import { registerPlainText } from '@lexical/plain-text';
+import { mergeRegister } from '@lexical/utils';
+import {
+  COMMAND_PRIORITY_CRITICAL,
+  COPY_COMMAND,
+  CUT_COMMAND,
+  createEditor,
+  DELETE_CHARACTER_COMMAND,
+  DROP_COMMAND,
+  HISTORY_MERGE_TAG,
+  KEY_DOWN_COMMAND,
+  PASTE_COMMAND,
+  REDO_COMMAND,
+  SKIP_DOM_SELECTION_TAG,
+  UNDO_COMMAND,
+  type LexicalEditor,
+} from 'lexical';
 import * as React from 'react';
-import * as stylex from '@stylexjs/stylex';
+import { createPortal } from 'react-dom';
 import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import {
-  applyTextEditToMentions,
+  $offsetToPoint,
+  $readComposerValue,
+  $readMentionOffsets,
+  $readSelectionOffsets,
+  $setSelectionOffsets,
+  $writeComposerValue,
+  sanitizeComposerMentions,
+} from './composer-document';
+import {
+  type ComposerController,
+  type ComposerInputElement,
+  type ComposerSelection,
+  registerComposerController,
+} from './composer-input';
+import { MentionRangeView } from './mention-chip-content';
+import {
   areMentionsEqual,
   areStringArraysEqual,
   findAdjacentMentionForHorizontalNavigation,
   findMentionBeforeCursorForDeletion,
   getMentionValuesFromMentions,
-  getTextDiff,
   removeMentionText,
 } from './mention-input-core';
-import { MentionHighlighter } from './mention-highlighter';
+import { type MentionDecoration, MentionDecoratorNode } from './mention-node';
 import { findTriggerCandidates, isMentionNavigationPrefix } from './mention-trigger';
 import { type Mention, useMentionContext } from './mention-root';
 
 const INPUT_NAME = 'MentionInput';
 
-const styles = stylex.create({
-  mirroredInput: {
-    // The native control owns editing and the caret, never visible text.
-    WebkitTextFillColor: 'transparent',
-    '::selection': { backgroundColor: 'transparent', color: 'transparent' },
-  },
-});
+/** Updates that copy the owner's value into the editor. They are not edits. */
+const SYNC_TAG = 'lody-composer-sync';
 
-type InputElement = React.ElementRef<typeof Primitive.textarea>;
+type InputElement = ComposerInputElement;
 
 type PendingSelection = {
   start: number;
@@ -71,244 +98,312 @@ function getHorizontalCaretMove(
   return { direction, isWordJump: false };
 }
 
-function normalizeTextareaValue(
-  value: React.ComponentPropsWithoutRef<typeof Primitive.textarea>['value']
-): string | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return '';
-  if (Array.isArray(value)) return value.join('\n');
-  return String(value);
+type ComposerDocument = { text: string; mentions: Mention[] };
+
+const EMPTY_DOCUMENT: ComposerDocument = { text: '', mentions: [] };
+
+function isSameDocument(left: ComposerDocument, right: ComposerDocument) {
+  return left.text === right.text && areMentionsEqual(left.mentions, right.mentions);
 }
 
-function isPointInsideMentionHighlight(
-  input: InputElement,
-  mention: Mention,
-  clientX: number,
-  clientY: number
-) {
-  const highlighter = input.parentElement?.querySelector<HTMLElement>(
-    '[data-mention-highlighter="true"]'
-  );
-  if (!highlighter) return false;
+function isSameSelection(left: ComposerSelection | null, right: ComposerSelection | null) {
+  return left?.start === right?.start && left?.end === right?.end;
+}
 
-  const mentionKind = mention.kind ?? 'mention';
-  const mentionElements = highlighter.querySelectorAll<HTMLElement>('[data-mention-start]');
+function hasFiles(dataTransfer: DataTransfer | null | undefined) {
+  return !!dataTransfer && Array.from(dataTransfer.types ?? []).includes('Files');
+}
 
-  for (const element of mentionElements) {
-    if (
-      Number(element.dataset.mentionStart) !== mention.start ||
-      Number(element.dataset.mentionEnd) !== mention.end ||
-      element.dataset.mentionKind !== mentionKind ||
-      element.dataset.mentionValue !== mention.value
-    ) {
-      continue;
-    }
-
-    for (const rect of element.getClientRects()) {
-      if (
-        clientX >= rect.left - 1 &&
-        clientX <= rect.right + 1 &&
-        clientY >= rect.top - 1 &&
-        clientY <= rect.bottom + 1
-      ) {
-        return true;
+/** A DOM range over the editor for composer-string offsets. */
+function createDomRange(editor: LexicalEditor, start: number, end: number): Range | null {
+  return editor.getEditorState().read(() => {
+    const toDom = (offset: number): [Node, number] | null => {
+      const point = $offsetToPoint(offset);
+      const element = editor.getElementByKey(point.key);
+      if (!element) return null;
+      if (point.type === 'text') {
+        const textNode = element.firstChild;
+        if (!textNode) return null;
+        return [textNode, Math.min(point.offset, textNode.textContent?.length ?? 0)];
       }
-    }
+      return [element, Math.min(point.offset, element.childNodes.length)];
+    };
+    const from = toDom(start);
+    const to = start === end ? from : toDom(end);
+    if (!from || !to) return null;
+    const range = document.createRange();
+    range.setStart(from[0], from[1]);
+    range.setEnd(to[0], to[1]);
+    return range;
+  });
+}
+
+function lineHeightOf(element: Element) {
+  const style = window.getComputedStyle(element);
+  return Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2 || 16;
+}
+
+function isEmptyRect(rect: DOMRect | null | undefined) {
+  return !rect || (rect.width === 0 && rect.height === 0 && rect.x === 0 && rect.y === 0);
+}
+
+/** A zero-width, one-line rect at the laid-out caret position for `offset`. */
+function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: number): DOMRect {
+  const lineHeight = lineHeightOf(element);
+  let rect: DOMRect | null = null;
+  const range = createDomRange(editor, offset, offset);
+  if (range) {
+    const rects = range.getClientRects();
+    rect = rects.length > 0 ? rects[0]! : range.getBoundingClientRect();
+    if (isEmptyRect(rect)) rect = null;
   }
-
-  return false;
+  // A collapsed range between element children (beside a chip, on an empty
+  // line) has no box of its own: measure the character before it instead.
+  if (!rect && offset > 0) {
+    const previous = createDomRange(editor, offset - 1, offset)?.getClientRects();
+    const last = previous && previous.length > 0 ? previous[previous.length - 1] : null;
+    if (last && last.height > 0) rect = new DOMRect(last.right, last.top, 0, last.height);
+  }
+  if (!rect) {
+    const box = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    rect = new DOMRect(
+      box.left +
+        (Number.parseFloat(style.paddingLeft) || 0) +
+        (Number.parseFloat(style.borderLeftWidth) || 0),
+      box.top +
+        (Number.parseFloat(style.paddingTop) || 0) +
+        (Number.parseFloat(style.borderTopWidth) || 0) -
+        element.scrollTop,
+      0,
+      lineHeight
+    );
+  }
+  const top = rect.top + (rect.height - lineHeight) / 2;
+  return new DOMRect(rect.left, top, 0, lineHeight);
 }
 
-/**
- * Mention ranges are atomic editing units. Keep a collapsed caret out of the
- * range so a following edit cannot accidentally split its identity. Selections
- * spanning a mention stay native so the browser can still select/copy ordinary text naturally.
- */
-function constrainCaretToMentionBoundary(input: InputElement, mentions: readonly Mention[]) {
-  const selectionStart = input.selectionStart ?? 0;
-  const selectionEnd = input.selectionEnd ?? selectionStart;
-  if (selectionStart !== selectionEnd) return;
+/** Copy the placeholder paint of a textarea styled like the editor. */
+function usePlaceholderPaint(
+  element: InputElement | null,
+  className: string | undefined,
+  placeholder: string | undefined
+) {
+  React.useLayoutEffect(() => {
+    if (!element || !placeholder) return undefined;
+    const measure = () => {
+      const probe = document.createElement('textarea');
+      probe.className = className ?? '';
+      probe.placeholder = placeholder;
+      probe.tabIndex = -1;
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;pointer-events:none;height:0;min-height:0;';
+      (element.parentElement ?? document.body).appendChild(probe);
+      const style = window.getComputedStyle(probe, '::placeholder');
+      element.style.setProperty('--composer-placeholder-color', style.color);
+      element.style.setProperty('--composer-placeholder-opacity', style.opacity || '1');
+      probe.remove();
+    };
+    measure();
+    // Theme switches restyle the placeholder along with the rest of the app.
+    const observer = new MutationObserver(measure);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+    });
+    return () => observer.disconnect();
+  }, [className, element, placeholder]);
+}
 
-  const mention = mentions.find(
-    (candidate) => selectionStart > candidate.start && selectionStart < candidate.end
+/** Padding and border a textarea adds around its `rows` lines. */
+function useRowsChrome(element: InputElement | null) {
+  React.useLayoutEffect(() => {
+    if (!element) return undefined;
+    const measure = () => {
+      const style = window.getComputedStyle(element);
+      const chrome =
+        (Number.parseFloat(style.paddingTop) || 0) +
+        (Number.parseFloat(style.paddingBottom) || 0) +
+        (Number.parseFloat(style.borderTopWidth) || 0) +
+        (Number.parseFloat(style.borderBottomWidth) || 0);
+      const next = `${chrome}px`;
+      if (element.style.getPropertyValue('--composer-rows-chrome') !== next) {
+        element.style.setProperty('--composer-rows-chrome', next);
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+}
+
+/** Renders every mention node's chip into the editor's own DOM for it. */
+function MentionDecorations({
+  editor,
+  offsets,
+  selection,
+  focused,
+}: {
+  editor: LexicalEditor;
+  offsets: Record<string, ComposerSelection>;
+  selection: ComposerSelection | null;
+  focused: boolean;
+}) {
+  const context = useMentionContext(INPUT_NAME);
+  const [decorators, setDecorators] = React.useState<Record<string, MentionDecoration>>(() => ({
+    ...editor.getDecorators<MentionDecoration>(),
+  }));
+  React.useLayoutEffect(
+    () =>
+      editor.registerDecoratorListener<MentionDecoration>((next) => {
+        setDecorators({ ...next });
+      }),
+    [editor]
   );
-  if (!mention) return;
-
-  const distanceFromStart = selectionStart - mention.start;
-  const distanceToEnd = mention.end - selectionStart;
-  const nextPosition = distanceFromStart <= distanceToEnd ? mention.start : mention.end;
-  input.setSelectionRange(nextPosition, nextPosition);
+  return (
+    <>
+      {Object.entries(decorators).map(([key, decoration]) => {
+        const element = editor.getElementByKey(key);
+        const position = offsets[key];
+        if (!element || !position) return null;
+        const mention = { ...decoration.range, ...position } as Mention;
+        const chip = context.getMentionChip?.(mention, decoration.text) ?? null;
+        // The selection paints only while the editor has focus, as before.
+        const selected =
+          focused &&
+          !!selection &&
+          selection.start !== selection.end &&
+          selection.start < mention.end &&
+          selection.end > mention.start;
+        return createPortal(
+          <MentionRangeView
+            mention={mention}
+            text={decoration.text}
+            chip={chip}
+            selected={selected}
+          />,
+          element,
+          key
+        );
+      })}
+    </>
+  );
 }
 
-interface MentionInputProps extends React.ComponentPropsWithoutRef<typeof Primitive.textarea> {
+interface MentionInputProps
+  extends Omit<
+    React.HTMLAttributes<InputElement>,
+    'onChange' | 'defaultValue' | 'children' | 'contentEditable'
+  > {
+  /** The owner's text. Defaults to the Mention root's `inputValue`. */
+  value?: string | null;
+  /** Kept for call sites; edits reach the owner through the Mention root. */
+  onChange?: () => void;
+  /** Lines of height before the editor scrolls, as a textarea's `rows`. */
+  rows?: number;
+  placeholder?: string;
+  autoFocus?: boolean;
+  readOnly?: boolean;
+  disabled?: boolean;
+  required?: boolean;
   containerClassName?: string;
-  highlighterClassName?: string;
 }
 
 const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, forwardedRef) => {
   const context = useMentionContext(INPUT_NAME);
-  const composedRef = useComposedRefs(forwardedRef, context.inputRef);
-  const { containerClassName, highlighterClassName, ...inputProps } = props;
-  const pendingSelectionFromRoot = context.pendingSelection;
-  const onPendingSelectionFromRootChange = context.onPendingSelectionChange;
-  const inputRef = context.inputRef;
-  const inputValue = context.inputValue;
+  const {
+    containerClassName,
+    value: valueProp,
+    onChange: _onChange,
+    rows = 2,
+    placeholder,
+    autoFocus,
+    readOnly,
+    disabled,
+    required,
+    className,
+    style,
+    spellCheck,
+    onKeyDown,
+    onPaste,
+    onCopy,
+    onCut,
+    onClick,
+    onFocus,
+    onBlur,
+    onCompositionStart,
+    onCompositionEnd,
+    ...elementProps
+  } = props;
+  const [element, setElement] = React.useState<InputElement | null>(null);
+  const composedRef = useComposedRefs(forwardedRef, context.inputRef, setElement);
 
+  const [editor] = React.useState(() =>
+    createEditor({
+      namespace: 'lody-composer',
+      nodes: [MentionDecoratorNode],
+      onError: (error) => {
+        console.error(error);
+      },
+    })
+  );
+
+  const contextRef = React.useRef(context);
+  contextRef.current = context;
+  const documentRef = React.useRef<ComposerDocument>(EMPTY_DOCUMENT);
+  const selectionRef = React.useRef<ComposerSelection | null>(null);
   const pendingSelectionRef = React.useRef<PendingSelection | null>(null);
   const virtualAnchorSnapshotRef = React.useRef<VirtualAnchorSnapshot | null>(null);
-  // Simplified IME handling: only track if we're in composition, ignore all updates
-  // during composition, and sync the final value after composition ends.
-  const isComposingRef = React.useRef(false);
-  const [compositionRenderValue, setCompositionRenderValue] = React.useState<string | null>(null);
+  const [paint, setPaint] = React.useState<{
+    empty: boolean;
+    offsets: Record<string, ComposerSelection>;
+    selection: ComposerSelection | null;
+  }>({ empty: true, offsets: {}, selection: null });
+  const [focused, setFocused] = React.useState(false);
 
-  const normalizedPropValue = React.useMemo(
-    () => normalizeTextareaValue(inputProps.value),
-    [inputProps.value]
+  const readSelection = React.useCallback((): ComposerSelection => {
+    const selection = editor.getEditorState().read(() => $readSelectionOffsets());
+    if (selection) return selection;
+    const end = documentRef.current.text.length;
+    return { start: end, end };
+  }, [editor]);
+
+  const isFocused = React.useCallback(
+    () => !!element && element.contains(element.ownerDocument.activeElement),
+    [element]
   );
 
-  // Sync compositionRenderValue with external value when they match.
-  React.useLayoutEffect(() => {
-    if (compositionRenderValue === null) return;
-    if (normalizedPropValue === compositionRenderValue) {
-      setCompositionRenderValue(null);
-    }
-  }, [compositionRenderValue, normalizedPropValue]);
-
-  const renderedInputValue = compositionRenderValue ?? normalizedPropValue;
-  const mentionRenderValue = compositionRenderValue ?? context.inputValue;
-  // IME preedit changes the textarea before the owner commits its controlled
-  // value. Move the mirror ranges through that transient edit so the chip stays
-  // aligned instead of exposing either the raw token or an offset duplicate.
-  const mentionRenderMentions = React.useMemo(() => {
-    if (compositionRenderValue === null) return context.mentions;
-    const diff = getTextDiff(context.inputValue, compositionRenderValue);
-    if (!diff) return context.mentions;
-    return applyTextEditToMentions(context.mentions, diff.start, diff.prevEnd, diff.delta);
-  }, [compositionRenderValue, context.inputValue, context.mentions]);
-
-  const mirrorText = !!context.getMentionChip;
-  // An empty control paints only its native placeholder. WebKit inherits the
-  // transparent fill into that pseudo-element even with a ::placeholder reset.
-  const hideNativeText = mirrorText && mentionRenderValue.length > 0;
-
-  const queueSelectionRestore = React.useCallback(
-    (start: number, end: number = start, expectedValue?: string) => {
-      // Selection is restored by a layout effect, not immediately in handlers.
-      // This keeps cursor moves deterministic across desktop/mobile where
-      // controlled value commits can land in slightly different event phases.
-      pendingSelectionRef.current = { start, end, expectedValue };
+  const writeSelection = React.useCallback(
+    (start: number, end: number = start) => {
+      editor.update(() => $setSelectionOffsets(start, end), {
+        discrete: true,
+        tag: isFocused() ? undefined : SKIP_DOM_SELECTION_TAG,
+      });
     },
-    []
+    [editor, isFocused]
   );
-
-  React.useLayoutEffect(() => {
-    if (pendingSelectionFromRoot) {
-      // MentionRoot cannot safely mutate DOM selection directly because its
-      // state updates and the input's controlled value commit may be out of sync.
-      // We consume root-issued selection requests here and apply them only after
-      // the textarea reflects the expected value.
-      pendingSelectionRef.current = pendingSelectionFromRoot;
-      onPendingSelectionFromRootChange(null);
-    }
-
-    const pending = pendingSelectionRef.current;
-    if (!pending) return;
-
-    const input = inputRef.current;
-    if (!input) return;
-
-    if (pending.expectedValue !== undefined && input.value !== pending.expectedValue) {
-      return;
-    }
-
-    pendingSelectionRef.current = null;
-
-    const max = input.value.length;
-    const start = Math.max(0, Math.min(max, pending.start));
-    const end = Math.max(0, Math.min(max, pending.end));
-    input.setSelectionRange(start, end);
-  }, [inputRef, inputValue, onPendingSelectionFromRootChange, pendingSelectionFromRoot]);
-
-  const calculatePosition = React.useCallback((input: InputElement, cursorPosition: number) => {
-    const rect = input.getBoundingClientRect();
-    const style = window.getComputedStyle(input);
-    // A textarea wraps at word and glyph boundaries, not at multiples of a
-    // measured line width. Mirror its layout so the anchor stays on the real
-    // caret after soft wraps, scroll, font changes and fractional zoom.
-    const mirror = document.createElement('div');
-    mirror.style.position = 'fixed';
-    mirror.style.top = '0';
-    mirror.style.left = '0';
-    mirror.style.visibility = 'hidden';
-    mirror.style.pointerEvents = 'none';
-    mirror.style.boxSizing = 'border-box';
-    mirror.style.width = `${
-      (input.clientWidth || rect.width) +
-      Number.parseFloat(style.borderLeftWidth || '0') +
-      Number.parseFloat(style.borderRightWidth || '0')
-    }px`;
-    mirror.style.padding = style.padding;
-    mirror.style.borderStyle = style.borderStyle;
-    mirror.style.borderWidth = style.borderWidth;
-    mirror.style.font = style.font;
-    mirror.style.letterSpacing = style.letterSpacing;
-    mirror.style.textTransform = style.textTransform;
-    mirror.style.textIndent = style.textIndent;
-    mirror.style.textAlign = style.textAlign;
-    mirror.style.lineHeight = style.lineHeight;
-    mirror.style.tabSize = style.tabSize;
-    mirror.style.wordBreak = style.wordBreak;
-    mirror.style.overflowWrap = style.overflowWrap;
-    mirror.style.whiteSpace = input.wrap === 'off' ? 'pre' : 'pre-wrap';
-    mirror.style.direction = style.direction;
-    mirror.textContent = input.value.slice(0, cursorPosition);
-    const marker = document.createElement('span');
-    marker.textContent = '\u200b';
-    mirror.appendChild(marker);
-    // Measure outside zoomed/transformed app containers; the scale below
-    // then maps the unscaled mirror back into the textarea's viewport rect.
-    // Keep body's :last-child state stable to avoid restyling the app on every read.
-    document.documentElement.insertBefore(mirror, document.body);
-    const markerRect = marker.getBoundingClientRect();
-    const mirrorRect = mirror.getBoundingClientRect();
-    mirror.remove();
-
-    const scaleX = input.offsetWidth ? rect.width / input.offsetWidth : 1;
-    const scaleY = input.offsetHeight ? rect.height / input.offsetHeight : 1;
-    const lineHeight =
-      (Number.parseFloat(style.lineHeight) || markerRect.height || input.offsetHeight) * scaleY;
-    const x = rect.left + (markerRect.left - mirrorRect.left - input.scrollLeft) * scaleX;
-    const y = rect.top + (markerRect.top - mirrorRect.top - input.scrollTop) * scaleY;
-
-    return {
-      width: 0,
-      height: lineHeight,
-      x,
-      y,
-      top: y,
-      right: x,
-      bottom: y + lineHeight,
-      left: x,
-      toJSON() {
-        return this;
-      },
-    } satisfies DOMRect;
-  }, []);
 
   const createVirtualElement = React.useCallback(
-    (element: InputElement, cursorPosition: number) => {
+    (anchorElement: InputElement, cursorPosition: number) => {
+      const ctx = contextRef.current;
       const currentAnchor = virtualAnchorSnapshotRef.current;
-      if (currentAnchor?.element === element && currentAnchor.cursorPosition === cursorPosition) {
-        if (context.virtualAnchor !== currentAnchor.anchor) {
-          context.onVirtualAnchorChange(currentAnchor.anchor);
+      if (
+        currentAnchor?.element === anchorElement &&
+        currentAnchor.cursorPosition === cursorPosition
+      ) {
+        if (ctx.virtualAnchor !== currentAnchor.anchor) {
+          ctx.onVirtualAnchorChange(currentAnchor.anchor);
         }
         return;
       }
 
       const virtualElement: VirtualElement = {
-        contextElement: element,
+        contextElement: anchorElement,
         getBoundingClientRect() {
-          return calculatePosition(element, cursorPosition);
+          return measureCaretRect(editor, anchorElement, cursorPosition);
         },
         getClientRects() {
           const rect = this.getBoundingClientRect();
@@ -323,28 +418,26 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       };
 
       virtualAnchorSnapshotRef.current = {
-        element,
+        element: anchorElement,
         cursorPosition,
         anchor: virtualElement,
       };
-      context.onVirtualAnchorChange(virtualElement);
+      ctx.onVirtualAnchorChange(virtualElement);
     },
-    [calculatePosition, context]
+    [editor]
   );
 
   const onMentionUpdate = React.useCallback(
-    (element: InputElement, selectionStart: number | null = null) => {
-      if (context.disabled || context.readonly) return false;
-      if (isComposingRef.current) return false;
+    (value: string, currentPosition: number) => {
+      const ctx = contextRef.current;
+      if (ctx.disabled || ctx.readonly) return false;
+      if (editor.isComposing()) return false;
+      if (!element) return false;
 
-      const currentPosition = selectionStart ?? element.selectionStart;
-      if (currentPosition === null) return false;
-
-      const value = element.value;
-      const candidates = findTriggerCandidates(value, context.triggers, currentPosition);
+      const candidates = findTriggerCandidates(value, ctx.triggers, currentPosition);
 
       for (const { trigger, index: lastTriggerIndex } of candidates) {
-        const mentionAtTrigger = context.mentions.find(
+        const mentionAtTrigger = ctx.mentions.find(
           (mention) => mention.start <= lastTriggerIndex && mention.end > lastTriggerIndex
         );
 
@@ -379,9 +472,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           !firstCharAfterCursor ||
           firstCharAfterCursor === ' ' ||
           firstCharAfterCursor === '\n' ||
-          context.triggers.includes(firstCharAfterCursor);
+          ctx.triggers.includes(firstCharAfterCursor);
 
-        const isTextAfterCursorPartOfMention = context.mentions.some(
+        const isTextAfterCursorPartOfMention = ctx.mentions.some(
           (mention) => currentPosition >= mention.start && currentPosition < mention.end
         );
 
@@ -395,193 +488,288 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         }
 
         if (isValidMention && (isCursorAfterTrigger || isImmediatelyAfterTrigger)) {
-          if (context.trigger !== trigger) {
-            context.onTriggerChange(trigger);
+          if (ctx.trigger !== trigger) {
+            ctx.onTriggerChange(trigger);
           }
 
           createVirtualElement(element, currentPosition);
-          context.onOpenChange(true);
-          context.filterStore.search = isImmediatelyAfterTrigger ? '' : textAfterTrigger;
-          requestAnimationFrame(() => context.onItemsFilter());
+          ctx.onOpenChange(true);
+          ctx.filterStore.search = isImmediatelyAfterTrigger ? '' : textAfterTrigger;
+          requestAnimationFrame(() => contextRef.current.onItemsFilter());
           return true;
         }
       }
 
-      if (context.open) {
-        context.onOpenChange(false);
-        context.onHighlightedItemChange(null);
-        context.filterStore.search = '';
+      if (ctx.open) {
+        ctx.onOpenChange(false);
+        ctx.onHighlightedItemChange(null);
+        ctx.filterStore.search = '';
       }
 
       return false;
     },
-    [context, createVirtualElement]
+    [createVirtualElement, editor, element]
   );
 
-  const syncResolvedInputValue = React.useCallback(
-    (newValue: string) => {
-      const prevValue = context.inputValue;
-      const diff = getTextDiff(prevValue, newValue);
-
-      if (diff) {
-        const nextMentions = applyTextEditToMentions(
-          context.mentions,
-          diff.start,
-          diff.prevEnd,
-          diff.delta
-        );
-
-        if (!areMentionsEqual(context.mentions, nextMentions)) {
-          context.onMentionsChange(nextMentions);
-        }
-
-        const nextMentionValues = getMentionValuesFromMentions(nextMentions);
-        if (!areStringArraysEqual(context.value, nextMentionValues)) {
-          context.onValueChange(nextMentionValues);
-        }
+  /** Hand an edit made in the editor to the owner, as a textarea change did. */
+  const publish = React.useCallback(
+    (document: ComposerDocument, caret: number) => {
+      const ctx = contextRef.current;
+      if (!areMentionsEqual(ctx.mentions, document.mentions)) {
+        ctx.onMentionsChange(document.mentions);
       }
-
-      context.onInputValueChange?.(newValue);
+      const nextMentionValues = getMentionValuesFromMentions(document.mentions);
+      if (!areStringArraysEqual(ctx.value, nextMentionValues)) {
+        ctx.onValueChange(nextMentionValues);
+      }
+      ctx.onInputValueChange?.(document.text);
+      onMentionUpdate(document.text, caret);
     },
-    [context]
+    [onMentionUpdate]
   );
 
-  const syncInputValue = React.useCallback(
-    (input: InputElement) => {
-      syncResolvedInputValue(input.value);
-    },
-    [syncResolvedInputValue]
-  );
+  const isPublished = React.useCallback(() => {
+    const ctx = contextRef.current;
+    return isSameDocument(documentRef.current, {
+      text: ctx.inputValue,
+      mentions: sanitizeComposerMentions(ctx.inputValue, ctx.mentions),
+    });
+  }, []);
 
   const applyInputValue = React.useCallback(
-    (
-      nextValue: string,
-      selectionStart: number,
-      options?: {
-        mentionsToRemove?: Mention[];
-      }
-    ) => {
+    (nextValue: string, selectionStart: number, options?: { mentionsToRemove?: Mention[] }) => {
+      const ctx = contextRef.current;
       if (options?.mentionsToRemove?.length) {
-        context.onMentionsRemove(options.mentionsToRemove);
+        ctx.onMentionsRemove(options.mentionsToRemove);
       }
-
-      context.onInputValueChange?.(nextValue);
-      queueSelectionRestore(selectionStart, selectionStart, nextValue);
+      ctx.onInputValueChange?.(nextValue);
+      pendingSelectionRef.current = {
+        start: selectionStart,
+        end: selectionStart,
+        expectedValue: nextValue,
+      };
     },
-    [context, queueSelectionRestore]
+    []
   );
 
-  const onChange = React.useCallback(
-    (event: React.ChangeEvent<InputElement>) => {
-      if (context.disabled || context.readonly) return;
-
-      const input = event.currentTarget;
-
-      // Check if we're truly in composition.
-      // - isComposingRef tracks our internal state based on compositionStart/End
-      // - nativeEvent.isComposing is the browser's flag
-      //
-      // Some IMEs may have mismatch:
-      // - During composition: both should be true
-      // - After compositionEnd: isComposingRef=false, but nativeEvent.isComposing
-      //   may still be true for the first few events
-      //
-      // We trust isComposingRef more because it's based on the explicit events.
-      const trulyComposing = isComposingRef.current;
-
-      // During composition: only update local render value, don't sync to parent.
-      if (trulyComposing) {
-        setCompositionRenderValue(input.value);
-        return;
-      }
-
-      // After composition ends: sync the final value to parent.
-      syncInputValue(input);
-      onMentionUpdate(input);
+  /** Backward deletion reaching a chip from Lexical (mobile `beforeinput`). */
+  const deleteMentionCharacter = React.useCallback(
+    (isBackward: boolean) => {
+      const ctx = contextRef.current;
+      if (ctx.disabled || ctx.readonly) return false;
+      const value = documentRef.current.text;
+      const { start, end } = readSelection();
+      if (start !== end) return false;
+      const mention = ctx.mentions.find((candidate) =>
+        isBackward
+          ? start > candidate.start && start <= candidate.end
+          : start >= candidate.start && start < candidate.end
+      );
+      if (!mention) return false;
+      const includeTrailingSpace = isBackward && value[mention.end] === ' ';
+      applyInputValue(removeMentionText(value, mention, includeTrailingSpace), mention.start, {
+        mentionsToRemove: [mention],
+      });
+      return true;
     },
-    [context, onMentionUpdate, syncInputValue]
+    [applyInputValue, readSelection]
   );
 
-  const onCompositionStart = React.useCallback(() => {
-    context.cancelMentionPreparation();
-    isComposingRef.current = true;
-  }, [context]);
-
-  const onCompositionEnd = React.useCallback(
-    (event: React.CompositionEvent<InputElement>) => {
-      if (context.disabled || context.readonly) return;
-
-      const input = event.currentTarget;
-      isComposingRef.current = false;
-
-      // Always update local render value to match DOM.
-      setCompositionRenderValue(input.value);
-
-      // Always sync the value after composition ends.
-      // The value at compositionEnd should be the final committed text.
-      syncInputValue(input);
-      onMentionUpdate(input);
-    },
-    [context, onMentionUpdate, syncInputValue]
+  const controller = React.useMemo<ComposerController | null>(
+    () =>
+      element
+        ? {
+            getText: () => documentRef.current.text,
+            getSelection: readSelection,
+            setSelection: writeSelection,
+            isComposing: () => editor.isComposing(),
+            getCaretRect: (offset) => measureCaretRect(editor, element, offset),
+            getRangeRects: (start, end) => {
+              const range = createDomRange(editor, start, end);
+              return range ? Array.from(range.getClientRects()) : [];
+            },
+          }
+        : null,
+    [editor, element, readSelection, writeSelection]
   );
 
-  const onClick = React.useCallback(
-    (event: React.MouseEvent<InputElement>) => {
-      const input = event.currentTarget;
-      if (isComposingRef.current) return;
-      const selectionStart = input.selectionStart ?? 0;
-      const selectionEnd = input.selectionEnd ?? selectionStart;
-      const mentionAtClick =
-        selectionStart === selectionEnd
-          ? context.mentions.find(
-              (mention) => selectionStart >= mention.start && selectionStart <= mention.end
-            )
-          : undefined;
+  // Mount the editor on its element and wire Lexical's defaults behind the
+  // primitive and caller handlers, which run first and may prevent them.
+  React.useLayoutEffect(() => {
+    if (!element || !controller) return undefined;
+    editor.setRootElement(element);
+    const unregister = mergeRegister(
+      registerPlainText(editor),
+      registerHistory(editor, createEmptyHistoryState(), 300),
+      editor.registerCommand(
+        KEY_DOWN_COMMAND,
+        (event) => event.defaultPrevented,
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerCommand(
+        PASTE_COMMAND,
+        (event) => 'defaultPrevented' in event && event.defaultPrevented,
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerCommand(
+        COPY_COMMAND,
+        (event) => !!event && 'defaultPrevented' in event && event.defaultPrevented,
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerCommand(
+        CUT_COMMAND,
+        (event) => !!event && 'defaultPrevented' in event && event.defaultPrevented,
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      // Files dropped on the editor belong to the composer's drop handling.
+      editor.registerCommand(
+        DROP_COMMAND,
+        (event) => event.defaultPrevented || hasFiles(event.dataTransfer),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerCommand(
+        UNDO_COMMAND,
+        () => contextRef.current.onHistoryMove(-1),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerCommand(
+        REDO_COMMAND,
+        () => contextRef.current.onHistoryMove(1),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerCommand(
+        DELETE_CHARACTER_COMMAND,
+        (isBackward) => deleteMentionCharacter(isBackward),
+        COMMAND_PRIORITY_CRITICAL
+      ),
+      editor.registerUpdateListener(({ editorState, tags }) => {
+        const { document, selection, offsets } = editorState.read(() => ({
+          document: $readComposerValue<Mention>(),
+          selection: $readSelectionOffsets(),
+          offsets: $readMentionOffsets(),
+        }));
+        const previousSelection = selectionRef.current;
+        const changed = !isSameDocument(documentRef.current, document);
+        documentRef.current = document;
+        selectionRef.current = selection;
+        setPaint((current) =>
+          current.empty === (document.text.length === 0) &&
+          isSameSelection(current.selection, selection) &&
+          !changed
+            ? current
+            : { empty: document.text.length === 0, offsets, selection }
+        );
+        if (tags.has(SYNC_TAG)) return;
+        // The owner hears about IME text only once it is committed.
+        if (editor.isComposing()) return;
+        const caret = selection?.end ?? document.text.length;
+        if (changed || !isPublished()) {
+          publish(document, caret);
+        } else if (!isSameSelection(previousSelection, selection) && selection) {
+          onMentionUpdate(document.text, selection.start);
+        }
+      }),
+      registerComposerController(element, controller)
+    );
+    return () => {
+      unregister();
+      editor.setRootElement(null);
+    };
+  }, [
+    controller,
+    deleteMentionCharacter,
+    editor,
+    element,
+    isPublished,
+    onMentionUpdate,
+    publish,
+  ]);
 
-      constrainCaretToMentionBoundary(input, context.mentions);
-      onMentionUpdate(input);
+  React.useEffect(() => {
+    editor.setEditable(!readOnly && !disabled);
+  }, [disabled, editor, readOnly]);
 
-      if (!context.onMentionClick) return;
-      if (selectionStart !== selectionEnd) return;
+  React.useEffect(() => {
+    if (autoFocus) element?.focus({ preventScroll: true });
+    // Only on mount, as the `autofocus` attribute does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [element]);
 
-      if (
-        mentionAtClick &&
-        isPointInsideMentionHighlight(input, mentionAtClick, event.clientX, event.clientY)
-      ) {
-        context.onMentionClick(mentionAtClick);
-      }
-    },
-    [context, onMentionUpdate]
-  );
+  const ownerValue = valueProp ?? context.inputValue;
+  const pendingSelectionFromRoot = context.pendingSelection;
+  const onPendingSelectionFromRootChange = context.onPendingSelectionChange;
 
-  const onFocus = React.useCallback(
-    (event: React.FocusEvent<InputElement>) => {
-      if (!isComposingRef.current) {
-        constrainCaretToMentionBoundary(event.currentTarget, context.mentions);
-      }
-      onMentionUpdate(event.currentTarget);
-    },
-    [context, onMentionUpdate]
-  );
+  // Copy the owner's value into the editor whenever it differs from what the
+  // editor holds, then restore the caret the owner asked for.
+  React.useLayoutEffect(() => {
+    if (!element) return;
+    if (pendingSelectionFromRoot) {
+      pendingSelectionRef.current = pendingSelectionFromRoot;
+      onPendingSelectionFromRootChange(null);
+    }
+    if (editor.isComposing()) return;
 
-  const onKeyDown = React.useCallback(
+    const incoming: ComposerDocument = {
+      text: ownerValue ?? '',
+      mentions: sanitizeComposerMentions(ownerValue ?? '', context.mentions),
+    };
+    const pending = pendingSelectionRef.current;
+    const pendingApplies =
+      !!pending && (pending.expectedValue === undefined || pending.expectedValue === incoming.text);
+    const isInitial = documentRef.current === EMPTY_DOCUMENT;
+
+    if (!isSameDocument(documentRef.current, incoming) || isInitial) {
+      const focusedNow = isFocused();
+      const keep = pendingApplies ? pending : (selectionRef.current ?? null);
+      editor.update(
+        () => {
+          $writeComposerValue(incoming.text, incoming.mentions);
+          if (keep && (focusedNow || pendingApplies)) {
+            const max = incoming.text.length;
+            $setSelectionOffsets(Math.min(keep.start, max), Math.min(keep.end, max));
+          }
+        },
+        {
+          discrete: true,
+          tag: [
+            SYNC_TAG,
+            ...(isInitial ? [HISTORY_MERGE_TAG] : []),
+            ...(focusedNow ? [] : [SKIP_DOM_SELECTION_TAG]),
+          ],
+        }
+      );
+      if (pendingApplies) pendingSelectionRef.current = null;
+      return;
+    }
+
+    if (pending && pendingApplies) {
+      pendingSelectionRef.current = null;
+      const max = incoming.text.length;
+      writeSelection(Math.min(pending.start, max), Math.min(pending.end, max));
+    }
+  });
+
+  usePlaceholderPaint(element, className, placeholder);
+  useRowsChrome(element);
+
+  const onKeyDownPrimitive = React.useCallback(
     (event: React.KeyboardEvent<InputElement>) => {
+      const ctx = contextRef.current;
       if (isImeComposingKeyboardEvent(event)) {
         return;
       }
 
       if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
-        if (context.onHistoryMove(event.shiftKey ? 1 : -1)) event.preventDefault();
+        if (ctx.onHistoryMove(event.shiftKey ? 1 : -1)) event.preventDefault();
         return;
       }
       if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === 'y') {
-        if (context.onHistoryMove(1)) event.preventDefault();
+        if (ctx.onHistoryMove(1)) event.preventDefault();
         return;
       }
 
-      const input = event.currentTarget;
-      const cursorPosition = input.selectionStart ?? 0;
-      const selectionEnd = input.selectionEnd ?? cursorPosition;
+      const value = documentRef.current.text;
+      const { start: cursorPosition, end: selectionEnd } = readSelection();
       const hasSelection = cursorPosition !== selectionEnd;
       const horizontalMove = hasSelection ? null : getHorizontalCaretMove(event);
 
@@ -589,8 +777,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         const { direction, isWordJump } = horizontalMove;
 
         const adjacentMention = findAdjacentMentionForHorizontalNavigation({
-          mentions: context.mentions,
-          value: input.value,
+          mentions: ctx.mentions,
+          value,
           cursorPosition,
           direction,
           isWordJump,
@@ -610,7 +798,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
                 ? adjacentMention.start
                 : adjacentMention.end;
 
-          input.setSelectionRange(newPosition, newPosition);
+          writeSelection(newPosition, newPosition);
           return;
         }
 
@@ -619,36 +807,36 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         }
       }
 
-      if (event.key === 'Delete' && !context.open && !hasSelection && !context.readonly) {
-        const next = context.mentions.find(
+      if (event.key === 'Delete' && !ctx.open && !hasSelection && !ctx.readonly) {
+        const next = ctx.mentions.find(
           (mention) => cursorPosition >= mention.start && cursorPosition < mention.end
         );
         if (next) {
           event.preventDefault();
-          applyInputValue(removeMentionText(input.value, next, false), next.start, {
+          applyInputValue(removeMentionText(value, next, false), next.start, {
             mentionsToRemove: [next],
           });
           return;
         }
       }
-      if (event.key === 'Backspace' && !context.open && !hasSelection) {
+      if (event.key === 'Backspace' && !ctx.open && !hasSelection && !ctx.readonly) {
         const isCtrlOrCmd = event.metaKey || event.ctrlKey;
 
         const mentionBeforeCursor = findMentionBeforeCursorForDeletion({
-          mentions: context.mentions,
-          value: input.value,
+          mentions: ctx.mentions,
+          value,
           cursorPosition,
           isCtrlOrCmd,
         });
 
         if (mentionBeforeCursor) {
-          const hasTrailingSpace = input.value[mentionBeforeCursor.end] === ' ';
+          const hasTrailingSpace = value[mentionBeforeCursor.end] === ' ';
           const isCursorInsideMention =
             cursorPosition > mentionBeforeCursor.start && cursorPosition <= mentionBeforeCursor.end;
 
           if (isCursorInsideMention || isCtrlOrCmd) {
             event.preventDefault();
-            const newValue = removeMentionText(input.value, mentionBeforeCursor, hasTrailingSpace);
+            const newValue = removeMentionText(value, mentionBeforeCursor, hasTrailingSpace);
             applyInputValue(newValue, mentionBeforeCursor.start, {
               mentionsToRemove: [mentionBeforeCursor],
             });
@@ -658,14 +846,13 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           if (hasTrailingSpace && cursorPosition === mentionBeforeCursor.end + 1 && !isCtrlOrCmd) {
             event.preventDefault();
             const newValue =
-              input.value.slice(0, mentionBeforeCursor.end) +
-              input.value.slice(mentionBeforeCursor.end + 1);
+              value.slice(0, mentionBeforeCursor.end) + value.slice(mentionBeforeCursor.end + 1);
             applyInputValue(newValue, mentionBeforeCursor.end);
             return;
           }
 
           event.preventDefault();
-          const newValue = removeMentionText(input.value, mentionBeforeCursor, hasTrailingSpace);
+          const newValue = removeMentionText(value, mentionBeforeCursor, hasTrailingSpace);
           applyInputValue(newValue, mentionBeforeCursor.start, {
             mentionsToRemove: [mentionBeforeCursor],
           });
@@ -673,7 +860,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         }
       }
 
-      if (!context.open) return;
+      if (!ctx.open) return;
 
       // A modified Enter belongs to the input, not the menu: Cmd/Ctrl+Enter is
       // the owner's send/save, Shift+Enter is a literal newline. Bail before the
@@ -695,36 +882,36 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       }
 
       function onMenuClose() {
-        context.onOpenChange(false);
-        context.onHighlightedItemChange(null);
-        context.filterStore.search = '';
+        ctx.onOpenChange(false);
+        ctx.onHighlightedItemChange(null);
+        ctx.filterStore.search = '';
       }
 
       function getTriggerSpan() {
-        const triggerIndex = input.value.lastIndexOf(context.trigger, cursorPosition);
+        const triggerIndex = value.lastIndexOf(ctx.trigger, cursorPosition);
         if (triggerIndex === -1) return null;
         return {
           triggerIndex,
-          search: input.value.slice(triggerIndex + context.trigger.length, cursorPosition),
+          search: value.slice(triggerIndex + ctx.trigger.length, cursorPosition),
         };
       }
 
       // `highlightedItem` can be a partial snapshot created on hover, so read
       // navigation data off the registered item instead.
-      function getRegisteredItem(value: string) {
-        return context.getEnabledItems().find((item) => item.value === value) ?? null;
+      function getRegisteredItem(itemValue: string) {
+        return ctx.getEnabledItems().find((item) => item.value === itemValue) ?? null;
       }
 
       /** Descend into the highlighted navigation item, if it is one. */
       function tryNavigateInto() {
         if (hasSelection || event.shiftKey) return false;
-        const highlighted = context.highlightedItem;
+        const highlighted = ctx.highlightedItem;
         if (!highlighted) return false;
         const registered = getRegisteredItem(highlighted.value);
         if (!registered?.navigateText) return false;
         const span = getTriggerSpan();
         if (!span) return false;
-        void context.onMentionAdd(registered.value, span.triggerIndex);
+        void ctx.onMentionAdd(registered.value, span.triggerIndex);
         return true;
       }
 
@@ -733,7 +920,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         if (hasSelection || event.shiftKey) return false;
         const span = getTriggerSpan();
         if (!span || !isMentionNavigationPrefix(span.search)) return false;
-        return context.onNavigateBack();
+        return ctx.onNavigateBack();
       }
 
       /** Commit the highlighted (or exact-match) item, matching Enter. */
@@ -744,10 +931,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         const searchText = span.search;
         const exactMatchItem =
           searchText.length > 0
-            ? context.getEnabledItems().find((item) => item.label === searchText)
+            ? ctx.getEnabledItems().find((item) => item.label === searchText)
             : null;
 
-        const selectedItem = context.highlightedItem ?? exactMatchItem;
+        const selectedItem = ctx.highlightedItem ?? exactMatchItem;
         if (!selectedItem) return false;
 
         // Enter/Tab on a navigation item the user has already typed out in full
@@ -757,7 +944,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         const shouldCommit =
           Boolean(registeredItem.navigateText) && registeredItem.label === searchText;
 
-        void context.onMentionAdd(selectedItem.value, span.triggerIndex, {
+        void ctx.onMentionAdd(selectedItem.value, span.triggerIndex, {
           commit: shouldCommit,
         });
         return true;
@@ -775,7 +962,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         case 'Tab': {
           // ⇧Tab is the composer mode-cycle binding; do not steal it to select.
           if (event.shiftKey) {
-            if (context.modal) event.preventDefault();
+            if (ctx.modal) event.preventDefault();
             onMenuClose();
             break;
           }
@@ -787,7 +974,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
             event.preventDefault();
             break;
           }
-          if (context.modal) event.preventDefault();
+          if (ctx.modal) event.preventDefault();
           onMenuClose();
           break;
         }
@@ -804,27 +991,27 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           break;
         }
         case 'ArrowDown': {
-          if (context.readonly) return;
-          context.onHighlightMove(context.highlightedItem ? 'next' : 'first');
+          if (ctx.readonly) return;
+          ctx.onHighlightMove(ctx.highlightedItem ? 'next' : 'first');
           break;
         }
         case 'ArrowUp': {
-          if (context.readonly) return;
-          context.onHighlightMove(context.highlightedItem ? 'prev' : 'last');
+          if (ctx.readonly) return;
+          ctx.onHighlightMove(ctx.highlightedItem ? 'prev' : 'last');
           break;
         }
         case 'Home': {
           if (event.metaKey || event.ctrlKey) return;
-          if (context.readonly) return;
+          if (ctx.readonly) return;
           event.preventDefault();
-          context.onHighlightMove('first');
+          ctx.onHighlightMove('first');
           break;
         }
         case 'End': {
           if (event.metaKey || event.ctrlKey) return;
-          if (context.readonly) return;
+          if (ctx.readonly) return;
           event.preventDefault();
-          context.onHighlightMove('last');
+          ctx.onHighlightMove('last');
           break;
         }
         case 'Escape': {
@@ -834,96 +1021,102 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         }
       }
     },
-    [applyInputValue, context]
+    [applyInputValue, readSelection, writeSelection]
   );
 
-  const onBeforeInput = React.useCallback(
-    (event: React.FormEvent<InputElement> & { inputType?: string }) => {
-      if (context.disabled || context.readonly) return;
-      const input = event.currentTarget;
-      const cursorPosition = input.selectionStart ?? 0;
-
-      const inputType = event.inputType ?? (event.nativeEvent as InputEvent).inputType;
-      if (inputType === 'historyUndo' || inputType === 'historyRedo') {
-        if (isComposingRef.current) return;
-        if (context.onHistoryMove(inputType === 'historyUndo' ? -1 : 1)) event.preventDefault();
+  const onClickPrimitive = React.useCallback(
+    (event: React.MouseEvent<InputElement>) => {
+      if (editor.isComposing()) return;
+      const ctx = contextRef.current;
+      const target = event.target instanceof Element ? event.target : null;
+      const chipElement = target?.closest<HTMLElement>('[data-mention-start]');
+      if (chipElement && element?.contains(chipElement)) {
+        const start = Number(chipElement.dataset.mentionStart);
+        const end = Number(chipElement.dataset.mentionEnd);
+        // A click lands the caret on the chip's nearer edge, never inside it.
+        const rects = Array.from(chipElement.getClientRects());
+        const first = rects[0];
+        const towardStart =
+          !!first &&
+          event.clientY <= first.bottom &&
+          event.clientX < first.left + (first.right - first.left) / 2 &&
+          (rects.length === 1 || event.clientY >= first.top);
+        const edge = towardStart ? start : end;
+        writeSelection(edge, edge);
+        onMentionUpdate(documentRef.current.text, edge);
+        const mention = ctx.mentions.find(
+          (candidate) => candidate.start === start && candidate.end === end
+        );
+        if (mention && ctx.onMentionClick) ctx.onMentionClick(mention);
         return;
       }
-      if (inputType === 'deleteContentBackward') {
-        const mentionAtCursor = context.mentions.find(
-          (mention) => cursorPosition > mention.start && cursorPosition <= mention.end
-        );
-
-        if (mentionAtCursor) {
-          event.preventDefault();
-          const hasTrailingSpace = input.value[mentionAtCursor.end] === ' ';
-          const newValue = removeMentionText(input.value, mentionAtCursor, hasTrailingSpace);
-
-          applyInputValue(newValue, mentionAtCursor.start, {
-            mentionsToRemove: [mentionAtCursor],
-          });
-        }
-      }
+      onMentionUpdate(documentRef.current.text, readSelection().start);
     },
-    [applyInputValue, context]
+    [editor, element, onMentionUpdate, readSelection, writeSelection]
   );
 
-  const onSelect = React.useCallback(() => {
-    if (context.disabled) return;
-    // IMEs own the transient selection while composing. The committed mention
-    // ranges still use the pre-composition offsets, so snapping against them
-    // moves the IME caret into the wrong text.
-    if (isComposingRef.current) return;
-    const inputElement = context.inputRef.current;
-    if (!inputElement) return;
-    constrainCaretToMentionBoundary(inputElement, context.mentions);
-    if (context.readonly) return;
-    onMentionUpdate(inputElement);
-  }, [context, onMentionUpdate]);
+  const onFocusPrimitive = React.useCallback(() => {
+    setFocused(true);
+    onMentionUpdate(documentRef.current.text, readSelection().start);
+  }, [onMentionUpdate, readSelection]);
+
+  const onCompositionStartPrimitive = React.useCallback(() => {
+    contextRef.current.cancelMentionPreparation();
+  }, []);
+
+  const onCompositionEndPrimitive = React.useCallback(() => {
+    // Lexical commits the composed text in its own handler, which runs before
+    // this one; make sure the owner received it.
+    if (!isPublished() && !editor.isComposing()) {
+      publish(documentRef.current, readSelection().end);
+    }
+  }, [editor, isPublished, publish, readSelection]);
+
+  const mirrorSelection = !!context.getMentionChip;
+  const editable = !readOnly && !disabled;
 
   return (
     <div className={cn('relative', containerClassName)}>
-      <Primitive.textarea
+      <div
         role="combobox"
         id={context.inputId}
-        autoComplete="off"
         aria-expanded={context.open}
         aria-controls={context.listId}
         aria-labelledby={context.labelId}
         aria-autocomplete="list"
         aria-activedescendant={context.highlightedItem?.ref.current?.id}
-        aria-disabled={context.disabled}
-        aria-readonly={context.readonly}
-        disabled={context.disabled}
-        readOnly={context.readonly}
+        aria-disabled={context.disabled || disabled || undefined}
+        aria-readonly={context.readonly || readOnly || undefined}
+        aria-required={required || undefined}
+        aria-multiline="true"
+        aria-placeholder={placeholder}
         dir={context.dir}
-        {...inputProps}
+        tabIndex={!editable && !disabled ? 0 : undefined}
+        {...elementProps}
         ref={composedRef}
-        value={renderedInputValue}
-        className={cn(
-          'relative',
-          'z-10',
-          hideNativeText && stylex.props(styles.mirroredInput).className,
-          inputProps.className,
-          'bg-transparent'
-        )}
-        style={inputProps.style}
-        // Native spelling decorations can repaint glyphs above the mirror.
-        spellCheck={mirrorText ? false : inputProps.spellCheck}
-        onBeforeInput={composeEventHandlers(inputProps.onBeforeInput, onBeforeInput)}
-        onChange={composeEventHandlers(inputProps.onChange, onChange)}
-        onClick={composeEventHandlers(inputProps.onClick, onClick)}
-        onFocus={composeEventHandlers(inputProps.onFocus, onFocus)}
-        onKeyDown={composeEventHandlers(onKeyDown, inputProps.onKeyDown)}
-        onCompositionStart={composeEventHandlers(inputProps.onCompositionStart, onCompositionStart)}
-        onCompositionEnd={composeEventHandlers(inputProps.onCompositionEnd, onCompositionEnd)}
-        onSelect={composeEventHandlers(inputProps.onSelect, onSelect)}
+        data-composer-editor=""
+        data-placeholder={placeholder}
+        data-empty={paint.empty ? '' : undefined}
+        data-system-selection={mirrorSelection ? '' : undefined}
+        className={cn('relative', 'z-10', className, 'bg-transparent')}
+        style={{ '--composer-rows': rows, ...style } as React.CSSProperties}
+        // Chip glyphs repaint under native spelling decorations.
+        spellCheck={mirrorSelection ? false : spellCheck}
+        onKeyDownCapture={composeEventHandlers(onKeyDownPrimitive, onKeyDown)}
+        onPasteCapture={onPaste}
+        onCopyCapture={onCopy}
+        onCutCapture={onCut}
+        onClick={composeEventHandlers(onClick, onClickPrimitive)}
+        onFocus={composeEventHandlers(onFocus, onFocusPrimitive)}
+        onBlur={composeEventHandlers(onBlur, () => setFocused(false))}
+        onCompositionStart={composeEventHandlers(onCompositionStart, onCompositionStartPrimitive)}
+        onCompositionEnd={composeEventHandlers(onCompositionEnd, onCompositionEndPrimitive)}
       />
-      <MentionHighlighter
-        className={highlighterClassName}
-        renderValue={mentionRenderValue}
-        renderMentions={mentionRenderMentions}
-        showText={mirrorText}
+      <MentionDecorations
+        editor={editor}
+        offsets={paint.offsets}
+        selection={paint.selection}
+        focused={focused}
       />
     </div>
   );

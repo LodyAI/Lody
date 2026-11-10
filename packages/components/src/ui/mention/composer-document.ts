@@ -257,3 +257,18 @@ export function $setSelectionOffsets(start: number, end: number = start): void {
   selection.focus.set(focus.key, focus.offset, focus.type);
   $setSelection(selection);
 }
+
+/** Current string offsets of every mention node, by node key. */
+export function $readMentionOffsets(): Record<string, SelectionOffsets> {
+  const offsets: Record<string, SelectionOffsets> = {};
+  let text = 0;
+  $paragraphs().forEach((paragraph, index) => {
+    if (index > 0) text += 1;
+    for (const child of paragraph.getChildren()) {
+      const length = nodeLength(child);
+      if ($isMentionNode(child)) offsets[child.getKey()] = { start: text, end: text + length };
+      text += length;
+    }
+  });
+  return offsets;
+}

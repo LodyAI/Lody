@@ -41,15 +41,15 @@ export class MentionDecoratorNode extends DecoratorNode<MentionDecoration> {
   __text: string;
   __range: MentionNodeRange;
 
-  static getType(): string {
+  static override getType(): string {
     return 'lody-mention';
   }
 
-  static clone(node: MentionDecoratorNode): MentionDecoratorNode {
+  static override clone(node: MentionDecoratorNode): MentionDecoratorNode {
     return new MentionDecoratorNode(node.__text, node.__range, node.__key);
   }
 
-  static importJSON(serialized: SerializedMentionNode): MentionDecoratorNode {
+  static override importJSON(serialized: SerializedMentionNode): MentionDecoratorNode {
     return $createMentionNode(serialized.text, {
       start: 0,
       end: serialized.text.length,
@@ -64,7 +64,7 @@ export class MentionDecoratorNode extends DecoratorNode<MentionDecoration> {
     this.__range = range;
   }
 
-  exportJSON(): SerializedMentionNode {
+  override exportJSON(): SerializedMentionNode {
     return {
       ...super.exportJSON(),
       type: MentionDecoratorNode.getType(),
@@ -75,25 +75,17 @@ export class MentionDecoratorNode extends DecoratorNode<MentionDecoration> {
     };
   }
 
-  createDOM(_config: EditorConfig): HTMLElement {
+  override createDOM(_config: EditorConfig): HTMLElement {
     const element = document.createElement('span');
     element.contentEditable = 'false';
-    element.dataset.mentionValue = this.__range.value;
-    element.dataset.mentionKind = this.__range.kind ?? 'mention';
     return element;
   }
 
-  updateDOM(prev: MentionDecoratorNode, element: HTMLElement): boolean {
-    if (prev.__range.value !== this.__range.value) {
-      element.dataset.mentionValue = this.__range.value;
-    }
-    if (prev.__range.kind !== this.__range.kind) {
-      element.dataset.mentionKind = this.__range.kind ?? 'mention';
-    }
+  override updateDOM(): boolean {
     return false;
   }
 
-  getTextContent(): string {
+  override getTextContent(): string {
     return this.__text;
   }
 
@@ -101,20 +93,20 @@ export class MentionDecoratorNode extends DecoratorNode<MentionDecoration> {
     return this.getLatest().__range;
   }
 
-  isInline(): boolean {
+  override isInline(): boolean {
     return true;
   }
 
-  isIsolated(): boolean {
+  override isIsolated(): boolean {
     return false;
   }
 
   /** Arrow keys step over a chip instead of selecting it as a node. */
-  isKeyboardSelectable(): boolean {
+  override isKeyboardSelectable(): boolean {
     return false;
   }
 
-  decorate(): MentionDecoration {
+  override decorate(): MentionDecoration {
     return { text: this.__text, range: this.__range };
   }
 }

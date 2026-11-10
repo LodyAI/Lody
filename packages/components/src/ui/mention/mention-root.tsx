@@ -24,7 +24,7 @@ import {
   resolveMentionInsertPrefix,
   type MentionSplice,
 } from './mention-input-core';
-import type { InputElement } from './mention-input';
+import { getComposerSelection, getComposerText, type ComposerInputElement as InputElement } from './composer-input';
 import type { ItemElement } from './mention-item';
 
 function getDataState(open: boolean) {
@@ -574,7 +574,10 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       setOpen(false);
       const caret =
         direction < 0
-          ? Math.min(inputRef.current?.selectionStart ?? next.text.length, next.text.length)
+          ? Math.min(
+              inputRef.current ? getComposerSelection(inputRef.current).start : next.text.length,
+              next.text.length
+            )
           : next.text.length;
       setPendingSelection({ start: caret, end: caret, expectedValue: next.text });
       return true;
@@ -657,8 +660,8 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
         navigateText ??
         selectedItem?.insertText ??
         `${trigger}${selectedItem?.label ?? payloadValue}`;
-      const sourceValue = input?.value ?? inputValue;
-      const insertionPoint = input?.selectionStart ?? triggerIndex;
+      const sourceValue = input ? getComposerText(input) : inputValue;
+      const insertionPoint = input ? getComposerSelection(input).start : triggerIndex;
       const commit = (prepared: PreparedMention | null = null) => {
         const committedValue = payloadValue;
         const splice: MentionSplice = {
@@ -772,7 +775,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       const requests = Array.isArray(request) ? request : [request];
       if (requests.length === 0) return;
       const input = inputRef.current;
-      const sourceValue = input?.value ?? inputValue;
+      const sourceValue = input ? getComposerText(input) : inputValue;
       // Every insert reads the result of the previous one, then the controlled
       // text and ranges are published once for the entire gesture.
       const applyRequests = (initialMentions: Mention[]) => {
@@ -821,12 +824,13 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
   const onNavigateBack = React.useCallback(() => {
     const input = inputRef.current;
     if (!input) return false;
-    const caretPosition = input.selectionStart ?? input.value.length;
-    const triggerIndex = input.value.lastIndexOf(trigger, caretPosition);
+    const text = getComposerText(input);
+    const caretPosition = getComposerSelection(input).start;
+    const triggerIndex = text.lastIndexOf(trigger, caretPosition);
     if (triggerIndex === -1) return false;
 
     const caret = triggerIndex + trigger.length;
-    const nextValue = input.value.slice(0, caret) + input.value.slice(caretPosition);
+    const nextValue = text.slice(0, caret) + text.slice(caretPosition);
     setInputValue(nextValue);
     // Same reason as `onMentionAdd`: MentionInput restores the caret once it has
     // rendered this exact value, because touching the DOM selection here races
@@ -840,7 +844,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
 
   const onMentionsRemove = React.useCallback(
     (mentionsToRemove: Mention[]) => {
-      const input = inputRef.current;
+      const inputText = getComposerText(inputRef.current);
       setMentions((prev) => {
         // must match their actual order in the text
         const removed = [...mentionsToRemove].sort((a, b) => a.start - b.start);
@@ -858,7 +862,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
               .filter((r) => r.start < mention.start)
               .reduce((acc, r) => {
                 const mentionLength = r.end - r.start;
-                const hasTrailingSpace = input?.value[r.end] === ' ';
+                const hasTrailingSpace = inputText[r.end] === ' ';
                 return acc + mentionLength + (hasTrailingSpace ? 1 : 0);
               }, 0);
 
