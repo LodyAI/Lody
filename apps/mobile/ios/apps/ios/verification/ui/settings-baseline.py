@@ -117,7 +117,7 @@ for index, scenario in enumerate(scenarios):
         back()
 
     if has_workspace:
-        for identifier in ('remote-agent', 'project-history', 'archived'):
+        for identifier in ('remote-agent', 'archived'):
             reveal(identifier)
         state = scenario if scenario in ('live', 'syncing') else 'offline'
         # Only an offline workspace has a footer; connected and syncing stay quiet.
@@ -145,7 +145,7 @@ for index, scenario in enumerate(scenarios):
     assert not {'appearance', 'remote-mcp', 'memory-settings'} & visible
     assert not {'licenses', 'notifications', 'queued-message-behavior', 'accent-color', 'app-icon'} & visible
     if not has_workspace:
-        assert not {'remote-machine', 'archived', 'connection', 'project-history'} & visible
+        assert not {'remote-machine', 'archived', 'connection'} & visible
     ui.capture(f'{scenario}-bottom')
     observations.append({'scenario': scenario, 'workspace': has_workspace,
                          'seconds': round(time.monotonic() - started, 2)})

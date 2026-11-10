@@ -8,6 +8,7 @@ import type {
 import {
   DEFAULT_ROLE_EMOJI,
   readRole,
+  roleEmoji,
   readableRole,
   record,
   roleRunConfig,
@@ -163,7 +164,11 @@ export async function roleSettings(
       typeof fields.promptPrefix !== 'string' ||
       fields.promptPrefix.length > 32000 ||
       fields.promptPrefix.includes('\0') ||
-      !['private', 'workspace'].includes(fields.visibility)
+      !['private', 'workspace'].includes(fields.visibility) ||
+      (fields.emoji !== undefined &&
+        (typeof fields.emoji !== 'string' ||
+          !roleEmoji(fields.emoji) ||
+          Array.from(fields.emoji).length > 8))
     )
       throw new Error('role_invalid');
     const slug = roleSlug(fields.name);
@@ -202,13 +207,15 @@ export async function roleSettings(
     }
     const name = fields.name.trim(),
       description = fields.description,
-      promptPrefix = fields.promptPrefix.trim();
+      promptPrefix = fields.promptPrefix.trim(),
+      emoji = fields.emoji === undefined ? undefined : roleEmoji(fields.emoji);
     if (
       current &&
       current.name === name &&
       current.description === description &&
       current.promptPrefix === promptPrefix &&
-      current.visibility === fields.visibility
+      current.visibility === fields.visibility &&
+      (emoji === undefined || current.emoji === emoji)
     )
       return snapshot();
     Object.assign(value, {
@@ -216,6 +223,7 @@ export async function roleSettings(
       description,
       promptPrefix,
       visibility: fields.visibility,
+      ...(emoji ? { emoji } : {}),
       revision: (current?.revision ?? 0) + 1,
       updatedAt: Date.now(),
     });

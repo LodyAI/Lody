@@ -141,7 +141,6 @@ final class NativeDebugController: UIViewController {
       ("push-subscription-verify", String(localized: "debug.native.verify.onesignal.subscription", bundle: .lody), "bell.badge"),
       ("permission-native-preview", String(localized: "debug.native.permission.verification", bundle: .lody), "hand.raised"),
       ("onboarding-preview", String(localized: "debug.native.onboarding.verification", bundle: .lody), "hand.wave"),
-      ("project-history-preview", String(localized: "debug.native.project.conversation.sync.verification", bundle: .lody), "arrow.triangle.2.circlepath"),
       ("directory-preview", "Folder browser", "folder"),
       ("project-preview", "Project page", "folder.badge.gearshape"),
       ("activity-preview", "Activity page", "bolt.horizontal"),
