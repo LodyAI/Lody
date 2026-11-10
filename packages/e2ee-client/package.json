@@ -11,6 +11,7 @@
     "./automatic-pairing": "./src/automatic-pairing.ts",
     "./account-requester": "./src/account-requester.ts",
     "./history": "./src/admission.ts",
+    "./member": "./src/member.ts",
     "./errors": "./src/errors.ts",
     "./maintenance": "./src/maintenance.ts",
     "./recovery-restore": "./src/recovery-restore.ts",
