@@ -160,7 +160,14 @@ let oldSession: typeof session;
 let otherSession: typeof session;
 let trackNextReader = false;
 /** The synthetic member relay: one waiting applicant at a time, plus a call log. */
-let memberRelay: { item?: E2eeMemberRequest; calls: string[] } = { calls: [] };
+let memberRelay: {
+  item?: E2eeMemberRequest;
+  others: E2eeMemberRequest[];
+  /** What the relay answers when asked for the listed item, if it lies. */
+  readAs?: E2eeMemberRequest;
+  calls: string[];
+} = { calls: [], others: [] };
+let loseNextAppendReply = false;
 /** The relay authenticates the admitted device's own credential, as the real one does. */
 function memberRelayAccess(access: { workspaceId: string; credential: string }) {
   const claim = decodePersonalRequest(localStorage.getItem('last-request')!);
@@ -361,9 +368,11 @@ export async function boot(
               const item = memberRelay.item;
               return {
                 invitations: [],
-                items: item
-                  ? [{ ...item, applicantName: 'Riley', applicantEmail: 'r@example.test' }]
-                  : [],
+                items: [...(item ? [item] : []), ...memberRelay.others].map((entry) => ({
+                  ...entry,
+                  applicantName: 'Riley',
+                  applicantEmail: 'r@example.test',
+                })),
                 hasMore: false,
                 seatPreview: null as never,
               };
@@ -372,8 +381,14 @@ export async function boot(
             Effect.sync(() => {
               memberRelayAccess(access);
               memberRelay.calls.push('read');
-              const item = memberRelay.item!;
-              if (item.requestId !== requestId) throw new Error('unknown request');
+              const listed = [memberRelay.item!, ...memberRelay.others].find(
+                (entry) => entry.requestId === requestId
+              );
+              if (!listed) throw new Error('unknown request');
+              const item =
+                memberRelay.readAs && listed === memberRelay.item
+                  ? { ...memberRelay.readAs, requestId }
+                  : listed;
               const admitted = view().inspectState().devices.has(item.signingPublicKey);
               return { ...item, state: admitted ? ('committed' as const) : item.state };
             }),
@@ -475,6 +490,13 @@ export async function boot(
                       return yield* new LedgerLogError({});
                     records.push(new Uint8Array(record));
                     retain();
+                    if (loseNextAppendReply) {
+                      // The record landed; only its reply is lost on the way back.
+                      loseNextAppendReply = false;
+                      return yield* new LedgerLogError({
+                        cause: new Error('synthetic lost reply'),
+                      });
+                    }
                     return undefined;
                   }),
               });
@@ -1798,6 +1820,31 @@ export async function runtimeInvoke(action: string) {
           memberRelay.item!.requestId,
           'automatic'
         );
+        break;
+      case 'memberSecondApplicant':
+        memberRelay.others = [await Effect.runPromise(memberApplicant(71, 0x52))];
+        value = memberRelay.others[0]!.requestId;
+        break;
+      case 'memberReadSecondAsFirst':
+        // Asked for the first request, the relay answers with the second's package.
+        memberRelay.readAs = memberRelay.others[0];
+        value = true;
+        break;
+      case 'memberReadHonest':
+        memberRelay.readAs = undefined;
+        value = true;
+        break;
+      case 'memberSecondAdmitted':
+        value = view().inspectState().devices.has(memberRelay.others[0]!.signingPublicKey);
+        break;
+      case 'memberLoseReply':
+        loseNextAppendReply = true;
+        localStorage.setItem('synthetic-offline', '1');
+        value = true;
+        break;
+      case 'memberOnline':
+        localStorage.removeItem('synthetic-offline');
+        value = true;
         break;
       case 'memberAdmitted':
         value = view().inspectState().devices.has(memberRelay.item!.signingPublicKey);

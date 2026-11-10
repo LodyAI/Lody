@@ -287,6 +287,15 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               Effect.gen(function* () {
                 if (mode !== 'automatic' && mode !== 'explicit')
                   return yield* fail('invalid-input');
+                // An earlier approval whose reply was lost left its signed original in the
+                // journal: resubmit those exact bytes and settle them before anything new.
+                const resumed = yield* session.resume();
+                if (resumed) {
+                  yield* session.acknowledge(resumed);
+                  if (resumed.outcome !== 'Committed') return { admitted: false, keyPending: true };
+                }
+                // Decided against the verified ledger: an applicant the resumed original
+                // admitted needs no second signature.
                 const command = yield* session.members.admission(requestId, mode);
                 if (command) {
                   // The session journals the signed original; a lost reply is settled from

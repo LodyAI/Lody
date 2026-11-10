@@ -767,7 +767,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                     yield* Effect.fromResult(
                       prepareLedgerCommand(view, device.publicKey, admitMember(proof.request))
                     );
+                  // The listed id must be the signed request's own id: the pin is keyed by
+                  // the id an approval names, so no listed entry can stand for another.
                   const id = toHex(proof.request.requestId.toBytes());
+                  if (item.requestId !== id) return yield* fail('conflict');
                   const pinned = memberPreviews.get(id);
                   if (pinned !== undefined && pinned !== item.keyPackageHex)
                     return yield* fail('conflict');
@@ -793,10 +796,11 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             )
               return yield* fail('conflict');
             const proof = yield* memberProof(material.keyPackageHex);
-            // Only a package this session listed and showed may be signed.
+            // Only the package this session listed and showed for this very request may be
+            // signed: the signed request's id is the approved id, and its pin must match.
             if (
-              memberPreviews.get(toHex(proof.request.requestId.toBytes())) !==
-              material.keyPackageHex
+              toHex(proof.request.requestId.toBytes()) !== requestId ||
+              memberPreviews.get(requestId) !== material.keyPackageHex
             )
               return yield* fail('conflict');
             const state = (yield* admitted()).inspectState();

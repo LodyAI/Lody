@@ -333,19 +333,34 @@ it.each(['chromium', 'webkit'] as const)(
       expect(await good(page, 'memberInvite')).toBe('link');
       const applicant = await good(page, 'memberApplicant');
       expect((await call(page, 'memberApprove')).ok).toBe(false);
-      expect(await good(page, 'memberList')).toEqual([applicant]);
+      const second = await good(page, 'memberSecondApplicant');
+      expect(await good(page, 'memberList')).toEqual([applicant, second]);
       expect((await call(page, 'memberAutomatic')).ok).toBe(false);
+      // Asked for the first request, the relay answers with the second listed package:
+      // approving the first never admits the second.
+      await good(page, 'memberReadSecondAsFirst');
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      expect(await good(page, 'memberSecondAdmitted')).toBe(false);
+      await good(page, 'memberReadHonest');
       await good(page, 'memberSwap');
-      expect(await good(page, 'memberList')).toEqual([]);
+      expect(await good(page, 'memberList')).toEqual([second]);
       expect((await call(page, 'memberApprove')).ok).toBe(false);
       expect(await good(page, 'memberAdmitted')).toBe(false);
       await good(page, 'memberRestore');
       const beforeAdmission = (await good(page, 'memberRecordCount')) as number;
+      // The admission lands but its reply and the read-back are both lost; once online, the
+      // retry settles the same original instead of staying pending or signing again.
+      await good(page, 'memberLoseReply');
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      await good(page, 'memberOnline');
       expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true, keyPending: true });
       expect(await good(page, 'memberAdmitted')).toBe(true);
+      // The journal is settled, so later management is not left blocked behind it.
+      expect(await good(page, 'management')).toMatchObject({ updatePending: false });
       expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
       expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
       expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
+      expect(await good(page, 'memberSecondAdmitted')).toBe(false);
       // A key delivery's approval sessions never leak a reader: the last release
       // closes the workspace the approval opened.
       expect(await good(page, 'approvalRelease')).toEqual({
