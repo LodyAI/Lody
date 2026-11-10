@@ -6054,9 +6054,11 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     ledger: runtime.executionLedger,
     openContent: (_intent, request) => contentBinding.openAuthenticated(request),
   });
+  // The machine's own clock: tests move it to model a machine that was offline.
+  const machineClock = { now: Date.parse(queuedTimestamp) + 1_000 };
   const journal = RealtimeJournal.create(
     join(directory, 'queued-journal.sqlite'),
-    () => Date.parse(queuedTimestamp) + 1_000
+    () => machineClock.now
   );
   const execution = makeEncryptedAgentExecution({
     genesis: hex(fixture.genesis.toBytes()),
@@ -6294,6 +6296,7 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     fixture,
     gate,
     io,
+    machineClock,
     machineKey,
     member,
     memberRpc,
@@ -6372,6 +6375,47 @@ describe('encrypted queued input evidence', () => {
         yield* h.append({ _tag: 'DeclareCapabilities', capabilities: [1] });
         yield* h.append({ _tag: 'RemoveMember', membershipId: h.membershipId });
         expect(yield* h.claim(turn)).toMatchObject({ state: 'denied' });
+      })
+    ));
+
+  const threeDays = 3 * 24 * 60 * 60_000;
+
+  it('starts a message that reaches a machine which was offline for three days', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('late-turn', h.ownerRpc);
+        h.machineClock.now += threeDays;
+        expect(yield* h.claim(yield* h.promote())).toMatchObject({
+          state: 'claimed',
+          principal: 'owner',
+        });
+      })
+    ));
+
+  it('refuses, with a reason, a message a removed member sent three days earlier', () =>
+    run(true, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('removed-late-turn', h.memberRpc);
+        const turn = yield* h.promote();
+        yield* h.append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+        yield* h.append({ _tag: 'RemoveMember', membershipId: h.membershipId });
+        h.machineClock.now += threeDays;
+        expect(yield* h.claim(turn)).toEqual({
+          state: 'denied',
+          reason: 'e2ee_sender_not_authorized',
+        });
+      })
+    ));
+
+  it('starts a replayed message ID only once, however late it arrives', () =>
+    run(false, (h) =>
+      Effect.gen(function* () {
+        yield* h.send('replayed-turn', h.ownerRpc);
+        const turn = yield* h.promote();
+        h.machineClock.now += threeDays;
+        expect(yield* h.claim(turn)).toMatchObject({ state: 'claimed' });
+        h.machineClock.now += threeDays;
+        expect((yield* h.claim(turn)).state).not.toBe('claimed');
       })
     ));
 
