@@ -224,9 +224,8 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 ## Settings
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
-Agent settings, Agent Roles and sign-out. There is no Machines or Agent conversation
-sync destination. Other unfinished settings destinations (including prompt shortcuts,
-which need a native shortcut-cloud bridge) show an explicit placeholder.
+Agent settings, Agent Roles, prompt shortcuts and sign-out. There is no Machines or Agent conversation
+sync destination. Other unfinished settings destinations show an explicit placeholder.
 
 Preferences follows iOS: language and notifications open the system pages for this
 app, then the queued-message behaviour (`AppPreferences`). Steer applies only when
@@ -239,6 +238,17 @@ grid, name, description, target agent, sharing, instructions). The last list sho
 from process memory while a live read refreshes it; only a live list enables writes.
 Saves and deletes show at once and roll back on failure; unknown outcomes are never
 replayed. Canonical role settings validate ownership and conflicts.
+
+Prompt shortcuts (`ShortcutsScreen`, runtime `shortcutSettings`) list private and
+workspace shortcuts with their `/slug`, read a fresh body before editing, and create or
+edit simple ones (name, slug, prompt; visibility only when creating), as iOS: owner
+only, and shortcuts with a project / computer / provider scope or structured references
+stay view only. A save shows at once and rolls back on failure; an unknown outcome holds
+the same payload so the only next step is retrying that save. The runtime's
+`shortcutCloud` host calls (`listAccessibleDocuments`, `getStreamToken`, `stageDocument`,
+`activateDocument`) reach `PromptShortcutCloud`, which calls `promptShortcuts:*` on Convex
+with the verified account and the native workspace; mutations use a one-shot client.
+This also lets the composer's `/` shortcuts load their bodies.
 
 Agent settings select one machine above its provider list (online and own machines
 first); the top bar's "+" adds a provider to it, and the last list shows from process

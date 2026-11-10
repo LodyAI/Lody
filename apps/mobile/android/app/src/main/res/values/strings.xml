@@ -697,4 +697,21 @@
     <string name="roles_target_unavailable">The selected Agent is unavailable. Refresh and try again.</string>
     <string name="roles_invalid">Check the name and instructions, then try again.</string>
     <string name="roles_unknown">The change could not be confirmed. Refresh before trying again.</string>
+    <string name="shortcuts_add">Add Shortcut</string>
+    <string name="shortcuts_changed">Shortcut changed or access was revoked. Refresh and reopen.</string>
+    <string name="shortcuts_empty">No shortcuts yet. Tap + to add a private or workspace shortcut.</string>
+    <string name="shortcuts_load_failed">Unable to load shortcuts. Try again.</string>
+    <string name="shortcuts_hint">In chat, type / and pick a shortcut.</string>
+    <string name="shortcuts_private">Private</string>
+    <string name="shortcuts_workspace">Shared with workspace</string>
+    <string name="shortcuts_view_only">View only</string>
+    <string name="shortcuts_read_only">Only the owner can edit. Shortcuts with context or structured references are view only on Android.</string>
+    <string name="shortcuts_slug">Command name</string>
+    <string name="shortcuts_slug_hint">Use 1–40 lowercase letters, digits or hyphens.</string>
+    <string name="shortcuts_prompt">Prompt</string>
+    <string name="shortcuts_workspace_toggle">Shared with workspace</string>
+    <string name="shortcuts_visibility_hint">Choose visibility when creating; an existing shortcut keeps its visibility.</string>
+    <string name="shortcuts_retry">Retry this save</string>
+    <string name="shortcuts_save_unknown">Save could not be confirmed. This same save is held for a safe retry; close and refresh to edit again.</string>
+    <string name="shortcuts_save_failed">The shortcut could not be saved. Check the command name, then try again.</string>
 </resources>

@@ -93,5 +93,10 @@ replicas with online and own computers first, loads prompt-shortcut indexes in
 parallel, accepts a Role `emoji` on save and removes the project-history action.
 `role-commands.mjs` bridges `agentRoleSettings` (list / save / delete) with the native
 identity and a closed error vocabulary; both network gates permit read, create and
-append of `<workspace>:wf:workspace` only. Prompt shortcuts still need a native
-`shortcutCloud` bridge before Android can list or edit them.
+append of `<workspace>:wf:workspace` only. Prompt shortcuts: the contract bridge forwards
+the runtime's allow-listed `shortcutCloud` host calls for the current workspace to native as
+`shortcutCloud` events and answers each once through `shortcutCloudReply` (`{value}` or
+null → `shortcut_unavailable`, 60-second native deadline); `shortcut-commands.mjs` bridges
+`shortcutSettings` (list / read / save). Both gates permit read, create and append of
+`shortcut-index:<workspace>:<owner>:<visibility>` and `shortcut-body:<id>`, whose
+stream-specific tokens come from `getStreamToken`.

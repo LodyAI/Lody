@@ -40,6 +40,8 @@ open class WebViewRuntime internal constructor(
         is RuntimeCommand.AgentProviders -> RuntimeResult.AgentProviders(AgentProviderJson.result(call("agentProviders", JSONArray().put(AgentProviderJson.request(command.action)), CommandDeadline.PROVIDER_PROBE) as JSONObject))
         is RuntimeCommand.AgentRoleSettings -> RuntimeResult.RoleSettings(RoleSettingsJson.result(call("agentRoleSettings", JSONArray().put(RoleSettingsJson.request(command.action)),
             if (command.action == RoleSettingsAction.List) CommandDeadline.QUERY else CommandDeadline.WRITE) as JSONObject))
+        is RuntimeCommand.ShortcutSettings -> RuntimeResult.ShortcutSettings(ShortcutSettingsJson.result(call("shortcutSettings", JSONArray().put(ShortcutSettingsJson.request(command.action)),
+            if (command.action is ShortcutSettingsAction.Save) CommandDeadline.WRITE else CommandDeadline.QUERY) as JSONObject))
         is RuntimeCommand.MessageAction -> RuntimeResult.MessageAction(call("messageAction", JSONArray().put(command.kind).put(command.payload), CommandDeadline.WRITE) as JSONObject)
         is RuntimeCommand.SetTabClosed -> {
             call("setTabClosed", JSONArray().put(command.id).put(command.closed), CommandDeadline.WRITE)

@@ -191,6 +191,7 @@ fun ChatListScreen(
     creation: app.lody.android.create.CreationService? = null,
     agentProviders: AgentProviderService? = null,
     roleSettings: RoleSettingsService? = null,
+    shortcutSettings: ShortcutSettingsService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
     onOpenSession: (String) -> Unit = {},
@@ -218,6 +219,7 @@ fun ChatListScreen(
     var agentsOpen by rememberSaveable(scope) { mutableStateOf(false) }
     var preferencesOpen by rememberSaveable { mutableStateOf(false) }
     var rolesOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var shortcutsOpen by rememberSaveable(scope) { mutableStateOf(false) }
     val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
@@ -242,6 +244,10 @@ fun ChatListScreen(
 
     if (preferencesOpen) {
         PreferencesScreen(onBack = { preferencesOpen = false })
+        return
+    }
+    if (shortcutsOpen) {
+        ShortcutsScreen(state, shortcutSettings, scope, onBack = { shortcutsOpen = false })
         return
     }
     if (rolesOpen) {
@@ -326,7 +332,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onDeferred = { notice(deferredMessage) })
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onShortcuts = { shortcutsOpen = true }, onDeferred = { notice(deferredMessage) })
         }
     }
     }

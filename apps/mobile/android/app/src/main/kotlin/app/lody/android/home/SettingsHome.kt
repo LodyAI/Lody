@@ -16,7 +16,7 @@ import app.lody.android.designsystem.*
 /** iOS SettingsSections ordering, with platform-native sheets for account/workspace selection. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSelectWorkspace: (Workspace) -> Unit, onSignOut: () -> Unit, onAgents: () -> Unit, onPreferences: () -> Unit, onRoles: () -> Unit, onDeferred: () -> Unit) {
+internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSelectWorkspace: (Workspace) -> Unit, onSignOut: () -> Unit, onAgents: () -> Unit, onPreferences: () -> Unit, onRoles: () -> Unit, onShortcuts: () -> Unit, onDeferred: () -> Unit) {
     var sheet by remember { mutableStateOf<String?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item {
@@ -36,7 +36,7 @@ internal fun SettingsHome(state: ChatListUiState, padding: PaddingValues, onSele
                 SettingsLine(stringResource(R.string.settings_workspace_general), LodyIcons.ProjectGroup, stringResource(R.string.settings_workspace_hint), { sheet = "workspace" })
                 SettingsLine(stringResource(R.string.settings_agents), LodyIcons.Sparkles, onClick = onAgents)
                 SettingsLine(stringResource(R.string.settings_roles), LodyIcons.User, onClick = onRoles)
-                SettingsLine(stringResource(R.string.settings_shortcuts), LodyIcons.File, onClick = onDeferred)
+                SettingsLine(stringResource(R.string.settings_shortcuts), LodyIcons.File, onClick = onShortcuts)
                 SettingsLine(stringResource(R.string.settings_projects), LodyIcons.Folder, onClick = onDeferred)
                 SettingsLine(stringResource(R.string.settings_github), LodyIcons.Github, onClick = onDeferred)
                 SettingsLine(stringResource(R.string.settings_usage), LodyIcons.StateRunning, onClick = onDeferred)
