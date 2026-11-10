@@ -365,6 +365,9 @@ function SessionAccessMembers({
   const directory = new Map(
     (state.availableMembers ?? []).map((member) => [member.userId, member])
   );
+  const memberName = (userId: string) =>
+    directory.get(userId)?.name?.trim() ||
+    t(state.membersLoading ? 'common.loading' : 'sessions.access.unknownMember');
   const ids = [
     ...new Set([...(state.ownerUserId ? [state.ownerUserId] : []), ...(state.memberUserIds ?? [])]),
   ];
@@ -387,20 +390,26 @@ function SessionAccessMembers({
       <p {...stylex.props(memberStyles.heading)}>{t('sessions.access.members')}</p>
       {ids.map((userId) => (
         <div key={userId} {...stylex.props(memberStyles.row)}>
-          <span {...stylex.props(memberStyles.name)}>{directory.get(userId)?.name ?? userId}</span>
+          <span
+            {...stylex.props(memberStyles.name)}
+            aria-busy={!!state.membersLoading && !directory.has(userId)}
+          >
+            {memberName(userId)}
+          </span>
           <span {...stylex.props(memberStyles.role)}>
             {t(
               userId === state.ownerUserId ? 'sessions.access.owner' : 'sessions.access.memberRead'
             )}
           </span>
-          {state.canManage && userId === state.ownerUserId && (
-            // Holds the remove button's width so every role label lines up.
-            <span aria-hidden="true" {...stylex.props(memberStyles.placeholder)}>
-              <Button variant="ghost" icon size="small" disabled tabIndex={-1}>
-                <X {...stylex.props(shareSurface.glyphSmall)} />
-              </Button>
-            </span>
-          )}
+          {state.canManage &&
+            userId === state.ownerUserId && (
+              // Holds the remove button's width so every role label lines up.
+              <span aria-hidden="true" {...stylex.props(memberStyles.placeholder)}>
+                <Button variant="ghost" icon size="small" disabled tabIndex={-1}>
+                  <X {...stylex.props(shareSurface.glyphSmall)} />
+                </Button>
+              </span>
+            )}
           {state.canManage && userId !== state.ownerUserId && (
             <Button
               variant="ghost"
@@ -408,7 +417,7 @@ function SessionAccessMembers({
               size="small"
               disabled={busy}
               aria-label={t('sessions.access.removeMember', {
-                name: directory.get(userId)?.name ?? userId,
+                name: memberName(userId),
               })}
               onClick={() => {
                 void change(userId, false);

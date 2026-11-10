@@ -181,6 +181,43 @@ describe('SessionAccessControl', () => {
     }
   );
 
+  it.each([
+    ['en', true, 'Loading...'],
+    ['en', false, 'Unknown member'],
+    ['zh_CN', true, '加载中...'],
+    ['zh_CN', false, '未知成员'],
+  ] as const)(
+    'uses localized member placeholders and keeps removal available (%s, loading=%s)',
+    async (locale, loading, label) => {
+      await initI18n(locale);
+      let removed: string | undefined;
+      await render({
+        state: {
+          ...baseState,
+          visibility: 'private',
+          ownerUserId: 'raw-owner-id',
+          memberUserIds: ['raw-departed-id'],
+          availableMembers: [],
+          membersLoading: loading,
+          setMemberReadAccess: async (id, shared) => {
+            if (!shared) removed = id;
+          },
+        },
+      });
+      await openPanel();
+      expect(panel().textContent).toContain(label);
+      expect(panel().textContent).not.toContain('raw-owner-id');
+      expect(panel().textContent).not.toContain('raw-departed-id');
+      const remove = [...panel().querySelectorAll<HTMLButtonElement>('button[aria-label]')].find(
+        (button) => button.getAttribute('aria-label')?.includes(label)
+      );
+      expect(remove).toBeDefined();
+      expect(remove!.disabled).toBe(false);
+      await act(async () => remove!.click());
+      expect(removed).toBe('raw-departed-id');
+    }
+  );
+
   it.each(['team', 'unknown'] as const)(
     'shows the conversation state when visibility is %s without a public link',
     async (visibility) => {

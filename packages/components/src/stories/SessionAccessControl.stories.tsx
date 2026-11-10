@@ -209,3 +209,17 @@ export const PersonalReadOnlyMobile: Story = {
   parameters: { viewport: { defaultViewport: 'mobile1' } },
   args: { state: memberState, presentation: 'dialog' },
 };
+
+export const MembersLoading: Story = {
+  args: { state: { ...memberState, availableMembers: [], membersLoading: true } },
+  play: PersonalReadOnly.play,
+};
+export const UnknownMember: Story = {
+  args: {
+    state: {
+      ...memberState,
+      availableMembers: memberState.availableMembers.filter((member) => member.userId !== 'bob'),
+    },
+  },
+  play: PersonalReadOnly.play,
+};

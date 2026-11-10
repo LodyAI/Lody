@@ -88,7 +88,7 @@ export function SidebarMachineHoverCard({
   );
 }
 
-function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
+export function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
   const { t } = useTranslation();
   const status = useMachineOnlineStatus(machine.machineId);
   const activityDescription = useSidebarGroupActivityDescription(machine.activity);

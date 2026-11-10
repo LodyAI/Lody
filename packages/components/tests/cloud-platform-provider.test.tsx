@@ -525,37 +525,57 @@ describe('CloudPlatformProvider', () => {
     expect(container.textContent).toContain('v9');
   });
 
-  it('re-signs a revoked issuer policy without dropping undisplayed project choices', async () => {
-    let view = {
-      ...policyView(),
-      needsResign: true,
-      sharedWithTeam: true,
-      projects: ['project-a', 'retained-project'],
-    };
-    fixture.invoke = async (channel, ...args) => {
-      if (channel === 'e2ee.readMachineSharing') return view;
-      expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
-      expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
-      view = {
-        ...view,
-        needsResign: false,
-        head: { revision: 2, digest: '55'.repeat(32) },
-        signer: '66'.repeat(32),
+  it.each(['en', 'zh_CN'] as const)(
+    'keeps a revoked signer policy effective and re-signs without dropping choices (%s)',
+    async (language) => {
+      let view = {
+        ...policyView(),
+        needsResign: true,
+        sharedWithTeam: true,
+        projects: ['project-a', 'retained-project'],
       };
-      return { status: 'saved', requestId: args[3] };
-    };
-    await renderSharing();
-    expect(container.textContent).toContain('Review recommended');
-    await clickSharing('Review and re-sign');
-    expect(container.textContent).toContain('v2');
-    expect(container.textContent).toContain('666666666666');
-    expect(container.textContent).toContain('retained-project');
-    expect(
-      container
-        .querySelector('[aria-label="Share Lody with the team"]')
-        ?.getAttribute('aria-checked')
-    ).toBe('true');
-  });
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+        expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
+        view = {
+          ...view,
+          needsResign: false,
+          head: { revision: 2, digest: '55'.repeat(32) },
+          signer: '66'.repeat(32),
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      await act(async () => {
+        await initI18n(language);
+      });
+      expect(container.textContent).toContain(
+        language === 'en' ? 'Review recommended' : '建议检查'
+      );
+      expect(container.textContent).toContain(language === 'en' ? 'Effective version' : '生效版本');
+      expect(container.textContent).not.toContain(language === 'en' ? 'inactive' : '未生效');
+      const toggle = container.querySelector<HTMLButtonElement>(
+        '[data-testid=machine-sharing-toggle]'
+      )!;
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+      expect(toggle.disabled).toBe(false);
+      expect(container.textContent).toContain(language === 'en' ? 'Signing device' : '签名设备');
+      await clickSharing(language === 'en' ? 'Review and re-sign' : '检查并重新签名');
+      expect(container.textContent).toContain('v2');
+      expect(container.textContent).toContain('666666666666');
+      expect(container.textContent).toContain('retained-project');
+      expect(
+        container
+          .querySelector(
+            language === 'en'
+              ? '[aria-label="Share Lody with the team"]'
+              : '[aria-label="与团队共享 Lody"]'
+          )
+          ?.getAttribute('aria-checked')
+      ).toBe('true');
+    }
+  );
 
   it.each(['withdrawn', 'readmitted', 'pending'] as const)(
     'rechecks a stale re-sign surface before writing when the latest policy is %s',

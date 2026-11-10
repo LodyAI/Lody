@@ -78,8 +78,8 @@ function MobileSessionAccessDialog({
   workspaceId: WorkspaceId;
   onClose: () => void;
 }) {
-  const members = useWorkspaceMembers().members;
-  const sharing = useSessionSharing({ workspaceId, members });
+  const { members, isLoading: membersLoading } = useWorkspaceMembers();
+  const sharing = useSessionSharing({ workspaceId, members, membersLoading });
   return (
     <SessionAccessControl
       state={sharing.resolve(session)}

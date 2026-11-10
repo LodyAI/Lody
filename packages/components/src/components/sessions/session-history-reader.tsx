@@ -293,8 +293,8 @@ export function SessionHistoryReader({
   const { t } = useTranslation();
   const store = useStore();
   const sessionAccess = useSessionAccess();
-  const members = useWorkspaceMembers().members;
-  const sharingResolver = useSessionSharing({ members });
+  const { members, isLoading: membersLoading } = useWorkspaceMembers();
+  const sharingResolver = useSessionSharing({ members, membersLoading });
   const accountId = useWorkspaceLocalAccountId();
   const router = useRouter();
   const fullscreen = useElectronFullscreen();

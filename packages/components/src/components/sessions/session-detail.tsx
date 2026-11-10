@@ -1295,8 +1295,11 @@ const SessionDetail = ({
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localHomeDir = useAtomValue(localHomeDirAtom);
   const user = useAtomValue(userAtom);
-  const { members: workspaceMembers, isMultiMember: isMultiMemberWorkspace } =
-    useWorkspaceMembers();
+  const {
+    members: workspaceMembers,
+    isMultiMember: isMultiMemberWorkspace,
+    isLoading: sharingMembersLoading,
+  } = useWorkspaceMembers();
   const {
     accessByMachineId: sharingMachineAccessById,
     accessByProjectKey: sharingProjectAccessByKey,
@@ -1305,7 +1308,7 @@ const SessionDetail = ({
     showSessionSharing,
     resolve: resolveSessionSharing,
     shareWithTeam: shareSessionWithTeam,
-  } = useSessionSharing({ members: workspaceMembers });
+  } = useSessionSharing({ members: workspaceMembers, membersLoading: sharingMembersLoading });
   const controlConnectionState = useAtomValue(lodyControlConnectionStateAtom);
   // The local-token route can render before Convex workspace access fills
   // currentWorkspaceIdAtom. The workspace runtime already resolved the same id

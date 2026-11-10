@@ -106,11 +106,9 @@ export function MachineSharingPanel({
         ? 'unavailable'
         : pending
           ? 'pending'
-          : view.needsResign
-            ? 'needsResign'
-            : effective
-              ? 'shared'
-              : 'private';
+          : effective
+            ? 'shared'
+            : 'private';
   return (
     <div {...stylex.props(styles.root)} aria-busy={!!busy || !!loading}>
       <CompactSection title={t('e2ee.machineSharing.title')}>
@@ -131,13 +129,7 @@ export function MachineSharingPanel({
           {busy || loading ? <Spinner size="small" /> : null}
         </CompactRow>
         <CompactRow
-          label={t(
-            view?.needsResign
-              ? 'e2ee.machineSharing.recordedVersion'
-              : pending
-                ? 'e2ee.machineSharing.lastVersion'
-                : 'e2ee.machineSharing.version'
-          )}
+          label={t(pending ? 'e2ee.machineSharing.lastVersion' : 'e2ee.machineSharing.version')}
         >
           <span>{view?.head ? `v${view.head.revision}` : t('e2ee.machineSharing.noVersion')}</span>
         </CompactRow>
@@ -189,6 +181,7 @@ export function MachineSharingPanel({
           ) : null}
           {view?.needsResign ? (
             <Alert.Root>
+              <Alert.Title>{t('e2ee.machineSharing.state.needsResign')}</Alert.Title>
               <Alert.Description>{t('e2ee.machineSharing.resignHint')}</Alert.Description>
             </Alert.Root>
           ) : null}
