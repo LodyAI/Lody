@@ -74,8 +74,9 @@ if (platform === 'ios') {
     'arm64-v8a',
     '-t',
     'x86_64',
+    // The app's minSdkVersion.
     '-P',
-    '26',
+    '24',
     '-o',
     path.join(dir, 'jniLibs'),
     'build',
