@@ -176,7 +176,7 @@ class ProjectVisibilityController: UIViewController {
     case "rowAction":
       guard let id = body["id"] as? String, let action = body["actionId"] as? String,
             ["shared", "private"].contains(action), live, !busy, !failed, !unconfirmed, !mutating,
-            let row = snapshot?.rows.first(where: { $0.id == id }), row.ownerUserId == snapshot?.userId,
+            let row = snapshot?.effectiveRows(catalog: workspace.catalog).first(where: { $0.id == id }), row.ownerUserId == snapshot?.userId,
             row.sharedWithTeam != (action == "shared") else { return }
       write(row, shared: action == "shared")
     default:

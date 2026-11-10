@@ -30,7 +30,7 @@ private final class ProjectVisibilityFixture {
   private var snapshot = VisibilitySnapshot(userId: "owner", rows: [
     VisibilityRow(machineId: "m1", localProjectId: "same", ownerUserId: "owner", sharedWithTeam: false, updatedAt: 1),
     VisibilityRow(machineId: "m2", localProjectId: "same", ownerUserId: "teammate", sharedWithTeam: true, updatedAt: 1),
-  ])
+  ], ownedMachineIds: ["m1"])
 
   func request(_ request: VisibilityRequest) async throws -> VisibilitySnapshot {
     if request.action == "set", let shared = request.sharedWithTeam {
