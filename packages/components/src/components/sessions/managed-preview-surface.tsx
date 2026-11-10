@@ -20,11 +20,6 @@ import {
 } from '@lody/shared/visual-annotation-inspector';
 import {
   RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
-  SET_ANNOTATION_MODE_MESSAGE_TYPE,
-  MANAGED_BROWSER_COMMAND_MESSAGE_TYPE,
-  MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
-  MANAGED_BROWSER_STATE_MESSAGE_TYPE,
-  MANAGED_BROWSER_READY_MESSAGE_TYPE,
   VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
   VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
   type VisualAnnotationAnchorsResolvedMessage,
@@ -35,7 +30,6 @@ import {
   type VisualAnnotationViewport,
   type ResolveVisualAnnotationAnchorsMessage,
   type ManagedBrowserCommand,
-  type ManagedBrowserNavigationRequestMessage,
   type ManagedBrowserStateMessage,
 } from '@lody/shared/visual-annotation-types';
 import {
@@ -59,15 +53,8 @@ import { useConversationVersion } from '@/hooks/use-conversation-view';
 import { resolveActiveAssistantTurnIdFromIndex } from '@/lib/conversation-view';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import {
-  buildManagedViewerUrlForLogicalUrl,
-  getManagedPageKey,
-  toManagedLogicalUrl,
-} from '@/lib/session-browser-url';
-import {
-  acquireManagedPreviewFrame,
-  releaseManagedPreviewFrame,
-} from './managed-preview-frame-cache';
+import { getManagedPageKey } from '@/lib/session-browser-url';
+import { useManagedPreviewFrame } from './use-managed-preview-frame';
 
 const styles = stylex.create({
   root: {
@@ -230,24 +217,6 @@ const isVisualAnnotationAnchorsResolvedMessage = (
   Array.isArray(value.payload.results) &&
   value.payload.results.every(isVisualAnnotationResolvedAnchor);
 
-const isManagedBrowserStateMessage = (value: unknown): value is ManagedBrowserStateMessage =>
-  isRecord(value) &&
-  value.type === MANAGED_BROWSER_STATE_MESSAGE_TYPE &&
-  isRecord(value.payload) &&
-  typeof value.payload.url === 'string' &&
-  typeof value.payload.title === 'string' &&
-  typeof value.payload.loading === 'boolean' &&
-  typeof value.payload.canGoBack === 'boolean' &&
-  typeof value.payload.canGoForward === 'boolean';
-
-const isManagedBrowserNavigationRequestMessage = (
-  value: unknown
-): value is ManagedBrowserNavigationRequestMessage =>
-  isRecord(value) &&
-  value.type === MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE &&
-  isRecord(value.payload) &&
-  typeof value.payload.url === 'string';
-
 const getTargetLabel = (payload: VisualAnnotationInspectPayload): string => {
   const tag = payload.target.tag.toLowerCase();
   const id = payload.target.id ? `#${payload.target.id}` : '';
@@ -338,10 +307,8 @@ export function ManagedPreviewSurface({
   const { t } = useTranslation();
   const user = useAtomValue(userAtom);
   const sessionDoc = useSessionDoc(session.id);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const iframeHostRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [selectedTarget, setSelectedTarget] = useState<VisualAnnotationInspectPayload | null>(null);
   const [draftBody, setDraftBody] = useState('');
@@ -352,16 +319,7 @@ export function ManagedPreviewSurface({
     Record<string, VisualAnnotationResolvedAnchor>
   >({});
   const trackedAnchorIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const handledCommandIdRef = useRef(0);
-  const previewOrigin = useMemo(
-    () => (documentHtml === undefined ? new URL(viewerUrl).origin : 'null'),
-    [documentHtml, viewerUrl]
-  );
-  const previewPostMessageOrigin = documentHtml === undefined ? previewOrigin : '*';
   const managedFrameTitle = t('sessions.browser.managedFrameTitle', 'Managed preview');
-  // Read at acquire time so a language switch retitles the live frame instead of
-  // re-running the acquire effect, which would reparent the iframe.
-  const managedFrameTitleRef = useRef(managedFrameTitle);
   const commentUser = useMemo(
     () => (user?.id ? { id: user.id, name: user.name ?? user.email ?? undefined } : null),
     [user?.email, user?.id, user?.name]
@@ -420,14 +378,69 @@ export function ManagedPreviewSurface({
     return next;
   }, [comments, selectedTarget]);
 
-  const postToPreview = useCallback(
-    (message: unknown) => {
-      if (!iframeLoaded) return;
-      iframeRef.current?.contentWindow?.postMessage(message, previewPostMessageOrigin);
-    },
-    [iframeLoaded, previewPostMessageOrigin]
+  const trackedAnchorsRef = useRef<readonly TrackedVisualAnnotationAnchor[]>([]);
+  const postTrackedAnchorsRef = useRef<(anchors: readonly TrackedVisualAnnotationAnchor[]) => void>(
+    () => {}
   );
-
+  const invalidRuntimeUrlMessage = t(
+    'sessions.browser.errors.invalidRuntimePageUrl',
+    'The managed preview runtime reported an invalid page URL.'
+  );
+  const handleBrowserStateChange = useStableCallback(
+    (state: ManagedBrowserStateMessage['payload']) => {
+      onBrowserStateChange(state);
+      postTrackedAnchorsRef.current(trackedAnchorsRef.current);
+    }
+  );
+  const handleRuntimeMessage = useStableCallback((data: unknown) => {
+    if (isVisualAnnotationAnchorsResolvedMessage(data)) {
+      startTransition(() => {
+        setResolvedAnchors(
+          Object.fromEntries(
+            data.payload.results
+              .filter((result) => trackedAnchorIdsRef.current.has(result.commentId))
+              .map((result) => [result.commentId, result])
+          )
+        );
+      });
+    } else if (isVisualAnnotationTargetMessage(data)) {
+      let pageUrl: string;
+      try {
+        pageUrl = mapRuntimeUrl(data.payload.page.url);
+      } catch {
+        onRuntimeError(invalidRuntimeUrlMessage);
+        return;
+      }
+      startTransition(() => {
+        setSelectedTarget({
+          ...data.payload,
+          page: {
+            ...data.payload.page,
+            url: pageUrl,
+            pathname: new URL(pageUrl).pathname,
+          },
+        });
+        setDraftBody('');
+      });
+    }
+  });
+  const { iframeLoaded, postToPreview, mapRuntimeUrl } = useManagedPreviewFrame({
+    hostRef: iframeHostRef,
+    sessionId: session.id,
+    viewerUrl,
+    logicalUrl,
+    documentHtml,
+    title: managedFrameTitle,
+    annotationEnabled,
+    command,
+    invalidRuntimeUrlMessage,
+    onAnnotationAvailabilityChange,
+    onRuntimeError,
+    onLoadingChange,
+    onBrowserStateChange: handleBrowserStateChange,
+    onNavigationRequest,
+    onRuntimeMessage: handleRuntimeMessage,
+  });
   const postTrackedAnchors = useCallback(
     (anchors: readonly TrackedVisualAnnotationAnchor[]) => {
       trackedAnchorIdsRef.current = new Set(anchors.map(({ commentId }) => commentId));
@@ -448,42 +461,10 @@ export function ManagedPreviewSurface({
     postTrackedAnchors(trackedAnchors);
   }, [iframeLoaded, postTrackedAnchors, trackedAnchors]);
 
-  const handleIframeLoad = useStableCallback(() => {
-    // A new document starts its handshake from scratch; a live runtime re-reports
-    // immediately in response to the SET_ANNOTATION_MODE message below.
-    setIframeLoaded(true);
-    onAnnotationAvailabilityChange(false);
-    onLoadingChange(false);
-    // Annotation is optional. A missing or late handshake must not turn page
-    // loading into an error; a later valid state message enables annotation.
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled },
-      previewPostMessageOrigin
-    );
-  });
-
-  const syncFrameLoadState = useStableCallback((loaded: boolean) => {
-    setIframeLoaded(loaded);
-    onLoadingChange(!loaded);
-  });
-
-  const hardReloadFrame = useStableCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    if (documentHtml !== undefined) {
-      syncFrameLoadState(false);
-      iframe.srcdoc = documentHtml;
-      return;
-    }
-    let nextSrc = viewerUrl;
-    try {
-      nextSrc = buildManagedViewerUrlForLogicalUrl(viewerUrl, logicalUrl);
-    } catch {
-      // Fall back to the acquire-time viewer URL when the logical URL is unusable.
-    }
-    syncFrameLoadState(false);
-    iframe.src = nextSrc;
-  });
+  useLayoutEffect(() => {
+    trackedAnchorsRef.current = trackedAnchors;
+    postTrackedAnchorsRef.current = postTrackedAnchors;
+  }, [postTrackedAnchors, trackedAnchors]);
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
@@ -493,62 +474,11 @@ export function ManagedPreviewSurface({
     return observeResizeOnAnimationFrame(surface, measure);
   }, []);
 
-  useLayoutEffect(() => {
-    const host = iframeHostRef.current;
-    if (!host) return undefined;
-    const frame = acquireManagedPreviewFrame({
-      sessionId: session.id,
-      viewerUrl,
-      title: managedFrameTitleRef.current,
-      host,
-      documentHtml,
-    });
-    iframeRef.current = frame.iframe;
-    frame.iframe.addEventListener('load', handleIframeLoad);
-    syncFrameLoadState(frame.loaded);
-    return () => {
-      frame.iframe.removeEventListener('load', handleIframeLoad);
-      if (iframeRef.current === frame.iframe) iframeRef.current = null;
-      releaseManagedPreviewFrame(session.id, frame.iframe);
-    };
-  }, [documentHtml, handleIframeLoad, session.id, syncFrameLoadState, viewerUrl]);
-
-  useEffect(() => {
-    managedFrameTitleRef.current = managedFrameTitle;
-    const iframe = iframeRef.current;
-    if (iframe) iframe.title = managedFrameTitle;
-  }, [managedFrameTitle]);
-
   useEffect(() => {
     setSelectedTarget(null);
     setDraftBody('');
     setResolvedAnchors({});
-    onAnnotationAvailabilityChange(false);
-    onRuntimeError(null);
-  }, [documentHtml, onAnnotationAvailabilityChange, onRuntimeError, session.id, viewerUrl]);
-
-  useEffect(() => {
-    if (iframeLoaded) {
-      postToPreview({ type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled });
-    }
-  }, [annotationEnabled, iframeLoaded, postToPreview]);
-
-  useEffect(() => {
-    if (!command || command.id === handledCommandIdRef.current) return;
-    if (command.action === 'reload') {
-      // Always reload from the parent: a runtime that once handshook can later
-      // fail or be removed by the page, so it cannot own this recovery action.
-      handledCommandIdRef.current = command.id;
-      hardReloadFrame();
-      return;
-    }
-    if (!iframeLoaded) return;
-    handledCommandIdRef.current = command.id;
-    postToPreview({
-      type: MANAGED_BROWSER_COMMAND_MESSAGE_TYPE,
-      command: command.action,
-    });
-  }, [command, documentHtml, hardReloadFrame, iframeLoaded, postToPreview]);
+  }, [documentHtml, session.id, viewerUrl]);
 
   useEffect(() => {
     resolveAnchors();
@@ -560,106 +490,6 @@ export function ManagedPreviewSurface({
     );
     setCollapsedCommentIds((current) => current.filter((id) => visibleCommentIds.has(id)));
   }, [visibleCommentIds]);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent<unknown>) => {
-      if (event.origin !== previewOrigin || event.source !== iframeRef.current?.contentWindow)
-        return;
-      if (isRecord(event.data) && event.data.type === MANAGED_BROWSER_READY_MESSAGE_TYPE) {
-        // Scripts can be ready while images or other page resources still load.
-        // This reply does not require iframeLoaded and contains no page data.
-        iframeRef.current?.contentWindow?.postMessage(
-          { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled },
-          previewPostMessageOrigin
-        );
-      } else if (isManagedBrowserStateMessage(event.data)) {
-        let mappedUrl: string;
-        try {
-          mappedUrl =
-            documentHtml === undefined
-              ? toManagedLogicalUrl(event.data.payload.url, logicalUrl)
-              : logicalUrl;
-        } catch {
-          onAnnotationAvailabilityChange(false);
-          onRuntimeError(
-            t(
-              'sessions.browser.errors.invalidRuntimePageUrl',
-              'The managed preview runtime reported an invalid page URL.'
-            )
-          );
-          return;
-        }
-        onAnnotationAvailabilityChange(true);
-        onRuntimeError(null);
-        // In-frame navigation does not change the parent's iframe src. Use the
-        // runtime as an optional toolbar hint, never as frame/content readiness.
-        // The native load handler clears this even if the runtime disappears.
-        onLoadingChange(event.data.payload.loading);
-        onBrowserStateChange({
-          ...event.data.payload,
-          url: mappedUrl,
-        });
-        postTrackedAnchors(trackedAnchors);
-      } else if (isManagedBrowserNavigationRequestMessage(event.data)) {
-        onNavigationRequest(event.data.payload.url);
-      } else if (isVisualAnnotationAnchorsResolvedMessage(event.data)) {
-        const message = event.data;
-        startTransition(() => {
-          setResolvedAnchors(
-            Object.fromEntries(
-              message.payload.results
-                .filter((result) => trackedAnchorIdsRef.current.has(result.commentId))
-                .map((result) => [result.commentId, result])
-            )
-          );
-        });
-      } else if (isVisualAnnotationTargetMessage(event.data)) {
-        const message = event.data;
-        let pageUrl: string;
-        try {
-          pageUrl =
-            documentHtml === undefined
-              ? toManagedLogicalUrl(message.payload.page.url, logicalUrl)
-              : logicalUrl;
-        } catch {
-          onRuntimeError(
-            t(
-              'sessions.browser.errors.invalidRuntimePageUrl',
-              'The managed preview runtime reported an invalid page URL.'
-            )
-          );
-          return;
-        }
-        startTransition(() => {
-          setSelectedTarget({
-            ...message.payload,
-            page: {
-              ...message.payload.page,
-              url: pageUrl,
-              pathname: new URL(pageUrl).pathname,
-            },
-          });
-          setDraftBody('');
-        });
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [
-    annotationEnabled,
-    documentHtml,
-    logicalUrl,
-    onAnnotationAvailabilityChange,
-    onBrowserStateChange,
-    onLoadingChange,
-    onNavigationRequest,
-    onRuntimeError,
-    postTrackedAnchors,
-    previewOrigin,
-    previewPostMessageOrigin,
-    t,
-    trackedAnchors,
-  ]);
 
   const submitDraft = useCallback(async () => {
     if (!selectedTarget || !draftBody.trim() || submitting) return;

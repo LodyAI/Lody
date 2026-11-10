@@ -41,13 +41,23 @@ this page is the full text of the rules summarised there.
   default to preview. Truncated documents never enter either HTML preview. The iframe is a
   permission boundary, not a promised
   renderer-process/thread boundary; do not claim arbitrary user JS cannot consume the app renderer.
-  Likewise, CSP governs the initial `srcdoc`, not an arbitrary later self-navigation. Require
-  credentialless iframe support before running scripts, and do not describe the
-  executable self-contained/no-network rule as a hard browser guarantee. Engines without
-  that support use `ReadOnlyHtmlPreview`: an empty sandbox, script-blocking CSP,
-  and a document stripped of navigation, scripts, nested documents, and SVG mutation.
-  This preserves inline CSS and embedded media but offers no script interaction or annotation.
-  The standalone mobile project browser uses the same readonly preview and eye toggle.
+  Likewise, CSP governs the initial `srcdoc`, not an arbitrary later self-navigation, and do
+  not describe the executable self-contained/no-network rule as a hard browser guarantee.
+  `getExecutableHtmlPreviewSupport()` decides whether scripts may run: `automatic` with
+  credentialless iframes (Chromium); `opt-in` on WebKit (every iOS browser), where a
+  self-navigation is an ordinary request and frame JS shares the app's main thread, so the
+  rendered view starts read-only and runs scripts only after the user presses "Run scripts"
+  for that document (revoked when rendered mode ends); `unsupported` (Gecko and any other
+  engine) never runs them. The read-only fallback is `ReadOnlyHtmlPreview`: an empty sandbox,
+  script-blocking CSP, and a document stripped of navigation, scripts, nested documents, and
+  SVG mutation. It preserves inline CSS and embedded media but offers no script interaction
+  or annotation. Any executable static document goes through `useManagedPreviewFrame`
+  (frame policy from the frame cache, runtime handshake, navigation policy); never build a
+  second executable iframe. A static-document load the parent did not initiate (page script
+  replacing the document) is treated as a navigation request and leaves rendered mode.
+  The standalone mobile project browser treats repository HTML as untrusted: it opens the
+  read-only preview with the eye toggle and runs scripts only behind an explicit "Run
+  scripts" opt-in (`StaticHtmlScriptPreview`, no annotation), on any engine that supports it.
   The session rendered frame exists only while
   its viewer tab and containing sidebar are visible. Key the file viewer by session + tab so switching
   session targets resets the HTML mode to that surface’s default.

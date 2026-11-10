@@ -1,3 +1,4 @@
+import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -8,11 +9,13 @@ import {
   EyeClosed,
   MessageCircle,
   Pencil,
+  Play,
   LockKeyhole,
   RefreshCw,
   Save,
   Search,
   ShieldAlert,
+  Square,
   WrapText,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
@@ -117,6 +120,7 @@ import { SessionFileErrorState } from './session-file-error-state';
 import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
 
+import { getExecutableHtmlPreviewSupport } from './managed-preview-frame-cache';
 import {
   buildStaticHtmlPreviewDocument,
   getStaticHtmlPreviewLogicalUrl,
@@ -634,6 +638,9 @@ function SessionFileContentViewImpl({
   );
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(false);
+  // WebKit has no credentialless frames, so HTML there runs scripts only after an
+  // explicit per-document opt-in; leaving rendered mode revokes it.
+  const [htmlScriptsOptedIn, setHtmlScriptsOptedIn] = useState(false);
   const [htmlAnnotationAvailable, setHtmlAnnotationAvailable] = useState(false);
   const [htmlPreviewLoading, setHtmlPreviewLoading] = useState(false);
   const [htmlRuntimeError, setHtmlRuntimeError] = useState<string | null>(null);
@@ -1193,6 +1200,9 @@ function SessionFileContentViewImpl({
   );
 
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
+  const htmlScriptSupport = getExecutableHtmlPreviewSupport();
+  const supportsHtmlPreview =
+    htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
   const htmlPreviewSource =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
@@ -1204,10 +1214,10 @@ function SessionFileContentViewImpl({
   const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
   const htmlPreviewDocument = useMemo(
     () =>
-      showHtmlRendered && htmlPreviewSource !== null
+      showHtmlRendered && supportsHtmlPreview && htmlPreviewSource !== null
         ? buildStaticHtmlPreviewDocument(htmlPreviewSource)
         : null,
-    [htmlPreviewSource, showHtmlRendered]
+    [htmlPreviewSource, showHtmlRendered, supportsHtmlPreview]
   );
   const htmlPreviewLogicalUrl = useMemo(
     () => getStaticHtmlPreviewLogicalUrl(normalizedPath),
@@ -1216,6 +1226,7 @@ function SessionFileContentViewImpl({
 
   useEffect(() => {
     if (showHtmlRendered) return;
+    setHtmlScriptsOptedIn(false);
     setHtmlAnnotationEnabled(false);
     setHtmlAnnotationAvailable(false);
     setHtmlPreviewLoading(false);
@@ -1235,6 +1246,7 @@ function SessionFileContentViewImpl({
   }, []);
   const handleHtmlBrowserStateChange = useCallback(() => undefined, []);
   const handleHtmlNavigationRequest = useCallback(() => {
+    setHtmlScriptsOptedIn(false);
     setHtmlAnnotationEnabled(false);
     setHtmlRenderMode('code');
     toast.warning(
@@ -1633,6 +1645,8 @@ function SessionFileContentViewImpl({
         onRetry={retryFile}
       />
     );
+  } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {
+    body = <ReadOnlyHtmlPreview text={htmlPreviewSource} />;
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
     body = (
       <div {...stylex.props(styles.previewFrame)}>
@@ -1881,7 +1895,7 @@ function SessionFileContentViewImpl({
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile
+                  isHtmlTextFile && htmlScriptSupport === 'automatic'
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }
@@ -1907,7 +1921,34 @@ function SessionFileContentViewImpl({
                 <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && htmlScriptSupport === 'opt-in' ? (
+              <button
+                type="button"
+                aria-pressed={htmlScriptsOptedIn}
+                onClick={() => {
+                  setHtmlAnnotationEnabled(false);
+                  setHtmlScriptsOptedIn((enabled) => !enabled);
+                }}
+                title={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                aria-label={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                {...stylex.props(styles.toolButton, htmlScriptsOptedIn && styles.toolButtonActive)}
+              >
+                {htmlScriptsOptedIn ? (
+                  <Square {...stylex.props(styles.icon)} aria-hidden="true" />
+                ) : (
+                  <Play {...stylex.props(styles.icon)} aria-hidden="true" />
+                )}
+              </button>
+            ) : null}
+            {showHtmlRendered && supportsHtmlPreview ? (
               <button
                 type="button"
                 aria-pressed={htmlAnnotationEnabled}
@@ -1923,7 +1964,7 @@ function SessionFileContentViewImpl({
                 <MessageCircle {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && supportsHtmlPreview ? (
               <button
                 type="button"
                 onClick={handleReloadHtmlPreview}

@@ -17,7 +17,11 @@ import {
 
 import { userAtom } from '../src/atoms';
 import { ManagedPreviewSurface } from '../src/components/sessions/managed-preview-surface';
-import { clearManagedPreviewFrame } from '../src/components/sessions/managed-preview-frame-cache';
+import {
+  clearManagedPreviewFrame,
+  getExecutableHtmlPreviewSupport,
+  isWebKitUserAgent,
+} from '../src/components/sessions/managed-preview-frame-cache';
 
 const mocks = vi.hoisted(() => ({
   comments: [],
@@ -233,6 +237,100 @@ describe('ManagedPreviewSurface', () => {
       root?.render(<Provider store={store}>{null}</Provider>);
     });
     expect(iframe.isConnected).toBe(false);
+  });
+
+  it('leaves rendered mode when a live static document navigates itself', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onNavigationRequest = vi.fn();
+    const logicalUrl = 'https://html-file-preview.invalid/result.html';
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={logicalUrl}
+            logicalUrl={logicalUrl}
+            documentHtml="<!doctype html><p>Preview</p>"
+            annotationEnabled={false}
+            onAnnotationAvailabilityChange={vi.fn()}
+            onRuntimeError={vi.fn()}
+            onLoadingChange={vi.fn()}
+            onBrowserStateChange={vi.fn()}
+            onNavigationRequest={onNavigationRequest}
+          />
+        </Provider>
+      );
+    });
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected static preview iframe');
+    vi.spyOn(iframe.contentWindow, 'postMessage').mockImplementation(() => {});
+
+    // An engine's initial load before the runtime announces itself is ordinary.
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'null',
+          source: iframe.contentWindow,
+          data: { type: MANAGED_BROWSER_READY_MESSAGE_TYPE },
+        })
+      );
+    });
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    expect(onNavigationRequest).not.toHaveBeenCalled();
+    expect(iframe.isConnected).toBe(true);
+
+    // A later load the parent did not start is script self-navigation.
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    expect(onNavigationRequest).toHaveBeenCalledWith(logicalUrl);
+    expect(iframe.isConnected).toBe(false);
+  });
+
+  it('classifies executable HTML preview support by engine', () => {
+    const safari =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+    const iosChrome =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1';
+    const chrome =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+    const firefox = 'Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0';
+    expect(isWebKitUserAgent(safari)).toBe(true);
+    expect(isWebKitUserAgent(iosChrome)).toBe(true);
+    expect(isWebKitUserAgent(chrome)).toBe(false);
+    expect(isWebKitUserAgent(firefox)).toBe(false);
+
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLIFrameElement.prototype,
+      'credentialless'
+    );
+    const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
+    try {
+      delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+        .credentialless;
+      userAgent.mockReturnValue(safari);
+      expect(getExecutableHtmlPreviewSupport()).toBe('opt-in');
+      userAgent.mockReturnValue(firefox);
+      expect(getExecutableHtmlPreviewSupport()).toBe('unsupported');
+      Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', {
+        configurable: true,
+        value: false,
+        writable: true,
+      });
+      userAgent.mockReturnValue(chrome);
+      expect(getExecutableHtmlPreviewSupport()).toBe('automatic');
+    } finally {
+      userAgent.mockRestore();
+      if (descriptor)
+        Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', descriptor);
+      else
+        delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+          .credentialless;
+    }
   });
 
   it('accepts runtime data only from the current exact Quick origin and frame, including after restore', async () => {
