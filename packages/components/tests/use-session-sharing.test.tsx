@@ -1,6 +1,6 @@
 import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 // @vitest-environment jsdom
-import { act, useEffect } from 'react';
+import { act, useEffect, useSyncExternalStore } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,9 +10,49 @@ import { getSessionRoomId, type MachineId, type SessionMeta, type WorkspaceId } 
 import { runtimeAtom } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { useWorkspaceMembers } from '../src/hooks/use-workspace-members';
 import { useSessionSharing } from '../src/hooks/use-session-sharing';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 
+vi.mock('../src/providers/convex-provider', () => ({
+  useAuthClient: () => ({
+    useActiveOrganization: () => ({
+      data: { members: [{ userId: 'stale', user: { name: 'Old cached name' } }] },
+      isPending: false,
+    }),
+  }),
+}));
+let directoryResult: {
+  data: { userId: string; name: string | null; image: string | null }[] | undefined;
+  error: Error | null;
+  retry: () => void;
+};
+const directoryListeners = new Set<() => void>();
+const directorySubscribe = (listener: () => void) => {
+  directoryListeners.add(listener);
+  return () => {
+    directoryListeners.delete(listener);
+  };
+};
+let directory: ReturnType<typeof useWorkspaceMembers>;
+function DirectoryProbe() {
+  directory = useWorkspaceMembers();
+  const sharing = useSessionSharing({
+    members: directory.members,
+    membersLoading: directory.isLoading,
+    membersError: directory.error,
+    retryMembers: directory.retry,
+  });
+  result = sharing;
+  return (
+    <div>
+      {sharing
+        .resolve(session)
+        .availableMembers?.map((m) => m.name)
+        .join(',')}
+    </div>
+  );
+}
 const sources = vi.hoisted(() => ({ machine: null as unknown, project: null as unknown }));
 vi.mock('../src/hooks/use-visible-machine-metas', () => ({
   useVisibleMachineMetas: () => sources.machine,
@@ -63,7 +103,8 @@ afterEach(async () => {
 async function render(
   mode: 'plaintext' | 'e2ee',
   records: SessionMeta[] = [session],
-  userId = 'owner'
+  userId = 'owner',
+  liveDirectory = false
 ) {
   const store = createStore();
   store.set(
@@ -101,6 +142,19 @@ async function render(
         activeWorkspaceId: workspaceId,
       }),
     },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useOptionalAuthenticatedQuery: (_operation, args) => {
+        const value = useSyncExternalStore(directorySubscribe, () => directoryResult);
+        return (
+          args !== 'skip' &&
+          (args as { accountId: string }).accountId === 'owner' &&
+          (args as { workspaceId: string }).workspaceId === workspaceId
+            ? value
+            : { data: undefined, error: null, retry: value.retry }
+        ) as never;
+      },
+    },
     sessionAccess: {
       list: async () => [view],
       read: async () => view,
@@ -127,9 +181,7 @@ async function render(
   await act(async () =>
     root.render(
       <PlatformContext.Provider value={platform}>
-        <Provider store={store}>
-          <Probe />
-        </Provider>
+        <Provider store={store}>{liveDirectory ? <DirectoryProbe /> : <Probe />}</Provider>
       </PlatformContext.Provider>
     )
   );
@@ -217,3 +269,50 @@ describe.each(['plaintext', 'e2ee'] as const)('single-session sharing in %s', (m
     expect(view.readSharedSessionIds).toEqual([]);
   });
 });
+
+it.each(['plaintext', 'e2ee'] as const)(
+  'updates the %s sharing directory on joins, replacement and departure, retaining labels on failure',
+  async (mode) => {
+    let retried = false;
+    const retry = () => {
+      retried = true;
+    };
+    directoryResult = {
+      data: [{ userId: 'owner', name: 'Owner', image: null }],
+      error: null,
+      retry,
+    };
+    await render(mode, [session], 'owner', true);
+    expect(container.textContent).toBe('Owner');
+    const publish = async (data: (typeof directoryResult)['data'], error: Error | null = null) => {
+      await act(async () => {
+        directoryResult = { data, error, retry };
+        for (const listener of directoryListeners) listener();
+      });
+    };
+    await publish([
+      { userId: 'owner', name: 'Owner', image: null },
+      { userId: 'joined', name: 'Joined Person', image: null },
+    ]);
+    expect(container.textContent).toBe('Joined Person,Owner');
+    expect(directory.isMultiMember).toBe(true);
+    await publish([
+      { userId: 'owner', name: 'Owner', image: null },
+      { userId: 'replacement', name: 'Replacement', image: null },
+    ]);
+    expect(container.textContent).toBe('Owner,Replacement');
+    await publish(undefined, new Error('directory offline'));
+    expect(container.textContent).toBe('Owner,Replacement');
+    expect(directory.error).toBe(true);
+    await act(async () => result.resolve(session).retryMembers!());
+    expect(retried).toBe(true);
+    await act(async () => result.resolve(session).setReadAccess!('read'));
+    expect(view.readSharedSessionIds).toEqual([session.id]);
+    await publish([{ userId: 'owner', name: 'Owner updated', image: null }]);
+    expect(container.textContent).toBe('Owner updated');
+    expect(directory.error).toBe(false);
+    expect(directory.isMultiMember).toBe(false);
+    await render(mode, [session], 'other-account', true);
+    expect(container.textContent).not.toContain('Owner updated');
+  }
+);

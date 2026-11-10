@@ -388,6 +388,16 @@ function SessionAccessMembers({
     <section {...stylex.props(memberStyles.section)}>
       <Separator />
       <p {...stylex.props(memberStyles.heading)}>{t('sessions.access.members')}</p>
+      {state.membersError && (
+        <div role="status" {...stylex.props(memberStyles.notice)}>
+          <span>{t('sessions.access.directoryFailed')}</span>
+          {state.retryMembers && (
+            <Button variant="ghost" size="small" onClick={state.retryMembers}>
+              {t('common.retry')}
+            </Button>
+          )}
+        </div>
+      )}
       {ids.map((userId) => (
         <div key={userId} {...stylex.props(memberStyles.row)}>
           <span
@@ -461,6 +471,7 @@ function SessionAccessMembers({
   );
 }
 const memberStyles = stylex.create({
+  notice: { display: 'flex', alignItems: 'center', gap: space[2], fontSize: text.captionSize, color: colors.secondaryLabel },
   section: { display: 'flex', flexDirection: 'column', gap: space[1], marginTop: space[2] },
   heading: {
     margin: 0,

@@ -6527,6 +6527,7 @@
   "sessions.access.readonlyMachine": "只读 · 运行在 {{machine}} 上",
   "sessions.access.reference": "在新会话中引用",
   "e2ee.machineSharing.pendingSession": "待确认更改：{{action}} {{name}} 的只读授权",
+  "sessions.access.directoryFailed": "成员列表刷新失败，仍显示上次加载的名称。",
   "sessions.access.unknownMember": "未知成员",
   "sessions.access.members": "成员",
   "sessions.access.owner": "所有者",
