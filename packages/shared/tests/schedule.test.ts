@@ -14,6 +14,7 @@ import {
   ScheduleAgentSchema,
   ScheduleDefinitionSchema,
 } from '../src/schedule-types';
+import { scheduleDeclarationSubject } from '../src/e2ee-execution-intent';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
 import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
 
@@ -109,6 +110,74 @@ describe('Schedule time contract', () => {
 });
 
 describe('Schedule persistence contract', () => {
+  it('signs an encrypted declaration first and writes it with the declaration, never unsigned', async () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+        },
+      }),
+      flush: async () => {},
+    };
+    const d = definition();
+    const save = (repo: ScheduleRepository) =>
+      repo.save({
+        scheduleId: 'signed',
+        draft: {
+          title: d.title,
+          machineId: d.machineId,
+          trigger: d.trigger,
+          agent: d.agent,
+          project: d.project,
+          misfirePolicy: d.misfirePolicy,
+          overlapPolicy: d.overlapPolicy,
+          retryPolicy: d.retryPolicy,
+          prompt: 'hello',
+        },
+        actorId: 'owner',
+        now: 1,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+    await expect(
+      save(new ScheduleRepository(port, 'workspace' as never, { protectedContent: true }))
+    ).rejects.toThrow('e2ee_signature_unavailable');
+    expect(docs.get('schedule-signed')?.toJSON() ?? {}).toEqual({});
+    const signed: { fingerprint: string; manualRunKey?: string }[] = [];
+    await save(
+      new ScheduleRepository(port, 'workspace' as never, {
+        protectedContent: true,
+        signDeclaration: async (document, manualRunKey) => {
+          signed.push({
+            fingerprint: scheduleDeclarationSubject(document, manualRunKey).contentDigest,
+            ...(manualRunKey ? { manualRunKey } : {}),
+          });
+          return 'A'.repeat(131);
+        },
+      })
+    );
+    const declared = (
+      docs.get('schedule-signed')!.toJSON() as {
+        scheduleAuthorizations: { definitionFingerprint: string; e2eeIntent?: string }[];
+      }
+    ).scheduleAuthorizations;
+    expect(declared).toEqual([
+      expect.objectContaining({
+        definitionFingerprint: signed[0]!.fingerprint,
+        e2eeIntent: 'A'.repeat(131),
+      }),
+    ]);
+  });
+
   it('writes the definition durably before enabling its Registry and reads absent docs without seeding', async () => {
     const docs = new Map<string, LoroDoc>();
     const rows = new Map<string, unknown>();

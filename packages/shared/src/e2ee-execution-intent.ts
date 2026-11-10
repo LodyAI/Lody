@@ -1,4 +1,6 @@
 import { sha256Hex } from './incremental-sha256';
+import { scheduleDefinitionFingerprint } from './schedule-registry';
+import type { ScheduleDocument } from './schedule-types';
 import { queuedInputEvidence } from './session-input';
 
 /**
@@ -147,3 +149,21 @@ export function turnExecutionDigest(input: Parameters<typeof turnExecutionConten
 /** Declaration message IDs: one definition, and one per manual run. */
 export const scheduleDeclarationMessageId = (manualRunKey?: string) =>
   manualRunKey ? `manual:${manualRunKey}` : 'definition';
+
+/**
+ * What the setter of a schedule signs: the definition fingerprint (every execution-
+ * relevant field, prompt and message) for its machine. The signing host computes this
+ * from the document itself; a caller never supplies the digest.
+ */
+export function scheduleDeclarationSubject(
+  document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+  manualRunKey?: string
+) {
+  return {
+    kind: E2EE_INTENT_KIND.scheduleDeclaration,
+    targetMachineId: document.definition.machineId,
+    scope: document.definition.scheduleId,
+    messageId: scheduleDeclarationMessageId(manualRunKey),
+    contentDigest: scheduleDefinitionFingerprint(document),
+  } as const;
+}
