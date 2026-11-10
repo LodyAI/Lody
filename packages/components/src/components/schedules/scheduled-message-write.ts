@@ -103,6 +103,7 @@ export async function saveScheduledMessage(args: {
     () =>
       new ScheduleRepository(args.runtime.repo, args.runtime.workspaceId, {
         protectedContent: args.runtime.contentMode === 'e2ee',
+        signDeclaration: args.runtime.signScheduleDeclaration,
       }).save({ ...args, now }),
     { create: args.create }
   );

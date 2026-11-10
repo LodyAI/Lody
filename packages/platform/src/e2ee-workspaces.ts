@@ -309,6 +309,13 @@ export interface E2eeWorkspaceRuntime extends E2eeAccountPairingRuntime {
     targetMachineId: string,
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Sign one schedule declaration with this device. The host computes the definition
+   * fingerprint from the document; it is never a general signing capability. */
+  signScheduleDeclaration?(
+    workspaceId: string,
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ): Promise<string>;
   /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
   acceptDispatchResponse?(
     workspaceId: string,

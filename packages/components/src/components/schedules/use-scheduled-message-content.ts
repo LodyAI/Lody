@@ -91,6 +91,7 @@ export function useScheduledMessageContents(
     let disposed = false;
     const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
       protectedContent: runtime.contentMode === 'e2ee',
+      signDeclaration: runtime.signScheduleDeclaration,
     });
     const readText = async (target: Target) => {
       try {

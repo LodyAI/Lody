@@ -7,6 +7,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
+import {
+  decodeE2eeIntentRecord,
+  scheduleDeclarationSubject
+} from '@lody/shared/e2ee-execution-intent'
 import { createDesktopE2eeContent } from '../../../../../packages/components/src/providers/desktop-e2ee-content.ts'
 import { Clock, Context, Effect, Layer, Result, Scope, Exit, Deferred, Fiber } from 'effect'
 import {
@@ -38,6 +42,7 @@ import {
   prepareEpochEnvelope,
   getCommittedEpochStagingKey,
   signDeviceCredentialBinding,
+  verifyExecutionIntent,
   prepareLedgerCommand,
   signLedgerRecord,
   extendLedger,
@@ -4210,6 +4215,69 @@ void test('sharing host retains an unknown owner original across reopen and pres
   )
   assert.equal(version.frameHex, original)
   assert.equal(commits, 1)
+})
+
+void test('signs a schedule declaration over the fingerprint it computes itself', async (t) => {
+  const directory = await fixture(t)
+  const document = {
+    definition: {
+      scheduleId: 'synthetic-schedule',
+      title: 'Synthetic',
+      ownerId: 'owner',
+      machineId: 'fixture-machine',
+      enabled: true,
+      activationId: 'activation',
+      activeFrom: 0,
+      trigger: { kind: 'interval', everyMs: 60_000, anchorAt: '2026-01-01T00:00:00Z' },
+      misfirePolicy: { kind: 'skip' },
+      overlapPolicy: 'queue_one',
+      agent: { agentConfigId: 'agent', modeId: 'safe' },
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      createdAt: 0,
+      updatedAt: 0,
+      createdBy: 'owner'
+    },
+    prompt: 'synthetic scheduled input'
+  }
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const status = yield* owner.host.status(workspaceId)
+      const manualRunKey = 'ab'.repeat(32)
+      const record = decodeE2eeIntentRecord(
+        yield* owner.host.signScheduleDeclaration(workspaceId, document, manualRunKey)
+      )
+      assert.equal(Buffer.from(record.signer).toString('hex'), status.signingPublicKey)
+      const subject = scheduleDeclarationSubject(document, manualRunKey)
+      const intent = {
+        ...subject,
+        genesis: Result.getOrThrow(Bytes.genesisHash(Buffer.from(status.genesisHash, 'hex'))),
+        workspaceId,
+        contentDigest: Buffer.from(subject.contentDigest, 'hex')
+      }
+      assert.equal(
+        Result.isSuccess(verifyExecutionIntent(intent, record.signer, record.signature)),
+        true
+      )
+      // It binds this definition and run only.
+      assert.equal(
+        Result.isFailure(
+          verifyExecutionIntent(
+            { ...intent, messageId: 'definition' },
+            record.signer,
+            record.signature
+          )
+        ),
+        true
+      )
+      const refused = yield* Effect.result(
+        owner.host.signScheduleDeclaration(workspaceId, { ...document, prompt: '' })
+      )
+      assert.equal(refused.failure.code, 'invalid-input')
+    })
+  )
 })
 
 void test('passive cache state never opens workspace custody or changes sibling entries', async (t) => {

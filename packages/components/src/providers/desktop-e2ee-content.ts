@@ -428,6 +428,19 @@ export function createE2eeContent(input: {
           input.runtime.prepareDispatch!(input.workspaceId, machineId, args)
         );
       },
+      signScheduleDeclaration: (
+        document: Pick<
+          import('@lody/shared').ScheduleDocument,
+          'definition' | 'prompt' | 'message'
+        >,
+        manualRunKey?: string
+      ) => {
+        if (!input.runtime.signScheduleDeclaration)
+          return Promise.reject(new Error('e2ee_signature_unavailable'));
+        return withinContent(() =>
+          input.runtime.signScheduleDeclaration!(input.workspaceId, document, manualRunKey)
+        );
+      },
       acceptDispatchResponse: (
         machineId: string,
         args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,

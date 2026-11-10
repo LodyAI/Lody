@@ -268,6 +268,10 @@ export type WorkspaceE2eeTransport = {
     machineId: string,
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  signScheduleDeclaration?: (
+    document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
+    manualRunKey?: string
+  ) => Promise<string>;
   acceptDispatchResponse?: (
     machineId: string,
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
@@ -6173,6 +6177,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
+    ...(protectedContent && deps.e2ee?.signScheduleDeclaration
+      ? { signScheduleDeclaration: deps.e2ee.signScheduleDeclaration }
+      : {}),
     repo,
     accountId: deps.accountId ?? null,
     pendingSends,

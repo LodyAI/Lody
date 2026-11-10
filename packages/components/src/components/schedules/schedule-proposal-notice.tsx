@@ -411,6 +411,7 @@ export function ScheduleProposalNotice({
           () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
             }).save({
               scheduleId,
               activationId: uuid(),

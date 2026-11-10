@@ -5752,6 +5752,7 @@ export const SessionChatInterface = memo(
         if (!runtime) return null;
         return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
           protectedContent: runtime.contentMode === 'e2ee',
+          signDeclaration: runtime.signScheduleDeclaration,
         }).read(scheduleId);
       },
       [runtime]
@@ -5828,6 +5829,7 @@ export const SessionChatInterface = memo(
           await runtime.withScheduleStore(item.scheduleId, () =>
             new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
             }).setEnabled({
               scheduleId: item.scheduleId,
               actorId: currentUser.id,

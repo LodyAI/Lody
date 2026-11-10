@@ -3,6 +3,8 @@ import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
+  decodeE2eeIntentRecord,
+  encodeE2eeIntentRecord,
   getSessionRoomId,
   type MachineId,
   type MessageQueueItem,
@@ -19,7 +21,6 @@ import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
 import {
   dispatchUserTurn,
   QUEUED_ORIGINAL_DEADLINE_MS,
-  removeQueuedOriginal,
   replaceQueueItem,
   sealEditedQueueItem,
   writeUserTurn,
@@ -227,8 +228,16 @@ it.each(['rpc-lost', 'oversized'] as const)(
   }
 );
 
-it.each(['accepted', 'transport-failed', 'prepare-failed'] as const)(
-  'retains encrypted RPC originals and durable activation when acceleration is %s',
+/** A well-formed signed intent whose signer bytes name the test case. */
+const signedIntent = (tag: number) =>
+  encodeE2eeIntentRecord({
+    kind: 1,
+    signer: new Uint8Array(32).fill(tag),
+    signature: new Uint8Array(64).fill(tag),
+  });
+
+it.each(['accepted', 'transport-failed'] as const)(
+  'writes an encrypted turn with its signed intent and keeps activation when acceleration is %s',
   async (mode) => {
     const f = fixture();
     const input = entry('encrypted-human');
@@ -241,52 +250,62 @@ it.each(['accepted', 'transport-failed', 'prepare-failed'] as const)(
       targetMachineId: MACHINE,
       frameHex: '02'.repeat(300),
       requesterDevice: '03'.repeat(32),
-      expiresAt: 1234,
+      expiresAt: 0,
+      e2eeIntent: signedIntent(3),
     };
-    let sawDurableOriginal = false;
-    f.runtime.prepareEncryptedDispatch = async () => {
-      if (mode === 'prepare-failed') throw new Error('synthetic host failure');
-      return {
-        original,
-        send: async () => {
-          sawDurableOriginal =
-            f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id) ===
-            original.frameHex;
-          if (mode === 'transport-failed') throw new Error('synthetic transport failure');
-          return {
-            type: 'session/dispatch-turn_response',
-            sessionId: SESSION,
-            userTurnId: input.id,
-            accepted: true,
-            disposition: 'accepted',
-          };
-        },
-      };
-    };
+    let sent = 0;
+    f.runtime.prepareEncryptedDispatch = async () => ({
+      original,
+      send: async () => {
+        sent += 1;
+        if (mode === 'transport-failed') throw new Error('synthetic transport failure');
+        return {
+          type: 'session/dispatch-turn_response',
+          sessionId: SESSION,
+          userTurnId: input.id,
+          accepted: true,
+          disposition: 'accepted',
+        };
+      },
+    });
     await writeUserTurn(f.runtime, {
       sessionId: SESSION,
       entry: input,
       delivery: { kind: 'history' },
     });
     await dispatchUserTurn(f.runtime, SESSION, input.id);
+    expect(sent).toBe(1);
     expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
-    expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
-      mode === 'prepare-failed' ? undefined : original.frameHex
-    );
-    expect(sawDurableOriginal).toBe(mode !== 'prepare-failed');
+    // The intent is part of the turn's own durable state, so a snapshot carries it.
     const restored = new LoroDoc();
     try {
       const source = f.sessionDocs.get(SESSION);
       if (!source) throw new Error('missing fixture doc');
       restored.import(source.export({ mode: 'snapshot' }));
-      expect(restored.getMap('rpcDispatchOriginals').get(input.id)).toBe(
-        mode === 'prepare-failed' ? undefined : original.frameHex
+      const history = restored.toJSON() as { history: { id: string; e2eeIntent?: string }[] };
+      expect(history.history.find((turn) => turn.id === input.id)?.e2eeIntent).toBe(
+        original.e2eeIntent
       );
+      expect(restored.toJSON()).not.toHaveProperty('rpcDispatchOriginals');
     } finally {
       restored.free();
     }
   }
 );
+
+it('does not write an encrypted turn its host could not sign', async () => {
+  const f = fixture();
+  const input = entry('encrypted-unsigned');
+  f.runtime.contentMode = 'e2ee';
+  f.runtime.prepareEncryptedDispatch = async () => {
+    throw new Error('synthetic host failure');
+  };
+  await expect(
+    writeUserTurn(f.runtime, { sessionId: SESSION, entry: input, delivery: { kind: 'dispatch' } })
+  ).rejects.toBeInstanceOf(SessionInputNotSentError);
+  expect(f.turns()).toEqual([]);
+  expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
+});
 
 it.each(['history', 'dispatch'] as const)(
   'never writes executable %s input after the host reports a known machine withdrawal',
@@ -374,37 +393,50 @@ const queueRow = (input: SessionHistory) => ({
   acpSessionConfig: input.inputConfig,
   isEditing: false,
 });
-const queuedOriginal = (f: ReturnType<typeof fixture>, id: string) =>
-  f.sessionDocs.get(SESSION)?.getMap('queueDispatchOriginals').get(id);
-const preparedOriginal = (frameHex: string) => ({
+/** The signed intent stored on the queue item for this message, if any. */
+const queuedIntent = (f: ReturnType<typeof fixture>, id: string) =>
+  (
+    (
+      f.sessionDocs.get(SESSION)?.toJSON() as {
+        mq?: { userTurnId?: string; e2eeIntent?: string }[];
+      }
+    )?.mq ?? []
+  ).find((item) => item.userTurnId === id)?.e2eeIntent;
+const preparedOriginal = (tag: number) => ({
   original: {
     requestId: '01'.repeat(16),
     targetMachineId: MACHINE,
-    frameHex,
+    frameHex: '02'.repeat(300),
     requesterDevice: '03'.repeat(32),
-    expiresAt: 1234,
+    expiresAt: 0,
+    e2eeIntent: signedIntent(tag),
   },
   send: async () => null,
 });
 
-it('stores the signed original before an encrypted queue row', async () => {
+it('writes the signed intent in the same encrypted queue row', async () => {
   const f = fixture();
   const input = entry('queued-human');
   f.runtime.contentMode = 'e2ee';
-  const order: string[] = [];
+  const rows: unknown[] = [];
   const enqueue = f.runtime.writer.enqueueSessionMessage;
   f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
-    order.push(`row:${String(queuedOriginal(f, input.id))}`);
+    rows.push(item);
     await enqueue(sessionId, item);
   };
-  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0a'.repeat(32));
+  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal(10);
   await writeUserTurn(f.runtime, {
     sessionId: SESSION,
     entry: input,
     delivery: { kind: 'queue' },
     queue: queueRow(input),
   });
-  expect(order).toEqual([`row:${'0a'.repeat(32)}`]);
+  expect(rows).toEqual([
+    expect.objectContaining({ userTurnId: input.id, e2eeIntent: signedIntent(10) }),
+  ]);
+  expect(decodeE2eeIntentRecord((rows[0] as { e2eeIntent?: string }).e2eeIntent)?.signer).toEqual(
+    new Uint8Array(32).fill(10)
+  );
 });
 
 it('waits for a slow host before writing an encrypted queue row', async () => {
@@ -412,7 +444,11 @@ it('waits for a slow host before writing an encrypted queue row', async () => {
   const input = entry('queued-slow');
   f.runtime.contentMode = 'e2ee';
   f.runtime.prepareEncryptedDispatch = async () => {
-    throw new EncryptedPrepareTimeout(Promise.resolve(preparedOriginal('0b'.repeat(32))));
+    throw new EncryptedPrepareTimeout(Promise.resolve(preparedOriginal(11)));
+  };
+  const rows: { e2eeIntent?: string }[] = [];
+  f.runtime.writer.enqueueSessionMessage = async (_sessionId, item) => {
+    rows.push(item);
   };
   await writeUserTurn(f.runtime, {
     sessionId: SESSION,
@@ -420,7 +456,7 @@ it('waits for a slow host before writing an encrypted queue row', async () => {
     delivery: { kind: 'queue' },
     queue: queueRow(input),
   });
-  expect(queuedOriginal(f, input.id)).toBe('0b'.repeat(32));
+  expect(rows.map((row) => row.e2eeIntent)).toEqual([signedIntent(11)]);
 });
 
 it.each(['failed', 'unavailable'] as const)(
@@ -451,25 +487,6 @@ it.each(['failed', 'unavailable'] as const)(
   }
 );
 
-it('removes the stored original when the queue row cannot be written', async () => {
-  const f = fixture();
-  const input = entry('queued-half-written');
-  f.runtime.contentMode = 'e2ee';
-  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('0d'.repeat(32));
-  f.runtime.writer.enqueueSessionMessage = async () => {
-    throw new Error('synthetic write failure');
-  };
-  await expect(
-    writeUserTurn(f.runtime, {
-      sessionId: SESSION,
-      entry: input,
-      delivery: { kind: 'queue' },
-      queue: queueRow(input),
-    })
-  ).rejects.toThrow('synthetic write failure');
-  expect(queuedOriginal(f, input.id)).toBeUndefined();
-});
-
 const failingEnqueue = (f: ReturnType<typeof fixture>, error: Error, commit: boolean) => {
   f.runtime.writer.enqueueSessionMessage = async (sessionId, item) => {
     if (commit)
@@ -483,7 +500,7 @@ const failingEnqueue = (f: ReturnType<typeof fixture>, error: Error, commit: boo
 };
 const queuedSend = (f: ReturnType<typeof fixture>, input: SessionHistory, signal?: AbortSignal) => {
   f.runtime.contentMode = 'e2ee';
-  f.runtime.prepareEncryptedDispatch ??= async () => preparedOriginal('0f'.repeat(32));
+  f.runtime.prepareEncryptedDispatch ??= async () => preparedOriginal(15);
   return writeUserTurn(
     f.runtime,
     { sessionId: SESSION, entry: input, delivery: { kind: 'queue' }, queue: queueRow(input) },
@@ -496,23 +513,22 @@ it('reports a queued send as written when only its signal failed', async () => {
   const input = entry('queued-committed');
   failingEnqueue(f, new QueueSignalError('synthetic signal failure'), true);
   await queuedSend(f, input);
-  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+  expect(queuedIntent(f, input.id)).toBe(signedIntent(15));
 });
 
 it('reports a queued send as written when its row already left the queue', async () => {
   const f = fixture();
   const input = entry('queued-promoted-early');
   failingEnqueue(f, new QueueSignalError('synthetic signal failure'), false);
-  await queuedSend(f, input);
-  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+  await expect(queuedSend(f, input)).resolves.toBeUndefined();
 });
 
-it('surfaces any other failure after the row committed and keeps its original', async () => {
+it('surfaces any other failure after the row committed, which keeps its intent', async () => {
   const f = fixture();
   const input = entry('queued-unknown');
   failingEnqueue(f, new Error('synthetic store failure'), true);
   await expect(queuedSend(f, input)).rejects.toThrow('synthetic store failure');
-  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
+  expect(queuedIntent(f, input.id)).toBe(signedIntent(15));
 });
 
 it('surfaces an abort raised by the queue write', async () => {
@@ -520,25 +536,6 @@ it('surfaces an abort raised by the queue write', async () => {
   const input = entry('queued-abort-error');
   failingEnqueue(f, new DOMException('stopped', 'AbortError'), true);
   await expect(queuedSend(f, input)).rejects.toMatchObject({ name: 'AbortError' });
-});
-
-it('keeps the original and the write failure when the cleanup check fails', async () => {
-  const f = fixture();
-  const input = entry('queued-unreadable');
-  failingEnqueue(f, new Error('synthetic store failure'), false);
-  const prepare = f.runtime.prepareEncryptedDispatch;
-  f.runtime.prepareEncryptedDispatch = prepare ?? (async () => preparedOriginal('0f'.repeat(32)));
-  const withSessionStore = f.runtime.sendResources.withSessionStore;
-  let reads = 0;
-  f.runtime.sendResources.withSessionStore = ((sessionId, work) =>
-    withSessionStore(sessionId, (store, signal) => {
-      reads += 1;
-      // Prepare stores the original on the first access; every later read is unavailable.
-      if (reads > 2) throw new Error('synthetic read failure');
-      return work(store, signal);
-    })) as typeof withSessionStore;
-  await expect(queuedSend(f, input)).rejects.toThrow('synthetic store failure');
-  expect(queuedOriginal(f, input.id)).toBe('0f'.repeat(32));
 });
 
 it('treats a send aborted after its row committed as written', async () => {
@@ -619,7 +616,7 @@ it('surfaces a write failure before the row exists unchanged', async () => {
   );
 });
 
-it('stops a queued send aborted after its original was stored', async () => {
+it('stops a queued send aborted after its intent was signed', async () => {
   const f = fixture();
   const input = entry('queued-abort-before-row');
   const abort = new AbortController();
@@ -627,16 +624,12 @@ it('stops a queued send aborted after its original was stored', async () => {
   f.runtime.writer.enqueueSessionMessage = async () => {
     wrote = true;
   };
-  const withSessionStore = f.runtime.sendResources.withSessionStore;
-  f.runtime.sendResources.withSessionStore = ((sessionId, work) =>
-    withSessionStore(sessionId, async (store, signal) => {
-      const result = await work(store, signal);
-      if (store.getState().queueDispatchOriginals?.[input.id]) abort.abort();
-      return result;
-    })) as typeof withSessionStore;
-  await expect(queuedSend(f, input, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  f.runtime.prepareEncryptedDispatch = async () => {
+    abort.abort();
+    return preparedOriginal(16);
+  };
+  await expect(queuedSend(f, input, abort.signal)).rejects.toThrow();
   expect(wrote).toBe(false);
-  expect(queuedOriginal(f, input.id)).toBeUndefined();
 });
 
 it('retries the queue signal within its bound', async () => {
@@ -666,76 +659,50 @@ it('reports an exhausted queue signal as a signal failure', async () => {
   }
 });
 
-it('drops the new original when an encrypted queue edit cannot be written', async () => {
+it('signs a changed encrypted queue edit again under the same message ID', async () => {
   const f = fixture();
-  const input = entry('queued-failed-edit');
+  const input = entry('queued-before-edit');
   f.runtime.contentMode = 'e2ee';
-  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('11'.repeat(32));
-  let written = '';
+  const prepared: { userTurnId: string; inputConfig: unknown }[] = [];
+  f.runtime.prepareEncryptedDispatch = async (_machine, args) => {
+    prepared.push(args);
+    return preparedOriginal(12);
+  };
+  const current = {
+    ...queueRow(input),
+    $cid: 'cid',
+    operationId: `queue:${input.id}`,
+    e2eeIntent: signedIntent(1),
+  } as unknown as MessageQueueItem;
+  const edited = {
+    ...current,
+    task: 'changed',
+    acpSessionConfig: {
+      ...current.acpSessionConfig,
+      prompt: 'changed',
+      inputBlocks: [{ type: 'text', text: 'changed' }],
+    },
+  } as MessageQueueItem;
+  let written: Record<string, unknown> | undefined;
   f.runtime.writer.updateSessionMessage = async (_sessionId, _cid, patch) => {
-    written = String(patch.userTurnId);
-    throw new Error('synthetic edit failure');
+    written = patch;
   };
-  const current = { ...queueRow(input), $cid: 'cid' } as unknown as MessageQueueItem;
-  const edited = {
-    ...current,
-    acpSessionConfig: {
-      ...current.acpSessionConfig,
-      prompt: 'changed',
-      inputBlocks: [{ type: 'text', text: 'changed' }],
-    },
-  } as MessageQueueItem;
-  await expect(replaceQueueItem(f.runtime, SESSION, 'cid', current, edited)).rejects.toThrow(
-    'synthetic edit failure'
-  );
-  expect(written).not.toBe(input.id);
-  expect(queuedOriginal(f, written)).toBeUndefined();
-});
-
-it('replaces the original of a written encrypted queue edit', async () => {
-  const f = fixture();
-  const input = entry('queued-written-edit');
-  f.runtime.contentMode = 'e2ee';
-  f.runtime.prepareEncryptedDispatch = async () => preparedOriginal('12'.repeat(32));
-  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
-    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
-      draft.queueDispatchOriginals = { [input.id]: '13' };
-    })
-  );
-  let written = '';
-  f.runtime.writer.updateSessionMessage = async (sessionId, _cid, patch) => {
-    written = String(patch.userTurnId);
-    await f.runtime.sendResources.withSessionStore(sessionId as SessionId, (store) =>
-      store.setState((draft: { mq?: unknown[] }) => {
-        draft.mq = [...(draft.mq ?? []), patch];
-      })
-    );
-  };
-  const current = { ...queueRow(input), $cid: 'cid' } as unknown as MessageQueueItem;
-  const edited = {
-    ...current,
-    acpSessionConfig: {
-      ...current.acpSessionConfig,
-      prompt: 'changed',
-      inputBlocks: [{ type: 'text', text: 'changed' }],
-    },
-  } as MessageQueueItem;
   await replaceQueueItem(f.runtime, SESSION, 'cid', current, edited);
-  expect(queuedOriginal(f, written)).toBe('12'.repeat(32));
-  expect(queuedOriginal(f, input.id)).toBeUndefined();
-});
-
-it('keeps the original of a Turn already promoted to history', async () => {
-  const f = fixture();
-  f.runtime.contentMode = 'e2ee';
-  await f.append(entry('queued-promoted'));
-  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
-    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
-      draft.queueDispatchOriginals = { 'queued-promoted': '10' };
-    })
-  );
-  await removeQueuedOriginal(f.runtime, SESSION, 'queued-promoted');
-  expect(queuedOriginal(f, 'queued-promoted')).toBe('10');
+  expect(written).toMatchObject({
+    userTurnId: input.id,
+    operationId: `queue:${input.id}`,
+    e2eeIntent: signedIntent(12),
+  });
+  expect(prepared).toEqual([
+    expect.objectContaining({
+      userTurnId: input.id,
+      inputConfig: expect.objectContaining({ prompt: 'changed' }),
+    }),
+  ]);
+  // Editing flags change nothing that runs, so the existing signature stays.
+  const toggled = { ...current, isEditing: true } as MessageQueueItem;
+  expect(await sealEditedQueueItem(f.runtime, SESSION, current, toggled)).toBe(toggled);
+  expect(prepared).toHaveLength(1);
 });
 
 it('stops waiting for a host that never answers a queued send', async () => {
@@ -795,51 +762,7 @@ it('leaves an ordinary workspace queue row unsigned', async () => {
     queue: queueRow(input),
   });
   expect(wrote).toBe(true);
-  expect(queuedOriginal(f, input.id)).toBeUndefined();
-});
-
-it('gives an edited encrypted queue row a new Turn and its own original', async () => {
-  const f = fixture();
-  const input = entry('queued-before-edit');
-  f.runtime.contentMode = 'e2ee';
-  const prepared: { userTurnId: string; inputConfig: unknown }[] = [];
-  f.runtime.prepareEncryptedDispatch = async (_machine, args) => {
-    prepared.push(args);
-    return preparedOriginal('0c'.repeat(32));
-  };
-  const current = {
-    ...queueRow(input),
-    $cid: 'cid',
-    operationId: `queue:${input.id}`,
-  } as unknown as MessageQueueItem;
-  const edited = {
-    ...current,
-    task: 'changed',
-    acpSessionConfig: {
-      ...current.acpSessionConfig,
-      prompt: 'changed',
-      inputBlocks: [{ type: 'text', text: 'changed' }],
-    },
-  } as MessageQueueItem;
-  const sealed = await sealEditedQueueItem(f.runtime, SESSION, current, edited);
-  expect(sealed.userTurnId).not.toBe(input.id);
-  expect(sealed.operationId).toBe(`queue:${sealed.userTurnId}`);
-  expect(prepared).toHaveLength(1);
-  expect(prepared[0]).toMatchObject({
-    userTurnId: sealed.userTurnId,
-    inputConfig: { prompt: 'changed' },
-  });
-  expect(queuedOriginal(f, sealed.userTurnId!)).toBe('0c'.repeat(32));
-  await f.runtime.sendResources.withSessionStore(SESSION, (store) =>
-    store.setState((draft: { queueDispatchOriginals?: Record<string, string> }) => {
-      draft.queueDispatchOriginals = { ...draft.queueDispatchOriginals, [input.id]: '0e' };
-    })
-  );
-  await removeQueuedOriginal(f.runtime, SESSION, input.id);
-  expect(queuedOriginal(f, input.id)).toBeUndefined();
-  const toggled = { ...current, isEditing: true } as MessageQueueItem;
-  expect(await sealEditedQueueItem(f.runtime, SESSION, current, toggled)).toBe(toggled);
-  expect(prepared).toHaveLength(1);
+  expect(queuedIntent(f, input.id)).toBeUndefined();
 });
 
 it('keeps a verified withdrawal after a later unverifiable prepare', async () => {
@@ -873,126 +796,98 @@ it('keeps a verified withdrawal when a later prepare outlasts its deadline', asy
   }
 });
 
-it('settles timed-out input that a late verified withdrawal reaches before any machine claims it', async () => {
+it('does not write an encrypted turn whose host never signs it', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     const f = fixture();
     const host = encryptedHost(f);
     const asked = host.hold();
     const written = send(f, entry('late'));
+    const refused = expect(written).rejects.toBeInstanceOf(SessionInputNotSentError);
     await asked;
-    await vi.advanceTimersByTimeAsync(200);
-    // No withdrawal was known: the unknown outcome keeps the durable write.
-    await written;
-    expect(turnStatus(f, 'late')).toBe('pending');
-    vi.useRealTimers();
-    host.release('e2ee_machine_not_shared');
-    await vi.waitFor(() => expect(turnStatus(f, 'late')).toBe('canceled'));
-    expect(f.turns().find((turn) => turn.id === 'late')?.items).toEqual(entry('late').items);
+    await vi.advanceTimersByTimeAsync(QUEUED_ORIGINAL_DEADLINE_MS);
+    await refused;
+    expect(f.turns()).toEqual([]);
   } finally {
     vi.useRealTimers();
   }
 });
 
-it.each(['pending', 'seen', 'processing'] as const)(
-  'accelerates an activated %s turn once when credential confirmation outlasts 300ms',
-  async (status) => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const f = fixture();
-    f.runtime.contentMode = 'e2ee';
-    const input = entry(`slow-host-${status}`);
-    const original = {
-      requestId: '04'.repeat(16),
-      targetMachineId: MACHINE,
-      frameHex: '05'.repeat(300),
-      requesterDevice: '06'.repeat(32),
-      expiresAt: 4_102_444_800_000,
-    };
-    const answered = Promise.withResolvers<void>();
-    const asked = Promise.withResolvers<void>();
-    const appended = Promise.withResolvers<string>();
-    const frames: string[] = [];
-    const activated = Promise.withResolvers<void>();
-    const upsert = f.runtime.writer.upsertDocMeta;
-    f.runtime.writer.upsertDocMeta = async (roomId, patch) => {
-      await upsert(roomId, patch);
-      if (patch.latestUserMsgId === input.id) activated.resolve();
-    };
-    // A host whose credential-confirmed preparation answers only after the renderer deadline.
-    const rpc = createEncryptedDispatchLegacy({
-      workspaceId: 'workspace',
-      prepare: async () => {
-        asked.resolve();
-        await answered.promise;
-        return original;
-      },
-      accept: async () => {
-        throw new Error('no response is delivered');
-      },
-      client: async () =>
-        ({
-          ensureJsonStream: async () => undefined,
-          readJsonLive: (
-            _stream: string,
-            _state: unknown,
-            _batch: unknown,
-            options: { signal: AbortSignal }
-          ) =>
-            new Promise<void>((resolve) =>
-              options.signal.addEventListener('abort', () => resolve())
-            ),
-          appendJson: async (_stream: string, value: { id: string }) => {
-            frames.push(value.id);
-            appended.resolve(value.id);
-          },
-        }) as unknown as LoroStreamsJsonStreamClient,
+it('writes a turn once a slow host signs it, then accelerates it once', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const f = fixture();
+  f.runtime.contentMode = 'e2ee';
+  const input = entry('slow-host');
+  const original = {
+    requestId: '04'.repeat(16),
+    targetMachineId: MACHINE,
+    frameHex: '05'.repeat(300),
+    requesterDevice: '06'.repeat(32),
+    expiresAt: 0,
+    e2eeIntent: signedIntent(6),
+  };
+  const answered = Promise.withResolvers<void>();
+  const asked = Promise.withResolvers<void>();
+  const appended = Promise.withResolvers<string>();
+  const frames: string[] = [];
+  // A host whose credential-confirmed preparation answers only after the renderer deadline.
+  const rpc = createEncryptedDispatchLegacy({
+    workspaceId: 'workspace',
+    prepare: async () => {
+      asked.resolve();
+      await answered.promise;
+      return original;
+    },
+    accept: async () => {
+      throw new Error('no response is delivered');
+    },
+    client: async () =>
+      ({
+        ensureJsonStream: async () => undefined,
+        readJsonLive: (
+          _stream: string,
+          _state: unknown,
+          _batch: unknown,
+          options: { signal: AbortSignal }
+        ) =>
+          new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+        appendJson: async (_stream: string, value: { id: string }) => {
+          frames.push(value.id);
+          appended.resolve(value.id);
+        },
+      }) as unknown as LoroStreamsJsonStreamClient,
+  });
+  cleanup.push(() => rpc.close());
+  f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
+  let dispatched: Promise<void> | undefined;
+  try {
+    const written = writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'history' },
     });
-    cleanup.push(() => rpc.close());
-    f.runtime.prepareEncryptedDispatch = (machineId, args) => rpc.prepare(machineId, args);
-    let dispatched: Promise<void> | undefined;
-    try {
-      // Keep the pre-write probe and real Loro commit in this end-to-end send control.
-      const written = writeUserTurn(f.runtime, {
-        sessionId: SESSION,
-        entry: input,
-        delivery: { kind: 'history' },
-      });
-      await asked.promise;
-      await vi.advanceTimersByTimeAsync(200);
-      await written;
-      dispatched = dispatchUserTurn(f.runtime, SESSION, input.id);
-      await vi.advanceTimersByTimeAsync(200);
-      await activated.promise;
-      expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
-      expect(frames).toEqual([]);
-      // The daemon may claim the durable input before native preparation returns.
-      await f.runtime.sendResources.withSessionStore(SESSION, async (store) => {
-        await store.sessionData.commands.applyHistoryAction({
-          kind: 'user-status',
-          turnId: input.id,
-          status,
-        });
-      });
-      expect(turnStatus(f, input.id)).toBe(status);
-      await vi.advanceTimersByTimeAsync(101);
-      answered.resolve();
-      expect(
-        await Promise.race([appended.promise, dispatched.then(() => 'settled unaccelerated')])
-      ).toBe(original.requestId);
-      expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
-        original.frameHex
-      );
-      await rpc.close();
-      await dispatched;
-      expect(frames).toEqual([original.requestId]);
-    } finally {
-      vi.useRealTimers();
-      answered.resolve();
-      await rpc.close();
-      await dispatched;
-    }
+    await asked.promise;
+    await vi.advanceTimersByTimeAsync(300);
+    // Nothing executable exists until the intent is signed.
+    expect(f.turns()).toEqual([]);
+    answered.resolve();
+    await written;
+    expect(
+      (f.turns().find((turn) => turn.id === input.id) as { e2eeIntent?: string } | undefined)
+        ?.e2eeIntent
+    ).toBe(original.e2eeIntent);
+    dispatched = dispatchUserTurn(f.runtime, SESSION, input.id);
+    expect(await appended.promise).toBe(original.requestId);
+    await rpc.close();
+    await dispatched;
+    expect(frames).toEqual([original.requestId]);
+  } finally {
+    vi.useRealTimers();
+    answered.resolve();
+    await rpc.close();
+    await dispatched;
   }
-);
+});
 
 it.each(['canceled', 'handled', 'failed'] as const)(
   'drops a late encrypted preparation when the real persisted turn is %s',
@@ -1054,9 +949,6 @@ it.each(['canceled', 'handled', 'failed'] as const)(
       expect(
         await Promise.race([dispatched.then(() => 'dropped'), appended.promise.then(() => 'sent')])
       ).toBe('dropped');
-      expect(
-        f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get('canceled-late')
-      ).toBeUndefined();
       expect(frames).toEqual([]);
     } finally {
       vi.useRealTimers();
