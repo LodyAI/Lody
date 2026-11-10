@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import {
   CodeCollabOpenDiffManifestRequestSchema,
   CodeCollabReadBlobRequestSchema,
@@ -399,7 +400,10 @@ type RpcServerDeps = {
   maxPendingRequests?: number;
   /** Required for history writes; retain a refusal until the original request expires. */
   historyRequestRejections?: SessionHistoryRpcRejectionStore;
-  getMachineStatus: (args?: { includeDisk?: boolean }) => Promise<MachineStatusResponse>;
+  getMachineStatus: (args?: {
+    includeDisk?: boolean;
+    includeDaemonUpdate?: boolean;
+  }) => Promise<MachineStatusResponse>;
   getPreviewControl?: () => Promise<MachinePreviewControlResponse>;
   getAutomationControl?: () => Promise<RemoteAutomationHandshake>;
   controlAutomation?: (args: {
@@ -421,6 +425,7 @@ type RpcServerDeps = {
     requestToken: string;
     requestId: string;
     targetVersion?: string;
+    upgrade?: ManagedDaemonUpgradeOptions;
   }) => Promise<MachineUpgradeResponse>;
   /** Accepted operations proceed after the ACK succeeds, fails, or reaches its deadline. */
   onMachineLifecycleResponseSettled?: (
@@ -1236,9 +1241,7 @@ export class LoroStreamsMachineRpcServer {
       }
       switch (request.method) {
         case 'machine/status': {
-          const response = await this.deps.getMachineStatus(
-            request.params.includeDisk ? { includeDisk: true } : undefined
-          );
+          const response = await this.deps.getMachineStatus(request.params);
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
@@ -1336,6 +1339,7 @@ export class LoroStreamsMachineRpcServer {
             requestToken: request.params.requestToken,
             requestId: request.params.requestId,
             targetVersion: request.params.targetVersion,
+            upgrade: request.params.upgrade,
           });
           await this.settleMachineLifecycleResponse(request.replyTo, request.id, {
             action: 'upgrade',

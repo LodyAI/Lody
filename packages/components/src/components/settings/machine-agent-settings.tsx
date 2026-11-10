@@ -1,3 +1,6 @@
+import type { ManagedDaemonUpdateStatus } from '@lody/shared';
+import { collectClientBuildInfo } from '@/lib/client-build-info';
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
@@ -54,8 +57,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { canDeleteOfflineMachine, canManageAllMachines } from '@/lib/machine-deletion';
 import { useAppCapability } from '@/lib/app-platform';
 import {
-  fetchLatestCliVersion,
-  isCliVersionOutdated,
+  fetchLatestDaemonVersion,
   mintMachineLifecycleRequestToken,
   type MachineLifecycleAction,
 } from '@/lib/machine-lifecycle-api';
@@ -849,6 +851,28 @@ export function MachineAgentSettings({
     if (dialogMode && dialogMachineAvailable) setDialogOpen(true);
   }, [dialogMode, dialogMachineAvailable]);
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
+  const [managedUpdateObservation, setManagedUpdateObservation] = useState<{
+    machineId: MachineId;
+    status: ManagedDaemonUpdateStatus | null | undefined;
+  } | null>(null);
+  const selectedManagedUpdate =
+    managedUpdateObservation?.machineId === resolvedSelectedMachine?.id
+      ? managedUpdateObservation?.status
+      : null;
+  const observedMachineId = resolvedSelectedMachine?.id;
+  const receiveManagedUpdate = useCallback(
+    (status: ManagedDaemonUpdateStatus | null | undefined) => {
+      if (!observedMachineId) return;
+      setManagedUpdateObservation((current) => ({
+        machineId: observedMachineId,
+        status:
+          status === undefined && current?.machineId === observedMachineId && current.status
+            ? { ...current.status, phase: 'unconfirmed' }
+            : status,
+      }));
+    },
+    [observedMachineId]
+  );
 
   const sharedWithTeam = resolvedSelectedMachine
     ? (accessByMachineId.get(resolvedSelectedMachine.id)?.sharedWithTeam ?? false)
@@ -887,6 +911,7 @@ export function MachineAgentSettings({
   const selectedLifecycleCapability = useMachineLifecycleCapability({
     machineId: resolvedSelectedMachine?.id ?? null,
     enabled: selectedCanManageLifecycle && selectedIsOnline,
+    onUpdateStatus: receiveManagedUpdate,
   });
   const selectedCanRemoteRestart =
     selectedCanManageLifecycle &&
@@ -898,7 +923,9 @@ export function MachineAgentSettings({
     selectedLifecycleCapability?.canRemoteUpgrade === true;
   const selectedUpdateAvailable =
     selectedCanRemoteUpgrade &&
-    isCliVersionOutdated(resolvedSelectedMachine?.cliVersion, latestCliVersion ?? undefined);
+    !!latestCliVersion &&
+    !!resolvedSelectedMachine?.cliVersion &&
+    resolvedSelectedMachine.cliVersion !== latestCliVersion;
   const selectedDaemonUpdate =
     selectedUpdateAvailable && resolvedSelectedMachine?.cliVersion && latestCliVersion
       ? {
@@ -967,7 +994,10 @@ export function MachineAgentSettings({
     // the network call entirely when remote lifecycle is unavailable.
     if (!remoteMachinesAvailable) return undefined;
     let cancelled = false;
-    void fetchLatestCliVersion().then((result) => {
+    const releaseChannel = collectClientBuildInfo().releaseChannel;
+    const channel =
+      releaseChannel === 'nightly' ? 'nightly' : releaseChannel === 'staging' ? 'next' : 'stable';
+    void fetchLatestDaemonVersion(channel).then((result) => {
       if (cancelled) return;
       setLatestCliVersion(result.ok ? result.latestVersion : null);
     });
@@ -1002,6 +1032,7 @@ export function MachineAgentSettings({
       machineId: MachineId;
       action: MachineLifecycleAction;
       targetVersion?: string;
+      upgrade?: ManagedDaemonUpgradeOptions;
       restoreMachineId?: MachineId;
     }) => {
       if (!runtime || !workspaceId || !authToken) {
@@ -1015,6 +1046,7 @@ export function MachineAgentSettings({
         action: args.action,
         requestId,
         targetVersion: args.targetVersion,
+        upgrade: args.upgrade,
         restoreMachineId: args.restoreMachineId,
         sessionToken: authToken,
       });
@@ -1051,7 +1083,7 @@ export function MachineAgentSettings({
       }
 
       const responsePromise = runtime.waitForMachineUpgradeResponse(args.machineId, requestId, {
-        timeoutMs: 120000,
+        timeoutMs: 12 * 60_000,
       });
       runtime.sendControl({
         type: 'machine/upgrade',
@@ -1061,6 +1093,7 @@ export function MachineAgentSettings({
         requestToken: minted.requestToken,
         requestId,
         targetVersion: args.targetVersion,
+        upgrade: args.upgrade,
       });
       const response = await responsePromise;
       if (!response) {
@@ -1110,8 +1143,26 @@ export function MachineAgentSettings({
   };
 
   const upgradeMachine = useCallback(
-    async (machineId: MachineId, targetVersion: string) => {
-      await requestMachineLifecycle({ machineId, action: 'upgrade', targetVersion });
+    async (
+      machineId: MachineId,
+      targetVersion: string,
+      switchPolicy: 'when-idle' | 'immediate' = 'when-idle'
+    ) => {
+      const releaseChannel = collectClientBuildInfo().releaseChannel;
+      const channel =
+        releaseChannel === 'nightly' ? 'nightly' : releaseChannel === 'staging' ? 'next' : 'stable';
+      await requestMachineLifecycle({
+        machineId,
+        action: 'upgrade',
+        targetVersion,
+        upgrade: {
+          protocol: 1,
+          channel,
+          switchPolicy,
+          confirmChannelChange: true,
+          confirmDowngrade: true,
+        },
+      });
     },
     [requestMachineLifecycle]
   );
@@ -1449,6 +1500,7 @@ export function MachineAgentSettings({
               onDeleteSetup={handleDeleteSetup}
               onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
               daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
+              daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
               onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
               onUpgradeDaemon={isOwn && selectedDaemonUpdate ? upgradeMachine : undefined}
               monitorSnapshot={machineMonitor.snapshot}
@@ -1590,6 +1642,7 @@ export function MachineAgentSettings({
           onDeleteSetup={handleDeleteSetup}
           onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
           daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
+          daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
           onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
           onUpgradeDaemon={isOwn && selectedDaemonUpdate ? upgradeMachine : undefined}
           canRevokeCredentials={isOwn && (credentialState?.revocableCount ?? 0) > 0}
@@ -1655,6 +1708,7 @@ export function MachineAgentSettings({
               onDeleteSetup={handleDeleteSetup}
               onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
               daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
+              daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
               onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
               onUpgradeDaemon={isOwn && selectedDaemonUpdate ? upgradeMachine : undefined}
               canRevokeCredentials={isOwn && (credentialState?.revocableCount ?? 0) > 0}

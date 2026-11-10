@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpdateStatus } from '@lody/shared';
 import { MachineIdentityRestore } from './machine-identity-restore';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
@@ -402,9 +403,14 @@ export type MachineDetailPaneProps = {
   onPing?: (machineId: MachineId) => Promise<number>;
   daemonUpdate?: { currentVersion: string; latestVersion: string };
   onRestartDaemon?: (machineId: MachineId) => Promise<void>;
+  daemonUpdateStatus?: ManagedDaemonUpdateStatus | null;
+  onUpgradeDaemon?: (
+    machineId: MachineId,
+    targetVersion: string,
+    switchPolicy?: 'when-idle' | 'immediate'
+  ) => Promise<void>;
   onRestoreIdentity?: (source: MachineId, target: MachineId) => Promise<void>;
   restoreIdentityCandidates?: MachineViewMeta[];
-  onUpgradeDaemon?: (machineId: MachineId, targetVersion: string) => Promise<void>;
   canRevokeCredentials?: boolean;
   /** Must reject on failure so the confirm dialog stays open; the callback owns
    *  surfacing the error (toast) exactly once. */
@@ -449,6 +455,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     onPing,
     daemonUpdate,
     onRestartDaemon,
+    daemonUpdateStatus,
     onUpgradeDaemon,
     canRevokeCredentials = false,
     onRevokeCredentials,
@@ -936,6 +943,27 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
           ) : !isMobile ? (
             <div {...stylex.props(styles.metaRow)}>{metaBadges}</div>
           ) : null}
+          {daemonUpdateStatus && (
+            <div role="status" {...stylex.props(surface.formBlock, styles.update)}>
+              {t(`settings.agent.machineLifecycle.phase.${daemonUpdateStatus.phase}`, {
+                defaultValue: {
+                  preparing: 'Downloading and checking update',
+                  prepared: 'Update prepared',
+                  waiting: 'Waiting for running tasks to finish',
+                  switching: 'Switching daemon version',
+                  observing: 'Checking the new daemon',
+                  applied: 'Daemon updated to v{{version}}',
+                  'rollback-stop': 'Restoring the previous daemon',
+                  'rolled-back': 'Update failed; restored v{{previous}}',
+                  blocked: 'Update needs local recovery',
+                  failed: 'Update canceled or preparation failed; previous daemon retained',
+                  unconfirmed: 'Update outcome is not yet confirmed',
+                }[daemonUpdateStatus.phase],
+                version: daemonUpdateStatus.targetVersion,
+                previous: daemonUpdateStatus.previousVersion,
+              })}
+            </div>
+          )}
           {updateVisible && daemonUpdate && (
             <div {...stylex.props(surface.formBlock, styles.update)}>
               <div {...stylex.props(styles.updateText)}>
@@ -963,7 +991,18 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
                 ) : (
                   <Download {...stylex.props(styles.icon14)} />
                 )}
-                {t('settings.agent.machineLifecycle.upgradeAndRestartButton', 'Update and restart')}
+                {t('settings.agent.machineLifecycle.upgradeAfterIdleButton', 'Update when idle')}
+              </Button>
+              <Button
+                size="small"
+                variant="ghost"
+                disabled={restartingDaemon || upgradingDaemon}
+                onClick={() => void handleUpgradeDaemon('immediate')}
+              >
+                {t(
+                  'settings.agent.machineLifecycle.upgradeImmediatelyButton',
+                  'Update now (interrupt tasks)'
+                )}
               </Button>
             </div>
           )}

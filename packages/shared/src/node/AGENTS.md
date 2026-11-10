@@ -134,3 +134,5 @@ may enable it. Preserve the same clock object across operations; new clock
 domains must not restart durable epoch grace. The private owner-only file moves
 wall and monotonic readings together; sleep and process ownership use real time.
 The inspector is passive and cannot initialize or mutate the clock.
+
+Application-owned process observers inventory acquired trees without granting signal authority. Managed daemon drain receipts require every observed tree to be proven gone.

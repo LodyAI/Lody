@@ -1,3 +1,4 @@
+import type { ManagedDaemonUpdateStatus, ManagedDaemonUpgradeOptions } from './daemon-update';
 import type { ProjectLocalMemberProbe, SessionProjectRun } from './workspace-project';
 import type {
   MachineId,
@@ -245,6 +246,7 @@ export interface MachineStatusRequest {
   workspaceId: WorkspaceId;
   /** Only for daemons advertising `machineDiskStatus`. */
   includeDisk?: true;
+  includeDaemonUpdate?: true;
 }
 
 export type MachineLifecycleLaunchMode = 'daemon' | 'foreground' | 'electron' | 'unknown';
@@ -267,6 +269,7 @@ export interface MachineStatusResponse {
   /** Sent only when the request asked with `includeDisk`. */
   disk?: { totalGB: number; freeGB: number; usedPercent: number };
   lifecycle?: MachineLifecycleCapability;
+  daemonUpdate?: ManagedDaemonUpdateStatus | null;
   error?: string;
 }
 
@@ -337,6 +340,7 @@ export interface MachineUpgradeRequest {
   requestId: string;
   /** Defaults to `latest`; exact semver-like versions are also accepted. */
   targetVersion?: string;
+  upgrade?: ManagedDaemonUpgradeOptions;
 }
 
 export interface MachineUpgradeResponse {

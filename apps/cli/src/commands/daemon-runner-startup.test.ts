@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CliRunResult, SupervisorState } from '@lody/cli-supervisor';
 import { EXIT_CODE_RETRYABLE_STARTUP } from '@/lib/machine-lifecycle';
 import {
   describeDaemonWorkerStartupFailure,
   isDaemonWorkerReady,
   isRetryableDaemonWorkerStartupExit,
+  startManagedWorkerReadinessDeadline,
 } from './daemon-runner-startup';
 
 function state(
@@ -89,5 +90,105 @@ describe('daemon runner startup handshake', () => {
         stderr: '',
       })
     ).toBe('CLI worker exited from signal SIGTERM before becoming ready');
+  });
+});
+
+describe('managed candidate readiness deadline', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('bounds a hung candidate even when its shutdown IPC never completes', async () => {
+    vi.useFakeTimers();
+    let phase = 'observing';
+    let alive = true;
+    const deadline = startManagedWorkerReadinessDeadline({
+      timeoutMs: 180_000,
+      shutdownGraceMs: 8_000,
+      requestShutdown: () => new Promise<void>(() => {}),
+      terminate: async () => {
+        alive = false;
+      },
+      onExpired: () => {
+        phase = 'blocked';
+      },
+      onTerminationFailure: () => {
+        phase = 'blocked';
+      },
+    });
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(deadline.expired).toBe(true);
+    expect(phase).toBe('blocked');
+    expect(alive).toBe(true);
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(alive).toBe(false);
+    deadline.clear();
+    expect(deadline.expired).toBe(true); // Late ready is still ineligible to commit.
+  });
+
+  it('clears the deadline for a committed candidate or a fully stopped exact child', async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const ready = startManagedWorkerReadinessDeadline({
+      timeoutMs: 180_000,
+      shutdownGraceMs: 8_000,
+      requestShutdown: () => {
+        events.push('shutdown');
+      },
+      terminate: async () => {
+        events.push('terminate');
+      },
+      onExpired: () => {
+        events.push('expired');
+      },
+      onTerminationFailure: () => {
+        events.push('blocked');
+      },
+    });
+    await vi.advanceTimersByTimeAsync(179_999);
+    ready.clear();
+    await vi.advanceTimersByTimeAsync(188_000);
+    expect(events).toEqual([]);
+    const draining = startManagedWorkerReadinessDeadline({
+      timeoutMs: 180_000,
+      shutdownGraceMs: 8_000,
+      requestShutdown: () => {
+        events.push('drained-and-stopped');
+        draining.clear();
+      },
+      terminate: async () => {
+        events.push('terminate');
+      },
+      onExpired: () => {
+        events.push('expired');
+      },
+      onTerminationFailure: () => {
+        events.push('blocked');
+      },
+    });
+    await vi.advanceTimersByTimeAsync(188_000);
+    expect(events).toEqual(['expired', 'drained-and-stopped']);
+  });
+
+  it('reports unconfirmed containment instead of treating a failed force stop as recovery', async () => {
+    vi.useFakeTimers();
+    const failures: unknown[] = [];
+    const failure = new Error('owned candidate group survived');
+    const deadline = startManagedWorkerReadinessDeadline({
+      timeoutMs: 180_000,
+      shutdownGraceMs: 8_000,
+      requestShutdown: () => {
+        throw new Error('IPC closed');
+      },
+      terminate: async () => {
+        throw failure;
+      },
+      onExpired: () => {},
+      onTerminationFailure: (error) => {
+        failures.push(error);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(188_000);
+    expect(deadline.expired).toBe(true);
+    expect(failures).toEqual([failure]);
+    deadline.clear();
   });
 });

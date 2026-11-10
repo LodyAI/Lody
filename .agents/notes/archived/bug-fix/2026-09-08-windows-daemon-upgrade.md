@@ -1,6 +1,7 @@
 # Launch Windows daemon upgrades through the npm command shim
 
 Status: implemented
+Archived: 2026-11-06
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/488
 
@@ -24,7 +25,7 @@ timeouts, cancellation, and watchdog handoff remain unchanged. This fixes the
 existing Windows behavior rather than changing product intent or the protocol.
 
 The lifecycle response-append failure is handled by the separate
-[ACK fix](2026-09-08-machine-lifecycle-ack.md) in the same PR.
+[ACK fix](../../implemented/bug-fix/2026-09-08-machine-lifecycle-ack.md) in the same PR.
 No existing owning note was found for the upgrade launcher.
 
 ## Evidence and verification
@@ -33,7 +34,7 @@ No existing owning note was found for the upgrade launcher.
   describes the interpreter requirement.
 - [Implementation](../../../../apps/cli/src/lib/machine-lifecycle.ts) uses the existing
   dependency; no manifest or lockfile change is needed.
-- [Regression tests](../../../../apps/cli/src/lib/machine-lifecycle-upgrade.test.ts)
+- [Regression tests](https://github.com/LodyAI/Lody/blob/d1386868d9a8dfe185ec060266136c6b50a81ab6/apps/cli/src/lib/machine-lifecycle-upgrade.test.ts)
   isolate PATH to a temporary npm shim in a directory containing spaces. They run
   a `.cmd` on Windows and a shell script on POSIX, with exit codes 0 and 1.
 - Targeted lifecycle tests passed (10 tests) on macOS, and `pnpm check` passed

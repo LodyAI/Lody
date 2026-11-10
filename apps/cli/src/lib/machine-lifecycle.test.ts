@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadEnv } from '@/utils/const';
 import type { MachineId, WorkspaceId } from '@lody/shared';
 import {
-  buildLodyUpgradeInstallArgs,
   normalizeMachineUpgradeTargetVersion,
   resolveMachineLifecycleCapability,
-  resolveNpmExecutable,
   verifyMachineLifecycleRequest,
 } from './machine-lifecycle';
 
@@ -30,25 +28,12 @@ describe('machine lifecycle helpers', () => {
     expect(() => normalizeMachineUpgradeTargetVersion('next')).toThrow(/exact semver/);
   });
 
-  it('builds a fixed npm global install command for lody only', () => {
-    expect(buildLodyUpgradeInstallArgs('1.2.3')).toEqual([
-      'install',
-      '-g',
-      'lody@1.2.3',
-      '--registry=https://registry.npmjs.org',
-    ]);
-  });
-
-  it('uses npm.cmd on Windows', () => {
-    expect(resolveNpmExecutable('win32')).toBe('npm.cmd');
-    expect(resolveNpmExecutable('linux')).toBe('npm');
-  });
-
-  it('enables remote lifecycle only for supervised daemon workers', () => {
+  it('legacy daemons require explicit migration instead of remote npm installation', () => {
     expect(resolveMachineLifecycleCapability('daemon')).toEqual({
       launchMode: 'daemon',
       canRemoteRestart: true,
-      canRemoteUpgrade: true,
+      canRemoteUpgrade: false,
+      reason: 'unsupported_install',
     });
   });
 
@@ -71,6 +56,25 @@ describe('machine lifecycle helpers', () => {
   });
 });
 
+describe('managed lifecycle capability', () => {
+  it('requires a managed plaintext daemon with proven process containment', () => {
+    expect(
+      resolveMachineLifecycleCapability('daemon', { managed: true, platform: 'linux' })
+        .canRemoteUpgrade
+    ).toBe(true);
+    expect(
+      resolveMachineLifecycleCapability('daemon', { managed: true, encrypted: true })
+        .canRemoteUpgrade
+    ).toBe(false);
+    expect(
+      resolveMachineLifecycleCapability('daemon', { managed: true, platform: 'win32' })
+        .canRemoteUpgrade
+    ).toBe(false);
+  });
+});
+
+// Installation safety: a successful shutdown receipt must include retained
+// detached groups even when their original root has already exited.
 // Exercise persisted daemon recovery with real files: a restarted worker must
 // never open a runtime with an unconfirmed or half-published identity.
 describe('daemon machine identity restore', () => {
@@ -100,6 +104,32 @@ describe('daemon machine identity restore', () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }
+  it('candidate startup refuses pending identity work before remote commits or local writes', async () => {
+    const { prepareMachineIdentityRestore, applyPendingMachineIdentityRestore } =
+      await import('./machine-identity-restore');
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    await fixture(async (root) => {
+      const fetchImpl: typeof fetch = async () => {
+        throw new Error('candidate must not contact auth');
+      };
+      await applyPendingMachineIdentityRestore({ root, readOnly: true, fetchImpl });
+      await prepareMachineIdentityRestore(intent, root);
+      await expect(
+        applyPendingMachineIdentityRestore({ root, readOnly: true, fetchImpl })
+      ).rejects.toThrow('pending machine identity restore');
+      expect(JSON.parse(await fs.readFile(path.join(root, 'credentials.json'), 'utf8'))).toEqual(
+        originalCredentials
+      );
+      expect(await fs.readFile(path.join(root, 'machine-id'), 'utf8')).toBe(intent.sourceMachineId);
+      expect(
+        JSON.parse(await fs.readFile(path.join(root, 'machine-identity-restore.json'), 'utf8'))
+      ).toEqual(intent);
+      await expect(fs.access(path.join(root, 'identity-restore-backups'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    });
+  });
   it.each([500, 503, 408, 429, 'network', 'timeout'] as const)(
     'retains the pending identity and uses non-crash retry for %s',
     async (failure) => {
