@@ -1,3 +1,6 @@
+import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
+import { LODY_AUTH_URL } from '@/utils/const';
+import { isContainedSession } from '@lody/shared';
 import { createToolHelpServer, LODY_HELP_INSTRUCTIONS } from './tool-help';
 import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
@@ -146,6 +149,8 @@ import {
   type ResolvedTurnDispatchConfig,
   type SessionLiveStatusBatchItem,
   type DelegatedSessionRequester,
+  assertSessionManagementAccess,
+  SessionManagementAccessDeniedError,
 } from '@/commands/session';
 import { classifyMachinePresence, type MachinePresence } from '@/commands/session-machine-presence';
 import type {
@@ -188,7 +193,9 @@ import {
   discoveryCursor,
 } from '@/lib/discovery-query';
 import {
+  runWithSessionHistoryRequester,
   getDaemonWorkspace,
+  readBoundDaemonOwnerAccess,
   getSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
@@ -1242,6 +1249,9 @@ const jsonTextResult = (value: unknown, isError = false) =>
   textResult(JSON.stringify(value, null, 2), isError);
 
 const normalizeMcpError = (error: unknown) => {
+  if (error instanceof SessionManagementAccessDeniedError) {
+    return makeLodyError(error.code, error.message, error.retryable);
+  }
   if (error instanceof LodyOperationStoreError) {
     return error.toLodyError();
   }
@@ -2396,39 +2406,85 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   const requestedSessionId = resolveMcpSessionId(input.sessionId, ctx);
-  return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
-    const session = await readCurrentSessionMeta(manager, sessionId);
-    if (!session) {
-      throw new LodyOperationStoreError(
-        'SESSION_NOT_FOUND',
-        `Session not found: ${sessionId}`,
-        false
+  const identity = buildInvocationIdentity(await resolveInvokingTurnSource());
+  const requester = { userId: identity.userId, machineId: auth.machineId };
+  return await runWithSessionHistoryRequester(requester, () =>
+    withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+      const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
+      const session = await readCurrentSessionMeta(manager, sessionId);
+      if (!session) {
+        throw new LodyOperationStoreError(
+          'SESSION_NOT_FOUND',
+          `Session not found: ${sessionId}`,
+          false
+        );
+      }
+      const parent = session.parentSessionId
+        ? await readCurrentSessionMeta(manager, session.parentSessionId as SessionId)
+        : undefined;
+      const root = isContainedSession(session, parent) ? parent! : session;
+      const nativeOwner = await readBoundDaemonOwnerAccess({
+        auth,
+        manager,
+        workspaceId: workspace.id as WorkspaceId,
+        machineId: session.machineId,
+        requesterUserId: requester.userId,
+      });
+      const allowed = manager.isEncryptedWorkspace()
+        ? await manager.authorizeEncryptedSessionRead({
+            machineId: session.machineId,
+            rootSessionId: root.id,
+            requesterUserId: requester.userId,
+            sessionOwnerUserId: root.userId,
+            localProjectId:
+              session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+          })
+        : nativeOwner !== undefined
+          ? nativeOwner
+          : getSessionCommandEnvironment() !== undefined
+            ? requester.userId === auth.userId && session.machineId === auth.machineId
+            : await canReadSessionForCliRequester({
+                token: auth.token,
+                authBaseUrl: LODY_AUTH_URL,
+                workspaceId: workspace.id,
+                machineId: session.machineId,
+                sessionId: session.id,
+                rootSessionId: root.id,
+                sessionOwnerUserId: root.userId,
+                localProjectId:
+                  session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+                requester,
+              });
+      if (!allowed)
+        throw new LodyOperationStoreError(
+          'SESSION_HISTORY_DENIED',
+          'Session history is not shared with this requester.',
+          false
+        );
+      return await readSessionDocForMcp(
+        manager,
+        session,
+        auth.machineId,
+        async (sessionDoc) => {
+          const backend = await createSessionBackend(sessionDoc, session);
+          // Bounded business paging: `limit` counts displayable turns, the cursor is a
+          // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+          return await buildSessionHistoryForReader({
+            sessionId,
+            history: backend.history,
+            limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+            ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+            direction: input.direction,
+            role: input.role,
+            since: input.since,
+            maxChars: input.maxChars,
+            maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+          });
+        },
+        REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
       );
-    }
-    return await readSessionDocForMcp(
-      manager,
-      session,
-      auth.machineId,
-      async (sessionDoc) => {
-        const backend = await createSessionBackend(sessionDoc, session);
-        // Bounded business paging: `limit` counts displayable turns, the cursor is a
-        // raw position, and entries removed by the 128 KiB byte cap stay reachable.
-        return await buildSessionHistoryForReader({
-          sessionId,
-          history: backend.history,
-          limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-          ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-          direction: input.direction,
-          role: input.role,
-          since: input.since,
-          maxChars: input.maxChars,
-          maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
-        });
-      },
-      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
-    );
-  });
+    })
+  );
 };
 
 const selectMachineMetasForOptions = (
@@ -3793,10 +3849,11 @@ const applySessionRenameItems = async (
 const persistSessionRenameItems = async (
   manager: LoroDocumentManager,
   items: readonly ResolvedSessionRenameItem[],
-  syncReason: string
+  syncReason: string,
+  assertCanManage: (sessionId: SessionId) => Promise<SessionMeta>
 ): Promise<Awaited<ReturnType<typeof applySessionRenameItems>>> => {
   const results = await applySessionRenameItems(items, async (item) => {
-    const session = await readCurrentSessionMeta(manager, item.sessionId);
+    let session = await readCurrentSessionMeta(manager, item.sessionId);
     if (!session) {
       throw new LodyOperationStoreError(
         'SESSION_NOT_FOUND',
@@ -3804,6 +3861,7 @@ const persistSessionRenameItems = async (
         false
       );
     }
+    session = await assertCanManage(item.sessionId);
     if (item.scope === 'group' && session.parentSessionId) {
       throw new LodyOperationStoreError(
         'COMMAND_REJECTED',
@@ -3834,7 +3892,11 @@ const renameSessionItems = async (
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     const reason = `mcp.session_rename_many:${ctx.sessionId}`;
     await syncWorkspaceMetaForRead(manager, reason);
-    return await persistSessionRenameItems(manager, resolved, reason);
+    const identity = buildInvocationIdentity(await resolveInvokingTurnSource());
+    const delegatedRequester = toDelegatedSessionRequester(identity);
+    return await persistSessionRenameItems(manager, resolved, reason, (sessionId) =>
+      assertSessionManagementAccess({ auth, workspace, manager, sessionId, delegatedRequester })
+    );
   });
 };
 
@@ -5636,13 +5698,24 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         const auth = getCliAuthContextOrThrow('mcp');
         const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
         return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+          const delegatedRequester = toDelegatedSessionRequester(
+            buildInvocationIdentity(await resolveInvokingTurnSource())
+          );
           const archive = async (rawSessionId: string) => {
             const sessionId = resolveMcpSessionId(rawSessionId, ctx);
             try {
               const archivedChildSessionIds = await runSessionOperationWithSyncedMetadata(
                 manager,
                 sessionId as SessionId,
-                'archive'
+                'archive',
+                (targetId) =>
+                  assertSessionManagementAccess({
+                    auth,
+                    workspace,
+                    manager,
+                    sessionId: targetId,
+                    delegatedRequester,
+                  })
               );
               return { ok: true as const, sessionId, archivedChildSessionIds };
             } catch (error) {

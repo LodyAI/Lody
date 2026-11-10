@@ -1,3 +1,8 @@
+import {
+  sessionHistoryWriteIntentDigest,
+  SessionHistoryReadResponseSchema,
+  isContainedSession,
+} from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
 import {
   storeLocalSessionImage,
@@ -906,12 +911,19 @@ export class MessageHandler {
     expiresAt: number,
     signal: AbortSignal
   ) {
+    // Scoped history uses the feature receiver's exact-session authorization.
+    if (input.method === 'session/history-read') throw new Error('e2ee_query_method');
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
   }
   async readEncryptedMachineRequest(
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
-    context: { requestId: string; expiresAt: number; signal: AbortSignal }
+    context: {
+      requestId: string;
+      expiresAt: number;
+      signal: AbortSignal;
+      authority?: { isCurrent: () => boolean; signal: AbortSignal };
+    }
   ) {
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readFeatureQuery(request, context);
@@ -3716,13 +3728,14 @@ export class MessageHandler {
                 getServerNow()
               )
             ),
-          put: (request, rejection) =>
+          put: (request, rejection, retainUntil) =>
             Effect.runPromise(
               putSessionHistoryRpcRejection(
                 path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
                 request,
                 rejection,
-                getServerNow()
+                getServerNow(),
+                retainUntil
               )
             ),
         },
@@ -3934,6 +3947,36 @@ export class MessageHandler {
         prepareSession: async (spec) => this.declineSessionPreparation(spec),
         cancelSessionPreparation: async (args) => this.declineSessionPreparationCancel(args),
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
+        authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
+          if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
+          const target = await this.resolveSessionHistoryAccessTarget(sessionId);
+          return await this.cloudPort.access.verifySessionHistoryRead({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            sessionId,
+            ...target,
+            requestToken: readProof,
+          });
+        },
+        authorizeSessionHistoryWrite: async ({
+          sessionId,
+          writeProof,
+          requestId,
+          operation,
+          payload,
+        }) => {
+          if (!writeProof || !this.cloudPort.access.verifySessionHistoryWrite) return null;
+          const target = await this.resolveSessionHistoryAccessTarget(sessionId);
+          return await this.cloudPort.access.verifySessionHistoryWrite({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            sessionId,
+            ...target,
+            requestToken: writeProof,
+            requestId,
+            intentDigest: await sessionHistoryWriteIntentDigest(requestId, operation, payload),
+          });
+        },
         readSessionHistory: async ({ sessionId, query, signal }) =>
           await this.readSessionHistoryForRpc(sessionId, query, signal),
         waitForSessionHistoryChanges: async (args) => await this.waitForSessionHistoryChanges(args),
@@ -7709,6 +7752,15 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'session/history-read':
+        return SessionHistoryReadResponseSchema.parse(
+          await this.readSessionHistoryForRpc(
+            request.params.sessionId,
+            request.params.query,
+            signal
+          )
+        );
+
       case 'machine/acp-interaction':
         throw new Error('e2ee_feature_unavailable');
       case 'machine/status':
@@ -8310,6 +8362,31 @@ export class MessageHandler {
         context.send(await this.previewService.getStatus(message));
         break;
     }
+  }
+
+  /** Synced ownership/containment is the accepted UI trust boundary, not a registry. */
+  async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
+    await this.resolveSessionHistoryOwnerSessionId(sessionId);
+    const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!entry || entry.meta.machineId !== this.machineId)
+      throw new Error('session_history_read_denied');
+    const child = { ...(entry.meta as SessionMeta), id: sessionId };
+    const parentId = typeof child.parentSessionId === 'string' ? child.parentSessionId : undefined;
+    const parent = parentId
+      ? await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(parentId as SessionId))
+      : undefined;
+    const root =
+      parent &&
+      !parent.deleted &&
+      isContainedSession(child, { ...(parent.meta as SessionMeta), id: parentId })
+        ? { ...(parent.meta as SessionMeta), id: parentId! }
+        : child;
+    const project = child.project as SessionMeta['project'];
+    return {
+      rootSessionId: root.id,
+      sessionOwnerUserId: typeof root.userId === 'string' ? root.userId : undefined,
+      localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
+    };
   }
 
   private readonly resolveSessionHistoryOwnerSessionId = async (

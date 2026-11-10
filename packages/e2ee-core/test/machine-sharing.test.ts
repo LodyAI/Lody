@@ -121,6 +121,7 @@ async function fixture() {
     requestId: '31'.repeat(16),
     sharedWithTeam: true,
     projects: ['project-a'],
+    sessions: [],
     signer: hex(f.owner.publicKey),
     issuedAt: 1234,
   };
@@ -186,8 +187,63 @@ async function fixture() {
 }
 
 describe('owner-signed complete machine sharing policies', () => {
+  it('shares and revokes one conversation without enabling machine execution', async () => {
+    const f = await fixture();
+    const initial = { sharedWithTeam: false, projects: [], sessions: [] };
+    const shared = ok(
+      P.updateMachineSharingState(initial, {
+        kind: 'session',
+        sessionId: 'session-a',
+        level: 'read',
+      })
+    );
+    expect(shared).toEqual({
+      ...initial,
+      sessions: [{ sessionId: 'session-a', audience: 'team' as const, level: 'read' }],
+    });
+    const body = { ...f.policy, ...shared };
+    const encoded = ok(P.encodeMachineSharingPolicy(body));
+    expect((ok(decodeMachineSharingCbor(encoded)) as P.CborValue[])[0]).toBe(3);
+    const verified = ok(f.open(await f.seal(body)));
+    expect(verified.inspect().sessions).toEqual(shared.sessions);
+    expect(f.authorize(verified)).toEqual({ allowed: false, reason: 'machine-not-shared' });
+    expect(
+      ok(
+        P.updateMachineSharingState(shared, {
+          kind: 'session',
+          sessionId: 'session-a',
+          level: null,
+        })
+      )
+    ).toEqual(initial);
+    await expect(f.seal(body, f.bob.signer)).rejects.toMatchObject({
+      code: 'policy-signer-ineligible',
+    });
+  });
+
+  it('rejects duplicate or unsupported conversation grants and isolates inspected grants', async () => {
+    const f = await fixture();
+    const sessions = [
+      { sessionId: 'session-a', audience: 'team' as const, level: 'read' as const },
+    ];
+    for (const invalid of [
+      [...sessions, ...sessions],
+      [{ sessionId: '', level: 'read' }],
+      [{ sessionId: 'a', level: 'write' }],
+    ]) {
+      expect(
+        Result.isFailure(
+          P.encodeMachineSharingPolicy({ ...f.policy, sessions: invalid } as P.MachineSharingPolicy)
+        )
+      ).toBe(true);
+    }
+    const verified = ok(f.open(await f.seal({ ...f.policy, sessions })));
+    (verified.inspect().sessions[0] as { sessionId: string }).sessionId = 'changed';
+    expect(verified.inspect().sessions).toEqual(sessions);
+  });
+
   it('preserves project records while applying the existing atomic switch semantics', () => {
-    const privateState = { sharedWithTeam: false, projects: [] };
+    const privateState = { sharedWithTeam: false, projects: [], sessions: [] };
     const enabled = ok(
       P.updateMachineSharingState(privateState, {
         kind: 'project',
@@ -195,11 +251,11 @@ describe('owner-signed complete machine sharing policies', () => {
         sharedWithTeam: true,
       })
     );
-    expect(enabled).toEqual({ sharedWithTeam: true, projects: ['project-a'] });
+    expect(enabled).toEqual({ sharedWithTeam: true, projects: ['project-a'], sessions: [] });
     const disabled = ok(
       P.updateMachineSharingState(enabled, { kind: 'machine', sharedWithTeam: false })
     );
-    expect(disabled).toEqual({ sharedWithTeam: false, projects: ['project-a'] });
+    expect(disabled).toEqual({ sharedWithTeam: false, projects: ['project-a'], sessions: [] });
     expect(
       ok(
         P.updateMachineSharingState(enabled, {
@@ -208,9 +264,69 @@ describe('owner-signed complete machine sharing policies', () => {
           sharedWithTeam: false,
         })
       )
-    ).toEqual({ sharedWithTeam: true, projects: [] });
-    expect(privateState).toEqual({ sharedWithTeam: false, projects: [] });
+    ).toEqual({ sharedWithTeam: true, projects: [], sessions: [] });
+    expect(privateState).toEqual({ sharedWithTeam: false, projects: [], sessions: [] });
   });
+  it('retains independent team/member audiences canonically and removes only the selected grant', async () => {
+    const f = await fixture();
+    const initial = { sharedWithTeam: false, projects: [], sessions: [] };
+    const individual = ok(
+      P.updateMachineSharingState(initial, {
+        kind: 'session',
+        sessionId: 'root',
+        audience: { userId: 'reader' },
+        level: 'read',
+      })
+    );
+    const all = ok(
+      P.updateMachineSharingState(individual, {
+        kind: 'session',
+        sessionId: 'root',
+        audience: 'team',
+        level: 'read',
+      })
+    );
+    expect(all.sessions).toHaveLength(2);
+    const policy = { ...f.policy, ...all };
+    const wire = ok(P.encodeMachineSharingPolicy(policy));
+    const reordered = { ...policy, sessions: [...policy.sessions].reverse() };
+    expect(ok(P.encodeMachineSharingPolicy(reordered))).toEqual(wire);
+    expect(ok(f.open(await f.seal(policy))).inspect().sessions).toEqual(all.sessions);
+    expect(
+      ok(
+        P.updateMachineSharingState(all, {
+          kind: 'session',
+          sessionId: 'root',
+          audience: 'team',
+          level: null,
+        })
+      )
+    ).toEqual(individual);
+    expect(
+      ok(
+        P.updateMachineSharingState(all, {
+          kind: 'session',
+          sessionId: 'root',
+          audience: { userId: 'reader' },
+          level: null,
+        })
+      ).sessions
+    ).toEqual([{ sessionId: 'root', audience: 'team', level: 'read' }]);
+    expect(
+      Result.isFailure(
+        P.encodeMachineSharingPolicy({ ...policy, sessions: [...all.sessions, all.sessions[0]!] })
+      )
+    ).toBe(true);
+    expect(
+      Result.isFailure(
+        P.encodeMachineSharingPolicy({
+          ...policy,
+          sessions: [{ sessionId: 'root', level: 'read' } as never],
+        })
+      )
+    ).toBe(true);
+  });
+
   it('round trips canonical state and keeps projects independent of the machine switch', async () => {
     const f = await fixture();
     const body = { ...f.policy, projects: ['project-z', 'project-a'], sharedWithTeam: false };
@@ -332,87 +448,24 @@ describe('owner-signed complete machine sharing policies', () => {
     });
   });
 
-  it('rechecks signer revocation and never falls back to an older allow policy', async () => {
+  it('retains server-accepted policies after signer revocation without allowing new signing', async () => {
     const f = await fixture(),
       original = await f.seal({ ...f.policy, projects: ['project-a', 'project-z'] });
     const verified = ok(f.open(original));
     await f.command({ _tag: 'RevokeDevice', target: f.owner.publicKey }, f.second.signer);
-    expect(f.authorize(verified)).toEqual({ allowed: false, reason: 'policy-signer-ineligible' });
-    expect(failure(f.open(original))).toBe('policy-signer-ineligible');
-    // A fresh machine may traverse revoked history, but that result is no execution capability.
-    const historical = ok(
-      P.verifyMachineSharingHistoryStep({
-        machineGeneration: f.generation,
-        ledger: f.current(),
-        binding: f.binding,
-        epoch: 0,
-        documentKey: f.key,
-        frame: original,
-        expectedHead: verified.head,
-        previous: null,
-      })
-    );
-    expect(historical).toEqual(verified.head);
-    expect(f.authorize(historical as unknown as P.VerifiedMachineSharingPolicy)).toEqual({
-      allowed: false,
-      reason: 'policy-unverified',
-    });
-    const historyInput = {
-      machineGeneration: f.generation,
-      ledger: f.current(),
-      binding: f.binding,
-      epoch: 0,
-      documentKey: f.key,
-      frame: original,
-      expectedHead: verified.head,
-      previous: null,
-    };
-    const history = ok(P.readMachineSharingHistoryStep(historyInput));
-    expect(history).toEqual({
-      _tag: 'MachineSharingHistoryStep',
-      head: verified.head,
-      policy: { ...f.policy, projects: ['project-a', 'project-z'] },
-    });
-    expect(f.authorize(history as unknown as P.VerifiedMachineSharingPolicy)).toEqual({
-      allowed: false,
-      reason: 'policy-unverified',
-    });
-    const retained = ok(P.restoreVerifiedState(ok(P.exportVerifiedState(f.current()))));
-    expect(
-      ok(
-        P.readMachineSharingHistoryStep({
-          ...historyInput,
-          ledger: retained,
-          machineGeneration: f.machineGeneration(),
-        })
-      )
-    ).toEqual(history);
-    expect(
-      Result.isFailure(
-        P.readMachineSharingHistoryStep({
-          ...historyInput,
-          binding: { ...f.binding, workspaceId: 'wrong-workspace' },
-        })
-      )
-    ).toBe(true);
-    expect(
-      Result.isFailure(
-        P.readMachineSharingHistoryStep({
-          ...historyInput,
-          expectedHead: { ...verified.head, digest: 'ff'.repeat(32) },
-        })
-      )
-    ).toBe(true);
+    expect(f.authorize(verified)).toEqual({ allowed: true, reason: 'team' });
+    expect(ok(f.open(original)).inspect().projects).toEqual(['project-a', 'project-z']);
+    await expect(f.seal()).rejects.toMatchObject({ code: 'policy-signer-ineligible' });
     const next = {
-      ...history.policy,
-      revision: history.head.revision + 1,
-      previousDigest: history.head.digest,
+      ...f.policy,
+      revision: verified.head.revision + 1,
+      previousDigest: verified.head.digest,
       requestId: '32'.repeat(16),
       signer: hex(f.second.publicKey),
     };
     const current = ok(f.open(await f.seal(next, f.second.signer), verified.head, 2));
     expect(f.authorize(current).allowed).toBe(true);
-    expect(current.inspect().projects).toEqual(['project-a', 'project-z']);
+    expect(current.inspect().projects).toEqual(['project-a']);
   });
 
   it('rejects a retired machine key while preserving policy across same-member replacement', async () => {
@@ -739,7 +792,7 @@ describe('owner-signed complete machine sharing policies', () => {
     ).toEqual({ allowed: true, reason: 'owner' });
   });
 
-  it('enforces initial, consecutive, idempotent and fork/rollback version rules', async () => {
+  it('accepts latest revisions and enforces idempotent and fork/rollback pins', async () => {
     const f = await fixture(),
       original = await f.seal(),
       first = ok(f.open(original));
@@ -754,13 +807,15 @@ describe('owner-signed complete machine sharing policies', () => {
       next = ok(f.open(nextFrame, first.head, 2));
     expect(f.authorize(next)).toEqual({ allowed: false, reason: 'machine-not-shared' });
     expect(failure(f.open(original, next.head))).toBe('policy-version-conflict');
-    expect(failure(f.open(nextFrame, null, 2))).toBe('policy-version-conflict');
+    expect(Result.isSuccess(f.open(nextFrame, null, 2))).toBe(true);
     expect(failure(f.open(await f.seal(), first.head))).toBe('policy-version-conflict');
     expect(
-      failure(f.open(await f.seal({ ...close, previousDigest: '77'.repeat(32) }), first.head, 2))
-    ).toBe('policy-version-conflict');
-    expect(failure(f.open(await f.seal({ ...close, revision: 3 }), first.head, 3))).toBe(
-      'policy-version-conflict'
+      Result.isSuccess(
+        f.open(await f.seal({ ...close, previousDigest: '77'.repeat(32) }), first.head, 2)
+      )
+    ).toBe(true);
+    expect(Result.isSuccess(f.open(await f.seal({ ...close, revision: 3 }), first.head, 3))).toBe(
+      true
     );
   });
 
@@ -830,7 +885,7 @@ describe('owner-signed complete machine sharing policies', () => {
           signer,
           ledger: () => Effect.succeed(f.current()),
           plaintext,
-          additionalData: new TextEncoder().encode('lody-e2ee/machine-sharing/v2\0'),
+          additionalData: new TextEncoder().encode('lody-e2ee/machine-sharing/v3\0'),
         })
       );
       plaintext.fill(0);
@@ -838,20 +893,6 @@ describe('owner-signed complete machine sharing policies', () => {
         signer === f.bob.signer ? 'policy-binding-mismatch' : 'policy-signer-ineligible'
       );
       expect(Result.isFailure(admitMachineSharingFrame({ ...input, frame: forged }))).toBe(true);
-      expect(
-        Result.isFailure(
-          P.readMachineSharingHistoryStep({
-            machineGeneration: f.generation,
-            ledger: f.current(),
-            binding: f.binding,
-            epoch: 0,
-            documentKey: f.key,
-            frame: forged,
-            previous: null,
-            expectedHead: { revision: 1, digest: ok(P.machineSharingDigest(forged)) },
-          })
-        )
-      ).toBe(true);
     }
     await f.command({ _tag: 'RevokeDevice', target: f.owner.publicKey }, f.second.signer);
     expect(failure(admitMachineSharingFrame({ ...input, ledger: f.current() }))).toBe(

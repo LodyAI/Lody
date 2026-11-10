@@ -117,12 +117,13 @@ describe('image preview context menu', () => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).inert;
   });
 
-  const renderViewer = (onClose: () => void = () => {}) => {
+  const renderViewer = (onClose: () => void = () => {}, allowExport = true) => {
     function Preview() {
       const [open, setOpen] = useState(true);
       return (
         <ZoomableImageViewer
           open={open}
+          allowExport={allowExport}
           onClose={() => {
             setOpen(false);
             onClose();
@@ -149,6 +150,18 @@ describe('image preview context menu', () => {
     });
     return event;
   };
+
+  it('suppresses save and copy menus in read-only history', async () => {
+    const bridge = createBridge('save');
+    installImageIpc(bridge);
+    const photo = renderViewer(() => {}, false);
+    const event = await rightClick(photo);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(bridge.saveAs).not.toHaveBeenCalled();
+    expect(bridge.copyToClipboard).not.toHaveBeenCalled();
+    expect(photo.isConnected).toBe(true);
+  });
 
   it.each([IMAGE_SRC, undefined])(
     'isolates the gallery and restores its opener with source %s',

@@ -22,9 +22,10 @@ export type WorkspaceMember = {
 export function useWorkspaceMembers(): {
   members: WorkspaceMember[];
   isMultiMember: boolean;
+  isLoading: boolean;
 } {
   const authClient = useAuthClient();
-  const { data: activeOrganization } = authClient.useActiveOrganization();
+  const { data: activeOrganization, isPending } = authClient.useActiveOrganization();
   const rawMembers = activeOrganization?.members;
 
   return useMemo(() => {
@@ -40,6 +41,10 @@ export function useWorkspaceMembers(): {
       });
     }
     members.sort((a, b) => a.name.localeCompare(b.name));
-    return { members, isMultiMember: members.length > 1 };
-  }, [rawMembers]);
+    return {
+      members,
+      isMultiMember: members.length > 1,
+      isLoading: !!isPending || rawMembers === undefined,
+    };
+  }, [rawMembers, isPending]);
 }

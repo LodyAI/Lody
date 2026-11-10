@@ -1,3 +1,5 @@
+import { accountUserId } from '@lody/e2ee-core/protocol';
+import { authorizeCliE2eeSessionTarget } from '../src/lib/e2ee/execution-authorization';
 import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import {
   createDaemonLossRegistry,
@@ -20,7 +22,7 @@ import {
 import { ScheduleEngine, type ScheduleEnginePorts } from '../src/lib/schedules/schedule-engine';
 import { ScheduleStore } from '../src/lib/schedules/schedule-store';
 import { LoroRepo } from 'loro-repo';
-import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { SessionDocument, LoroDocumentManager } from '../src/lib/loro/doc';
 import { prepareSessionInput, resolveTurnDispatchConfig } from '../src/commands/session';
 import {
   materializePreparedSessionInput,
@@ -173,7 +175,8 @@ const setup = (
   machineDirectory = join(directory, 'machine'),
   includeRotation = false,
   publishRotation = false,
-  includeGuestMachine = false
+  includeGuestMachine = false,
+  accountIds = false
 ) =>
   Effect.gen(function* () {
     const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'owner'), wrapper });
@@ -184,7 +187,9 @@ const setup = (
       signer: prepared,
       encryptionPublicKey: prepared.enc,
       initialKey,
-      userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+      userId: Result.getOrThrow(
+        accountIds ? accountUserId('acct') : Bytes.userId(new Uint8Array(32).fill(30))
+      ),
       membershipId,
     });
     const owner = yield* custody.retainDevice(signed.genesis, prepared);
@@ -225,7 +230,9 @@ const setup = (
       const request = yield* prepareJoinRequest({
         genesis: signed.genesis,
         requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(50))),
-        userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(60))),
+        userId: Result.getOrThrow(
+          accountIds ? accountUserId('reader') : Bytes.userId(new Uint8Array(32).fill(60))
+        ),
         encryptionPublicKey: joining.enc,
         expiresAt: null,
         signer: joining,
@@ -5769,9 +5776,21 @@ describe('remote machine command', () => {
   });
 });
 
-const executionFixture = Effect.fnUntraced(function* (directory: string, count = 2) {
+const executionFixture = Effect.fnUntraced(function* (
+  directory: string,
+  count = 2,
+  accountIds = false
+) {
   let observedAuthority: Parameters<typeof readDaemonLossAuthority>[0];
-  const fixture = yield* setup(directory, count);
+  const fixture = yield* setup(
+    directory,
+    count,
+    join(directory, 'machine'),
+    false,
+    false,
+    false,
+    accountIds
+  );
   const custody = yield* makeCliE2eeCustody({
     directory: join(directory, 'machine'),
     keyring: noKeyring,
@@ -5810,10 +5829,12 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
   };
   const makeGate = (
     sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing'],
-    onWindowNotice?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['onWindowNotice']
+    onWindowNotice?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['onWindowNotice'],
+    sessionSharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sessionSharing']
   ) =>
     makeCliE2eeExecutionAuthorization({
       sharing,
+      sessionSharing,
       onWindowNotice,
       workspaceId: 'workspace',
       credential: fixture.credential,
@@ -8487,6 +8508,172 @@ describe('machine execution authorization freshness', () => {
     }
   });
 
+  it('fences source-side personal context reads when the actual human is removed while policy I/O yields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'source-history-removal-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime } = yield* executionFixture(directory, 3, true);
+          const member = [...fixture.current.inspectState().members.entries()].find(
+            ([, row]) => row.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const memberDevice = [...fixture.current.inspectState().devices.values()].find(
+            (row) => hex(row.membershipId.toBytes()) === member[0]
+          );
+          if (!memberDevice) throw new Error('missing reader');
+          let current = fixture.current;
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const original = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(current, fixture.owner.publicKey, command)),
+              fixture.owner
+            );
+            fixture.records.push(original);
+            current = Result.getOrThrow(
+              extendLedger(current, [original], {
+                length: fixture.records.length,
+                head: hashRecordBytes(original),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records));
+          });
+          yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          let remove = false;
+          let teamRead = false;
+          let individualRead = true;
+          const options = {
+            runtime,
+            sourceDevice: hex(fixture.owner.publicKey.toBytes()),
+            readPolicy: () =>
+              Effect.gen(function* () {
+                if (remove) {
+                  yield* append({ _tag: 'RemoveMember', membershipId: memberDevice.membershipId });
+                }
+                return {
+                  machineId: 'machine',
+                  sharedWithTeam: teamRead,
+                  projects: [],
+                  sessions: individualRead
+                    ? [{ sessionId: 'shared-root', audience: { userId: 'reader' }, level: 'read' }]
+                    : [],
+                  canManage: false,
+                } as import('@lody/platform').E2eeMachineSharingView;
+              }),
+          };
+          const target = {
+            machineId: 'machine',
+            rootSessionId: 'shared-root',
+            requesterUserId: 'reader',
+          };
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(true);
+          expect(
+            yield* authorizeCliE2eeSessionTarget(options, { ...target, requesterUserId: 'other' })
+          ).toBe(false);
+          expect(
+            yield* authorizeCliE2eeSessionTarget(options, {
+              ...target,
+              rootSessionId: 'unshared-root',
+            })
+          ).toBe(false);
+          yield* append({
+            _tag: 'SetRole',
+            membershipId: memberDevice.membershipId,
+            role: 'guest',
+          });
+          teamRead = true;
+          individualRead = false;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+          individualRead = true;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(true);
+          remove = true;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('limits an admitted encrypted reader to one shared history and honors revocation without enabling other machine methods', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'history-only-authority-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3);
+          const member = [...fixture.current.inspectState().members].find(
+            ([, entry]) => entry.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const requester = [...fixture.current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === member[0]
+          );
+          if (!requester) throw new Error('missing device');
+          const [device] = requester;
+          let shared = true;
+          const gate = yield* makeGate(undefined, undefined, (reader, session) =>
+            Effect.succeed({
+              allowed: shared && reader === device && session === 'shared-root',
+              isCurrent: () => shared,
+            })
+          );
+          const admittedRead = yield* gate.authorizeSessionRead('workspace', device, 'shared-root');
+          expect(admittedRead).toMatchObject({ _tag: 'Authorized' });
+          if (admittedRead._tag !== 'Authorized' || !admittedRead.isCurrent)
+            throw new Error('missing read fence');
+          expect(admittedRead.isCurrent()).toBe(true);
+          expect(yield* gate.authorizeSessionRead('workspace', device, 'other-root')).toMatchObject(
+            { _tag: 'Denied' }
+          );
+          expect(yield* gate.authorizeRead('workspace', device)).toMatchObject({ _tag: 'Denied' });
+          expect(yield* gate.authorizeOwnedExecution('workspace', device)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeExecution('workspace', device)).toMatchObject({
+            _tag: 'Denied',
+          });
+          const capability = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+                _tag: 'DeclareCapabilities',
+                capabilities: [1],
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(capability);
+          const declared = Result.getOrThrow(
+            extendLedger(fixture.current, [capability], {
+              length: fixture.records.length,
+              head: hashRecordBytes(capability),
+            })
+          );
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(declared, fixture.owner.publicKey, {
+                _tag: 'RemoveMember',
+                membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.from(member[0], 'hex'))),
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(record);
+          yield* runtime.ingest(page(fixture.records));
+          expect(admittedRead.isCurrent()).toBe(false);
+          shared = false;
+          expect(admittedRead.isCurrent()).toBe(false);
+          expect(
+            yield* gate.authorizeSessionRead('workspace', device, 'shared-root')
+          ).toMatchObject({ _tag: 'Denied' });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('denies a shared start when a verified member removal lands while the sharing check yields', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-sharing-removal-'));
     try {
@@ -8999,3 +9186,226 @@ it('revokes a real encrypted ACP owner when the verified runtime ledger changes'
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// The response stream can yield after the body has been sealed. No earlier
+// authorization, including a cached response, may bypass the final actual-target check.
+it.each([false, true])(
+  'drops a history reply when assigned access changes during stream creation (cached=%s)',
+  async (cached) => {
+    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+    const created = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const refused = Promise.withResolvers<void>();
+    let owner = 'reader';
+    const sent: unknown[] = [];
+    await execute(
+      Effect.gen(function* () {
+        const opened = {
+          requestId: 'history-proof',
+          requesterDevice: 'reader-device',
+          expiresAt: Date.now() + 60_000,
+          input: {
+            request: {
+              method: 'session/history-read',
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              params: { sessionId: 'root', query: { kind: 'count' } },
+            },
+          },
+        };
+        const native = {
+          openFeature: () => Effect.succeed(opened),
+          retainFeatureRequest: () => Effect.void,
+          readFeatureResponse: () => Effect.succeed(cached ? [Uint8Array.of(1)] : []),
+          sealFeatureResult: () => Effect.succeed([Uint8Array.of(1)]),
+          verifyFeatureRequest: () => Effect.void,
+          responseStream: () => 'response',
+        } as unknown as ReturnType<typeof makeE2eeRpcNative>;
+        const feature = yield* makeEncryptedFeatureReceiver({
+          workspaceId: 'workspace',
+          machineId: 'machine',
+          genesis: 'genesis',
+          native,
+          journal: () => {
+            throw new Error('history must not open the execution journal');
+          },
+          authorize: () => Effect.succeed({ _tag: 'Denied', reason: 'not-authorized' }),
+          authorizeRead: () => Effect.succeed({ _tag: 'Denied', reason: 'not-authorized' }),
+          authorizeHistoryRead: () =>
+            Effect.sync(() => {
+              if (owner !== 'reader') {
+                refused.resolve();
+                return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+              }
+              return { _tag: 'Authorized' as const, isCurrent: () => true };
+            }),
+          authoritySignal: () => new AbortController().signal,
+          isOpen: () => true,
+          handle: async () => ({ ok: true, result: { count: 123 } }),
+          client: {
+            ensureJsonStream: async () => {
+              created.resolve();
+              await resume.promise;
+            },
+            appendJson: async (_stream, value) => {
+              sent.push(value);
+              return '1';
+            },
+            readJsonLive: async () => {
+              throw new Error('unused');
+            },
+          },
+        });
+        yield* feature({ id: opened.requestId, frame: 'synthetic' });
+        yield* Effect.promise(() => created.promise);
+        owner = 'other-owner';
+        resume.resolve();
+        yield* Effect.promise(() => refused.promise);
+      })
+    );
+    expect(sent).toEqual([]);
+  }
+);
+
+it.each(['team', 'individual', 'private'] as const)(
+  'uses the same expiring session-read admission for the Roost history method (%s)',
+  async (audience) => {
+    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+    const { E2eeFeatureInputSchema } = await import('@lody/shared/e2ee-rpc');
+    const directory = await mkdtemp(join(tmpdir(), 'backend-neutral-history-'));
+    const outcome = Promise.withResolvers<'published' | 'denied'>();
+    const replies: unknown[] = [];
+    const bodies: unknown[] = [];
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3, true);
+          const member = [...fixture.current.inspectState().members].find(
+            ([, entry]) => entry.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const requester = [...fixture.current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === member[0]
+          );
+          if (!requester) throw new Error('missing requester');
+          const sessions = [
+            {
+              sessionId: 'roost-root',
+              audience:
+                audience === 'team'
+                  ? ('team' as const)
+                  : { userId: audience === 'private' ? 'acct' : 'reader' },
+              level: 'read' as const,
+            },
+          ];
+          const gate = yield* makeGate(undefined, undefined, (reader, session) =>
+            authorizeCliE2eeSessionTarget(
+              {
+                runtime,
+                sourceDevice: hex(fixture.owner.publicKey.toBytes()),
+                readPolicy: () =>
+                  Effect.succeed({
+                    machineId: 'machine',
+                    sharedWithTeam: false,
+                    projects: [],
+                    sessions,
+                    canManage: false,
+                  } as import('@lody/platform').E2eeMachineSharingView),
+              },
+              {
+                machineId: 'machine',
+                rootSessionId: session,
+                requesterUserId: reader === requester[0] ? 'reader' : 'other',
+              }
+            ).pipe(Effect.map((allowed) => ({ allowed, isCurrent: () => true })))
+          );
+          // This is the same wire method the Roost adapter uses, without a storage-kind flag.
+          const input = E2eeFeatureInputSchema.parse({
+            requestId: 'a'.repeat(32),
+            request: {
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              method: 'session/history-read',
+              params: { sessionId: 'roost-root', query: { kind: 'count' } },
+            },
+          });
+          const opened = {
+            requestId: input.requestId,
+            requesterDevice: requester[0],
+            expiresAt: Date.now() + 60_000,
+            input,
+          };
+          const native = {
+            openFeature: () => Effect.succeed(opened),
+            retainFeatureRequest: () => Effect.void,
+            readFeatureResponse: () => Effect.succeed([]),
+            sealFeatureResult: (_machine: unknown, _opened: unknown, result: unknown) =>
+              Effect.sync(() => {
+                replies.push(result);
+                return [new Uint8Array(143).fill(1)];
+              }),
+            verifyFeatureRequest: () => Effect.void,
+            responseStream: () => 'history-response',
+          } as unknown as ReturnType<typeof makeE2eeRpcNative>;
+          const feature = yield* makeEncryptedFeatureReceiver({
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            genesis: 'genesis',
+            native,
+            journal: () => {
+              throw new Error('history must not enter the execution journal');
+            },
+            // No general read/execution permission: only exact-session admission may pass.
+            authorize: gate.authorizeOwnedExecution,
+            authorizeRead: gate.authorizeRead,
+            authorizeHistoryRead: (workspace, device, session) =>
+              gate.authorizeSessionRead(workspace, device, session).pipe(
+                Effect.tap((verdict) =>
+                  Effect.sync(() => {
+                    if (verdict._tag === 'Denied') outcome.resolve('denied');
+                  })
+                )
+              ),
+            authoritySignal: () => new AbortController().signal,
+            isOpen: () => true,
+            handle: async (request, context) => {
+              if (request.method !== 'session/history-read' || !context.authority?.isCurrent())
+                throw new Error('missing exact-session authority');
+              const result = { backend: 'roost', count: 7 };
+              bodies.push(result);
+              return { ok: true, result };
+            },
+            client: {
+              ensureJsonStream: async () => {},
+              appendJson: async () => {
+                outcome.resolve('published');
+                return '1';
+              },
+              readJsonLive: async () => {
+                throw new Error('unused');
+              },
+            },
+          });
+          yield* feature({ id: input.requestId, frame: 'synthetic' });
+          expect(yield* Effect.promise(() => outcome.promise)).toBe(
+            audience === 'private' ? 'denied' : 'published'
+          );
+        })
+      );
+      if (audience === 'private') expect(bodies).toEqual([]);
+      else expect(bodies).toEqual([{ backend: 'roost', count: 7 }]);
+      if (audience === 'team' || audience === 'individual')
+        expect(replies).toEqual([{ ok: true, result: { backend: 'roost', count: 7 } }]);
+      // Admission readiness does not enable the currently unsupported storage backend.
+      await expect(
+        LoroDocumentManager.prototype.getOrCreateSessionDoc.call(
+          { encryptedWorkspace: true } as LoroDocumentManager,
+          'roost-root' as SessionId,
+          { historyBackend: 'roost' }
+        )
+      ).rejects.toThrow('e2ee_history_backend_unavailable');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);

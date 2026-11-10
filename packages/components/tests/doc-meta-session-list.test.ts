@@ -157,3 +157,22 @@ it('refreshes sidebar lifecycle without association writes and suppresses revisi
   store.set(sessionMetaCacheAtom, { [roomId]: { ...session, [next.field]: next.value } });
   expect(store.get(sessionListAtom)).toBe(after);
 });
+
+it('excludes noncontained and cross-machine records from a root history tab projection', () => {
+  const store = createStore();
+  const parentId = 'parent' as SessionId;
+  const parent = { ...session, id: parentId };
+  const make = (id: string, extra: object) =>
+    ({ ...session, id, parentSessionId: parentId, ...extra }) as unknown as SessionMeta;
+  const valid = make('tab', {});
+  const unknown = make('independent', { childSessionPlacement: 'sidebar' });
+  const foreign = make('foreign', { machineId: 'another-machine' });
+  const opened = make('opened', { parentSessionId: undefined, openedBySessionId: parentId });
+  store.set(
+    sessionMetaCacheAtom,
+    Object.fromEntries(
+      [parent, valid, unknown, foreign, opened].map((meta) => [getSessionRoomId(meta.id), meta])
+    )
+  );
+  expect(store.get(childSessionsAtomFamily(parentId)).map((meta) => meta.id)).toEqual(['tab']);
+});

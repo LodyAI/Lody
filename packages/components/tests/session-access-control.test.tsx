@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -13,11 +11,7 @@ import {
 import type { SessionPublicShareStatus, SessionSharingState } from '../src/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback: string) => fallback,
-  }),
-}));
+import { initI18n } from '../src/i18n';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -44,7 +38,8 @@ describe('SessionAccessControl', () => {
   let container: HTMLDivElement;
   let root: Root;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     Object.defineProperty(globalThis, 'PointerEvent', {
       configurable: true,
       value: TestPointerEvent,
@@ -97,19 +92,6 @@ describe('SessionAccessControl', () => {
     return popup!;
   }
 
-  function stops(): HTMLElement[] {
-    return Array.from(panel().querySelectorAll<HTMLElement>('[role="tab"]'));
-  }
-
-  function stop(label: string): HTMLElement {
-    const found = stops().find((candidate) => candidate.textContent === label);
-    expect(found, label).toBeDefined();
-    return found!;
-  }
-
-  const isDisabled = (el: HTMLElement) =>
-    el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
-
   function backButton(): HTMLButtonElement {
     const found = panel().querySelector<HTMLButtonElement>('button[aria-label="Back"]');
     expect(found).toBeInstanceOf(HTMLButtonElement);
@@ -143,109 +125,207 @@ describe('SessionAccessControl', () => {
     privateReason: 'project',
   };
 
-  it.each(['team', 'unknown'] as const)(
-    'renders nothing when visibility is %s and nothing can be published',
-    async (visibility) => {
-      await render({ state: { ...baseState, visibility } });
-
-      expect(container.querySelector('button')).toBeNull();
-      expect(container.textContent).toBe('');
+  it.each([true, false])(
+    'shows the immutable owner and personal recipients; can manage=%s',
+    async (canManage) => {
+      const granted = new Set(['reader']);
+      const changes: string[] = [];
+      const state: SessionSharingState = {
+        ...baseState,
+        visibility: 'private',
+        access: 'read',
+        canManage,
+        ownerUserId: 'owner',
+        memberUserIds: [...granted],
+        availableMembers: [
+          { userId: 'owner', name: 'Owner Alice' },
+          { userId: 'reader', name: 'Reader Bob' },
+          { userId: 'new', name: 'New Carol' },
+        ],
+        setMemberReadAccess: async (userId, shared) => {
+          changes.push(userId);
+          if (shared) granted.add(userId);
+          else granted.delete(userId);
+        },
+      };
+      await render({ state });
+      expect(trigger().textContent).toContain('Shared with 1 person');
+      await openPanel();
+      expect(panel().textContent).toContain('Owner Alice');
+      expect(panel().textContent).toContain('Reader Bob');
+      expect(document.querySelector('button[aria-label="Remove Owner Alice"]')).toBeNull();
+      const remove = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Remove Reader Bob"]'
+      );
+      if (canManage) {
+        expect(remove).not.toBeNull();
+        await act(async () => remove!.click());
+        expect([...granted]).toEqual([]);
+        await act(async () => panelButton('Add member').click());
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          (item) => item.textContent === 'New Carol'
+        );
+        expect(item).toBeDefined();
+        await act(async () => item!.click());
+        expect([...granted]).toEqual(['new']);
+        expect(changes).toEqual(['reader', 'new']);
+      } else {
+        expect(remove).toBeNull();
+        expect(
+          [...panel().querySelectorAll('button')].some(
+            (button) => button.textContent === 'Add member'
+          )
+        ).toBe(false);
+        expect(changes).toEqual([]);
+      }
     }
   );
 
-  it('keeps the panel open and the way back disabled while a publication is under way', async () => {
+  it.each([
+    ['en', true, 'Loading...'],
+    ['en', false, 'Unknown member'],
+    ['zh_CN', true, '加载中...'],
+    ['zh_CN', false, '未知成员'],
+  ] as const)(
+    'uses localized member placeholders and keeps removal available (%s, loading=%s)',
+    async (locale, loading, label) => {
+      await initI18n(locale);
+      let removed: string | undefined;
+      await render({
+        state: {
+          ...baseState,
+          visibility: 'private',
+          ownerUserId: 'raw-owner-id',
+          memberUserIds: ['raw-departed-id'],
+          availableMembers: [],
+          membersLoading: loading,
+          setMemberReadAccess: async (id, shared) => {
+            if (!shared) removed = id;
+          },
+        },
+      });
+      await openPanel();
+      expect(panel().textContent).toContain(label);
+      expect(panel().textContent).not.toContain('raw-owner-id');
+      expect(panel().textContent).not.toContain('raw-departed-id');
+      const remove = [...panel().querySelectorAll<HTMLButtonElement>('button[aria-label]')].find(
+        (button) => button.getAttribute('aria-label')?.includes(label)
+      );
+      expect(remove).toBeDefined();
+      expect(remove!.disabled).toBe(false);
+      await act(async () => remove!.click());
+      expect(removed).toBe('raw-departed-id');
+    }
+  );
+
+  it.each(['team', 'unknown'] as const)(
+    'shows the conversation state when visibility is %s without a public link',
+    async (visibility) => {
+      await render({ state: { ...baseState, visibility } });
+      expect(trigger().textContent).toContain(
+        visibility === 'team' ? 'Team can edit' : 'Checking visibility'
+      );
+    }
+  );
+
+  it('keeps publication open and disables Back while publishing', async () => {
     await render({
       state: privateState,
-      publicShare: {
-        status: 'none',
-        renderEditor: ({ onBusyChange }) => editorBody(onBusyChange),
-      },
+      publicShare: { status: 'none', renderEditor: ({ onBusyChange }) => editorBody(onBusyChange) },
     });
-
     await openPanel();
-    await act(async () => stop('Web').click());
+    await act(async () => panelButton('Publish to the web').click());
     await act(async () => panelButton('Start publishing').click());
     expect(backButton().disabled).toBe(true);
-
-    // An outside press and Escape both ask to close; neither may dismiss it now.
     await act(async () => {
       document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
-  it('marks the team for a team-visible conversation and never offers to narrow it', async () => {
+  it('explains effective machine sharing and links to its settings without offering a private override', async () => {
+    let opened = false;
     await render({
-      state: { ...baseState, visibility: 'team' },
-      publicShare: { status: 'none', renderEditor },
+      state: {
+        ...baseState,
+        visibility: 'team',
+        access: 'edit',
+        openMachineSettings: () => {
+          opened = true;
+        },
+      },
     });
-
     await openPanel();
-    expect(panel().textContent).toContain('Shared with team');
-    expect(stop('Team').getAttribute('aria-selected')).toBe('true');
-    expect(isDisabled(stop('Only you'))).toBe(true);
+    expect(panel().textContent).toContain('Team can edit · Controlled by machine sharing');
+    expect(panelButton('Open machine settings')).toBeDefined();
+    expect(panel().querySelector('[role=tab]')).toBeNull();
+    await act(async () => panelButton('Open machine settings').click());
+    expect(opened).toBe(true);
+    expect(document.querySelector('[role=dialog]')).toBeNull();
   });
 
-  it('reads a solo workspace as only you and still offers the web', async () => {
-    await render({ publicShare: { status: 'none', renderEditor } });
-
-    expect(trigger().textContent).toContain('Share');
+  it('omits machine settings when its callback is unavailable', async () => {
+    await render({ state: { ...baseState, visibility: 'team', access: 'edit' } });
     await openPanel();
-    expect(panel().textContent).toContain('Private to you');
-    expect(panel().textContent).not.toContain('Shared with team');
-    expect(stops().map((el) => el.textContent)).toEqual(['Only you', 'Web']);
-    expect(stop('Only you').getAttribute('aria-selected')).toBe('true');
+    expect(panel().textContent).toContain('Team can edit · Controlled by machine sharing');
+    expect(panel().textContent).not.toContain('Open machine settings');
+  });
 
-    await act(async () => stop('Web').click());
+  it('keeps public publication available in a solo workspace', async () => {
+    await render({ publicShare: { status: 'none', renderEditor } });
+    await openPanel();
+    await act(async () => panelButton('Publish to the web').click());
     expect(panel().textContent).toContain('Editor body');
   });
 
-  it('does not claim privacy while the visibility is still being resolved', async () => {
-    await render({
-      state: { ...baseState, visibility: 'unknown' },
-      publicShare: { status: 'none', renderEditor },
-    });
-
+  it('shows pending visibility without offering permission changes', async () => {
+    await render({ state: { ...baseState, visibility: 'unknown' } });
+    expect(trigger().textContent).toContain('Checking visibility');
     await openPanel();
-    expect(panel().textContent).toContain('Checking visibility…');
-    // One audience is not a choice, so there is no strip to slide.
-    expect(stops()).toHaveLength(0);
+    expect(panelButton('Private').getAttribute('aria-disabled')).toBe('true');
+    expect(panelButton('Team read-only').getAttribute('aria-disabled')).toBe('true');
   });
 
-  it('does not claim a conversation is shared before the status resolves', async () => {
-    await render({
-      state: { ...baseState, visibility: 'team' },
-      publicShare: { status: 'unknown', renderEditor },
-    });
-
-    expect(trigger().textContent).toContain('Share');
-    expect(trigger().textContent).not.toContain('Shared');
-  });
-
-  it('reads a published private conversation as web and offers to manage the link', async () => {
+  it('keeps team access independent of an unresolved or published public link', async () => {
     await render({ state: privateState, publicShare: { status: 'shared', renderEditor } });
-
-    expect(trigger().textContent).toContain('Shared');
-    expect(trigger().getAttribute('aria-label')).toContain('Anyone with the link');
-
+    expect(trigger().textContent).toContain('Private');
     await openPanel();
-    expect(stop('Web').getAttribute('aria-selected')).toBe('true');
     await act(async () => panelButton('Manage link').click());
     expect(panel().textContent).toContain('Editor body');
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
   });
 
-  it('disables the team for someone who does not own the device and says why', async () => {
-    await render({
-      state: { ...baseState, canManage: false, visibility: 'private', privateReason: 'machine' },
-      publicShare: { status: 'none', renderEditor },
-    });
-
+  it('disables both choices for a non-owner and explains the reason', async () => {
+    await render({ state: { ...baseState, canManage: false, visibility: 'team', access: 'read' } });
     await openPanel();
-    expect(isDisabled(stop('Team'))).toBe(true);
+    expect(panelButton('Private').getAttribute('aria-disabled')).toBe('true');
+    expect(panelButton('Team read-only').getAttribute('aria-disabled')).toBe('true');
     expect(panel().textContent).toContain('Only the device owner can share');
+    await act(async () => panelButton('Private').click());
+    expect(trigger().textContent).toContain('Team read-only');
+  });
+
+  it('lets the owner grant and revoke one read-only conversation while the panel stays open', async () => {
+    let state: SessionSharingState = {
+      ...privateState,
+      access: 'private',
+      setReadAccess: async (level) => {
+        state = {
+          ...state,
+          visibility: level === 'read' ? 'team' : 'private',
+          access: level === 'read' ? 'read' : 'private',
+        };
+        await render({ state });
+      },
+    };
+    await render({ state });
+    await openPanel();
+    await act(async () => panelButton('Team read-only').click());
+    expect(trigger().textContent).toContain('Team read-only');
+    expect(panelButton('Team read-only').getAttribute('aria-selected')).toBe('true');
+    await act(async () => panelButton('Private').click());
+    expect(trigger().textContent).toContain('Private');
+    expect(panelButton('Private').getAttribute('aria-selected')).toBe('true');
   });
 });

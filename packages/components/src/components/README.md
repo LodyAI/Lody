@@ -216,7 +216,10 @@ records the preservation boundary.
 visibility copy (`getSessionSharingLabel` / `getSessionSharingDescription`), the
 list-row `SessionSharingIndicator`, the `SessionArchivedBadge`, the team-share
 confirmation dialogs, and `SessionAccessControl` — the one header control
-carrying both team visibility and static publication.
+showing Private / Team read-only / Team can edit. Machine owners manage independent
+read grants through the platform `sessionAccess` port in both workspace modes;
+public publication remains a separate section. Read-only targets mount the
+independent history reader. See the draft [session access Spec](../../../../specs/session-access.md).
 
 Team visibility is resolved by `hooks/use-session-sharing.ts` over
 `lib/session-sharing.ts`. Static publication lives in `sharing/`, with

@@ -3,9 +3,13 @@
 Status: approved
 Translation: current
 
-Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
-Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
-[批准记录](https://github.com/LodyAI/Lody/pull/1894)。
+Approved revision: [`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+Approval: 2026-11-10，owner 批准本次修订：撤销签名设备后保留最新清单并提醒重签；
+只验证最新签名版本。[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2487)。
+
+原批准记录：2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
+[批准记录](https://github.com/LodyAI/Lody/pull/1894)，
+[原批准版本](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
 
 [English](e2ee-foundations.md)
 
@@ -186,7 +190,7 @@ Guest/recovery 不执行。
 准入即使成员／machineId 相同也有新根和资源，旧代永久关闭。恢复共享需要新明确所有者
 意图，从 1/null 父项开始，不导入旧授权、pin 或已删除策略历史。
 
-current-only v2 签名策略绑定工作区 ID、genesis、machineId、所有者成员实例、代次、
+current-only v3 签名策略绑定工作区 ID、genesis、machineId、所有者成员实例、代次、
 版本／前一原帧摘要、requestId、完整状态、personal 签名者与仅供描述的 issuedAt。
 独立业务签名／AAD 域和含代次资源复用既有 content-v0 加密、docEpoch 零，不改账本
 记录或状态格式。同代内服务端 CAS 为原文定序，在同一事务核对当前账本代次及完整
@@ -195,8 +199,12 @@ head status／scope／位置；旧 pending 请求即使数值相同也不能跨�
 精确重试收据不能恢复已清理密文。
 
 新开始及后续需授权动作前检查当前账本资格、实际机器密钥／代次与当前所有者 personal
-策略，本地项目还需其独立开关。签发者撤销使旧策略不能用于执行；历史个人设备正文可为
-同代新的明确意图保留状态，但不授予执行、不跳过历史。撤回不强杀运行命令，只阻止新
+策略，本地项目还需其独立开关。只验证最新原文的签名、资源／绑定／代次及不低于本地
+pin 的版本；同版本必须同摘要，不要求中间策略历史。服务端已接受、曾准入的所有者个人
+设备签名的最新策略在该设备撤销后仍授权。设置给出非阻塞的检查及重签提醒，当前个人
+设备可按原样重签完整清单，也可先修改。这依赖服务端 commit 时检查设备当前有效、拒绝
+已撤销设备，且不恶意接受策略或隐瞒最新 head；属于 owner 接受的服务端信任前提，
+不是签名时间的密码学证明。撤回不强杀运行命令，只阻止新
 开始及后续需授权动作。独立账号显示 query 只返回密文／未验证元数据。
 
 已观察到的撤回立即使授权失效；严格小于 15 分钟的内存缓存（机器所属成员见[后端故障窗口](e2ee/execution-freshness-outage.zh.md)）约束本机经认证最新读取

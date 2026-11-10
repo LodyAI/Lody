@@ -1,3 +1,5 @@
+import { createSessionAccessStore } from '../src/lib/session-access-store';
+import type { SessionAccessPort, SessionAccessView } from '@lody/platform';
 import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
@@ -171,4 +173,99 @@ describe('session sharing', () => {
       canManage: true,
     });
   });
+});
+
+describe('live authoritative session access', () => {
+  it('removes revoked grants and ignores a delayed older read after a version notification', async () => {
+    let notify = () => {};
+    let rows: SessionAccessView[] = [
+      { machineId, readSharedSessionIds: ['root'], canManage: false },
+    ];
+    let completeRead!: (view: SessionAccessView) => void;
+    const port: SessionAccessPort = {
+      list: async () => rows,
+      read: () =>
+        new Promise((resolve) => {
+          completeRead = resolve;
+        }),
+      set: async () => ({ status: 'saved' }),
+      subscribe: (_workspace, invalidate) => {
+        notify = invalidate;
+        return () => {
+          notify = () => {};
+        };
+      },
+    };
+    const store = createSessionAccessStore(port, 'workspace');
+    await store.refresh();
+    expect(store.getSnapshot().views.get(machineId)?.readSharedSessionIds).toEqual(['root']);
+    const oldRead = store.read(machineId);
+    rows = [{ machineId, readSharedSessionIds: [], canManage: false }];
+    notify();
+    await store.refresh();
+    completeRead({ machineId, readSharedSessionIds: ['root'], canManage: false });
+    await expect(oldRead).rejects.toThrow('session_access_superseded');
+    expect(store.getSnapshot().views.get(machineId)?.readSharedSessionIds).toEqual([]);
+    store.dispose();
+    rows = [{ machineId, readSharedSessionIds: ['root'], canManage: false }];
+    notify();
+    expect(store.getSnapshot().views.get(machineId)?.readSharedSessionIds).toEqual([]);
+  });
+});
+
+it('keeps unrelated revocations when a deep-link read finishes during a workspace refresh', async () => {
+  const other = 'machine-other';
+  let finishList!: (rows: SessionAccessView[]) => void;
+  let finishRead!: (row: SessionAccessView) => void;
+  let deferred = false;
+  const initial = [
+    { machineId, canManage: false, readSharedSessionIds: ['root'] },
+    { machineId: other, canManage: false, readSharedSessionIds: ['other-root'] },
+  ];
+  const port: SessionAccessPort = {
+    list: () =>
+      deferred
+        ? new Promise((resolve) => {
+            finishList = resolve;
+          })
+        : Promise.resolve(initial),
+    read: () =>
+      new Promise((resolve) => {
+        finishRead = resolve;
+      }),
+    set: async () => ({ status: 'saved' }),
+    subscribe: () => () => {},
+  };
+  const store = createSessionAccessStore(port, 'workspace');
+  await store.refresh();
+  deferred = true;
+  const refresh = store.refresh();
+  const read = store.read(machineId);
+  finishRead({ machineId, canManage: false, readSharedSessionIds: ['fresh-root'] });
+  await read;
+  finishList([]);
+  await refresh;
+  expect(store.getSnapshot().views.get(machineId)?.readSharedSessionIds).toEqual(['fresh-root']);
+  expect(store.getSnapshot().views.has(other)).toBe(false);
+  store.dispose();
+});
+
+it('contains a rejected live subscription and retries it before publishing grants', async () => {
+  let ready = false;
+  const port: SessionAccessPort = {
+    subscribe: () => {
+      if (!ready) throw new Error('account transition');
+      return () => {};
+    },
+    list: async () => [{ machineId, canManage: false, readSharedSessionIds: ['root'] }],
+    read: async () => ({ machineId, canManage: false, readSharedSessionIds: ['root'] }),
+    set: async () => ({ status: 'saved' }),
+  };
+  const store = createSessionAccessStore(port, 'workspace');
+  await store.refresh();
+  expect(store.getSnapshot().views.size).toBe(0);
+  ready = true;
+  await store.refresh();
+  expect(store.getSnapshot().views.get(machineId)?.readSharedSessionIds).toEqual(['root']);
+  store.dispose();
 });

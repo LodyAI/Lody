@@ -556,12 +556,18 @@ export function MobileChatListCard({
               onClick={() => onSelect?.(conversation.id)}
               archived={archived}
               treeSlot={treeSlot}
-              selectionMode={selection?.active ?? false}
+              selectionMode={!conversation.readOnly && (selection?.active ?? false)}
               isSelected={selection?.isSelected(conversation.id) ?? false}
               onToggleSelect={
-                selection ? () => selection.onToggleSelect(conversation.id) : undefined
+                selection && !conversation.readOnly
+                  ? () => selection.onToggleSelect(conversation.id)
+                  : undefined
               }
-              onLongPress={selection ? () => selection.onLongPress(conversation.id) : undefined}
+              onLongPress={
+                selection && !conversation.readOnly
+                  ? () => selection.onLongPress(conversation.id)
+                  : undefined
+              }
               secondaryField={secondaryField}
             />
           );
@@ -595,11 +601,15 @@ export function MobileChatListCard({
                     variant="archived"
                     liftAboveEdgeSwipeZone={showsTreeToggle}
                     onRestore={
-                      rowActions?.onRestore
+                      !conversation.readOnly && rowActions?.onRestore
                         ? () => rowActions.onRestore!(conversation.id)
                         : undefined
                     }
-                    onDelete={onRequestDelete ? () => onRequestDelete(conversation.id) : undefined}
+                    onDelete={
+                      !conversation.readOnly && onRequestDelete
+                        ? () => onRequestDelete(conversation.id)
+                        : undefined
+                    }
                   >
                     {row}
                   </MobileSwipeableRow>
@@ -616,7 +626,7 @@ export function MobileChatListCard({
                         : undefined
                     }
                     onArchive={
-                      rowActions?.onArchive
+                      !conversation.readOnly && rowActions?.onArchive
                         ? () => rowActions.onArchive!(conversation.id)
                         : undefined
                     }
@@ -1097,7 +1107,7 @@ export function MobileChatList({
 
   /* The full id set for "select-all" computations. Memoized so the
      toolbar can read it cheaply on every render. */
-  const allIds = useMemo(() => chats.map((c) => c.id), [chats]);
+  const allIds = useMemo(() => chats.filter((c) => !c.readOnly).map((c) => c.id), [chats]);
 
   /* When the underlying chat set changes (e.g. user flips the archive
      toggle off, or a delete completes), drop any ids that are no

@@ -453,3 +453,14 @@ mention-compatible and at most 60 characters after trimming; descriptions allow 
 140 Unicode code points; instructions allow up to 32,768 characters before trimming.
 Machine/config IDs must be nonempty and at most 128 characters after trimming.
 Unsupported fields are rejected.
+
+## Session management authority
+
+Single/batch rename and archive derive the requester from the active Turn, then
+require current machine/project editing access before metadata writes. The daemon
+owner and SessionMeta assignment cannot substitute for the driving human. Standalone
+CLI rename, archive, restore and delete use the same admission; archive/restore/delete
+preflight every contained target before writes or cleanup and recheck each write.
+These metadata operations do not require machine presence or start execution.
+`SESSION_MANAGEMENT_DENIED` is nonretryable. A session-only read grant permits history
+reading, not these management operations.

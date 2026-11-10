@@ -353,3 +353,17 @@ are exhausted. Local changes preserve the warning and do not mark a retry active
 Only successful first sync clears the sync warning. An initial local scan failure
 releases the unusable observer so the next attempt can reopen it. Workspace changes
 or unmount release both subscriptions and retire pending results.
+
+## Read-only session actions and containment
+
+Sidebar pin/unread actions use `useSessionActions`' checked preference path, while
+read-only rows omit management controls. The action layer still refuses management
+writes and rechecks preference access after asynchronous reads.
+
+`isContainedSession` owns read-grant inheritance, history tab projection, deep-link
+selection and sharing-target resolution. It accepts direct same-machine containment:
+the existing sparse default is a Tab, and `side-panel` is the supported override.
+Unknown placements and nested/cross-machine links do not inherit. Opener provenance
+alone grants nothing; malformed parent links do not redirect a sharing mutation away
+from the current session. This client check cannot authenticate a forged otherwise
+valid containment relation or provide an authoritative session-to-machine binding.

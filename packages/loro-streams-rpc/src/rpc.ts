@@ -756,12 +756,17 @@ export const LoroSessionHistoryWriteRpcRequestSchema = BaseRpcRequestSchema.exte
 }).strict();
 
 export const SessionHistoryReadRpcPayloadSchema = z
-  .object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema })
+  .object({
+    sessionId: SessionIdSchema,
+    query: SessionHistoryReadQuerySchema,
+    readProof: z.string().min(1).max(8192).optional(),
+  })
   .strict();
 
 export const SessionHistoryWriteRpcPayloadSchema = z
   .object({
     sessionId: SessionIdSchema,
+    writeProof: z.string().min(1).max(8192).optional(),
     operation: SessionHistoryWriteOperationSchema,
     payload: z.record(z.string(), z.unknown()),
   })
@@ -3537,6 +3542,7 @@ export class LoroStreamsMachineRpcClient {
 
   async requestSessionHistoryRead(options: {
     sessionId: SessionId;
+    readProof?: string;
     query: SessionHistoryReadQuery;
     ownerSessionId?: string;
     timeoutMs?: number;
@@ -3546,12 +3552,18 @@ export class LoroStreamsMachineRpcClient {
         options.query.kind === 'watchChanges' ? 'session/history-watch' : 'session/history-read',
       timeoutMs: options.timeoutMs ?? (options.query.kind === 'watchChanges' ? 45_000 : 30_000),
       ownerSessionId: options.ownerSessionId ?? options.sessionId,
-      params: { sessionId: options.sessionId, query: options.query },
+      params: {
+        sessionId: options.sessionId,
+        query: options.query,
+        ...(options.readProof ? { readProof: options.readProof } : {}),
+      },
     })) as SessionHistoryRpcReadResponse | null;
   }
 
   async requestSessionHistoryWrite(options: {
     sessionId: SessionId;
+    writeProof?: string;
+    requestId?: string;
     ownerSessionId?: string;
     operation: SessionHistoryWriteOperation;
     payload: Record<string, unknown>;
@@ -3559,10 +3571,12 @@ export class LoroStreamsMachineRpcClient {
   }): Promise<SessionHistoryRpcWriteResponse | null> {
     return (await this.sendRequest({
       method: 'session/history-write',
+      requestId: options.requestId,
       timeoutMs: options.timeoutMs ?? 30_000,
       ownerSessionId: options.ownerSessionId ?? options.sessionId,
       params: {
         sessionId: options.sessionId,
+        ...(options.writeProof ? { writeProof: options.writeProof } : {}),
         operation: options.operation,
         payload: options.payload,
       },
@@ -4166,6 +4180,7 @@ export class LoroStreamsMachineRpcClient {
         }
       | {
           method: 'session/history-write';
+          requestId?: string;
           timeoutMs: number;
           ownerSessionId: string;
           params: {
@@ -4338,7 +4353,10 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'machine/acp-capabilities-refresh' ? args.signal : undefined;
     if (abortSignal?.aborted) return null;
 
-    const requestId = crypto.randomUUID();
+    const requestId =
+      args.method === 'session/history-write'
+        ? (args.requestId ?? crypto.randomUUID())
+        : crypto.randomUUID();
     const timeoutMs = Math.max(0, args.timeoutMs);
     const now = Math.round(this.options.now?.() ?? Date.now());
     const startedAtMs = Date.now();

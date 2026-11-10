@@ -4,6 +4,7 @@ import {
   Archive,
   ChevronDown,
   ChevronLeft,
+  Eye,
   File as FileIcon,
   Github,
   Hand,
@@ -14,6 +15,7 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
@@ -127,6 +129,7 @@ export type MobileConversationItem = {
   isOffline?: boolean;
   hasUnreadMessages?: boolean;
   isPinned?: boolean;
+  readOnly?: boolean;
   /** Machine id the conversation lives on. Powers the machine filter. */
   machineId?: string | null;
   /** PRECISE Session that created this one — `lody session create` with a
@@ -491,6 +494,7 @@ export function ConversationRow({
      grouping) do not need a simultaneous API change. */
   secondaryField?: 'branch' | 'project';
 }) {
+  const { t } = useTranslation();
   void _secondaryField;
   const treeChild = treeSlot?.kind === 'child' ? treeSlot : null;
   /* One node, one meaning. An active row shows its status and drops both the
@@ -604,6 +608,12 @@ export function ConversationRow({
         >
           {conversation.title}
         </span>
+        {conversation.readOnly ? (
+          <Eye
+            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+            aria-label={t('sessions.access.read')}
+          />
+        ) : null}
       </div>
       {showMergeablePill ? (
         <SessionMergeablePill />

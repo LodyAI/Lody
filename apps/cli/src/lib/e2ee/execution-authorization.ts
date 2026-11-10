@@ -1,7 +1,7 @@
 import { Cause, Clock, Effect, Fiber, Result } from 'effect';
 import { z } from 'zod';
-import { Bytes, contentPermissions } from '@lody/e2ee-core/protocol';
-import type { CloudE2eePort } from '@lody/platform';
+import { Bytes, contentPermissions, accountIdFromUserId } from '@lody/e2ee-core/protocol';
+import type { CloudE2eePort, E2eeMachineSharingView } from '@lody/platform';
 import { CloudE2eeLedgerOutage } from '../cloud-e2ee-errors';
 import { authorityClocksAgree, withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
 import type { makeCliE2eeRuntime } from './runtime';
@@ -48,6 +48,11 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       requesterDevice: string,
       localProjectId?: string
     ) => Effect.Effect<{ allowed: boolean; isCurrent?: () => boolean }, unknown>;
+    sessionSharing?: (
+      requesterDevice: string,
+      sessionId: string,
+      sessionOwnerUserId?: string
+    ) => Effect.Effect<{ allowed: boolean; isCurrent: () => boolean }, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
     /** True while a window is in use, false once access is confirmed or refused again. */
     onWindowNotice?: (active: boolean) => void;
@@ -180,8 +185,10 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       function* (
         workspaceId: string,
         requesterDevice: string,
-        access: 'read' | 'execute' | 'owned-execute',
-        localProjectId?: string
+        access: 'read' | 'execute' | 'owned-execute' | 'session-read',
+        localProjectId?: string,
+        sessionId?: string,
+        sessionOwnerUserId?: string
       ): Effect.fn.Return<ExecutionAuthorization, unknown> {
         if (closed) return denied('closed');
         if (
@@ -226,7 +233,9 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           reader &&
           reader.kind !== 'recovery' &&
           state.members.has(Buffer.from(reader.membershipId.toBytes()).toString('hex'));
-        if (access === 'read' ? !mayRead : !permissions.mayWriteDocument) {
+        if (
+          access === 'read' || access === 'session-read' ? !mayRead : !permissions.mayWriteDocument
+        ) {
           grants.delete(requesterDevice);
           return denied('not-authorized');
         }
@@ -257,6 +266,46 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (relaxed && !current(yield* stamp)) return denied('unavailable');
         if (principal === 'member') {
           grants.delete(requesterDevice);
+          if (access === 'session-read') {
+            if (!sessionId || !options.sessionSharing) return denied('e2ee_machine_not_shared');
+            const generation = options.runtime.executionGeneration();
+            const shared = yield* options.sessionSharing(
+              requesterDevice,
+              sessionId,
+              sessionOwnerUserId
+            );
+            if (
+              !shared.allowed ||
+              !shared.isCurrent() ||
+              generation !== options.runtime.executionGeneration()
+            )
+              return denied('e2ee_machine_not_shared');
+            // The session policy check may ingest new ledger state. Revalidate both
+            // devices and reader eligibility before allowing even a history reply.
+            const after = (yield* options.runtime.executionLedger()).inspectState();
+            const machine = after.devices.get(self),
+              signer = after.devices.get(requesterDevice);
+            if (
+              !machine ||
+              !signer ||
+              signer.kind === 'recovery' ||
+              !after.members.has(Buffer.from(machine.membershipId.toBytes()).toString('hex')) ||
+              !after.members.has(Buffer.from(signer.membershipId.toBytes()).toString('hex')) ||
+              !current(yield* stamp)
+            )
+              return denied('not-authorized');
+            const isCurrent = () =>
+              !closed &&
+              options.runtime.executionGeneration() === generation &&
+              shared.isCurrent() &&
+              current({
+                wall: clock.currentTimeMillisUnsafe(),
+                monotonic: clock.monotonicTimeNanosUnsafe(),
+              });
+            return isCurrent()
+              ? { _tag: 'Authorized' as const, isCurrent }
+              : denied('not-authorized');
+          }
           if (access !== 'execute') return denied('e2ee_machine_not_owned');
           if (!options.sharing) return denied('e2ee_machine_not_shared');
           const shared = yield* options
@@ -323,6 +372,20 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       refreshLedger: refreshOnce.pipe(
         Effect.flatMap((value) => (value ? Effect.void : Effect.fail('unavailable' as const)))
       ),
+      authorizeSessionRead: (
+        workspaceId: string,
+        requesterDevice: string,
+        rootSessionId: string,
+        sessionOwnerUserId?: string
+      ) =>
+        authorize(
+          workspaceId,
+          requesterDevice,
+          'session-read',
+          undefined,
+          rootSessionId,
+          sessionOwnerUserId
+        ),
       authorizeRead: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'read'),
       /** A reply moved the ledger back. Ordinary grants are unaffected; a later read reopens it. */
@@ -343,3 +406,64 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     };
   }
 );
+
+export type CliE2eeSessionReadTarget = {
+  machineId: string;
+  rootSessionId: string;
+  requesterUserId: string;
+  sessionOwnerUserId?: string;
+  localProjectId?: string;
+};
+/** Proxy reads retain the intersection of the source account and declared human. */
+export const authorizeCliE2eeSessionTarget = (
+  options: {
+    runtime: Pick<
+      Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
+      'executionLedger' | 'executionGeneration'
+    >;
+    sourceDevice: string;
+    readPolicy?: (machineId: string) => Effect.Effect<E2eeMachineSharingView, unknown>;
+  },
+  target: CliE2eeSessionReadTarget
+) =>
+  Effect.gen(function* () {
+    const state = (yield* options.runtime.executionLedger()).inspectState();
+    const generation = options.runtime.executionGeneration();
+    const source = state.devices.get(options.sourceDevice);
+    if (!source || source.kind === 'recovery') return false;
+    const issuer = state.members.get(Buffer.from(source.membershipId.toBytes()).toString('hex'));
+    const account = issuer && accountIdFromUserId(issuer.userId);
+    if (!account || Result.isFailure(account)) return false;
+    const machine = [...state.devices.values()].find(
+      (row) => row.kind === 'machine' && row.machineId === target.machineId
+    );
+    if (!machine) return false;
+    let policy: E2eeMachineSharingView | undefined;
+    const check = Effect.fnUntraced(function* (userId: string) {
+      const member = [...state.members.entries()].find(([, row]) => {
+        const account = accountIdFromUserId(row.userId);
+        return Result.isSuccess(account) && account.success === userId;
+      });
+      if (!member) return false;
+      if (
+        Buffer.from(machine.membershipId.toBytes()).toString('hex') === member[0] ||
+        target.sessionOwnerUserId === userId
+      )
+        return true;
+      if (!options.readPolicy) return false;
+      policy ??= yield* options.readPolicy(target.machineId);
+      if (policy.removed || policy.unavailable) return false;
+      return (
+        (member[1].role !== 'guest' &&
+          policy.sharedWithTeam &&
+          (!target.localProjectId || policy.projects.includes(target.localProjectId))) ||
+        policy.sessions.some(
+          (row) =>
+            row.sessionId === target.rootSessionId &&
+            (row.audience === 'team' || row.audience.userId === userId)
+        )
+      );
+    });
+    const allowed = (yield* check(account.success)) && (yield* check(target.requesterUserId));
+    return allowed && generation === options.runtime.executionGeneration();
+  });
