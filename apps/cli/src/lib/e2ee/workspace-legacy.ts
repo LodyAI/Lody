@@ -1760,8 +1760,17 @@ async function openWorkspaceOwned(
                   native: iroh,
                   relays,
                   withSeed: (open) => opened.custody.withTransportSeed(genesis, key, open),
+                  // Route evidence only: ids and timestamps, never frames or content.
+                  onOpen: (endpoint) =>
+                    console.debug('[e2ee-iroh] listening', {
+                      endpoint: endpoint.endpointId.slice(0, 12),
+                    }),
                   handle: (envelope, sink) =>
                     Effect.gen(function* () {
+                      console.debug('[e2ee-iroh] request', {
+                        requestId: envelope.id,
+                        at: Date.now(),
+                      });
                       if (receiveFeature && (yield* receiveFeature(envelope, sink))) return;
                       yield* receive(envelope, sink).pipe(
                         Effect.ensuring(Effect.promise(() => sink.end().catch(() => undefined))),

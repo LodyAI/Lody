@@ -172,8 +172,23 @@ export function createEncryptedDispatchLegacy(options: {
         call.kind === 'dispatch'
           ? await options.accept(original.targetMachineId, call.input, frame).catch(() => undefined)
           : await options.acceptFeature?.(call.input, frame).catch(() => undefined);
-      if (reply) return reply;
+      if (reply) {
+        // Route evidence only: which transport answered, never the frame.
+        console.debug('[e2ee-rpc-timing]', {
+          stage: 'iroh-reply',
+          kind: call.kind,
+          requestId: original.requestId,
+          at: Date.now(),
+        });
+        return reply;
+      }
     }
+    console.debug('[e2ee-rpc-timing]', {
+      stage: 'iroh-fallback',
+      kind: call.kind,
+      requestId: original.requestId,
+      at: Date.now(),
+    });
     return undefined;
   };
   const requestFeature = async (
