@@ -74,7 +74,7 @@
 
 ## Lifecycle
 
-- Agent archive/restore uses negotiated Core capabilities and the saved native identity and Provider, after runtime release. Serialize transitions; distinguish native archive, title markers and unsupported agents. Synchronization failure must preserve Lody cleanup and remain visible. Never edit native storage directly. See [the decision](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
+- Agent archive/restore uses negotiated Core capabilities and the saved native identity and Provider, after runtime release. Serialize transitions; distinguish native archive, title markers and unsupported agents. Synchronization failure must preserve Lody cleanup and remain visible. Document release shares it and spares restored Sessions; shutdown aborts and joins it. Never edit native storage directly. See [the decision](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
 
 - Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
   Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.

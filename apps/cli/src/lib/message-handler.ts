@@ -4548,15 +4548,9 @@ export class MessageHandler {
       }
     }
 
-    const warning = await this.sessionManager.archiveSession(sessionId);
-    if (warning) {
-      // Reopen after cleanup, so warning persistence cannot race document destruction.
-      try {
-        await this.recordAgentWarning(sessionId, warning);
-      } finally {
-        await this.workspaceDocument.cleanSessionDoc(sessionId);
-      }
-    }
+    await this.sessionManager.archiveSession(sessionId, {
+      recordWarning: (warning) => this.recordAgentWarning(sessionId, warning),
+    });
     this.store.get(sessionId).logger = null;
     this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }

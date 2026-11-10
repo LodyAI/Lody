@@ -21,6 +21,8 @@ import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
+import { TURN_BUDGETS } from './turn-budgets';
+import type { AgentSessionWarning } from '../agent/agent-client';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { Logger } from '../utils/logger';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
@@ -145,7 +147,13 @@ describe('SessionManager agent archive (#1537)', () => {
     'reports %s separately from native archive success',
     async (result) => {
       const state = fixture(async () => result);
-      const warning = await state.manager.archiveSession(sessionId);
+      let warning: AgentSessionWarning | undefined;
+      await state.manager.archiveSession(sessionId, {
+        recordWarning: async (recorded) => {
+          expect(state.cleaned()).toBe(false);
+          warning = recorded;
+        },
+      });
       expect(state.cleaned()).toBe(true);
       expect(warning?.message).toContain(
         result === 'unsupported' ? 'Lody only' : 'native history picker'
@@ -157,9 +165,84 @@ describe('SessionManager agent archive (#1537)', () => {
     const state = fixture(async () => {
       throw new Error('native failure');
     });
-    const warning = await state.manager.archiveSession(sessionId);
+    let warning: AgentSessionWarning | undefined;
+    await state.manager.archiveSession(sessionId, {
+      recordWarning: async (recorded) => {
+        warning = recorded;
+      },
+    });
     expect(state.cleaned()).toBe(true);
     expect(warning?.message).toContain('Agent archive synchronization failed');
+  });
+
+  it.each(['success', 'failure'] as const)(
+    'keeps the document a restore adopted while archive synchronization ended in %s',
+    async (outcome) => {
+      const started = deferred<void>();
+      const release = deferred<void>();
+      const state = fixture(async (input) => {
+        if (!input.archived) return 'native';
+        started.resolve();
+        await release.promise;
+        if (outcome === 'failure') throw new Error('native failure');
+        return 'native';
+      });
+      const warnings: string[] = [];
+      const archive = state.manager.archiveSession(sessionId, {
+        recordWarning: async (warning) => {
+          warnings.push(warning.message);
+        },
+      });
+      await started.promise;
+      state.meta.isArchived = false;
+      const restore = state.manager.syncNativeSessionArchive(sessionId, false);
+      release.resolve();
+      await Promise.all([archive, restore]);
+      expect(state.cleaned()).toBe(false);
+      expect(warnings).toHaveLength(outcome === 'failure' ? 1 : 0);
+    }
+  );
+
+  it('cancels an archive at shutdown and records its failure before the final flush', async () => {
+    const started = deferred<void>();
+    const state = fixture(async (input) => {
+      started.resolve();
+      return await new Promise<never>((_resolve, reject) => {
+        input.signal?.addEventListener('abort', () => reject(input.signal?.reason), {
+          once: true,
+        });
+      });
+    });
+    const warnings: string[] = [];
+    const archive = state.manager.archiveSession(sessionId, {
+      recordWarning: async (warning) => {
+        warnings.push(warning.message);
+      },
+    });
+    await started.promise;
+    await state.manager.cleanUp({ keepWorkspaceDocumentOpen: true });
+    expect(warnings).toEqual([expect.stringContaining('Agent archive synchronization failed')]);
+    expect(state.cleaned()).toBe(true);
+    await expect(archive).resolves.toBeUndefined();
+  });
+
+  it('bounds the shutdown wait for an archive that ignores cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      const started = deferred<void>();
+      const state = fixture(async () => {
+        started.resolve();
+        return await new Promise<never>(() => {});
+      });
+      void state.manager.archiveSession(sessionId);
+      await started.promise;
+      const cleanup = state.manager.cleanUp({ keepWorkspaceDocumentOpen: true });
+      const rejected = expect(cleanup).rejects.toThrow('Session manager cleanup failed');
+      await vi.advanceTimersByTimeAsync(TURN_BUDGETS.agentCleanupMs);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes restore behind archive and applies the newest committed state', async () => {
