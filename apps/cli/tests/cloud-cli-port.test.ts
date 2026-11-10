@@ -18,6 +18,7 @@ import { downloadSessionImageForPrompt } from '../src/lib/session-image-download
 import {
   createCommandAttachmentTransfer,
   mintCliSessionHistoryReadProof,
+  canReadSessionForCliRequester,
   createCloudE2eePort,
   createCloudSessionSharingPort,
   createCloudStreamsTokenPort,
@@ -979,3 +980,25 @@ it.each([false, true])(
     expect(await mintCliSessionHistoryReadProof(input)).toBe('signed-dual-principal-proof');
   }
 );
+
+it('refuses remote history authorization without an injected endpoint before any network work', async () => {
+  vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => {
+    throw new Error('Missing configuration must not start HTTP');
+  });
+  const target = {
+    token: 'synthetic-cli',
+    workspaceId: 'workspace',
+    machineId: 'remote',
+    sessionId: 'session',
+    rootSessionId: 'session',
+    sourceMachineId: 'source',
+    requester: { userId: 'reader', machineId: 'source' },
+  };
+  expect(await canReadSessionForCliRequester(target)).toBe(false);
+  await expect(mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger })).rejects.toThrow(
+    'Cloud history authorization is unavailable'
+  );
+  await expect(
+    mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger, edit: true })
+  ).rejects.toThrow('Cloud history authorization is unavailable');
+});

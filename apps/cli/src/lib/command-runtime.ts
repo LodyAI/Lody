@@ -423,7 +423,6 @@ export function createCommandSessionHistoryFactory(
     return createRoostRpcSessionServices(doc, {
       coherentInspection: machineSupportsSessionHistoryInspection(machine),
       read: async (query) => {
-        if (!LODY_AUTH_URL) throw new Error('Cloud history authorization is unavailable');
         const readProof = await mintCliSessionHistoryReadProof({
           ...(await historyTarget()),
           token: auth.token,
@@ -447,7 +446,6 @@ export function createCommandSessionHistoryFactory(
         return response;
       },
       write: async (operation, payload) => {
-        if (!LODY_AUTH_URL) throw new Error('Cloud history authorization is unavailable');
         const requestId = crypto.randomUUID();
         const intentDigest = await sessionHistoryWriteIntentDigest(requestId, operation, payload);
         const writeProof = await mintCliSessionHistoryReadProof({

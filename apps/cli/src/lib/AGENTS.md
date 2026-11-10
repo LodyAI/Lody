@@ -9,6 +9,8 @@
 
 ## Composition and transports
 
+- Bound ordinary daemon owners read history and manage Session metadata locally; other accounts and remote targets still require cloud authorization.
+
 - Daemon commands borrow its replica; command cleanup failures never fence.
 - Before changing GitHub authentication or agent PATH merging, read the
   [credential broker rules](../session/worktree/AGENTS.md#git-credential-broker).

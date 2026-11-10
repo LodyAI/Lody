@@ -5,7 +5,11 @@ import {
   syncMcpCatalog,
   waitForMcpDefaultCatalog,
 } from '@/lib/workspace-mcp-store';
-import { getDaemonWorkspace, readEncryptedMachineAccess } from '@/lib/session-command-environment';
+import {
+  getDaemonWorkspace,
+  readBoundDaemonOwnerAccess,
+  readEncryptedMachineAccess,
+} from '@/lib/session-command-environment';
 import type { SessionSteerResponse } from '@lody/shared';
 import {
   buildSessionGroupRenamePatch,
@@ -1161,13 +1165,24 @@ export async function assertSessionManagementAccess(args: {
   delegatedRequester?: DelegatedSessionRequester;
 }): Promise<SessionMeta> {
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
-  const access = await readSessionMachineAccess({
+  const nativeOwner = await readBoundDaemonOwnerAccess({
     auth: args.auth,
+    manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
-    delegatedRequester: args.delegatedRequester,
-    localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+    requesterUserId: resolveSessionRequester(args.auth, undefined, args.delegatedRequester).userId,
   });
+  const access =
+    nativeOwner !== undefined
+      ? { allowed: nativeOwner }
+      : await readSessionMachineAccess({
+          auth: args.auth,
+          workspaceId: args.workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          delegatedRequester: args.delegatedRequester,
+          localProjectId:
+            session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+        });
   if (!access.allowed) throw new SessionManagementAccessDeniedError();
   const current = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (

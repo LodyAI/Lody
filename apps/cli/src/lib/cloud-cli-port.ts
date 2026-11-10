@@ -75,7 +75,7 @@ export interface CloudCliPortOptions {
 /** Source CLI credential stays on HTTPS; relay only this exact-session read proof. */
 export async function mintCliSessionHistoryReadProof(options: {
   token: string;
-  authBaseUrl: string;
+  authBaseUrl?: string;
   authSiteUrl?: string;
   logger: Logger;
   workspaceId: string;
@@ -90,6 +90,7 @@ export async function mintCliSessionHistoryReadProof(options: {
   requestId?: string;
   intentDigest?: string;
 }): Promise<string> {
+  if (!options.authBaseUrl) throw new Error('Cloud history authorization is unavailable');
   const response = await getCliHttpFetch({ logger: options.logger })(
     new URL(
       options.edit
@@ -950,7 +951,7 @@ export function createCloudRemoteMachinePairingClaim(options: {
 /** Ordinary source-daemon preflight; metadata is routing evidence under the UI trust model. */
 export async function canReadSessionForCliRequester(input: {
   token: string;
-  authBaseUrl: string;
+  authBaseUrl?: string;
   workspaceId: string;
   machineId: string;
   sessionId: string;
@@ -960,6 +961,7 @@ export async function canReadSessionForCliRequester(input: {
   requester: { userId: string; machineId: string };
 }): Promise<boolean> {
   const { token, authBaseUrl, ...target } = input;
+  if (!authBaseUrl) return false;
   return z
     .object({ allowed: z.boolean() })
     .strict()

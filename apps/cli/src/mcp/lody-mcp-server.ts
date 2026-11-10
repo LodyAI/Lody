@@ -195,6 +195,7 @@ import {
 import {
   runWithSessionHistoryRequester,
   getDaemonWorkspace,
+  readBoundDaemonOwnerAccess,
   getSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
@@ -2422,6 +2423,13 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
         ? await readCurrentSessionMeta(manager, session.parentSessionId as SessionId)
         : undefined;
       const root = isContainedSession(session, parent) ? parent! : session;
+      const nativeOwner = await readBoundDaemonOwnerAccess({
+        auth,
+        manager,
+        workspaceId: workspace.id as WorkspaceId,
+        machineId: session.machineId,
+        requesterUserId: requester.userId,
+      });
       const allowed = manager.isEncryptedWorkspace()
         ? await manager.authorizeEncryptedSessionRead({
             machineId: session.machineId,
@@ -2431,21 +2439,22 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
             localProjectId:
               session.project?.kind === 'local' ? session.project.localProjectId : undefined,
           })
-        : getSessionCommandEnvironment() !== undefined
-          ? requester.userId === auth.userId && session.machineId === auth.machineId
-          : !!LODY_AUTH_URL &&
-            (await canReadSessionForCliRequester({
-              token: auth.token,
-              authBaseUrl: LODY_AUTH_URL,
-              workspaceId: workspace.id,
-              machineId: session.machineId,
-              sessionId: session.id,
-              rootSessionId: root.id,
-              sessionOwnerUserId: root.userId,
-              localProjectId:
-                session.project?.kind === 'local' ? session.project.localProjectId : undefined,
-              requester,
-            }));
+        : nativeOwner !== undefined
+          ? nativeOwner
+          : getSessionCommandEnvironment() !== undefined
+            ? requester.userId === auth.userId && session.machineId === auth.machineId
+            : await canReadSessionForCliRequester({
+                token: auth.token,
+                authBaseUrl: LODY_AUTH_URL,
+                workspaceId: workspace.id,
+                machineId: session.machineId,
+                sessionId: session.id,
+                rootSessionId: root.id,
+                sessionOwnerUserId: root.userId,
+                localProjectId:
+                  session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+                requester,
+              });
       if (!allowed)
         throw new LodyOperationStoreError(
           'SESSION_HISTORY_DENIED',

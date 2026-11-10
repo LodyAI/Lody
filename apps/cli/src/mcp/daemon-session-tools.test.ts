@@ -1,3 +1,4 @@
+import { loadEnv } from '@/utils/const';
 import * as cloudCliPort from '@/lib/cloud-cli-port';
 import { ConvexHttpClient } from 'convex/browser';
 import { getFunctionName } from 'convex/server';
@@ -98,6 +99,9 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     vi.spyOn(cloudCliPort, 'canReadSessionForCliRequester').mockResolvedValue(true);
     presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
+    // This cloud fixture explicitly supplies its control-plane endpoint.
+    process.env.LODY_AUTH_URL = 'https://daemon-fixture.convex.cloud';
+    loadEnv();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-daemon-tools-'));
     process.env.LODY_DATA_DIR = path.join(tempDir, '.lody');
     delete process.env.LODY_PLATFORM;
@@ -134,6 +138,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     await manager.cleanUp({ fast: true });
     await presenceApplication.closeLegacy();
     process.env = originalEnv;
+    loadEnv();
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -837,6 +842,75 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     const item = JSON.parse(status.content[0]?.text ?? '{}').items[0];
     expect(item).toMatchObject({ ok: true, sessionId });
     expect(item.value).not.toHaveProperty('lastTurnFailure');
+  });
+
+  it('keeps bound owner history and archive usable without cloud configuration while other identities stay denied', async () => {
+    delete process.env.LODY_AUTH_URL;
+    delete process.env.LODY_AUTH_SITE_URL;
+    delete process.env.LODY_SERVER_URL;
+    loadEnv();
+    vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockRestore();
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(workspaceApi, 'listWorkspacesForToken').mockRejectedValue(
+      new Error('Discovery is down')
+    );
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    daemon.readInvocation = (id) => ({
+      type: 'session/active-invocation-context',
+      active: true,
+      sessionId: id,
+      requesterUserId: ownerUserId,
+      sourceTurnId: 'owner-turn',
+      inputConfig: { cliType: 'custom', agentType: 'claude' },
+    });
+    daemon.readAccess = () => ({
+      status: 'authorized',
+      workspace: { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'owner' },
+    });
+    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+    await backend.appendHistoryTurn({
+      id: 'owner-local-context',
+      role: 'user',
+      timestamp: '2026-11-10T00:00:00Z',
+      items: [{ type: 'text', text: 'owner local history' }],
+      fileDiff: [],
+    } as never);
+    const call = (name: string, args: Record<string, unknown>) =>
+      runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+    const read = await call('lody_session_history', { sessionId });
+    expect(read.isError, JSON.stringify(read)).not.toBe(true);
+    expect(read.content[0]?.text).toContain('owner local history');
+    const authorized = daemon.readAccess;
+    daemon.readAccess = () => ({ status: 'revoked' });
+    const revoked = await call('lody_session_archive', { sessionId });
+    expect(revoked.isError).toBe(true);
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
+      false
+    );
+    daemon.readAccess = authorized;
+    const archived = await call('lody_session_archive', { sessionId });
+    expect(archived.isError, JSON.stringify(archived)).not.toBe(true);
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
+      true
+    );
+    // Neither a different driving human nor a different target machine inherits native ownership.
+    const ownerInvocation = daemon.readInvocation;
+    daemon.readInvocation = (id) => ({
+      ...ownerInvocation(id),
+      requesterUserId: 'synthetic-collaborator',
+    });
+    const sharedReader = await call('lody_session_history', { sessionId });
+    expect(sharedReader.isError).toBe(true);
+    expect(sharedReader.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+    expect(sharedReader.content[0]?.text).not.toContain('owner local history');
+    daemon.readInvocation = ownerInvocation;
+    const foreign = await manager.createSession(machineId, 'custom', 'claude');
+    await manager.repo.upsertDocMeta(getSessionRoomId(foreign), { machineId: 'foreign-machine' });
+    const remote = await call('lody_session_history', { sessionId: foreign });
+    expect(remote.isError).toBe(true);
+    expect(remote.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+    expect(remote.content[0]?.text).not.toContain('owner local history');
   });
 
   it('reports the latest failed turn and marks its history entry', async () => {
