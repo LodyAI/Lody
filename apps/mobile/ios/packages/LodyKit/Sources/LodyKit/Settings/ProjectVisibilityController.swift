@@ -61,6 +61,9 @@ class ProjectVisibilityController: UIViewController {
   private func sync(force: Bool = false) {
     let next = fixed ?? .current
     let scopeChanged = next.key != workspace.key
+    // Catalog events arrive every few seconds (sessions, presence); re-rendering an unchanged
+    // projection reconfigures every row and makes their values blink.
+    guard force || scopeChanged || next != workspace else { return }
     workspace = next
     guard force || scopeChanged else { return render() }
     snapshot = nil
