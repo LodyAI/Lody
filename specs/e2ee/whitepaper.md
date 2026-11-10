@@ -202,9 +202,10 @@ Execution requests include starting an Agent turn, saving a remote file and term
 Org execution permissions obey the same worst-case 15-minute revocation bound. Caches cannot outlive the original freshness proof, and forwarding, receipt, or restart does not start a new timer. Known revocation invalidates them immediately; failure to refresh by expiry blocks new execution, except that a read which gets no answer leaves the same member's requests inside the longer windows of [execution freshness during a backend outage](execution-freshness-outage.md). This bound depends on the server honestly supplying current control state: a local timer cannot prevent a malicious server from continually concealing revocation. Cancelling an already started command is a separate process; revocation does not automatically undo its effects.
 
 The [M5 realtime review draft](../e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
-sets the concrete bytes and MVP route order: encrypted Streams RPC, then encrypted
-history/Meta durable dispatch as the final fallback. The 2026-10-28 owner decision
-defers iroh to a later, non-MVP acceleration layer.
+sets the concrete bytes and route order: iroh where the host supports it, then
+encrypted Streams RPC, then encrypted history/Meta durable dispatch as the final
+fallback. The owner deferred iroh from the MVP on 2026-10-28 and made it the
+preferred route on 2026-11-10.
 All routes share current authorization and one durable actual-start claim;
 realtime retries retain the exact original ciphertext and ID. The merged ledger
 binds machineId in admission and possession; old developer ledgers are recreated
@@ -218,9 +219,9 @@ journal's persistent workspace expiry floor is not that grant. Execution evidenc
 is not automatically collected. The send-to-actual-start target is ≤1 second,
 with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizing
 (including 143 bytes) and canonical unpadded-base64url machine resources on
-2026-10-28. The later iroh identity still reuses the ledger device key; the reported
-domain-separation review found no signing-protocol confusion. Native key lifetime
-and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
+2026-10-28. Iroh reuses the ledger device key; the reported domain-separation
+review found no signing-protocol confusion, and the key signs only TLS and relay
+handshakes. Native key lifetime and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
 2026-10-28 through the owner-authorized coordinator review recorded above.
 
 **Presence option A — owner approved (2026-10-28):** encrypted workspaces use the
