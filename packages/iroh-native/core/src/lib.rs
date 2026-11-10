@@ -288,19 +288,17 @@ impl LodyEndpoint {
             .is_ok()
     }
 
-    /// Whether a live connection to `endpoint_id` already exists.
+    /// Whether a live connection to `endpoint_id` already exists. Never waits for
+    /// a dial in progress: a peer whose slot is busy dialing is reported as not
+    /// connected, so callers can use another route immediately.
     pub async fn has_connection(&self, endpoint_id: &[u8; 32]) -> bool {
         let Ok(id) = EndpointId::from_bytes(endpoint_id) else {
             return false;
         };
         let slot = self.connections.lock().await.get(&id).cloned();
-        match slot {
-            Some(slot) => slot
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|c| c.close_reason().is_none()),
-            None => false,
+        match slot.as_ref().map(|slot| slot.try_lock()) {
+            Some(Ok(guard)) => guard.as_ref().is_some_and(|c| c.close_reason().is_none()),
+            _ => false,
         }
     }
 

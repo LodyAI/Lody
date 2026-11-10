@@ -68,6 +68,24 @@ describe.skipIf(!native)('@lody/iroh-native', () => {
     expect(seed.equals(Buffer.alloc(31))).toBe(true);
   });
 
+  it('cancel ends a reply wait at once while the listener keeps the stream open', async () => {
+    const listener = await open(true);
+    const dialer = await open(false);
+    const held = listener.nextRequest();
+    const call = await dialer.call(
+      { endpointId: listener.endpointId, directAddrs: listener.directAddrs() },
+      Buffer.from('frame'),
+      10_000
+    );
+    // The listener received the request and never replies or finishes.
+    expect(await held).not.toBeNull();
+    const waiting = call.nextReply();
+    call.cancel();
+    // Hangs (and fails on the test timeout) if cancel waited for the read.
+    expect(await waiting).toBeNull();
+    expect(await call.nextReply()).toBeNull();
+  });
+
   it('ends nextRequest with null when the endpoint closes', async () => {
     const listener = await open(true);
     const pending = listener.nextRequest();

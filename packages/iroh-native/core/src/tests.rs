@@ -112,6 +112,20 @@ async fn dial_reaches_a_peer_homed_on_any_configured_relay() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn connection_status_never_waits_for_a_dial_in_progress() {
+    let dialer = LodyEndpoint::open(config(12, false, vec![])).await.unwrap();
+    let id = EndpointId::from_bytes(&public(13)).unwrap();
+    let slot = Arc::new(Mutex::new(None));
+    dialer.connections.lock().await.insert(id, slot.clone());
+    // Hold the peer slot exactly as `connection` does while it dials.
+    let dialing = slot.lock().await;
+    let answered = tokio::time::timeout(WAIT, dialer.has_connection(&public(13))).await;
+    assert_eq!(answered, Ok(false));
+    drop(dialing);
+    dialer.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn oversized_request_is_refused_before_dialing() {
     let dialer = LodyEndpoint::open(config(6, false, vec![])).await.unwrap();
     let target = Target {

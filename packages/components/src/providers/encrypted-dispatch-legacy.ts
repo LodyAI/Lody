@@ -19,6 +19,8 @@ import {
 } from '../lib/encrypted-dispatch-outcome';
 
 const PREPARE_DEADLINE_MS = 200;
+/** Longest wait for "is iroh connected?" before a send proceeds on Streams. */
+const IROH_READY_BUDGET_MS = 100;
 
 type Call =
   | { kind: 'dispatch'; input: E2eeDispatchInput }
@@ -150,7 +152,14 @@ export function createEncryptedDispatchLegacy(options: {
   ): Promise<Reply | undefined> => {
     const iroh = options.iroh;
     if (!iroh || closed || (original.frames && original.frames.length !== 1)) return undefined;
-    if (!(await iroh.ready(original.targetMachineId).catch(() => false))) return undefined;
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    const ready = await Promise.race([
+      iroh.ready(original.targetMachineId).catch(() => false),
+      new Promise<false>((resolve) => {
+        budget = setTimeout(() => resolve(false), IROH_READY_BUDGET_MS);
+      }),
+    ]).finally(() => clearTimeout(budget));
+    if (!ready) return undefined;
     const frames = await iroh
       .call(
         original.targetMachineId,

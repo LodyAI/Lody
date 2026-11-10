@@ -11,7 +11,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use lody_iroh::{EndpointConfig, EndpointError, LodyEndpoint, Target};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use zeroize::{Zeroize, Zeroizing};
 
 fn js_error(error: EndpointError) -> Error {
@@ -168,6 +168,7 @@ impl IrohEndpoint {
             .map_err(js_error)?;
         Ok(IrohCall {
             inner: Mutex::new(Some(call)),
+            cancelled: watch::Sender::new(false),
         })
     }
 
@@ -193,18 +194,36 @@ impl IrohEndpoint {
 #[napi]
 pub struct IrohCall {
     inner: Mutex<Option<lody_iroh::Call>>,
+    cancelled: watch::Sender<bool>,
 }
 
 #[napi]
 impl IrohCall {
-    /// Next reply, or `null` when the listener finished the stream.
+    /// Next reply, or `null` when the listener finished the stream or the call
+    /// was cancelled.
     #[napi]
     pub async fn next_reply(&self) -> Result<Option<Buffer>> {
+        let mut cancelled = self.cancelled.subscribe();
         let mut guard = self.inner.lock().await;
+        if *cancelled.borrow() {
+            if let Some(call) = guard.take() {
+                call.cancel();
+            }
+            return Ok(None);
+        }
         let Some(call) = guard.as_mut() else {
             return Ok(None);
         };
-        match call.next_reply().await.map_err(js_error)? {
+        let reply = tokio::select! {
+            reply = call.next_reply() => reply,
+            _ = cancelled.wait_for(|cancelled| *cancelled) => {
+                if let Some(call) = guard.take() {
+                    call.cancel();
+                }
+                return Ok(None);
+            }
+        };
+        match reply.map_err(js_error)? {
             Some(reply) => Ok(Some(reply.into())),
             None => {
                 guard.take();
@@ -213,11 +232,15 @@ impl IrohCall {
         }
     }
 
-    /// Stops reading replies and resets the stream.
+    /// Stops reading replies and resets the stream. Returns at once, even while a
+    /// `nextReply` is waiting: that read ends with `null`.
     #[napi]
-    pub async fn cancel(&self) {
-        if let Some(call) = self.inner.lock().await.take() {
-            call.cancel();
+    pub fn cancel(&self) {
+        self.cancelled.send_replace(true);
+        if let Ok(mut guard) = self.inner.try_lock() {
+            if let Some(call) = guard.take() {
+                call.cancel();
+            }
         }
     }
 }

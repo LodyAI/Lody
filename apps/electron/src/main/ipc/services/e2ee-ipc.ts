@@ -218,6 +218,23 @@ const PAIRING_REFUSALS = new Set([
   'pairing-rate-limited',
   'invalid-input'
 ])
+/** Resolves an iroh route under the account lock; no network wait happens here. */
+async function irohRoute(
+  id: ReturnType<typeof sender>,
+  workspaceId: string,
+  targetMachineId: string
+) {
+  const target = irohTargetSchema.parse({ workspaceId, targetMachineId })
+  return withDesktopE2eeAccount(
+    (owner) =>
+      owner.readers.get(target.workspaceId)?.has(id)
+        ? owner.host.irohPrepare(target.workspaceId, target.targetMachineId)
+        : refuseUnopened(owner, target.workspaceId),
+    target.workspaceId,
+    false
+  ).catch(() => undefined)
+}
+
 function sender() {
   const { event } = getIpcContext()
   assertProductWindowSender(event)
@@ -2871,22 +2888,16 @@ export class E2eeIpc extends IpcService {
       false
     )
   }
-  /** Whether an iroh connection to the machine is live; starts one when not. */
+  /** Whether an iroh connection to the machine is live; starts one when not.
+   * Only route resolution runs under the account lock; the check runs after it. */
   @IpcMethod()
   async irohReady(workspaceId: string, targetMachineId: string) {
-    const id = sender()
-    const target = irohTargetSchema.parse({ workspaceId, targetMachineId })
-    return withDesktopE2eeAccount(
-      (owner) =>
-        owner.readers.get(target.workspaceId)?.has(id)
-          ? owner.host.irohReady(target.workspaceId, target.targetMachineId)
-          : refuseUnopened(owner, target.workspaceId),
-      target.workspaceId,
-      false
-    )
+    const route = await irohRoute(sender(), workspaceId, targetMachineId)
+    return route ? route.ready() : false
   }
   /** Carries one prepared `{id, frame}` envelope; returns reply frames for the
-   * renderer to verify with the existing accept methods. Never prepares or signs. */
+   * renderer to verify with the existing accept methods. Never prepares or signs.
+   * The network wait runs after the account lock is released. */
   @IpcMethod()
   async irohCall(
     workspaceId: string,
@@ -2894,21 +2905,10 @@ export class E2eeIpc extends IpcService {
     envelope: { id: string; frame: string },
     timeoutMs: number
   ) {
-    const id = sender()
     const input = irohCallSchema.parse({ workspaceId, targetMachineId, envelope, timeoutMs })
-    return withDesktopE2eeAccount(
-      (owner) =>
-        owner.readers.get(input.workspaceId)?.has(id)
-          ? owner.host.irohCall(
-              input.workspaceId,
-              input.targetMachineId,
-              input.envelope,
-              input.timeoutMs
-            )
-          : refuseUnopened(owner, input.workspaceId),
-      input.workspaceId,
-      false
-    )
+    const route = await irohRoute(sender(), input.workspaceId, input.targetMachineId)
+    if (!route) throw new Error('iroh_unavailable')
+    return route.call(input.envelope, input.timeoutMs)
   }
   @IpcMethod()
   async prepareDispatch(

@@ -238,3 +238,49 @@ describe('iroh route', () => {
     }
   });
 });
+
+it('does not wait for a slow iroh readiness answer before sending on Streams', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const appended = Promise.withResolvers<{ id: string; frame: string }>();
+    const client = {
+      ensureJsonStream: async () => undefined,
+      readJsonLive: (
+        _stream: string,
+        _state: unknown,
+        _batch: unknown,
+        options: { signal: AbortSignal }
+      ) =>
+        new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve())),
+      appendJson: async (_stream: string, value: { id: string; frame: string }) => {
+        appended.resolve(value);
+      },
+    } as unknown as LoroStreamsJsonStreamClient;
+    let calls = 0;
+    const dispatcher = createEncryptedDispatchLegacy({
+      workspaceId: 'iroh-slow-ready',
+      prepare: async () => original('55'.repeat(16)),
+      accept: async () => ({}) as never,
+      client: async () => client,
+      iroh: {
+        // Never answers: a busy host lock or a stalled check.
+        ready: () => new Promise<boolean>(() => {}),
+        call: async () => {
+          calls++;
+          return [];
+        },
+      },
+    });
+    try {
+      const prepared = await dispatcher.prepare('machine-1', input('slow'));
+      void prepared.send().catch(() => null);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await appended.promise).toEqual({ id: '55'.repeat(16), frame: 'ab'.repeat(200) });
+      expect(calls).toBe(0);
+    } finally {
+      await dispatcher.close();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -95,62 +95,78 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
   })
   return {
     /**
-     * Whether a live connection to the machine exists. Without one, starts a
-     * bounded background dial (at most one per machine) and answers `false`, so
-     * this request uses Streams and a later one can use iroh.
+     * Runs under the host's serial lock: resolves the target from the verified
+     * ledger and opens the endpoint (no network wait). The returned route does all
+     * network waiting, and callers must run it after releasing every lock.
      */
-    ready: (machineId: string) =>
+    prepare: (machineId: string) =>
       Effect.gen(function* () {
         const key = yield* target(machineId)
         const live = yield* endpoint
-        if (yield* Effect.promise(() => live.hasConnection(key))) return true
-        if (!warming.has(key)) {
-          warming.add(key)
-          yield* Effect.forkIn(
-            Effect.promise(() =>
-              live.warm({ endpointId: key }, WARM_TIMEOUT_MS).catch(() => undefined)
-            ).pipe(Effect.ensuring(Effect.sync(() => warming.delete(key)))),
-            scope
-          )
-        }
-        return false
-      }).pipe(Effect.catch(() => Effect.succeed(false))),
-    /**
-     * Sends one `{id, frame}` envelope and returns every reply envelope's frame.
-     * Fails on any transport problem; the caller retries the same original over
-     * Streams.
-     */
-    call: (machineId: string, envelope: { id: string; frame: string }, timeoutMs: number) =>
-      Effect.gen(function* () {
-        const key = yield* target(machineId)
-        const live = yield* endpoint
-        const call = yield* Effect.tryPromise({
-          try: () =>
-            live.call(
-              { endpointId: key },
-              Buffer.from(JSON.stringify(envelope), 'utf8'),
-              CONNECT_TIMEOUT_MS
-            ),
-          catch: () => new Error('iroh_call')
-        })
-        const frames: string[] = []
-        yield* Effect.tryPromise({
-          try: async () => {
-            for (let reply = await call.nextReply(); reply; reply = await call.nextReply()) {
-              const parsed = JSON.parse(reply.toString('utf8')) as { id?: unknown; frame?: unknown }
-              if (parsed.id === envelope.id && typeof parsed.frame === 'string')
-                frames.push(parsed.frame)
-              if (frames.length > 128) throw new Error('iroh_reply_limit')
-            }
-          },
-          catch: () => new Error('iroh_reply')
-        }).pipe(
-          Effect.timeout(timeoutMs),
-          Effect.onError(() => Effect.promise(() => call.cancel()))
-        )
-        return frames
+        return makeIrohRoute(live, key, warming)
       })
   }
 })
+
+/** One machine's iroh route on an open endpoint. Every method is lock-free. */
+export type IrohRoute = ReturnType<typeof makeIrohRoute>
+
+export function makeIrohRoute(
+  live: Pick<IrohEndpoint, 'hasConnection' | 'warm' | 'call'>,
+  key: string,
+  warming: Set<string>
+) {
+  return {
+    /**
+     * Whether a live connection exists; never waits for a dial in progress.
+     * Without one, starts a bounded background dial (at most one per machine) and
+     * answers `false`, so this request uses Streams and a later one can use iroh.
+     */
+    ready: async (): Promise<boolean> => {
+      if (await live.hasConnection(key).catch(() => false)) return true
+      if (!warming.has(key)) {
+        warming.add(key)
+        void live
+          .warm({ endpointId: key }, WARM_TIMEOUT_MS)
+          .catch(() => undefined)
+          .finally(() => warming.delete(key))
+      }
+      return false
+    },
+    /**
+     * Sends one `{id, frame}` envelope and returns every reply envelope's frame
+     * read within `timeoutMs`. Any transport problem rejects; the caller retries
+     * the same original over Streams. Timing out cancels the stream at once.
+     */
+    call: async (envelope: { id: string; frame: string }, timeoutMs: number): Promise<string[]> => {
+      const call = await live.call(
+        { endpointId: key },
+        Buffer.from(JSON.stringify(envelope), 'utf8'),
+        CONNECT_TIMEOUT_MS
+      )
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        call.cancel()
+      }, timeoutMs)
+      try {
+        const frames: string[] = []
+        for (let reply = await call.nextReply(); reply; reply = await call.nextReply()) {
+          const parsed = JSON.parse(reply.toString('utf8')) as { id?: unknown; frame?: unknown }
+          if (parsed.id === envelope.id && typeof parsed.frame === 'string')
+            frames.push(parsed.frame)
+          if (frames.length > 128) throw new Error('iroh_reply_limit')
+        }
+        if (timedOut) throw new Error('iroh_timeout')
+        return frames
+      } catch (cause) {
+        call.cancel()
+        throw cause
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+  }
+}
 
 export type DesktopIrohClient = Effect.Success<ReturnType<typeof makeDesktopIrohClient>>

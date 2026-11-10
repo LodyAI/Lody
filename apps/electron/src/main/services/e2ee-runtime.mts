@@ -2130,24 +2130,15 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.rpc.acceptResponse(targetMachineId, input, frameHex)
           )
         ),
-      /** Whether an iroh connection to the machine is live (starting one if not). */
-      irohReady: (workspaceId: string, targetMachineId: string) =>
-        run(
-          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.iroh ? entry.iroh.ready(targetMachineId) : Effect.succeed(false)
-          )
-        ),
-      /** Carries one prepared envelope over iroh; replies are verified by the caller. */
-      irohCall: (
-        workspaceId: string,
-        targetMachineId: string,
-        envelope: { id: string; frame: string },
-        timeoutMs: number
-      ) =>
+      /**
+       * Resolves the machine's iroh route under the host lock without any network
+       * wait. Callers run the route's `ready`/`call` after releasing every lock.
+       */
+      irohPrepare: (workspaceId: string, targetMachineId: string) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
             entry.iroh
-              ? entry.iroh.call(targetMachineId, envelope, timeoutMs)
+              ? entry.iroh.prepare(targetMachineId)
               : Effect.fail(new Error('iroh_unavailable'))
           )
         ),

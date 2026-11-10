@@ -24,8 +24,9 @@ export interface CallTarget {
 export interface IrohCall {
   /** Next reply, or `null` once the listener finished the stream. */
   nextReply(): Promise<Buffer | null>;
-  /** Stops reading replies and resets the stream. */
-  cancel(): Promise<void>;
+  /** Stops reading replies and resets the stream at once; a pending `nextReply`
+   * resolves `null`. */
+  cancel(): void;
 }
 
 /** One incoming request. `remoteEndpointId` is transport identity, not authority. */

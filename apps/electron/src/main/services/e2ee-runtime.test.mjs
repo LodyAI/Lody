@@ -4522,3 +4522,28 @@ for (const advance of [false, true]) {
     )
   })
 }
+
+void test('an iroh call that outlives its budget is cancelled and rejects for Streams fallback', async (t) => {
+  const { makeIrohRoute } = await import('./e2ee-iroh.mts')
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let release
+  const call = {
+    // The machine accepted the stream but never replies or finishes it.
+    nextReply: () => new Promise((resolve) => (release = resolve)),
+    cancel: () => release?.(null)
+  }
+  const route = makeIrohRoute(
+    {
+      hasConnection: async () => true,
+      warm: async () => undefined,
+      call: async () => call
+    },
+    'aa'.repeat(32),
+    new Set()
+  )
+  assert.equal(await route.ready(), true)
+  const pending = route.call({ id: 'bb'.repeat(16), frame: 'cc'.repeat(200) }, 800)
+  await new Promise((resolve) => setImmediate(resolve))
+  t.mock.timers.tick(800)
+  await assert.rejects(pending, /iroh_timeout/)
+})
