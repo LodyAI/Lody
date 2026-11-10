@@ -88,6 +88,8 @@ type SessionDispatchWatcherDeps = {
   /** Encrypted only: new execution evidence arrived, for one session document
    * (its room ID) or, without one, for every waiting turn (ledger or key update). */
   subscribeExecutionEvidence?: (listener: (roomId?: string) => void) => () => void;
+  /** Encrypted only: a message cancelled before it started must never start later. */
+  retireEncryptedInput?: (intent: { sessionId: string; userTurnId: string }) => Promise<void>;
   logger: Logger;
   machineId: MachineId;
   workspaceId: WorkspaceId;
@@ -152,6 +154,15 @@ type AccessRetryHandle = {
   fiber: Fiber.Fiber<void, never>;
   /** A turn waiting for execution evidence, which new evidence wakes at once. */
   evidence?: true;
+  /** The session document's version when the wait began; any later change ends it. */
+  version?: string;
+};
+/** Comparable document version; undefined when the handle exposes none. */
+const sessionDocVersion = (sessionDoc: SessionDocumentHandle): string | undefined => {
+  const doc = (
+    sessionDoc as { handle?: { doc?: { version(): { toJSON(): Map<unknown, unknown> } } } }
+  ).handle?.doc;
+  return doc ? JSON.stringify([...doc.version().toJSON()].sort()) : undefined;
 };
 /** Fallback recheck for a waiting encrypted turn: doubles from 1 s, capped at 5 min
  * (owner decision 2026-11-10). Evidence events are the primary trigger. */
@@ -464,6 +475,8 @@ export class SessionDispatchWatcher {
     { turnId: string; attempts: number }
   >();
   private detachExecutionEvidence: (() => void) | null = null;
+  /** Canceled inputs already recorded as retired in the execution journal. */
+  private readonly retiredInputs = new Set<string>();
 
   private metadataWatchHandle: RepoWatchHandle | null = null;
   private readonly userResolver: SessionUserResolverLike;
@@ -1537,7 +1550,11 @@ export class SessionDispatchWatcher {
       if (encryptedRequester && 'state' in encryptedRequester) {
         if (encryptedRequester.state === 'pending') {
           outcome = 'execution-deferred';
-          this.forkExecutionEvidenceRetry(sessionId, nextUserTurn.id);
+          this.forkExecutionEvidenceRetry(
+            sessionId,
+            nextUserTurn.id,
+            sessionDocVersion(sessionDoc)
+          );
           return;
         }
       }
@@ -1549,9 +1566,20 @@ export class SessionDispatchWatcher {
       // A background verify-with-retry fiber already owns this turn (from a prior
       // indeterminate result). Don't re-verify on every mirror tick — the fiber
       // re-enqueues a dispatch check once it reaches a definitive answer.
-      if (this.accessFibers.get(sessionId)?.turnId === nextUserTurn.id) {
-        outcome = 'access-retry-in-flight';
-        return;
+      const inFlight = this.accessFibers.get(sessionId);
+      if (inFlight?.turnId === nextUserTurn.id) {
+        // A turn waiting for evidence rechecks now once its document changed since the
+        // wait began (owner decision 2026-11-10). Its own writes precede that version, so
+        // an unchanged document cannot loop; an access verification keeps its owner.
+        const changed =
+          inFlight.evidence &&
+          inFlight.version !== undefined &&
+          inFlight.version !== sessionDocVersion(sessionDoc);
+        if (!changed) {
+          outcome = 'access-retry-in-flight';
+          return;
+        }
+        this.interruptAccessRetry(sessionId);
       }
 
       // Access verification, launch-config resolution, user resolution, and
@@ -1732,7 +1760,12 @@ export class SessionDispatchWatcher {
             accessPromise: executionAccessPromise,
             requestPromise,
             onExecutionDeferred: () => {
-              if (isActive()) this.forkExecutionEvidenceRetry(sessionId, nextUserTurn.id);
+              if (isActive())
+                this.forkExecutionEvidenceRetry(
+                  sessionId,
+                  nextUserTurn.id,
+                  sessionDocVersion(sessionDoc)
+                );
             },
             onAccessAllowed: async () => {
               ensureActive();
@@ -1860,7 +1893,7 @@ export class SessionDispatchWatcher {
     });
   }
 
-  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string): void {
+  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string, version?: string): void {
     this.interruptAccessRetry(sessionId);
     const previous = this.evidenceRetryAttempts.get(sessionId);
     const attempts = previous?.turnId === turnId ? Math.min(previous.attempts + 1, 16) : 0;
@@ -1880,7 +1913,12 @@ export class SessionDispatchWatcher {
     );
     // Share the existing per-session admission-retry owner and its lifecycle
     // cancellation. Never wake the withdrawn Inbox in a tight release loop.
-    this.accessFibers.set(sessionId, { turnId, fiber: Effect.runFork(program), evidence: true });
+    this.accessFibers.set(sessionId, {
+      turnId,
+      fiber: Effect.runFork(program),
+      evidence: true,
+      ...(version !== undefined ? { version } : {}),
+    });
   }
 
   /** Recheck waiting turns now instead of at their fallback timer. */
@@ -2233,7 +2271,11 @@ export class SessionDispatchWatcher {
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
-        resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
+        // Encrypted inputs never choose their resume target: the signature leaves out the
+        // `resume` that promotion supplies, so it comes from this Session's metadata.
+        resume: this.deps.encryptedWorkspace
+          ? resolveDispatchAcpSessionId(meta)
+          : (entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta)),
       },
       userTurnId: entry.id,
       userId: requesterUserId ?? entry.userId ?? meta.userId,
@@ -2280,7 +2322,8 @@ export class SessionDispatchWatcher {
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
-        resume: entry.inputConfig?.resume,
+        // As above: an encrypted row's unsigned `resume` is never a requested target.
+        resume: this.deps.encryptedWorkspace ? undefined : entry.inputConfig?.resume,
       },
       worktreeSetup: launchConfig?.worktreeSetup,
       worktreeCleanup: launchConfig?.worktreeCleanup,
@@ -2362,6 +2405,10 @@ export class SessionDispatchWatcher {
           id: queuedTurnId,
           ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
           ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
+          // The author's signed intent covers this content without the `resume` added above.
+          ...(this.deps.encryptedWorkspace && queuedItem.e2eeIntent
+            ? { e2eeIntent: queuedItem.e2eeIntent }
+            : {}),
         }
       : null;
   }
@@ -3219,6 +3266,23 @@ export class SessionDispatchWatcher {
       }
       let canceledInput = false;
       for (const entry of history) {
+        if (
+          this.deps.retireEncryptedInput &&
+          entry.role === 'user' &&
+          entry.status === 'canceled' &&
+          !this.retiredInputs.has(entry.id)
+        ) {
+          this.retiredInputs.add(entry.id);
+          await this.deps
+            .retireEncryptedInput({ sessionId: meta.id, userTurnId: entry.id })
+            .catch((error: unknown) => {
+              // A later observation retries; nothing has started either way.
+              this.retiredInputs.delete(entry.id);
+              this.deps.logger.debug(
+                `[${meta.id}] Could not retire canceled input ${entry.id}: ${formatErrorMessage(error)}`
+              );
+            });
+        }
         if (
           entry.role === 'user' &&
           ['pending', 'seen', 'prepared', 'pending_apply'].includes(entry.status ?? '') &&

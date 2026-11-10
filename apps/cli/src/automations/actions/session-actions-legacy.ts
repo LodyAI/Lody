@@ -524,13 +524,24 @@ export class AutomationSessionActionsLegacy {
     )
       return { state: 'blocked', reason: 'session_admission_blocked' };
     const timestamp = new Date(receipt.createdAt).toISOString();
-    this.manager.retainQueuedInput({
-      sessionId,
-      userTurnId: receipt.turnId,
-      timestamp,
-      userId: receipt.rule.ownerUserId,
-      inputConfig: config,
-    });
+    const acpSessionConfig = {
+      ...config,
+      prompt: config.prompt,
+      cliType: config.cliType,
+      agentType: config.agentType,
+    };
+    // Encrypted: this machine signs its own queued input, stored with it in one commit.
+    const targetMachineId = this.manager.isEncryptedWorkspace()
+      ? (await backend.getMetaState())?.machineId
+      : undefined;
+    const e2eeIntent = targetMachineId
+      ? await this.manager.signMachineInput({
+          sessionId,
+          targetMachineId,
+          userTurnId: receipt.turnId,
+          inputConfig: acpSessionConfig,
+        })
+      : undefined;
     await doc.pushMessageQueue({
       task: config.prompt,
       userId: receipt.rule.ownerUserId,
@@ -540,12 +551,8 @@ export class AutomationSessionActionsLegacy {
       isEditing: false,
       editingStartedAt: undefined,
       project: (preparedInput?.meta.project ?? receipt.prepared?.project) as SessionMeta['project'],
-      acpSessionConfig: {
-        ...config,
-        prompt: config.prompt,
-        cliType: config.cliType,
-        agentType: config.agentType,
-      },
+      acpSessionConfig,
+      e2eeIntent,
     });
     await this.signalQueue(doc);
     return { state: 'queued' };

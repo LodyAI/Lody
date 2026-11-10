@@ -17,8 +17,8 @@ import type { MachineAccessVerification } from '../src/session/session-access-re
 import { fileLockLayer } from '../src/utils/file-lock';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { createSessionBackend } from '../src/session/session-backend';
-import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
+import { turnExecutionDigest } from '@lody/shared';
 import { createLoroSessionData, createRoostDirectoryRow } from '@lody/shared/session-data';
 import {
   buildMissingEmail,
@@ -2102,14 +2102,18 @@ describe('SessionDispatchWatcher', () => {
         expect(work.watchedSessions.has(sessionId)).toBe(false);
         expect(dispatched).toEqual([]);
         if (automation) {
-          let receipted: { timestamp: unknown; userId: unknown; inputConfig: unknown } | undefined;
+          let signed:
+            | { targetMachineId: string; userTurnId: string; inputConfig: unknown }
+            | undefined;
           const adapter = new AutomationSessionActionsLegacy({
             lody: {
               documentManager: {
                 repo,
                 getOrCreateSessionDoc: async () => doc,
-                retainQueuedInput: (input: typeof receipted) => {
-                  receipted = input;
+                isEncryptedWorkspace: () => true,
+                signMachineInput: async (input: NonNullable<typeof signed>) => {
+                  signed = input;
+                  return 'B'.repeat(131);
                 },
               },
               getAutomationSessionAuthority: () => ({ acceptInput: async () => true }),
@@ -2143,14 +2147,16 @@ describe('SessionDispatchWatcher', () => {
             dispatched: ['late-queued-turn'],
             queued: [],
           });
-          // The local evidence must match the row promotion wrote, or encrypted starts refuse.
+          // What the machine signed must be what promotion wrote, or encrypted starts refuse.
           const promoted = await doc.sessionData.history.readTurn('late-queued-turn');
           if (promoted.state !== 'ready') throw new Error('promoted turn missing');
-          expect(receipted?.timestamp).toBe(promoted.turn.timestamp);
-          expect(receipted?.userId).toBe(promoted.turn.userId);
-          expect(queuedInputEvidence(promoted.turn.inputConfig)).toBeDefined();
-          expect(queuedInputEvidence(receipted?.inputConfig)).toBe(
-            queuedInputEvidence(promoted.turn.inputConfig)
+          expect(signed).toMatchObject({
+            targetMachineId: 'machine-1',
+            userTurnId: 'late-queued-turn',
+          });
+          expect(turnExecutionDigest({ inputConfig: promoted.turn.inputConfig })).toBeDefined();
+          expect(turnExecutionDigest({ inputConfig: signed?.inputConfig })).toBe(
+            turnExecutionDigest({ inputConfig: promoted.turn.inputConfig })
           );
           return;
         }
@@ -2772,8 +2778,14 @@ describe('SessionDispatchWatcher', () => {
     return meta;
   };
 
-  it('keeps a promoted queue intent identical to its durable Loro config at the encrypted origin gate', async () => {
+  it('promotes an encrypted queue item with its signed intent and an unchanged content digest', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'queued-execution-origin-'));
+    const queuedConfig = {
+      prompt: 'synthetic queue prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
+    };
+    const signedIntent = 'A'.repeat(131);
     const id = 'queue-origin' as SessionId;
     let meta = {
       id,
@@ -2798,6 +2810,7 @@ describe('SessionDispatchWatcher', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       workspaceDocument: { repo } as never,
+      encryptedWorkspace: true,
       executionService: {} as SessionExecutionService,
       canUseMachine: createAllowMachineAccess(),
     });
@@ -2807,11 +2820,8 @@ describe('SessionDispatchWatcher', () => {
         task: 'synthetic queue prompt',
         userId: 'user-1',
         timestamp: '2026-10-30T20:17:36.812Z',
-        acpSessionConfig: {
-          prompt: 'synthetic queue prompt',
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
+        acpSessionConfig: queuedConfig,
+        e2eeIntent: signedIntent,
       } as never);
       const promoted = await (
         watcher as unknown as {
@@ -2823,43 +2833,11 @@ describe('SessionDispatchWatcher', () => {
         }
       ).promoteNextQueuedMessage(doc, meta, []);
       if (!promoted) throw new Error('queue promotion failed');
-      const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
-      // Missing signed originals must defer, never deny because JS-only undefined
-      // fields differ from the exact durable input config before evidence lookup.
-      const result = await Effect.runPromise(
-        Effect.scoped(
-          origins.resolve(
-            {
-              workspaceId: 'workspace-1',
-              sessionId: id,
-              userTurnId: promoted.id,
-              inputConfig: promoted.inputConfig,
-            },
-            loro,
-            () => Effect.die('no signed frame has arrived')
-          )
-        )
+      // The machine adds `resume` and normalizes the row; the author's signature still covers it.
+      expect(promoted).toMatchObject({ queuedInput: true, e2eeIntent: signedIntent });
+      expect(turnExecutionDigest({ inputConfig: promoted.inputConfig })).toBe(
+        turnExecutionDigest({ inputConfig: queuedConfig })
       );
-      expect(result).toEqual({
-        state: 'pending-evidence',
-        expiresAt: Date.parse('2026-10-30T20:32:36.812Z'),
-      });
-      expect(
-        await Effect.runPromise(
-          Effect.scoped(
-            origins.resolve(
-              {
-                workspaceId: 'workspace-1',
-                sessionId: id,
-                userTurnId: promoted.id,
-                inputConfig: { ...promoted.inputConfig, prompt: 'different input' },
-              },
-              loro,
-              () => Effect.die('changed input must not open an original')
-            )
-          )
-        )
-      ).toBeUndefined();
       const stored = await doc.sessionData.history.readTurn(promoted.id);
       expect(stored.state).toBe('ready');
       if (stored.state === 'ready')

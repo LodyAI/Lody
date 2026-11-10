@@ -6,12 +6,7 @@ import {
 } from './client-loss-observer';
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
 import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
-import {
-  getScheduleRoomId,
-  getScheduleIdFromRoomId,
-  type ScheduleAuthorizationRequest,
-} from '@lody/shared';
-import { makeExecutionOriginRecovery } from './execution-origin-recovery';
+import { getScheduleIdFromRoomId, type ScheduleAuthorizationRequest } from '@lody/shared';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { makeLedgerCatchUp, withLedgerCatchUp } from './rpc-ledger-catch-up';
@@ -22,11 +17,13 @@ import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { makeEncryptedRpcListener, type E2eeRpcTiming } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { E2eeDispatchInput, E2eeDispatchAck } from '@lody/shared/e2ee-rpc';
+import { makeVerifiedExecutionIntent } from './execution-intent-verification';
+import { Bytes as IntentBytes } from '@lody/e2ee-core/protocol';
 import {
-  makeVerifiedExecutionOriginal,
-  sessionContentResource,
-} from './verified-execution-original';
-import { ExecutionOrigins } from './execution-origins';
+  E2EE_INTENT_KIND,
+  encodeE2eeIntentRecord,
+  turnExecutionDigest,
+} from '@lody/shared/e2ee-execution-intent';
 import type { LoroDoc } from 'loro-crdt';
 import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
 import { isSessionDocRoomId, type SessionId, type LoroStreamsTokenAuth } from '@lody/shared';
@@ -58,6 +55,8 @@ import { openMachinePairingJournal, MachinePairingJournalError } from './pairing
 /** Fast enough for the 900s client-loss envelope; a successful check refreshes the
  * verified ledger through the same single-flight owner used by every other trigger. */
 const AUTHORITY_CHECK_INTERVAL_MS = 5 * 60_000;
+/** Longest gap between background ledger retries after a failure. */
+const BACKGROUND_RETRY_MAX_MS = 5 * 60_000;
 /** Inbound machine-control work is a hint, not a reason to check per frame. */
 const AUTHORITY_CHECK_DEBOUNCE_MS = 30_000;
 
@@ -836,7 +835,6 @@ async function openWorkspaceOwned(
       }
     );
   };
-  let originWriteFailed = false;
   // Waiting encrypted turns recheck on these events; their timer is only a fallback.
   // A room ID names one document's new frame; none means a confirmed ledger read.
   const evidenceListeners = new Set<(roomId?: string) => void>();
@@ -861,12 +859,6 @@ async function openWorkspaceOwned(
       }
     });
   };
-  const executionOrigins = new ExecutionOrigins(
-    join(
-      repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
-      'execution-origins.sqlite'
-    )
-  );
   const rpc = makeE2eeRpcNative({
     workspaceId: options.workspaceId,
     requesterDevice: opened.signingPublicKey,
@@ -883,6 +875,7 @@ async function openWorkspaceOwned(
       )
     ),
     ledger: () => opened.runtime.executionLedger(),
+    signIntent: (request) => opened.runtime.signExecutionIntent(request),
     binding: (resource) => opened.runtime.realtimeBinding(resource),
   });
   const rpcJournal = lazyExecutionJournal(
@@ -914,19 +907,6 @@ async function openWorkspaceOwned(
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   const stopRpc = () =>
     rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
-  const readExecutionOriginPage = options.cloud.readExecutionOriginPage?.bind(options.cloud);
-  const originRecovery = readExecutionOriginPage
-    ? makeExecutionOriginRecovery(
-        executionOrigins,
-        (input, signal) =>
-          readExecutionOriginPage(input, signal).catch((cause: unknown) => {
-            credentialFailureHandler(cause);
-            throw cause;
-          }),
-        { workspaceId: options.workspaceId, credential: opened.credential },
-        encryptedWorkspaceNamespace(binding.genesisHash)
-      )
-    : undefined;
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
@@ -975,15 +955,8 @@ async function openWorkspaceOwned(
                 getScheduleIdFromRoomId(descriptor.resource.slice(4))) &&
               originalFrame.context.kind === 'update_batch'
             ) {
-              try {
-                executionOrigins.retain(descriptor.resource, originalFrame, result.plaintext);
-                originWriteFailed = false;
-                notifyExecutionEvidence(descriptor.resource.slice(4));
-              } catch {
-                if (!originWriteFailed)
-                  console.warn('[e2ee] execution origin unavailable; affected turns cannot start');
-                originWriteFailed = true;
-              }
+              // A remote change to a session or schedule may carry a waiting input.
+              notifyExecutionEvidence(descriptor.resource.slice(4));
             }
             return result.plaintext;
           },
@@ -1084,12 +1057,20 @@ async function openWorkspaceOwned(
     if (refreshRetryTimer !== undefined) clearTimeout(refreshRetryTimer);
     refreshRetryTimer = undefined;
   };
+  // A failed ledger read keeps retrying while the workspace is open: waiting inputs
+  // depend on it. Doubling from one second, never longer than five minutes apart
+  // (owner decision 2026-11-10); success resets the backoff.
+  const backgroundRetryDelay = (attempt: number, firstMs: number) =>
+    Math.min(firstMs * 2 ** Math.min(attempt, 16), BACKGROUND_RETRY_MAX_MS);
   const scheduleRefreshRetry = () => {
-    if (closed || refreshRetryTimer !== undefined || refreshRetryAttempts >= 3) return;
-    refreshRetryTimer = setTimeout(() => {
-      refreshRetryTimer = undefined;
-      void refreshInBackground(false);
-    }, [1_000, 5_000, 30_000][refreshRetryAttempts]);
+    if (closed || refreshRetryTimer !== undefined) return;
+    refreshRetryTimer = setTimeout(
+      () => {
+        refreshRetryTimer = undefined;
+        void refreshInBackground(false);
+      },
+      backgroundRetryDelay(refreshRetryAttempts, 1_000)
+    );
     refreshRetryAttempts++;
     refreshRetryTimer.unref?.();
   };
@@ -1101,18 +1082,20 @@ async function openWorkspaceOwned(
     authorityCheckRequested = false;
   };
   const retryLedger = (): void => {
-    if (closed || !ledgerBlocked || refresh || ledgerRetryAttempts >= 3) return;
+    if (closed || !ledgerBlocked || refresh) return;
     clearLedgerRetry();
     ledgerRetryAttempts++;
     void refreshInBackground(false);
   };
   const scheduleLedgerRetry = () => {
-    if (closed || !ledgerBlocked || ledgerRetryTimer !== undefined || ledgerRetryAttempts >= 3)
-      return;
-    ledgerRetryTimer = setTimeout(() => {
-      ledgerRetryTimer = undefined;
-      retryLedger();
-    }, [250, 1_000, 4_000][ledgerRetryAttempts]);
+    if (closed || !ledgerBlocked || ledgerRetryTimer !== undefined) return;
+    ledgerRetryTimer = setTimeout(
+      () => {
+        ledgerRetryTimer = undefined;
+        retryLedger();
+      },
+      backgroundRetryDelay(ledgerRetryAttempts, 250)
+    );
     ledgerRetryTimer.unref?.();
   };
   const startMemberRemoval = (reason: 'member-removed' | 'device-revoked' = 'member-removed') => {
@@ -1414,7 +1397,6 @@ async function openWorkspaceOwned(
       await epochTransition.close();
       await refresh;
       await Promise.allSettled([...snapshotFlights]);
-      originRecovery?.clear();
       // History/snapshot diagnosis may start while close drains those flights.
       // Keep custody alive through identity verification and the durable receipt,
       // never await the parent drain/full erasure that calls back into close.
@@ -1441,53 +1423,61 @@ async function openWorkspaceOwned(
   // In J08 the daemon's machine credential stays valid, so the ledger refresh is
   // what observes the revoked desktop; a revoked machine takes the exact-code path.
   startAuthorityCheck();
+  const intentGenesis = Result.getOrThrow(IntentBytes.genesisHash(bytes(binding.genesisHash)));
   const authorizeScheduleExecution = (
     request: ScheduleAuthorizationRequest,
     doc: LoroDoc,
     executionTarget?: { localProjectId?: string }
   ) =>
-    Effect.scoped(
-      authorizeEncryptedSchedule({
-        workspaceId: options.workspaceId,
-        request,
-        doc,
-        executionTarget,
-        origins: executionOrigins,
-        open: (input) =>
-          Effect.gen(function* () {
-            const native = yield* opened.runtime.binding(
-              `doc:${getScheduleRoomId(request.scheduleId)}`,
-              'loro',
-              'current'
-            );
-            return yield* native.openAuthenticated(input);
-          }),
-        recover: originRecovery?.recover,
-        authorizeExecution: opened.executionAuthorization.authorizeExecution,
-        isExecutionOpen: () => !closed,
-      })
-    );
-  const resolveVerifiedExecutionOriginal = makeVerifiedExecutionOriginal({
+    authorizeEncryptedSchedule({
+      workspaceId: options.workspaceId,
+      genesis: intentGenesis,
+      request,
+      doc,
+      executionTarget,
+      authorizeExecution: opened.executionAuthorization.authorizeExecution,
+      isExecutionOpen: () => !closed,
+    });
+  const resolveVerifiedExecutionOriginal = makeVerifiedExecutionIntent({
     workspaceId: options.workspaceId,
+    genesis: intentGenesis,
     selfDevice: opened.signingPublicKey,
     isClosed: () => closed,
-    origins: executionOrigins,
-    readIncoming: (intent) => rpc.readIncoming(intent),
+    readIncoming: (intent) => rpc.readIncoming({ ...intent, inputConfig: intent.inputConfig }),
     openDispatch: dispatchNative.openDispatch,
     ledger: () => opened.runtime.executionLedger(),
-    openContent: (intent, request) =>
-      Effect.gen(function* () {
-        if (closed || intent.workspaceId !== options.workspaceId)
-          return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
-        const contentBinding = yield* opened.runtime.binding(
-          sessionContentResource(intent.sessionId),
-          'loro',
-          'current'
-        );
-        return yield* contentBinding.openAuthenticated(request);
-      }),
-    recover: originRecovery?.recover,
+    refreshLedger: opened.executionAuthorization.refreshLedger,
   });
+  /** This machine's own signed intent for an input it writes, in the same commit
+   * (owner decision 2026-11-10): derived work, scheduled runs and automations. */
+  const signMachineInput = (input: {
+    sessionId: string;
+    targetMachineId: string;
+    userTurnId: string;
+    inputConfig: unknown;
+    derivedFrom?: unknown;
+    scheduleRun?: unknown;
+  }) =>
+    run(
+      Effect.gen(function* () {
+        if (closed) return yield* Effect.fail(new Error('e2ee_closed'));
+        const digest = turnExecutionDigest(input);
+        if (!digest) return yield* Effect.fail(new Error('e2ee_signature_invalid'));
+        const signature = yield* opened.runtime.signExecutionIntent({
+          kind: E2EE_INTENT_KIND.machineInput,
+          workspaceId: options.workspaceId,
+          targetMachineId: input.targetMachineId,
+          scope: input.sessionId,
+          messageId: input.userTurnId,
+          contentDigest: bytes(digest),
+        });
+        return encodeE2eeIntentRecord({
+          kind: E2EE_INTENT_KIND.machineInput,
+          signer: bytes(opened.signingPublicKey),
+          signature,
+        });
+      })
+    );
   return {
     attachmentToken: async () => {
       if (closed) throw new Error('e2ee_closed');
@@ -1565,8 +1555,7 @@ async function openWorkspaceOwned(
         );
         return result.allowed;
       }),
-    retainQueuedInput: (input: Parameters<ExecutionOrigins['retainQueuedInput']>[0]) =>
-      executionOrigins.retainQueuedInput(input),
+    signMachineInput,
     startRpc: (
       machineId: string,
       offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
@@ -1576,11 +1565,15 @@ async function openWorkspaceOwned(
       run(
         Effect.gen(function* () {
           if (rpcFiber || closed) return;
+          let attempts = 0;
           rpcFiber = yield* Effect.forkIn(
             Effect.scoped(
               Effect.gen(function* () {
                 const provider = yield* createTokenProvider(true);
                 yield* provider.getToken();
+                // The backend answered again after a failed attempt: refresh the ledger
+                // now, so waiting inputs recheck on its success rather than a timer.
+                if (attempts++ > 0) void refreshInBackground(false);
                 const bucketId = provider.getBucketId();
                 if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
                   return yield* Effect.fail(new Error('e2ee_content_configuration'));
@@ -1643,6 +1636,7 @@ async function openWorkspaceOwned(
                       Effect.tap(() =>
                         Effect.sync(() => {
                           requestAuthorityCheck();
+                          if (failureReported) void refreshInBackground(false);
                           failureReported = false;
                         })
                       )
