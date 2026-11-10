@@ -5,7 +5,7 @@ import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from '@/atoms/doc-meta';
 import {
   filterSessionsByVisibility,
-  isSessionVisibleToUser,
+  isSessionEditableToUser,
   isSessionReadShared,
   type SessionListEntry,
 } from '@/lib/session-visibility';
@@ -66,8 +66,9 @@ function useHistoryOnlySessionIds(
       sessions
         .filter(
           (session) =>
-            isSessionReadShared(session, readSharedSessions, sessionsById) &&
-            !isSessionVisibleToUser(session, machines, projects, accountId, ownedMachineIds)
+            (isSessionReadShared(session, readSharedSessions, sessionsById, accountId) ||
+              (!!accountId && session.userId === accountId)) &&
+            !isSessionEditableToUser(session, machines, projects, accountId, ownedMachineIds)
         )
         .map((session) => session.id)
     );

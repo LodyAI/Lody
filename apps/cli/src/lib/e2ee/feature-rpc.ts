@@ -33,6 +33,12 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   journal: () => RealtimeJournal;
   authorize: AuthorizeEncryptedExecution;
   authorizeRead: AuthorizeEncryptedExecution;
+  /** Exact-session history admission; never reused for other read or write methods. */
+  authorizeHistoryRead?: (
+    workspaceId: string,
+    requesterDevice: string,
+    sessionId: string
+  ) => ReturnType<AuthorizeEncryptedExecution>;
   authoritySignal?: () => AbortSignal;
   isOpen: () => boolean;
   handle: EncryptedFeatureHandler;
@@ -53,7 +59,18 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const active = read ? reads : writes;
     if (active.has(envelope.id) || active.size >= 32) return true;
     active.add(envelope.id);
-    const authorize = read ? options.authorizeRead : options.authorize;
+    const historyRequest =
+      opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
+    const authorize: AuthorizeEncryptedExecution = historyRequest
+      ? (workspaceId, requesterDevice) =>
+          options.authorizeHistoryRead?.(
+            workspaceId,
+            requesterDevice,
+            historyRequest.params.sessionId
+          ) ?? Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
+      : read
+        ? options.authorizeRead
+        : options.authorize;
     const invoke = (authority: { isCurrent(): boolean; signal: AbortSignal } | undefined) =>
       Effect.acquireUseRelease(
         Effect.sync(() => ({

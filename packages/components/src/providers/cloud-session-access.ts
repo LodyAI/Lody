@@ -47,6 +47,7 @@ export function createCloudSessionAccess(input: {
     return {
       machineId,
       canManage: view.canManage,
+      needsResign: view.needsResign,
       generation: view.generation,
       ...(view.pendingRequest?.change.kind === 'session'
         ? {
@@ -54,13 +55,22 @@ export function createCloudSessionAccess(input: {
               requestId: view.pendingRequest.requestId,
               sessionId: view.pendingRequest.change.sessionId,
               level: view.pendingRequest.change.level,
+              audience: view.pendingRequest.change.audience,
             },
           }
         : {}),
       readSharedSessionIds:
-        view.removed || view.needsResign || view.unavailable
+        view.removed || view.unavailable
           ? []
-          : view.sessions.map((row) => row.sessionId),
+          : view.sessions.filter((row) => row.audience === 'team').map((row) => row.sessionId),
+      memberReadSharedSessions:
+        view.removed || view.unavailable
+          ? []
+          : view.sessions.flatMap((row) =>
+              row.audience === 'team'
+                ? []
+                : [{ sessionId: row.sessionId, userId: row.audience.userId }]
+            ),
     };
   };
   return {
@@ -106,7 +116,12 @@ export function createCloudSessionAccess(input: {
           intent.machineId,
           intent.generation,
           intent.requestId,
-          { kind: 'session', sessionId: intent.sessionId, level: intent.level }
+          {
+            kind: 'session',
+            sessionId: intent.sessionId,
+            level: intent.level,
+            audience: intent.audience,
+          }
         );
       }
       await input.client.mutation(cloudOperations.machines.setSessionReadSharedWithTeam, {
@@ -114,6 +129,7 @@ export function createCloudSessionAccess(input: {
         machineId: intent.machineId,
         sessionId: intent.sessionId,
         sharedWithTeam: intent.level === 'read',
+        audience: intent.audience,
       });
       return { status: 'saved' };
     },

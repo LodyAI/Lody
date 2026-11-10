@@ -139,9 +139,16 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
-  it.each(['read', 'watch', 'write'] as const)(
-    'does not start history %s when the RPC expires during metadata readiness',
-    async (kind) => {
+  it.each([
+    ['read', 'metadata'],
+    ['watch', 'metadata'],
+    ['write', 'metadata'],
+    ['write', 'authorization'],
+    ['write', 'claim'],
+    ['write', 'proof'],
+  ] as const)(
+    'does not start history %s when its deadline expires during %s',
+    async (kind, phase) => {
       const fake = createFakeStreamClient();
       let now = 1;
       let entered!: () => void;
@@ -153,6 +160,16 @@ describe('LoroStreamsMachineRpcServer', () => {
         ready = resolve;
       });
       const operations: string[] = [];
+      const rejectionStore = createHistoryRejectionStore();
+      const put = rejectionStore.put;
+      rejectionStore.put = async (...args) => {
+        const result = await put(...args);
+        if (phase === 'claim') {
+          entered();
+          await metadata;
+        }
+        return result;
+      };
       const server = new LoroStreamsMachineRpcServer({
         workspaceId: 'synthetic-workspace' as WorkspaceId,
         machineId: 'synthetic-machine' as MachineId,
@@ -161,18 +178,28 @@ describe('LoroStreamsMachineRpcServer', () => {
         streamClient: fake.streamClient,
         getMachineStatus: vi.fn(),
         refreshMachineAcpCapabilities: vi.fn(),
-        historyRequestRejections: createHistoryRejectionStore(),
+        historyRequestRejections: rejectionStore,
         resolveSessionHistoryOwnerSessionId: async (id) => {
-          entered();
-          await metadata;
+          if (phase === 'metadata') {
+            entered();
+            await metadata;
+          }
           return id;
         },
+        authorizeSessionHistoryRead: async () => true,
         readSessionHistory: async ({ sessionId }) => {
           operations.push('read');
           return { type: 'session/history-read_response', sessionId, success: true, result: [] };
         },
         waitForSessionHistoryChanges: async () => {
           operations.push('watch');
+        },
+        authorizeSessionHistoryWrite: async () => {
+          if (phase === 'authorization' || phase === 'proof') {
+            entered();
+            await metadata;
+          }
+          return { expiresAt: phase === 'proof' ? 2 : Number.MAX_SAFE_INTEGER };
         },
         writeSessionHistory: async ({ sessionId, operation }) => {
           operations.push('write');
@@ -197,7 +224,7 @@ describe('LoroStreamsMachineRpcServer', () => {
                     ? 'session/history-read'
                     : 'session/history-write',
               sentAt: 1,
-              expiresAt: 2,
+              expiresAt: phase === 'proof' ? 30_001 : 2,
               params: await encryptCodeCollabV2RpcPayload(
                 'synthetic-session',
                 kind === 'read'
@@ -225,7 +252,11 @@ describe('LoroStreamsMachineRpcServer', () => {
           (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
         );
         expect(operations).toEqual([]);
-        expect(fake.appended).toEqual([]);
+        if (phase === 'proof')
+          expect(fake.appended[0]?.value).toMatchObject({
+            error: { code: 'session_history_write_denied' },
+          });
+        else expect(fake.appended).toEqual([]);
       } finally {
         ready();
         server.stop();
@@ -262,6 +293,7 @@ describe('LoroStreamsMachineRpcServer', () => {
             'Metadata is pending; history was not started.'
           );
         },
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
         writeSessionHistory: async ({ sessionId, operation }) => {
           stored.push(sessionId);
           return { type: 'session/history-write_response', sessionId, operation, success: true };
@@ -332,6 +364,7 @@ describe('LoroStreamsMachineRpcServer', () => {
         await metadata;
         return id;
       },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId, operation }) => {
         stored.push(sessionId);
         return { type: 'session/history-write_response', sessionId, operation, success: true };
@@ -423,6 +456,7 @@ describe('LoroStreamsMachineRpcServer', () => {
             );
           return sessionId;
         },
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
         writeSessionHistory: async ({ sessionId: id, operation }) => {
           stored.push(id);
           return {
@@ -508,6 +542,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           );
           entered();
         }),
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId, operation }) => {
         stored.push(sessionId);
         return {
@@ -600,6 +635,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           );
         return id;
       },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId: targetSessionId, operation }) => {
         records.push(targetSessionId);
         return {
@@ -4021,6 +4057,7 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
       }
       if (signal?.aborted) throw signal.reason;
     },
+    authorizeSessionHistoryRead: async () => true,
     readSessionHistory: async ({ sessionId, query }) => ({
       type: 'session/history-read_response',
       sessionId,
@@ -4032,6 +4069,7 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
           ? 1
           : { state: 'ready', checkpoint: 'checkpoint-2', ids: ['synthetic-body'] },
     }),
+    authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
     writeSessionHistory: async ({ sessionId, operation }) => ({
       type: 'session/history-write_response',
       sessionId,
@@ -4170,6 +4208,7 @@ it('negotiates the encrypted checkpoint watch method through the real Machine RP
       entered.resolve();
       await release.promise;
     },
+    authorizeSessionHistoryRead: async () => true,
     readSessionHistory: async ({ sessionId: targetSessionId, query }) => {
       expect(query.kind).toBe('readChanges');
       return {
@@ -4366,6 +4405,7 @@ it.each([1, 16])(
       },
       historyRequestRejections: createHistoryRejectionStore(),
       resolveSessionHistoryOwnerSessionId: async (id) => id,
+      authorizeSessionHistoryRead: async () => true,
       readSessionHistory: async ({ sessionId }) => {
         if (++activeReads === capacity) readStarted();
         await reads;
@@ -4378,6 +4418,7 @@ it.each([1, 16])(
           historyRevision: 1,
         };
       },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId, operation }) => {
         accepted.push('synthetic-input');
         return {
@@ -4544,6 +4585,146 @@ it('round trips Android commands and isolates unavailable and denied controls', 
     expect(denied).toMatchObject({ success: false, sessionId: 's', error: 'failed' });
   } finally {
     client.stop();
+    server.stop();
+  }
+});
+
+it('admits a session-only read proof without lending it to another session or write; revocation rechecks', async () => {
+  const fake = createFakeStreamClient();
+  let granted = true;
+  const readIds: string[] = [],
+    writeIds: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId: 'synthetic-machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    historyRequestRejections: createHistoryRejectionStore(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    authorizeSessionHistoryRead: async ({ sessionId, readProof }) =>
+      granted && sessionId === 'shared-session' && readProof === 'synthetic-session-read-proof',
+    readSessionHistory: async ({ sessionId }) => {
+      readIds.push(sessionId);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        result: ['readable-history'],
+      };
+    },
+    authorizeSessionHistoryWrite: async () => null,
+    writeSessionHistory: async ({ sessionId, operation }) => {
+      writeIds.push(sessionId);
+      return { type: 'session/history-write_response', sessionId, operation, success: true };
+    },
+  });
+  const send = async (
+    id: string,
+    sessionId: string,
+    write = false,
+    proof: string | undefined = 'synthetic-session-read-proof'
+  ) => {
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id,
+          rpcVersion: '1',
+          workspaceId: 'synthetic-workspace',
+          machineId: 'synthetic-machine',
+          replyTo: 'native-query',
+          sentAt: 1,
+          expiresAt: 100,
+          method: write ? 'session/history-write' : 'session/history-read',
+          params: await encryptCodeCollabV2RpcPayload(sessionId, {
+            sessionId,
+            ...(write ? { operation: 'append', payload: {} } : { query: { kind: 'count' } }),
+            ...(proof ? { readProof: proof } : {}),
+          }),
+        },
+      ],
+      upToDate: true,
+    });
+  };
+  await server.start();
+  try {
+    await send('read', 'shared-session');
+    await fake.waitForAppendedCount(1);
+    expect(readIds).toEqual(['shared-session']);
+    await send('other', 'other-session');
+    await fake.waitForAppendedCount(2);
+    await send('write', 'shared-session', true, undefined);
+    await fake.waitForAppendedCount(3);
+    granted = false;
+    await send('revoked', 'shared-session');
+    await fake.waitForAppendedCount(4);
+    expect(readIds).toEqual(['shared-session']);
+    expect(writeIds).toEqual([]);
+    const replies = fake.appended.map((x) => x.value as { id: string; error?: { code: string } });
+    expect(replies.find((x) => x.id === 'other')?.error?.code).toBe('session_history_read_denied');
+    expect(replies.find((x) => x.id === 'revoked')?.error?.code).toBe(
+      'session_history_read_denied'
+    );
+    expect(replies.find((x) => x.id === 'write')?.error).toBeDefined();
+  } finally {
+    server.stop();
+  }
+});
+
+it('preserves encrypted history watch semantics through the real feature adapter without entering writes', async () => {
+  const observed: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'workspace' as WorkspaceId,
+    machineId: 'machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    waitForSessionHistoryChanges: async () => {
+      observed.push('wait');
+    },
+    readSessionHistory: async ({ sessionId, query }) => {
+      observed.push(query.kind);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyRevision: 1,
+        historyCount: 0,
+        result: { state: 'ready', checkpoint: 'next', ids: [] },
+      };
+    },
+    writeSessionHistory: async () => {
+      throw new Error('history read started a write');
+    },
+  });
+  try {
+    const result = await server.readFeatureQuery(
+      {
+        method: 'session/history-read',
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        params: {
+          sessionId: 'root' as SessionId,
+          query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
+        },
+      },
+      { requestId: 'synthetic', expiresAt: 1000, signal: new AbortController().signal }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        type: 'session/history-read_response',
+        success: true,
+        result: { checkpoint: 'next' },
+      },
+    });
+    expect(observed).toEqual(['wait', 'readChanges']);
+  } finally {
     server.stop();
   }
 });

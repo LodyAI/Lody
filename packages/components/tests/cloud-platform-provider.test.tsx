@@ -545,8 +545,8 @@ describe('CloudPlatformProvider', () => {
       return { status: 'saved', requestId: args[3] };
     };
     await renderSharing();
-    expect(container.textContent).toContain('Re-sign required');
-    await clickSharing('Re-sign with this device');
+    expect(container.textContent).toContain('Review recommended');
+    await clickSharing('Review and re-sign');
     expect(container.textContent).toContain('v2');
     expect(container.textContent).toContain('666666666666');
     expect(container.textContent).toContain('retained-project');
@@ -587,7 +587,7 @@ describe('CloudPlatformProvider', () => {
           : latest === 'withdrawn'
             ? { ...policyView(), head: { revision: 2, digest: '88'.repeat(32) } }
             : { ...view, pendingRequest: { requestId: pendingId, change: pendingChange } };
-      await clickSharing('Re-sign with this device');
+      await clickSharing('Review and re-sign');
       expect(writes).toHaveLength(0);
       if (latest === 'pending') {
         expect(container.textContent).toContain('Retry change');
@@ -597,7 +597,7 @@ describe('CloudPlatformProvider', () => {
         ]);
         expect(container.textContent).toContain('v3');
       } else {
-        expect(container.textContent).not.toContain('Re-sign with this device');
+        expect(container.textContent).not.toContain('Review and re-sign');
         expect(
           container
             .querySelector('[aria-label="Share with the whole team"]')
@@ -1089,7 +1089,7 @@ describe('authoritative session access cloud port', () => {
     current = {};
     complete({
       machineId: 'private',
-      sessions: [{ sessionId: 'root', level: 'read' }],
+      sessions: [{ sessionId: 'root', audience: 'team', level: 'read' }],
       canManage: false,
     } as import('@lody/platform').E2eeMachineSharingView);
     await expect(read).rejects.toThrow('session_access_scope_changed');

@@ -1,7 +1,7 @@
 import { Cause, Clock, Effect, Fiber, Result } from 'effect';
 import { z } from 'zod';
-import { Bytes, contentPermissions } from '@lody/e2ee-core/protocol';
-import type { CloudE2eePort } from '@lody/platform';
+import { Bytes, contentPermissions, accountIdFromUserId } from '@lody/e2ee-core/protocol';
+import type { CloudE2eePort, E2eeMachineSharingView } from '@lody/platform';
 import { CloudE2eeLedgerOutage } from '../cloud-e2ee-errors';
 import { authorityClocksAgree, withinAuthorityLimit, type AuthorityStamp } from './authority-clock';
 import type { makeCliE2eeRuntime } from './runtime';
@@ -48,6 +48,11 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       requesterDevice: string,
       localProjectId?: string
     ) => Effect.Effect<{ allowed: boolean; isCurrent?: () => boolean }, unknown>;
+    sessionSharing?: (
+      requesterDevice: string,
+      sessionId: string,
+      sessionOwnerUserId?: string
+    ) => Effect.Effect<boolean, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
     /** True while a window is in use, false once access is confirmed or refused again. */
     onWindowNotice?: (active: boolean) => void;
@@ -180,8 +185,10 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       function* (
         workspaceId: string,
         requesterDevice: string,
-        access: 'read' | 'execute' | 'owned-execute',
-        localProjectId?: string
+        access: 'read' | 'execute' | 'owned-execute' | 'session-read',
+        localProjectId?: string,
+        sessionId?: string,
+        sessionOwnerUserId?: string
       ): Effect.fn.Return<ExecutionAuthorization, unknown> {
         if (closed) return denied('closed');
         if (
@@ -226,7 +233,9 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           reader &&
           reader.kind !== 'recovery' &&
           state.members.has(Buffer.from(reader.membershipId.toBytes()).toString('hex'));
-        if (access === 'read' ? !mayRead : !permissions.mayWriteDocument) {
+        if (
+          access === 'read' || access === 'session-read' ? !mayRead : !permissions.mayWriteDocument
+        ) {
           grants.delete(requesterDevice);
           return denied('not-authorized');
         }
@@ -257,6 +266,29 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (relaxed && !current(yield* stamp)) return denied('unavailable');
         if (principal === 'member') {
           grants.delete(requesterDevice);
+          if (access === 'session-read') {
+            if (
+              !sessionId ||
+              !options.sessionSharing ||
+              !(yield* options.sessionSharing(requesterDevice, sessionId, sessionOwnerUserId))
+            )
+              return denied('e2ee_machine_not_shared');
+            // The session policy check may ingest new ledger state. Revalidate both
+            // devices and reader eligibility before allowing even a history reply.
+            const after = (yield* options.runtime.executionLedger()).inspectState();
+            const machine = after.devices.get(self),
+              signer = after.devices.get(requesterDevice);
+            if (
+              !machine ||
+              !signer ||
+              signer.kind === 'recovery' ||
+              !after.members.has(Buffer.from(machine.membershipId.toBytes()).toString('hex')) ||
+              !after.members.has(Buffer.from(signer.membershipId.toBytes()).toString('hex')) ||
+              !current(yield* stamp)
+            )
+              return denied('not-authorized');
+            return { _tag: 'Authorized' as const };
+          }
           if (access !== 'execute') return denied('e2ee_machine_not_owned');
           if (!options.sharing) return denied('e2ee_machine_not_shared');
           const shared = yield* options
@@ -323,6 +355,20 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       refreshLedger: refreshOnce.pipe(
         Effect.flatMap((value) => (value ? Effect.void : Effect.fail('unavailable' as const)))
       ),
+      authorizeSessionRead: (
+        workspaceId: string,
+        requesterDevice: string,
+        rootSessionId: string,
+        sessionOwnerUserId?: string
+      ) =>
+        authorize(
+          workspaceId,
+          requesterDevice,
+          'session-read',
+          undefined,
+          rootSessionId,
+          sessionOwnerUserId
+        ),
       authorizeRead: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'read'),
       /** A reply moved the ledger back. Ordinary grants are unaffected; a later read reopens it. */
@@ -343,3 +389,53 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     };
   }
 );
+
+export type CliE2eeSessionReadTarget = {
+  machineId: string;
+  rootSessionId: string;
+  requesterUserId: string;
+  sessionOwnerUserId?: string;
+  localProjectId?: string;
+};
+/** Source-side context reads use the actual human, with a ledger fence across policy I/O. */
+export const authorizeCliE2eeSessionTarget = (
+  options: {
+    runtime: Pick<
+      Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
+      'executionLedger' | 'executionGeneration'
+    >;
+    readPolicy?: (machineId: string) => Effect.Effect<E2eeMachineSharingView, unknown>;
+  },
+  target: CliE2eeSessionReadTarget
+) =>
+  Effect.gen(function* () {
+    const state = (yield* options.runtime.executionLedger()).inspectState();
+    const generation = options.runtime.executionGeneration();
+    const member = [...state.members.entries()].find(([, row]) => {
+      const account = accountIdFromUserId(row.userId);
+      return Result.isSuccess(account) && account.success === target.requesterUserId;
+    });
+    if (!member) return false;
+    const machine = [...state.devices.values()].find(
+      (row) => row.kind === 'machine' && row.machineId === target.machineId
+    );
+    if (!machine) return false;
+    if (
+      Buffer.from(machine.membershipId.toBytes()).toString('hex') === member[0] ||
+      target.sessionOwnerUserId === target.requesterUserId
+    )
+      return true;
+    if (!options.readPolicy) return false;
+    const view = yield* options.readPolicy(target.machineId);
+    if (generation !== options.runtime.executionGeneration() || view.removed || view.unavailable)
+      return false;
+    return (
+      (view.sharedWithTeam &&
+        (!target.localProjectId || view.projects.includes(target.localProjectId))) ||
+      view.sessions.some(
+        (row) =>
+          row.sessionId === target.rootSessionId &&
+          (row.audience === 'team' || row.audience.userId === target.requesterUserId)
+      )
+    );
+  });

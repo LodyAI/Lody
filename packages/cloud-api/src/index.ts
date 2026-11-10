@@ -986,6 +986,7 @@ export type CloudApi = {
       Array<{
         machineId: string;
         readSharedSessionIds: string[];
+        memberReadSharedSessions?: Array<{ sessionId: string; userId: string }>;
         canManage: boolean;
       }>
     >;
@@ -995,6 +996,7 @@ export type CloudApi = {
         machineId: string;
         sessionId: string;
         sharedWithTeam: boolean;
+        audience?: 'team' | { userId: string };
       },
       { success: true }
     >;
@@ -1052,6 +1054,19 @@ export type CloudApi = {
             | 'not_visible'
             | 'project_not_shared';
         }
+    >;
+    canRequestSessionReadFromCliToken: Query<
+      {
+        cliToken: string;
+        workspaceId: string;
+        machineId: string;
+        sessionId: string;
+        rootSessionId: string;
+        sessionOwnerUserId?: string;
+        localProjectId?: string;
+        requester: { userId: string; machineId: string };
+      },
+      { allowed: boolean }
     >;
     canRequestMachineFromCliToken: Query<
       {

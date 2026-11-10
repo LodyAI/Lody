@@ -197,7 +197,10 @@ describe('owner-signed complete machine sharing policies', () => {
         level: 'read',
       })
     );
-    expect(shared).toEqual({ ...initial, sessions: [{ sessionId: 'session-a', level: 'read' }] });
+    expect(shared).toEqual({
+      ...initial,
+      sessions: [{ sessionId: 'session-a', audience: 'team' as const, level: 'read' }],
+    });
     const body = { ...f.policy, ...shared };
     const encoded = ok(P.encodeMachineSharingPolicy(body));
     expect((ok(decodeMachineSharingCbor(encoded)) as P.CborValue[])[0]).toBe(3);
@@ -220,7 +223,9 @@ describe('owner-signed complete machine sharing policies', () => {
 
   it('rejects duplicate or unsupported conversation grants and isolates inspected grants', async () => {
     const f = await fixture();
-    const sessions = [{ sessionId: 'session-a', level: 'read' as const }];
+    const sessions = [
+      { sessionId: 'session-a', audience: 'team' as const, level: 'read' as const },
+    ];
     for (const invalid of [
       [...sessions, ...sessions],
       [{ sessionId: '', level: 'read' }],
@@ -262,6 +267,66 @@ describe('owner-signed complete machine sharing policies', () => {
     ).toEqual({ sharedWithTeam: true, projects: [], sessions: [] });
     expect(privateState).toEqual({ sharedWithTeam: false, projects: [], sessions: [] });
   });
+  it('retains independent team/member audiences canonically and removes only the selected grant', async () => {
+    const f = await fixture();
+    const initial = { sharedWithTeam: false, projects: [], sessions: [] };
+    const individual = ok(
+      P.updateMachineSharingState(initial, {
+        kind: 'session',
+        sessionId: 'root',
+        audience: { userId: 'reader' },
+        level: 'read',
+      })
+    );
+    const all = ok(
+      P.updateMachineSharingState(individual, {
+        kind: 'session',
+        sessionId: 'root',
+        audience: 'team',
+        level: 'read',
+      })
+    );
+    expect(all.sessions).toHaveLength(2);
+    const policy = { ...f.policy, ...all };
+    const wire = ok(P.encodeMachineSharingPolicy(policy));
+    const reordered = { ...policy, sessions: [...policy.sessions].reverse() };
+    expect(ok(P.encodeMachineSharingPolicy(reordered))).toEqual(wire);
+    expect(ok(f.open(await f.seal(policy))).inspect().sessions).toEqual(all.sessions);
+    expect(
+      ok(
+        P.updateMachineSharingState(all, {
+          kind: 'session',
+          sessionId: 'root',
+          audience: 'team',
+          level: null,
+        })
+      )
+    ).toEqual(individual);
+    expect(
+      ok(
+        P.updateMachineSharingState(all, {
+          kind: 'session',
+          sessionId: 'root',
+          audience: { userId: 'reader' },
+          level: null,
+        })
+      ).sessions
+    ).toEqual([{ sessionId: 'root', audience: 'team', level: 'read' }]);
+    expect(
+      Result.isFailure(
+        P.encodeMachineSharingPolicy({ ...policy, sessions: [...all.sessions, all.sessions[0]!] })
+      )
+    ).toBe(true);
+    expect(
+      Result.isFailure(
+        P.encodeMachineSharingPolicy({
+          ...policy,
+          sessions: [{ sessionId: 'root', level: 'read' } as never],
+        })
+      )
+    ).toBe(true);
+  });
+
   it('round trips canonical state and keeps projects independent of the machine switch', async () => {
     const f = await fixture();
     const body = { ...f.policy, projects: ['project-z', 'project-a'], sharedWithTeam: false };
@@ -383,13 +448,14 @@ describe('owner-signed complete machine sharing policies', () => {
     });
   });
 
-  it('rechecks signer revocation and never falls back to an older allow policy', async () => {
+  it('retains server-accepted policies after signer revocation without allowing new signing', async () => {
     const f = await fixture(),
       original = await f.seal({ ...f.policy, projects: ['project-a', 'project-z'] });
     const verified = ok(f.open(original));
     await f.command({ _tag: 'RevokeDevice', target: f.owner.publicKey }, f.second.signer);
-    expect(f.authorize(verified)).toEqual({ allowed: false, reason: 'policy-signer-ineligible' });
-    expect(failure(f.open(original))).toBe('policy-signer-ineligible');
+    expect(f.authorize(verified)).toEqual({ allowed: true, reason: 'team' });
+    expect(ok(f.open(original)).inspect().projects).toEqual(['project-a', 'project-z']);
+    await expect(f.seal()).rejects.toMatchObject({ code: 'policy-signer-ineligible' });
     const next = {
       ...f.policy,
       revision: verified.head.revision + 1,

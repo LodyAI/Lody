@@ -84,15 +84,13 @@ export function MachineSharingPanel({
     issue === 'notOwned' ||
     issue === 'notShared';
   const pending = !!view?.pendingRequest || (!!retryable && issue !== 'conflict');
-  const effective =
-    !pending && !unavailable && !view.needsResign && !view.removed && view.sharedWithTeam;
+  const effective = !pending && !unavailable && !view.removed && view.sharedWithTeam;
   const disabled =
     busy ||
     loading ||
     unavailable ||
     !view?.canManage ||
     view?.removed ||
-    view?.needsResign ||
     !!view?.pendingRequest ||
     retryable ||
     (!!issue && issue !== 'generation');
@@ -170,7 +168,7 @@ export function MachineSharingPanel({
               ) : (
                 <Badge>
                   {t(
-                    `e2ee.machineSharing.state.${unavailable ? 'unavailable' : view?.needsResign ? 'needsResign' : effective && stored ? 'shared' : 'private'}`
+                    `e2ee.machineSharing.state.${unavailable ? 'unavailable' : effective && stored ? 'shared' : 'private'}`
                   )}
                 </Badge>
               )}

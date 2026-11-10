@@ -1,3 +1,4 @@
+import { historicalContentIdentity, historicalDeviceKind } from './ledger/replay';
 import { Effect, Result } from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Bytes from './foundation/bytes';
@@ -28,13 +29,22 @@ export interface MachineSharingState {
   readonly sharedWithTeam: boolean;
   readonly projects: readonly string[];
   /** Read-only conversation grants, independent of the machine switch. */
-  readonly sessions: readonly { readonly sessionId: string; readonly level: 'read' }[];
+  readonly sessions: readonly {
+    readonly sessionId: string;
+    readonly audience: 'team' | { readonly userId: string };
+    readonly level: 'read';
+  }[];
 }
 /** A single owner intent; enabling a project also enables the machine atomically. */
 export type MachineSharingChange =
   | { readonly kind: 'machine'; readonly sharedWithTeam: boolean }
   | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean }
-  | { readonly kind: 'session'; readonly sessionId: string; readonly level: 'read' | null };
+  | {
+      readonly kind: 'session';
+      readonly sessionId: string;
+      readonly audience?: 'team' | { readonly userId: string };
+      readonly level: 'read' | null;
+    };
 /** Complete policy body, inside content-v0 encryption/signature. issuedAt is descriptive, never freshness or admission proof. */
 export interface MachineSharingPolicy extends MachineSharingBinding, MachineSharingState {
   readonly revision: number;
@@ -89,11 +99,45 @@ function projectSet(projects: readonly string[]) {
 function sessionSet(sessions: MachineSharingState['sessions']) {
   return Result.gen(function* () {
     if (!Array.isArray(sessions) || sessions.length > 4096) return yield* fail('invalid-policy');
-    for (const row of sessions)
+    const rows: { text: string; bytes: Uint8Array; audience: 0 | Uint8Array; sortKey: string }[] =
+      [];
+    for (const row of sessions) {
       if (!row || row.level !== 'read') return yield* fail('invalid-policy');
-    return yield* projectSet(sessions.map((row) => row.sessionId));
+      const bytes = yield* identity(row.sessionId);
+      const audience =
+        row.audience === 'team'
+          ? (0 as const)
+          : row.audience &&
+              typeof row.audience === 'object' &&
+              Object.keys(row.audience).length === 1
+            ? yield* identity(row.audience.userId)
+            : undefined;
+      if (audience === undefined) return yield* fail('invalid-policy');
+      const sortKey = keyId(bytes) + ':' + (audience === 0 ? '0' : '1' + keyId(audience));
+      rows.push({ text: row.sessionId, bytes, audience, sortKey });
+    }
+    rows.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
+    if (rows.some((row, i) => i > 0 && row.sortKey === rows[i - 1]!.sortKey))
+      return yield* fail('invalid-policy');
+    return rows;
   });
 }
+const grant = (row: { text: string; audience: 0 | Uint8Array }) =>
+  Object.freeze({
+    sessionId: row.text,
+    audience:
+      row.audience === 0
+        ? ('team' as const)
+        : Object.freeze({ userId: Result.getOrThrow(decodeMachineId(row.audience)) }),
+    level: 'read' as const,
+  });
+const sameAudience = (
+  a: MachineSharingChange & { kind: 'session' },
+  row: MachineSharingState['sessions'][number]
+) =>
+  (a.audience === undefined ? 'team' : a.audience) === 'team'
+    ? row.audience === 'team'
+    : row.audience !== 'team' && row.audience.userId === (a.audience as { userId: string }).userId;
 /** Apply the plaintext-compatible switches without mutating the source. Turning the machine off retains every project record. */
 export function updateMachineSharingState(
   state: MachineSharingState,
@@ -101,10 +145,7 @@ export function updateMachineSharingState(
 ) {
   return Result.gen(function* () {
     const current = yield* projectSet(state.projects);
-    let sessions = (yield* sessionSet(state.sessions)).map((row) => ({
-      sessionId: row.text,
-      level: 'read' as const,
-    }));
+    let sessions = (yield* sessionSet(state.sessions)).map(grant);
     if (
       typeof state.sharedWithTeam !== 'boolean' ||
       (change.kind !== 'session' && typeof change.sharedWithTeam !== 'boolean')
@@ -123,16 +164,26 @@ export function updateMachineSharingState(
     } else if (change.kind === 'session') {
       yield* identity(change.sessionId);
       if (change.level !== null && change.level !== 'read') return yield* fail('invalid-policy');
-      sessions = sessions.filter((row) => row.sessionId !== change.sessionId);
-      if (change.level === 'read') sessions.push({ sessionId: change.sessionId, level: 'read' });
+      yield* sessionSet([
+        {
+          sessionId: change.sessionId,
+          audience: change.audience === undefined ? 'team' : change.audience,
+          level: 'read',
+        },
+      ]);
+      sessions = sessions.filter(
+        (row) => row.sessionId !== change.sessionId || !sameAudience(change, row)
+      );
+      if (change.level === 'read')
+        sessions.push({
+          sessionId: change.sessionId,
+          audience: change.audience ?? 'team',
+          level: 'read',
+        });
     } else return yield* fail('invalid-policy');
     return Object.freeze({
       sharedWithTeam,
-      sessions: Object.freeze(
-        (yield* sessionSet(sessions)).map((row) =>
-          Object.freeze({ sessionId: row.text, level: 'read' as const })
-        )
-      ),
+      sessions: Object.freeze((yield* sessionSet(sessions)).map(grant)),
       projects: Object.freeze((yield* projectSet(projects)).map((row) => row.text)),
     });
   });
@@ -180,7 +231,7 @@ export function encodeMachineSharingPolicy(
         policy.issuedAt,
         request,
         generation,
-        sessions.map((row) => [row.bytes, 1]),
+        sessions.map((row) => [row.bytes, row.audience, 1]),
       ])
     );
   });
@@ -228,11 +279,17 @@ export function decodeMachineSharingPolicy(
       return yield* fail('invalid-policy');
     const names: string[] = [];
     for (const project of projects) names.push(yield* text(project));
-    const grants: { sessionId: string; level: 'read' }[] = [];
+    const grants: MachineSharingState['sessions'][number][] = [];
     for (const session of sessions) {
-      if (!Array.isArray(session) || session.length !== 2 || session[1] !== 1)
+      if (!Array.isArray(session) || session.length !== 3 || session[2] !== 1)
         return yield* fail('invalid-policy');
-      grants.push(Object.freeze({ sessionId: yield* text(session[0]), level: 'read' }));
+      grants.push(
+        Object.freeze({
+          sessionId: yield* text(session[0]),
+          audience: session[1] === 0 ? 'team' : Object.freeze({ userId: yield* text(session[1]) }),
+          level: 'read',
+        })
+      );
     }
     const policy: MachineSharingPolicy = Object.freeze({
       sessions: Object.freeze(grants),
@@ -297,15 +354,27 @@ export function machineSharingDigest(frame: Uint8Array): Result.Result<string, C
 function policyAuthority(
   ledger: LedgerView,
   policy: MachineSharingBinding & { readonly signer: string },
-  machineGeneration: VerifiedMachineSharingGeneration
+  machineGeneration: VerifiedMachineSharingGeneration,
+  acceptRetiredPersonal = false
 ) {
   return Result.gen(function* () {
     yield* mapped(requireLedgerContinuation(ledger, ledger), 'invalid-policy-ledger');
     yield* requireMachineSharingGeneration(ledger, policy, machineGeneration);
     if (keyId(ledger.genesis.toBytes()) !== policy.genesisHash)
       return yield* fail('policy-binding-mismatch');
-    const state = ledger.inspectState(),
-      signer = state.devices.get(policy.signer);
+    const state = ledger.inspectState();
+    const currentSigner = state.devices.get(policy.signer);
+    const key = yield* mapped(Bytes.signingPublicKey(yield* rawHex(policy.signer, 32)));
+    const historical = acceptRetiredPersonal ? historicalContentIdentity(ledger, key) : null;
+    const historicalKind = acceptRetiredPersonal ? historicalDeviceKind(ledger, key) : null;
+    const signer =
+      currentSigner ??
+      (historical &&
+      Result.isSuccess(historical) &&
+      historicalKind &&
+      Result.isSuccess(historicalKind)
+        ? { kind: historicalKind.success, membershipId: historical.success.memberInstance }
+        : undefined);
     const owner = state.members.get(policy.ownerMembershipId);
     const machine = [...state.devices.values()].find(
       (d) => d.kind === 'machine' && d.machineId === policy.machineId
@@ -462,21 +531,24 @@ function readPolicyFrame(input: OpenPolicyInput) {
   });
 }
 /** Verify/decrypt the latest v3 state against a caller-owned high-water pin, then require
- * the current machine owner's active personal signer. Revision gaps are allowed; the
+ * a historically admitted owner-personal signer of a server-accepted policy. Revision gaps are allowed; the
  * same revision must have the same digest. The host proves latest-read freshness. */
 export function openMachineSharingPolicy(
   input: OpenPolicyInput
 ): Result.Result<VerifiedMachineSharingPolicy, ContentError> {
   return Result.gen(function* () {
     const { policy, head } = yield* readPolicyFrame(input);
-    yield* policyAuthority(input.ledger, policy, input.machineGeneration);
+    yield* policyAuthority(input.ledger, policy, input.machineGeneration, true);
     const evidence: VerifiedMachineSharingPolicy = Object.freeze({
       [verified]: true as const,
       head,
       inspect: () => ({
         ...policy,
         projects: [...policy.projects],
-        sessions: policy.sessions.map((row) => ({ ...row })),
+        sessions: policy.sessions.map((row) => ({
+          ...row,
+          audience: row.audience === 'team' ? ('team' as const) : { ...row.audience },
+        })),
       }),
     });
     policies.set(evidence, { policy, ledger: input.ledger });
@@ -562,7 +634,7 @@ export function authorizeMachineExecution(input: {
   const policy = evidence.policy;
   if (!sameBinding(policy, { ...target, ownerMembershipId: keyId(machine.membershipId.toBytes()) }))
     return deny('policy-binding-mismatch');
-  if (Result.isFailure(policyAuthority(input.ledger, policy, input.machineGeneration)))
+  if (Result.isFailure(policyAuthority(input.ledger, policy, input.machineGeneration, true)))
     return deny('policy-signer-ineligible');
   if (!policy.sharedWithTeam) return deny('machine-not-shared');
   if (input.localProjectId !== undefined && !policy.projects.includes(input.localProjectId))

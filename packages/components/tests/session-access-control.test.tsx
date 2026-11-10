@@ -125,6 +125,62 @@ describe('SessionAccessControl', () => {
     privateReason: 'project',
   };
 
+  it.each([true, false])(
+    'shows the immutable owner and personal recipients; can manage=%s',
+    async (canManage) => {
+      const granted = new Set(['reader']);
+      const changes: string[] = [];
+      const state: SessionSharingState = {
+        ...baseState,
+        visibility: 'private',
+        access: 'read',
+        canManage,
+        ownerUserId: 'owner',
+        memberUserIds: [...granted],
+        availableMembers: [
+          { userId: 'owner', name: 'Owner Alice' },
+          { userId: 'reader', name: 'Reader Bob' },
+          { userId: 'new', name: 'New Carol' },
+        ],
+        setMemberReadAccess: async (userId, shared) => {
+          changes.push(userId);
+          if (shared) granted.add(userId);
+          else granted.delete(userId);
+        },
+      };
+      await render({ state });
+      expect(trigger().textContent).toContain('Shared with 1 person');
+      await openPanel();
+      expect(panel().textContent).toContain('Owner Alice');
+      expect(panel().textContent).toContain('Reader Bob');
+      expect(document.querySelector('button[aria-label="Remove Owner Alice"]')).toBeNull();
+      const remove = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Remove Reader Bob"]'
+      );
+      if (canManage) {
+        expect(remove).not.toBeNull();
+        await act(async () => remove!.click());
+        expect([...granted]).toEqual([]);
+        await act(async () => panelButton('Add member').click());
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          (item) => item.textContent === 'New Carol'
+        );
+        expect(item).toBeDefined();
+        await act(async () => item!.click());
+        expect([...granted]).toEqual(['new']);
+        expect(changes).toEqual(['reader', 'new']);
+      } else {
+        expect(remove).toBeNull();
+        expect(
+          [...panel().querySelectorAll('button')].some(
+            (button) => button.textContent === 'Add member'
+          )
+        ).toBe(false);
+        expect(changes).toEqual([]);
+      }
+    }
+  );
+
   it.each(['team', 'unknown'] as const)(
     'shows the conversation state when visibility is %s without a public link',
     async (visibility) => {

@@ -526,3 +526,9 @@ export * from './encrypted-attachment';
 export * from './device-preview';
 
 export * from './android-emulator';
+
+export {
+  isContainedSession,
+  sessionHistoryWriteIntentDigest,
+  type SessionAccessRecord,
+} from './session-access';

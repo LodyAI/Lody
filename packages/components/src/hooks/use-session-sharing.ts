@@ -20,6 +20,7 @@ type UseSessionSharingOptions = {
   includeLocalProjectDetails?: boolean;
   workspaceId?: WorkspaceId | null;
   enabled?: boolean;
+  members?: SessionSharingState['availableMembers'];
 };
 
 /** Team read grants use the same owner-only port in ordinary and encrypted workspaces. */
@@ -46,7 +47,12 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
   const isLoading = machineVisibilityLoading || localProjectVisibilityLoading || access.loading;
   const pending = useRef(new Map<string, { requestId: string; level: 'read' | null }>());
   const setReadAccess = useCallback(
-    async (machineId: string, sessionId: string, level: 'read' | null) => {
+    async (
+      machineId: string,
+      sessionId: string,
+      level: 'read' | null,
+      audience: 'team' | { userId: string } = 'team'
+    ) => {
       if (!access.port || !access.workspaceId || !access.enabled)
         throw new Error('session_access_unavailable');
       const latest = await access.port.read(access.workspaceId, machineId);
@@ -57,12 +63,16 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         machineId,
         latest.generation,
         sessionId,
+        audience,
       ]);
       const retained = pending.current.get(key);
       const interrupted = latest.pendingRequest;
       if (
         (retained && retained.level !== level) ||
-        (interrupted && (interrupted.sessionId !== sessionId || interrupted.level !== level))
+        (interrupted &&
+          (interrupted.sessionId !== sessionId ||
+            interrupted.level !== level ||
+            JSON.stringify(interrupted.audience ?? 'team') !== JSON.stringify(audience)))
       )
         throw new Error('sharing_conflict');
       const requestId =
@@ -73,6 +83,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         machineId,
         sessionId,
         level,
+        audience,
         generation: latest.generation,
         requestId,
       });
@@ -100,21 +111,39 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         isLoading,
       });
       const grant = access.views.get(session.machineId);
-      const rootId = resolveSessionReadRoot(session, sessionsById).id;
-      const readShared = isSessionReadShared(session, access.views, sessionsById);
-      const effective = base.visibility === 'team' ? 'edit' : readShared ? 'read' : 'private';
+      const root = resolveSessionReadRoot(session, sessionsById);
+      const rootId = root.id;
+      const readShared = isSessionReadShared(session, access.views, sessionsById, currentUserId);
+      const assignedRead = !!currentUserId && session.userId === currentUserId && !base.canManage;
+      const effective =
+        base.visibility === 'team' ? 'edit' : readShared || assignedRead ? 'read' : 'private';
       return {
         ...base,
         access: effective,
         sessionId: rootId,
+        ownerUserId: root.userId,
+        availableMembers: options.members,
+        memberUserIds: [
+          ...new Set(
+            (grant?.memberReadSharedSessions ?? [])
+              .filter((row) => row.sessionId === rootId)
+              .map((row) => row.userId)
+          ),
+        ],
+        setMemberReadAccess: (userId, shared) =>
+          setReadAccess(session.machineId, rootId, shared ? 'read' : null, { userId }),
         openMachineSettings: () => openSettings('machines', { machineId: session.machineId }),
-        visibility: effective === 'private' ? base.visibility : 'team',
+        visibility:
+          grant?.readSharedSessionIds.includes(rootId) || base.visibility === 'team'
+            ? 'team'
+            : base.visibility,
         canManage: grant?.canManage ?? base.canManage,
         setReadAccess: (level) => setReadAccess(session.machineId, rootId, level),
       };
     },
     [
       machines,
+      options.members,
       projects,
       currentUserId,
       accessByMachineId,
@@ -131,6 +160,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
     await state.setReadAccess('read');
   }, []);
   return {
+    sessionAccessViews: access.views,
     machines,
     accessByMachineId,
     projects,

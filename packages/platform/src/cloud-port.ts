@@ -188,6 +188,27 @@ export type CloudAccessSnapshot =
  * local catalog, the owner is always allowed, and no network I/O happens.
  */
 export interface CloudAccessPort {
+  /** Online verification of a short-lived, purpose-bound ordinary history proof. */
+  verifySessionHistoryRead?: (request: {
+    workspaceId: string;
+    machineId: string;
+    sessionId: string;
+    rootSessionId: string;
+    sessionOwnerUserId?: string;
+    localProjectId?: string;
+    requestToken: string;
+  }) => Promise<boolean>;
+  verifySessionHistoryWrite?: (request: {
+    requestId: string;
+    intentDigest: string;
+    workspaceId: string;
+    machineId: string;
+    sessionId: string;
+    rootSessionId: string;
+    sessionOwnerUserId?: string;
+    localProjectId?: string;
+    requestToken: string;
+  }) => Promise<{ expiresAt: number } | null>;
   /**
    * Emits the current workspace set immediately and on every change.
    */

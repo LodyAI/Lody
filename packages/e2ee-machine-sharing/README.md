@@ -42,7 +42,7 @@ acknowledges the original intent, which a later policy may already have replaced
 
 Execution caches exist only in RAM. Wall and monotonic clocks both enforce a
 strictly shorter than 15-minute interval from before ledger/head I/O. A fresh read
-clears the old policy before I/O; known withdrawal, issuer revocation, rollback,
+clears the old policy before I/O; known withdrawal, rollback,
 fork or removal cannot fall back to an older grant. At actual start the caller
 also checks the returned synchronous fence and the current ledger generation.
 Every new start checks its actual localProjectId; the RPC receipt alone never
@@ -78,16 +78,18 @@ fence. This does not change withdrawal semantics, TTL or UI polling frequency.
 
 Policies are current-only v3; no v2 reader, writer or migration exists. Encrypted
 workspaces have no production data requiring an upgrade path. Read only the latest
-original, including on cold open and before writes. Verify its current owner-personal
+original, including on cold open and before writes. Verify its historically admitted owner-personal
 signature, binding and generation; reject revisions below the local pin and differing
 digests at the same revision. Revision gaps and missing intermediate originals are
 allowed. `previousDigest` still participates in server CAS, never client chain traversal.
 
-Revoking the issuer invalidates its grants. The display returns private defaults with
-`needsResign`, without importing the old body. Another active owner-personal device
-can sign explicit new intent at the current CAS head; this starts with empty project
-and session grants. It does not preserve the revoked device's grants automatically.
-A locally retained policy whose issuer is now ineligible yields a denial, never a grant.
+A service-accepted policy remains effective when its personal signer is revoked.
+Historical ledger admission must bind that signer to the current owner's membership;
+Guest/recovery/machine signers still fail. `needsResign` is a nonblocking reminder.
+Another active owner-personal device can review/edit and re-sign the entire current
+machine/project/session list without dropping grants. Publication still requires a
+current eligible owner device; clients trust that backend commit-time admission
+and latest-head delivery rather than claiming cryptographic evidence of signing time.
 
 The CLI's retained identity remains machine-only, so it can consume policy but
 cannot impersonate a personal owner to publish a change. Its host write method
@@ -108,6 +110,6 @@ behavior, not a deployed backend or two-device product acceptance.
 `inspectCache(machineId)` is passive RAM evidence for diagnostics. It counts
 retained policies and team-enabled policy objects for that machine only, without
 opening a lazy owner, reading a clock, touching storage/network or renewing any
-stamp. Counts are not current authorization: an expired/revoked policy object may
+stamp. Counts are not current authorization: an expired/removed-generation policy object may
 still be retained until a real operation invalidates it. `authorize` remains the
 only execution decision, with all existing freshness and ledger checks.

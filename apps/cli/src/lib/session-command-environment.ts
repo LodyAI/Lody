@@ -183,3 +183,12 @@ export function createLocalSessionCommandEnvironment(args: {
     },
   };
 }
+
+/** Exact human driving this command; a cached backend must read it for each operation. */
+export type SessionHistoryRequester = { userId: string; machineId: string };
+const historyRequesters = new AsyncLocalStorage<SessionHistoryRequester>();
+export const getSessionHistoryRequester = () => historyRequesters.getStore();
+export const runWithSessionHistoryRequester = <T>(
+  requester: SessionHistoryRequester,
+  run: () => T
+): T => historyRequesters.run(requester, run);

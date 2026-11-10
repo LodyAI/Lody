@@ -29,7 +29,7 @@ import {
 } from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
-import { mintPreviewControlProof } from '@/lib/preview-control-api';
+import { mintPreviewControlProof, mintSessionHistoryReadProof } from '@/lib/preview-control-api';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import type { RemoteAutomationOperation, RemoteAutomationResult } from '@lody/shared/automations';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -57,6 +57,8 @@ import {
   type IosSimulatorCommand,
   type IosSimulatorResponse,
   machineSupportsSessionHistoryProtocol,
+  SessionHistoryReadQuerySchema,
+  sessionHistoryWriteIntentDigest,
   type MachineProtocolCapabilities,
   type AgentConfigId,
   type CodeCollabRole,
@@ -316,11 +318,28 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     if (plane === 'local') {
       throw new Error('Local Roost history must use the local session control bridge.');
     }
+    if (deps.protectedContent) {
+      if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
+      const response = await deps.requestEncryptedFeature({
+        method: 'session/history-read',
+        machineId,
+        workspaceId,
+        params: { sessionId, query: SessionHistoryReadQuerySchema.parse(query) },
+        timeoutMs: options?.timeoutMs ?? 30_000,
+      });
+      if (!response.ok) throw new Error(response.code ?? 'session_history_read_denied');
+      return response.result as SessionHistoryReadResponse;
+    }
+    const readProof = await mintSessionHistoryReadProof(
+      { workspaceId, machineId, sessionId },
+      deps.getSessionToken?.() ?? null
+    );
     const response = await (
       await getMachineRpcClient(machineId)
     ).requestSessionHistoryRead({
       sessionId,
       query,
+      readProof,
       timeoutMs: options?.timeoutMs ?? 30_000,
     });
     if (!response) throw new Error('Roost session history read request timed out.');
@@ -341,10 +360,24 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     if (plane === 'local') {
       throw new Error('Local Roost history must use the local session control bridge.');
     }
+    if (deps.protectedContent) throw new Error('e2ee_history_write_unavailable');
+    const requestId = crypto.randomUUID();
+    const intentDigest = await sessionHistoryWriteIntentDigest(
+      requestId,
+      args.operation,
+      args.payload
+    );
+    const writeProof = await mintSessionHistoryReadProof(
+      { workspaceId, machineId, sessionId: args.sessionId, requestId, intentDigest },
+      deps.getSessionToken?.() ?? null,
+      true
+    );
     const response = await (
       await getMachineRpcClient(machineId)
     ).requestSessionHistoryWrite({
       ...args,
+      writeProof,
+      requestId,
       timeoutMs: options?.timeoutMs ?? 30_000,
     });
     if (!response) throw new Error('Roost session history write request timed out.');

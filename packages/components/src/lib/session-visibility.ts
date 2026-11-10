@@ -1,3 +1,5 @@
+import { isContainedSession } from '@lody/shared';
+export { isContainedSession } from '@lody/shared';
 import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
 import type { SessionAccessView } from '@lody/platform';
 import type { MachineVisibilityAccess } from './visible-machine-index';
@@ -73,7 +75,7 @@ export function availableLocalHistoryMachineIds(
   ];
 }
 
-export function isSessionVisibleToUser(
+export function isSessionEditableToUser(
   session: SessionMachineRecord,
   visibleMachineIds: ReadonlySet<MachineId>,
   visibleLocalProjectKeys: ReadonlySet<string>,
@@ -96,13 +98,40 @@ export function isSessionVisibleToUser(
   return visibleMachineIds.has(session.machineId as MachineId);
 }
 
+/** Assignment is an owner-approved UI read fallback, never execution authority. */
+export function isSessionVisibleToUser(
+  session: SessionMachineRecord,
+  visibleMachineIds: ReadonlySet<MachineId>,
+  visibleLocalProjectKeys: ReadonlySet<string>,
+  currentUserId?: string | null,
+  ownedMachineIds?: ReadonlySet<MachineId>
+): boolean {
+  return (
+    (!!currentUserId && session.userId === currentUserId) ||
+    isSessionEditableToUser(
+      session,
+      visibleMachineIds,
+      visibleLocalProjectKeys,
+      currentUserId,
+      ownedMachineIds
+    )
+  );
+}
+
 export function resolveSessionVisibilityState(
   session: SessionMachineRecord,
   visibleMachineIds: ReadonlySet<MachineId>,
   visibleLocalProjectKeys: ReadonlySet<string>,
   options: SessionVisibilityOptions = {}
 ): SessionVisibilityState {
-  if (isSessionReadShared(session, options.readSharedSessions, options.sessionsById))
+  if (
+    isSessionReadShared(
+      session,
+      options.readSharedSessions,
+      options.sessionsById,
+      options.currentUserId
+    )
+  )
     return 'visible';
   if (
     isSessionVisibleToUser(
@@ -195,26 +224,6 @@ export function getSessionOwnerAccessReason(
   return null;
 }
 
-/** The sparse default is a Tab; side-panel is the only supported override.
- * Synced relation fields are untrusted: unknown placements, cross-machine links
- * and nested containment never inherit. Provenance alone is not containment.
- */
-export function isContainedSession(
-  child: SessionMachineRecord | null | undefined,
-  parent: SessionMachineRecord | null | undefined
-): boolean {
-  return (
-    !!child?.id &&
-    !!parent?.id &&
-    child.id !== parent.id &&
-    child.parentSessionId === parent.id &&
-    !parent.parentSessionId &&
-    !!child.machineId &&
-    child.machineId === parent.machineId &&
-    (child.childSessionPlacement === undefined || child.childSessionPlacement === 'side-panel')
-  );
-}
-
 export function resolveSessionReadRoot<T extends SessionMachineRecord>(
   session: T,
   sessionsById?: ReadonlyMap<string, T>
@@ -227,7 +236,8 @@ export function resolveSessionReadRoot<T extends SessionMachineRecord>(
 export function isSessionReadShared(
   session: SessionMachineRecord,
   views?: ReadonlyMap<string, SessionAccessView>,
-  sessionsById?: ReadonlyMap<string, SessionMachineRecord>
+  sessionsById?: ReadonlyMap<string, SessionMachineRecord>,
+  currentUserId?: string | null
 ): boolean {
   if (!session.machineId || !session.id) return false;
   const root = resolveSessionReadRoot(session, sessionsById);
@@ -235,6 +245,10 @@ export function isSessionReadShared(
   return (
     view?.machineId === session.machineId &&
     !!root.id &&
-    view.readSharedSessionIds.includes(root.id)
+    (view.readSharedSessionIds.includes(root.id) ||
+      (!!currentUserId &&
+        !!view.memberReadSharedSessions?.some(
+          (row) => row.sessionId === root.id && row.userId === currentUserId
+        )))
   );
 }

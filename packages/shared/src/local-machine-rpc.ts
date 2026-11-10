@@ -22,6 +22,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { SessionHistoryReadQuerySchema, SessionHistoryReadResponseSchema } from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
@@ -261,6 +262,10 @@ export const E2eeAcpInteractionResultSchema = z
   .strict();
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/history-read'),
+    params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/acp-interaction'),
     params: E2eeAcpInteractionParamsSchema,
@@ -667,6 +672,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 ]);
 
 export const LocalMachineRpcResultSchema = z.union([
+  SessionHistoryReadResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,
   MachineStatusResponseSchema,

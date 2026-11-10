@@ -26,6 +26,22 @@ import {
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 
+vi.mock('../src/hooks/use-workspace-members', () => ({
+  useWorkspaceMembers: () => ({ members: [], isMultiMember: false }),
+}));
+vi.mock('../src/hooks/use-session-sharing', () => ({
+  useSessionSharing: () => ({
+    resolve: () => ({
+      visibility: 'team',
+      access: 'read',
+      canManage: false,
+      machineId: 'unshared-owner-machine',
+      localProjectId: null,
+      machineName: null,
+      projectName: null,
+    }),
+  }),
+}));
 vi.mock('@tanstack/react-router', () => ({ useRouter: () => ({ navigate: async () => {} }) }));
 // The browser story exercises the real windowed renderer; these tests exercise the
 // connected reader and real C1 export gate without a jsdom virtual viewport.
@@ -295,7 +311,7 @@ it('does not announce an empty cold replica as ready before its first remote syn
   expect(machineOperations).toBe(0);
 });
 
-it('never opens a machine-owned history backend on an unavailable target', async () => {
+it('opens a read-only machine-owned history backend without exposing write controls', async () => {
   const cached = store.get(sessionMetaCacheAtom);
   store.set(sessionMetaCacheAtom, {
     [getSessionRoomId(sessionId)]: {
@@ -304,10 +320,9 @@ it('never opens a machine-owned history backend on an unavailable target', async
     },
   });
   await render();
-  expect(container.textContent).toContain('This history format requires machine access');
-  expect(container.querySelector('[data-window-session-ready]')).toBeNull();
+  expect(container.querySelector('[data-window-session-ready]')).not.toBeNull();
   expect(container.querySelector('textarea, [contenteditable="true"]')).toBeNull();
-  expect(documentAcquisitions).toBe(0);
+  expect(documentAcquisitions).toBe(1);
   expect(machineOperations).toBe(0);
   expect(writes).toEqual([]);
 });

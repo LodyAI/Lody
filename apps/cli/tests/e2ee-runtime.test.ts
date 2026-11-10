@@ -1,3 +1,5 @@
+import { accountUserId } from '@lody/e2ee-core/protocol';
+import { authorizeCliE2eeSessionTarget } from '../src/lib/e2ee/execution-authorization';
 import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import {
   createDaemonLossRegistry,
@@ -173,7 +175,8 @@ const setup = (
   machineDirectory = join(directory, 'machine'),
   includeRotation = false,
   publishRotation = false,
-  includeGuestMachine = false
+  includeGuestMachine = false,
+  accountIds = false
 ) =>
   Effect.gen(function* () {
     const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'owner'), wrapper });
@@ -225,7 +228,9 @@ const setup = (
       const request = yield* prepareJoinRequest({
         genesis: signed.genesis,
         requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(50))),
-        userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(60))),
+        userId: Result.getOrThrow(
+          accountIds ? accountUserId('reader') : Bytes.userId(new Uint8Array(32).fill(60))
+        ),
         encryptionPublicKey: joining.enc,
         expiresAt: null,
         signer: joining,
@@ -5769,9 +5774,21 @@ describe('remote machine command', () => {
   });
 });
 
-const executionFixture = Effect.fnUntraced(function* (directory: string, count = 2) {
+const executionFixture = Effect.fnUntraced(function* (
+  directory: string,
+  count = 2,
+  accountIds = false
+) {
   let observedAuthority: Parameters<typeof readDaemonLossAuthority>[0];
-  const fixture = yield* setup(directory, count);
+  const fixture = yield* setup(
+    directory,
+    count,
+    join(directory, 'machine'),
+    false,
+    false,
+    false,
+    accountIds
+  );
   const custody = yield* makeCliE2eeCustody({
     directory: join(directory, 'machine'),
     keyring: noKeyring,
@@ -5810,10 +5827,12 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
   };
   const makeGate = (
     sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing'],
-    onWindowNotice?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['onWindowNotice']
+    onWindowNotice?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['onWindowNotice'],
+    sessionSharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sessionSharing']
   ) =>
     makeCliE2eeExecutionAuthorization({
       sharing,
+      sessionSharing,
       onWindowNotice,
       workspaceId: 'workspace',
       credential: fixture.credential,
@@ -8480,6 +8499,125 @@ describe('machine execution authorization freshness', () => {
             _tag: 'Denied',
             reason: 'not-authorized',
           });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('fences source-side personal context reads when the actual human is removed while policy I/O yields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'source-history-removal-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime } = yield* executionFixture(directory, 3, true);
+          const member = [...fixture.current.inspectState().members.entries()].find(
+            ([, row]) => row.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const memberDevice = [...fixture.current.inspectState().devices.values()].find(
+            (row) => hex(row.membershipId.toBytes()) === member[0]
+          );
+          if (!memberDevice) throw new Error('missing reader');
+          let current = fixture.current;
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const original = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(current, fixture.owner.publicKey, command)),
+              fixture.owner
+            );
+            fixture.records.push(original);
+            current = Result.getOrThrow(
+              extendLedger(current, [original], {
+                length: fixture.records.length,
+                head: hashRecordBytes(original),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records));
+          });
+          yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          let remove = false;
+          const options = {
+            runtime,
+            readPolicy: () =>
+              Effect.gen(function* () {
+                if (remove) {
+                  yield* append({ _tag: 'RemoveMember', membershipId: memberDevice.membershipId });
+                }
+                return {
+                  machineId: 'machine',
+                  sharedWithTeam: false,
+                  projects: [],
+                  sessions: [
+                    { sessionId: 'shared-root', audience: { userId: 'reader' }, level: 'read' },
+                  ],
+                  canManage: false,
+                } as import('@lody/platform').E2eeMachineSharingView;
+              }),
+          };
+          const target = {
+            machineId: 'machine',
+            rootSessionId: 'shared-root',
+            requesterUserId: 'reader',
+          };
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(true);
+          expect(
+            yield* authorizeCliE2eeSessionTarget(options, { ...target, requesterUserId: 'other' })
+          ).toBe(false);
+          expect(
+            yield* authorizeCliE2eeSessionTarget(options, {
+              ...target,
+              rootSessionId: 'unshared-root',
+            })
+          ).toBe(false);
+          remove = true;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('limits an admitted encrypted reader to one shared history and honors revocation without enabling other machine methods', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'history-only-authority-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, makeGate } = yield* executionFixture(directory, 3);
+          const member = [...fixture.current.inspectState().members].find(
+            ([, entry]) => entry.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const requester = [...fixture.current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === member[0]
+          );
+          if (!requester) throw new Error('missing device');
+          const [device] = requester;
+          let shared = true;
+          const gate = yield* makeGate(undefined, undefined, (reader, session) =>
+            Effect.succeed(shared && reader === device && session === 'shared-root')
+          );
+          expect(
+            yield* gate.authorizeSessionRead('workspace', device, 'shared-root')
+          ).toMatchObject({ _tag: 'Authorized' });
+          expect(yield* gate.authorizeSessionRead('workspace', device, 'other-root')).toMatchObject(
+            { _tag: 'Denied' }
+          );
+          expect(yield* gate.authorizeRead('workspace', device)).toMatchObject({ _tag: 'Denied' });
+          expect(yield* gate.authorizeOwnedExecution('workspace', device)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeExecution('workspace', device)).toMatchObject({
+            _tag: 'Denied',
+          });
+          shared = false;
+          expect(
+            yield* gate.authorizeSessionRead('workspace', device, 'shared-root')
+          ).toMatchObject({ _tag: 'Denied' });
         })
       );
     } finally {

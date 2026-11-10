@@ -1,97 +1,121 @@
-# Team access to one conversation
+# Access to one conversation
 
 Status: draft
 Translation: current
 
 [中文](session-access.zh.md)
 
-A machine owner can share one conversation for team reading while keeping the
-machine private. Teammates can read the full conversation and reference it from
-their own sessions. They cannot send input, run commands or manage the shared
-conversation. Ordinary and encrypted workspaces use the same controls and rules.
+A machine owner can share one conversation for team or selected-member reading
+while keeping the machine private. Recipients can read its full Loro or Roost
+history and reference it from their own conversations. They cannot send input,
+execute work or manage that conversation. Both workspace modes use the same rules.
+Owner decisions of 2026-11-10 are pending approval of this draft in PR #2487.
 
 ## Authority and effective access
 
-Permissions never live in mutable CRDT SessionMeta. The owner of the machine
-named by the conversation's current `machineId` manages sharing; its assigned
-`userId` grants nothing. An authorization for a different machine does not apply.
-Contained child Tabs and Side Chats inherit the root's grant only on that same
-machine; opened independent Sessions do not inherit it.
+Only the owner of the machine named by current `SessionMeta.machineId` manages
+sharing. Assignment through `SessionMeta.userId` supplies a read-only visibility
+fallback, never management or execution. Ownership transfer still requires the
+recipient to have machine/project access.
 
-| Current authority | Effective access |
+Effective access is the maximum of these sources:
+
+| Source | Access |
 | --- | --- |
 | Machine owner | Manage and edit; always visible |
-| Shared machine and, for a local project, shared project | Edit, as before |
-| Explicit root-session read grant on the matching machine | Read only |
+| Shared machine and, for a local project, shared project | Edit |
+| Matching team or personal session read grant | Read only |
+| Assigned session owner | Read only, unless machine/project access permits editing |
 | None | Hidden |
 
-A read grant never enables machine/project sharing or execution. This phase cannot
-make one conversation private inside an otherwise shared machine/project.
+Grants apply only when their machine equals current Meta's machine. Only direct,
+same-machine contained Tabs and Side Chats inherit the root's grant. Missing
+`childSessionPlacement` means Tab; `side-panel` means Side Chat. Unknown placements,
+nested parents and opener-only provenance do not inherit. Team and personal grants
+coexist and revoking one does not remove the other. A session read grant never
+opens the machine/project execution switches. This phase cannot hide an individual
+conversation inside an otherwise editable shared machine/project.
 
-## Storage and trust
+## Storage and read admission
 
-Ordinary workspaces store `readSharedSessionIds` on the authoritative machine row.
-Only its owner may mutate the set after current workspace membership checks.
-Convex subscriptions publish changes. Public source owns only DTOs and capability
-gated calls; backend handlers belong to the private composition.
+Ordinary machine rows hold the team session ID set and explicit
+`{sessionId, userId}` read grants. Only the current machine owner may mutate them;
+selected recipients must be current workspace members. Convex subscriptions carry
+changes. Public code owns DTOs and capability-gated platform calls; private #4253
+owns backend handlers.
 
-Encrypted workspaces store `sessions: [{sessionId, level: 'read'}]` in the complete
-machine-owner-signed v3 policy. A `session` change grants or removes that one ID
-without changing the machine/project switches. The format is current-only: no
-older-format reader, migration or reset script. E2EE has no production data.
-Compatible backend admission must deploy before clients; older clients reject v3.
-The membership ledger format remains unchanged.
+Encrypted owner-signed v3 policies hold
+`sessions: [{sessionId, audience: 'team' | {userId}, level: 'read'}]` independently of
+machine/project switches. IDs are bounded, entries are canonical and duplicate
+session/audience pairs fail. Only read is supported; later write access requires a
+new reviewed contract. The format is current-only, with no old reader, migration or
+reset script. E2EE has no production data; old clients reject the new shape.
+The membership ledger format is unchanged.
 
-Only the latest original needs verification: decrypt, verify the currently active
-owner-personal signer, check resource/binding/generation, and compare the local
-high-water pin. Lower revisions and differing digests at an equal revision fail;
-missing intermediate revisions do not matter. Parent digests order server CAS
-writes. Revoking an issuer invalidates its policy; another active owner device
-shares again from private defaults, without inheriting revoked grants.
+Verify only the latest original: decrypt, verify the historical owner-personal
+signer and resource/binding/generation, and compare local pins. Lower revisions and
+differing digests at an equal revision fail; missing intermediate policies do not
+matter. Parent digests order server CAS writes. A service-accepted policy remains
+effective after its signer is revoked. Settings and affected machine cards show a
+nonblocking review reminder; a current personal device can re-sign the full current
+machine/project/session list unchanged, or edit it first. This depends on trusting
+the service to reject revoked signers at commit time and not withhold newer heads.
+Guest, recovery and machine devices cannot sign sharing policies.
 
-A subscribable encrypted query exposes only machine/generation/version hints.
-Hints trigger a host policy reread; opening a deep link also forces a reread.
-Hints never grant authority. Withdrawal retains the existing receiving-machine
-freshness window and trust limits in the [machine-sharing Spec](e2ee/machine-sharing.md).
-Execution still requires machine/project authorization. CLI/MCP history reads may
-accept a matching session read grant without granting execution.
+Encrypted version subscriptions are invalidation hints, never authority; deep links
+also force a policy reread. Receiving-machine execution authorization is unchanged.
+Roost history reads use a separate exact-session admission: ordinary requests relay
+a short-lived, purpose-bound proof of the human identity and the serving machine
+checks current membership/access online; encrypted requests use the verified device
+and v3 policy. Contained children resolve the same root. Long polls recheck after
+waiting and before returning. Read admission grants no writes, execution, file or
+terminal methods, or other sessions. Ordinary history writes require a separate
+editing proof. An offline/unavailable machine produces an explicit reading-unavailable
+state. Loro history retains its document reader.
 
-Encrypted private-machine conversations are hidden from other members unless
-shared at machine/project or session level. **This is interface hiding, not
-cryptographic privacy:** members still hold content keys and can recover content
-outside this interface. It is not a server room-filtering or per-session-key design.
+## Interface
 
-## Read-only interface
+The header shows Private / Team read-only / Team can edit; with only personal
+grants it shows Shared with N people. Team access offers Private and Team read-only.
+Machine sharing explains editing and links to settings. A Members section always
+includes the assigned owner, marked owner and not removable, and explicit read-only
+recipients. The machine owner can add workspace members and remove explicit grants,
+even while team reading is on. Nonowners see the same list and disabled controls.
+Public links keep separate publication consent and authorization.
 
-The header shows Private / Team read-only / Team can edit. Its Team access panel
-offers Private and Team read-only. Effective machine/project sharing explains why
-editing is enabled and links to machine settings. Other members see the same panel
-with disabled controls and an ownership explanation. Public-link publication remains
-separate and retains its existing consent and authorization.
-
-The read-only page replaces the composer with “Read-only · Runs on X” and a
-“Reference in a new session” action that prefills a real session mention. It retains
+The read-only page replaces its composer with a machine-labelled banner and
+Reference in a new session, which prefills a real session mention. It retains
 pinning, mark unread, Markdown copy and references. It exposes no Stop, Steer,
 queue, approval/question replies, run/Role controls, rename/archive/owner/sharing
-mutations, file saves, terminal input, Commit/Push, or browser/simulator previews.
-Lists on desktop and mobile show read-only markers; management commands recheck
-current access rather than trusting retained UI callbacks.
+mutations, file saves, terminal input, Commit/Push or browser/simulator previews.
+Desktop and mobile lists show read-only markers. Management callbacks recheck current
+editing authority before writing; assignment/read grants do not pass that guard.
 
-## Current acceptance gap
+## Accepted trust boundary and later phases
 
-The experimental machine-owned Roost history format currently requires machine
-RPC access; the document-only reader supports workspace-synced Loro history.
-Session-only Roost RPC authorization is unresolved. This does not relax the full
-conversation requirement above: do not claim complete acceptance for Roost until
-the owner resolves this scope and its read boundary is implemented and tested.
+**This prevents accidental interface exposure for honest members; it does not
+isolate malicious members who directly edit synchronized data.** `machineId`,
+containment and `userId` are mutable CRDT metadata. A malicious member can forge
+those fields and defeat these visibility/read-routing rules, including the assigned-owner
+fallback. Owner accepted that boundary on 2026-11-10; there is no authoritative
+session-to-machine registry in this phase.
 
-## Later phases and evidence
+**E2EE privacy is interface hiding, not cryptographic privacy.** Members retain
+workspace content keys and may recover content outside this interface. Stronger
+isolation needs authoritative session-to-machine registration plus server filtering
+by session; per-session keys remain a later phase. Writable sharing and other
+invitation semantics require separate review.
 
-Writable sharing and individual invitations, server filtering by room, and
-per-session keys require separate review. This draft is not human approval or a
-claim of deployed, native or two-member product acceptance.
+## Evidence and rollout
 
 Owners: [platform port](../packages/platform/src/session-access.ts),
 [policy](../packages/e2ee-core/src/internal/machine-sharing.ts),
 [visibility](../packages/components/src/lib/session-visibility.ts),
 [decision note](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+
+**Implementation gap pending owner scope confirmation:** the encrypted workspace currently rejects Roost storage in the CLI document manager and send-admission gate. The scoped read RPC alone does not implement encrypted Roost storage/reading. Until that backend is supplied, E2EE Roost history is unavailable and the full Roost requirement is unfulfilled.
+
+Rollout: merge backend #4253 (automatically deploys staging), run a two-account
+product check, merge #2487, then the owner deploys production. Local-only composition
+makes no product-cloud calls. Automated suites do not establish deployed,
+two-account or native-device acceptance; this Spec remains draft.

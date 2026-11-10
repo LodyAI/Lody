@@ -12,7 +12,7 @@ import { userAtom } from '@/atoms';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import {
-  isSessionVisibleToUser,
+  isSessionEditableToUser,
   isSessionReadShared,
   isContainedSession,
 } from '@/lib/session-visibility';
@@ -37,8 +37,7 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
   return useCallback(
     async (sessionIds: readonly SessionId[], preferences = false) => {
       // Local-only composition has no team grants.
-      if (platform.kind === 'local' || (runtime?.contentMode !== 'e2ee' && !platform.sessionAccess))
-        return;
+      if (platform.kind === 'local') return;
       if (!runtime) throw new SessionManagementDeniedError(t('sessions.historyMachineUnavailable'));
       const deny = () => {
         throw new SessionManagementDeniedError(t('sessions.historyMachineUnavailable'));
@@ -72,7 +71,7 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
         if (!entry || isLoroRepoDocDeleted(entry)) deny();
         const meta = { ...(entry!.meta as SessionMeta), id };
         if (
-          isSessionVisibleToUser(
+          isSessionEditableToUser(
             meta,
             access.machines.visibleMachineIds,
             access.projects.visibleLocalProjectKeys,
@@ -81,7 +80,9 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
           )
         )
           continue;
-        if (!preferences || !access.sessionAccess.port) deny();
+        if (!preferences) deny();
+        if (meta.userId === (store.get(userAtom)?.id ?? runtime.accountId)) continue;
+        if (!access.sessionAccess.port) deny();
         const records = new Map<string, SessionMeta>([[id, meta]]);
         if (meta.parentSessionId) {
           const parentId = meta.parentSessionId;
@@ -106,7 +107,15 @@ export function useSessionManagementGuard(runtime: WorkspaceRuntime | null) {
           )
             deny();
         }
-        if (!isSessionReadShared(meta, new Map([[view.machineId, view]]), records)) deny();
+        if (
+          !isSessionReadShared(
+            meta,
+            new Map([[view.machineId, view]]),
+            records,
+            store.get(userAtom)?.id ?? runtime.accountId
+          )
+        )
+          deny();
       }
     },
     [runtime, store, platform, t]

@@ -1,3 +1,6 @@
+import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
+import { LODY_AUTH_URL } from '@/utils/const';
+import { isContainedSession } from '@lody/shared';
 import { createToolHelpServer, LODY_HELP_INSTRUCTIONS } from './tool-help';
 import { registerAndroidEmulatorPreviewTool } from './android-emulator-tool';
 import { resolveSessionPullRequests } from '@lody/shared';
@@ -190,6 +193,7 @@ import {
   discoveryCursor,
 } from '@/lib/discovery-query';
 import {
+  runWithSessionHistoryRequester,
   getDaemonWorkspace,
   getSessionCommandEnvironment,
 } from '@/lib/session-command-environment';
@@ -2401,39 +2405,77 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   const requestedSessionId = resolveMcpSessionId(input.sessionId, ctx);
-  return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
-    const session = await readCurrentSessionMeta(manager, sessionId);
-    if (!session) {
-      throw new LodyOperationStoreError(
-        'SESSION_NOT_FOUND',
-        `Session not found: ${sessionId}`,
-        false
+  const identity = buildInvocationIdentity(await resolveInvokingTurnSource());
+  const requester = { userId: identity.userId, machineId: auth.machineId };
+  return await runWithSessionHistoryRequester(requester, () =>
+    withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
+      const sessionId = (await createSessionIdResolver(manager)(requestedSessionId)) as SessionId;
+      const session = await readCurrentSessionMeta(manager, sessionId);
+      if (!session) {
+        throw new LodyOperationStoreError(
+          'SESSION_NOT_FOUND',
+          `Session not found: ${sessionId}`,
+          false
+        );
+      }
+      const parent = session.parentSessionId
+        ? await readCurrentSessionMeta(manager, session.parentSessionId as SessionId)
+        : undefined;
+      const root = isContainedSession(session, parent) ? parent! : session;
+      const allowed = manager.isEncryptedWorkspace()
+        ? await manager.authorizeEncryptedSessionRead({
+            machineId: session.machineId,
+            rootSessionId: root.id,
+            requesterUserId: requester.userId,
+            sessionOwnerUserId: root.userId,
+            localProjectId:
+              session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+          })
+        : workspace.slug === 'local'
+          ? requester.userId === auth.userId && session.machineId === auth.machineId
+          : !!LODY_AUTH_URL &&
+            (await canReadSessionForCliRequester({
+              token: auth.token,
+              authBaseUrl: LODY_AUTH_URL,
+              workspaceId: workspace.id,
+              machineId: session.machineId,
+              sessionId: session.id,
+              rootSessionId: root.id,
+              sessionOwnerUserId: root.userId,
+              localProjectId:
+                session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+              requester,
+            }));
+      if (!allowed)
+        throw new LodyOperationStoreError(
+          'SESSION_HISTORY_DENIED',
+          'Session history is not shared with this requester.',
+          false
+        );
+      return await readSessionDocForMcp(
+        manager,
+        session,
+        auth.machineId,
+        async (sessionDoc) => {
+          const backend = await createSessionBackend(sessionDoc, session);
+          // Bounded business paging: `limit` counts displayable turns, the cursor is a
+          // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+          return await buildSessionHistoryForReader({
+            sessionId,
+            history: backend.history,
+            limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+            ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+            direction: input.direction,
+            role: input.role,
+            since: input.since,
+            maxChars: input.maxChars,
+            maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+          });
+        },
+        REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
       );
-    }
-    return await readSessionDocForMcp(
-      manager,
-      session,
-      auth.machineId,
-      async (sessionDoc) => {
-        const backend = await createSessionBackend(sessionDoc, session);
-        // Bounded business paging: `limit` counts displayable turns, the cursor is a
-        // raw position, and entries removed by the 128 KiB byte cap stay reachable.
-        return await buildSessionHistoryForReader({
-          sessionId,
-          history: backend.history,
-          limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-          ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
-          direction: input.direction,
-          role: input.role,
-          since: input.since,
-          maxChars: input.maxChars,
-          maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
-        });
-      },
-      REMOTE_SESSION_HISTORY_SYNC_WAIT_MS
-    );
-  });
+    })
+  );
 };
 
 const selectMachineMetasForOptions = (

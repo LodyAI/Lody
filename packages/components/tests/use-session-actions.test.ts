@@ -1,3 +1,4 @@
+import { cloudOperations } from '../src/lib/cloud-api-operations';
 import { buildVisibleMachineIndex } from '../src/lib/visible-machine-index';
 import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
@@ -586,14 +587,79 @@ describe('useSessionActions', () => {
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
+    const accountId = runtime.accountId ?? 'synthetic-session-account';
+    if (
+      !visibilityIndexOverride.current &&
+      runtime.contentMode !== 'e2ee' &&
+      !options.sessionAccess
+    ) {
+      const rows = runtime.repo.listDoc ? await runtime.repo.listDoc({}).catch(() => []) : [];
+      const cached = Object.values(options.sessionMetaCache ?? {});
+      const rawMachines = Object.values(jotaiStore.get(machineMetaCacheAtom));
+      const ids = new Set<MachineId>([
+        'machine-1' as MachineId,
+        ...cached.map((meta) => meta.machineId),
+        ...rows.flatMap((row) =>
+          typeof row.meta.machineId === 'string' ? [row.meta.machineId as MachineId] : []
+        ),
+        ...rawMachines.map((row) => row.id),
+      ]);
+      const access = new Map(
+        [...ids].map((machineId) => [
+          machineId,
+          { machineId, ownerUserId: accountId, sharedWithTeam: false, updatedAt: 1 },
+        ])
+      );
+      const explicit = testCloudApi.useQuery(cloudOperations.machines.listVisibleMachines, {
+        workspaceId: runtime.workspaceId,
+      }) as
+        | {
+            machineId: MachineId;
+            ownerUserId: string;
+            sharedWithTeam: boolean;
+            updatedAt: number;
+          }[]
+        | undefined;
+      for (const row of explicit ?? []) access.set(row.machineId, row);
+      for (const row of rawMachines)
+        access.set(row.id, {
+          machineId: row.id,
+          ownerUserId: row.ownerUserId ?? accountId,
+          sharedWithTeam: false,
+          updatedAt: 1,
+        });
+      visibilityIndexOverride.current = {
+        machines: new Map(),
+        accessByMachineId: access,
+        isLoading: false,
+      };
+      const read = runtime.repo.getDocMeta?.bind(runtime.repo);
+      // Lifecycle-only fixtures previously omitted authority fields. Give those
+      // synthetic documents an explicit owning machine; security fixtures retain
+      // their real metadata and explicit visibility indexes.
+      if (read)
+        runtime.repo.getDocMeta = async (id) => {
+          const row = await read(id);
+          return row && Object.keys(row.meta).length > 0 && typeof row.meta.machineId !== 'string'
+            ? {
+                ...row,
+                meta: {
+                  id: id.slice(SESSION_DOC_PREFIX.length),
+                  machineId: 'machine-1',
+                  ...row.meta,
+                },
+              }
+            : row;
+        };
+    }
     jotaiStore.set(runtimeAtom, runtime);
     jotaiStore.set(docMetaCacheReadyAtom, options.docMetaCacheReady ?? true);
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
     jotaiStore.set(currentWorkspaceIdAtom, options.workspaceId ?? ('workspace-1' as WorkspaceId));
     jotaiStore.set(currentWorkspaceSlugAtom, options.workspaceSlug ?? 'workspace-slug');
-    jotaiStore.set(userAtom, { id: 'synthetic-session-account' } as never);
+    jotaiStore.set(userAtom, { id: accountId } as never);
     jotaiStore.set(workspaceContentModeAtom, {
-      accountId: 'synthetic-session-account',
+      accountId,
       workspaceId: options.workspaceId ?? 'workspace-1',
       workspaceSlug: options.workspaceSlug ?? 'workspace-slug',
       descriptor: {
@@ -603,22 +669,16 @@ describe('useSessionActions', () => {
       },
     });
 
-    const platform =
-      runtime.contentMode === 'e2ee' || options.sessionAccess
-        ? {
-            ...testPlatform,
-            sessionAccess: options.sessionAccess,
-            identity: {
-              ...testPlatform.identity,
-              session:
-                options.identitySession ??
-                createStaticStore({
-                  status: 'authenticated' as const,
-                  user: { id: 'synthetic-session-account' },
-                }),
-            },
-          }
-        : testPlatform;
+    const platform: PlatformProvider = {
+      ...testPlatform,
+      sessionAccess: options.sessionAccess,
+      identity: {
+        ...testPlatform.identity,
+        session:
+          options.identitySession ??
+          createStaticStore({ status: 'authenticated', user: { id: accountId } }),
+      },
+    };
     let actions: SessionActions | null = null;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -659,7 +719,7 @@ describe('useSessionActions', () => {
       const meta = {
         id,
         machineId: 'private-machine' as MachineId,
-        userId: 'synthetic-session-account',
+        userId: 'other-session-owner',
         title: 'Original',
         lastMessageAt: 100,
       } as SessionMeta;
@@ -1601,11 +1661,14 @@ describe('useSessionActions', () => {
       lastMessageAt: 500,
       lastReadAt: 500,
     } as SessionMeta;
+    let metadataReady = false;
     const runtime = createRuntime({
       repo: {
         // The sidebar's rendered cache can lead the async repo read during
         // hydration; the visible row's action must still work in that window.
-        getDocMeta: vi.fn(async () => undefined),
+        getDocMeta: vi.fn(async () =>
+          metadataReady ? { meta: { ...sessionMeta, machineId: 'machine-1' } } : undefined
+        ),
         upsertDocMeta,
       } as unknown as WorkspaceRuntime['repo'],
     });
@@ -1613,6 +1676,11 @@ describe('useSessionActions', () => {
       sessionMetaCache: { [getSessionRoomId(sessionId)]: sessionMeta },
     });
 
+    await expect(actions.markSessionUnread(sessionId)).rejects.toMatchObject({
+      code: 'session_management_denied',
+    });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+    metadataReady = true;
     await actions.markSessionUnread(sessionId);
 
     expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
@@ -2485,7 +2553,7 @@ describe('useSessionActions', () => {
       const store = createStore();
       const actions = await renderActions(runtime, { store });
       const result = actions[action](tree.rootSession.id);
-      const rejected = expect(result).rejects.toThrow('Workspace changed');
+      const rejected = expect(result).rejects.toMatchObject({ code: 'session_management_denied' });
       await reading.promise;
       await act(async () => {
         store.set(runtimeAtom, createRuntime({ repo: replacement.repo }));
@@ -2500,7 +2568,7 @@ describe('useSessionActions', () => {
     }
   );
 
-  it('finishes the captured snapshot on its original runtime after the first write', async () => {
+  it('fences later management writes after a runtime switch without rolling back the first write', async () => {
     const tree = createContainmentSessions('pinned', false);
     const original = createSessionMetaRepo(tree.sessions);
     const replacement = createSessionMetaRepo(tree.sessions);
@@ -2524,10 +2592,9 @@ describe('useSessionActions', () => {
       store.set(runtimeAtom, createRuntime({ repo: replacement.repo }));
     });
     finish.resolve();
-    await result;
-    for (const session of [tree.rootSession, tree.tabSession]) {
-      expect(original.getSession(session.id)?.isArchived).toBe(true);
-    }
+    await expect(result).rejects.toMatchObject({ code: 'session_management_denied' });
+    expect(original.getSession(tree.rootSession.id)?.isArchived).toBe(true);
+    expect(original.getSession(tree.tabSession.id)?.isArchived).toBe(false);
     for (const session of [tree.openedSession, tree.openedFromTabSession]) {
       expect(original.getSession(session.id)).toEqual(session);
     }
@@ -2597,7 +2664,7 @@ describe('useSessionActions', () => {
         root?.render(
           createElement(
             PlatformContext.Provider,
-            { value: testPlatform },
+            { value: { ...testPlatform, kind: 'local' } },
             createElement(
               Provider,
               { store: jotaiStore },

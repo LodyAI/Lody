@@ -109,8 +109,8 @@ export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
-/** Native publication and watch are the history authority; no Loro cursor log. */
-export const SESSION_HISTORY_PROTOCOL_VERSION = 3;
+/** v4 adds purpose-bound member read/edit proofs; older strict payloads are incompatible. */
+export const SESSION_HISTORY_PROTOCOL_VERSION = 4;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_WATCH_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;

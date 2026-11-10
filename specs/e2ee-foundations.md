@@ -1,11 +1,15 @@
 # E2EE foundation boundary
 
-Status: approved
+Status: draft
 Translation: current
 
 Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
 (session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
+
+Revision: owner-directed on 2026-11-10; this latest-only policy and retained-grant
+revision awaits owner approval in PR #2487. The approved revision above is retained
+as historical approval, not approval of these changes.
 
 [中文](e2ee-foundations.zh.md)
 
@@ -241,7 +245,7 @@ a new root/resource even for the same member/machineId. The old generation remai
 terminal. New sharing requires new explicit owner intent and starts at revision
 1/null parent, without importing old grants, pins or deleted policy history.
 
-Signed current-only policy v2 binds workspace ID, pinned genesis, machineId,
+Signed current-only policy v3 binds workspace ID, pinned genesis, machineId,
 owner membership instance, generation, revision/previous original-frame digest,
 requestId, complete state, personal signer and descriptive issuedAt. A distinct
 business signature/AAD domain and generation-qualified resource use existing
@@ -255,9 +259,16 @@ substitute for verified pins. Exact retry receipts never resurrect cleaned frame
 
 Before each start and later authorized action, check current ledger eligibility,
 actual machine key/generation and the current owner-personal policy; actual local
-projects also need their own switch. A revoked signer invalidates execution on
-its old policy. Historical owner-personal data may preserve state for a new
-explicit same-generation intent, but cannot grant execution or skip history.
+projects also need their own switch. Verify only the latest original: its signature,
+resource/binding/generation, and a revision no lower than the local pin; equal
+revisions require equal digests. Intermediate policy history is not required.
+The latest service-accepted policy signed by a historically admitted owner-personal
+device keeps authorizing after that device is revoked. Settings show a nonblocking
+review-and-re-sign reminder; a current personal device re-signs the complete list
+unchanged, or edits it first. This relies on the service checking current device
+eligibility at commit time, refusing revoked devices, and not maliciously accepting
+or withholding policies. That is an owner-accepted service-trust premise, not a
+cryptographic proof of signing time.
 Withdrawal blocks new starts/later actions without killing already running tasks.
 A separate account display query returns only ciphertext/untrusted metadata.
 

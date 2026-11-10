@@ -16,7 +16,7 @@ Read parent rules and linked context.
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive/delete; reopen clears only it, never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
-- `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
+- `Change owner` writes the OWNER `SessionMeta.userId`, never sharing;
   candidates need machine/project access.
 
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)

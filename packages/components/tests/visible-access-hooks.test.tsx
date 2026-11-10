@@ -541,13 +541,13 @@ describe('visible access hooks', () => {
     expectSessionSnapshot(['cached-session'], 'resolved', false);
   });
 
-  it('hides metadata-owned sessions while machine authority is loading', async () => {
+  it('shows metadata-owned sessions read-only while machine authority is loading', async () => {
     const session = createCachedSession('viewer-user');
     cacheSession(session);
 
     await mount('workspace-owner-session', sessionProbe(session));
 
-    expectSessionSnapshot([], 'loading', true);
+    expectSessionSnapshot(['cached-session'], 'resolved', true);
   });
 
   for (const scenario of [
@@ -775,10 +775,9 @@ describe('encrypted shared machine visibility', () => {
               machineId: value.machineId,
               canManage: value.canManage,
               generation: value.generation,
-              readSharedSessionIds:
-                value.needsResign || value.unavailable
-                  ? []
-                  : value.sessions.map((row) => row.sessionId),
+              readSharedSessionIds: value.unavailable
+                ? []
+                : value.sessions.map((row) => row.sessionId),
             })),
         read: async (_workspace: string, machineId: string) => {
           const value = views.get(machineId);
@@ -921,8 +920,8 @@ describe('encrypted shared machine visibility', () => {
       view('private-machine', {
         sharedWithTeam: false,
         sessions: [
-          { sessionId: privateHistory.id, level: 'read' },
-          { sessionId: ownHistory.id, level: 'read' },
+          { sessionId: privateHistory.id, audience: 'team', level: 'read' },
+          { sessionId: ownHistory.id, audience: 'team', level: 'read' },
         ],
       })
     );
@@ -958,7 +957,7 @@ describe('encrypted shared machine visibility', () => {
       'private-machine',
       view('private-machine', {
         sharedWithTeam: false,
-        sessions: [{ sessionId: history.id, level: 'read' }],
+        sessions: [{ sessionId: history.id, audience: 'team', level: 'read' }],
       })
     );
     const tree = (
@@ -978,7 +977,7 @@ describe('encrypted shared machine visibility', () => {
       'private-machine',
       view('private-machine', {
         sharedWithTeam: false,
-        sessions: [{ sessionId: history.id, level: 'read' }],
+        sessions: [{ sessionId: history.id, audience: 'team', level: 'read' }],
       })
     );
     await act(async () => notifyE2eeLedgerChanged(member, workspaceId));
@@ -987,35 +986,43 @@ describe('encrypted shared machine visibility', () => {
     expect(mountedControls).toBe(1);
   });
 
-  it('reads a private project or child tab without granting its shared machine’s other projects', async () => {
-    const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
-    const child = {
-      ...parent,
-      id: 'child' as SessionId,
-      parentSessionId: parent.id,
-      project: { kind: 'local', localProjectId: 'private-project' as LocalProjectId },
-    } as SessionMeta;
-    store.set(sessionMetaCacheAtom, {
-      [getSessionRoomId(parent.id)]: parent,
-      [getSessionRoomId(child.id)]: child,
-    });
-    views.set(
-      parent.machineId,
-      view(parent.machineId, { sessions: [{ sessionId: parent.id, level: 'read' }] })
-    );
-    await renderTree(
-      <SessionHistoryAccessBoundary sessionId={parent.id} urlTab={child.id}>
-        <input aria-label="Execution composer" />
-      </SessionHistoryAccessBoundary>
-    );
-    expect(container.querySelector('article')?.textContent).toBe(child.id);
-    expect(container.querySelector('input')).toBeNull();
-    await act(async () => {
-      store.set(userAtom, { id: 'different-account' } as never);
-    });
-    expect(container.querySelector('article')).toBeNull();
-    expect(container.querySelector('input')).toBeNull();
-  });
+  it.each(['tab', 'direct'] as const)(
+    'reads a private project or child through a %s link without granting other projects',
+    async (route) => {
+      const parent = { ...createCachedSession(owner), id: 'root' as SessionId };
+      const child = {
+        ...parent,
+        id: 'child' as SessionId,
+        parentSessionId: parent.id,
+        project: { kind: 'local', localProjectId: 'private-project' as LocalProjectId },
+      } as SessionMeta;
+      store.set(sessionMetaCacheAtom, {
+        [getSessionRoomId(parent.id)]: parent,
+        [getSessionRoomId(child.id)]: child,
+      });
+      views.set(
+        parent.machineId,
+        view(parent.machineId, {
+          sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }],
+        })
+      );
+      await renderTree(
+        <SessionHistoryAccessBoundary
+          sessionId={route === 'direct' ? child.id : parent.id}
+          urlTab={route === 'tab' ? child.id : undefined}
+        >
+          <input aria-label="Execution composer" />
+        </SessionHistoryAccessBoundary>
+      );
+      expect(container.querySelector('article')?.textContent).toBe(child.id);
+      expect(container.querySelector('input')).toBeNull();
+      await act(async () => {
+        store.set(userAtom, { id: 'different-account' } as never);
+      });
+      expect(container.querySelector('article')).toBeNull();
+      expect(container.querySelector('input')).toBeNull();
+    }
+  );
 
   it.each(['sidebar', 'other-machine', 'nested'] as const)(
     'rejects a forged %s parent relation in a read-only tab deep link',
@@ -1040,7 +1047,7 @@ describe('encrypted shared machine visibility', () => {
         parent.machineId,
         view(parent.machineId, {
           sharedWithTeam: false,
-          sessions: [{ sessionId: parent.id, level: 'read' }],
+          sessions: [{ sessionId: parent.id, audience: 'team', level: 'read' }],
         })
       );
       await renderTree(

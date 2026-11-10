@@ -57,7 +57,9 @@ running a seal again creates a new encryption. No product transport is enabled.
 The protocol entry also provides an owner-signed complete machine-sharing codec,
 resource binding, version verification and pure execution gate.
 Policies use current-only v3, with independent read-only session grants. Clients verify
-only the latest original and the current active owner-personal signer. Local high-water
+only the latest service-accepted original and its historically admitted owner-personal signer.
+Revoking that signer leaves grants effective and prompts nonblocking review/re-sign;
+new seals/commits still require an active device. This trusts commit-time service admission. Local high-water
 pins reject lower revisions and differing digests at the same revision; missing older
 policy revisions do not block reads. Parent digests remain server CAS metadata. The backend
 entry admits opaque owner frames; platform/cloud-api define the matching CAS
@@ -69,7 +71,7 @@ The signed sharing format is current-only v3. Every scope includes a generation:
 the initial machine signing key of its uninterrupted atomic-replacement chain.
 `verifyMachineSharingGeneration` qualifies that chain's original admission records
 at their genuine ledger positions. Supply its opaque `machineGeneration` evidence
-to seal/open/history/admission/execution calls. Removal/readmission starts a new
+to seal/open/admission/execution calls. Removal/readmission starts a new
 resource at revision 1 with private defaults; atomic replacement retains the root.
 A compact view without those ledger checkpoints needs qualification against a
 full verified endpoint; server hints or removed-policy high waters are insufficient.

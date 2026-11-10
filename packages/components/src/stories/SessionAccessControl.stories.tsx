@@ -176,3 +176,36 @@ export const ReadOnlyNonOwnerDark: Story = {
   ...ReadOnlyNonOwner,
   globals: { theme: 'dark' },
 };
+
+const memberState = {
+  ...teamState,
+  visibility: 'private' as const,
+  access: 'read' as const,
+  ownerUserId: 'alice',
+  memberUserIds: ['bob'],
+  availableMembers: [
+    { userId: 'alice', name: 'Alice Chen' },
+    { userId: 'bob', name: 'Bob Li' },
+    { userId: 'carol', name: 'Carol Wang' },
+  ],
+  setMemberReadAccess: fn(),
+  setReadAccess: fn(),
+};
+export const PersonalReadOnly: Story = {
+  args: { state: memberState },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
+  },
+};
+export const PersonalReadOnlyNonowner: Story = {
+  args: { state: { ...memberState, canManage: false } },
+  play: PersonalReadOnly.play,
+};
+export const TeamAndPersonal: Story = {
+  args: { state: { ...memberState, visibility: 'team', access: 'read' } },
+  play: PersonalReadOnly.play,
+};
+export const PersonalReadOnlyMobile: Story = {
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  args: { state: memberState, presentation: 'dialog' },
+};

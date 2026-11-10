@@ -1,4 +1,5 @@
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
@@ -1677,15 +1678,18 @@ export function LoroAppSidebar({
       workspaceId: scopedWorkspaceId,
       enabled: workspaceDataReady,
     });
+  const sharingMembers = useWorkspaceMembers().members;
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
+    sessionAccessViews,
     projects: visibleLocalProjectMap,
     showSessionSharing,
     resolve: resolveSessionSharing,
     shareWithTeam: shareSessionWithTeam,
   } = useSessionSharing({
     includeLocalProjectDetails: true,
+    members: sharingMembers,
     workspaceId: scopedWorkspaceId,
     enabled: workspaceDataReady,
   });
@@ -3048,6 +3052,10 @@ export function LoroAppSidebar({
             section.machineId && machineMeta
               ? {
                   machineId: section.machineId,
+                  needsSharingReview: sessionAccessViews?.get(section.machineId)?.needsResign,
+                  onReviewSharing: sessionAccessViews?.get(section.machineId)?.canManage
+                    ? () => openSettings('machines', { machineId: section.machineId! })
+                    : undefined,
                   name: machineMeta.name,
                   owner: machineMeta.ownerUserId
                     ? (membersByUserId.get(machineMeta.ownerUserId) ?? null)

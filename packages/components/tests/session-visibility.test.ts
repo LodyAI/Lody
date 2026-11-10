@@ -3,6 +3,7 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   filterSessionsByVisibility,
   isSessionVisibleToUser,
+  isSessionEditableToUser,
   getSessionOwnerAccessReason,
   isSessionReadShared,
   resolveSessionVisibilityState,
@@ -14,7 +15,7 @@ const m2 = 'machine-2' as MachineId;
 const p1 = 'project-1' as LocalProjectId;
 
 describe('session visibility', () => {
-  it('does not grant access from the mutable conversation owner without machine access', () => {
+  it('keeps the assigned conversation owner visible without granting machine access', () => {
     expect(
       isSessionVisibleToUser(
         {
@@ -27,7 +28,7 @@ describe('session visibility', () => {
         new Set<string>(),
         'user-1'
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('still hides another user local-project session when the project is not visible', () => {
@@ -72,7 +73,7 @@ describe('session visibility', () => {
         false,
         'user-1'
       ).map((item) => item.id)
-    ).toEqual(['s-shared-machine', 's-visible-local']);
+    ).toEqual(['s-owner', 's-shared-machine', 's-visible-local']);
   });
 
   it('hides a local-project session when machine access is revoked before its project index refreshes', () => {
@@ -115,7 +116,7 @@ describe('session visibility', () => {
     ).toEqual([{ id: 's1', machineId: m1, project: { kind: 'local', localProjectId: p1 } }]);
   });
 
-  it('hides a metadata owner session during machine visibility loading', () => {
+  it('keeps a metadata owner session visible during machine visibility loading', () => {
     const sessions = [
       { id: 's-owner', machineId: m1, userId: 'user-1' },
       { id: 's-other', machineId: m2, userId: 'user-2' },
@@ -125,7 +126,7 @@ describe('session visibility', () => {
       filterSessionsByVisibility(sessions, new Set(), new Set(), true, 'user-1').map(
         (item) => item.id
       )
-    ).toEqual([]);
+    ).toEqual(['s-owner']);
   });
 });
 
@@ -216,13 +217,13 @@ describe('machine-bound session read grants', () => {
       false
     );
   });
-  it('never opens all E2EE history or grants access from a mutable session owner', () => {
+  it('retains only assigned-owner and machine-owner visibility, not all E2EE history', () => {
     expect(
       resolveSessionVisibilityState(root, new Set(), new Set(), {
         workspaceHistoryReadable: true,
         currentUserId: root.userId,
       })
-    ).toBe('hidden');
+    ).toBe('visible');
     expect(
       resolveSessionVisibilityState(root, new Set(), new Set(), {
         currentUserId: 'machine-owner',
@@ -253,4 +254,41 @@ it('inherits read access only through a direct same-machine contained Tab or sid
   expect(
     isSessionReadShared(child, views, new Map([['root', { ...root, parentSessionId: 'other' }]]))
   ).toBe(false);
+});
+
+it('assignment admits reading but never editing or machine access', () => {
+  const assigned = { id: 'assigned', machineId: m1, userId: 'me' };
+  expect(isSessionVisibleToUser(assigned, new Set(), new Set(), 'me')).toBe(true);
+  expect(isSessionEditableToUser(assigned, new Set(), new Set(), 'me')).toBe(false);
+  expect(isSessionEditableToUser(assigned, new Set([m1]), new Set(), 'me')).toBe(true);
+});
+
+it('limits personal read grants to that account, bound machine and contained root, then withdraws', () => {
+  const root = { id: 'personal-root', machineId: m1, userId: 'someone' };
+  const child = { id: 'contained', machineId: m1, parentSessionId: root.id };
+  const view = {
+    machineId: m1,
+    canManage: false,
+    readSharedSessionIds: [],
+    memberReadSharedSessions: [{ sessionId: root.id, userId: 'reader' }],
+  };
+  const views = new Map([[m1, view]]),
+    records = new Map([
+      [root.id, root],
+      [child.id, child],
+    ]);
+  const options = { currentUserId: 'reader', readSharedSessions: views, sessionsById: records };
+  expect(resolveSessionVisibilityState(root, new Set(), new Set(), options)).toBe('visible');
+  expect(resolveSessionVisibilityState(child, new Set(), new Set(), options)).toBe('visible');
+  expect(
+    resolveSessionVisibilityState(root, new Set(), new Set(), {
+      ...options,
+      currentUserId: 'other',
+    })
+  ).toBe('hidden');
+  expect(
+    resolveSessionVisibilityState({ ...root, machineId: m2 }, new Set(), new Set(), options)
+  ).toBe('hidden');
+  view.memberReadSharedSessions = [];
+  expect(resolveSessionVisibilityState(root, new Set(), new Set(), options)).toBe('hidden');
 });

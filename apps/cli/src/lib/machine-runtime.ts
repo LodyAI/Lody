@@ -74,6 +74,9 @@ export class MachineRuntime {
     }
     return this.dispatchLocalMachineRpc(request, context?.signal);
   }
+  resolveSessionHistoryAccessTarget(sessionId: string) {
+    return this.requireHandler().resolveSessionHistoryAccessTarget(sessionId as SessionId);
+  }
   private handler: MessageHandler | null = null;
   private clientLossHandler: MessageHandler | null = null;
   inspectClientLoss() {

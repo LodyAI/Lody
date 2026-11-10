@@ -10,7 +10,12 @@ export const id = z
   .refine((v) => new TextEncoder().encode(v).length <= 256);
 export const sharingChangeSchema = z.discriminatedUnion('kind', [
   z
-    .object({ kind: z.literal('session'), sessionId: id, level: z.literal('read').nullable() })
+    .object({
+      kind: z.literal('session'),
+      sessionId: id,
+      audience: z.union([z.literal('team'), z.object({ userId: id }).strict()]).optional(),
+      level: z.literal('read').nullable(),
+    })
     .strict(),
   z.object({ kind: z.literal('machine'), sharedWithTeam: z.boolean() }).strict(),
   z

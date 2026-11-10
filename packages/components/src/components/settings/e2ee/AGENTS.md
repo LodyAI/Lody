@@ -15,7 +15,7 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   workspace, machine and verified generation. Render native ownership hints;
   main rechecks authority. Retry an unknown result with its original requestId
   and change; only explicit retry after confirmed conflict creates a new intent.
-  Historical signer-revoked state is display/re-sign input, never execution evidence.
+  Signer revocation preserves accepted grants; review/re-sign is nonblocking and preserves the list.
   [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 
 - Remote device pages retain the protected sharing panel without a local agent;

@@ -60,23 +60,27 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
 });
-async function render(mode: 'plaintext' | 'e2ee', records: SessionMeta[] = [session]) {
+async function render(
+  mode: 'plaintext' | 'e2ee',
+  records: SessionMeta[] = [session],
+  userId = 'owner'
+) {
   const store = createStore();
   store.set(
     sessionMetaCacheAtom,
     Object.fromEntries(records.map((meta) => [getSessionRoomId(meta.id), meta]))
   );
-  store.set(userAtom, { id: 'owner' } as never);
+  store.set(userAtom, { id: userId } as never);
   store.set(currentWorkspaceIdAtom, workspaceId);
   store.set(currentWorkspaceSlugAtom, 'sharing');
   store.set(runtimeAtom, {
     workspaceId,
     workspaceSlug: 'sharing',
-    accountId: 'owner',
+    accountId: userId,
     contentMode: mode,
   } as never);
   store.set(workspaceContentModeAtom, {
-    accountId: 'owner',
+    accountId: userId,
     workspaceId,
     workspaceSlug: 'sharing',
     descriptor: { workspaceId, contentMode: mode, contentModeVersion: 1 },
@@ -85,7 +89,7 @@ async function render(mode: 'plaintext' | 'e2ee', records: SessionMeta[] = [sess
     ...TEST_CLOUD_PLATFORM,
     identity: {
       ...TEST_CLOUD_PLATFORM.identity,
-      session: createStaticStore({ status: 'authenticated', user: { id: 'owner' } }),
+      session: createStaticStore({ status: 'authenticated', user: { id: userId } }),
     },
     workspaces: {
       ...TEST_CLOUD_PLATFORM.workspaces,
@@ -103,7 +107,19 @@ async function render(mode: 'plaintext' | 'e2ee', records: SessionMeta[] = [sess
       subscribe: () => () => {},
       set: async (input) => {
         if (!view.canManage) throw new Error('session_access_not_owned');
-        view = { ...view, readSharedSessionIds: input.level === 'read' ? [input.sessionId] : [] };
+        if (!input.audience || input.audience === 'team')
+          view = { ...view, readSharedSessionIds: input.level === 'read' ? [input.sessionId] : [] };
+        else {
+          const userId = input.audience.userId;
+          const rows = (view.memberReadSharedSessions ?? []).filter(
+            (row) => row.userId !== userId || row.sessionId !== input.sessionId
+          );
+          view = {
+            ...view,
+            memberReadSharedSessions:
+              input.level === 'read' ? [...rows, { sessionId: input.sessionId, userId }] : rows,
+          };
+        }
         return { status: 'saved' };
       },
     },
@@ -119,6 +135,41 @@ async function render(mode: 'plaintext' | 'e2ee', records: SessionMeta[] = [sess
   );
 }
 describe.each(['plaintext', 'e2ee'] as const)('single-session sharing in %s', (mode) => {
+  it('adds and removes one member independently of team access and refuses a nonowner', async () => {
+    await render(mode);
+    await act(async () => result.resolve(session).setMemberReadAccess!('reader', true));
+    expect(result.resolve(session)).toMatchObject({
+      visibility: 'private',
+      memberUserIds: ['reader'],
+    });
+    await act(async () => result.shareWithTeam(result.resolve(session)));
+    expect(view.memberReadSharedSessions).toEqual([{ sessionId: 'root', userId: 'reader' }]);
+    await act(async () => result.resolve(session).setMemberReadAccess!('reader', false));
+    expect(result.resolve(session)).toMatchObject({
+      visibility: 'team',
+      access: 'read',
+      memberUserIds: [],
+    });
+    view = { ...view, canManage: false };
+    await expect(result.resolve(session).setMemberReadAccess!('other', true)).rejects.toThrow(
+      'session_access_not_owned'
+    );
+    expect(view.memberReadSharedSessions).toEqual([]);
+  });
+  it('resolves a selected reader without granting machine management', async () => {
+    view = {
+      ...view,
+      canManage: false,
+      memberReadSharedSessions: [{ sessionId: 'root', userId: 'reader' }],
+    };
+    await render(mode, [session], 'reader');
+    expect(result.resolve(session)).toMatchObject({
+      visibility: 'private',
+      access: 'read',
+      canManage: false,
+      memberUserIds: ['reader'],
+    });
+  });
   it('grants and revokes read access without enabling the machine or using the session owner', async () => {
     await render(mode);
     expect(result.resolve(session)).toMatchObject({ access: 'private', canManage: true });

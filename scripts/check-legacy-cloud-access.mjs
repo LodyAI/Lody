@@ -118,6 +118,10 @@ const exceptions = new Map([
     'apps/cli/src/lib/cloud-cli-port.ts',
     new Map([
       [
+        'machines:canRequestSessionReadFromCliToken',
+        'Ordinary MCP history preflight only; encrypted reads use the verified native policy host. Mode denial fails the requested read before joining history.',
+      ],
+      [
         'auth:getWorkspaceUserProfileForCliToken',
         'Ordinary CLI profile lookup; encrypted machine composition has no account catalog capability. Backend mode rejection yields no profile.',
       ],

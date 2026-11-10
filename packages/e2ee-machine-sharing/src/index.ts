@@ -318,8 +318,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     binding: MachineSharingBinding,
     version: E2eeMachineSharingVersion,
     machineGeneration: VerifiedMachineSharingGeneration,
-    previous: MachineSharingHead | null,
-    management = false
+    previous: MachineSharingHead | null
   ) {
     if (!matches(binding, version)) return yield* fail('sharing_invalid');
     const frame = unhex(version.frameHex);
@@ -345,16 +344,6 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           previous,
         };
         const active = openMachineSharingPolicy(input);
-        if (management) {
-          if (Result.isFailure(active)) {
-            // A revoked issuer grants nothing. A current owner can publish a new
-            // complete private-default policy under the existing head CAS, without
-            // importing any historical grants or accepting invalid signatures.
-            if (active.failure.code === 'policy-signer-ineligible')
-              return { head: version, policy: null, state: null, needsResign: true };
-            return yield* Effect.fail(active.failure);
-          }
-        }
         const policy = yield* Effect.fromResult(active);
         const body = policy.inspect();
         if (body.requestId !== version.requestId || body.previousDigest !== version.previousDigest)
@@ -367,8 +356,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     binding: MachineSharingBinding,
     remote: SharingRemote,
     machineGeneration: VerifiedMachineSharingGeneration,
-    force = false,
-    management = false
+    force = false
   ) {
     const token = invalidationToken;
     const resource = key(binding);
@@ -415,8 +403,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       binding,
       raw,
       machineGeneration,
-      saved?.head?.status === 'active' ? saved.head : null,
-      management
+      saved?.head?.status === 'active' ? saved.head : null
     );
     const policy = read.policy;
     const fullState = read.state;
@@ -425,9 +412,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     if (token !== invalidationToken || !sharingFresh(started, yield* sharingStamp))
       return yield* fail('sharing_unavailable');
     if (read.policy) yield* remember(binding, head, raw);
-    if (management && !policy && 'needsResign' in read)
-      return { policy: null, state: null, head, needsResign: true };
-    if ((!policy && !management) || !fullState || !sharingFresh(started, yield* sharingStamp))
+    if (!policy || !fullState || !sharingFresh(started, yield* sharingStamp))
       return yield* fail('sharing_unavailable');
     if (policy)
       yield* sql(() => {
@@ -522,9 +507,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             ),
           };
         });
-        const checked = yield* Effect.result(
-          latest(binding, remote, machineGeneration, force, true)
-        );
+        const checked = yield* Effect.result(latest(binding, remote, machineGeneration, force));
         if (Result.isFailure(checked) && !unfinished) return yield* Effect.fail(checked.failure);
         const policy = Result.isSuccess(checked) ? checked.success.policy : null;
         const saved = yield* pin(binding);
@@ -564,10 +547,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           sessions: body?.sessions ?? [],
           canManage,
           signer: body?.signer ?? null,
-          needsResign:
-            Result.isSuccess(checked) &&
-            'needsResign' in checked.success &&
-            checked.success.needsResign === true,
+          needsResign: !!body && !current.ledger.inspectState().devices.has(body.signer),
           ...(!decision.allowed ? { deniedReason: 'e2ee_machine_not_shared' as const } : {}),
           removed: saved?.head?.status === 'removed',
           ...(unfinished ? { pendingRequest: unfinished } : {}),
@@ -596,13 +576,10 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         original.digest !== saved.head.digest
       )
         return undefined;
-      const retained = yield* readFrame(
-        initial.binding,
-        original,
-        initial.machineGeneration,
-        { revision: original.revision, digest: original.digest },
-        false
-      );
+      const retained = yield* readFrame(initial.binding, original, initial.machineGeneration, {
+        revision: original.revision,
+        digest: original.digest,
+      });
       if (!retained.policy) return undefined;
       const decision = decide(yield* options.ledger(), retained.policy);
       return !decision.allowed &&
@@ -772,7 +749,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
               .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
           );
           if (unfinished) return yield* fail('sharing_conflict');
-          const current = yield* latest(binding, remote, machineGeneration, true, true);
+          const current = yield* latest(binding, remote, machineGeneration, true);
           const expectedHead = current.head;
           if (expectedHead?.status === 'removed') return { status: 'removed', requestId: rid };
           const state = current.state ?? { sharedWithTeam: false, projects: [], sessions: [] };
@@ -873,7 +850,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
                   digest: original.request.expectedHead.digest as string,
                 }
               : null;
-          yield* readFrame(binding, version, machineGeneration, previous, true);
+          yield* readFrame(binding, version, machineGeneration, previous);
           yield* remember(
             binding,
             { ...binding, revision: version.revision, digest: version.digest, status: 'active' },

@@ -16,6 +16,7 @@ import {
   isSessionReadShared,
   isContainedSession,
 } from '@/lib/session-visibility';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { SessionHistoryReader } from './session-history-reader';
 
@@ -30,6 +31,7 @@ function useSessionTarget(sessionId: SessionId) {
               ? {
                   id: sessionId,
                   machineId: meta.machineId,
+                  userId: meta.userId,
                   project: meta.project,
                   parentSessionId: meta.parentSessionId,
                   childSessionPlacement: meta.childSessionPlacement,
@@ -56,10 +58,14 @@ export function SessionHistoryAccessBoundary({
   onMobilePresented?: (sessionId: string) => void;
   children: ReactNode;
 }) {
+  const accountId = useWorkspaceLocalAccountId();
   const localOnly = !usePlatform().capabilities.has('teamSharing');
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const { t } = useTranslation();
-  const root = useSessionTarget(sessionId);
+  const routed = useSessionTarget(sessionId);
+  const parent = useSessionTarget((routed?.parentSessionId ?? sessionId) as SessionId);
+  const root = isContainedSession(routed, parent) ? parent : routed;
+  const rootId = root?.id ?? sessionId;
   const selectedId = (urlTab || sessionId) as SessionId;
   const selected = useSessionTarget(selectedId);
   const access = useSessionAccess();
@@ -69,12 +75,12 @@ export function SessionHistoryAccessBoundary({
     isLoading: machinesLoading,
   } = useVisibleMachineIdSet();
   const { visibleLocalProjectKeys, isLoading: projectsLoading } = useVisibleLocalProjectKeySet();
-  const validTab = selectedId === sessionId || isContainedSession(selected, root);
+  const validTab = selectedId === rootId || isContainedSession(selected, root);
   const editable =
     !!root &&
     (ownedMachineIds.has(root.machineId) ||
       isSessionMachineAvailable(root, visibleMachineIds, visibleLocalProjectKeys)) &&
-    (selectedId === sessionId ||
+    (selectedId === rootId ||
       (validTab &&
         !!selected &&
         (ownedMachineIds.has(selected.machineId) ||
@@ -107,14 +113,15 @@ export function SessionHistoryAccessBoundary({
   // The detail subtree handles absent metadata, workspace transitions and local-only sessions.
   if (!root) return children;
   const readable =
-    isSessionReadShared(root, access.views) &&
-    (selectedId === sessionId || (validTab && !!selected && selected.machineId === root.machineId));
+    (isSessionReadShared(root, access.views, undefined, accountId) ||
+      (!!accountId && root.userId === accountId)) &&
+    (selectedId === rootId || (validTab && !!selected && selected.machineId === root.machineId));
   if (!readable) return <p role="status">{t('sessions.access.unavailable')}</p>;
   return (
     <SessionHistoryReader
-      key={`${runtime?.workspaceId}:${runtime?.accountId}:${sessionId}:${selectedId}`}
-      rootSessionId={sessionId}
-      sessionId={validTab ? selectedId : sessionId}
+      key={`${runtime?.workspaceId}:${runtime?.accountId}:${rootId}:${selectedId}`}
+      rootSessionId={rootId}
+      sessionId={validTab ? selectedId : rootId}
       onMobileBack={onMobileBack}
       onMobilePresented={onMobilePresented}
     />

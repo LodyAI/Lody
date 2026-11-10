@@ -9,13 +9,13 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
   requests, pins and caches by generation; never migrate grants on readmission.
 - Persist resource-bound high water and ciphertext, never credentials or freshness.
   Restart requires authenticated latest v3 reads. Verify only the latest original against
-  the current active owner-personal signer and local high-water pin; revision gaps are allowed.
+  a historically admitted owner-personal signer and local high-water pin; revision gaps are allowed.
 - Recheck the current ledger and actual local project before admitting new work.
   Known withdrawal denies immediately; unknown changes have a RAM-only read-start
   lifetime strictly shorter than 15 minutes on wall and monotonic clocks.
 - A verified denial in the accepted pin stays known through failed refreshes and restarts;
-  only a newer verified head releases it. An ineligible current issuer also denies execution.
-  Re-signing starts from private defaults, without importing revoked grants.
+  only a newer verified head releases it. Signer revocation alone preserves grants and advises review.
+  Re-signing preserves the complete current list; new writes require an active owner device.
 - An authenticated read finding no policy for the current generation, or its removal, is
   the private default and a known denial, never an unknown outcome.
 
