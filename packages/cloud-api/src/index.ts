@@ -1,3 +1,7 @@
+export type {
+  MachineIdentityRestoreIntent,
+  MachineIdentityRestoreResult,
+} from './machine-identity-restore';
 export type SubscriptionPaymentStatus = {
   billingInterval: BillingInterval;
   effectiveAt: number | null;

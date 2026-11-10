@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MachineId, MachineViewMeta } from '@lody/shared';
 import {
   buildWorkspaceMachineSelectionPool,
+  getMachineIdentityRestoreCandidates,
   resolveDesktopMachineSelection,
 } from '../src/components/settings/machine-selection';
 import type { MachineTabItem } from '../src/components/settings/machine-tab-list';
@@ -111,5 +112,30 @@ describe('resolveDesktopMachineSelection', () => {
       localMachineId: OWN_LOCAL,
     });
     expect(result.nextSelectedMachineId).toBe(OWN_LOCAL);
+  });
+});
+
+describe('old identity recovery candidates', () => {
+  it('uses account ownership rather than the local-machine ownership shortcut', () => {
+    const localShortcut = item(OWN_LOCAL, { isOwn: true, isOnline: false });
+    const ownedRemote = item(OWN_OTHER, { isOwn: false, isOnline: false });
+    const onlineOwn = item('online-own', { isOwn: true });
+    const unknownOwner = item('unknown-owner', { isOwn: true, isOnline: false });
+    const allItems = [localShortcut, ownedRemote, onlineOwn, unknownOwner];
+    const accessByMachineId = new Map([
+      [OWN_LOCAL, { ownerUserId: 'another-account' }],
+      [OWN_OTHER, { ownerUserId: 'current-account' }],
+      ['online-own' as MachineId, { ownerUserId: 'current-account' }],
+    ]);
+    expect(
+      getMachineIdentityRestoreCandidates({
+        allItems,
+        accessByMachineId,
+        currentUserId: 'current-account',
+      })
+    ).toEqual([ownedRemote.machine]);
+    expect(
+      getMachineIdentityRestoreCandidates({ allItems, accessByMachineId, currentUserId: null })
+    ).toEqual([]);
   });
 });

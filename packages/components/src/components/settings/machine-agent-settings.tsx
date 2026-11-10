@@ -11,6 +11,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
+  MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsProtocolCapability,
   type AcpSessionMonitorSnapshot,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -86,6 +88,7 @@ import {
 import { MachineDetailPane, MachineProvidersSection } from './machine-detail-pane';
 import {
   buildWorkspaceMachineSelectionPool,
+  getMachineIdentityRestoreCandidates,
   resolveDesktopMachineSelection,
 } from './machine-selection';
 import { MachinePills } from './machine-pills';
@@ -999,6 +1002,7 @@ export function MachineAgentSettings({
       machineId: MachineId;
       action: MachineLifecycleAction;
       targetVersion?: string;
+      restoreMachineId?: MachineId;
     }) => {
       if (!runtime || !workspaceId || !authToken) {
         throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
@@ -1011,6 +1015,7 @@ export function MachineAgentSettings({
         action: args.action,
         requestId,
         targetVersion: args.targetVersion,
+        restoreMachineId: args.restoreMachineId,
         sessionToken: authToken,
       });
       if (!minted.ok) {
@@ -1023,6 +1028,7 @@ export function MachineAgentSettings({
         });
         runtime.sendControl({
           type: 'machine/restart',
+          restoreMachineId: args.restoreMachineId,
           machineId: args.machineId,
           workspaceId,
           requesterUserId: minted.requesterUserId,
@@ -1078,6 +1084,30 @@ export function MachineAgentSettings({
     },
     [requestMachineLifecycle]
   );
+
+  const restoreMachineIdentity = useCallback(
+    async (machineId: MachineId, restoreMachineId: MachineId) => {
+      await requestMachineLifecycle({ machineId, action: 'restart', restoreMachineId });
+    },
+    [requestMachineLifecycle]
+  );
+  const restoreIdentityProps = {
+    onRestoreIdentity:
+      isOwn &&
+      selectedCanRemoteRestart &&
+      machineSupportsProtocolCapability(
+        resolvedSelectedMachine,
+        MACHINE_PROTOCOL_CAPABILITIES.machineIdentityRestore,
+        1
+      )
+        ? restoreMachineIdentity
+        : undefined,
+    restoreIdentityCandidates: getMachineIdentityRestoreCandidates({
+      allItems,
+      accessByMachineId,
+      currentUserId,
+    }),
+  };
 
   const upgradeMachine = useCallback(
     async (machineId: MachineId, targetVersion: string) => {
@@ -1394,6 +1424,7 @@ export function MachineAgentSettings({
           {banner ? <div {...stylex.props(styles.bannerSlot)}>{banner}</div> : null}
           <div {...stylex.props(styles.column, styles.clip)}>
             <MachineDetailPane
+              {...restoreIdentityProps}
               key={resolvedSelectedMachine.id}
               mode="devices"
               readOnly={!isOwn}
@@ -1534,6 +1565,7 @@ export function MachineAgentSettings({
         onCollapse={() => selectDesktopMachine(null)}
       >
         <MachineDetailPane
+          {...restoreIdentityProps}
           key={item.machine.id}
           mode="devices"
           readOnly={!isOwn}
@@ -1599,6 +1631,7 @@ export function MachineAgentSettings({
           {header}
           {resolvedSelectedMachine ? (
             <MachineDetailPane
+              {...restoreIdentityProps}
               key={resolvedSelectedMachine.id}
               mode="devices"
               machine={resolvedSelectedMachine}

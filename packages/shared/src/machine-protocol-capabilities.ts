@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  machineIdentityRestore: 'machineIdentityRestore',
   multiRepoProject: 'multiRepoProject',
   projectFolderSelection: 'projectFolderSelection',
   projectFileRoots: 'projectFileRoots',
@@ -171,6 +172,7 @@ export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
 export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
 
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.machineIdentityRestore]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.codeCollabDiffBlobs]: CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION,
   // `session/live-status` accepts `includeActivity` and may answer with `activity`.
   [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,

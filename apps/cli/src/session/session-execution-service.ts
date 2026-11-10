@@ -949,6 +949,17 @@ export class SessionExecutionService {
   }
 
   private readonly shutdownAbort = new AbortController();
+  private machineIdentityRestoreSealed = false;
+
+  isMachineIdentityRestoreIdle(): boolean {
+    // An execution owner can exist before its active presence is published.
+    return !this.machineIdentityRestoreSealed && this.turnRuntimeBySession.size === 0;
+  }
+
+  stopNewIdentityRestoreExecutions(): void {
+    this.machineIdentityRestoreSealed = true;
+  }
+
   private readonly ownedWork = new Set<Promise<unknown>>();
   private ownBookkeeping<T>(sessionId: SessionId, work: Promise<T>): Promise<T | undefined> {
     const observed = work.catch((error: unknown) => {
@@ -4627,6 +4638,7 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
+    if (this.machineIdentityRestoreSealed) return 'identity-restore-pending';
     const { sessionId, sessionDoc, userTurnId } = options;
     const assistantEntryParentTurnId = options.assistantEntryParentTurnId ?? userTurnId;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
@@ -4757,6 +4769,13 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
+      // Recheck after every pre-owner await has finished. No await may separate
+      // this check from registration: Fleet either sees this owner or seals first.
+      // Returning before ownership leaves pending input/history and Inbox intact.
+      if (this.machineIdentityRestoreSealed) {
+        span.end({ outcome: 'identity-restore-pending' });
+        return 'identity-restore-pending';
+      }
       turnId = this.deps.beginConversationTurn(sessionId, assistantEntryParentTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
@@ -6635,10 +6654,12 @@ export class SessionExecutionService {
     rawMessage: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    if (this.machineIdentityRestoreSealed) return;
     const message =
       dispatchOptions?.dispatchSource === 'inbox'
         ? rawMessage
         : await this.withVerifiedRequester(rawMessage);
+    if (this.machineIdentityRestoreSealed) return;
     if (
       dispatchOptions?.dispatchSource === 'inbox' &&
       (!dispatchOptions.inboxBatch || !this.operationInbox)
@@ -6646,6 +6667,7 @@ export class SessionExecutionService {
       throw new Error('INBOX_BATCH_REQUIRED');
     }
     const turn = await this.prepareContinueSessionTurn(message, dispatchOptions);
+    if (this.machineIdentityRestoreSealed) return;
     if (
       dispatchOptions?.dispatchSource !== 'inbox' &&
       (await this.markCancelledUserTurnBeforeOwner({
@@ -7659,8 +7681,11 @@ export class SessionExecutionService {
     rawMessage: SessionCreateRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    if (this.machineIdentityRestoreSealed) return;
     const message = await this.withVerifiedRequester(rawMessage);
+    if (this.machineIdentityRestoreSealed) return;
     const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
+    if (this.machineIdentityRestoreSealed) return;
     const userTurnId =
       typeof message.userTurnId === 'string' && message.userTurnId.trim()
         ? message.userTurnId.trim()

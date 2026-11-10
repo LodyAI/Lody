@@ -558,6 +558,10 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
 
   if (value.type === 'machine/restart' || value.type === 'machine/upgrade') {
     return (
+      (value.restoreMachineId === undefined ||
+        (value.type === 'machine/restart' &&
+          typeof value.restoreMachineId === 'string' &&
+          value.restoreMachineId.trim().length > 0)) &&
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.requesterUserId === 'string' &&

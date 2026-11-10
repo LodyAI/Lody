@@ -402,6 +402,7 @@ export const LoroMachineRestartRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/restart'),
   params: z
     .object({
+      restoreMachineId: z.string().trim().min(1).optional(),
       requesterUserId: z.string().trim().min(1),
       requestToken: z.string().trim().min(1),
       requestId: z.string().trim().min(1),
@@ -3082,6 +3083,7 @@ export class LoroStreamsMachineRpcClient {
   }
 
   async requestMachineRestart(options: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -3094,6 +3096,7 @@ export class LoroStreamsMachineRpcClient {
         requesterUserId: options.requesterUserId,
         requestToken: options.requestToken,
         requestId: options.requestId,
+        ...(options.restoreMachineId ? { restoreMachineId: options.restoreMachineId } : {}),
       },
     })) as MachineRestartResponse | null;
   }

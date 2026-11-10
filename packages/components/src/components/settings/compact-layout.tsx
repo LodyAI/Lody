@@ -36,6 +36,10 @@ interface CompactSectionProps {
   className?: string;
 }
 
+const rowStyles = stylex.create({
+  flush: { paddingInline: 0 },
+});
+
 interface CompactRowProps {
   label: string;
   /** Optional identity mark beside the label and helper. */
@@ -47,6 +51,8 @@ interface CompactRowProps {
   children?: ReactNode;
   className?: string;
   alignTop?: boolean;
+  /** The enclosing dialog or collapsible panel already owns horizontal padding. */
+  inset?: boolean;
   /**
    * The row's control cannot be used here. Its name steps back with the
    * control, and the helper should say why.
@@ -155,6 +161,7 @@ export function CompactRow({
   children,
   className,
   alignTop = false,
+  inset = true,
   disabled = false,
 }: CompactRowProps) {
   const text = (
@@ -172,7 +179,10 @@ export function CompactRow({
 
   return (
     <div
-      {...withClassName(stylex.props(surface.row, alignTop && surface.rowTop), className)}
+      {...withClassName(
+        stylex.props(surface.row, alignTop && surface.rowTop, !inset && rowStyles.flush),
+        className
+      )}
       data-disabled={disabled ? '' : undefined}
     >
       {/* A bare label may use the whole column: long command names should not wrap early. */}

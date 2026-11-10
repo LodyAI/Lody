@@ -49,6 +49,10 @@
 
 ## Turn execution
 
+- Machine identity recovery seals actual Turn admission before restart. Recheck after
+  pre-owner awaits; sealed requests retain pending history and Inbox inputs without
+  marking them handled, failed or canceled. Registered Turns block recovery even
+  before presence publication.
 - Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before

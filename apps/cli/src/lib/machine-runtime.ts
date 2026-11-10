@@ -196,6 +196,10 @@ export class MachineRuntime {
     return this.handler?.getActiveTurnCount() ?? 0;
   }
 
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.handler?.isIdentityRestoreExecutionIdle() ?? false;
+  }
+
   isRemoteBridgeAttached(): boolean {
     return this.remoteBridgeAttached;
   }
@@ -273,6 +277,11 @@ export class MachineRuntime {
       await handler.cancelActiveTurnsForRemoteRevocation();
       handler.recheckPendingSessionAccess('remote-access-revoked');
     });
+  }
+
+  stopNewIdentityRestoreDispatch(): void {
+    this.messageProcessor.stop();
+    this.handler?.stopNewIdentityRestoreDispatch();
   }
 
   async prepareForShutdown(): Promise<void> {
