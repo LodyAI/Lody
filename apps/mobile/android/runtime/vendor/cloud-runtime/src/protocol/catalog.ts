@@ -193,7 +193,9 @@ export function projectRows(
       awaitingUserSince: stamp(value.awaitingUserSince),
       branchName: text(value.branchName) || undefined,
       baseBranch:
-        text(value.baseBranch).trim() || text(project.branch).trim() || undefined,
+        text(value.baseBranch).trim() ||
+        text(project.branch).trim() ||
+        undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
       pullRequests: pullRequestReferences(

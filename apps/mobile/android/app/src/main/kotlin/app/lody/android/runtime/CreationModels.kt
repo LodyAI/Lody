@@ -4,7 +4,7 @@ data class CreationChoice(val id: String, val name: String)
 data class CreationAgent(val id: String, val name: String, val machineId: String, val cliType: String, val agentType: String)
 /** An agent switch the composer may offer (ACP config option); [options] are a select's value ids. */
 data class CreationConfigOption(val id: String, val category: String?, val type: String, val currentValue: Any?, val options: List<String> = emptyList())
-data class CreationCapability(val machineId: String, val cliType: String, val agentType: String, val models: List<CreationChoice>, val modes: List<CreationChoice>, val efforts: Map<String, List<String>>, val agentConfigId: String? = null, val defaultModelId: String? = null, val defaultEfforts: List<String> = emptyList(), val switches: List<CreationConfigOption> = emptyList(), val fastModes: Map<String, Boolean> = emptyMap()) {
+data class CreationCapability(val machineId: String, val cliType: String, val agentType: String, val models: List<CreationChoice>, val modes: List<CreationChoice>, val efforts: Map<String, List<String>>, val agentConfigId: String? = null, val defaultModelId: String? = null, val defaultEfforts: List<String> = emptyList(), val switches: List<CreationConfigOption> = emptyList(), val fastModes: Map<String, Boolean> = emptyMap(), val steer: Boolean = false) {
     fun effortsFor(modelId: String?): List<String> = efforts[modelId ?: defaultModelId] ?: defaultEfforts
 
     /** Web's Plan switch: Lody's boolean `plan_mode`, or a collaboration mode with a `plan` value. */

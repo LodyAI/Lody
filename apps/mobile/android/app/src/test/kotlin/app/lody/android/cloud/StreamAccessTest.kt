@@ -17,8 +17,8 @@ class StreamAccessTest {
  }
  @Test fun permitsCreationAndProviderAppendsButNotOtherWorkspaceWrites() {
   val access=StreamAccess("workspace","https://streams.example.org")
-  for ((stream,method) in listOf("workspace:mf:m" to "POST", "workspace:meta" to "POST", "workspace:s:s1" to "PUT", "workspace:s:s1" to "POST", "workspace:rpc:req:m" to "POST", "workspace:rpc:res:m:r" to "PUT", "workspace:rpc:res:m:r" to "GET")) assertTrue(access.allows("https://streams.example.org/ds/lody/$stream",method))
-  for ((stream,method) in listOf("other:s:s1" to "POST", "workspace:mf:m" to "PUT", "workspace:mf:m" to "DELETE", "other:mf:m" to "POST", "workspace:mf:m/bootstrap" to "POST", "workspace:meta" to "PUT", "workspace:rpc:req:m" to "GET", "workspace:rpc:res:m:r" to "POST", "workspace:s:s1/bootstrap" to "POST")) assertFalse(access.allows("https://streams.example.org/ds/lody/$stream",method))
+  for ((stream,method) in listOf("workspace:mf:m" to "POST", "workspace:meta" to "POST", "workspace:s:s1" to "PUT", "workspace:s:s1" to "POST", "workspace:rpc:req:m" to "POST", "workspace:rpc:res:m:r" to "PUT", "workspace:rpc:res:m:r" to "GET", "workspace:wf:workspace" to "GET", "workspace:wf:workspace" to "POST", "workspace:wf:workspace" to "PUT")) assertTrue(access.allows("https://streams.example.org/ds/lody/$stream",method))
+  for ((stream,method) in listOf("other:s:s1" to "POST", "workspace:mf:m" to "PUT", "workspace:mf:m" to "DELETE", "other:mf:m" to "POST", "workspace:mf:m/bootstrap" to "POST", "workspace:meta" to "PUT", "workspace:rpc:req:m" to "GET", "workspace:rpc:res:m:r" to "POST", "workspace:s:s1/bootstrap" to "POST", "workspace:wf:workspace" to "DELETE", "other:wf:workspace" to "GET", "workspace:wf:other" to "GET")) assertFalse(access.allows("https://streams.example.org/ds/lody/$stream",method))
  }
  @Test fun permitsScheduleRegistryAndDocumentsInsideTheWorkspace() {
   val access=StreamAccess("workspace","https://streams.example.org")

@@ -111,7 +111,6 @@ final class AgentRoleEditorController: LodyFormController {
     configuration.cornerStyle = .capsule
     configuration.contentInsets = .zero
     emojiButton.configuration = configuration
-    emojiButton.titleLabel?.font = .systemFont(ofSize: 44)
     emojiButton.accessibilityIdentifier = "role-emoji"
     emojiButton.accessibilityHint = text("emojiHint")
     emojiButton.addAction(UIAction { [weak self] _ in self?.pickEmoji() }, for: .touchUpInside)
@@ -188,7 +187,9 @@ final class AgentRoleEditorController: LodyFormController {
     deleteButton.isEnabled = editable
     emojiButton.isEnabled = editable
     emojiHint.isHidden = !editable
-    emojiButton.setTitle(emoji, for: .normal)
+    var configuration = emojiButton.configuration
+    configuration?.attributedTitle = AttributedString(emoji, attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 44)]))
+    emojiButton.configuration = configuration
     emojiButton.accessibilityLabel = String.localizedStringWithFormat(text("emojiLabel"), emoji)
     targetButton.setTitle(target.map { "\($0.name) · \($0.machineName)" } ?? text("agent"), for: .normal)
     targetButton.accessibilityLabel = targetButton.title(for: .normal)

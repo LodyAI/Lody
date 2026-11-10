@@ -23,6 +23,8 @@ sealed interface RuntimeCommand {
     data class ProviderOperation(val machineId: String, val id: String?, val action: String, val cliType: String? = null, val agentType: String? = null) : RuntimeCommand
     data class ProviderAuth(val request: ProviderAuthRequest) : RuntimeCommand
     data class AgentProviders(val action: ProviderAction) : RuntimeCommand
+    /** Agent Roles settings: list, save (with the listed base) or delete; writes are never replayed. */
+    data class AgentRoleSettings(val action: RoleSettingsAction) : RuntimeCommand
     data class SetTabClosed(val id: String, val closed: Boolean) : RuntimeCommand
     data class CreateTab(val parentId: String, val id: String, val title: String) : RuntimeCommand
     data class GetCreationOptions(val projectId: String?, val agentConfigId: String? = null) : RuntimeCommand
@@ -65,6 +67,7 @@ sealed interface RuntimeResult {
     data class ProviderOperation(val value: app.lody.android.runtime.ProviderOperation) : RuntimeResult
     data class ProviderAuth(val value: ProviderAuthState) : RuntimeResult
     data class AgentProviders(val value: app.lody.android.runtime.AgentProviders) : RuntimeResult
+    data class RoleSettings(val value: RoleSettingsSnapshot) : RuntimeResult
     data class MessageAction(val value: org.json.JSONObject) : RuntimeResult
     data class Options(val value: CreationOptions) : RuntimeResult
     data class Roles(val value: List<AgentRole>) : RuntimeResult
@@ -244,6 +247,8 @@ data class SendTextRequest(
     val agentConfigId: String? = null,
     /** Agent switches the reader changed (Plan, Fast); empty sends none. */
     val configOptionValues: Map<String, Any> = emptyMap(),
+    /** Steer the running reply instead of queueing (the "Guide" preference, when the agent can steer). */
+    val guide: Boolean = false,
 )
 /** What a turn says about its Agent Role: inherit the latest turn's, an explicit None, or a Role. */
 sealed interface RoleSend {

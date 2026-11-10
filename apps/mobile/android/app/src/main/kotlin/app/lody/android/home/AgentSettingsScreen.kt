@@ -61,6 +61,10 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
             IconButton(onClick = { tasks.launch { state?.refresh() } }, enabled = state != null && !state.busy) {
                 Icon(LodyIcons.Refresh, stringResource(R.string.settings_agent_refresh))
             }
+            // A new provider on the selected computer.
+            IconButton(onClick = { editor = ProviderEditor() }, enabled = canManage && machine?.online == true) {
+                Icon(LodyIcons.Plus, stringResource(R.string.settings_agent_add))
+            }
         }
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
@@ -72,24 +76,14 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
             } else {
                 item {
                     Column(Modifier.padding(vertical = LodySpacing.md)) {
-                        SettingsLine(machine.name.ifBlank { machine.id }, LodyIcons.Machine,
-                            stringResource(if (machine.online) R.string.settings_agent_online else R.string.settings_agent_offline),
-                            onClick = { picker = true }, leading = { PresenceDot(machine.online) })
+                        SettingsLine(machine.name.ifBlank { machine.id }, LodyIcons.Machine, machineLine(machine),
+                            onClick = { picker = true }.takeIf { data?.machines.orEmpty().size > 1 }, leading = { PresenceDot(machine.online) })
                     }
                 }
                 if (!machine.online || machine.readOnly) item {
                     ProviderNotice(stringResource(if (machine.readOnly) R.string.settings_agent_read_only else R.string.settings_agent_offline_hint))
                 }
-                item {
-                    Row(Modifier.fillMaxWidth().padding(start = LodySpacing.xxl, end = LodySpacing.sm), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.settings_agent_providers), Modifier.weight(1f), style = LodyTheme.typography.footnote, color = LodyTheme.colors.textSecondary)
-                        TextButton(onClick = { editor = ProviderEditor() }, enabled = canManage) {
-                            Icon(LodyIcons.Plus, null, Modifier.size(LodyIconSize.sm))
-                            Spacer(Modifier.width(LodySpacing.xs))
-                            Text(stringResource(R.string.settings_agent_add))
-                        }
-                    }
-                }
+                item { SettingsHeading(stringResource(R.string.settings_agent_providers)) }
                 val providers = data?.providers.orEmpty().filter { it.machineId == machine.id }
                 if (providers.isEmpty()) item { ProviderNotice(stringResource(R.string.settings_agent_empty)) }
                 items(providers, key = { "provider-${it.id}" }) { provider ->
@@ -139,8 +133,7 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
         SettingsHeading(stringResource(R.string.settings_agent_machines))
         LazyColumn {
             items(data?.machines.orEmpty(), key = { it.id }) { item ->
-                SettingsLine(item.name.ifBlank { item.id }, LodyIcons.Machine,
-                    stringResource(if (item.online) R.string.settings_agent_online else R.string.settings_agent_offline),
+                SettingsLine(item.name.ifBlank { item.id }, LodyIcons.Machine, machineLine(item),
                     onClick = { machineId = item.id; picker = false }, leading = { PresenceDot(item.online) }, trailing = {
                         if (item.id == machine?.id) Icon(LodyIcons.Check, stringResource(R.string.settings_agent_selected), tint = LodyTheme.colors.accentFg)
                     })
@@ -157,6 +150,11 @@ internal fun AgentSettingsScreen(home: ChatListUiState, service: AgentProviderSe
 }
 
 internal data class ProviderEditor(val base: AgentProvider? = null, val id: String = base?.id ?: UUID.randomUUID().toString())
+
+@Composable
+private fun machineLine(machine: ProviderMachine): String =
+    stringResource(if (machine.online) R.string.settings_agent_online else R.string.settings_agent_offline) + " · " +
+        stringResource(if (machine.readOnly) R.string.settings_agent_teammate_machine else R.string.settings_agent_own_machine)
 
 @Composable
 private fun PresenceDot(online: Boolean) {

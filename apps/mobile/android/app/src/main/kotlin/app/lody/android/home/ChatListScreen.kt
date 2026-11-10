@@ -190,6 +190,7 @@ fun ChatListScreen(
     /** Computers, agents, models and modes for the schedule editor. */
     creation: app.lody.android.create.CreationService? = null,
     agentProviders: AgentProviderService? = null,
+    roleSettings: RoleSettingsService? = null,
     scope: app.lody.android.runtime.RuntimeScope? = null,
     /** Opens a conversation by id (a schedule's last run). */
     onOpenSession: (String) -> Unit = {},
@@ -215,6 +216,8 @@ fun ChatListScreen(
     // Schedules: the list for this workspace and the open editor (a schedule id or [NEW_SCHEDULE]).
     val scheduleList = app.lody.android.schedules.rememberSchedulesState(schedules, scope)
     var agentsOpen by rememberSaveable(scope) { mutableStateOf(false) }
+    var preferencesOpen by rememberSaveable { mutableStateOf(false) }
+    var rolesOpen by rememberSaveable(scope) { mutableStateOf(false) }
     val deferredMessage = stringResource(R.string.settings_deferred)
     var scheduleEditor by rememberSaveable(scope) { mutableStateOf<String?>(null) }
     LaunchedEffect(tab, scheduleList, state.sync) {
@@ -237,6 +240,14 @@ fun ChatListScreen(
 
     BackHandler(enabled = searching) { closeSearch() }
 
+    if (preferencesOpen) {
+        PreferencesScreen(onBack = { preferencesOpen = false })
+        return
+    }
+    if (rolesOpen) {
+        RolesScreen(state, roleSettings, scope, onBack = { rolesOpen = false })
+        return
+    }
     if (agentsOpen) {
         AgentSettingsScreen(state, agentProviders, scope, onBack = { agentsOpen = false })
         return
@@ -315,7 +326,7 @@ fun ChatListScreen(
                 onToggleIdle = { idleExpanded = !idleExpanded },
                 onOpenChat = onOpenChat,
             )
-            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onDeferred = { notice(deferredMessage) })
+            else -> SettingsHome(state, padding, onSelectWorkspace, onSignOut, onAgents = { agentsOpen = true }, onPreferences = { preferencesOpen = true }, onRoles = { rolesOpen = true }, onDeferred = { notice(deferredMessage) })
         }
     }
     }

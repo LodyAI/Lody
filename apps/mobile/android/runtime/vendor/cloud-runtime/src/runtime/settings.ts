@@ -11,14 +11,81 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
-// Settings are read on demand inside the native-owned runtime. A fresh bootstrap
-// before an edit preserves fields changed by another client while the editor was open.
+// Settings are read on demand inside the native-owned runtime. List reads may opt
+// into a per-runtime cache of each stream's last read, so the next list only catches
+// up from its offset instead of bootstrapping the whole history. Callers always
+// receive a private copy, so a write that fails to append never leaks into the
+// cache; writes and turn-time reads still bootstrap fresh.
+type Cached = {
+  flock: Flock;
+  offset: string;
+  cursor: string | undefined;
+  size: number;
+};
+const replicas = new Map<string, Cached>();
+const SETTINGS_LIMIT = 8 * 1024 * 1024;
+
+/** Drops every cached settings read (a new account or workspace). */
+export function forgetSettings() {
+  replicas.clear();
+}
+
+function copy(flock: Flock) {
+  const result = new Flock(`lody-ios-settings-${crypto.randomUUID()}`);
+  result.importFile(flock.exportFile());
+  return result;
+}
+
+async function catchUp(
+  client: Awaited<ReturnType<typeof clientFor>>,
+  cached: Cached,
+  signal: AbortSignal,
+) {
+  const apply = (bytes: Uint8Array) => {
+    cached.size += bytes.length;
+    if (cached.size > SETTINGS_LIMIT) throw new Error('catalog_limit');
+    for (const frame of decodeFrames(bytes))
+      cached.flock.importJson(JSON.parse(new TextDecoder().decode(frame)));
+  };
+  for (let page = 0; ; page++) {
+    signal.throwIfAborted();
+    if (page >= 100) throw new Error('catalog_limit');
+    const next = await client.readOnce({
+      offset: cached.offset,
+      cursor: cached.cursor,
+      signal,
+    });
+    if (!next.ok) throw new Error(next.result.code);
+    if (next.result.payload) apply(next.result.payload.body);
+    if (next.result.upToDate) {
+      cached.offset = next.result.nextOffset;
+      cached.cursor = next.result.cursor;
+      return;
+    }
+    if (cached.offset === next.result.nextOffset)
+      throw new Error('stalled_cursor');
+    cached.offset = next.result.nextOffset;
+    cached.cursor = next.result.cursor;
+  }
+}
+
 export async function openSettings(
   stream: string,
   grant: Grant,
   signal: AbortSignal,
+  options: { cached?: boolean } = {},
 ) {
   const client = await clientFor(stream, grant);
+  const cached = options.cached ? replicas.get(stream) : undefined;
+  if (cached) {
+    try {
+      await catchUp(client, cached, signal);
+      return { flock: copy(cached.flock), client };
+    } catch (error) {
+      replicas.delete(stream);
+      if (signal.aborted) throw error;
+    }
+  }
   const initial = await client.bootstrap({ signal });
   if (!initial.ok) throw new Error(initial.result.code);
   const flock = new Flock(`lody-ios-settings-${crypto.randomUUID()}`);
@@ -26,7 +93,7 @@ export async function openSettings(
   let size = 0;
   const bound = (bytes: Uint8Array) => {
     size += bytes.length;
-    if (size > 8 * 1024 * 1024) throw new Error('catalog_limit');
+    if (size > SETTINGS_LIMIT) throw new Error('catalog_limit');
   };
   const apply = (bytes: Uint8Array) => {
     bound(bytes);
@@ -59,7 +126,10 @@ export async function openSettings(
       throw new Error('stalled_cursor');
     ({ nextOffset: offset, cursor, upToDate } = next.result);
   }
-  return { flock, client };
+  if (!options.cached) return { flock, client };
+  if (replicas.size >= 64) replicas.delete(replicas.keys().next().value!);
+  replicas.set(stream, { flock, offset, cursor, size });
+  return { flock: copy(flock), client };
 }
 
 export function settingsRows(

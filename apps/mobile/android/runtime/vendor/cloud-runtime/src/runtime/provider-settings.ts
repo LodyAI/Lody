@@ -348,9 +348,13 @@ export async function agentProviders(
   signal: AbortSignal,
   presence: MachinePresence,
   check: () => void,
+  live?: { meta: Flock; machines: Map<string, Flock> },
 ): Promise<Result> {
   check();
-  const meta = await openSettings(`${request.workspaceId}:meta`, grant, signal);
+  const listing = request.action === 'list' && !!live;
+  const meta = listing
+    ? { flock: live!.meta }
+    : await openSettings(`${request.workspaceId}:meta`, grant, signal);
   check();
   const machines = settingsRows('machine', meta.flock).map((item) => {
     const room = `machine-${item.id}`,
@@ -377,6 +381,13 @@ export async function agentProviders(
         Number(object(field('protocolCapabilities')).piExtensions) >= 1,
     };
   });
+  // Online computers lead, and among them the user's own.
+  machines.sort(
+    (a, b) =>
+      Number(b.online) - Number(a.online) ||
+      Number(a.readOnly) - Number(b.readOnly) ||
+      a.name.localeCompare(b.name),
+  );
   const result: Result = {
     machines,
     providers: [],
@@ -392,6 +403,41 @@ export async function agentProviders(
   else selected = request.setup.machineId;
   if (selected && !machines.some((item) => item.id === selected))
     throw new Error('machine_unavailable');
+  if (listing) {
+    const pending: typeof machines = [];
+    for (const machine of machines.filter(
+      (item) => !selected || item.id === selected,
+    )) {
+      const flock = live!.machines.get(machine.id);
+      if (flock) {
+        const rows = providerRows(flock, machine.id, machine.readOnly);
+        result.providers.push(...rows.providers);
+        result.setups.push(...rows.setups);
+      } else pending.push(machine);
+    }
+    // Computers whose replica is not synced yet are read in parallel.
+    const fetched = await Promise.all(
+      pending.map((machine) =>
+        openSettings(`${request.workspaceId}:mf:${machine.id}`, grant, signal, {
+          cached: true,
+        })
+          .then(({ flock }) =>
+            providerRows(flock, machine.id, machine.readOnly),
+          )
+          .catch((error) => {
+            if (error instanceof Error && error.message === 'not_found')
+              return { providers: [], setups: [] };
+            throw error;
+          }),
+      ),
+    );
+    check();
+    for (const rows of fetched) {
+      result.providers.push(...rows.providers);
+      result.setups.push(...rows.setups);
+    }
+    return result;
+  }
   for (const machine of machines.filter(
     (item) => !selected || item.id === selected,
   )) {

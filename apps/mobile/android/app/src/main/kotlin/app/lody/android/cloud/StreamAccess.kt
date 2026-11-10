@@ -24,6 +24,8 @@ internal class StreamAccess(val workspaceId: String, gateway: String) {
         val permitted = when {
             stream == "$workspaceId:meta" -> read || method == "POST"
             stream.matches(Regex("$workspace:mf:$id")) -> read || method == "POST"
+            // Agent Roles: the workspace Flock is read, created when missing and appended by Role edits.
+            stream == "$workspaceId:wf:workspace" -> read || method in setOf("PUT", "POST")
             // Schedules: the Flock registry and one schedule's Loro doc are each created, read and appended.
             stream == "$workspaceId:sr" -> read || method in setOf("PUT", "POST")
             stream.matches(Regex("$workspace:schedule:$id")) -> read || method in setOf("PUT", "POST")

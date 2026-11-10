@@ -43,3 +43,20 @@ test('provider detail and interactive auth use native scope and redact failures'
  assert.deepEqual((await adapter.agentProviderDetail({machineId:'machine',id:'provider',workspaceId:'other'})).env,[{key:'EXAMPLE_TOKEN',hasValue:true}]);
  assert.deepEqual(await adapter.agentProviderAuth({action:'submit',values:{key:'synthetic'},userId:'other'}),{error:'provider_write_unknown'});
 });
+import {roleCommands} from '../src/role-commands.mjs';
+test('role settings use the verified scope, keep known refusals and report other write failures as unknown',async()=>{
+ let writes=0;
+ const adapter=roleCommands({async agentRoles(input){
+  assert.equal(input.workspaceId,'workspace');assert.equal(input.userId,'user');
+  if(input.action==='list')return {roles:[],agents:[]};
+  writes++;
+  throw Error(input.action==='delete'?'role_read_only':'private backend diagnostic');
+ }},()=>({workspaceId:'workspace',userId:'user'}));
+ assert.deepEqual(await adapter.agentRoleSettings({action:'list',workspaceId:'foreign',userId:'other'}),{roles:[],agents:[]});
+ assert.deepEqual(await adapter.agentRoleSettings({action:'delete',base:{id:'r'}}),{error:'role_read_only'});
+ assert.deepEqual(await adapter.agentRoleSettings({action:'save',id:'r',base:null,fields:{}}),{error:'role_write_unknown'});
+ assert.equal(writes,2);
+ assert.deepEqual(await adapter.agentRoleSettings({action:'drop'}),{error:'role_invalid'});
+ const offline=roleCommands({agentRoles(){throw Error('must not run')}},()=>null);
+ assert.deepEqual(await offline.agentRoleSettings({action:'list'}),{error:'not_connected'});
+});

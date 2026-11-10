@@ -224,10 +224,25 @@ write retry identity handling are unchanged. Open last chat uses Home navigation
 ## Settings
 
 Settings Home mirrors iOS flat groups with account/workspace controls, preferences,
-Agent settings and sign-out. There is no Machines destination. Other unfinished
-settings destinations show an explicit placeholder.
+Agent settings, Agent Roles and sign-out. There is no Machines or Agent conversation
+sync destination. Other unfinished settings destinations (including prompt shortcuts,
+which need a native shortcut-cloud bridge) show an explicit placeholder.
 
-Agent settings select one machine above its provider list. Native forms support
+Preferences follows iOS: language and notifications open the system pages for this
+app, then the queued-message behaviour (`AppPreferences`). Steer applies only when
+the conversation's agent advertises `steer`; otherwise a message sent while it works
+queues. Android has no alternate app icon.
+
+Agent Roles (`RolesScreen`, runtime `agentRoleSettings`) list your Roles and those
+shared by teammates with their emoji, and create, edit and delete your own (emoji
+grid, name, description, target agent, sharing, instructions). The last list shows
+from process memory while a live read refreshes it; only a live list enables writes.
+Saves and deletes show at once and roll back on failure; unknown outcomes are never
+replayed. Canonical role settings validate ownership and conflicts.
+
+Agent settings select one machine above its provider list (online and own machines
+first); the top bar's "+" adds a provider to it, and the last list shows from process
+memory while refreshing. Deletions leave the list at once and return on failure. Native forms support
 catalog entries and presets, names/prompts/descriptions, custom commands, write-only
 environment changes, endpoints, Codex profiles, runtime paths and capability-derived
 title options. Stored credential values are never returned to forms; omitting an
@@ -256,7 +271,7 @@ shared session usage meters and reset-time controls. Absent usage stays hidden.
 The native adapter uses canonical `agentProviders`, `agentProviderDetail`,
 `agentProviderProbe`, `agentProviderAuth` and `agentProviderOperation` with verified
 native identity. The reviewed runtime snapshot is fixed at
-`82e848b8e01937bec9768c64d342b81f1d44bd6e` with matching provenance and hashes.
+`eff22abfca8108a5a3ccd1a59eb05935f7e2ee49` with matching provenance and hashes.
 Native compilation and synthetic acceptance do not establish cloud integration.
 
 `ANDROID_SERIAL=<disposable-emulator> python3 verification/agent-settings.py` runs

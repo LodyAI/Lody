@@ -85,6 +85,8 @@ export const AgentRolesParams = z
         description: z.string(),
         promptPrefix: z.string(),
         visibility,
+        /** One short glyph (web `normalizeAgentRoleEmoji`); omitted keeps the stored one. */
+        emoji: z.string().optional(),
       }),
       target: z
         .object({
