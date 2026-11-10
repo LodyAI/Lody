@@ -120,6 +120,18 @@ export class PersonalHostPlatform extends Context.Service<
         access: E2eeDeviceAccess,
         token: string
       ): Effect.Effect<E2eeMemberReplies['revoke'], unknown>;
+      /** Joining side, authenticated by the account login only: the joining device has
+       * no admitted credential yet. Submission is retried with the retained original. */
+      submit?(input: {
+        token: string;
+        keyPackageHex: string;
+      }): Effect.Effect<E2eeMemberReplies['submit'], unknown>;
+      /** Relay state for this account's own request. `committed` is a hint; only the
+       * verified signed history admits the device. */
+      claim?(input: {
+        workspaceId: string;
+        requestId: string;
+      }): Effect.Effect<E2eeMemberReplies['claim'], unknown>;
     };
     /** Real optional policy host. Uses existing core policy verification/pins; absence does not advertise sharing. */
     machineSharing?(
