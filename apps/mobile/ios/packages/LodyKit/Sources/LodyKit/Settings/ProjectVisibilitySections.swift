@@ -15,6 +15,28 @@ struct VisibilityRow: Codable, Equatable, Sendable {
 struct VisibilitySnapshot: Codable, Equatable, Sendable {
   var userId: String
   var rows: [VisibilityRow]
+  /// The user's own machines; nil when the machine read failed (or a cache predates it).
+  var ownedMachineIds: [String]?
+
+  init(userId: String, rows: [VisibilityRow], ownedMachineIds: [String]? = nil) {
+    self.userId = userId
+    self.rows = rows
+    self.ownedMachineIds = ownedMachineIds
+  }
+
+  /// Registrations plus, as desktop does, a private row for each catalog project on the user's
+  /// own machine that has no registration yet.
+  func effectiveRows(catalog: SettingsCatalog) -> [VisibilityRow] {
+    guard let owned = ownedMachineIds.map({ Set($0) }), !owned.isEmpty else { return rows }
+    var result = rows
+    var keys = Set(rows.map(\.id))
+    for project in catalog.projects where owned.contains(project.machineId) {
+      guard let local = ProjectVisibilitySections.localId(project) else { continue }
+      let row = VisibilityRow(machineId: project.machineId, localProjectId: local, ownerUserId: userId, sharedWithTeam: false, updatedAt: 0)
+      if keys.insert(row.id).inserted { result.append(row) }
+    }
+    return result
+  }
 
   var valid: Bool {
     !userId.isEmpty && rows.count <= 10000 && rows.allSatisfy {
@@ -75,7 +97,8 @@ enum ProjectVisibilitySections {
       }
       groups[machine]?.rows.append(row)
     }
-    for item in snapshot?.rows ?? [] {
+    let effective = snapshot?.effectiveRows(catalog: catalog) ?? []
+    for item in effective {
       let project = catalog.projects.first { $0.id == "\(item.machineId):local:\(item.localProjectId)" }
       let owned = item.ownerUserId == snapshot?.userId
       let value = text(item.sharedWithTeam ? "sharedValue" : "private")
@@ -97,13 +120,14 @@ enum ProjectVisibilitySections {
       }
       append(row, to: item.machineId)
     }
-    // The local catalog is the list's source: a project without a cloud registration (or
-    // before the registration read returns) still shows, with an unknown, read-only state.
+    // The local catalog is the list's source. Before the first registration read, or when the
+    // machine read failed, a project without a row shows as unknown and read only. Once the
+    // user's machines are known, unregistered projects on others' machines stay hidden (desktop).
+    let ownershipKnown = snapshot?.ownedMachineIds != nil
     for project in catalog.projects {
-      let prefix = "\(project.machineId):local:"
-      guard project.id.hasPrefix(prefix) else { continue }
-      let local = String(project.id.dropFirst(prefix.count))
-      if snapshot?.rows.contains(where: { $0.machineId == project.machineId && $0.localProjectId == local }) == true { continue }
+      guard let local = localId(project) else { continue }
+      if effective.contains(where: { $0.machineId == project.machineId && $0.localProjectId == local }) { continue }
+      if ownershipKnown { continue }
       var row = LodyListRow()
       row.id = "unknown:\(project.id)"
       row.title = project.name.isEmpty ? local : project.name
@@ -116,6 +140,13 @@ enum ProjectVisibilitySections {
       append(row, to: project.machineId)
     }
     return order.compactMap { groups[$0] }
+  }
+
+  /// The local project id of a catalog `<machine>:local:<id>` project.
+  static func localId(_ project: SettingsProject) -> String? {
+    let prefix = "\(project.machineId):local:"
+    guard project.id.hasPrefix(prefix) else { return nil }
+    return String(project.id.dropFirst(prefix.count))
   }
 
   private static func symbol(_ shared: Bool) -> String { shared ? "person.2" : "lock" }
