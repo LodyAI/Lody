@@ -234,6 +234,8 @@ its next read rather than claiming verified provenance.
 
 ### Implementation plan and acceptance
 
+The [step-by-step execution plan](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-execution-plan.md) defines dependencies, actions and acceptance for each delivery.
+
 | Stage | Deliverable | Acceptance boundary |
 | --- | --- | --- |
 | 1. Contracts | Resolve the scope questions below; define backend DTOs, current-version provenance states, access checks and credential lifecycle. | No owner-key distribution, no implicit history promises, explicit incomplete-write and conflict results. |

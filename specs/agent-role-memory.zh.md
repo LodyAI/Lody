@@ -172,6 +172,8 @@ Token 可以存在 daemon 和挂载进程的内存中。
 
 ### 实施计划与验收
 
+完整的依赖顺序、每步动作和验收标准见[逐步执行计划](../.agents/notes/proposed/architecture/2026-11-09-lody-memory-execution-plan.zh.md)。
+
 | 阶段 | 交付内容 | 验收边界 |
 | --- | --- | --- |
 | 1. 合同设计 | 明确下方范围问题，定义 backend DTO、当前版本来源状态、访问校验和凭据生命周期。 | 不分发 owner key，不隐含承诺历史恢复，明确写入不完整与冲突结果。 |

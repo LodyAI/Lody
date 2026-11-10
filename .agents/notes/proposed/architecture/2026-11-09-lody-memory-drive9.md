@@ -304,6 +304,8 @@ subsequent access and is distinct from normal renewal.
 
 ## Implementation order and contract verification
 
+The [step-by-step execution plan](2026-11-09-lody-memory-execution-plan.md) defines dependencies, delivery boundaries and release acceptance.
+
 Define entry encoding and source-verification contracts first, then implement the
 authenticated control port, SDK backend, entry tools and source UI. Add shared
 mounts as a separate path. Mount launch timing remains open; engineering stages do
