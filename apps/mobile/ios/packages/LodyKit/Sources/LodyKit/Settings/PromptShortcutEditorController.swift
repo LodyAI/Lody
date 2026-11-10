@@ -9,22 +9,24 @@ final class PromptShortcutEditorController: LodyFormController {
   var failed: (() -> Void)?
   private let workspace: SettingsWorkspace
   private let entry: PromptShortcutEntry?
-  private let value: PromptShortcutValue?
+  /// The body being edited; nil for a new shortcut, or while an existing one's body loads.
+  private var value: PromptShortcutValue?
   private let service: PromptShortcutService
-  private let readOnly: Bool
+  private var readOnly: Bool
   private var busy = false
   private var attempt: PromptShortcutRequest?
   private lazy var name = LodyFormField(
-    id: "shortcut-name", label: String(localized: "settings.remote.name", bundle: .lody), text: value?.name, limit: 60
+    id: "shortcut-name", label: String(localized: "settings.remote.name", bundle: .lody), text: value?.name ?? entry?.name, limit: 60
   )
-  private lazy var slug = LodyFormField(id: "shortcut-slug", label: text("slug"), text: value?.slug, limit: 40)
+  private lazy var slug = LodyFormField(id: "shortcut-slug", label: text("slug"), text: value?.slug ?? entry?.slug, limit: 40)
   private lazy var prompt = LodyFormTextView(
     id: "shortcut-prompt", label: String(localized: "settings.remote.prompt", bundle: .lody), text: value?.prompt,
     limit: PromptShortcutSections.promptLimit, minHeight: 160
   )
   private lazy var shared = LodyFormToggle(
-    id: "shortcut-shared", title: text("workspace"), isOn: value?.visibility == .workspace
+    id: "shortcut-shared", title: text("workspace"), isOn: (value?.visibility.rawValue ?? entry?.visibility.rawValue) == "workspace"
   )
+  private lazy var hintGroup = LodyFormGroup(footer: hints, name, slug)
   private lazy var promptGroup = LodyFormGroup(header: String(localized: "settings.remote.prompt", bundle: .lody), prompt)
   private lazy var cancelItem = Self.barButton(symbol: "xmark", label: String(localized: "common.cancel", bundle: .lody)) { [weak self] in
     self?.closeForm()
@@ -38,7 +40,8 @@ final class PromptShortcutEditorController: LodyFormController {
     self.entry = entry
     self.value = value
     self.service = service
-    readOnly = value.map { PromptShortcutSections.readOnly($0, userId: workspace.userId) } ?? false
+    readOnly = value.map { PromptShortcutSections.readOnly($0, userId: workspace.userId) }
+      ?? entry.map { PromptShortcutSections.viewOnly($0, userId: workspace.userId) } ?? false
     super.init(nibName: nil, bundle: nil)
     title = text("title")
   }
@@ -51,8 +54,7 @@ final class PromptShortcutEditorController: LodyFormController {
     slug.autocapitalizationType = .none
     for field in [name, slug] { field.changed = { [weak self] in self?.render() } }
     prompt.changed = { [weak self] in self?.render() }
-    let hints = (readOnly ? [text("readonly")] : []) + [text("slugHint")]
-    stack.addArrangedSubview(LodyFormGroup(footer: hints.joined(separator: " "), name, slug))
+    stack.addArrangedSubview(hintGroup)
     stack.addArrangedSubview(promptGroup)
     stack.addArrangedSubview(LodyFormGroup(footer: text("visibilityHint"), shared))
     render()
@@ -61,21 +63,40 @@ final class PromptShortcutEditorController: LodyFormController {
   override func didMove(toParent parent: UIViewController?) {
     super.didMove(toParent: parent)
     header?.leftBarButtonItems = [cancelItem]
-    header?.rightBarButtonItems = readOnly ? [] : [saveItem]
     render()
   }
 
+  /// The sheet opens on the index entry at once; its body arrives here.
+  func load(_ value: PromptShortcutValue) {
+    guard entry != nil, self.value == nil else { return }
+    self.value = value
+    readOnly = PromptShortcutSections.readOnly(value, userId: workspace.userId)
+    name.text = value.name
+    slug.text = value.slug
+    prompt.replaceText(value.prompt)
+    shared.toggle.isOn = value.visibility == .workspace
+    render()
+  }
+
+  private var hints: String { ((readOnly ? [text("readonly")] : []) + [text("slugHint")]).joined(separator: " ") }
+
+  /// An existing shortcut whose body has not arrived yet.
+  private var pending: Bool { entry != nil && value == nil }
+
   private var valid: Bool {
-    !name.trimmed.isEmpty && !prompt.trimmed.isEmpty && PromptShortcutSections.validSlug(slug.text ?? "")
+    !pending && !name.trimmed.isEmpty && !prompt.trimmed.isEmpty && PromptShortcutSections.validSlug(slug.text ?? "")
   }
 
   private func render() {
     guard isViewLoaded else { return }
-    let editable = !readOnly && !busy && attempt == nil
+    let editable = !readOnly && !busy && !pending && attempt == nil
     for field in [name, slug] { field.isEnabled = editable }
     prompt.isEditable = editable
     shared.toggle.isEnabled = editable && entry == nil
-    promptGroup.footer = attempt == nil ? nil : text("uncertain")
+    hintGroup.footer = hints
+    promptGroup.footer = pending ? String(localized: "common.loading", bundle: .lody) : attempt == nil ? nil : text("uncertain")
+    let trailing = readOnly ? [] : [saveItem]
+    if header?.rightBarButtonItems ?? [] != trailing { header?.rightBarButtonItems = trailing }
     cancelItem.isEnabled = !busy
     saveItem.accessibilityLabel = String(localized: String.LocalizationValue(attempt == nil ? "common.save" : "common.retry"), bundle: .lody)
     saveItem.isEnabled = !busy && valid
