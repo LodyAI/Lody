@@ -1,0 +1,69 @@
+---
+title: Permission Ledger
+description: A closer look at the permission ledger behind Lody end-to-end encrypted workspaces - signed records, the hash chain, who may sign what, how devices verify it, and what it relies on.
+---
+
+# Permission Ledger
+
+Every end-to-end encrypted workspace has a **permission ledger**. In the encryption console it appears as the change history. The ledger decides who is a member, what role each person has, and which devices may receive keys.
+
+## What the ledger records
+
+The ledger is an ordered list of records, each describing one change, for example:
+
+- Creating the workspace (the first record, the "genesis")
+- Admitting a member, changing a role, removing a member
+- Adding or revoking a device
+- Replacing the workspace key
+- Transferring ownership
+
+It records **account IDs and device public keys**, never conversations or files. Names and avatars come from account profiles and are not in the ledger.
+
+## Every record is signed
+
+Each record is signed by the person making the change, **on their own authorized personal device**. The signature covers the operation, its target and the workspace; changing anything breaks it.
+
+The server stores and relays records but **holds nobody's signing key**, so it cannot sign for anyone and cannot quietly add a member or a device.
+
+## Records form a chain
+
+Each record contains the hash of the one before it, all the way back to genesis.
+
+- Removing, inserting or reordering any record breaks the chain, and devices notice.
+- A new record can only be appended at the current end. If two people submit at once, only one succeeds; the other refreshes and confirms again.
+- Changes take effect in the order they were committed. If B admits C before the owner removes B, C stays a member; if the removal commits first, B's earlier invitation no longer works.
+
+## Who may sign what
+
+For every change, devices check the signer's permission **against the ledger as it stood just before that change**, not against what the signer could do when they joined.
+
+| Change | Who may sign |
+| --- | --- |
+| Admit a member | Owner or administrator |
+| Remove a member | Owner or administrator |
+| Remove an administrator, change roles | Owner only |
+| Transfer ownership | Owner only; the former owner becomes an administrator |
+| Add your own new device | One of your authorized devices; a recovery file if all are lost |
+| Revoke a device | Its owner, or a member with management permission |
+| Replace the workspace key | Owner or administrator |
+
+Remote machines and recovery devices **never have management permission**; they only receive keys and do work.
+
+## How devices verify the ledger
+
+- **Existing devices** accept a new record only if it links to the previous one, its signature is valid, and its signer had permission at that point.
+- **Newly joined devices** do not always replay from genesis. They can accept a "current state" snapshot signed by an owner's or administrator's device, then verify every record after it. That means trusting the snapshot's signer.
+- **When something fails**, the device stops at the last trusted record, keeps the evidence and pauses inviting and approving. It **never repairs or skips** automatically. Existing conversations stay readable.
+
+## Revoking and replacing keys
+
+- Revoking a device affects only that device; revoking your laptop does not also revoke the phone it once approved.
+- Removing a member cuts off all of their devices immediately. Afterwards, **replace the workspace key**: the new key goes only to devices still authorized, so an old device holding the old key cannot decrypt new content. History already downloaded to their devices cannot be taken back.
+
+## What the ledger relies on
+
+The ledger stops the server from **forging** any signature. What it cannot do on its own is make sure everyone holds the **same, latest** ledger.
+
+The current version assumes the server serves a complete ledger that is not rolled back or forked. A server that showed different people different versions still could not forge signatures, but it could hide a revocation from some of them.
+
+That is what the [security code](/docs/encrypted-workspaces-security-code) is for: comparing codes with a teammate reveals whether you hold the same ledger.

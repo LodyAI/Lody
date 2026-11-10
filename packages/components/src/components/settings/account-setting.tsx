@@ -69,8 +69,11 @@ export async function persistUserAvatar({
 
 export function AccountSettingsComponent({
   surface = 'account',
+  encryptedTeamManagement = true,
 }: {
   surface?: AccountSettingsSurface;
+  /** Desktop General leaves encrypted invitations to the encryption console. */
+  encryptedTeamManagement?: boolean;
 }) {
   // Personal account and workspace administration are cloud-account surfaces.
   // Registry-level gating hides their tabs without `cloudAccount`; this is the
@@ -79,10 +82,18 @@ export function AccountSettingsComponent({
   if (!cloudAccountAvailable) {
     return null;
   }
-  return <CloudAccountSettings surface={surface} />;
+  return (
+    <CloudAccountSettings surface={surface} encryptedTeamManagement={encryptedTeamManagement} />
+  );
 }
 
-function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) {
+function CloudAccountSettings({
+  surface,
+  encryptedTeamManagement,
+}: {
+  surface: AccountSettingsSurface;
+  encryptedTeamManagement: boolean;
+}) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const transferOwnership = useLegacyWorkspaceMutation(
@@ -765,7 +776,10 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         ) : undefined
       }
       workspaceJoinRequestsSlot={
-        encrypted && platform.e2eeWorkspaces?.runtime && currentUserId ? (
+        encrypted &&
+        encryptedTeamManagement &&
+        platform.e2eeWorkspaces?.runtime &&
+        currentUserId ? (
           <E2eeTeamSettingsHost
             runtime={platform.e2eeWorkspaces.runtime}
             workspaceId={activeOrganization.id}

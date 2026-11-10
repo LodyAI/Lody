@@ -12,6 +12,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { getAppShareUrl } from '@/lib/app-location';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { SeatCostNotice, SeatAdmissionActions, isSeatAdmissionReady } from './invite-member-dialog';
 
 type Runtime = Pick<
@@ -27,6 +28,10 @@ type Runtime = Pick<
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  // The address and its send button stay on one line.
+  inviteRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  inviteField: { flexGrow: 1, minWidth: 0 },
+  approveCost: { fontSize: text.footnoteSize, color: colors.warning },
   identity: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' },
   label: { fontSize: text.subheadlineSize, color: colors.secondaryLabel },
   item: {
@@ -46,6 +51,13 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
 });
+/** First 16 hex digits in groups of four: what an applicant reads aloud to compare. */
+const deviceFingerprint = (key: string) =>
+  key
+    .slice(0, 16)
+    .toUpperCase()
+    .replace(/(.{4})(?=.)/g, '$1 ');
+
 export const memberInvitationUrl = (offer: E2eeMemberOffer) =>
   getAppShareUrl(`/join/${offer.token}#e2ee=${encodeURIComponent(JSON.stringify(offer))}`);
 
@@ -75,7 +87,15 @@ function TeamSession({
   onOpenBilling?: () => void;
   onRefreshBilling?: () => Promise<unknown>;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // Product language, not the OS locale.
+  const formatExpiry = (value: number | string) =>
+    new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value));
   const [data, setData] = useState<E2eeMemberReplies['pending'] | null>(null);
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -176,6 +196,19 @@ function TeamSession({
       }
       await refresh();
     });
+  // Approval adds a paid seat: say so beside the approve button, not only at the top.
+  const seat = data?.seatPreview;
+  const approvalCost =
+    seat?.status === 'billed'
+      ? seat.proratedAmount === null
+        ? t('e2ee.team.approveCostUnknown')
+        : t('e2ee.team.approveCost', {
+            amount: new Intl.NumberFormat(toIntlLocaleOrEn(i18n?.language), {
+              style: 'currency',
+              currency: seat.currency ?? 'usd',
+            }).format(seat.proratedAmount / 100),
+          })
+      : null;
   return (
     <Card.Root data-testid="e2ee-team-settings">
       <Card.Header>
@@ -184,42 +217,24 @@ function TeamSession({
       </Card.Header>
       <div {...stylex.props(styles.stack)}>
         {message && <p role="status">{message}</p>}
-        <SeatCostNotice preview={data?.seatPreview} />
-        <div {...stylex.props(styles.row)}>
-          <SeatAdmissionActions
-            preview={data?.seatPreview}
-            pending={busy}
-            onOpenBilling={onOpenBilling}
-            onRefresh={
-              onRefreshBilling
-                ? () =>
-                    void perform(async () => {
-                      try {
-                        await onRefreshBilling();
-                      } finally {
-                        await refresh();
-                      }
-                    })
-                : undefined
-            }
-          />
-        </div>
         <form
-          {...stylex.props(styles.row)}
+          {...stylex.props(styles.inviteRow)}
           onSubmit={(event) => {
             event.preventDefault();
             void create('email');
           }}
         >
-          <Input
-            type="email"
-            required
-            aria-label={t('e2ee.team.email')}
-            placeholder={t('e2ee.team.email')}
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            disabled={busy}
-          />
+          <div {...stylex.props(styles.inviteField)}>
+            <Input
+              type="email"
+              required
+              aria-label={t('e2ee.team.email')}
+              placeholder={t('e2ee.team.email')}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              disabled={busy}
+            />
+          </div>
           <Button
             variant={isSeatAdmissionReady(data?.seatPreview) ? 'primary' : 'secondary'}
             data-testid="e2ee-invite-email"
@@ -249,6 +264,26 @@ function TeamSession({
             onFocus={(event) => event.target.select()}
           />
         )}
+        <SeatCostNotice preview={data?.seatPreview} />
+        <div {...stylex.props(styles.row)}>
+          <SeatAdmissionActions
+            preview={data?.seatPreview}
+            pending={busy}
+            onOpenBilling={onOpenBilling}
+            onRefresh={
+              onRefreshBilling
+                ? () =>
+                    void perform(async () => {
+                      try {
+                        await onRefreshBilling();
+                      } finally {
+                        await refresh();
+                      }
+                    })
+                : undefined
+            }
+          />
+        </div>
         <h3>{t('e2ee.team.requests')}</h3>
         {data?.items.length === 0 && (
           <p {...stylex.props(styles.label)}>{t('e2ee.team.noRequests')}</p>
@@ -273,10 +308,17 @@ function TeamSession({
             {request.applicantEmail && (
               <span {...stylex.props(styles.label)}>{request.applicantEmail}</span>
             )}
-            <details>
-              <summary>{t('e2ee.team.deviceKey')}</summary>
-              <code {...stylex.props(styles.code)}>{request.signingPublicKey}</code>
-            </details>
+            <span {...stylex.props(styles.label)}>
+              {t('e2ee.team.deviceKey')}{' '}
+              <code title={request.signingPublicKey} {...stylex.props(styles.code)}>
+                {deviceFingerprint(request.signingPublicKey)}
+              </code>
+            </span>
+            {request.state === 'pending' && approvalCost && (
+              <span data-testid="e2ee-join-approve-cost" {...stylex.props(styles.approveCost)}>
+                {approvalCost}
+              </span>
+            )}
             <div {...stylex.props(styles.row)}>
               <Button
                 data-testid="e2ee-join-approve"
@@ -418,7 +460,7 @@ function TeamSession({
           <div key={offer.token} {...stylex.props(styles.row)}>
             <span {...stylex.props(styles.identity, styles.label)}>
               {t(offer.mode === 'email' ? 'e2ee.team.emailInvitation' : 'e2ee.team.linkInvitation')}{' '}
-              · {new Date(offer.expiresAt).toLocaleString()}
+              · {formatExpiry(offer.expiresAt)}
             </span>
             <Button
               variant="secondary"

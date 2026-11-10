@@ -2633,6 +2633,13 @@ export class E2eeIpc extends IpcService {
       throw new Error('e2ee_invalid-input')
     await this.manage(workspaceId, { type: 'setRole', membershipId, role })
   }
+  /** Owner-only: hands ownership to an existing member; this owner becomes an admin. */
+  @IpcMethod()
+  async transferOwnership(workspaceId: string, membershipId: string) {
+    if (typeof membershipId !== 'string' || !/^[0-9a-f]{32}$/.test(membershipId))
+      throw new Error('e2ee_invalid-input')
+    await this.manage(workspaceId, { type: 'transferOwner', membershipId })
+  }
   @IpcMethod()
   async contentStreamsToken(
     workspaceId: string,
@@ -3364,7 +3371,9 @@ export class E2eeIpc extends IpcService {
     )
     if (result === 'Conflict')
       throw new Error(
-        command.type === 'removeMember' || command.type === 'setRole'
+        command.type === 'removeMember' ||
+          command.type === 'setRole' ||
+          command.type === 'transferOwner'
           ? 'e2ee_member_management_conflict'
           : 'e2ee_management_conflict'
       )

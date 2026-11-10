@@ -108,7 +108,8 @@ export function E2eeSettingsIcon() {
   return <E2eeSettingsGlyph attention={attention} />;
 }
 
-function useMemberJoinAttention(
+/** True while a link join request waits for this manager; polled every 15 s. */
+export function useMemberJoinAttention(
   native: E2eeWorkspaceRuntime | undefined,
   workspaceId: string | null,
   accountId: string | null | undefined,

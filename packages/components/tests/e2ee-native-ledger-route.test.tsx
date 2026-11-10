@@ -1,4 +1,6 @@
 vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
+// The security-code card links to public docs; the route never opens it here.
+vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => true }));
 // @vitest-environment jsdom
 // @vitest-environment jsdom
 import { act, createElement, Fragment, type ReactNode } from 'react';
@@ -135,6 +137,7 @@ import {
   readObservedLedgerCheckpoint,
 } from '../src/lib/e2ee-workspace-storage';
 import { Route } from '../src/routes/workspace/e2ee/$workspaceId';
+import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { useE2eeAccountId } from '../src/lib/e2ee-account';
 (
@@ -417,9 +420,9 @@ it('guides a desktop that never joined this workspace to approval and, by defaul
   );
   if (start) await act(async () => start.click());
   expect(started).toEqual([{ pairingString: undefined }]);
-  expect(
-    container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent
-  ).toBe('50M6-HA79-55MT');
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
+    '50M6-HA79-55MT'
+  );
 });
 
 it('opens the local ledger with an expired renderer snapshot and offline main identity, then reconnects', async () => {
@@ -1567,4 +1570,77 @@ it('does not carry an in-flight personal registration into another account', asy
   expect(f.button('common.cancel')).toBeUndefined();
   expect(container.querySelector('textarea')).not.toBeNull();
   expect(f.button('e2ee.pair.trust')).toBeDefined();
+});
+
+it('opened from Settings keeps the running workspace, closes instead of navigating and releases its reader', async () => {
+  const cleared: unknown[] = [];
+  const previousClear = fixture.clear;
+  fixture.clear = (value: unknown) => {
+    cleared.push(value);
+  };
+  const leases = new Set<string>();
+  fixture.port = {
+    create: async () => {
+      throw new Error('unused');
+    },
+    describe: async () => ({
+      workspaceId,
+      contentMode: 'e2ee',
+      contentModeVersion: 1,
+      genesisHash,
+      cryptoOrgId: genesisHash,
+      activation: 'control-only',
+    }),
+    history: async () => ({
+      workspaceId,
+      genesisHash,
+      checkpoint: { headHash: genesisHash, length: 1 },
+      startIndex: 1,
+      recordsHex: [],
+      position: local.status.position!,
+      nextCursor: null,
+    }),
+    runtime: {
+      account: async () => ({ userId: 'account', source: 'offline' }),
+      recordCreated: async () => {},
+      open: async (id) => {
+        leases.add(id);
+        return local.status;
+      },
+      close: async (id) => {
+        leases.delete(id);
+      },
+      readIdentity: async () => ({ workspaceId, genesisHash }),
+      status: async () => local.status,
+      ledgerView: async () => local,
+      ingestLedgerRecords: async () => local.status,
+    },
+  };
+  let closed = 0;
+  try {
+    await act(async () => {
+      root.render(
+        createElement(E2eeWorkspaceConsole, {
+          workspaceId,
+          presentation: 'modal',
+          onClose: () => {
+            closed += 1;
+          },
+        })
+      );
+    });
+    for (let tick = 0; tick < 10; tick++) await act(async () => {});
+    expect(container.textContent).toContain('1');
+    expect(leases.has(workspaceId)).toBe(true);
+    // The Settings dialog sits over an open workspace: it must not clear that context.
+    expect(cleared).toEqual([]);
+    await act(async () => (container.querySelector('[data-back]') as HTMLButtonElement).click());
+    expect(closed).toBe(1);
+    expect(fixture.navigation).toEqual([]);
+    await act(async () => root.render(createElement('div')));
+    for (let tick = 0; tick < 10; tick++) await act(async () => {});
+    expect(leases.size).toBe(0);
+  } finally {
+    fixture.clear = previousClear;
+  }
 });

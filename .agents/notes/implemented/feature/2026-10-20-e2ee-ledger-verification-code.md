@@ -14,17 +14,17 @@ Members of an encrypted workspace had no way to check that the Lody server shows
 ## Decisions
 
 - **What the code is.** `ledgerStateDigest(view)` in core returns the digest that `comparisonNote` already computes, `sha256("snapshot-digest/v4" ‖ CBOR[4, genesis, length, head, authorization state])`, without requiring a ledger device as note signer. The control page holds no device key, so it could not call `comparisonNote`. The [whitepaper](../../../../specs/e2ee/whitepaper.md) requires safety codes to bind the actual state: a head alone can accompany a wrong state, for example on a snapshot-bootstrapped client.
-- **Version** is the number of verified records. The QR payload is `lody-ledger:1:<version>:<head>:<digest>`. The copied text is a header with the version, then the digest in sixteen groups of four.
+- **Version** is the number of verified records. The QR payload is `lody-ledger:1:<version>:<head>:<digest>`. The copied text is a plain header, then the digest in sixteen groups of four. The version stays in the QR payload but is no longer shown to people.
 - **Comparison** (`e2ee-ledger-verification.ts`):
   - same version and digest (and head, when present): match;
   - same version, different digest or head: mismatch;
   - an earlier version whose head equals this ledger's record at that position: same history, the other side is behind;
   - an earlier version with a different head: mismatch;
   - a later version: refresh first;
-  - a pasted digest without a version that differs: undecided.
+  - a digest without a version that differs: undecided. The parser still accepts one, but the page no longer offers a paste field.
   
   Different positions are never reported as an attack, as the whitepaper asks.
-- **Scanning** uses `getUserMedia` plus `jsqr` (Apache-2.0), only after the person presses the camera button, and releases the camera on the first decoded frame. Pasting always works. The macOS build adds the camera entitlement and `NSCameraUsageDescription`.
+- **Scanning** uses `getUserMedia` plus `jsqr` (Apache-2.0), only after the person presses the camera button, and releases the camera on the first decoded frame. When scanning is not possible, both people read the codes by eye and choose "all the same" or "something differs". The owner removed the paste field on 2026-11-09 because reading the groups aloud is faster than typing them back. A manual "differs" cannot tell an older copy from a fork, so it shows the refresh-then-stop guidance rather than a mismatch. The macOS build adds the camera entitlement and `NSCameraUsageDescription`.
 - **Names and avatars** are display data, not ledger facts. The ledger's user ID names an account but carries no display data, and this page takes profiles from a separate directory. The page accepts `you` and `memberProfiles`. The route supplies only `you`, attached to the genesis member and only when this device holds the creation pin; others show "Member N". The hint text tells people to confirm in person which member they are.
 
 ## Alternatives
@@ -36,9 +36,9 @@ Members of an encrypted workspace had no way to check that the Lody server shows
 ## Verification and limits
 
 - Core test: the signer-free digest equals the comparison-note digest, both for full and snapshot-verified views, and a counterfeit view is refused.
-- Unit tests cover parsing, including a copied header with a version, and every comparison outcome.
+- Unit tests cover parsing, including a copied header with a version, and every comparison outcome. `tests/e2ee-workspace-control-page.test.tsx` pins the manual comparison and the absence of a paste field.
 - Page tests check that the shown code equals the digest and that the profile only attaches with the pin.
-- In headless Chromium, a fake camera feed of generated QR codes produced match, older-copy and fork (right head, wrong state) verdicts, and copy-then-paste matched.
+- In headless Chromium, a fake camera feed of generated QR codes produced match, older-copy and fork (right head, wrong state) verdicts. That run predates the manual comparison, which has no camera run of its own.
 - Not verified:
   - real macOS signing with the new entitlement;
   - iOS/Android shells, which need their own camera permission strings in the private app.

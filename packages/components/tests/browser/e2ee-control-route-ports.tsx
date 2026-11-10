@@ -86,3 +86,5 @@ export const E2eeAccountPairingKeyRetry = () => null;
 export const E2eeDeviceApprovalGuide = () =>
   createElement('output', { 'data-approval-guide': true });
 export const E2eeLedgerAudit = () => null;
+// Places console content on a tab; the stub page above ignores tabs.
+export const E2eeConsoleSection = ({ children }: { children?: ReactNode }) => children;

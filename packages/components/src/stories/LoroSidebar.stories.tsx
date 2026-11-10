@@ -580,6 +580,21 @@ export const Default: Story = {
   },
 };
 
+/** The current workspace is end-to-end encrypted: a lock beside its name, explained on hover. */
+export const EncryptedWorkspace: Story = {
+  ...Default,
+  args: {
+    ...Default.args,
+    workspaceName: 'Cipher Lab',
+    workspaces: [
+      { id: 'ws-e2ee', name: 'Cipher Lab', memberCount: 3, encrypted: true },
+      { id: 'ws-1', name: 'Loro', planTier: 'plus' },
+      { id: 'ws-2', name: 'Lody' },
+    ],
+    currentWorkspaceId: 'ws-e2ee',
+  },
+};
+
 export const WorkspaceSyncing: Story = {
   render: (args) => <StoryLayout {...args} />,
   args: {
