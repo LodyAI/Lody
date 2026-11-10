@@ -42,7 +42,8 @@
   failed main close. Bound permits/cleanup; reply before send; exact retries.
   `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host
   authority. UI accounts are display-only. No capability: deny.
-  Missing origin: backfill/retry pending to original expiry. No snapshot-author
+  Missing origin: backfill/retry pending; a dispatch original's `expiresAt` 0 never
+  expires. A signer outside the current ledger is refused with a reason. No snapshot-author
   substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact

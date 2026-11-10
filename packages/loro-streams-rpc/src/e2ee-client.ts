@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hex, unhex, equalJson } from './e2ee-client-bytes';
-import { Clock, Effect, type Scope } from 'effect';
+import { Effect, type Scope } from 'effect';
 import { z } from 'zod';
 import type { LedgerView } from '@lody/e2ee-core/protocol';
 import type { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
@@ -44,6 +44,8 @@ const attempt = <A>(body: () => A) =>
   Effect.try({ try: body, catch: () => new Error('e2ee_rpc_invalid') });
 const key = (args: Pick<E2eeDispatchInput, 'sessionId' | 'userTurnId'>) =>
   JSON.stringify([args.sessionId, args.userTurnId]);
+/** The signed `expiresAt` of every `session/dispatch-turn` original: no deadline. */
+export const E2EE_DISPATCH_NO_DEADLINE = 0;
 export const e2eeRpcDigest = (frame: Uint8Array) => sha256(frame);
 type Binding = Effect.Success<ReturnType<typeof makeRealtimeContentBinding>>;
 
@@ -110,10 +112,12 @@ export function makeE2eeRpcClient(options: {
           )
         );
         const timestamp = Date.parse(args.timestamp);
+        // A dispatch original has no deadline (owner decision 2026-11-10): a machine
+        // that was offline for days still starts it once. Only 0 is accepted.
         if (
           !Number.isSafeInteger(timestamp) ||
           timestamp < 0 ||
-          body.expiresAt > timestamp + 900_000
+          body.expiresAt !== E2EE_DISPATCH_NO_DEADLINE
         )
           return yield* Effect.fail(new Error('e2ee_rpc_expiry'));
         return {
@@ -193,12 +197,10 @@ export function makeE2eeRpcClient(options: {
         if (!saved) {
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
-              const now = yield* Clock.currentTimeMillis;
-              const expiresAt = Math.min(now + 900_000, Date.parse(args.timestamp) + 900_000);
               const body = yield* attempt(() =>
                 encodeE2eeRpcRequestBody({
                   requestId: crypto.getRandomValues(new Uint8Array(16)),
-                  expiresAt,
+                  expiresAt: E2EE_DISPATCH_NO_DEADLINE,
                   method: 'session/dispatch-turn',
                   params: new TextEncoder().encode(JSON.stringify(args)),
                 })

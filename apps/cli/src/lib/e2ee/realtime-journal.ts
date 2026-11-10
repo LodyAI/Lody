@@ -561,7 +561,9 @@ export class RealtimeJournal {
             request.workspaceId,
             now
           );
-          if (request.expiresAt <= now)
+          // 0 is a signed dispatch original's "no deadline"; openers reject 0 for
+          // every other method. The retired request ID still starts only once.
+          if (request.expiresAt !== 0 && request.expiresAt <= now)
             return { state: 'expired' as const, record: this.record(request, row) };
           const claim = randomUUID();
           const changed = db

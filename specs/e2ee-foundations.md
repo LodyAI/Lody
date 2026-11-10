@@ -169,6 +169,19 @@ Request IDs are host-generated secure random 16-byte values. RPC timestamps are
 nonnegative Unix UTC milliseconds. Expired means `now >= expiresAt`. The RPC body
 codec does not check current time, replay state, permissions or request freshness.
 
+**Dispatch originals without a deadline (proposed revision, draft).** Per the owner
+decision of 2026-11-10, a `session/dispatch-turn` original is always signed with
+`expiresAt = 0`, which means no deadline, and its opener rejects any other value. Every
+other method still requires a real deadline and rejects 0. A machine that was offline
+for days still starts such a message once: the journal's retired request ID keeps
+replay to one start, and the signer is checked against the machine's current verified
+ledger at start, so a removed member's or revoked device's message is refused with
+`e2ee_sender_not_authorized`. A machine-authored queued input keeps its local
+receipt's 15-minute window. Open questions for the owner: binding the original to the
+target machine's device key, how a waiting input is retried and when it stops, and
+whether the further consequences listed in the PR are acceptable. E2EE has no
+production data, so the format has no compatibility path.
+
 Method params, success/progress and error details remain exact opaque bytes for
 the authorized method codec; JSON methods use their explicit UTF-8 JSON codec,
 without reserialization for hashing. Binary output requires an explicit codec.
@@ -280,7 +293,8 @@ writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the si
 row, only while that origin turn is active and only for this machine. At start, the
 machine verifies the origin as the member's own signed, non-derived Turn and authorizes
 the member's rights ∩ the owner's sharing policy ∩ every reached project. The start
-deadline is the origin's signed deadline plus 15 minutes. Derivation is one level deep,
+deadline is the origin's signed deadline plus 15 minutes; an origin without a deadline
+(see above, draft) leaves only the active-turn and per-origin bounds. Derivation is one level deep,
 with at most 20 inputs per origin. Owner work is unchanged. Cross-machine derivation is
 not implemented and fails closed; a future version would use a user-approved signature
 from the originating member's personal device. See [derived work](../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
@@ -338,7 +352,7 @@ from sender acceptance of the send to the machine's actual-start boundary, not
 to a receipt ACK or business completion. Measure ordinary/encrypted paths and
 transport/fallback selection separately under stated conditions. Offline durable
 catch-up has no one-second delivery guarantee; a passed deadline still forbids
-a new start. No latency result is claimed by this documentation revision.
+a new start, and a dispatch original without a deadline (draft, above) has none to pass. No latency result is claimed by this documentation revision.
 
 ### Later acceleration: iroh (outside the MVP)
 

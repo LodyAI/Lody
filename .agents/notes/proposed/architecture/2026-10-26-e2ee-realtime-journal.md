@@ -87,7 +87,8 @@ readResponse(originalRequest, index) -> retained response or absent
 ```
 
 The key is `(genesis, workspaceId, targetMachineId, requestId)`. Requester identity,
-deadline and exact frame bytes are immutable under that key. SHA-256 checks the
+deadline and exact frame bytes are immutable under that key. A deadline of 0 is a
+dispatch original's "no deadline" (owner decision 2026-11-10) and never expires. SHA-256 checks the
 stored original and outcome against their retained digests; it does not authenticate local disk
 against an attacker. A different valid requester cannot reuse an ID to start again.
 The caller supplies an account-private path and must verify the frame and authority.

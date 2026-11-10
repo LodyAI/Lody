@@ -31,6 +31,8 @@ type OpenedDispatch = {
 };
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
+/** Without a deadline, a signer outside the current ledger is refused, never left waiting. */
+const refused = { state: 'sender-not-authorized' } as const;
 const isContentUnauthorized = (cause: unknown) =>
   cause instanceof Error &&
   'code' in cause &&
@@ -92,7 +94,7 @@ export function makeVerifiedExecutionOriginal(options: {
           if (verified.requesterDevice !== options.selfDevice) {
             const device = state.devices.get(verified.requesterDevice);
             const member = device && state.members.get(hex(device.membershipId.toBytes()));
-            if (!member) return undefined;
+            if (!member) return refused;
             return {
               requesterDevice: verified.requesterDevice,
               requesterCryptoUserId: hex(member.userId.toBytes()),
@@ -129,13 +131,14 @@ export function makeVerifiedExecutionOriginal(options: {
             .openDispatch(machineId, queuedOriginal)
             .pipe(
               Effect.catch((cause: unknown) =>
-                isContentUnauthorized(cause) ? Effect.succeed(undefined) : Effect.fail(cause)
+                isContentUnauthorized(cause) ? Effect.succeed(refused) : Effect.fail(cause)
               )
             );
-          if (!verified) return undefined;
+          if ('state' in verified) return verified;
           const evidence = queuedInputEvidence(row.inputConfig);
           const device = state.devices.get(verified.requesterDevice);
           const member = device && state.members.get(hex(device.membershipId.toBytes()));
+          if (!member && verified.requesterDevice !== options.selfDevice) return refused;
           if (
             !evidence ||
             !member ||

@@ -63,10 +63,17 @@ export type VerifiedExecutionOriginal = {
   queued?: { timestamp: unknown; inputConfig: unknown; userId: unknown };
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
+/** A signed original whose signer is not a current member of the verified ledger. */
+export type RefusedExecutionOriginal = { state: 'sender-not-authorized' };
 export type ResolveVerifiedExecutionOriginal = (
   intent: EncryptedExecutionIntent,
   lookup?: { readonly origin?: boolean }
-) => Effect.Effect<VerifiedExecutionOriginal | PendingExecutionOriginal | undefined, unknown>;
+) => Effect.Effect<
+  VerifiedExecutionOriginal | PendingExecutionOriginal | RefusedExecutionOriginal | undefined,
+  unknown
+>;
+/** Signed dispatch originals carry no deadline: a late delivery still starts once. */
+const hasDeadline = (expiresAt: number) => expiresAt !== 0;
 
 export type EncryptedExecutionClaim =
   | {
@@ -79,7 +86,7 @@ export type EncryptedExecutionClaim =
       /** The member's verified device, for derivation and agent control. */
       origin?: { readonly requesterDevice: string };
     }
-  | { state: 'denied'; reason?: 'e2ee_machine_not_shared' }
+  | { state: 'denied'; reason?: 'e2ee_machine_not_shared' | 'e2ee_sender_not_authorized' }
   | { state: 'uncertain' | 'completed' | 'expired' | 'pending-evidence' };
 
 /** One owner per encrypted workspace. Journal opening stays lazy so a broken
@@ -280,12 +287,16 @@ export function makeEncryptedAgentExecution(options: {
     if (retained && retained.state !== 'received') return { state: retained.state };
     if (options.isExecutionOpen?.() === false) return { state: 'denied' };
     const verified = yield* options.resolveVerifiedOriginal(intent);
+    if (verified && 'state' in verified && verified.state === 'sender-not-authorized')
+      return { state: 'denied', reason: 'e2ee_sender_not_authorized' };
     if (verified && 'state' in verified) {
       // Snapshot timestamps can bound waiting, but never grant execution. A
       // recovered signed original still defines the actual admission deadline.
       return {
         state:
-          (yield* Clock.currentTimeMillis) >= verified.expiresAt ? 'expired' : 'pending-evidence',
+          hasDeadline(verified.expiresAt) && (yield* Clock.currentTimeMillis) >= verified.expiresAt
+            ? 'expired'
+            : 'pending-evidence',
       };
     }
     if (
@@ -320,7 +331,10 @@ export function makeEncryptedAgentExecution(options: {
         origin.requesterDevice === options.selfDevice
       )
         return { state: 'denied' };
-      if ((yield* Clock.currentTimeMillis) > origin.expiresAt + DERIVED_START_GRACE_MS)
+      if (
+        hasDeadline(origin.expiresAt) &&
+        (yield* Clock.currentTimeMillis) > origin.expiresAt + DERIVED_START_GRACE_MS
+      )
         return { state: 'expired' };
       originKey = JSON.stringify([verified.derivedFrom.sessionId, verified.derivedFrom.userTurnId]);
       if ((derivedClaims.get(originKey) ?? 0) >= MAX_DERIVED_TURNS_PER_ORIGIN)
@@ -336,7 +350,7 @@ export function makeEncryptedAgentExecution(options: {
     const unavailable = Effect.fnUntraced(function* () {
       return {
         state:
-          (yield* Clock.currentTimeMillis) < verified.expiresAt
+          !hasDeadline(verified.expiresAt) || (yield* Clock.currentTimeMillis) < verified.expiresAt
             ? ('pending-evidence' as const)
             : ('expired' as const),
       };
@@ -347,7 +361,9 @@ export function makeEncryptedAgentExecution(options: {
         ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
         : authorization.reason === 'unavailable'
           ? yield* unavailable()
-          : { state: 'denied' };
+          : authorization.reason === 'not-authorized'
+            ? { state: 'denied', reason: 'e2ee_sender_not_authorized' }
+            : { state: 'denied' };
     let scheduleCurrent: (() => boolean) | undefined;
     if (verified.schedule) {
       if (!options.authorizeSchedule) return { state: 'denied' };
@@ -360,7 +376,8 @@ export function makeEncryptedAgentExecution(options: {
         return {
           state:
             schedule.reason === 'e2ee_schedule_evidence_pending'
-              ? (yield* Clock.currentTimeMillis) < verified.expiresAt
+              ? !hasDeadline(verified.expiresAt) ||
+                (yield* Clock.currentTimeMillis) < verified.expiresAt
                 ? 'pending-evidence'
                 : 'expired'
               : 'denied',

@@ -5425,7 +5425,10 @@ export class SessionExecutionService {
                         ? 'This encrypted turn expired before execution. Send a new turn to continue.'
                         : result.state === 'denied' && result.reason === 'e2ee_machine_not_shared'
                           ? 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。'
-                          : 'This encrypted turn is not authorized for execution.',
+                          : result.state === 'denied' &&
+                              result.reason === 'e2ee_sender_not_authorized'
+                            ? 'e2ee_sender_not_authorized: The sender is not authorized to run turns in this encrypted workspace now, so this turn will not run.'
+                            : 'This encrypted turn is not authorized for execution.',
               });
             });
 

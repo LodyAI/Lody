@@ -740,7 +740,7 @@ describe('machine E2EE local runtime', () => {
               signer,
               plaintext: encodeE2eeRpcRequestBody({
                 requestId: new Uint8Array(16).fill(23),
-                expiresAt: 901000,
+                expiresAt: 0,
                 method: 'session/dispatch-turn',
                 params: new TextEncoder().encode(JSON.stringify(input)),
               }),
@@ -766,7 +766,7 @@ describe('machine E2EE local runtime', () => {
         }
         expect(await original).toMatchObject({
           requesterDevice: fixture.sender,
-          expiresAt: 901000,
+          expiresAt: 0,
         });
         expect(await host.status()).toMatchObject({ epoch: 1, writeEpoch: 1, hasCurrentKey: true });
       } finally {
