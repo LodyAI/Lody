@@ -120,6 +120,15 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
 - `packages/components/tests/encrypted-dispatch-legacy.test.ts` 覆盖路径选择：有存活
   连接时走 iroh；没有连接、调用失败或没有可验证回复时用同一原件改走 Streams；分块
   原件留在 Streams。
+- 2026-11-10 本地探索式验收（macOS arm64，HTTPS/h2 本地栈，云端桌面 test-build，内嵌
+  CLI，n0 公共中继，head `39e57c00`）：同一加密会话的 3 条消息各执行一次，且每条都有
+  对应的 CLI `[e2ee-iroh] request` 和渲染进程 `iroh-reply`；agent 改文件后能看到真实
+  diff 和文件预览；能力刷新（一个 feature 请求）经 iroh 回复；去掉模块后 CLI 退回
+  Streams 且只执行一次。这不是干净的脚本化运行，也没有证明 diff/预览内容本身经 iroh。
+- 该运行发现并在本 PR 修复了两个缺陷：macOS 上 Cargo 的 strip 步骤生成了 Node 和
+  Electron 拒绝加载的 dylib（`mis-aligned LINKEDIT string pool`）；在只能经 HTTP 代理
+  出网的网络里，Endpoint 不走代理就连不上中继（直连 `iroh_connect_timeout`；经
+  `127.0.0.1:1087` 两端都 online，约 937 ms 收到回复）。
 - 尚未验证：桌面客户端连接已部署的中继；直连、只走中继和 Streams 三种路径的发送
   到实际启动延迟；打洞成功率；监听机器上的 Windows 防火墙弹窗；各平台安装包里原生
   模块的加载和 macOS 签名。

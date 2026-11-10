@@ -146,6 +146,18 @@ External facts:
 - `packages/components/tests/encrypted-dispatch-legacy.test.ts` covers route
   selection: iroh with a live connection, Streams with the same original after no
   connection, a failed call or no verifiable reply, and chunked originals.
+- Exploratory local acceptance on 2026-11-10 (macOS arm64, local stack over HTTPS/h2,
+  cloud desktop test-build, embedded CLI, n0 public relays, head `39e57c00`): three
+  messages in one encrypted session each executed once and each had a matching CLI
+  `[e2ee-iroh] request` and renderer `iroh-reply`; an agent edit produced a real
+  diff and file preview; capability refresh (a feature request) answered over iroh;
+  without the module the CLI fell back to Streams and executed once. Not a clean
+  scripted run, and diff/preview content was not shown to travel over iroh.
+- That run found two defects fixed in this PR: Cargo's macOS strip step produced a
+  dylib Node and Electron refused ("mis-aligned LINKEDIT string pool"), and on a
+  network that reaches the internet only through an HTTP proxy the endpoint never
+  connected to a relay until it used the proxy (direct: `iroh_connect_timeout`;
+  via `127.0.0.1:1087`: both endpoints online, reply in about 937 ms).
 - Not yet verified: the desktop client against a deployed relay; send-to-actual-start
   latency over direct, relay-only and Streams routes; hole-punching rate; Windows
   firewall prompts on the listening machine; native module loading and macOS signing
