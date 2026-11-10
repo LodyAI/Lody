@@ -1,6 +1,6 @@
 # Shared runtime source and dependency updates
 
-`runtime/vendor/cloud-runtime` is a 119-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `82e848b8e01937bec9768c64d342b81f1d44bd6e` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
+`runtime/vendor/cloud-runtime` is a 117-file snapshot of this monorepo's `apps/mobile/ios/packages/cloud-runtime`, commit `7f74298641f35b714c68752f3976e9b0ffaf6c52` (`git archive <commit> apps/mobile/ios/packages/cloud-runtime`), exported whole with no local overlays. Its license is retained. `vendor/PROVENANCE.json` identifies the source and `vendor/SHA256.json` records every file. `npm --prefix runtime run snapshot:check` and every asset build reject changed, added or missing files and symlinks. The drift test modifies a disposable copy, never the actual snapshot.
 
 For an intentional update:
 
@@ -29,6 +29,13 @@ state, PR merge state), the 16 MiB per-replica catalog input budget and per-conf
 creation capabilities, so no bundle-time source adapters remain. A later difference
 belongs in the next re-snapshot, not in a patch over the snapshot. `catalog-budget.test.mjs`
 still runs the bundled watcher against a synthetic transport to pin the budget.
+
+The snapshot at `7f742986` gates the composer's prompt shortcuts by their saved project,
+computer and agent scope (as web) instead of dropping every scoped or referencing one,
+answers `cmd` mention reads from the runtime's last shortcut listing while reading a fresh
+one, and reports a listing with an unreadable or pending owner index as incomplete rather
+than empty. The `promptShortcuts` list action (Settings and `shortcutBody`) lists what is
+readable; send-time `/shortcut:` expansion keeps the strict listing.
 
 ## Android text creation
 

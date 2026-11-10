@@ -132,55 +132,66 @@ export function shortcutAccess(
     }
     return openSettings(stream, getGrant, signal, { cached: !write });
   };
+  type Row = Awaited<ReturnType<typeof directory>>[number];
+  const listed = (entry: PromptShortcutIndexEntry, rows: Row[]) =>
+    rows.some(
+      (row) =>
+        row.shortcutId === entry.id &&
+        row.bodyDocId === entry.bodyDocId &&
+        row.revision === entry.revision,
+    );
+  const domain = async (row: Row, rows: Row[]) => {
+    const { flock } = await index(row.ownerUserId, row.visibility);
+    return new PromptShortcutCatalog(flock)
+      .list()
+      .filter(
+        (entry) =>
+          entry.workspaceId === workspaceId &&
+          entry.ownerUserId === row.ownerUserId &&
+          entry.visibility === row.visibility &&
+          listed(entry, rows),
+      );
+  };
+  const domains = (rows: Row[]) => [
+    ...new Map(
+      rows.map((row) => [`${row.ownerUserId}:${row.visibility}`, row]),
+    ).values(),
+  ];
+  const byName = (a: PromptShortcutIndexEntry, b: PromptShortcutIndexEntry) =>
+    a.name.localeCompare(b.name);
   const list = async () => {
     const rows = await directory();
-    const domains = new Map(
-      rows.map((row) => [`${row.ownerUserId}:${row.visibility}`, row]),
-    );
-    const entries: PromptShortcutIndexEntry[] = (
-      await Promise.all(
-        [...domains.values()].map(async (row) => {
-          const { flock } = await index(row.ownerUserId, row.visibility);
-          return new PromptShortcutCatalog(flock)
-            .list()
-            .filter(
-              (entry) =>
-                entry.workspaceId === workspaceId &&
-                entry.ownerUserId === row.ownerUserId &&
-                entry.visibility === row.visibility &&
-                rows.some(
-                  (access) =>
-                    access.shortcutId === entry.id &&
-                    access.bodyDocId === entry.bodyDocId &&
-                    access.revision === entry.revision,
-                ),
-            );
-        }),
-      )
+    const entries = (
+      await Promise.all(domains(rows).map((row) => domain(row, rows)))
     ).flat();
     const fresh = await directory();
-    if (
-      fresh.some(
-        (row) =>
-          !entries.some(
-            (entry) =>
-              entry.id === row.shortcutId &&
-              entry.bodyDocId === row.bodyDocId &&
-              entry.revision === row.revision,
-          ),
-      )
-    )
+    if (fresh.some((row) => !entries.some((entry) => listed(entry, [row]))))
       throw new Error('shortcut_index_pending');
-    return entries
-      .filter((entry) =>
-        fresh.some(
-          (row) =>
-            row.shortcutId === entry.id &&
-            row.bodyDocId === entry.bodyDocId &&
-            row.revision === entry.revision,
+    return entries.filter((entry) => listed(entry, fresh)).sort(byName);
+  };
+  /**
+   * Mention discovery: everything readable now. One owner's index that fails to read, or a
+   * row whose index has not landed yet, leaves the rest listed and marks the result
+   * incomplete instead of hiding every shortcut. Send-time expansion keeps the strict `list`;
+   * a listed row is only a display, and reading its body re-checks the directory.
+   */
+  const listAvailable = async () => {
+    const rows = await directory();
+    let incomplete = false;
+    const entries = (
+      await Promise.all(
+        domains(rows).map((row) =>
+          domain(row, rows).catch(() => {
+            signal.throwIfAborted();
+            incomplete = true;
+            return [];
+          }),
         ),
       )
-      .sort((a, b) => a.name.localeCompare(b.name));
+    ).flat();
+    if (rows.some((row) => !entries.some((entry) => listed(entry, [row]))))
+      incomplete = true;
+    return { entries: entries.sort(byName), incomplete };
   };
   const read = async (entry: PromptShortcutIndexEntry) => {
     await authorized(entry);
@@ -235,7 +246,54 @@ export function shortcutAccess(
     await authorized(entry);
     return value;
   };
-  return { list, read, authorized, index, grant, directory };
+  return { list, listAvailable, read, authorized, index, grant, directory };
+}
+
+type ShortcutListing = {
+  entries: PromptShortcutIndexEntry[];
+  incomplete: boolean;
+};
+const listings = new Map<
+  string,
+  { value?: ShortcutListing; pending?: Promise<ShortcutListing> }
+>();
+
+/**
+ * The shortcuts a composer lists, per workspace and account. Reading them takes several
+ * round trips (directory, a grant and a read per owner's index), so the last listing answers
+ * at once while a fresh one is read for the next composer; only the first read is awaited.
+ * Rows only display: choosing one reads its body and sending re-checks the directory.
+ */
+export async function listedShortcuts(
+  workspaceId: string,
+  userId: string,
+  cloud: Cloud,
+): Promise<ShortcutListing> {
+  const key = `${workspaceId}:${userId}`;
+  for (const other of listings.keys())
+    if (other !== key) listings.delete(other);
+  const slot = listings.get(key) ?? {};
+  listings.set(key, slot);
+  slot.pending ??= shortcutAccess(
+    workspaceId,
+    userId,
+    cloud,
+    AbortSignal.timeout(30000),
+  )
+    .listAvailable()
+    .then((value) => {
+      if (listings.get(key) === slot) slot.value = value;
+      return value;
+    })
+    .finally(() => {
+      slot.pending = undefined;
+    });
+  const pending = slot.pending;
+  if (slot.value) {
+    pending.catch(() => {});
+    return slot.value;
+  }
+  return pending.catch(() => ({ entries: [], incomplete: true }));
 }
 
 export async function promptShortcuts(
@@ -246,7 +304,9 @@ export async function promptShortcuts(
 ) {
   if (!userId) throw new Error('shortcut_unavailable');
   const access = shortcutAccess(request.workspaceId, userId, cloud, signal);
-  if (request.action === 'list') return access.list();
+  // Settings and the composer's body read list what is readable now; one owner's index that
+  // has not landed hides only its own rows. Send-time expansion keeps the strict listing.
+  if (request.action === 'list') return (await access.listAvailable()).entries;
   if (request.action === 'read')
     return access.read(parseShortcutIndex(request.entry));
   if (request.action !== 'save') throw new Error('invalid_shortcut');
@@ -353,6 +413,8 @@ export async function promptShortcuts(
     },
   });
   if (!saved.ok) throw new Error('shortcut_write_unknown');
+  // The next composer lists the saved shortcut rather than the earlier listing.
+  listings.clear();
   return entry;
 }
 
