@@ -259,7 +259,7 @@ describe('recovery vault settings actions', () => {
     }
   });
 
-  it('sets up every uncovered workspace with one unlock and names those that did not finish', async () => {
+  it('sets up every unfinished workspace with one unlock and counts only verified setups as done', async () => {
     const requests: unknown[][] = [];
     const view = await mount(
       {
@@ -269,18 +269,21 @@ describe('recovery vault settings actions', () => {
         covered: [
           workspace('a', { kind: 'notSet' }),
           workspace('b', { kind: 'notSet' }),
-          workspace('c', { kind: 'verified', update: 2 }),
+          // Saved but unverified: its setup still has to finish.
+          workspace('c', { kind: 'saved' }),
+          workspace('d', { kind: 'verified', update: 2 }),
         ],
         uncovered: [],
       },
       {
         'e2ee.setupRecoveryForWorkspaces': (...args) => {
           requests.push(args);
+          // b is still waiting for its envelope and c returned no result at all.
           return {
             outcome: 'settled',
             results: [
               { workspaceId: 'a', outcome: 'Committed', recoverable: true },
-              { workspaceId: 'b', outcome: 'Failed', recoverable: false },
+              { workspaceId: 'b', outcome: 'Pending', recoverable: false },
             ],
           };
         },
@@ -289,9 +292,10 @@ describe('recovery vault settings actions', () => {
     try {
       expect(view.text).toContain('e2ee.recovery.uncoveredTitle');
       expect(view.primary).toEqual(['e2ee.recovery.setupAll']);
+      // The saved workspace keeps its own way to continue.
+      expect(view.labels).toContain('e2ee.recovery.setupContinue');
       await view.click('e2ee.recovery.setupAll');
-      // One request for both uncovered workspaces; the covered one is left alone.
-      expect(requests).toEqual([[['a', 'b'], 'file']]);
+      expect(requests).toEqual([[['a', 'b', 'c'], 'file']]);
       expect(view.text).toContain('e2ee.recovery.setupAllPartial');
       expect(view.text).not.toContain('e2ee.recovery.setupAllDone');
     } finally {
@@ -326,7 +330,8 @@ describe('recovery vault settings actions', () => {
       await view.click('common.retry');
       expect(view.text).not.toContain('e2ee.recovery.planFailed');
       expect(view.labels).not.toContain('common.retry');
-      expect(view.primary).toEqual(['e2ee.recovery.check']);
+      // The saved workspace is not verified yet, so finishing its setup leads.
+      expect(view.primary).toEqual(['e2ee.recovery.setupAll']);
       expect(view.text).toContain('e2ee.recovery.workspace.saved');
     } finally {
       view.done();

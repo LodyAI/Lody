@@ -75,8 +75,8 @@ type Result =
   | { kind: 'opened'; vaultId: string; count: number }
   | { kind: 'error'; code: string };
 
-/** This workspace's recovery readiness for the console's getting-started list: true when
- * the vault covers it, false when it does not, undefined when recovery is off or unknown. */
+/** This workspace's recovery readiness for the console's getting-started list: true only
+ * when recovery is verified, false when it is not yet, undefined when off or unknown. */
 export function useWorkspaceRecoveryReady(workspaceId: string | undefined, accountId?: string) {
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
   const [e2ee] = useState(() => getIpcServices()?.e2ee);
@@ -95,7 +95,7 @@ export function useWorkspaceRecoveryReady(workspaceId: string | undefined, accou
             ? false
             : status === undefined || status.kind === 'unknown'
               ? undefined
-              : status.kind !== 'notSet',
+              : status.kind === 'verified',
         });
       },
       () => {
@@ -210,22 +210,32 @@ export function RecoveryVaultSection() {
       : undefined;
   };
   const short = (vaultId: string) => vaultId.slice(0, 12);
-  const notSet =
-    mode === 'ready' ? (plan?.covered.filter((row) => row.status.kind === 'notSet') ?? []) : [];
+  // Saved but not yet verified still needs its setup finished: a held receipt or an
+  // undelivered envelope continues from the journal's original submission.
+  const unfinished =
+    mode === 'ready'
+      ? (plan?.covered.filter(
+          (row) => row.status.kind === 'notSet' || row.status.kind === 'saved'
+        ) ?? [])
+      : [];
   const setupAll = (method: 'file' | 'passkey') =>
     void run(async () => {
       const settled = await e2ee.setupRecoveryForWorkspaces(
-        notSet.map((row) => row.id),
+        unfinished.map((row) => row.id),
         method
       );
       if (settled.outcome === 'cancelled') return undefined;
-      const names = new Map(notSet.map((row) => [row.id, row.name] as const));
+      // Reconcile against what was asked: only a committed, verified setup is done.
+      // Pending, conflicting, unverified or missing results are listed as not finished.
+      const finished = new Set(
+        settled.results
+          .filter((row) => row.outcome === 'Committed' && row.recoverable)
+          .map((row) => row.workspaceId)
+      );
       return {
         kind: 'setupAll',
-        done: settled.results.filter((row) => row.outcome !== 'Failed').length,
-        failed: settled.results
-          .filter((row) => row.outcome === 'Failed')
-          .map((row) => names.get(row.workspaceId) ?? row.workspaceId),
+        done: unfinished.filter((row) => finished.has(row.id)).length,
+        failed: unfinished.filter((row) => !finished.has(row.id)).map((row) => row.name),
       };
     });
   const restoreButton = (method: 'file' | 'passkey') => (
@@ -269,9 +279,11 @@ export function RecoveryVaultSection() {
           <Alert.Description>{t('e2ee.recovery.lead')}</Alert.Description>
         </Alert.Root>
       )}
-      {notSet.length > 0 && (
+      {unfinished.length > 0 && (
         <Alert.Root tone="warning" data-testid="e2ee-recovery-uncovered">
-          <Alert.Title>{t('e2ee.recovery.uncoveredTitle', { count: notSet.length })}</Alert.Title>
+          <Alert.Title>
+            {t('e2ee.recovery.uncoveredTitle', { count: unfinished.length })}
+          </Alert.Title>
           <Alert.Description>{t('e2ee.recovery.uncoveredBody')}</Alert.Description>
           <Alert.Actions>
             <Button disabled={busy} onClick={() => setupAll('file')}>
@@ -320,7 +332,7 @@ export function RecoveryVaultSection() {
                 size="small"
                 // One primary action at a time: setting up uncovered workspaces leads when
                 // there are any; otherwise checking the saved file does.
-                variant={mode === 'ready' && notSet.length === 0 ? 'primary' : 'secondary'}
+                variant={mode === 'ready' && unfinished.length === 0 ? 'primary' : 'secondary'}
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
@@ -457,7 +469,7 @@ export function RecoveryVaultSection() {
                   <Badge tone={badge.tone} data-recovery-status={workspace.status.kind}>
                     {t(badge.key)}
                   </Badge>
-                  {workspace.status.kind === 'notSet' && (
+                  {(workspace.status.kind === 'notSet' || workspace.status.kind === 'saved') && (
                     <Button
                       size="small"
                       variant="secondary"
@@ -476,7 +488,11 @@ export function RecoveryVaultSection() {
                         })
                       }
                     >
-                      {t('e2ee.recovery.setup')}
+                      {t(
+                        workspace.status.kind === 'saved'
+                          ? 'e2ee.recovery.setupContinue'
+                          : 'e2ee.recovery.setup'
+                      )}
                     </Button>
                   )}
                 </div>
