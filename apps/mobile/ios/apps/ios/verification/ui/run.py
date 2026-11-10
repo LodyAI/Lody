@@ -20,7 +20,7 @@ from simulator import DEVICE_TYPES, run_with_simulator, SimulatorPool
 CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
-    'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
+    'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
     'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
     'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
 }
@@ -36,7 +36,7 @@ CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
 CASES = PHONE_CASES + PAD_CASES + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
-HOME_CASES = {'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
+HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
 PREVIEW = {
     'toast': 'session-preview-live',
     'role-mention-chat': 'mention-chat',
@@ -442,6 +442,8 @@ try:
                     launch = ['launch', args.udid, 'ai.lody.mobile', '--ui-verify']
                     if case in HOME_CASES:
                         launch.append('--ui-verify-home')
+                    if case == 'home-grouping-crash':
+                        launch.append('--ui-verify-sticky-groups')
                     if case in {'session-search', 'session-search-pad'}:
                         launch.append('--ui-verify-search')
                     if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
@@ -518,6 +520,8 @@ try:
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
                 script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                if case == 'home-grouping-crash':
+                    script = Path(__file__).with_name('home-grouping-crash.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:

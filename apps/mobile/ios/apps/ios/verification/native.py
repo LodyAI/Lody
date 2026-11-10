@@ -107,7 +107,9 @@ checks = {
     'unified-patch': ['Diff/UnifiedPatch.swift'],
     'create-draft': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift', 'Outbox/OutboxRecord.swift', 'CreateSession/CreateDraftRecord.swift'],
     'share-ingest': ['LodyLocalization.swift', 'Chat/ChatAttachments.swift', 'CreateSession/CreateSessionForm.swift', 'CreateSession/ShareStore.swift', str(root / 'apps/ios/Extensions/Share/ShareIngest.swift')],
-    'share': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift', 'CreateSession/ShareStore.swift'],
+    'share': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift', 'CreateSession/ShareStore.swift',
+        'Shell/NativeShareCoordinator.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift',
+        'Sessions/InboxSections.swift', 'Sessions/HomeGrouping.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift'],
     'design': ['LodyTint.swift'],
     'form': ['LodyTint.swift', 'UIFont+Dynamic.swift', 'Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'Settings/LodyForm.swift'],
 }
@@ -202,10 +204,10 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
+        simulator = name in ['share', 'auth-session', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'chat-list-scroll', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'banner', 'chat-title', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'file-link']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
-        if name in ['message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows']:
+        if name in ['share', 'message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows']:
             command += ['-D', 'LODY_SHARE_EXTENSION']
         if name == 'simulator-transport':
             subprocess.run(['/bin/bash', str(kit / 'DataChannel/build.sh')], check=True)
