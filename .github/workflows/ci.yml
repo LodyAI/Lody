@@ -228,9 +228,13 @@ jobs:
   # the Node suites that exercise the real module and otherwise skip without it.
   # Not a dependency of the required Tests check.
   iroh-native:
-    name: Tests (iroh native)
-    runs-on: ubuntu-latest
+    name: Tests (iroh native, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -261,6 +265,8 @@ jobs:
         run: pnpm --filter lody prepare:acp-adapters
 
       - name: Node tests with the module
+        env:
+          LODY_IROH_REQUIRE: '1'
         run: |
           pnpm --filter @lody/iroh-native test
           pnpm --dir apps/cli exec vitest run src/lib/e2ee/realtime-rpc.test.ts tests/e2ee-runtime.test.ts

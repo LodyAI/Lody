@@ -25,4 +25,6 @@ rationale: [iroh transport decision](../../.agents/notes/proposed/architecture/2
 - Keep the iroh floor at 1.4.1 or later and follow upstream security advisories.
   Mobile bindings must disable port mapping and `fast-apple-datapath`.
 - Rust tests (`cargo test -p lody-iroh`) cover the wire and endpoint rules; Node
-  tests load the development build and skip when it is absent.
+  tests load the development build and skip when it is absent, except under
+  `LODY_IROH_REQUIRE=1` (CI on Linux and macOS), where absence fails. Release builds
+  are not stripped: Cargo's macOS strip step produced an unloadable dylib.

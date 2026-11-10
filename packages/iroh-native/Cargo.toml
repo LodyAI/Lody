@@ -18,4 +18,6 @@ zeroize = "1"
 opt-level = 3
 lto = true
 codegen-units = 1
-strip = true
+# No strip: on macOS Cargo shells out to the PATH `strip`, which produced a dylib
+# that Node and Electron refuse to load ("mis-aligned LINKEDIT string pool").
+strip = "none"

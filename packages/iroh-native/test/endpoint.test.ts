@@ -1,9 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { developmentNativePath, loadIrohNative, type IrohEndpoint } from '../index.js';
+import { developmentNativePath, loadError, loadIrohNative, type IrohEndpoint } from '../index.js';
 
-// Built by `pnpm --filter @lody/iroh-native build`; CI runs it before this suite.
+// Built by `pnpm --filter @lody/iroh-native build`. Without a module the suite
+// skips locally; LODY_IROH_REQUIRE=1 (CI) turns a missing or unloadable module
+// into a failure instead of a silent skip.
 const native = loadIrohNative(developmentNativePath());
+if (process.env.LODY_IROH_REQUIRE === '1' && !native)
+  throw new Error(`iroh native module unavailable: ${loadError(developmentNativePath())}`);
 const opened: IrohEndpoint[] = [];
 afterEach(async () => {
   await Promise.all(opened.splice(0).map((endpoint) => endpoint.close()));
