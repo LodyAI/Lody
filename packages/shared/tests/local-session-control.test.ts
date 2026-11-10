@@ -16,6 +16,76 @@ const {
 };
 
 describe('local session control node validators', () => {
+  it('lets desktop prepare and resolve local images across both IPC guards', () => {
+    const scope = { machineId: 'machine-1', workspaceId: 'workspace-1', sessionId: 'session-1' };
+    const image = {
+      imageId: '33333333-3333-4333-8333-333333333333',
+      mimeType: 'image/png',
+      sizeBytes: 8,
+      fileName: 'screenshot.png',
+      transport: 'local',
+      machineId: scope.machineId,
+    };
+    const prepare = {
+      ...scope,
+      type: 'session/image-prepare-local',
+      imageId: image.imageId,
+      fileName: image.fileName,
+      mimeType: image.mimeType,
+    };
+    for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+      for (const source of [{ path: '/tmp/screenshot.png' }, { base64: 'iVBORw0KGgo=' }]) {
+        expect(validate({ ...prepare, source })).toBe(true);
+        expect(validate({ ...prepare, source, machineId: '' })).toBe(false);
+        expect(validate({ ...prepare, source, imageId: 'invalid' })).toBe(false);
+        expect(validate({ ...prepare, source, mimeType: 'text/plain' })).toBe(false);
+      }
+      for (const source of [
+        undefined,
+        {},
+        { path: '' },
+        { base64: '' },
+        { base64: 1 },
+        { path: '/tmp/image.png', base64: 'iVBORw0KGgo=' },
+      ]) {
+        expect(validate({ ...prepare, source })).toBe(false);
+      }
+      const resolve = { ...scope, type: 'session/image-resolve-local', image };
+      expect(validate(resolve)).toBe(true);
+      expect(validate({ ...resolve, image: { ...image, sizeBytes: -1 } })).toBe(false);
+    }
+    for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+      const prepared = {
+        type: 'session/image-prepare-local_response',
+        sessionId: scope.sessionId,
+        success: true,
+        image,
+      };
+      const resolved = {
+        type: 'session/image-resolve-local_response',
+        sessionId: scope.sessionId,
+        success: true,
+        path: '/tmp/screenshot.png',
+      };
+      expect(validate(prepared)).toBe(true);
+      expect(validate(resolved)).toBe(true);
+      expect(validate({ ...prepared, image: undefined })).toBe(false);
+      expect(validate({ ...prepared, image: { ...image, mimeType: 'text/plain' } })).toBe(false);
+      expect(validate({ ...resolved, path: undefined })).toBe(false);
+      expect(validate({ ...resolved, path: '' })).toBe(false);
+      for (const type of [prepared.type, resolved.type]) {
+        expect(
+          validate({
+            type,
+            sessionId: scope.sessionId,
+            success: false,
+            error: 'source_unavailable',
+          })
+        ).toBe(true);
+      }
+    }
+  });
+
   it('accepts a selected authentication method only on start in both validators', () => {
     const base = {
       type: 'machine/acp-authenticate',
