@@ -1,6 +1,7 @@
 # Recovery vault
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
+Status: draft
+Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
 Translation: current
 
 [中文](recovery-vault.zh.md)
@@ -199,14 +200,35 @@ restore works there; both are built in parallel, behind default-off gates. The r
 still created with every vault. It remains the fallback when a passkey is lost, the
 iCloud account is lost, or the platform has no PRF.
 
-**One RP on a dedicated host.** All platforms share one RP ID so a synced passkey works
-everywhere. The RP ID is the dedicated exact host `vault.lody.ai` (owner decision, 2026-11-06), and never
-the parent domain or the Web app's own host. A browser lets any page on the RP ID or its
-subdomains run a ceremony, so a parent-domain RP would put every subdomain and every
-script served from them inside the boundary. The RP ID cannot change later without
-orphaning every enrolled passkey. The host serves the apple-app-site-association file
-and, if approved, the Web surface below, and nothing else. A future login passkey must
-use a different RP, so a login prompt can never unlock V.
+**One RP in the Web client — draft revision, 2026-11-10.** The proposed RP ID
+is `lody.ai` on macOS, iOS and Web. This supersedes the 2026-11-06 dedicated
+`vault.lody.ai` direction, but this changed security boundary remains draft pending
+review of the revision. The owner said: “我可以改到 lody.ai 然后 lody 网页版就和它一致，这样可以吗”
+and “然后就都在网页端里面做就好了”. Web opens with a passkey or recovery file,
+creates its first empty recovery file, and adds passkeys directly in the existing
+Web client. There is no isolated origin, second-device browser identity, cross-page
+handoff, or manual pairing-code fallback for this path.
+
+The cost is explicit: `lody.ai`, its subdomains and every script they serve are
+inside the passkey ceremony boundary, including marketing pages and analytics.
+Their scripts can request a recovery-vault ceremony; the system prompt and required
+user verification remain barriers, not proof that the site's code is trustworthy.
+Recovery files and transient V/R/PRF material are handled in Web-client memory;
+compromised client code can expose vault workspaces beyond the selected one.
+Never log or persist those transient secrets or enable telemetry on recovery UI.
+
+A future login passkey must use a different RP ID, with a compatible ceremony
+origin; a different path or credential label on `lody.ai` is not RP isolation.
+Do not reuse a login assertion/PRF as recovery authorization. Native association
+uses `webcredentials:lody.ai`; the site's association document contains only
+`webcredentials`, never `applinks`, and Android link revocations remain empty.
+
+The owner reports E2EE is not in production and no recovery passkeys are enrolled.
+Use only the latest RP/format: no migration, old-RP retry, or compatibility wrapper.
+If enrolled credentials existed this change would orphan them; that deployment
+assumption is not a claim of a production-data audit. All feature gates stay off
+until separate rollout/acceptance. Existing authorized content remains usable
+independently of recovery setup. Browser-first workspace creation remains unsupported.
 
 **Ceremony contract.** These rules are the same on every platform:
 
@@ -258,31 +280,27 @@ restores in the first phase. V is never retained, and the app must not gain
 over-the-air JavaScript updates while this path exists, or it falls under the Web
 risk below.
 
-**Web.** Web ships after macOS and iPhone. PRF is judged by a real ceremony, not by a
-browser list. When a browser has no PRF, the user uses the recovery file on the same
-surface. There is no downgrade. The surface is unlock-only and isolated on the RP host
-(owner decision, 2026-11-06): a separate minimal build with no third-party scripts or telemetry, a strict
-CSP, and its own deployment credentials. C lives on that origin, and the regular Web
-app or any other device then joins through ordinary pairing approved by C. V, R and
-the PRF result never reach the regular Web app. V is never stored in a browser.
+**Web — draft revision, 2026-11-10.** Web ships after macOS and iPhone. The ordinary
+Web client at `lody.ai` directly creates/opens the vault and restores its existing
+browser identity. There is no isolated build, intermediary device C or cross-page
+transfer. A real ceremony decides PRF support; recovery files use the same page when
+PRF is unavailable. V, R and PRF output are transient plaintext within this application's
+operation, wiped after actual settlement, never persisted as plaintext or sent to
+telemetry. Approved ciphertext packages and protected retry journals remain durable.
+An empty vault/recovery file can be created on first sign-in, but backing up a workspace
+requires an already authorized browser with its keys. Browser-first workspace creation
+is not offered in this phase.
 
-**Web risk.** Web code is delivered by the server, so tampered code at an origin allowed
-by the RP can request a ceremony, take the PRF result and fetch the wrap, which yields V
-and every R in the vault. Unlike a compromised browser device, which exposes only that
-browser's workspaces, this reaches all covered workspaces and lets the attacker admit
-devices until R is revoked. Three limits must be stated plainly:
-
-- _Unlock-only and in-page confirmation are product rules, not security boundaries._
-  Tampered code ignores them and calls WebAuthn directly. Unlock-only is still useful,
-  because routine V use never happens on Web.
-- _The risk is not confined to Web users._ A passkey enrolled on a Mac syncs and can be
-  requested at the RP host from any browser, even if the user never uses Web. Native
-  code avoids server-delivered JavaScript, but the credential is not bound to the app.
-  An operator controlling the RP host can always try this, even with no Web surface.
-- _The real barrier is user approval plus isolation._ The system prompt names the RP
-  and the credential and cannot be drawn by page code. A dedicated host excludes
-  ordinary compromise of the Web app, its dependencies and its subdomains. It does not
-  exclude a hostile operator.
+**Web risk.** All code at `lody.ai` and origins under it that can request the parent RP
+(including marketing, analytics and compromised subdomains) can attempt a ceremony.
+After system approval, malicious code can obtain V and every covered R, exposing all
+covered workspaces and admitting devices until R is revoked. The system prompt and
+required user verification remain a barrier; page confirmation is only a product rule.
+This also affects passkeys registered in native apps: synchronized credentials can be
+requested from Web even if the user ordinarily uses only native apps. A separate login
+RP prevents honest login code from selecting the recovery credential, but cannot prevent
+a compromised login subdomain from requesting its parent `lody.ai` RP. The dedicated-host
+isolation guarantee from 2026-11-06 is withdrawn by this draft revision.
 
 **Other authenticators.** There is no allow-list and no attestation requirement: any
 provider works if its real ceremonies return a PRF result that meets the contract. When
@@ -307,10 +325,11 @@ and rotation unchanged.
 
 ### Owner decisions
 
-Decided on 2026-11-06: the RP host is `vault.lody.ai`; Web is the isolated unlock-only
-surface, after macOS and iPhone, and other devices join it by ordinary pairing; that
-surface also accepts the recovery file; the passkey feature requires iOS 18.4; and
-recovery and passkey work run now, in parallel.
+The 2026-11-06 dedicated-host/isolated-Web direction is superseded by the
+**draft 2026-11-10 revision above**, based on the owner's quoted direction to
+`lody.ai` and in-client operation. This does not mark the changed security guarantee
+approved. Unchanged: passkey capability requires iOS 18.4 and recovery/passkey work
+runs behind default-off gates in parallel with the MVP.
 
 On the same date the owner decided two more. Authenticators use standard WebAuthn with
 PRF and no allow-list, as [described above](#passkey-unlock). The trust anchor
