@@ -1,5 +1,9 @@
-import { useMemo } from 'react';
-
+import { useMemo, useRef } from 'react';
+import { usePlatform } from '@lody/platform/react';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
+import { useTranslation } from 'react-i18next';
 import { useAuthClient } from '../providers/convex-provider';
 
 export type WorkspaceMember = {
@@ -10,41 +14,62 @@ export type WorkspaceMember = {
   image?: string | null;
 };
 
-/**
- * Workspace members of the active organization, shaped for owner/assignee
- * pickers. Reads better-auth's organization state directly (same source as
- * `use-session-sharing.ts`) rather than the heavier `useOrganization()`, which
- * also drives org list retries and mutations.
- *
- * `isMultiMember` is the gate for ownership UI: a solo workspace has nobody to
- * hand a session to, so those controls must not render at all.
- */
-export function useWorkspaceMembers(): {
-  members: WorkspaceMember[];
-  isMultiMember: boolean;
-  isLoading: boolean;
-} {
+/** Directory labels are optional metadata, never membership or grant authority. */
+export function useWorkspaceMembers() {
+  const platform = usePlatform();
+  const scope = useResolvedWorkspaceScope();
+  const accountId = useWorkspaceLocalAccountId();
+  const { t } = useTranslation();
   const authClient = useAuthClient();
   const { data: activeOrganization, isPending } = authClient.useActiveOrganization();
-  const rawMembers = activeOrganization?.members;
-
+  const enabled =
+    platform.capabilities.has('teamSharing') && scope.enabled && !!accountId && !!scope.workspaceId;
+  const query = platform.cloudApi?.useOptionalAuthenticatedQuery?.(
+    cloudOperations.workspaceMembers.list,
+    enabled ? { workspaceId: scope.workspaceId!, accountId: accountId! } : 'skip'
+  );
+  const key = JSON.stringify([accountId, scope.workspaceId]);
+  const retained = useRef<{
+    key: string;
+    api: typeof platform.cloudApi;
+    rows: NonNullable<typeof query>['data'];
+  } | null>(null);
+  if (retained.current?.key !== key || retained.current?.api !== platform.cloudApi || !enabled)
+    retained.current = null;
+  if (enabled && query?.data !== undefined)
+    retained.current = { key, api: platform.cloudApi, rows: query.data };
+  const rows = query ? (enabled ? (query.data ?? retained.current?.rows) : undefined) : undefined;
+  const live = query !== undefined;
+  const error = query?.error;
+  const retry = query?.retry;
   return useMemo(() => {
-    const members: WorkspaceMember[] = [];
-    for (const member of rawMembers ?? []) {
-      const name = member.user?.name?.trim() || member.user?.email?.trim() || '';
-      if (!name) continue;
-      members.push({
-        userId: member.userId,
-        name,
-        email: member.user?.email ?? null,
-        image: member.user?.image ?? null,
-      });
-    }
+    const members: WorkspaceMember[] = live
+      ? (rows ?? []).map((row) => ({
+          ...row,
+          name: row.name?.trim() || t('sessions.access.unknownMember'),
+        }))
+      : (activeOrganization?.members ?? []).flatMap((member) => {
+          const name = member.user?.name?.trim() || member.user?.email?.trim() || '';
+          return name
+            ? [
+                {
+                  userId: member.userId,
+                  name,
+                  email: member.user?.email,
+                  image: member.user?.image,
+                },
+              ]
+            : [];
+        });
     members.sort((a, b) => a.name.localeCompare(b.name));
     return {
       members,
       isMultiMember: members.length > 1,
-      isLoading: !!isPending || rawMembers === undefined,
+      isLoading: live
+        ? enabled && rows === undefined && !error
+        : !!isPending || activeOrganization?.members === undefined,
+      error: !!error,
+      retry,
     };
-  }, [rawMembers, isPending]);
+  }, [rows, live, error, retry, enabled, activeOrganization, isPending, t]);
 }

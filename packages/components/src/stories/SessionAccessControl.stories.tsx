@@ -223,3 +223,8 @@ export const UnknownMember: Story = {
   },
   play: PersonalReadOnly.play,
 };
+
+export const MembersRefreshFailed: Story = {
+  args: { state: { ...memberState, membersError: true, retryMembers: fn() } },
+  play: PersonalReadOnly.play,
+};

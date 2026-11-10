@@ -22,6 +22,8 @@ type UseSessionSharingOptions = {
   enabled?: boolean;
   members?: SessionSharingState['availableMembers'];
   membersLoading?: boolean;
+  membersError?: boolean;
+  retryMembers?: () => void;
 };
 
 /** Team read grants use the same owner-only port in ordinary and encrypted workspaces. */
@@ -125,6 +127,8 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
         ownerUserId: root.userId,
         availableMembers: options.members,
         membersLoading: options.membersLoading,
+        membersError: options.membersError,
+        retryMembers: options.retryMembers,
         memberUserIds: [
           ...new Set(
             (grant?.memberReadSharedSessions ?? [])
@@ -147,6 +151,8 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
       machines,
       options.members,
       options.membersLoading,
+      options.membersError,
+      options.retryMembers,
       projects,
       currentUserId,
       accessByMachineId,
