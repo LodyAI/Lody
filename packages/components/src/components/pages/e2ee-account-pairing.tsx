@@ -114,6 +114,8 @@ export function E2eeAccountPairingRequest(props: {
   onJoined: () => void;
   workspaceId?: string;
   pollMs?: number;
+  /** Consent-first browser choice; approval then uses the existing automatic flow. */
+  onRequestApproval?: () => void;
 }) {
   const { runtime } = props;
   const { t } = useTranslation();
@@ -151,9 +153,11 @@ export function E2eeAccountPairingRequest(props: {
   };
   const start = (pairingString?: string) => {
     if (personalRequired && !personalComputer) return Promise.resolve();
+    if (props.onRequestApproval) { props.onRequestApproval(); return Promise.resolve(); }
     return run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
   };
   useEffect(() => {
+    if (props.onRequestApproval) { setPhase('idle'); return undefined; }
     // Approver-only portable hosts must not start an unsupported requester.
     if (!runtime.requestAccountPairing) return undefined;
     let cancelled = false;
@@ -321,7 +325,7 @@ export function E2eeAccountPairingRequest(props: {
             {t('e2ee.accountPair.request.restart')}
           </Button>
         )}
-        {!entering && state?.status !== 'joined' && (
+        {!props.onRequestApproval && !entering && state?.status !== 'joined' && (
           <Button variant="ghost" disabled={phase === 'busy'} onClick={() => setEntering(true)}>
             {t('e2ee.accountPair.request.haveCode')}
           </Button>

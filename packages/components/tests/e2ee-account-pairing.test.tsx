@@ -812,3 +812,29 @@ it('browser device requests retain personal-computer consent while automatic ope
     CODE
   );
 });
+
+it('automatic-capable browsers choose recovery without pairing, or consent before the existing six-digit approval flow', async () => {
+  const { E2eeAutomaticPairingPage } = await import('../src/components/pages/e2ee-automatic-pairing');
+  const host = requesterHost();
+  let requested = false;
+  let opened = false;
+  const runtime = {
+    ...host.runtime,
+    requirePersonalComputer: true,
+    openBrowserRecovery: async () => { opened = true; return false; },
+    automaticPairingState: async () => null,
+    startAutomaticPairing: async () => { requested = true; return { id: 'a1'.repeat(16), phase: 'waiting', workspaceId: 'workspace-A', workspaceName: 'Alpha', deviceName: 'Web', comparisonCode: '123456', expiresAt: NOW + 600_000 }; },
+  } as unknown as E2eeWorkspaceRuntime;
+  await act(async () => root.render(<E2eeAutomaticPairingPage runtime={runtime} workspaceId="workspace-A" onJoined={() => {}} onBack={() => {}} />));
+  expect(requested).toBe(false);
+  expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(opened).toBe(true);
+  expect(requested).toBe(false);
+  expect(host.state).toBeNull();
+  await click('e2ee.accountPair.request.start');
+  expect(requested).toBe(true);
+  expect(container.textContent).toContain('123 456');
+  expect(host.state).toBeNull();
+});

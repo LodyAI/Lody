@@ -261,6 +261,7 @@ it.each(['chromium', 'webkit'] as const)(
         await (globalThis as Surface).HostFixture.bootRuntime();
       });
       expect((await call(page, 'open')).reason).toBe('identity-lost');
+      expect(await good(page, 'accountRequester')).toBeNull();
       expect((await raw(page, 'currentPhase')).value).toBeUndefined();
       expect((await call(page, 'wrongAccount')).reason).toBe('scope-mismatch');
       expect((await call(page, 'wrongWorkspace')).reason).toBe('scope-mismatch');
@@ -350,6 +351,7 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'startGrant');
       await good(page, 'switchAccount');
       expect(await good(page, 'releaseGrant')).toEqual({ ok: false, reason: 'scope-mismatch' });
+      expect((await call(page, 'accountRequester')).reason).toBe('closed');
       expect((await call(page, 'seal')).reason).toBe('closed');
       // After an account switch a delivery retry gets no approval session.
       expect((await call(page, 'approvalSession')).ok).toBe(false);

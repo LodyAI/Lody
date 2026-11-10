@@ -79,6 +79,7 @@ import {
   makeOwnedPersonalDeviceHost,
   makePersonalWorkspaceRuntime,
   personalRuntimeRecovery,
+  personalRuntimeAccountRequester,
   type PersonalHostPorts,
   PersonalMachineSharing,
   PersonalCloseIncomplete,
@@ -1443,6 +1444,17 @@ export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;
     switch (action) {
+      case 'accountRequester': {
+        const exposed = (
+          runtime as typeof runtime & {
+            accountRequester: NonNullable<ReturnType<typeof personalRuntimeAccountRequester>>;
+          }
+        ).accountRequester;
+        if (!exposed || exposed !== personalRuntimeAccountRequester(runtime))
+          throw new Error('requester must borrow the guarded runtime owner');
+        value = await Effect.runPromise(exposed.pendingPersonalJoin());
+        break;
+      }
       case 'observeCheckpoint':
         value = {
           genesisHash: offer.genesisHash,

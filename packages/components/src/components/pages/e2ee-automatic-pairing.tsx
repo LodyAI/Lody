@@ -19,6 +19,7 @@ import type {
 } from '@lody/platform';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
+import { E2eeAccountPairingRequest } from './e2ee-account-pairing';
 import { holdPrivateTelemetrySurface } from '@/lib/posthog-privacy';
 
 function usePairingPrivacy() {
@@ -71,6 +72,9 @@ export function E2eeAutomaticPairingPage({
 }) {
   usePairingPrivacy();
   const { t } = useTranslation();
+  const [approvalChoice, setApprovalChoice] = useState<{ runtime: E2eeWorkspaceRuntime; workspaceId: string } | null>(null);
+  const needsChoice = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
+  const canStart = !needsChoice || (approvalChoice?.runtime === runtime && approvalChoice.workspaceId === workspaceId);
   const [state, setState] = useState<E2eeAutomaticPairingState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -83,6 +87,7 @@ export function E2eeAutomaticPairingPage({
   const joinedRef = useRef(onJoined);
   joinedRef.current = onJoined;
   useEffect(() => {
+    if (!canStart) return undefined;
     let alive = true,
       running = false;
     setBusy(false);
@@ -154,7 +159,7 @@ export function E2eeAutomaticPairingPage({
       unsubscribe?.();
       clearInterval(timer);
     };
-  }, [runtime, workspaceId, generation]);
+  }, [runtime, workspaceId, generation, canStart]);
   const ownerRef = useRef({ runtime, workspaceId });
   if (ownerRef.current.runtime !== runtime || ownerRef.current.workspaceId !== workspaceId)
     ownerRef.current = { runtime, workspaceId };
@@ -241,6 +246,14 @@ export function E2eeAutomaticPairingPage({
       if (sameOwner(owner)) setBusy(false);
     }
   };
+  if (!canStart) return (
+    <main className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+      <Button variant="ghost" onClick={onBack}><ChevronLeft size={16} />{t('e2ee.control.back')}</Button>
+      <E2eeAccountPairingRequest key={workspaceId} runtime={runtime} workspaceId={workspaceId}
+        autoStart={false} onJoined={onJoined}
+        onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })} />
+    </main>
+  );
   const receiving = state?.phase === 'syncing' || state?.phase === 'joined';
   const terminal = state && ['declined', 'expired', 'cancelled'].includes(state.phase);
   return (
