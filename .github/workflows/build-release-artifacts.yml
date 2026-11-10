@@ -1,6 +1,5 @@
 name: Build release inputs
 run-name: release-inputs-${{ inputs.request-id }}
-
 on:
   workflow_dispatch:
     inputs:
@@ -12,15 +11,18 @@ on:
         description: Product to compile
         required: true
         type: choice
-        options: [desktop, cli]
+        options:
+          - desktop
+          - cli
       build-config:
         description: Explicit non-secret versions, profile, URLs and renderer origins
         required: true
         type: string
-
+  push:
+    branches:
+      - ci/oss-ci-acceptance
 permissions:
   contents: read
-
 jobs:
   configuration:
     runs-on: ubuntu-latest
@@ -39,7 +41,7 @@ jobs:
           BUILD_KIND: ${{ inputs.kind }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF" = refs/heads/ci/oss-ci-acceptance
           printf '%s\n' "$BUILD_CONFIG" > build-config.json
           jq -e --arg id "$REQUEST_ID" '
             .requestId == $id and ($id | test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
@@ -50,7 +52,7 @@ jobs:
           ' build-config.json
           source=$(jq -r .sourceSha build-config.json)
           git fetch --no-tags origin "$source"
-          git merge-base --is-ancestor "$source" origin/main
+          git merge-base --is-ancestor "$source" "$GITHUB_SHA"
           case "$BUILD_KIND" in
             desktop) matrix='{"include":[{"target":"mac","os":"macos-15"},{"target":"win","os":"windows-2022"},{"target":"linux","os":"ubuntu-latest"},{"target":"linux-arm64","os":"ubuntu-24.04-arm"}]}' ;;
             cli) matrix='{"include":[{"target":"cli","os":"ubuntu-latest"}]}' ;;
@@ -63,7 +65,7 @@ jobs:
           name: build-config
           path: build-config.json
           if-no-files-found: error
-
+    if: github.event_name == 'workflow_dispatch'
   build:
     needs: configuration
     strategy:
@@ -76,7 +78,7 @@ jobs:
         shell: bash
     env:
       NODE_OPTIONS: --max-old-space-size=8192
-      NODE_USE_ENV_PROXY: '1'
+      NODE_USE_ENV_PROXY: "1"
       LODY_RELEASE_CONFIG: ${{ github.workspace }}/build-config.json
       LODY_RELEASE_TARGET: ${{ matrix.target }}
       LODY_RELEASE_VERSION: ${{ matrix.target == 'cli' && fromJSON(inputs.build-config).cliVersion || fromJSON(inputs.build-config).embeddedCliVersion }}
@@ -88,7 +90,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
         with:
-          node-version: '24.22.1'
+          node-version: 24.22.1
       - uses: actions/download-artifact@v4
         with:
           name: build-config
@@ -112,7 +114,7 @@ jobs:
       - name: Stage native dependencies and package without release credentials
         if: matrix.target != 'cli'
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           pnpm --dir apps/electron sync:cli
           case "$LODY_RELEASE_TARGET" in
