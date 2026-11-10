@@ -1,6 +1,7 @@
 import type { LodyOperationItemResult, MachineId, SessionId, WorkspaceId } from '@lody/shared';
 import Database from 'better-sqlite3';
-import { Context, Deferred, Effect, Fiber, Layer, Scheduler } from 'effect';
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Scheduler } from 'effect';
+import { TestClock } from 'effect/testing';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -10,6 +11,8 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LodyOperationStore } from '../operation-store';
 import { inboxRepositoryLayer } from '../platform/inbox-repository';
+import { OrchestrationStorageFailure } from '../storage-error';
+import { InboxSqlite } from './sqlite';
 import { ExecutionMembers, makeExecutionOwner } from './execution-owner';
 import {
   batchDepth,
@@ -1492,6 +1495,226 @@ it.each(['error', 'defect'] as const)(
     }
   }
 );
+
+it.each(['recover', 'dispose'] as const)(
+  'defers a shared SQLite write lock without multiplying native waits (%s)',
+  async (ending) => {
+    const f = fixture();
+    for (const id of ['A', 'B', 'C']) f.add(`result-${id}`, 0, [], id);
+    // Real lock contention, with native waiting disabled so the test depends on
+    // explicit lock ownership and TestClock, never elapsed wall-clock time.
+    const db = new Database(f.filename, { timeout: 0 });
+    const sql = new InboxSqlite(db);
+    const blocker = new Database(f.filename);
+    blocker.exec('BEGIN IMMEDIATE');
+    const attempts: string[] = [];
+    const received: string[] = [];
+    const diagnostics: unknown[] = [];
+    let locked = true;
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const busy = yield* Deferred.make<void>();
+              const completed = yield* Deferred.make<void>();
+              const base = yield* Effect.provide(InboxRepository, inboxRepositoryLayer(sql));
+              let inbox: OperationInbox['Service'];
+              const repo = Layer.succeed(InboxRepository, {
+                ...base,
+                prepare: (...args: Parameters<typeof base.prepare>) =>
+                  Effect.suspend(() => {
+                    if (locked) attempts.push(args[0].sessionId);
+                    return base.prepare(...args);
+                  }),
+              });
+              const execution = Layer.succeed(InboxExecution, {
+                ready: () => true,
+                admit: () => true,
+                report: (cause) =>
+                  Effect.gen(function* () {
+                    diagnostics.push(cause);
+                    yield* Deferred.succeed(busy, undefined);
+                  }),
+                launch: (batch) =>
+                  Effect.gen(function* () {
+                    const id = `execution-${batch.sessionId}`;
+                    expect(yield* inbox.begin(batch, id)).toBe(true);
+                    yield* inbox.submit(batch, batch, id, () => received.push(batch.sessionId));
+                    yield* inbox.settle(batch, 'settled');
+                    yield* inbox.release({ ...batch, executionId: id, outcome: 'normal' });
+                    if (received.filter((session) => session !== 'D').length === 3)
+                      yield* Deferred.succeed(completed, undefined);
+                  }),
+              });
+              yield* Effect.gen(function* () {
+                inbox = yield* OperationInbox;
+                yield* Deferred.await(busy);
+                yield* TestClock.adjust(0);
+                expect(attempts).toEqual(['A']);
+                const cause = diagnostics[0];
+                if (!Cause.isCause(cause)) throw new Error('Missing original storage cause');
+                expect(cause.reasons).toContainEqual(
+                  expect.objectContaining({
+                    error: expect.objectContaining({ kind: 'busy', code: 'SQLITE_BUSY' }),
+                  })
+                );
+                for (let i = 0; i < 5; i++) yield* inbox.wake;
+                yield* TestClock.adjust(249);
+                expect(attempts).toEqual(['A']);
+                expect(received).toEqual([]);
+                expect(
+                  db.prepare('SELECT COUNT(*) AS n FROM inbox_results WHERE consumed=0').get()
+                ).toEqual({ n: 3 });
+                yield* TestClock.adjust(1);
+                expect(attempts).toEqual(['A', 'A']);
+                for (const delay of [500, 1000, 2000]) {
+                  const before = attempts.length;
+                  yield* TestClock.adjust(delay - 1);
+                  expect(attempts).toHaveLength(before);
+                  yield* TestClock.adjust(1);
+                  expect(attempts).toEqual(Array.from({ length: before + 1 }, () => 'A'));
+                }
+                if (ending === 'dispose') return;
+                locked = false;
+                blocker.exec('ROLLBACK');
+                // The scanner's backoff must not fence explicit new admission.
+                const fresh = { ...f.input, sessionId: 'D', inputId: 'fresh-D' };
+                expect(yield* inbox.accept(fresh)).toBe(true);
+                expect(yield* inbox.begin(fresh, 'execution-D')).toBe(true);
+                yield* inbox.submit(undefined, fresh, 'execution-D', () => received.push('D'));
+                yield* inbox.release({ ...fresh, executionId: 'execution-D', outcome: 'normal' });
+                yield* TestClock.adjust(2000);
+                yield* Deferred.await(completed);
+                expect(received.toSorted()).toEqual(['A', 'B', 'C', 'D']);
+                expect(
+                  db.prepare('SELECT COUNT(*) AS n FROM inbox_results WHERE consumed=0').get()
+                ).toEqual({ n: 0 });
+              }).pipe(
+                Effect.provide(
+                  OperationInbox.layer('workspace', 'owner').pipe(
+                    Layer.provide(Layer.merge(repo, execution))
+                  )
+                )
+              );
+            })
+          );
+          // Scope closure cancels the owned retry; it must not touch the DB later.
+          const before = attempts.length;
+          yield* TestClock.adjust(10_000);
+          expect(attempts).toHaveLength(before);
+        }).pipe(Effect.provide(TestClock.layer()))
+      );
+    } finally {
+      if (blocker.inTransaction) blocker.exec('ROLLBACK');
+      blocker.close();
+      db.close();
+    }
+  }
+);
+
+it('retains every settlement and its original error when shared BUSY interrupts recovery', async () => {
+  const f = fixture();
+  const db = new Database(f.filename, { timeout: 0 });
+  const sql = new InboxSqlite(db);
+  const batches = ['A', 'B'].map((sessionId) => {
+    const input = { ...f.input, sessionId, inputId: `input-${sessionId}` };
+    sql.accept(input);
+    f.add(`result-${sessionId}`, 0, [], sessionId);
+    const batch = sql.prepare(input, 'owner');
+    if (!batch) throw new Error('Missing batch');
+    sql.begin(input, `execution-${sessionId}`, 'owner');
+    expect(sql.fence(batch, `execution-${sessionId}`)).toBe(true);
+    return batch;
+  });
+  const blocker = new Database(f.filename);
+  const [firstBatch, secondBatch] = batches;
+  if (!firstBatch || !secondBatch) throw new Error('Missing retained batches');
+  f.add('pending-C', 0, [], 'C');
+  const attempts: string[] = [];
+  let recovering = false;
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const base = yield* Effect.provide(InboxRepository, inboxRepositoryLayer(sql));
+          const deps = Layer.merge(
+            Layer.succeed(InboxRepository, {
+              ...base,
+              prepare: (...args: Parameters<typeof base.prepare>) =>
+                Effect.suspend(() => {
+                  if (recovering) attempts.push(`prepare-${args[0].sessionId}`);
+                  return base.prepare(...args);
+                }),
+              settle: (...args: Parameters<typeof base.settle>) =>
+                Effect.suspend(() => {
+                  if (!recovering)
+                    return Effect.fail(
+                      new OrchestrationStorageFailure(new Error('retain this receipt'))
+                    );
+                  attempts.push(args[0].sessionId);
+                  return base.settle(...args);
+                }),
+            }),
+            Layer.succeed(InboxExecution, {
+              ready: () => false,
+              admit: () => true,
+              launch: () => Effect.void,
+              report: () => Effect.void,
+            })
+          );
+          yield* Effect.gen(function* () {
+            const inbox = yield* OperationInbox;
+            yield* inbox.settle(firstBatch, 'unknown', 'original provider error');
+            yield* inbox.settle(secondBatch, 'settled');
+            yield* TestClock.adjust(0);
+            recovering = true;
+            blocker.exec('BEGIN IMMEDIATE');
+            const repo = yield* InboxRepository;
+            try {
+              const exit = yield* Effect.exit(
+                inbox.recoverSettlements(repo.settle, repo.release, repo.pause)
+              );
+              expect(attempts).toEqual(['A']);
+              expect(Exit.isFailure(exit)).toBe(true);
+              if (!Exit.isFailure(exit)) throw new Error('Missing BUSY failure');
+              expect(exit.cause.reasons).toContainEqual(
+                expect.objectContaining({ error: expect.objectContaining({ code: 'SQLITE_BUSY' }) })
+              );
+              // Background recovery must not proceed to C's preparation after
+              // the retained A receipt already hit the shared writer lock.
+              yield* inbox.wake;
+              yield* TestClock.adjust(0);
+              expect(attempts).toEqual(['A', 'A']);
+            } finally {
+              blocker.exec('ROLLBACK');
+            }
+            yield* inbox.recoverSettlements(repo.settle, repo.release, repo.pause);
+            expect(attempts).toEqual(['A', 'A', 'A', 'B']);
+            expect(
+              db
+                .prepare(
+                  "SELECT session_id,state,cause FROM inbox_batches WHERE session_id IN ('A','B') ORDER BY session_id"
+                )
+                .all()
+            ).toEqual([
+              { session_id: 'A', state: 'unknown', cause: 'original provider error' },
+              { session_id: 'B', state: 'settled', cause: null },
+            ]);
+          }).pipe(
+            Effect.provide(
+              OperationInbox.layer('workspace', 'owner').pipe(Layer.provideMerge(deps))
+            )
+          );
+        })
+      ).pipe(Effect.provide(TestClock.layer()))
+    );
+  } finally {
+    if (blocker.inTransaction) blocker.exec('ROLLBACK');
+    blocker.close();
+    db.close();
+  }
+});
 
 it('retains a failed settlement without blocking a later receipt from being recovered', async () => {
   const f = fixture();

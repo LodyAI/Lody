@@ -62,6 +62,7 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.
   Retry independent receipts and prepare independent batches even after another fails; retain failed
   receipts and report the combined Cause without making it a prerequisite for workspace scanning.
+  Shared SQLite BUSY ends that pass and arms one scope-owned asynchronous retry; it never fences explicit admission.
 - Stop pauses queues; legacy Stop cancels execution. Fresh human/
   Agent-chat clears pause; Host `automation` cannot and yields to humans. Never
   revive canceled execution or discard prepared input. Automation release proof

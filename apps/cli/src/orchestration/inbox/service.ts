@@ -1,4 +1,5 @@
 import { Cause, Context, Effect, Layer, Queue, Semaphore } from 'effect';
+import { OrchestrationStorageFailure } from '../storage-error';
 import {
   InboxAdmissionRejected,
   inboxScopeKey,
@@ -138,6 +139,17 @@ export class OperationInbox extends Context.Service<
                 : Effect.void
             )
           );
+        const storageBusy = (cause: Cause.Cause<unknown>) =>
+          cause.reasons.some(
+            (reason) =>
+              Cause.isFailReason(reason) &&
+              reason.error instanceof OrchestrationStorageFailure &&
+              reason.error.kind === 'busy'
+          );
+        const reportIndependentFailure = (cause: Cause.Cause<unknown>) =>
+          Cause.hasInterrupts(cause) || storageBusy(cause)
+            ? Effect.failCause(cause)
+            : report(cause);
         const scope = yield* Effect.scope;
         const submissionGate = Semaphore.makeUnsafe(1);
         let quiesced = false;
@@ -169,6 +181,9 @@ export class OperationInbox extends Context.Service<
               Effect.catchCause((cause) => {
                 if (Cause.hasInterrupts(cause)) return Effect.failCause(cause);
                 failures = Cause.combine(failures, cause);
+                // These writes share one SQLite writer. Repeating its native
+                // busy_timeout cannot make an independent receipt succeed.
+                if (storageBusy(cause)) return Effect.failCause(failures);
                 return Effect.void;
               })
             );
@@ -232,6 +247,29 @@ export class OperationInbox extends Context.Service<
               })
           );
         const wake = Queue.offer(signal, undefined).pipe(Effect.asVoid);
+        let busyRetryScheduled = false;
+        let busyRetryAttempt = 0;
+        const deferBusyScan = Effect.fn('OperationInbox.deferBusyScan')(
+          function* () {
+            if (quiesced || busyRetryScheduled) return;
+            busyRetryScheduled = true;
+            const delay = 250 * 2 ** busyRetryAttempt;
+            busyRetryAttempt = Math.min(busyRetryAttempt + 1, 3);
+            yield* Effect.sleep(delay).pipe(
+              // Clear before waking: an old retry must not clear a newer retry.
+              Effect.ensuring(
+                Effect.sync(() => {
+                  busyRetryScheduled = false;
+                })
+              ),
+              Effect.andThen(Effect.suspend(() => (quiesced ? Effect.void : wake))),
+              Effect.interruptible,
+              Effect.forkIn(scope)
+            );
+          },
+          // Publish the flag and its owned fiber together, even if a caller stops.
+          Effect.uninterruptible
+        );
         const prepare = Effect.fn('OperationInbox.prepare')(function* (input: InboxInput) {
           return yield* withGate(input, repo.prepare(input, owner));
         });
@@ -263,7 +301,8 @@ export class OperationInbox extends Context.Service<
             )
           );
         const scan = Effect.fn('OperationInbox.scan')(function* () {
-          yield* retrySettlements().pipe(Effect.catchCause(report));
+          if (busyRetryScheduled) return;
+          yield* retrySettlements().pipe(Effect.catchCause(reportIndependentFailure));
           if (quiesced) return;
           const pending = yield* repo.pending(workspaceId);
           for (const item of pending) {
@@ -295,13 +334,20 @@ export class OperationInbox extends Context.Service<
                 ),
                 Effect.forkIn(scope)
               );
-            }).pipe(Effect.catchCause(report));
+            }).pipe(Effect.catchCause(reportIndependentFailure));
           }
+          busyRetryAttempt = 0;
         });
         yield* Effect.forever(
           Queue.take(signal).pipe(
             Effect.flatMap(() => scan()),
-            Effect.catchCause(report)
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause)
+                ? Effect.failCause(cause)
+                : report(cause).pipe(
+                    Effect.andThen(storageBusy(cause) ? deferBusyScan() : Effect.void)
+                  )
+            )
           )
         ).pipe(Effect.forkScoped);
         yield* wake;
@@ -439,7 +485,9 @@ export class OperationInbox extends Context.Service<
                   if (settlements.get(batch.batchId) === receipt) settlements.delete(batch.batchId);
                 })
               ),
-              Effect.catchCause((failure) => report(failure).pipe(Effect.andThen(wake)))
+              Effect.catchCause((failure) =>
+                report(failure).pipe(Effect.andThen(storageBusy(failure) ? deferBusyScan() : wake))
+              )
             );
           }),
         });
