@@ -77,7 +77,10 @@ type Result =
 
 /** This workspace's recovery readiness for the console's getting-started list: true only
  * when recovery is verified, false when it is not yet, undefined when off or unknown. */
-export function useWorkspaceRecoveryReady(workspaceId: string | undefined, accountId?: string) {
+export function useWorkspaceRecoveryReady(
+  workspaceId: string | null | undefined,
+  accountId?: string | null
+) {
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
   const [e2ee] = useState(() => getIpcServices()?.e2ee);
   const [ready, setReady] = useState<{ scope: string; value: boolean | undefined }>();
