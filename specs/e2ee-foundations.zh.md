@@ -1,16 +1,15 @@
 # E2EE 基础模块边界
 
-Status: draft
+Status: approved
 Translation: current
 
-此前批准的版本：[`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
-（2026-11-10，owner；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)）。
-更早：[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.zh.md)
+批准：2026-11-10，owner 批准移动端种子交接（WebView 中的 portable host 交给一个用途受限的
+原生 iroh 插件）；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#移动端种子交接)。
+上一版：[`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
+（2026-11-10，iroh 首选通道）；更早 [`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
 （[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准 2026-10-28，
 [PR #1894](https://github.com/LodyAI/Lody/pull/1894)。
-
-本次修订允许移动端 WebView 中的 portable host 经一个用途受限的原生插件交出一次设备
-种子（owner 决定，2026-11-10），因此回到 draft，等 owner 在 PR 中批准。
 
 [English](e2ee-foundations.md)
 

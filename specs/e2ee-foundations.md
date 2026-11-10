@@ -1,17 +1,17 @@
 # E2EE foundation boundary
 
-Status: draft
+Status: approved
 Translation: current
 
-Previously approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.md)
-(2026-11-10, owner; [approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#iroh-preferred-route)).
-Earlier: [`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.md)
+Approval: 2026-11-10, the owner approved the mobile seed handoff (WebView portable host
+to one purpose-limited native iroh plugin);
+[approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#mobile-seed-handoff).
+Previous: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.md)
+(2026-11-10, iroh preferred route); earlier
+[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
 ([PR #2487](https://github.com/LodyAI/Lody/pull/2487)); original approval 2026-10-28,
 [PR #1894](https://github.com/LodyAI/Lody/pull/1894).
-
-This revision lets the mobile WebView portable host hand the device seed once over
-a purpose-limited native plugin (owner decision, 2026-11-10); it returns to draft
-until the owner approves it in its pull request.
 
 [中文](e2ee-foundations.zh.md)
 
