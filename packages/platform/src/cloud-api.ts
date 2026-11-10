@@ -75,6 +75,15 @@ export type OptionalCloudArgsOrSkip<Args> =
  * implementation so the open platform package never imports a cloud SDK.
  */
 export interface CloudApi {
+  /** Authenticated optional metadata: failures remain local to the consumer. */
+  useOptionalAuthenticatedQuery?<Args, Result>(
+    operation: CloudQuery<Args, Result>,
+    args: Args | 'skip'
+  ): {
+    data: Result | undefined;
+    error: Error | null;
+    retry: () => void;
+  };
   useQuery<Args, Result>(
     operation: CloudQuery<Args, Result>,
     args: Args | 'skip'

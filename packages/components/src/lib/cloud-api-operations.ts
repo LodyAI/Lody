@@ -100,6 +100,7 @@ function capabilityForOperation(name: string): PlatformCapability {
     name.startsWith('e2eeJoinMailbox:')
   )
     return 'multiWorkspace';
+  if (name.startsWith('workspaceMembers:')) return 'teamSharing';
   if (name.startsWith('e2eeMachineSharing:')) return 'teamSharing';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
@@ -240,6 +241,7 @@ export const cloudOperations = {
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
+  workspaceMembers: { list: query<ConvexApi['workspaceMembers']['list']>('workspaceMembers:list') },
   auth: {
     transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
       'auth:transferWorkspaceOwnership'

@@ -6538,6 +6538,7 @@
   "sessions.access.readonlyMachine": "Read-only · Runs on {{machine}}",
   "sessions.access.reference": "Reference in a new session",
   "e2ee.machineSharing.pendingSession": "Pending change: {{action}} read access for {{name}}",
+  "sessions.access.directoryFailed": "Member list could not be refreshed. Previously loaded names are shown.",
   "sessions.access.unknownMember": "Unknown member",
   "sessions.access.members": "Members",
   "sessions.access.owner": "Owner",

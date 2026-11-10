@@ -1,3 +1,8 @@
+export type WorkspaceDirectoryMember = {
+  userId: string;
+  name: string | null;
+  image: string | null;
+};
 export type {
   MachineIdentityRestoreIntent,
   MachineIdentityRestoreResult,
@@ -664,6 +669,9 @@ export type CloudApi = {
       { workspaceId: string },
       { created: boolean; dayStartMs: number }
     >;
+  };
+  workspaceMembers: {
+    list: Query<{ workspaceId: string; accountId: string }, WorkspaceDirectoryMember[]>;
   };
   auth: {
     transferWorkspaceOwnership: Mutation<{ workspaceId: string; targetMemberId: string }, null>;

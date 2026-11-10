@@ -1679,7 +1679,12 @@ export function LoroAppSidebar({
       workspaceId: scopedWorkspaceId,
       enabled: workspaceDataReady,
     });
-  const { members: sharingMembers, isLoading: sharingMembersLoading } = useWorkspaceMembers();
+  const {
+    members: sharingMembers,
+    isLoading: sharingMembersLoading,
+    error: sharingMembersError,
+    retry: retrySharingMembers,
+  } = useWorkspaceMembers();
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
@@ -1692,6 +1697,8 @@ export function LoroAppSidebar({
     includeLocalProjectDetails: true,
     members: sharingMembers,
     membersLoading: sharingMembersLoading,
+    membersError: sharingMembersError,
+    retryMembers: retrySharingMembers,
     workspaceId: scopedWorkspaceId,
     enabled: workspaceDataReady,
   });

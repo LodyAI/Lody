@@ -16,6 +16,8 @@ export type SessionSharingState = {
   memberUserIds?: readonly string[];
   availableMembers?: readonly { userId: string; name: string; image?: string | null }[];
   membersLoading?: boolean;
+  membersError?: boolean;
+  retryMembers?: () => void;
   setMemberReadAccess?: (userId: string, shared: boolean) => Promise<void>;
   openMachineSettings?: () => void;
   /** Narrow owner action supplied by the bound session-access port. */

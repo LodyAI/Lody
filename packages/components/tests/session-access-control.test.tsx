@@ -181,6 +181,34 @@ describe('SessionAccessControl', () => {
     }
   );
 
+  it('retains cached candidates and team sharing controls when directory refresh fails, with a local retry', async () => {
+    let retried = false;
+    await render({
+      state: {
+        ...baseState,
+        visibility: 'private',
+        ownerUserId: 'owner',
+        availableMembers: [
+          { userId: 'owner', name: 'Alice' },
+          { userId: 'candidate', name: 'Bob' },
+        ],
+        membersError: true,
+        retryMembers: () => {
+          retried = true;
+        },
+        setMemberReadAccess: async () => {},
+        setReadAccess: async () => {},
+      },
+    });
+    await openPanel();
+    expect(panel().textContent).toContain('Member list could not be refreshed');
+    expect(panel().textContent).toContain('Alice');
+    expect(panelButton('Add member').disabled).toBe(false);
+    await act(async () => panelButton('Retry').click());
+    expect(retried).toBe(true);
+    expect(panelButton('Add member').disabled).toBe(false);
+  });
+
   it.each([
     ['en', true, 'Loading...'],
     ['en', false, 'Unknown member'],

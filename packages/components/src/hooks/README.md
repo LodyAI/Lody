@@ -367,3 +367,23 @@ Unknown placements and nested/cross-machine links do not inherit. Opener provena
 alone grants nothing; malformed parent links do not redirect a sharing mutation away
 from the current session. This client check cannot authenticate a forged otherwise
 valid containment relation or provide an authoritative session-to-machine binding.
+
+
+## Live member directory
+
+`useWorkspaceMembers` reads the capability-gated `workspaceMembers:list` descriptor
+through the existing shared authenticated query source. Convex dependency updates
+replace the whole directory on member joins, departures, replacements and profile
+changes. The response contains only account ID, display name (email fallback) and
+avatar; it is never a membership or sharing authority. Unsupported/local assemblies
+retain their existing organization projection.
+
+The directory query key includes the expected account, which the server compares
+with its authenticated user before any directory read. This prevents an old-account
+SDK cache from being accepted under a new account.
+
+Same-account/workspace labels survive optional-query failures. The sharing panel
+shows a local retry using the query owner's bounded retry budget, shared across all
+mounted consumers; no polling or second watch owner is added. Account, workspace or
+API changes discard retained labels. Team/public sharing and grant writes keep their
+independent permission checks even while labels are unavailable.
