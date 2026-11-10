@@ -72,6 +72,8 @@ final class OutboxDispatcher {
         guard let self, releaser != ObjectIdentifier(self) else { return }
         self.trigger = nil
         self.schedule()
+        // The page's composer reads the shared set for canSend; refresh it even if no record changes.
+        self.settled?()
       }
     }
   }
