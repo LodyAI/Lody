@@ -1,4 +1,6 @@
 {
+  "machinePairing.unixShell": "macOS / Linux",
+  "machinePairing.windowsShell": "Windows (PowerShell)",
   "settings.tabs.lodyAgent": "Lody Agent",
   "settings.categories.lodyAgent.description": "Sign in and connect the models Lody Agent uses",
   "lodyAgentSetting.disabled": "Turn on Lody Agent in Beta to use it.",
@@ -1039,8 +1041,8 @@
   "chat.mobileHome.localProjectSearchPlaceholder": "Search projects",
   "chat.mobileHome.machineSelector": "Machines",
   "chat.mobileHome.newChatAriaLabel": "New chat",
-  "chat.mobileHome.onboarding.commandHeading": "One command — on any machine",
-  "chat.mobileHome.onboarding.commandHint": "Run it on a server, VM, or your own computer (Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x)). It signs the machine into your account — a machine without a browser prints a link you can open on this phone.",
+  "chat.mobileHome.onboarding.commandHeading": "One command — macOS / Linux",
+  "chat.mobileHome.onboarding.commandHint": "Run the installer on a macOS/Linux server, VM, or computer. Node.js is included. It prints a sign-in link you can open on this phone.",
   "chat.mobileHome.onboarding.copyCommand": "Copy command",
   "chat.mobileHome.onboarding.copyDownload": "Copy download link",
   "chat.mobileHome.onboarding.description": "Agents run on a computer you own — this app is mission control.",

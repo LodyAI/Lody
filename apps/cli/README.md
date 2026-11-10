@@ -139,6 +139,17 @@ The entry holds the Host lease while replacing its Worker, using a pinned ordina
 Node for external JavaScript. No remote `npm install`, login shell, system Node,
 native compilation or global prefix write is involved. The npm CLI remains JavaScript.
 
+The cloud connection dialog now provides a standalone Shell installer for
+macOS/Linux and a PowerShell installer for Windows. It checks the capsule's archive
+and raw hashes and lets the verified capsule install its exact ordinary Node. The
+credential stays out of public download URLs and autostart definitions. The script
+installs the fixed entry, signs in, registers future autostart where available, and
+waits for the initial daemon-ready handshake. With `--no-start`, only installation
+is performed. Autostart failure is reported separately; the current connection can
+still run. Existing/modified service definitions are preserved. Linux user services
+may require lingering to stay available after logout; Windows uses a current-user
+login task without the scheduler's default execution-time or battery stop limits.
+
 Existing npm daemons require one explicit local migration:
 
 1. Stop the identified old service and disable its autostart registration.
@@ -152,7 +163,7 @@ Existing npm daemons require one explicit local migration:
    never rewrites an arbitrary existing service or launches a second host.
 4. Run that fixed executable with `daemon start` and check `daemon status`.
 
-On a managed macOS/Linux glibc installation, `daemon upgrade` prepares a signed
+On a managed macOS/Linux glibc installation, `daemon upgrade` prepares a SHA-256-checked
 release while the old daemon serves, then waits for active turns to finish.
 `--immediate` explicitly interrupts work after preparation. `--channel nightly`
 selects Nightly; `--allow-channel-change` and `--allow-downgrade` confirm those

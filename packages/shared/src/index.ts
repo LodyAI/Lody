@@ -1,3 +1,4 @@
+export * from './daemon-release';
 export * from './daemon-update';
 import {
   LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,

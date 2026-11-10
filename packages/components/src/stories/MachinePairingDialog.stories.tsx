@@ -1,9 +1,11 @@
+import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MachinePairingDialog } from '@/components/chat/machine-pairing-dialog';
 
 const requestId = 'pairing-request-story';
-const command =
-  'npx lody@latest daemon start --auth lody_pair_example-token-shown-in-full-for-copying';
+const { command, windowsCommand } = buildDaemonInstallCommands({
+  auth: 'lody_pair_example',
+});
 
 const meta = {
   title: 'Chat/MachinePairingDialog',
@@ -14,6 +16,7 @@ const meta = {
     requestId,
     status: 'pending',
     command,
+    windowsCommand,
     expiresAt: Date.now() + 30 * 60 * 1000,
     creating: false,
     createError: null,

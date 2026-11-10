@@ -22,6 +22,23 @@ separate from executed acceptance evidence.
 
 ## Installation and ownership
 
+The connection UI offers official shell and PowerShell installers instead of npx.
+The scripts identify the target platform, resolve the chosen client build channel
+once, verify compressed and extracted capsule SHA-256 values, and let that verified
+capsule check its pinned Node archive. No system Node, npm, Python or jq is required.
+Pairing credentials remain local arguments, never public download URLs or service
+configuration. Existing login and daemon-ready checks remain authoritative.
+
+An explicit first install publishes the fixed entry before authentication and start.
+An occupied Host still requires the owner to stop it and its service first; the
+installer never terminates an unrelated process. Autostart registration is scoped
+to the current profile and OS account (boot services for root where supported),
+preserves unknown service definitions, and takes effect on the next login/boot.
+The initial detached start uses the existing bounded ready handshake. Unavailable
+autostart remains visible without preventing the current daemon from running.
+Linux user-service persistence after logout may require lingering. Containers and
+externally packaged installations retain their explicit installation ownership.
+
 Install a fixed SEA service entry at a stable path registered with the selected OS
 service manager. It starts versioned daemon bundles and their Node executables by
 absolute path, independently of PATH, npm, nvm, login shells and npx caches. Use

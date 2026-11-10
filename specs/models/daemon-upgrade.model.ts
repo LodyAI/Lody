@@ -44,6 +44,8 @@ const initial: State = {
 const events = [
   'legacy-direct-sea',
   'explicit-installer',
+  'installer-bytes-verified',
+  'installer-download-failed',
   'legacy-tree-stopped',
   'install-root',
   'request',
@@ -94,8 +96,10 @@ function step(s: State, event: Event): State {
   if (event === 'foreign-released' && s.lease === 'foreign') return { ...s, lease: 'none' };
   if (s.phase === 'legacy' && event === 'explicit-installer') return { ...s, phase: 'migrating' };
   if (s.phase === 'migrating') {
+    if (event === 'installer-bytes-verified') return { ...s, verified: true };
+    if (event === 'installer-download-failed') return { ...s, phase: 'legacy', verified: false };
     if (event === 'legacy-tree-stopped') return { ...s, oldTree: false, lease: 'none' };
-    if (event === 'install-root' && !s.oldTree && s.lease === 'none') {
+    if (event === 'install-root' && s.verified && !s.oldTree && s.lease === 'none') {
       return { ...s, root: 'alive', lease: 'root', phase: 'idle', durable: true, oldTree: true };
     }
     return s;
@@ -117,7 +121,8 @@ function step(s: State, event: Event): State {
     return s;
   }
   if (s.root !== 'alive' || s.lease !== 'root') return s;
-  if (s.phase === 'idle' && event === 'request') return { ...s, phase: 'preparing' };
+  if (s.phase === 'idle' && event === 'request')
+    return { ...s, phase: 'preparing', verified: false, durable: false, confirmed: false };
   if (s.phase === 'preparing') {
     if (event === 'prepared-and-synced')
       return { ...s, phase: 'waiting', verified: true, durable: true };
@@ -191,11 +196,22 @@ for (let i = 0; i < queue.length; i++) {
     transitions++;
   }
 }
-const migrated: Event[] = ['explicit-installer', 'legacy-tree-stopped', 'install-root'];
+const migrated: Event[] = [
+  'explicit-installer',
+  'installer-bytes-verified',
+  'legacy-tree-stopped',
+  'install-root',
+];
 const prepared: Event[] = [...migrated, 'request', 'prepared-and-synced', 'idle-authorized'];
 const candidate: Event[] = [...prepared, 'old-tree-stopped', 'candidate-started'];
 const trace = (...es: Event[]) => es.reduce(step, initial);
 assert.equal(trace('legacy-direct-sea').phase, 'legacy');
+assert.equal(trace('explicit-installer', 'legacy-tree-stopped', 'install-root').root, 'absent');
+assert.equal(
+  trace('explicit-installer', 'installer-bytes-verified', 'install-root').lease,
+  'legacy'
+);
+assert.equal(trace('explicit-installer', 'installer-download-failed').oldTree, true);
 assert.equal(trace(...candidate, 'candidate-healthy-and-synced', 'observe-result').confirmed, true);
 assert.equal(
   trace(...candidate, 'candidate-failed', 'candidate-tree-stopped', 'old-started-healthy').phase,
@@ -234,5 +250,5 @@ assert.throws(() => check({ ...trace(...candidate), oldTree: true }));
 assert.throws(() => check({ ...trace(...candidate), confirmed: true }));
 assert.throws(() => check({ ...trace(...migrated), phase: 'rolled-back', lease: 'foreign' }));
 console.log(
-  JSON.stringify({ states: seen.size, transitions, positivePaths: 8, negativeControls: 3 })
+  JSON.stringify({ states: seen.size, transitions, positivePaths: 11, negativeControls: 3 })
 );

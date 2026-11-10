@@ -90,3 +90,20 @@ For this initial rollout, uncertain ownership requires OS-level recovery:
 
 Archiving a selection without first proving the old writers gone is unsafe.
 Automatic recovery across an uncertain root crash is not claimed by these steps.
+
+## Official first-install scripts
+
+The cloud composition serves shell/PowerShell scripts and bounded, versioned plain
+bootstrap metadata derived from the same strict `DaemonReleaseSchema` used by the
+updater. Plain metadata avoids requiring jq or Node before the capsule is trusted.
+Both compressed and raw capsule hashes are checked before execution; the capsule
+checks the separately downloaded Node against its embedded identities.
+`daemon install --start --autostart --auth <credential>` then uses existing machine
+authentication, registers next-login/boot startup without launching a second Host,
+and starts the fixed executable through the existing readiness handshake. Generic
+interactive installation can use device authorization; `--no-start` is suitable for
+offline verification. Unknown active Hosts and foreign service definitions are not
+replaced. Service-manager absence is a visible autostart degradation, not a reason
+to deny the initial connection. The current start is detached; future login/boot
+uses the registered service. Native script acceptance does not prove cloud pairing,
+SSH-logout persistence, full Agent execution or production CDN delivery.

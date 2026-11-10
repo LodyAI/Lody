@@ -16,10 +16,14 @@ Parent rules apply; see [Session rules](../session/AGENTS.md).
 - Remote restart/upgrade: attempt a bounded ACK; even on delivery failure, accepted
   work asks `start.ts` to exit with the lifecycle code for watchdog restart/upgrade. See [ACK contract](../../../../specs/machine-lifecycle-ack.md).
 - Managed updates keep the fixed SEA service entry and its Host lease alive while
-  replacing versioned children. Verify signed artifacts and prepare them before
+  replacing versioned children. Verify SHA-256-checked artifacts and prepare them before
   stopping the old Worker. A clean root exit is not descendant termination proof;
   require the authenticated drain receipt and process containment. Legacy npm
   installations need explicit migration; never install global npm packages remotely.
+  The official installer reuses foreground authentication and initial readiness.
+  Autostart registration targets the next login/boot, never another concurrent Host;
+  preserve foreign definitions and report unavailable registration independently.
+  Never persist pairing credentials in download URLs or service definitions.
   See [upgrade contract](../../../../specs/daemon-upgrade-installation.md).
 - `lody daemon start` resolves cloud authentication in the FOREGROUND process before spawning the
   detached runner (`daemon-auth-preflight.ts`): validate the cached credential, and on a

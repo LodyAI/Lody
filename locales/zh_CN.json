@@ -1,4 +1,6 @@
 {
+  "machinePairing.unixShell": "macOS / Linux",
+  "machinePairing.windowsShell": "Windows (PowerShell)",
   "settings.tabs.lodyAgent": "Lody Agent",
   "settings.categories.lodyAgent.description": "登录并连接 Lody Agent 使用的模型",
   "lodyAgentSetting.disabled": "在 Beta 中开启 Lody Agent 后即可使用。",
@@ -1039,8 +1041,8 @@
   "chat.mobileHome.localProjectSearchPlaceholder": "搜索项目",
   "chat.mobileHome.machineSelector": "机器",
   "chat.mobileHome.newChatAriaLabel": "新建对话",
-  "chat.mobileHome.onboarding.commandHeading": "一行命令，接入任意机器",
-  "chat.mobileHome.onboarding.commandHint": "在服务器、虚拟机或你的电脑上运行（需 Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+（26.x））。命令会发起登录；没有浏览器的机器会打印链接，用这台手机打开即可完成授权。",
+  "chat.mobileHome.onboarding.commandHeading": "一条命令 — macOS / Linux",
+  "chat.mobileHome.onboarding.commandHint": "在 macOS/Linux 服务器、虚拟机或电脑上运行安装脚本，已包含 Node.js。安装时会显示登录链接，可以在手机上打开。",
   "chat.mobileHome.onboarding.copyCommand": "复制命令",
   "chat.mobileHome.onboarding.copyDownload": "复制下载链接",
   "chat.mobileHome.onboarding.description": "Agent 实际运行在你的电脑上，手机端用来随时随地下达和跟进任务。",

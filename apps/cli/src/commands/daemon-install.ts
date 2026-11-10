@@ -2,8 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { requestLocalCliHostUpgrade } from '@lody/shared/node/local-cli-host-lease';
 import { readPidFileRecord } from './daemon-shared';
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
+import { registerDaemonAutostart, runInstallCommand } from './daemon-autostart';
+import { AuthClient, performLoginWithAuthCredential } from '@/lib/auth';
+import { getCliPlatformKind } from '@/lib/cli-platform';
+import { getLogger } from '@/utils/logger';
+import { ensureDaemonBackendAuth } from './daemon-auth-preflight';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { inspectLocalCliHost } from '@lody/shared/node/local-cli-host-lease';
 import {
   getSeaContext,
@@ -15,50 +22,94 @@ import {
 /** Explicit local migration boundary. Never rewrite arbitrary user-owned services. */
 export const daemonInstallCommand = new Command('install')
   .description('Install this SEA as the fixed managed daemon service entry')
-  .action(async () => {
-    const context = getSeaContext();
-    if (!context)
-      throw new Error('Run the downloaded SEA installer; npm keeps its JavaScript entry.');
-    const host = await inspectLocalCliHost();
-    if (host)
-      throw new Error(
-        'Stop the existing local host and its service before installing the managed daemon.'
-      );
-    const root = managedDaemonRoot();
-    await fs.mkdir(root, { recursive: true, mode: 0o700 });
-    const lockPath = path.join(root, 'install.lock');
-    const lock = await fs.open(lockPath, 'wx', 0o600);
+  .option('--auth <credential>', 'Connect using a machine pairing token or CLI API key')
+  .option('--start', 'Start the installed fixed entry and wait for daemon readiness')
+  .option('--autostart', 'Register this fixed entry for the next login or boot')
+  .action(installManagedDaemon);
+
+export async function installManagedDaemon(options: {
+  auth?: string;
+  start?: boolean;
+  autostart?: boolean;
+}): Promise<void> {
+  const context = getSeaContext();
+  if (!context)
+    throw new Error('Run the downloaded SEA installer; npm keeps its JavaScript entry.');
+  if (options.auth && getCliPlatformKind() !== 'cloud')
+    throw new Error('--auth is unavailable in the local product');
+  if (options.auth !== undefined && !options.auth.trim())
+    throw new Error('Missing --auth credential');
+  const host = await inspectLocalCliHost();
+  if (host)
+    throw new Error(
+      'Stop the existing local host and its service before installing the managed daemon.'
+    );
+  const root = managedDaemonRoot();
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  const lockPath = path.join(root, 'install.lock');
+  const lock = await fs.open(lockPath, 'wx', 0o600);
+  const tmp = path.join(root, `.service-${randomUUID()}.installing`);
+  try {
+    const service = path.join(root, process.platform === 'win32' ? 'service.exe' : 'service');
+    // The fixed service itself is upgraded only through this explicit command.
+    await fs.copyFile(context.capsulePath, tmp, constants.COPYFILE_EXCL);
+    await fs.chmod(tmp, 0o700);
+    const fd = await fs.open(tmp, 'r+');
     try {
-      const service = path.join(root, process.platform === 'win32' ? 'service.exe' : 'service');
-      // The fixed service itself is upgraded only through this explicit command.
-      const tmp = service + '.installing';
-      await fs.copyFile(context.capsulePath, tmp);
-      await fs.chmod(tmp, 0o700);
-      const fd = await fs.open(tmp, 'r+');
-      try {
-        await fd.sync();
-      } finally {
-        await fd.close();
-      }
-      await fs.rename(tmp, service);
-      await writeManagedRecord(path.join(root, 'installation.json'), {
-        format: 1,
-        product: context.metadata.product,
-        serviceProtocol: 1,
-        service,
-      });
-      console.log(`Installed fixed entry: ${service}`);
-      console.log(
-        `Use this absolute executable with "daemon-runner" in your user service; preserve your existing daemon options and LODY_DATA_DIR.`
-      );
-      console.log(
-        'Remove the old autostart registration before enabling this entry. Installation does not start a second daemon.'
-      );
+      await fd.sync();
     } finally {
-      await lock.close();
-      await fs.rm(lockPath);
+      await fd.close();
     }
-  });
+    await fs.rename(tmp, service);
+    await writeManagedRecord(path.join(root, 'installation.json'), {
+      format: 1,
+      product: context.metadata.product,
+      serviceProtocol: 1,
+      service,
+    });
+    console.log(`Installed fixed entry: ${service}`);
+    if (options.auth || (options.start && getCliPlatformKind() === 'cloud')) {
+      const logger = getLogger('daemon-install');
+      const authClient = new AuthClient(logger);
+      if (options.auth) {
+        const login = await performLoginWithAuthCredential(authClient, logger, {
+          credential: options.auth,
+        });
+        if (!login.success) throw new Error(login.error);
+      } else {
+        const preflight = await ensureDaemonBackendAuth({ authClient, logger });
+        if (preflight.status === 'failed') throw new Error(preflight.message);
+      }
+    }
+    if (options.autostart) {
+      try {
+        console.log(await registerDaemonAutostart({ service, dataDir: getLodyDataDir() }));
+      } catch {
+        console.warn(
+          'Automatic startup could not be registered. The daemon can still run now; configure your user service with the installed fixed entry for future boots.'
+        );
+      }
+    }
+    if (options.start)
+      await runInstallCommand(service, ['daemon', 'start', '--skip-auth-check'], 240000);
+    else console.log(`Start this fixed entry with: "${service}" daemon start`);
+    if (!options.autostart)
+      console.log(
+        'Use the installed absolute executable with daemon-runner in your user service; preserve LODY_DATA_DIR.'
+      );
+  } finally {
+    try {
+      await fs.rm(tmp, { force: true });
+    } finally {
+      try {
+        await lock.close();
+      } finally {
+        await fs.rm(lockPath);
+      }
+    }
+  }
+}
+
 export const daemonUpdateStatusCommand = new Command('update-status')
   .description('Read the durable managed daemon update outcome')
   .option('--request-id <id>', 'Read one accepted operation, including older outcomes')
