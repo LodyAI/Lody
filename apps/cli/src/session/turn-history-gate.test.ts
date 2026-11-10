@@ -137,6 +137,37 @@ describe('TurnHistoryGate', () => {
     expect(doc.subscriberCount).toBe(0);
   });
 
+  it.each([false, true])(
+    'keeps a signal-aware assistant write after timeout unless disposed (dispose=%s)',
+    async (dispose) => {
+      let completeRead: () => void = () => {};
+      const read = new Promise<void>((resolve) => {
+        completeRead = resolve;
+      });
+      const entries: string[] = [];
+      const gate = TurnHistoryGate.waitForUserTurn({
+        logger,
+        sessionId,
+        userTurnId,
+        hasUserTurn: async () => false,
+        subscribeHistory: () => undefined,
+        timeoutMs: 1_000,
+        onBeforeOpen: async (_reason, signal) => {
+          await read;
+          if (!signal.aborted) entries.push('assistant:with-author-and-model');
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await gate.waitUntilOpen();
+      expect(entries).toEqual([]);
+      if (dispose) gate.dispose();
+      completeRead();
+      await flushMicrotasks();
+      expect(entries).toEqual(dispose ? [] : ['assistant:with-author-and-model']);
+      gate.dispose();
+    }
+  );
+
   it('opens on timeout when the entry never syncs (bounded degradation)', async () => {
     const doc = createFakeDoc([]);
     const reasons: TurnHistoryGateOpenReason[] = [];
@@ -206,7 +237,7 @@ describe('TurnHistoryGate', () => {
   });
 
   it.each(['dispose', 'deadline'] as const)(
-    'releases a stalled pre-open write on %s and fences its late continuation',
+    'releases a stalled pre-open write on %s without affecting another gate',
     async (release) => {
       const doc = createFakeDoc([userEntry(userTurnId)]);
       let enter: () => void = () => {};
@@ -248,10 +279,11 @@ describe('TurnHistoryGate', () => {
       });
       complete();
       await flushMicrotasks();
-      expect(writes).toEqual([]);
+      expect(writes).toEqual(release === 'dispose' ? [] : ['old-turn']);
       expect(next.isOpen).toBe(false);
       nextDoc.setHistory([userEntry('next')]);
       await next.waitUntilOpen();
+      gate.dispose();
     }
   );
 

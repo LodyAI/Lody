@@ -2,6 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
+The 1,280-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
+existing authorization and execution boundaries; the default ceiling had no room for those rules.
+
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
@@ -50,7 +53,7 @@
 ## Turn execution
 
 - Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), including pre-open
-  writes, never status/meta. Disposal releases waiters immediately.
+  writes, never status/meta. Timeout preserves live metadata creation; disposal aborts it and releases waiters.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
   reusing an Agent. If release fails, detach that Agent, return the turn slot and report

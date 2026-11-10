@@ -216,7 +216,8 @@ wait until the user turn entry has synced into the CLI-local doc, because concur
 inserts can otherwise permanently order the reply before the user message. Status and meta map
 writes are never gated; some sit on the prompt critical path. The original 20-second gate deadline
 also bounds its pre-open assistant-entry callback. Disposal releases existing waiters immediately.
-Deadline/disposal signals stop late callbacks before their next write; already-issued writes remain
+The deadline keeps the live callback eligible to add author/model metadata. Only disposal aborts
+later callback steps, even if timeout already opened the gate; already-issued writes remain
 owned and observed, and a late completion cannot release a successor gate.
 
 ### Why the pointer write is bundled with the history append

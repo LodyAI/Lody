@@ -1429,63 +1429,69 @@ describe('manual Stop receipts', () => {
   });
 });
 
-it('keeps later Inbox turns available while one session cannot prepare and diagnostics fail', async () => {
-  const f = fixture();
-  f.add('poison-A');
-  f.add('first-B', 0, [], 'B');
-  const db = new Database(f.filename);
-  db.exec(
-    "CREATE TRIGGER fail_prepare_A BEFORE INSERT ON inbox_batches WHEN NEW.session_id='A' BEGIN SELECT RAISE(ABORT,'prepare A unavailable'); END;"
-  );
-  const received: string[] = [];
-  try {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const first = yield* Deferred.make<void>();
-          const second = yield* Deferred.make<void>();
-          let inbox: OperationInbox['Service'] | undefined;
-          const execution = Layer.succeed(InboxExecution, {
-            ready: () => inbox !== undefined,
-            admit: () => true,
-            report: () => Effect.die(new Error('diagnostic sink unavailable')),
-            launch: (batch) =>
-              Effect.gen(function* () {
-                const current = inbox;
-                if (!current) return yield* Effect.fail(new Error('Inbox not ready'));
-                const id = `B-${received.length}`;
-                expect(yield* current.begin(batch, id)).toBe(true);
-                yield* current.submit(batch, batch, id, () => received.push(batch.sessionId));
-                yield* current.settle(batch, 'settled');
-                yield* current.release({ ...batch, executionId: id, outcome: 'normal' });
-                yield* Deferred.succeed(received.length === 1 ? first : second, undefined);
-              }),
-          });
-          yield* Effect.gen(function* () {
-            inbox = yield* OperationInbox;
-            yield* inbox.wake;
-            yield* Deferred.await(first);
-            f.add('later-B', 0, [], 'B');
-            yield* inbox.wake;
-            yield* Deferred.await(second);
-            expect(received).toEqual(['B', 'B']);
-            expect(f.sql.pending('workspace').some((item) => item.input.sessionId === 'A')).toBe(
-              true
-            );
-          }).pipe(
-            Effect.provide(
-              OperationInbox.layer('workspace', 'owner').pipe(
-                Layer.provide(Layer.merge(inboxRepositoryLayer(f.sql), execution))
-              )
-            )
-          );
-        })
-      )
+it.each(['error', 'defect'] as const)(
+  'keeps later Inbox turns available while one session cannot prepare and diagnostics fail (%s)',
+  async (failure) => {
+    const f = fixture();
+    f.add('poison-A');
+    f.add('first-B', 0, [], 'B');
+    const db = new Database(f.filename);
+    db.exec(
+      "CREATE TRIGGER fail_prepare_A BEFORE INSERT ON inbox_batches WHEN NEW.session_id='A' BEGIN SELECT RAISE(ABORT,'prepare A unavailable'); END;"
     );
-  } finally {
-    db.close();
+    const received: string[] = [];
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const first = yield* Deferred.make<void>();
+            const second = yield* Deferred.make<void>();
+            let inbox: OperationInbox['Service'] | undefined;
+            const execution = Layer.succeed(InboxExecution, {
+              ready: () => inbox !== undefined,
+              admit: () => true,
+              report: () =>
+                failure === 'error'
+                  ? Effect.fail(new Error('diagnostic sink unavailable'))
+                  : Effect.die(new Error('diagnostic sink unavailable')),
+              launch: (batch) =>
+                Effect.gen(function* () {
+                  const current = inbox;
+                  if (!current) return yield* Effect.fail(new Error('Inbox not ready'));
+                  const id = `B-${received.length}`;
+                  expect(yield* current.begin(batch, id)).toBe(true);
+                  yield* current.submit(batch, batch, id, () => received.push(batch.sessionId));
+                  yield* current.settle(batch, 'settled');
+                  yield* current.release({ ...batch, executionId: id, outcome: 'normal' });
+                  yield* Deferred.succeed(received.length === 1 ? first : second, undefined);
+                }),
+            });
+            yield* Effect.gen(function* () {
+              inbox = yield* OperationInbox;
+              yield* inbox.wake;
+              yield* Deferred.await(first);
+              f.add('later-B', 0, [], 'B');
+              yield* inbox.wake;
+              yield* Deferred.await(second);
+              expect(received).toEqual(['B', 'B']);
+              expect(f.sql.pending('workspace').some((item) => item.input.sessionId === 'A')).toBe(
+                true
+              );
+            }).pipe(
+              Effect.provide(
+                OperationInbox.layer('workspace', 'owner').pipe(
+                  Layer.provide(Layer.merge(inboxRepositoryLayer(f.sql), execution))
+                )
+              )
+            );
+          })
+        )
+      );
+    } finally {
+      db.close();
+    }
   }
-});
+);
 
 it('retains a failed settlement without blocking a later receipt from being recovered', async () => {
   const f = fixture();

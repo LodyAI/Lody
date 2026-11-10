@@ -58,7 +58,7 @@ export class InboxExecution extends Context.Service<
     ready(batch: InboxBatch): boolean;
     admit(batch: InboxBatch): boolean;
     launch(batch: InboxBatch): Effect.Effect<void, unknown>;
-    report(cause: unknown): Effect.Effect<void>;
+    report(cause: unknown): Effect.Effect<void, unknown>;
     quiesce?(): void;
   }
 >()('lody/orchestration/InboxExecution') {}
@@ -129,7 +129,15 @@ export class OperationInbox extends Context.Service<
         const execution = yield* InboxExecution;
         // Diagnostics must not kill the scanner. Scope interruption still propagates.
         const report = (cause: unknown) =>
-          Effect.suspend(() => execution.report(cause)).pipe(Effect.catchDefect(() => Effect.void));
+          Effect.suspend(() => execution.report(cause)).pipe(
+            Effect.catchCause((failure) =>
+              Cause.hasInterrupts(failure)
+                ? Effect.failCause(
+                    Cause.fromReasons<never>(failure.reasons.filter(Cause.isInterruptReason))
+                  )
+                : Effect.void
+            )
+          );
         const scope = yield* Effect.scope;
         const submissionGate = Semaphore.makeUnsafe(1);
         let quiesced = false;

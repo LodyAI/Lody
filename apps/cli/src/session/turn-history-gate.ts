@@ -48,9 +48,10 @@ export type TurnHistoryGateArgs = {
   /**
    * Runs exactly once, right before waiters are released (skipped on dispose).
    * Used to create the turn's assistant entry so every gated writer resumes
-   * against an existing, correctly-ordered entry. Errors are logged; the original deadline and dispose release waiters even if
-   * this callback never returns. These paths do not cancel the underlying write and do not
-   * keep the gate closed — downstream flushes self-create the entry by id.
+   * against an existing, correctly-ordered entry. Errors are logged. The original
+   * deadline releases waiters even if this callback never returns, but lets it
+   * finish adding author/model metadata while the turn is live. Only disposal
+   * aborts later callback steps; it cannot undo an already-issued write.
    */
   onBeforeOpen?: (reason: TurnHistoryGateOpenReason, signal: AbortSignal) => Promise<void>;
   timeoutMs?: number;
@@ -125,6 +126,8 @@ export class TurnHistoryGate {
    * eviction). Late flushes self-create the assistant entry when needed.
    */
   dispose(): void {
+    // Timeout may already have opened the gate while its callback is pending.
+    this.beforeOpenAbort.abort();
     void this.openGate('disposed');
   }
 
@@ -186,7 +189,6 @@ export class TurnHistoryGate {
   private release(): void {
     if (this.phase === 'open') return;
     this.phase = 'open';
-    this.beforeOpenAbort.abort();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.detachHistory();
