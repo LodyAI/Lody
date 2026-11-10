@@ -96,7 +96,7 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
   const [method, setMethod] = useState<Method>(props.passkeyAvailable ? 'passkey' : 'file');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<readonly { name: string; outcome: string }[] | null>(null);
+  const [results, setResults] = useState<readonly RestoreResult[] | null>(null);
   const choices: Method[] = [
     ...(props.passkeyAvailable ? (['passkey'] as const) : []),
     'file',
