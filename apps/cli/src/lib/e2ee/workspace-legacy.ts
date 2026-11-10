@@ -744,23 +744,28 @@ async function openWorkspaceOwned(
             const member = signer && state.members.get(hex(signer.membershipId.toBytes()));
             const account = member && accountIdFromUserId(member.userId);
             if (account && Result.isSuccess(account) && account.success === sessionOwnerUserId)
-              return true;
+              return { allowed: true, isCurrent: () => true };
             const machine = state.devices.get(hex(device.publicKey.toBytes()));
             if (!sharingRemote || !sharing || machine?.kind !== 'machine' || !machine.machineId)
-              return false;
-            const view = yield* sharing.read(machine.machineId, sharingRemote);
-            return (
-              !view.removed &&
-              !view.unavailable &&
-              view.sessions.some(
-                (row) =>
-                  row.sessionId === sessionId &&
-                  (row.audience === 'team' ||
-                    (account &&
-                      Result.isSuccess(account) &&
-                      row.audience.userId === account.success))
-              )
+              return { allowed: false, isCurrent: () => false };
+            const { view, isCurrent } = yield* sharing.readSessionAccess(
+              machine.machineId,
+              sharingRemote
             );
+            return {
+              isCurrent,
+              allowed:
+                !view.removed &&
+                !view.unavailable &&
+                view.sessions.some(
+                  (row) =>
+                    row.sessionId === sessionId &&
+                    (row.audience === 'team' ||
+                      (account &&
+                        Result.isSuccess(account) &&
+                        row.audience.userId === account.success))
+                ),
+            };
           }),
         onCredentialFailure: (cause) => credentialFailureHandler(cause),
         runtime,
@@ -1549,6 +1554,7 @@ async function openWorkspaceOwned(
       authorizeCliE2eeSessionTarget(
         {
           runtime: opened.runtime,
+          sourceDevice: opened.signingPublicKey,
           readPolicy: opened.sharingRemote
             ? (machineId) => opened.sharing.read(machineId, opened.sharingRemote!)
             : undefined,

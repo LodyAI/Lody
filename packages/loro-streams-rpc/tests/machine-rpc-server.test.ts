@@ -4713,7 +4713,12 @@ it('preserves encrypted history watch semantics through the real feature adapter
           query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
         },
       },
-      { requestId: 'synthetic', expiresAt: 1000, signal: new AbortController().signal }
+      {
+        requestId: 'synthetic',
+        expiresAt: 1000,
+        signal: new AbortController().signal,
+        authority: { isCurrent: () => true, signal: new AbortController().signal },
+      }
     );
     expect(result).toMatchObject({
       ok: true,
@@ -4728,3 +4733,63 @@ it('preserves encrypted history watch semantics through the real feature adapter
     server.stop();
   }
 });
+
+it.each(['wait', 'read'] as const)(
+  'drops encrypted history when authority is withdrawn during %s',
+  async (phase) => {
+    let current = true;
+    const observed: string[] = [];
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'workspace' as WorkspaceId,
+      machineId: 'machine' as MachineId,
+      now: () => 1,
+      logger: createSilentLogger(),
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      waitForSessionHistoryChanges: async () => {
+        observed.push('wait');
+        if (phase === 'wait') current = false;
+      },
+      readSessionHistory: async ({ sessionId, query }) => {
+        observed.push(query.kind);
+        if (phase === 'read') current = false;
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: true,
+          historyRevision: 1,
+          historyCount: 0,
+          result: { state: 'ready', checkpoint: 'next', ids: [] },
+        };
+      },
+      writeSessionHistory: async () => {
+        throw new Error('history read started a write');
+      },
+    });
+    try {
+      const result = await server.readFeatureQuery(
+        {
+          method: 'session/history-read',
+          machineId: 'machine',
+          workspaceId: 'workspace',
+          params: {
+            sessionId: 'root' as SessionId,
+            query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
+          },
+        },
+        {
+          requestId: 'synthetic',
+          expiresAt: 1000,
+          signal: new AbortController().signal,
+          authority: { isCurrent: () => current, signal: new AbortController().signal },
+        }
+      );
+      expect(result).toMatchObject({ ok: false, code: 'session_history_read_denied' });
+      expect(JSON.stringify(result)).not.toContain('checkpoint');
+      expect(observed).toEqual(phase === 'wait' ? ['wait'] : ['wait', 'readChanges']);
+    } finally {
+      server.stop();
+    }
+  }
+);

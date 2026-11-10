@@ -113,3 +113,10 @@ opening a lazy owner, reading a clock, touching storage/network or renewing any
 stamp. Counts are not current authorization: an expired/removed-generation policy object may
 still be retained until a real operation invalidates it. `authorize` remains the
 only execution decision, with all existing freshness and ledger checks.
+
+Native exact-session history admission returns a view with a synchronous policy
+fence. The fence binds that view's head and machine binding to the retained cache
+object and its freshness. Unchanged cached reads preserve it; invalidation, a new
+head, expiry or shutdown retires it. The CLI combines it with the ledger generation
+and checks it across waits, reads, encryption and sending. This enables no new
+history storage backend.

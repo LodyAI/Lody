@@ -436,6 +436,11 @@ describe('native machine-sharing control and execution', () => {
           projects: [],
           sessions: [{ sessionId: 'session-a', audience: 'team' as const, level: 'read' }],
         });
+        const admission = yield* f.run(reopened.readSessionAccess('fixture-machine', f.remote));
+        expect(admission.isCurrent()).toBe(true);
+        // Another unchanged read must not invalidate an active poll.
+        yield* f.run(reopened.readSessionAccess('fixture-machine', f.remote));
+        expect(admission.isCurrent()).toBe(true);
         expect(
           yield* f.run(
             f.machine.authorize('fixture-machine', hex(f.bob.publicKey), undefined, f.remote)
@@ -451,6 +456,11 @@ describe('native machine-sharing control and execution', () => {
           sessions: [],
           sharedWithTeam: false,
         });
+        expect(admission.isCurrent()).toBe(false);
+        const withdrawn = yield* f.run(reopened.readSessionAccess('fixture-machine', f.remote));
+        expect(withdrawn.view.sessions).toEqual([]);
+        reopened.invalidate();
+        expect(withdrawn.isCurrent()).toBe(false);
       })
     ));
   it('reconciles a lost commit after restart using exact originals and no second publication', () =>

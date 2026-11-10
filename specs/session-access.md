@@ -65,10 +65,13 @@ Guest, recovery and machine devices cannot sign sharing policies.
 Encrypted version subscriptions are invalidation hints, never authority; deep links
 also force a policy reread. Receiving-machine execution authorization is unchanged.
 Roost history reads use a separate exact-session admission: ordinary requests relay
-a short-lived, purpose-bound proof of the human identity and the serving machine
-checks current membership/access online; encrypted requests use the verified device
-and v3 policy. Contained children resolve the same root. Long polls recheck after
-waiting and before returning. Read admission grants no writes, execution, file or
+a short-lived, purpose-bound proof; the serving machine checks current membership
+and actual target metadata online. CLI proofs bind the credential account, declared
+requester and source machine. Both accounts must have the target read/edit permission,
+and the requester must still be able to use the account-owned source machine; encrypted requests use the verified device
+and v3 policy. Contained children resolve the same root. Long polls recheck before waiting, after waking and before sending, including
+after body reads and response encryption. Encrypted reads retain a ledger-generation
+and verified-policy fence through the entire response; observed withdrawal drops the reply. Read admission grants no writes, execution, file or
 terminal methods, or other sessions. Ordinary history writes require a separate
 editing proof. An offline/unavailable machine produces an explicit reading-unavailable
 state. Loro history retains its document reader.

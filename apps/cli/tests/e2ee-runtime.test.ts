@@ -187,7 +187,9 @@ const setup = (
       signer: prepared,
       encryptionPublicKey: prepared.enc,
       initialKey,
-      userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+      userId: Result.getOrThrow(
+        accountIds ? accountUserId('acct') : Bytes.userId(new Uint8Array(32).fill(30))
+      ),
       membershipId,
     });
     const owner = yield* custody.retainDevice(signed.genesis, prepared);
@@ -8543,6 +8545,7 @@ describe('machine execution authorization freshness', () => {
           let individualRead = true;
           const options = {
             runtime,
+            sourceDevice: hex(fixture.owner.publicKey.toBytes()),
             readPolicy: () =>
               Effect.gen(function* () {
                 if (remove) {
@@ -8599,7 +8602,7 @@ describe('machine execution authorization freshness', () => {
     try {
       await execute(
         Effect.gen(function* () {
-          const { fixture, makeGate } = yield* executionFixture(directory, 3);
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3);
           const member = [...fixture.current.inspectState().members].find(
             ([, entry]) => entry.role === 'member'
           );
@@ -8611,11 +8614,16 @@ describe('machine execution authorization freshness', () => {
           const [device] = requester;
           let shared = true;
           const gate = yield* makeGate(undefined, undefined, (reader, session) =>
-            Effect.succeed(shared && reader === device && session === 'shared-root')
+            Effect.succeed({
+              allowed: shared && reader === device && session === 'shared-root',
+              isCurrent: () => shared,
+            })
           );
-          expect(
-            yield* gate.authorizeSessionRead('workspace', device, 'shared-root')
-          ).toMatchObject({ _tag: 'Authorized' });
+          const admittedRead = yield* gate.authorizeSessionRead('workspace', device, 'shared-root');
+          expect(admittedRead).toMatchObject({ _tag: 'Authorized' });
+          if (admittedRead._tag !== 'Authorized' || !admittedRead.isCurrent)
+            throw new Error('missing read fence');
+          expect(admittedRead.isCurrent()).toBe(true);
           expect(yield* gate.authorizeSessionRead('workspace', device, 'other-root')).toMatchObject(
             { _tag: 'Denied' }
           );
@@ -8626,7 +8634,36 @@ describe('machine execution authorization freshness', () => {
           expect(yield* gate.authorizeExecution('workspace', device)).toMatchObject({
             _tag: 'Denied',
           });
+          const capability = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+                _tag: 'DeclareCapabilities',
+                capabilities: [1],
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(capability);
+          const declared = Result.getOrThrow(
+            extendLedger(fixture.current, [capability], {
+              length: fixture.records.length,
+              head: hashRecordBytes(capability),
+            })
+          );
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(declared, fixture.owner.publicKey, {
+                _tag: 'RemoveMember',
+                membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.from(member[0], 'hex'))),
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(record);
+          yield* runtime.ingest(page(fixture.records));
+          expect(admittedRead.isCurrent()).toBe(false);
           shared = false;
+          expect(admittedRead.isCurrent()).toBe(false);
           expect(
             yield* gate.authorizeSessionRead('workspace', device, 'shared-root')
           ).toMatchObject({ _tag: 'Denied' });
@@ -9149,3 +9186,83 @@ it('revokes a real encrypted ACP owner when the verified runtime ledger changes'
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// The response stream can yield after the body has been sealed. No earlier
+// authorization, including a cached response, may bypass the final actual-target check.
+it.each([false, true])(
+  'drops a history reply when assigned access changes during stream creation (cached=%s)',
+  async (cached) => {
+    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+    const created = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const refused = Promise.withResolvers<void>();
+    let owner = 'reader';
+    const sent: unknown[] = [];
+    await execute(
+      Effect.gen(function* () {
+        const opened = {
+          requestId: 'history-proof',
+          requesterDevice: 'reader-device',
+          expiresAt: Date.now() + 60_000,
+          input: {
+            request: {
+              method: 'session/history-read',
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              params: { sessionId: 'root', query: { kind: 'count' } },
+            },
+          },
+        };
+        const native = {
+          openFeature: () => Effect.succeed(opened),
+          retainFeatureRequest: () => Effect.void,
+          readFeatureResponse: () => Effect.succeed(cached ? [Uint8Array.of(1)] : []),
+          sealFeatureResult: () => Effect.succeed([Uint8Array.of(1)]),
+          verifyFeatureRequest: () => Effect.void,
+          responseStream: () => 'response',
+        } as unknown as ReturnType<typeof makeE2eeRpcNative>;
+        const feature = yield* makeEncryptedFeatureReceiver({
+          workspaceId: 'workspace',
+          machineId: 'machine',
+          genesis: 'genesis',
+          native,
+          journal: () => {
+            throw new Error('history must not open the execution journal');
+          },
+          authorize: () => Effect.succeed({ _tag: 'Denied', reason: 'not-authorized' }),
+          authorizeRead: () => Effect.succeed({ _tag: 'Denied', reason: 'not-authorized' }),
+          authorizeHistoryRead: () =>
+            Effect.sync(() => {
+              if (owner !== 'reader') {
+                refused.resolve();
+                return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+              }
+              return { _tag: 'Authorized' as const, isCurrent: () => true };
+            }),
+          authoritySignal: () => new AbortController().signal,
+          isOpen: () => true,
+          handle: async () => ({ ok: true, result: { count: 123 } }),
+          client: {
+            ensureJsonStream: async () => {
+              created.resolve();
+              await resume.promise;
+            },
+            appendJson: async (_stream, value) => {
+              sent.push(value);
+              return '1';
+            },
+            readJsonLive: async () => {
+              throw new Error('unused');
+            },
+          },
+        });
+        yield* feature({ id: opened.requestId, frame: 'synthetic' });
+        yield* Effect.promise(() => created.promise);
+        owner = 'other-owner';
+        resume.resolve();
+        yield* Effect.promise(() => refused.promise);
+      })
+    );
+    expect(sent).toEqual([]);
+  }
+);

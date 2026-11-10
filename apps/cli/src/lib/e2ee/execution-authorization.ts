@@ -52,7 +52,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       requesterDevice: string,
       sessionId: string,
       sessionOwnerUserId?: string
-    ) => Effect.Effect<boolean, unknown>;
+    ) => Effect.Effect<{ allowed: boolean; isCurrent: () => boolean }, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
     /** True while a window is in use, false once access is confirmed or refused again. */
     onWindowNotice?: (active: boolean) => void;
@@ -267,10 +267,17 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (principal === 'member') {
           grants.delete(requesterDevice);
           if (access === 'session-read') {
+            if (!sessionId || !options.sessionSharing) return denied('e2ee_machine_not_shared');
+            const generation = options.runtime.executionGeneration();
+            const shared = yield* options.sessionSharing(
+              requesterDevice,
+              sessionId,
+              sessionOwnerUserId
+            );
             if (
-              !sessionId ||
-              !options.sessionSharing ||
-              !(yield* options.sessionSharing(requesterDevice, sessionId, sessionOwnerUserId))
+              !shared.allowed ||
+              !shared.isCurrent() ||
+              generation !== options.runtime.executionGeneration()
             )
               return denied('e2ee_machine_not_shared');
             // The session policy check may ingest new ledger state. Revalidate both
@@ -287,7 +294,17 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
               !current(yield* stamp)
             )
               return denied('not-authorized');
-            return { _tag: 'Authorized' as const };
+            const isCurrent = () =>
+              !closed &&
+              options.runtime.executionGeneration() === generation &&
+              shared.isCurrent() &&
+              current({
+                wall: clock.currentTimeMillisUnsafe(),
+                monotonic: clock.monotonicTimeNanosUnsafe(),
+              });
+            return isCurrent()
+              ? { _tag: 'Authorized' as const, isCurrent }
+              : denied('not-authorized');
           }
           if (access !== 'execute') return denied('e2ee_machine_not_owned');
           if (!options.sharing) return denied('e2ee_machine_not_shared');
@@ -397,13 +414,14 @@ export type CliE2eeSessionReadTarget = {
   sessionOwnerUserId?: string;
   localProjectId?: string;
 };
-/** Source-side context reads use the actual human, with a ledger fence across policy I/O. */
+/** Proxy reads retain the intersection of the source account and declared human. */
 export const authorizeCliE2eeSessionTarget = (
   options: {
     runtime: Pick<
       Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
       'executionLedger' | 'executionGeneration'
     >;
+    sourceDevice: string;
     readPolicy?: (machineId: string) => Effect.Effect<E2eeMachineSharingView, unknown>;
   },
   target: CliE2eeSessionReadTarget
@@ -411,32 +429,41 @@ export const authorizeCliE2eeSessionTarget = (
   Effect.gen(function* () {
     const state = (yield* options.runtime.executionLedger()).inspectState();
     const generation = options.runtime.executionGeneration();
-    const member = [...state.members.entries()].find(([, row]) => {
-      const account = accountIdFromUserId(row.userId);
-      return Result.isSuccess(account) && account.success === target.requesterUserId;
-    });
-    if (!member) return false;
+    const source = state.devices.get(options.sourceDevice);
+    if (!source || source.kind === 'recovery') return false;
+    const issuer = state.members.get(Buffer.from(source.membershipId.toBytes()).toString('hex'));
+    const account = issuer && accountIdFromUserId(issuer.userId);
+    if (!account || Result.isFailure(account)) return false;
     const machine = [...state.devices.values()].find(
       (row) => row.kind === 'machine' && row.machineId === target.machineId
     );
     if (!machine) return false;
-    if (
-      Buffer.from(machine.membershipId.toBytes()).toString('hex') === member[0] ||
-      target.sessionOwnerUserId === target.requesterUserId
-    )
-      return true;
-    if (!options.readPolicy) return false;
-    const view = yield* options.readPolicy(target.machineId);
-    if (generation !== options.runtime.executionGeneration() || view.removed || view.unavailable)
-      return false;
-    return (
-      (member[1].role !== 'guest' &&
-        view.sharedWithTeam &&
-        (!target.localProjectId || view.projects.includes(target.localProjectId))) ||
-      view.sessions.some(
-        (row) =>
-          row.sessionId === target.rootSessionId &&
-          (row.audience === 'team' || row.audience.userId === target.requesterUserId)
+    let policy: E2eeMachineSharingView | undefined;
+    const check = Effect.fnUntraced(function* (userId: string) {
+      const member = [...state.members.entries()].find(([, row]) => {
+        const account = accountIdFromUserId(row.userId);
+        return Result.isSuccess(account) && account.success === userId;
+      });
+      if (!member) return false;
+      if (
+        Buffer.from(machine.membershipId.toBytes()).toString('hex') === member[0] ||
+        target.sessionOwnerUserId === userId
       )
-    );
+        return true;
+      if (!options.readPolicy) return false;
+      policy ??= yield* options.readPolicy(target.machineId);
+      if (policy.removed || policy.unavailable) return false;
+      return (
+        (member[1].role !== 'guest' &&
+          policy.sharedWithTeam &&
+          (!target.localProjectId || policy.projects.includes(target.localProjectId))) ||
+        policy.sessions.some(
+          (row) =>
+            row.sessionId === target.rootSessionId &&
+            (row.audience === 'team' || row.audience.userId === userId)
+        )
+      );
+    });
+    const allowed = (yield* check(account.success)) && (yield* check(target.requesterUserId));
+    return allowed && generation === options.runtime.executionGeneration();
   });

@@ -81,6 +81,10 @@ export async function mintCliSessionHistoryReadProof(options: {
   workspaceId: string;
   machineId: string;
   sessionId: string;
+  sourceMachineId: string;
+  rootSessionId: string;
+  sessionOwnerUserId?: string;
+  localProjectId?: string;
   requester?: { userId: string; machineId: string };
   edit?: boolean;
   requestId?: string;
@@ -100,6 +104,10 @@ export async function mintCliSessionHistoryReadProof(options: {
         workspaceId: options.workspaceId,
         machineId: options.machineId,
         sessionId: options.sessionId,
+        sourceMachineId: options.sourceMachineId,
+        rootSessionId: options.rootSessionId,
+        sessionOwnerUserId: options.sessionOwnerUserId,
+        localProjectId: options.localProjectId,
         ...(options.requester ? { requester: options.requester } : {}),
         ...(options.edit
           ? { requestId: options.requestId, intentDigest: options.intentDigest }

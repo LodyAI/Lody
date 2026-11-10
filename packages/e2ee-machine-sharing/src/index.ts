@@ -563,8 +563,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   ) => ReturnType<typeof authorizeMachineExecution>;
   // The resource's accepted pin advances only on a newer verified head, and a failed or
   // timed-out refresh never rewrites it. A pinned denial therefore stays known until a
-  // newer verified policy replaces it; it never grants anything. Its issuer only had to
-  // remain eligible now; revoked originals grant no policy authority.
+  // newer verified policy replaces it; it never grants anything. Historical owner-personal
+  // signers remain accepted after revocation, as for every other latest-policy read.
   const pinnedDenial = (initial: Target, decide: Decide) =>
     Effect.gen(function* () {
       const saved = yield* pin(initial.binding);
@@ -708,6 +708,27 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         return { ...decide(ledger, policy), isCurrent };
       })
     );
+  });
+  // Native read admission carries its verified cache identity through long polls.
+  // The serializable view remains unchanged at platform/IPC boundaries.
+  const readSessionAccess = Effect.fnUntraced(function* (machineId: string, remote: SharingRemote) {
+    const view = yield* read(machineId, remote, false);
+    const { binding } = yield* target(machineId);
+    const cached = cache.get(key(binding));
+    const isCurrent = () =>
+      !closed &&
+      !!cached &&
+      !!view.head &&
+      cached.policy.head.revision === view.head.revision &&
+      cached.policy.head.digest === view.head.digest &&
+      binding.generation === view.generation &&
+      binding.ownerMembershipId === view.ownerMembershipId &&
+      cache.get(key(binding)) === cached &&
+      sharingFresh(cached.stamp, {
+        wall: clock.currentTimeMillisUnsafe(),
+        mono: clock.monotonicTimeNanosUnsafe(),
+      });
+    return { view, isCurrent };
   });
   const write = Effect.fnUntraced(function* (
     machineId: string,
@@ -890,6 +911,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     /** Passive counts of retained policies/team grants, never current authorization. */
     inspectCache,
     read: (...args: Parameters<typeof read>) => owned(read(...args)),
+    readSessionAccess: (...args: Parameters<typeof readSessionAccess>) =>
+      owned(readSessionAccess(...args)),
     write: (...args: Parameters<typeof write>) => owned(write(...args)),
     authorize: (...args: Parameters<typeof authorize>) => owned(authorize(...args)),
     /** A retained verified denial, read locally; `undefined` is unknown, never permission. */
@@ -948,6 +971,11 @@ export const makeLazyMachineSharingHost = Effect.fnUntraced(function* (
     read: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['read']>
     ) => Effect.flatMap(get, (value) => value.read(...args)),
+    readSessionAccess: (
+      ...args: Parameters<
+        Effect.Success<ReturnType<typeof makeMachineSharingHost>>['readSessionAccess']
+      >
+    ) => Effect.flatMap(get, (value) => value.readSessionAccess(...args)),
     write: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['write']>
     ) => Effect.flatMap(get, (value) => value.write(...args)),

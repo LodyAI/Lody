@@ -918,7 +918,12 @@ export class MessageHandler {
   }
   async readEncryptedMachineRequest(
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
-    context: { requestId: string; expiresAt: number; signal: AbortSignal }
+    context: {
+      requestId: string;
+      expiresAt: number;
+      signal: AbortSignal;
+      authority?: { isCurrent: () => boolean; signal: AbortSignal };
+    }
   ) {
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readFeatureQuery(request, context);

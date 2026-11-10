@@ -28,3 +28,5 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 - Reuse fresh cached grants. Before a cached machine/project sharing refusal, refresh
   the authenticated policy with per-binding concurrent sharing and a five-second
   read-start cooldown. Failed attempts never supply policy evidence or advance pins.
+
+- Native session-read fences bind the returned view to the same verified cache object and freshness; ledger generation is fenced by the caller through response publication.

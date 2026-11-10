@@ -7,6 +7,8 @@ import {
   getServerNow,
   sessionHistoryWriteIntentDigest,
   getMachineRoomId,
+  getSessionRoomId,
+  isContainedSession,
   resolveNewSessionHistoryBackend,
   machineSupportsSessionHistoryInspection,
   type MachineMeta,
@@ -400,11 +402,30 @@ export function createCommandSessionHistoryFactory(
       | MachineMeta
       | undefined;
     resolveNewSessionHistoryBackend(machine, { requested: 'roost' });
+    const historyTarget = async () => {
+      const child = await doc.getMetaState();
+      if (!child?.machineId) throw new Error('Session history owner is unavailable');
+      const parent = child.parentSessionId
+        ? await manager.repo.getDocMeta(getSessionRoomId(child.parentSessionId))
+        : undefined;
+      const parentMeta = parent
+        ? { ...(parent.meta as SessionMeta), id: child.parentSessionId! }
+        : undefined;
+      const root =
+        parent && !parent.deleted && isContainedSession(child, parentMeta) ? parentMeta! : child;
+      return {
+        sourceMachineId: auth.machineId,
+        rootSessionId: root.id,
+        sessionOwnerUserId: root.userId,
+        localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
+      };
+    };
     return createRoostRpcSessionServices(doc, {
       coherentInspection: machineSupportsSessionHistoryInspection(machine),
       read: async (query) => {
         if (!LODY_AUTH_URL) throw new Error('Cloud history authorization is unavailable');
         const readProof = await mintCliSessionHistoryReadProof({
+          ...(await historyTarget()),
           token: auth.token,
           authBaseUrl: LODY_AUTH_URL,
           authSiteUrl: LODY_AUTH_SITE_URL,
@@ -430,6 +451,7 @@ export function createCommandSessionHistoryFactory(
         const requestId = crypto.randomUUID();
         const intentDigest = await sessionHistoryWriteIntentDigest(requestId, operation, payload);
         const writeProof = await mintCliSessionHistoryReadProof({
+          ...(await historyTarget()),
           token: auth.token,
           authBaseUrl: LODY_AUTH_URL,
           authSiteUrl: LODY_AUTH_SITE_URL,

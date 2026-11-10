@@ -149,9 +149,16 @@ On 2026-11-09 the owner superseded the former A4 all-history visibility decision
 
 The common platform `sessionAccess` port uses ordinary owner-controlled machine rows or E2EE v3 signed session grants. Convex subscriptions invalidate ordinary views; E2EE subscribes to machine/generation/revision hints and reloads verified policy. Deep links force a machine policy read. None of these grants expands machine execution indexes. Private history is hidden by the interface only: workspace members still hold content keys, so this is not cryptographic privacy.
 
-The independent history reader has no composer, execution controls or management writes. It retains pin/unread, Markdown copy and a reference in a new conversation. `useSessionActions` re-reads actual Repo targets and current authority for management; retained callbacks cannot bypass revocation or metadata machine changes. Pin/unread use a narrow preference path. Roost uses an exact-session reader: an ordinary human proof is checked online by the
-serving machine, while E2EE checks the verified requester against the v3 team/member
-grants. Read admission never authorizes writes, execution, files or other sessions. The draft [session access Spec](../../../../specs/session-access.md) records the full contract and later phases. Deterministic suites are implementation evidence, not a two-member product acceptance run.
+The independent history reader has no composer, execution controls or management writes. It retains pin/unread, Markdown copy and a reference in a new conversation. `useSessionActions` re-reads actual Repo targets and current authority for management; retained callbacks cannot bypass revocation or metadata machine changes. Pin/unread use a narrow preference path. Roost uses an exact-session reader: an ordinary app proof binds its account; a CLI proof binds the credential account,
+declared requester and source machine. Mint preflight and serving-machine verification
+require both accounts' target authority and current requester admission on the
+account-owned source machine. The declared identity is not separately authenticated;
+checking it alone would let a shared source impersonate a private target's owner.
+Target verification uses actual metadata, not the mint snapshot. E2EE source reads
+likewise retain both principals' permission intersection. Encrypted read permits
+retain ledger-generation and verified-policy fences across waits, reads, encryption
+and publication; actual metadata access is checked again after stream creation.
+Cached replies follow the same checks. Read admission never authorizes writes, execution, files or other sessions. The draft [session access Spec](../../../../specs/session-access.md) records the full contract and later phases. Deterministic suites are implementation evidence, not a two-member product acceptance run.
 
 ## Sender withdrawal gate
 
