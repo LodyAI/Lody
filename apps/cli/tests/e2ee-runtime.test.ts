@@ -6400,6 +6400,15 @@ describe('encrypted queued input evidence', () => {
         yield* h.append({ _tag: 'DeclareCapabilities', capabilities: [1] });
         yield* h.append({ _tag: 'RemoveMember', membershipId: h.membershipId });
         h.machineClock.now += threeDays;
+        // The watcher must not keep such a message waiting before it reaches the claim.
+        expect(
+          yield* h.execution.resolveRequester({
+            workspaceId: 'workspace',
+            sessionId: queuedSessionId,
+            userTurnId: turn.id,
+            inputConfig: turn.inputConfig,
+          })
+        ).toEqual({ state: 'denied' });
         expect(yield* h.claim(turn)).toEqual({
           state: 'denied',
           reason: 'e2ee_sender_not_authorized',

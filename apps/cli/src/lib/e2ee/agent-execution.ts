@@ -207,7 +207,9 @@ export function makeEncryptedAgentExecution(options: {
   ): Effect.fn.Return<{ state: 'pending' | 'denied' } | { userId?: string }, unknown> {
     const intent = yield* attempt(() => intentSchema.parse(input));
     const verified = yield* options.resolveVerifiedOriginal(intent);
-    if (verified && 'state' in verified) return { state: 'pending' };
+    // A refused signer goes on to the claim, which records the reason; never wait on it.
+    if (verified && 'state' in verified)
+      return { state: verified.state === 'sender-not-authorized' ? 'denied' : 'pending' };
     if (!verified) return { state: 'denied' };
     const userId = yield* verifiedRequester(verified);
     return userId === undefined ? {} : { userId };
@@ -251,7 +253,8 @@ export function makeEncryptedAgentExecution(options: {
     const verified = yield* options.resolveVerifiedOriginal(
       yield* attempt(() => intentSchema.parse(input))
     );
-    if (verified && 'state' in verified) return 'pending';
+    if (verified && 'state' in verified)
+      return verified.state === 'sender-not-authorized' ? 'denied' : 'pending';
     return verified?.requesterDevice === options.selfDevice ? 'verified' : 'denied';
   });
   const claim = Effect.fnUntraced(function* (
