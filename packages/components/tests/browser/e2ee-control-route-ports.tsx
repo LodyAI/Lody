@@ -79,6 +79,7 @@ export const E2eeRemoteMachinePairing = () => null;
 export const E2eeIdentityRecovery = () => null;
 export const E2eeTeamSettingsHost = () => null;
 export const E2eePersonalPairing = () => null;
+export const E2eeAutomaticPairingPage = () => null;
 export const E2eeAccountPairingRequest = () => null;
 export const E2eeAccountPairingApprove = () => null;
 export const E2eeAccountPairingKeyRetry = () => null;
