@@ -1429,6 +1429,27 @@ const runtimeContext = {
 } as const;
 let heldApproval: Awaited<ReturnType<NonNullable<typeof runtime.accountApproval>>> | undefined;
 let approvalReleaseResult: Promise<{ state: string; code?: string }> | undefined;
+/**
+ * The shared UI's schedule save through this real portable runtime: the content bridge
+ * hands the host the document, and the host signs its declaration. Absent support is a
+ * result, so the caller sees why a save cannot be signed.
+ */
+export async function runtimeSignDeclaration(
+  document: Parameters<NonNullable<E2eeWorkspaceRuntime['signScheduleDeclaration']>>[1],
+  manualRunKey?: string
+) {
+  try {
+    if (!runtime.signScheduleDeclaration) return { ok: false, reason: 'unsupported' };
+    return {
+      ok: true,
+      value: await runtime.signScheduleDeclaration(offer.workspaceId, document, manualRunKey),
+    };
+  } catch (error) {
+    const e = error as { code?: unknown; reason?: unknown; message?: unknown };
+    return { ok: false, reason: e.code ?? e.reason ?? e.message };
+  }
+}
+
 export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;

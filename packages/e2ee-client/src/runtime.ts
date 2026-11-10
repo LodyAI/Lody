@@ -762,6 +762,10 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           })
         )
       ),
+    // Declarations need only this admitted device, not RPC transport: an encrypted
+    // schedule saved from any host carries its setter's signature.
+    signScheduleDeclaration: (id, document, manualRunKey) =>
+      run(withSession(id, (session) => session.signScheduleDeclaration(document, manualRunKey))),
     ...(host.capabilities.rpc
       ? ({
           prepareDispatch: (id, target, input) =>

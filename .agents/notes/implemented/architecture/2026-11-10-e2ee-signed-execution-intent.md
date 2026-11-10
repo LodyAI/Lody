@@ -30,13 +30,14 @@ the same meaning. The cost is one more signing step before an encrypted send is 
   the input configuration as the history writer stores it, through its own legacy
   normalization and schema, without `resume`, plus `derivedFrom` or `scheduleRun`. A schedule
   declaration signs its definition fingerprint. Fixed vectors pin both.
-- **Writers.** A client signs before it writes: the desktop host signs through
+- **Writers.** A client signs before it writes: the desktop and portable hosts sign through
   `prepareDispatch`, and the turn or queue item is written with the record in one commit; an
   input its host cannot sign is not sent. A changed queue edit keeps its message ID and is
   signed again by the editor. Promotion copies the queue item's record. This machine signs
   inputs it writes itself (prepared Sessions, agent messages, automations, scheduled runs).
   A schedule's setter signs through `signScheduleDeclaration`, a host capability that computes
-  the fingerprint itself and signs nothing else.
+  the fingerprint itself and signs nothing else. Both hosts provide it, independently of RPC
+  support, because the shared UI offers encrypted schedules on either.
 - **Start.** `execution-intent-verification.ts` recomputes the digest from what will run,
   verifies the signature for this workspace, machine, session and message, then checks the
   signer in the current ledger, refusing an unknown signer only after an authenticated read.
@@ -100,4 +101,6 @@ replayed, edited, machine-signed, rewritten items, dropped blocks), rotation, sc
 retries. `apps/cli/src/lib/e2ee/realtime-journal.test.ts` covers one start and retirement;
 `apps/cli/tests/session-dispatch-watcher.test.ts` covers wake-ups and the capped fallback;
 `packages/components/tests/legacy-session-send-migration.test.ts` covers client ordering.
+`packages/e2ee-client/test/runtime.browser.test.ts` saves an encrypted schedule through the
+real portable host and verifies the stored declaration.
 No real backend, device or mobile run was made.
