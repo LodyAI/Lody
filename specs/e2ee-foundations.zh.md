@@ -1,14 +1,15 @@
 # E2EE 基础模块边界
 
-Status: draft
+Status: approved
 Translation: current
 
-Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
-Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
-[批准记录](https://github.com/LodyAI/Lody/pull/1894)。
+Approved revision: [`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+Approval: 2026-11-10，owner 批准本次修订：撤销签名设备后保留最新清单并提醒重签；
+只验证最新签名版本。[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2487)。
 
-Revision: owner 于 2026-11-10 决定本次最新版本验证及保留授权修订，待审阅 PR #2487 时批准。
-保留的原批准记录不代表新修订已获批准。
+原批准记录：2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
+[批准记录](https://github.com/LodyAI/Lody/pull/1894)，
+[原批准版本](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
 
 [English](e2ee-foundations.md)
 

@@ -1,15 +1,16 @@
 # E2EE foundation boundary
 
-Status: draft
+Status: approved
 Translation: current
 
-Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
-Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
-(session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
+Approved revision: [`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+Approval: 2026-11-10, the owner approved this revision: retain the latest policy
+and remind the user to review and re-sign after signer revocation; verify only the
+latest signed version. [Revision and approval record](https://github.com/LodyAI/Lody/pull/2487).
 
-Revision: owner-directed on 2026-11-10; this latest-only policy and retained-grant
-revision awaits owner approval in PR #2487. The approved revision above is retained
-as historical approval, not approval of these changes.
+Original approval: 2026-10-28, reviewed and approved by the owner-authorized
+coordinator (session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894),
+[original approved revision](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862).
 
 [中文](e2ee-foundations.zh.md)
 
