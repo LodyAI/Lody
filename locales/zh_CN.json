@@ -6454,6 +6454,7 @@
   "e2ee.lostAll.result.waiting": "等待密钥",
   "e2ee.lostAll.result.failed": "没有找回",
   "e2ee.lostAll.result.askAdmin": "没有找回的工作区，请管理员重新邀请你。",
+  "e2ee.lostAll.result.currentPending": "这个工作区还没有找回，仍在等待另一台已授权设备批准。",
   "e2ee.lostAll.result.revokeHint": "建议：打开加密控制台的「设备与机器」，把丢失的旧设备撤销掉。",
   "e2ee.lostAll.tryAnother": "换一种方式",
   "e2ee.lostAll.open": "打开工作区",

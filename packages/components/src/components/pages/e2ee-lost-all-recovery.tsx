@@ -8,19 +8,23 @@ import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 
 type Method = 'passkey' | 'file' | 'none';
+type RestoreResult = { workspaceId?: string; name: string; outcome: string };
 type Restored =
   | { outcome: 'cancelled' }
   | {
       outcome: 'restored';
-      results: readonly { name: string; outcome: string }[];
+      results: readonly RestoreResult[];
     };
 
 export interface E2eeLostAllRecoveryProps {
+  /** The workspace this device is waiting to open. Only its own committed restore may
+   * end that wait; another workspace's success never does. */
+  workspaceId: string;
   /** Whether this device can attempt a passkey ceremony; the passkey choice leads when it can. */
   passkeyAvailable: boolean;
   /** Restores every workspace the chosen backup covers onto this device. */
   restore: (method: 'file' | 'passkey') => Promise<Restored>;
-  /** At least one workspace was restored: leave the waiting page and open it. */
+  /** This workspace was restored: leave the waiting page and open it. */
   onRecovered: () => void;
 }
 
@@ -117,6 +121,10 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
   if (results) {
     const restored = results.filter((row) => row.outcome === 'Committed').length;
     const unfinished = results.length - restored;
+    // Matched by ID: names are display text and may repeat.
+    const current = results.some(
+      (row) => row.workspaceId === props.workspaceId && row.outcome === 'Committed'
+    );
     return (
       <div data-testid="e2ee-lost-all-results" {...stylex.props(styles.root)}>
         <h3 {...stylex.props(styles.heading)}>
@@ -129,7 +137,11 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
             {results.map((row) => {
               const badge = resultBadge(row.outcome);
               return (
-                <li key={row.name} data-lost-all-result={row.outcome} {...stylex.props(styles.row)}>
+                <li
+                  key={row.workspaceId ?? row.name}
+                  data-lost-all-result={row.outcome}
+                  {...stylex.props(styles.row)}
+                >
                   <span>{row.name}</span>
                   <Badge tone={badge.tone}>{t(badge.key)}</Badge>
                 </li>
@@ -140,16 +152,21 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
         {(unfinished > 0 || results.length === 0) && (
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.askAdmin')}</p>
         )}
+        {restored > 0 && !current && (
+          <p data-testid="e2ee-lost-all-current-pending" {...stylex.props(styles.lead)}>
+            {t('e2ee.lostAll.result.currentPending')}
+          </p>
+        )}
         {restored > 0 && (
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.revokeHint')}</p>
         )}
         <div {...stylex.props(styles.actions)}>
-          {restored === 0 && (
+          {!current && (
             <Button variant="secondary" onClick={() => setResults(null)}>
               {t('e2ee.lostAll.tryAnother')}
             </Button>
           )}
-          {restored > 0 && <Button onClick={props.onRecovered}>{t('e2ee.lostAll.open')}</Button>}
+          {current && <Button onClick={props.onRecovered}>{t('e2ee.lostAll.open')}</Button>}
         </div>
       </div>
     );

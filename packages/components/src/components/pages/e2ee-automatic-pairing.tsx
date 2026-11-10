@@ -86,7 +86,7 @@ export function E2eeAutomaticPairingPage({
   keyFailure?: boolean;
   onRetryKeys?: () => void;
   /** Present where this host can restore from a backup (desktop with recovery on). */
-  lostAll?: E2eeLostAllRecoveryProps;
+  lostAll?: Omit<E2eeLostAllRecoveryProps, 'workspaceId'>;
 }) {
   usePairingPrivacy();
   const { t, i18n } = useTranslation();
@@ -296,7 +296,8 @@ export function E2eeAutomaticPairingPage({
     }).format(new Date(value));
   const recovered = () => {
     setLostAllOpen(false);
-    // The backup admitted this device; the pending request is no longer needed.
+    // Reached only when this workspace's own restore committed: its pending request is
+    // no longer needed. Another workspace's success keeps this request.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
     lostAll?.onRecovered();
   };
@@ -444,6 +445,7 @@ export function E2eeAutomaticPairingPage({
           <Dialog.Content width={480} className="max-h-[90dvh] overflow-y-auto">
             <Dialog.Title>{t('e2ee.lostAll.title')}</Dialog.Title>
             <E2eeLostAllRecovery
+              workspaceId={workspaceId}
               passkeyAvailable={lostAll.passkeyAvailable}
               restore={lostAll.restore}
               onRecovered={recovered}

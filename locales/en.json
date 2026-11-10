@@ -6465,6 +6465,7 @@
   "e2ee.lostAll.result.waiting": "Waiting for keys",
   "e2ee.lostAll.result.failed": "Not restored",
   "e2ee.lostAll.result.askAdmin": "For workspaces that were not restored, ask an admin to invite you again.",
+  "e2ee.lostAll.result.currentPending": "This workspace was not restored and is still waiting for another authorized device to approve it.",
   "e2ee.lostAll.result.revokeHint": "Next: open Devices & machines in the encryption console and revoke the devices you lost.",
   "e2ee.lostAll.tryAnother": "Try another way",
   "e2ee.lostAll.open": "Open workspace",

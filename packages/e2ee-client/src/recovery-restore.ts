@@ -192,7 +192,11 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
   readonly local: WorkspaceRecoveryInput['local'];
   readonly targets: readonly RecoveryRestoreTarget[];
 }) {
-  const results: { readonly name: string; readonly outcome: string }[] = [];
+  const results: {
+    readonly workspaceId: string;
+    readonly name: string;
+    readonly outcome: string;
+  }[] = [];
   for (const reference of yield* listVaultWorkspaces(input.vault)) {
     const target = input.targets.find((row) => row.genesisHash === reference.genesis);
     if (!target) continue;
@@ -200,7 +204,7 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     const progress = yield* input.local.read(key);
     const identity = target.hasIdentity();
     if (identity === 'unknown' && !isOpen(progress)) {
-      results.push({ name: target.name, outcome: 'Failed' });
+      results.push({ workspaceId: target.id, name: target.name, outcome: 'Failed' });
       continue;
     }
     if (identity === true && !isOpen(progress)) continue;
@@ -237,7 +241,11 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
       })
     );
     const exit = yield* Effect.exit(attempt);
-    results.push({ name: target.name, outcome: Exit.isSuccess(exit) ? exit.value : 'Failed' });
+    results.push({
+      workspaceId: target.id,
+      name: target.name,
+      outcome: Exit.isSuccess(exit) ? exit.value : 'Failed',
+    });
   }
   return results;
 });

@@ -516,35 +516,45 @@ describe('automatic pairing product flow', () => {
     expect(text()).toContain('e2ee.auto.noOtherDevice.elsewhere');
     expect(text()).not.toContain('e2ee.auto.noOtherDevice.restore');
 
+    const inDialog = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((value) =>
+        (value.textContent ?? '').startsWith(label)
+      );
+    let restoreResults: { workspaceId: string; name: string; outcome: string }[] = [
+      // Another workspace restored, this one not covered by the backup.
+      { workspaceId: 'w2', name: 'Alpha', outcome: 'Committed' },
+    ];
     await page({
       passkeyAvailable: true,
       restore: async (method) => {
         restores.push(method);
-        return {
-          outcome: 'restored',
-          results: [
-            { name: 'Alpha', outcome: 'Committed' },
-            { name: 'Design', outcome: 'Failed' },
-          ],
-        };
+        return { outcome: 'restored', results: restoreResults };
       },
       onRecovered: () => {
         recovered++;
       },
     });
     await click('e2ee.auto.noOtherDevice.restore');
-    const inDialog = (label: string) => {
-      const found = [...document.body.querySelectorAll('button')].find((value) =>
-        (value.textContent ?? '').startsWith(label)
-      );
-      if (!found) throw new Error(`missing ${label}`);
-      return found;
-    };
+    await act(async () => inDialog('e2ee.lostAll.continue')!.click());
+    // Another workspace's success never ends this workspace's pending approval,
+    // even when the names match.
+    expect(
+      document.body.querySelector('[data-testid="e2ee-lost-all-current-pending"]')
+    ).not.toBeNull();
+    expect(inDialog('e2ee.lostAll.open')).toBeUndefined();
+    expect(cancelled).toEqual([]);
+    expect(recovered).toBe(0);
+    await act(async () => inDialog('e2ee.lostAll.tryAnother')!.click());
+    restoreResults = [
+      { workspaceId: 'w1', name: 'Alpha', outcome: 'Committed' },
+      { workspaceId: 'w3', name: 'Design', outcome: 'Failed' },
+    ];
+    restores.length = 0;
     // The passkey is the fastest way, so it leads when this device can use one.
     expect(
       document.body.querySelector('[data-lost-all-method="passkey"]')?.getAttribute('aria-checked')
     ).toBe('true');
-    await act(async () => inDialog('e2ee.lostAll.continue').click());
+    await act(async () => inDialog('e2ee.lostAll.continue')!.click());
     expect(restores).toEqual(['passkey']);
     const results = document.body.querySelector('[data-testid="e2ee-lost-all-results"]');
     expect(results?.querySelector('[data-lost-all-result="Committed"]')?.textContent).toContain(
@@ -555,7 +565,7 @@ describe('automatic pairing product flow', () => {
     );
     expect(results?.textContent).toContain('e2ee.lostAll.result.askAdmin');
     expect(results?.textContent).toContain('e2ee.lostAll.result.revokeHint');
-    await act(async () => inDialog('e2ee.lostAll.open').click());
+    await act(async () => inDialog('e2ee.lostAll.open')!.click());
     // The backup admitted this device, so the pending request ends and the host refreshes.
     expect(cancelled).toEqual(['w1']);
     expect(recovered).toBe(1);

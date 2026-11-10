@@ -93,9 +93,9 @@ function Preview({
               restore: async () => ({
                 outcome: 'restored' as const,
                 results: [
-                  { name: 'Lody Design', outcome: 'Committed' },
-                  { name: 'Platform', outcome: 'Committed' },
-                  { name: 'Archive', outcome: 'Failed' },
+                  { workspaceId: 'preview', name: 'Lody Design', outcome: 'Committed' },
+                  { workspaceId: 'platform', name: 'Platform', outcome: 'Committed' },
+                  { workspaceId: 'archive', name: 'Archive', outcome: 'Failed' },
                 ],
               }),
               onRecovered: () => {},
