@@ -1,15 +1,15 @@
 # E2EE 基础模块边界
 
-Status: draft
+Status: approved
 Translation: current
 
-此前批准的版本：[`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
-（2026-11-10，owner；[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2487)）。
-原批准记录：2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
-[批准记录](https://github.com/LodyAI/Lody/pull/1894)，
-[原批准版本](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
-
-本次修订把 iroh 改为实时首选通道，改变了路径顺序，因此回到 draft，等 owner 在 PR 中批准。
+Approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
+批准：2026-11-10，owner 批准把 iroh 定为加密 RPC 首选通道（iroh → Streams RPC →
+持久派发，过渡期使用 n0 公共中继）；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)。
+上一版：[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+（2026-11-10，[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准：2026-10-28，
+owner 授权总调度（会话 `b12f1597`），[PR #1894](https://github.com/LodyAI/Lody/pull/1894)，
+[版本 `e4351fda`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
 
 [English](e2ee-foundations.md)
 

@@ -1,16 +1,17 @@
 # E2EE foundation boundary
 
-Status: draft
+Status: approved
 Translation: current
 
-Previously approved revision: [`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
-(2026-11-10, owner; [revision and approval record](https://github.com/LodyAI/Lody/pull/2487)).
-Original approval: 2026-10-28, reviewed and approved by the owner-authorized
-coordinator (session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894),
-[original approved revision](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862).
-
-This revision changes the realtime route order to make iroh the preferred route; it
-returns to draft until the owner approves it in its pull request.
+Approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.md)
+Approval: 2026-11-10, the owner approved iroh as the preferred encrypted RPC route
+(iroh → Streams RPC → durable dispatch, interim n0 public relays);
+[approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#iroh-preferred-route).
+Previous: [`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+(2026-11-10, [PR #2487](https://github.com/LodyAI/Lody/pull/2487)); original approval
+2026-10-28 by the owner-authorized coordinator (session `b12f1597`),
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894),
+[revision `e4351fda`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862).
 
 [中文](e2ee-foundations.zh.md)
 
