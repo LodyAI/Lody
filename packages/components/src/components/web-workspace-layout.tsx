@@ -3,11 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
-import {
-  DEFAULT_DESKTOP_SIDEBAR_WIDTH,
-  MAX_DESKTOP_SIDEBAR_WIDTH,
-  MIN_DESKTOP_SIDEBAR_WIDTH,
-} from './loro-sidebar';
+import { DEFAULT_DESKTOP_SIDEBAR_WIDTH, MAX_DESKTOP_SIDEBAR_WIDTH } from './loro-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
 import { useIsCompactDesktop } from '../hooks/use-mobile';
@@ -20,6 +16,7 @@ import {
 import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
+import { getNavigationSidebarMinWidth } from '@/lib/boot-shell-script';
 import { cn } from '@/lib/utils';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
@@ -102,7 +99,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   const sidebarSlideWidth = Math.min(
     Math.max(
       sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_DESKTOP_SIDEBAR_WIDTH,
-      MIN_DESKTOP_SIDEBAR_WIDTH
+      getNavigationSidebarMinWidth()
     ),
     MAX_DESKTOP_SIDEBAR_WIDTH
   );

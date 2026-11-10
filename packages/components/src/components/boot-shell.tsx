@@ -14,6 +14,7 @@ import { BOOT_SHELL_MARK_DATA_URL } from '@/lib/boot-shell-mark';
 import { DocumentStyle } from './document-style';
 import {
   BOOT_SHELL_SIDEBAR_WIDTH,
+  getNavigationSidebarMinWidth,
   resolveBootShellLayout,
   type BootShellLayout,
 } from '@/lib/boot-shell-script';
@@ -131,7 +132,7 @@ function BootShellFrame({
   const width =
     typeof sidebarWidth === 'number'
       ? sidebarWidth > 0 && Number.isFinite(sidebarWidth)
-        ? Math.min(widths.max, Math.max(widths.min, sidebarWidth))
+        ? Math.min(widths.max, Math.max(getNavigationSidebarMinWidth(), sidebarWidth))
         : widths.default
       : undefined;
   return (
