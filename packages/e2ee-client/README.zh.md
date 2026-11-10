@@ -177,3 +177,11 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 [已批准 custody Spec](../../specs/e2ee/client-custody.zh.md) 信任页面下发代码使用私钥。
 runtime 工厂是可选能力，其导出不启用任何产品组合。
 [所有权理由](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.zh.md#个人设备产品组合)。
+
+## 保险库接纳
+
+host 的显式 `restoreRecovery` 命令先认证恢复包，再准备个人设备身份，核对钉住的
+创世与账号成员身份，沿用 R 接纳和持久原件。它重放签名历史，通过原有
+`InstalledEpochKeys` 承诺、保护与读回边界安装恢复出的不透明密钥。安装失败后沿用
+同一身份重试，不返回签名器、私钥、R 或 V。应用负责保险库会话、传输、账号守卫、
+入口 pin 和产品启用；恢复仍须显式选择，打开既有身份不会触发恢复。
