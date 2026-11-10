@@ -78,6 +78,7 @@ import {
 import type { BootstrapSession } from './auth-service'
 import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
 import { getDesktopLog } from '../desktop-log'
+import { desktopIrohConfig } from './e2ee-iroh-config'
 import { createCliProbeTrace } from '../desktop-log-core'
 import {
   DESKTOP_HOST_ACCESS_DENIED_MESSAGE,
@@ -410,6 +411,19 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
   assignEnvIfPresent(env, 'LODY_AUTH_SITE_URL', import.meta.env.VITE_CONVEX_SITE_URL)
   assignEnvIfPresent(env, 'LODY_SERVER_URL', import.meta.env.VITE_SERVER_URL)
   assignEnvIfPresent(env, 'SITE_URL', import.meta.env.VITE_SITE_URL)
+  // The embedded CLI serves encrypted RPC over iroh only with the same relays and
+  // a native module that exists on this host; otherwise it keeps Streams RPC.
+  const iroh = desktopIrohConfig({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    env: import.meta.env
+  })
+  if (iroh) {
+    env.LODY_IROH_RELAYS = iroh.relays.urls.join(',')
+    if (iroh.relays.token) env.LODY_IROH_RELAY_TOKEN = iroh.relays.token
+    env.LODY_IROH_NATIVE_PATH = iroh.file
+  }
 
   return env
 }

@@ -22,7 +22,7 @@ PR: https://github.com/LodyAI/Lody/pull/488
 「ACK 出错后清除 pending」被否决，因为远端追加可能在其响应丢失之前就已提交。截止时间限定了
 等待；底层追加可能稍后完成，但无法再触发另一次生命周期操作。进程级串行化、跨重启去重与完成态
 UI 仍是独立工作。本记录是同一 PR 中
-[Windows 启动器修复](2026-09-08-windows-daemon-upgrade.md)的限定范围后续。
+[Windows 启动器修复](../../archived/bug-fix/2026-09-08-windows-daemon-upgrade.md)的限定范围后续。
 [接受契约](../../../../specs/machine-lifecycle-ack.md)仍为 draft。
 
 ## 验证

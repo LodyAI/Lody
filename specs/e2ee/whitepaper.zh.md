@@ -4,7 +4,7 @@ Status: approved · [批准记录](../../.agents/notes/implemented/architecture/
 Previously approved baseline: [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
 Translation: current
 
-Approved revision: 2026-11-07 后端故障期间的执行新鲜度（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)）；2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
+Approved revision: 2026-11-10 iroh 首选通道（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)）；2026-11-07 后端故障期间的执行新鲜度（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)）；2026-11-06 恢复保险库整库换新；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)。上一版：2026-11-06 账本用户编号（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#账本用户编号即账户-id)）、2026-11-06 恢复 passkey 解锁与可信锚（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库-passkey-解锁与可信锚)）、2026-11-01 账号级配对、2026-10-31 审计对齐、2026-10-28 恢复格式对齐。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
@@ -198,16 +198,17 @@ Owner/Admin 仍可主动换代。新成员、新设备、角色调整与 Owner �
 Org 执行权限使用同一最坏 15 分钟撤权上限。缓存不得晚于原新鲜度证明到期，转发、收到证明或重启不重新计时；已知撤权立即失效，到期无法刷新拒绝新执行；但读取没有得到答复时，同成员的请求适用[后端故障期间的执行新鲜度](execution-freshness-outage.zh.md)中更长的窗口。该时限依赖服务端诚实提供最新控制状态；本地计时无法阻止恶意服务端持续隐瞒撤权。已启动命令的取消是另一条流程，撤权不自动撤回既有副作用。
 
 [M5 实时评审草案](../e2ee-foundations.zh.md#实时-rpc-与-presencem5-评审草案)给出
-具体字节与 MVP 路由顺序：加密 Streams RPC 主路径、加密 history/Meta 持久派发
-最终回退。2026-10-28 的 owner 决定将 iroh 延后为非 MVP 加速层。各路共用当前
+具体字节与路由顺序：宿主支持时先走 iroh，再走加密 Streams RPC，最后由加密
+history/Meta 持久派发回退。Owner 于 2026-10-28 将 iroh 移出 MVP，又于 2026-11-10
+将其定为首选通道。各路共用当前
 授权和一个持久实际启动 claim；实时重试保留原密文及 ID。已
 合入账本在接纳与 possession 中绑定 machineId；旧开发账本 current-only 重建，
 不保留兼容路径。`rotationRequired` 只提示换钥，本身不阻断封装、发送或执行。机器
 执行新鲜度仅内存保存，从自己经认证拉最新账本前开始计最多 15 分钟（[后端故障](execution-freshness-outage.zh.md)期间机器所属成员的窗口更长），重启联网重查；
 journal 持久工作区过期下限不是该授权。执行证据不自动回收。发送到实际启动目标
 ≤1 秒，本次不声称测量通过。RPC 完整帧 1 MiB 包含 143 字节开销、机器资源规范
-无填充 base64url 两点已获 owner 批准（2026-10-28）。后续 iroh 仍复用账本设备钥；
-所报告的域隔离审查未发现签名协议混淆。原生密钥生命周期和产品验收仍须单独完成。
+无填充 base64url 两点已获 owner 批准（2026-10-28）。iroh 复用账本设备钥；
+所报告的域隔离审查未发现签名协议混淆，该密钥只签 TLS 与中继握手。原生密钥生命周期和产品验收仍须单独完成。
 完整 Spec revision `e4351fda` 已于 2026-10-28 经 owner 授权总调度审核后批准，
 记录见上。
 

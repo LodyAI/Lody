@@ -3,15 +3,14 @@
 Status: approved
 Translation: current
 
-Approved revision: [`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
-Approval: 2026-11-10，owner 批准本次修订：撤销签名设备后保留最新清单并提醒重签；
-只验证最新签名版本。[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2487)。
-
+Approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
+批准：2026-11-10，owner 批准把 iroh 定为加密 RPC 首选通道（iroh → Streams RPC →
+持久派发，过渡期使用 n0 公共中继）；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)。
 Approval: 2026-11-10，owner 批准签名执行意图这次修订。[本次修订及批准记录](https://github.com/LodyAI/Lody/pull/2510)。
-
-原批准记录：2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
-[批准记录](https://github.com/LodyAI/Lody/pull/1894)，
-[原批准版本](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
+上一版：[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+（2026-11-10，[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准：2026-10-28，
+owner 授权总调度（会话 `b12f1597`），[PR #1894](https://github.com/LodyAI/Lody/pull/1894)，
+[版本 `e4351fda`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
 
 [English](e2ee-foundations.md)
 
@@ -44,10 +43,10 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 
 ## 实时 RPC 与 presence（M5 评审草案）
 
-远程执行无论从哪条路径到达，都必须使用相同权限和执行证据。MVP 采用**加密 Streams
-RPC → 加密 history/Meta 持久派发最终回退**。Streams RPC 失效时必须保留持久路径，
-并进入同一个实际启动 claim，不能形成第二条执行入口。Iroh 为后续加速层，不在 MVP
-中。普通工作区保持原行为；RPC 和持久内容不回退明文，MVP presence 是下文单独
+远程执行无论从哪条路径到达，都必须使用相同权限和执行证据。路径顺序为 **iroh → 加密
+Streams RPC → 加密 history/Meta 持久派发最终回退**。前一条路径失效时必须保留后面的
+路径，所有路径都进入同一个实际启动 claim，不能形成第二条执行入口。宿主支持时 iroh
+为首选通道（[通道决定](#首选通道iroh)）。普通工作区保持原行为；RPC 和持久内容不回退明文，MVP presence 是下文单独
 批准的最小明文元数据通道。
 
 **本具体字节修订已批准，记录见上。** 下文两点已获 **owner 于 2026-10-28 批准**：RPC 的
@@ -271,24 +270,39 @@ claim 拒绝本机或已保存下限超前超过 600,000 ms 的情形；接受�
 原期限，不恢复新鲜度，也不授予重放权限。遵循公开
 [journal 恢复决定](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。
 
-### MVP 路由与延迟验收
+### 路由与延迟验收
 
-MVP 实时主路径为加密 Streams RPC；不可用时必须保留**加密 history/Meta 持久派发
-最终回退**。传输层重试复用原 ID 和完整原签名密文。两路针对同一消息 ID 携带同一份签名的执行意图
-（已批准，见上文），都经过同一实际启动 claim 和当前授权；持久到达不会产生第二次操作。MVP 交付和验收不依赖 iroh 连接或 SDK。
+已有到目标设备的 iroh 连接时由 iroh 传送实时帧；没有连接或 iroh 失败时由加密
+Streams RPC 传送；两者都不可用时必须保留**加密 history/Meta 持久派发最终回退**。传输层重试复用原 ID 和完整原签名密文。三条路针对同一消息 ID 携带同一份签名的执行意图
+（已批准，见上文），都经过同一实际启动 claim 和当前授权；持久到达不会产生第二次操作。交付从不依赖 iroh 连接或原生模块是否可用。
 
 验收目标为**发送到实际执行开始 ≤1 秒**：从发送方接受 send 到机器实际启动边界，
 不是到交付 ACK，也不是业务完成。按明确条件分别测普通／加密路径、通道和回退选择。
 离线持久补同步不保证一秒交付；按 owner 2026-11-10 决定（已批准），执行输入不论多晚到达都没有期限。本次文档修订不声称测量通过。
 
-### 后续加速层：iroh（非 MVP）
+### 首选通道：iroh
 
-Owner 于 **2026-10-28** 将 iroh 延后至 MVP 之后。保留其身份决定：复用工作区设备
-Ed25519 身份，EndpointId 等于其签名公钥。只有可信宿主交付私钥，不导出给 renderer，不开放任意签名 IPC。连接对端仍须通过共用帧、已验证绑定、
-当前权限、新鲜度和执行 journal 检查。2026-10-28 的 owner 决定记录域隔离审查未
-发现签名协议混淆；这不等于原生 SDK／密钥生命周期或安装平台验收通过。后续 iroh
-加速层须保留相同原 ID／密文、授权和实际启动 claim，不能拖住可用的加密 Streams
-RPC 或持久回退。
+Owner 于 2026-10-28 将 iroh 移出 MVP，又于 **2026-11-10** 将其定为首选通道。iroh
+只是传输：传送相同的签名帧和同一份签名的执行意图（已批准，见上文），请求 ID 和签名密文都相同；已连接的对端仍须通过共用帧、
+已验证绑定、当前权限和执行 journal 检查。执行输入按消息 ID 和内容摘要识别，不论走哪条路都没有期限；只有功能请求保留各自的新鲜度检查。传输层认证从不构成授权。
+
+- **身份。** iroh 复用工作区账本设备的 Ed25519 身份，EndpointId 等于其签名公钥。
+  只有可信原生宿主（Electron 主进程、CLI，以及以后的移动端原生壳）把种子交给原生
+  传输层，Endpoint 关闭时由其擦除。不向 renderer 或 WebView 导出，不开放任意签名
+  接口。同一进程内每把设备密钥最多一个存活的 Endpoint。该密钥只签 TLS 1.3 握手和
+  中继握手，两者都有域分隔；不使用地址查找记录。
+- **不经控制面的可达性。** 拨号方用全部已配置中继寻址目标，首包会到达对端选作
+  主中继的那一个；不向后端发布任何地址。打洞成功后走直连。在 Lody 自营中继上线
+  之前，官方构建配置 n0 的公共中继（owner 决定，2026-11-10）。公共中继只转发端到端
+  加密的流量，但能看到设备公钥、IP 地址以及哪些设备在通信；它们有限流、没有可用性
+  保证，因此 Streams RPC 和持久派发仍是回退路径。
+- **可选能力。** 没有原生传输或中继配置的宿主（包括仅本地运行的桌面版）继续使用
+  加密 Streams RPC 和持久派发。建立 iroh 连接从不拖住可用的后续路径：没有存活连接
+  时，请求先走 Streams RPC，同时准备连接。
+- **退役 Streams RPC。** 在所有支持的平台都迁移到 iroh 并验证兼容之前，保留加密
+  Streams RPC；下掉它需要再次修订本 Spec。浏览器版 iroh 不在范围内。
+
+实现理由与依据：[iroh 传输决定](../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.zh.md)。
 
 ### 持久身份、实际启动与结果保留
 

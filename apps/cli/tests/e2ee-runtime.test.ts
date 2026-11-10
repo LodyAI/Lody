@@ -67,6 +67,7 @@ import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
+import { developmentNativePath, loadIrohNative } from '@lody/iroh-native';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
@@ -446,6 +447,72 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  const iroh = loadIrohNative(developmentNativePath());
+  it.skipIf(!iroh)(
+    'opens the iroh endpoint as the retained ledger device and wipes the handed seed',
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-iroh-identity-'));
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const owner = yield* makeNodeE2eeCustody({
+                directory: join(directory, 'owner'),
+                wrapper,
+              });
+              const prepared = yield* owner.prepareDevice();
+              const signed = yield* signGenesisRecord({
+                signer: prepared,
+                encryptionPublicKey: prepared.enc,
+                initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+                userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+                membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10))),
+              });
+              yield* owner.retainDevice(signed.genesis, prepared);
+              const custody = yield* makeCliE2eeCustody({
+                directory: join(directory, 'machine'),
+                keyring: noKeyring,
+              });
+              const machine = yield* custody.createDevice(signed.genesis);
+              let handed: Uint8Array | undefined;
+              const endpoint = yield* custody.withTransportSeed(
+                signed.genesis,
+                machine.publicKey,
+                (seed) => {
+                  handed = seed;
+                  return iroh!.openEndpoint(
+                    Buffer.from(seed.buffer, seed.byteOffset, seed.byteLength),
+                    { relayUrls: [], accept: true }
+                  );
+                }
+              );
+              try {
+                // Senders dial the ledger signing key; nothing else names this device.
+                expect(endpoint.endpointId).toBe(
+                  Buffer.from(machine.publicKey.toBytes()).toString('hex')
+                );
+                expect(handed && handed.every((byte) => byte === 0)).toBe(true);
+                // A different identity is refused without opening anything.
+                let opened = false;
+                const refused = yield* Effect.exit(
+                  custody.withTransportSeed(signed.genesis, prepared.publicKey, async () => {
+                    opened = true;
+                  })
+                );
+                expect(refused._tag).toBe('Failure');
+                expect(opened).toBe(false);
+              } finally {
+                yield* Effect.promise(() => endpoint.close());
+              }
+            })
+          )
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('selects the new epoch when every key install outlasts its deadline', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-slow-key-install-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));

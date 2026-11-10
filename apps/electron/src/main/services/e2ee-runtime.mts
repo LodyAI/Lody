@@ -82,6 +82,8 @@ import {
 } from '@lody/e2ee-core/adapters/loro-streams'
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native'
 import type { E2eeIntentSigningRequest } from '@lody/loro-streams-rpc/e2ee-client'
+import { makeDesktopIrohClient, type DesktopIrohClient } from './e2ee-iroh.mjs'
+import type { IrohNative } from '@lody/iroh-native'
 import type { E2eeDispatchInput } from '@lody/shared/e2ee-rpc'
 import {
   encodeE2eeIntentRecord,
@@ -242,6 +244,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     readonly removeObsoleteCache?: typeof unlink
     readonly custody: DesktopE2eeCustody
     readonly bootstrap: Effect.Success<ReturnType<typeof makeDesktopE2eeBootstrap>>
+    /** Optional iroh route for encrypted RPC; absent keeps Streams RPC only. */
+    readonly iroh?: {
+      readonly native: IrohNative
+      readonly relays: import('@lody/platform').E2eeIrohRelays
+      readonly proxyUrl?: string
+    }
   }) {
     const serial = yield* Semaphore.make(1)
     let stopping = false
@@ -311,6 +319,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         rpc: ReturnType<typeof makeE2eeRpcNative>
         /** This device's execution intent signature over one already-computed subject. */
         signIntent: (request: E2eeIntentSigningRequest) => Effect.Effect<Uint8Array, unknown>
+        iroh: DesktopIrohClient | undefined
         ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<E2eeRuntimeStatus, unknown>
       }
     >()
@@ -1150,6 +1159,17 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             })
         })
         yield* Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie))
+        // Lives with this entry (its reader leases); the endpoint opens on first use.
+        const iroh = options.iroh
+          ? yield* makeDesktopIrohClient({
+              native: options.iroh.native,
+              relays: options.iroh.relays,
+              ...(options.iroh.proxyUrl ? { proxyUrl: options.iroh.proxyUrl } : {}),
+              withSeed: (open) =>
+                options.custody.withTransportSeed(genesis, device.publicKey, open),
+              ledger: () => verified.current()
+            })
+          : undefined
         const bindings = new Map<
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
@@ -1636,6 +1656,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           openContent,
           rpc,
           signIntent,
+          iroh,
           sharing,
           refreshSharingLedger: refreshManagementHistory,
           // Same selection as KeyDistributor: an admitted device of an active member.
@@ -2148,6 +2169,18 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
             entry.rpc.acceptResponse(targetMachineId, input, frameHex)
+          )
+        ),
+      /**
+       * Resolves the machine's iroh route under the host lock without any network
+       * wait. Callers run the route's `ready`/`call` after releasing every lock.
+       */
+      irohPrepare: (workspaceId: string, targetMachineId: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.iroh
+              ? entry.iroh.prepare(targetMachineId)
+              : Effect.fail(new Error('iroh_unavailable'))
           )
         ),
       ledgerView: (workspaceId: string) =>

@@ -11,7 +11,9 @@ import {
   Result,
 } from 'effect';
 import { VerifiedLedger, makeWorkspaceRecovery, memoryRecoveryEpochKeys } from '@lody/e2ee-core';
-import { wipeRecoveryPackage, accountUserId } from '@lody/e2ee-core/protocol';
+import { wipeRecoveryPackage, accountUserId, prepareJoinRequest } from '@lody/e2ee-core/protocol';
+import type { E2eeMemberOffer } from '@lody/cloud-api';
+import { encodeMemberKeyPackage, memberPairingOffer, MemberOfferSchema } from './member';
 import { prepareVaultRestore, type PersonalHostRecoveryInput } from './recovery-restore';
 import { Bytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
 import {
@@ -542,16 +544,12 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     });
   /** Account pairing without an invitation (Member approver): verify the complete
    * signed history and this device's admission, then retain the pages and approval. */
-  const acceptAccountHistory = (input: {
-    genesisRecordHex: string;
-    membershipId: string;
-    pages: unknown;
-    offer?: PersonalPairingOffer;
-  }) =>
+  /** Verify the complete signed history and this identity's admission, then retain
+   * the pages and the approval original. */
+  const acceptHistoryFor = (p: PreparedPersonalIdentity, source: unknown) =>
     Effect.gen(function* () {
-      const p = yield* prepare(input.offer ?? accountPairingOffer(platform.scope, input));
       if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
-      const pages = yield* Effect.fromResult(captureHistoryPages(input.pages));
+      const pages = yield* Effect.fromResult(captureHistoryPages(source));
       const descriptor = { kind: 'history' as const };
       return yield* withIdentity(p, (identity) =>
         Effect.gen(function* () {
@@ -575,6 +573,26 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         })
       );
     });
+  /** Account pairing without an invitation (Member approver): verify the complete
+   * signed history and this device's admission, then retain the pages and approval. */
+  const acceptAccountHistory = (input: {
+    genesisRecordHex: string;
+    membershipId: string;
+    pages: unknown;
+    offer?: PersonalPairingOffer;
+  }) =>
+    Effect.flatMap(prepare(input.offer ?? accountPairingOffer(platform.scope, input)), (p) =>
+      acceptHistoryFor(p, input.pages)
+    );
+  /** An existing identity for this offer, current or the replacement candidate a member
+   * join after an ended one prepares; never creates one. */
+  const prepareRetained = (offer: PersonalPairingOffer) =>
+    prepare(offer, false, true).pipe(
+      Effect.catchIf(
+        (error) => (error as { code?: string }).code === 'conflict',
+        () => prepare(offer, true, true)
+      )
+    );
   const restoreRecovery = (input: PersonalHostRecoveryInput) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -656,8 +674,229 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         );
       })
     );
+  /** The member join retained for this identity: the exact invitation and its public
+   * key package, written once before any network and reused on every retry. */
+  type MemberOriginal = {
+    version: 1;
+    kind: 'member';
+    offer: E2eeMemberOffer;
+    keyPackageHex: string;
+  };
+  const memberOriginal = (p: PreparedPersonalIdentity) =>
+    Effect.gen(function* () {
+      const row = yield* pairings.load(key(p, 'claim'));
+      // A settled join (its terminal receipt written) is over: never pending or claimable.
+      if (!row || row.receipt) return null;
+      const saved = yield* parse<MemberOriginal>(row.original);
+      if (saved.version !== 1 || saved.kind !== 'member') return yield* fail('conflict');
+      return saved;
+    });
+  const memberIdentity = (source: E2eeMemberOffer, settle = false) =>
+    Effect.gen(function* () {
+      const offer = yield* Effect.try({
+        try: () => MemberOfferSchema.parse(source),
+        catch: (cause) => fail('invalid-input', cause),
+      });
+      if (
+        offer.workspaceId !== platform.scope.workspaceId ||
+        offer.genesisHash !== toHex(platform.scope.genesis.toBytes())
+      )
+        return yield* fail('scope-mismatch');
+      const pairingOffer = yield* Effect.try({
+        try: () => memberPairingOffer(platform.scope.accountId, offer),
+        catch: (cause) => fail('invalid-input', cause),
+      });
+      // A new invitation first settles this account's earlier, never-admitted joins.
+      if (settle) yield* settleOtherMembers(pairingOffer.pairingSessionId);
+      // After an ended join this account's device is pinned to that membership; the new
+      // invitation then gets a replacement identity, activated only once admitted.
+      const p = yield* prepare(pairingOffer).pipe(
+        Effect.catchIf(
+          (error) => (error as { code?: string }).code === 'conflict',
+          () => prepare(pairingOffer, true)
+        )
+      );
+      return { offer, pairingOffer, p };
+    });
+  /** Earlier member joins of this identity that the relay confirms ended (rejected,
+   * cancelled, expired or revoked) get the exact terminal receipt the installation
+   * accepts as settled, so the never-admitted device can request another membership.
+   * An admitted join or a still-live request keeps refusing the new invitation. */
+  const settleOtherMembers = (keep: string) =>
+    Effect.gen(function* () {
+      const current = yield* installations.read();
+      if (!current) return undefined;
+      let cursor: string | null = null;
+      for (let page = 0; page < 256; page++) {
+        const listed: Effect.Success<ReturnType<ClientPairingOriginalStore['Service']['list']>> =
+          yield* pairings.list(current.binding, cursor, 64);
+        for (const entry of listed.entries) {
+          if (
+            entry.key.purpose !== 'claim' ||
+            entry.key.pairingSessionId === keep ||
+            entry.value.receipt
+          )
+            continue;
+          const saved = yield* parse<{ kind?: string } & Partial<MemberOriginal>>(
+            entry.value.original
+          );
+          if (saved.kind !== 'member') continue;
+          if (yield* pairings.load({ ...entry.key, purpose: 'approval' }))
+            return yield* fail('conflict');
+          const request = yield* pairings.load({ ...entry.key, purpose: 'request' });
+          if (!request) return yield* fail('corrupt');
+          const { requestHex } = yield* parse<{ requestHex: string }>(request.original);
+          const port = platform.members;
+          if (!port?.retire) return yield* fail('unsupported');
+          yield* guard;
+          const reply = yield* port.retire({
+            token: saved.offer!.token,
+            keyPackageHex: saved.keyPackageHex!,
+          });
+          yield* guard;
+          if (reply.state !== 'cancelled') return yield* fail('conflict');
+          yield* pairings.compareAndSet(entry.key, entry.value.revision, {
+            ...entry.value,
+            revision: entry.value.revision + 1,
+            receipt: encode({
+              version: 1,
+              accountId: entry.key.accountId,
+              workspaceId: entry.key.workspaceId,
+              genesisHash: toHex(entry.key.genesis.toBytes()),
+              pairingSessionId: entry.key.pairingSessionId,
+              requestHex,
+              status: 'cancelled',
+            }),
+          });
+        }
+        if (listed.next === null) break;
+        if (page === 255 || listed.next === cursor) return yield* fail('corrupt');
+        cursor = listed.next;
+      }
+      return undefined;
+    });
+  const relay = () => {
+    const port = platform.members;
+    return port?.submit && port.claim
+      ? Effect.succeed({ submit: port.submit.bind(port), claim: port.claim.bind(port) })
+      : Effect.fail(fail('unsupported'));
+  };
+  /** Joining a team: sign a core JoinRequest with this workspace's prepared device and
+   * submit its key package. The original is retained before the network; a retry of the
+   * same invitation resubmits it and never signs another. */
+  const prepareMember = (source: E2eeMemberOffer) =>
+    Effect.gen(function* () {
+      const ports = yield* relay();
+      const { offer, pairingOffer, p } = yield* memberIdentity(source, true);
+      let saved = yield* memberOriginal(p);
+      if (saved && JSON.stringify(saved.offer) !== JSON.stringify(offer))
+        return yield* fail('conflict');
+      if (!saved) {
+        const keyPackageHex = yield* withIdentity(p, (identity) =>
+          Effect.gen(function* () {
+            const request = yield* prepareJoinRequest({
+              genesis: p.binding.genesis,
+              requestId: Result.getOrThrow(Bytes.requestId(fromHex(pairingOffer.pairingSessionId))),
+              userId: yield* Effect.fromResult(accountUserId(platform.scope.accountId)),
+              encryptionPublicKey: identity.device.enc,
+              expiresAt: offer.expiresAt,
+              signer: identity.device,
+            });
+            // The identity already bound its credential to this request id.
+            return encodeMemberKeyPackage({
+              request,
+              credentialHash: identity.request.credentialHash,
+              bindingSignature: fromHex(identity.request.bindingSignature),
+            });
+          })
+        );
+        const original: MemberOriginal = { version: 1, kind: 'member', offer, keyPackageHex };
+        yield* pairings.compareAndSet(key(p, 'claim'), null, {
+          revision: 1,
+          original: encode(original),
+          receipt: null,
+        });
+        saved = yield* memberOriginal(p);
+        if (!saved || saved.keyPackageHex !== keyPackageHex) return yield* fail('conflict');
+      }
+      yield* guard;
+      const reply = yield* ports.submit({ token: offer.token, keyPackageHex: saved.keyPackageHex });
+      yield* guard;
+      if (
+        reply.accountId !== platform.scope.accountId ||
+        reply.workspaceId !== offer.workspaceId ||
+        reply.keyPackageHex !== saved.keyPackageHex ||
+        reply.requestId !== pairingOffer.pairingSessionId
+      )
+        return yield* fail('scope-mismatch');
+      return { request: reply, offer: pairingOffer };
+    });
+  /** The join retained behind an identity offer: only an offer this account derived from
+   * the retained invitation qualifies, so a personal pairing identity never reads as one. */
+  const retainedMember = (pairingOffer: PersonalPairingOffer) =>
+    Effect.gen(function* () {
+      const p = yield* prepareRetained(pairingOffer);
+      const saved = yield* memberOriginal(p);
+      if (!saved) return null;
+      const derived = yield* Effect.try({
+        try: () => memberPairingOffer(platform.scope.accountId, saved.offer),
+        catch: (cause) => fail('corrupt', cause),
+      });
+      if (JSON.stringify(derived) !== JSON.stringify(p.offer)) return yield* fail('conflict');
+      return { p, saved };
+    });
+  /** The relay's `committed` is only a hint: admission is accepted from this device's
+   * own verified full signed history, through the same approval original as pairing. */
+  const claimMember = (pairingOffer: PersonalPairingOffer, requestId: string) =>
+    Effect.gen(function* () {
+      const ports = yield* relay();
+      const found = yield* retainedMember(pairingOffer);
+      if (!found || found.p.offer.pairingSessionId !== requestId)
+        return yield* fail('approval-required');
+      const { p, saved } = found;
+      if (yield* pairings.load(key(p, 'approval'))) {
+        yield* loadApproval(p);
+        return { state: 'committed' as const };
+      }
+      yield* guard;
+      const reply = yield* ports.claim({ workspaceId: p.binding.workspaceId, requestId });
+      yield* guard;
+      if (
+        reply.accountId !== platform.scope.accountId ||
+        reply.workspaceId !== p.binding.workspaceId ||
+        reply.requestId !== requestId ||
+        reply.keyPackageHex !== saved.keyPackageHex
+      )
+        return yield* fail('scope-mismatch');
+      if (reply.state !== 'committed') return { state: reply.state };
+      if (!history) return yield* fail('unsupported');
+      const pages = yield* withIdentity(p, (identity) =>
+        Effect.gen(function* () {
+          yield* guard;
+          const pages = yield* history(identity.credential);
+          yield* guard;
+          return pages;
+        })
+      );
+      yield* acceptHistoryFor(p, pages);
+      return { state: 'committed' as const };
+    });
   return Object.freeze({
     close: () => close,
+    /** Join a team from an independently transferred member invitation. Returns the
+     * relay's request and the identity offer to retain for this workspace. */
+    prepareMember: (offer: E2eeMemberOffer) => run(prepareMember(offer)),
+    /** Accept this device's admission once its signed history shows it; the retained
+     * identity offer then opens the workspace like any approved pairing. */
+    claimMember: (pairingOffer: PersonalPairingOffer, requestId: string) =>
+      run(claimMember(pairingOffer, requestId)),
+    /** The retained invitation behind an identity offer, or null for a personal pairing. */
+    memberJoin: (pairingOffer: PersonalPairingOffer) =>
+      run(
+        Effect.map(retainedMember(pairingOffer), (found) =>
+          found ? { offer: found.saved.offer, requestId: found.p.offer.pairingSessionId } : null
+        )
+      ),
     /** Recover this pinned workspace from an authenticated vault; no private key escapes. */
     restoreRecovery: (input: PersonalHostRecoveryInput) => run(restoreRecovery(input)),
     /** Account pairing: create or reuse this workspace's identity for a verified
@@ -694,11 +933,16 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       contentToken: !!platform.contentToken,
       machineSharing: !!platform.machineSharing,
       members: !!platform.members,
+      memberJoin: !!(platform.members?.submit && platform.members.claim && history),
     }),
     open: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
       run(
         Effect.gen(function* () {
-          const p = yield* prepare(offer, replacement, existingOnly),
+          // A member join's replacement identity opens, and is activated, from its offer.
+          const p =
+              existingOnly && !replacement
+                ? yield* prepareRetained(offer)
+                : yield* prepare(offer, replacement, existingOnly),
             approval = yield* loadApproval(p);
           yield* activateReplacement(p, approval);
           yield* guard;

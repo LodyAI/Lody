@@ -325,6 +325,10 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
       run(host!.acceptAccount(...args)),
     acceptAccountHistory: (...args: Parameters<RawHost['acceptAccountHistory']>) =>
       run(host!.acceptAccountHistory(...args)),
+    prepareMember: (...args: Parameters<RawHost['prepareMember']>) =>
+      run(host!.prepareMember(...args)),
+    claimMember: (...args: Parameters<RawHost['claimMember']>) => run(host!.claimMember(...args)),
+    memberJoin: (...args: Parameters<RawHost['memberJoin']>) => run(host!.memberJoin(...args)),
     open: (...args: Parameters<RawHost['open']>) =>
       run(
         Effect.acquireUseRelease(

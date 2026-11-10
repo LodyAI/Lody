@@ -100,7 +100,11 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { LedgerFeedError } from '@lody/e2ee-core';
 import { toHex, fromHex } from '../../src/bytes';
-import { encodeMemberKeyPackage } from '../../src/member';
+import {
+  decodeMemberKeyPackage,
+  encodeMemberKeyPackage,
+  memberPairingOffer,
+} from '../../src/member';
 import type { E2eeMemberRequest } from '@lody/cloud-api';
 let runtimePorts: Layer.Layer<PersonalHostPorts, unknown>;
 let runtime: E2eeWorkspaceRuntime;
@@ -173,6 +177,12 @@ let memberRelay: {
   /** What the relay answers when asked for the listed item, if it lies. */
   readAs?: E2eeMemberRequest;
   calls: string[];
+  /** Joining side: every key package this account submitted, in order. */
+  submitted?: string[];
+  /** The relay reports `committed` before the ledger shows the admission. */
+  claimLies?: boolean;
+  /** Request ids an approver rejected. */
+  rejected?: Set<string>;
 } = { calls: [], others: [] };
 let loseNextAppendReply = false;
 /** The relay authenticates the admitted device's own credential, as the real one does. */
@@ -183,6 +193,29 @@ function memberRelayAccess(access: { workspaceId: string; credential: string }) 
     toHex(sha256(fromHex(access.credential))) !== claim.credentialHash
   )
     throw new Error('wrong device credential');
+}
+/** What the relay records for a submitted key package; `committed` follows the ledger
+ * unless the relay is set to claim it early. */
+function memberRequestFor(keyPackageHex: string, accountId: string): E2eeMemberRequest {
+  const { request } = decodeMemberKeyPackage(keyPackageHex);
+  const signingPublicKey = toHex(request.signingPublicKey.toBytes());
+  const admitted = view().inspectState().devices.has(signingPublicKey);
+  return {
+    id: 'relay-join',
+    workspaceId: offer.workspaceId,
+    accountId,
+    keyPackageHex,
+    signingPublicKey,
+    requestId: toHex(request.requestId.toBytes()),
+    source: 'link',
+    state:
+      admitted || memberRelay.claimLies
+        ? 'committed'
+        : memberRelay.rejected?.has(toHex(request.requestId.toBytes()))
+          ? 'rejected'
+          : 'pending',
+    expiresAt: request.expiresAt ?? 0,
+  };
 }
 /** A synthetic joining device's public key package, signed by its own fresh key. */
 const memberApplicant = (seed: number, requestByte: number) =>
@@ -408,6 +441,31 @@ export async function boot(
             Effect.sync(() => {
               memberRelayAccess(access);
               return { revoked: true as const };
+            }),
+          submit: (input) =>
+            Effect.sync(() => {
+              (memberRelay.submitted ??= []).push(input.keyPackageHex);
+              return memberRequestFor(input.keyPackageHex, recoveryAccount ?? 'account');
+            }),
+          claim: (input) =>
+            Effect.sync(() => {
+              const keyPackageHex = (memberRelay.submitted ?? []).find(
+                (hex) =>
+                  toHex(decodeMemberKeyPackage(hex).request.requestId.toBytes()) === input.requestId
+              );
+              if (!keyPackageHex || input.workspaceId !== offer.workspaceId)
+                throw new Error('unknown request');
+              return memberRequestFor(keyPackageHex, recoveryAccount ?? 'account');
+            }),
+          retire: (input) =>
+            Effect.sync(() => {
+              memberRelay.calls.push('retire');
+              // Like the real relay: only an ended request is cancelled; a live one stays.
+              const state = memberRequestFor(
+                input.keyPackageHex,
+                recoveryAccount ?? 'account'
+              ).state;
+              return { state: state === 'rejected' ? ('cancelled' as const) : state };
             }),
         },
         contentToken: (binding, credential, request) =>
@@ -1593,6 +1651,119 @@ export async function runtimeSignDeclaration(
   }
 }
 
+/** A teammate's portable runtime joining from a link invitation the genesis owner
+ * endorsed. Call after `boot` with this account as the device account. */
+let joiner: E2eeWorkspaceRuntime;
+let joinInvite: import('@lody/cloud-api').E2eeMemberOffer;
+let retainedJoin: PersonalPairingOffer;
+export async function bootJoiner(accountId: string) {
+  memberRelay = { calls: [], others: [] };
+  joinInvite = {
+    version: 1,
+    workspaceId: offer.workspaceId,
+    genesisHash: offer.genesisHash,
+    genesisRecordHex: offer.genesisRecordHex,
+    endorser: toHex(owner.publicKey.toBytes()),
+    token: 'cd'.repeat(32),
+    mode: 'link',
+    expiresAt: FIXED_NOW + 3_600_000,
+  };
+  // The application retains the derived identity offer before preparing the join.
+  retainedJoin = memberPairingOffer(accountId, joinInvite);
+  joiner = await Effect.runPromise(
+    makePersonalWorkspaceRuntime({
+      accountId,
+      workspaceId: offer.workspaceId,
+      genesisHash: offer.genesisHash,
+      ports: runtimePorts,
+      retainedOffer: () => Effect.sync(() => retainedJoin),
+      account: () => Effect.succeed({ userId: accountId, source: 'network' as const }),
+      ledgerRecords: () =>
+        Effect.succeed(records.map((record, position) => ({ record, position }))),
+      run: (program) =>
+        Effect.runPromise(program.pipe(Effect.provideService(Clock.Clock, fixedClock))),
+    }).pipe(Scope.provide(scope), Effect.provideService(Clock.Clock, fixedClock))
+  );
+}
+export async function joinInvoke(action: string, accountId: string) {
+  try {
+    let value: unknown;
+    switch (action) {
+      case 'prepare':
+        value = await joiner.prepareMemberJoin!(joinInvite);
+        break;
+      case 'pending':
+        value = await joiner.pendingMemberJoin!(offer.workspaceId);
+        break;
+      case 'claim': {
+        const pending = await joiner.pendingMemberJoin!(offer.workspaceId);
+        value = await joiner.claimMemberJoin!(offer.workspaceId, pending!.requestId!);
+        break;
+      }
+      case 'submitted':
+        value = memberRelay.submitted ?? [];
+        break;
+      case 'relayClaimsEarly':
+        memberRelay.claimLies = true;
+        value = true;
+        break;
+      case 'relayRejects': {
+        const { request } = decodeMemberKeyPackage(memberRelay.submitted!.at(-1)!);
+        (memberRelay.rejected ??= new Set()).add(toHex(request.requestId.toBytes()));
+        value = true;
+        break;
+      }
+      case 'secondInvite':
+        // A new link from the admin; the application re-pins its derived identity offer.
+        joinInvite = { ...joinInvite, token: 'ef'.repeat(32) };
+        retainedJoin = memberPairingOffer(accountId, joinInvite);
+        value = true;
+        break;
+      case 'retires':
+        value = memberRelay.calls.filter((call) => call === 'retire').length;
+        break;
+      case 'signingKey':
+        value = toHex(
+          decodeMemberKeyPackage(memberRelay.submitted!.at(-1)!).request.signingPublicKey.toBytes()
+        );
+        break;
+      case 'relayHonest':
+        memberRelay.claimLies = false;
+        value = true;
+        break;
+      case 'ownerAdmits': {
+        // The genesis owner signs the real AdmitMember for exactly the submitted package.
+        const { request } = decodeMemberKeyPackage(memberRelay.submitted!.at(-1)!);
+        const proposal = Result.getOrThrow(
+          prepareLedgerCommand(view(), owner.publicKey, {
+            _tag: 'AdmitMember',
+            membershipId: Result.getOrThrow(Bytes.membershipId(request.requestId.toBytes())),
+            request,
+          })
+        );
+        records.push(await Effect.runPromise(signLedgerRecord(proposal, owner)));
+        retain();
+        value = records.length;
+        break;
+      }
+      case 'open': {
+        const status = await joiner.open(offer.workspaceId, undefined, accountId);
+        value = {
+          deviceKind: status.deviceKind,
+          memberRole: status.memberRole,
+          membershipId: status.membershipId,
+        };
+        break;
+      }
+      default:
+        throw new Error('unknown join action ' + action);
+    }
+    return { ok: true as const, value };
+  } catch (error) {
+    const e = error as { code?: unknown; reason?: unknown; message?: unknown };
+    return { ok: false as const, reason: e.code ?? e.reason ?? e.message };
+  }
+}
 export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;

@@ -277,6 +277,13 @@ export type WorkspaceE2eeTransport = {
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
     frame: string
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
+  /** Optional iroh route; see `E2eeWorkspaceRuntime.irohReady`/`irohCall`. */
+  irohReady?: (machineId: string) => Promise<boolean>;
+  irohCall?: (
+    machineId: string,
+    envelope: { id: string; frame: string },
+    timeoutMs: number
+  ) => Promise<string[]>;
 };
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
@@ -374,7 +381,7 @@ const DOC_STREAM_CREATE_TIMEOUT_MS = 10_000;
 const MACHINE_RPC_TRANSPORT_READY_TIMEOUT_MS = 30_000;
 const LOCAL_MACHINE_ID_READY_TIMEOUT_MS = 2_000;
 const MACHINE_RESTART_RPC_TIMEOUT_MS = 30_000;
-const MACHINE_UPGRADE_RPC_TIMEOUT_MS = 120_000;
+const MACHINE_UPGRADE_RPC_TIMEOUT_MS = 12 * 60_000;
 const ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY = 2;
 const ACP_CAPABILITIES_STARTUP_NAVIGATION_COOLDOWN_MS = 30_000;
 
@@ -1986,6 +1993,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         accept: native.acceptDispatchResponse,
         prepareFeature: native.prepareFeatureRpc,
         acceptFeature: native.acceptFeatureRpcResponse,
+        ...(native.irohReady && native.irohCall
+          ? { iroh: { ready: native.irohReady, call: native.irohCall } }
+          : {}),
         closeClient: async () => {
           await encryptedRpcToken?.close();
           encryptedRpcToken = undefined;
@@ -2204,7 +2214,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): Promise<void> => {
     try {
       const client = await getMachineRpcClient(message.machineId);
-      const response = await client.requestMachineStatus({ timeoutMs: 30000 });
+      const response = await client.requestMachineStatus({
+        timeoutMs: 30000,
+        includeDisk: message.includeDisk,
+        includeDaemonUpdate: message.includeDaemonUpdate,
+      });
       handleMachineStatusResponse(
         response ?? {
           type: 'machine/status_response',
@@ -2298,6 +2312,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         requestToken: message.requestToken,
         requestId: message.requestId,
         targetVersion: message.targetVersion,
+        upgrade: message.upgrade,
         timeoutMs: MACHINE_UPGRADE_RPC_TIMEOUT_MS,
       });
       handleMachineUpgradeResponse(

@@ -1,3 +1,4 @@
+import { ManagedDaemonUpgradeOptionsSchema } from '../daemon-update';
 import type { LocalSessionControlRequest, LocalSessionControlResponse } from '../message';
 
 const SESSION_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024;
@@ -570,6 +571,8 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       value.requestToken.trim().length > 0 &&
       typeof value.requestId === 'string' &&
       value.requestId.trim().length > 0 &&
+      (typeof value.upgrade === 'undefined' ||
+        ManagedDaemonUpgradeOptionsSchema.safeParse(value.upgrade).success) &&
       (value.type === 'machine/restart' ||
         typeof value.targetVersion === 'undefined' ||
         (typeof value.targetVersion === 'string' && value.targetVersion.trim().length > 0))

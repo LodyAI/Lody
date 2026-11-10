@@ -100,13 +100,20 @@ final class MentionCatalogStore {
   }
 
   /// This composer's own read, else the workspace cache. Roles read while presence is not live
-  /// come back empty and incomplete; the cached Roles stay until a complete read replaces them.
+  /// come back empty and incomplete, and a shortcut listing can come back incomplete; cached
+  /// Roles and shortcuts stay until a complete read replaces them.
   private func shown(_ category: String) -> MentionCatalog? {
     switch category {
     case "role":
       if let live = catalogs["role"], !live.incomplete || !live.items.isEmpty { return live }
       return cached["role"] ?? catalogs["role"]
-    case "cmd": return catalogs["cmd"] ?? cached["shortcut"]
+    case "cmd":
+      // A read that could not list every shortcut keeps the cached ones beside the agent's commands.
+      guard let live = catalogs["cmd"] else { return cached["shortcut"] }
+      guard live.incomplete, let saved = cached["shortcut"] else { return live }
+      let listed = Set(live.items.filter(Self.isShortcut).map(\.insertText))
+      let missing = saved.items.filter { !listed.contains($0.insertText) }
+      return MentionCatalog(items: live.items + missing, truncated: live.truncated, incomplete: true)
     default: return catalogs[category]
     }
   }
@@ -118,6 +125,7 @@ final class MentionCatalogStore {
       guard !value.incomplete else { return }
       entry = ("role", value)
     case "cmd":
+      guard !value.incomplete else { return }
       entry = ("shortcut", MentionCatalog(items: value.items.filter(Self.isShortcut), truncated: false, incomplete: false))
     default: return
     }

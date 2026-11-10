@@ -242,9 +242,34 @@ export function createCloudStreamsTokenPort(options: {
 
 /** Device routes are lazy: constructing the ordinary cloud port never opens
  * custody, obtains a device token, or touches the operating system keyring. */
+/**
+ * Lody iroh relays from the official build composition (`LODY_IROH_RELAYS`, a
+ * comma-separated list of https URLs, and `LODY_IROH_RELAY_TOKEN`). Malformed or
+ * absent configuration means no iroh route; it is never fetched from the backend.
+ */
+export function irohRelaysFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): CloudE2eePort['irohRelays'] {
+  const urls = (env.LODY_IROH_RELAYS ?? '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+  if (urls.length === 0 || urls.length > 16) return undefined;
+  for (const url of urls) {
+    try {
+      if (new URL(url).protocol !== 'https:') return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const token = env.LODY_IROH_RELAY_TOKEN?.trim();
+  return Object.freeze({ urls: Object.freeze(urls), ...(token ? { token } : {}) });
+}
+
 export function createCloudE2eePort(
   options: Pick<CloudCliPortOptions, 'authBaseUrl' | 'logger'> & { token?: string }
 ): CloudE2eePort {
+  const irohRelays = irohRelaysFromEnv();
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
   const client = (signal: AbortSignal, onStatus?: (status: number) => void) =>
@@ -291,6 +316,7 @@ export function createCloudE2eePort(
     }
   };
   return {
+    ...(irohRelays ? { irohRelays } : {}),
     machineSharing: {
       readHead: async (input) =>
         sharingReplySchemas.readHead.parse(

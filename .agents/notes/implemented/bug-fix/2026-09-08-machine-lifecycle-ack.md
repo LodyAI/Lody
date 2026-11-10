@@ -27,7 +27,7 @@ already have committed before its response was lost. The deadline bounds waiting
 the underlying append may finish later, but cannot trigger another lifecycle action.
 Process-wide serialization, cross-restart deduplication, and completion UI remain
 separate work. This is the scoped follow-up to the
-[Windows launcher fix](2026-09-08-windows-daemon-upgrade.md) in the same PR.
+[Windows launcher fix](../../archived/bug-fix/2026-09-08-windows-daemon-upgrade.md) in the same PR.
 The [acceptance contract](../../../../specs/machine-lifecycle-ack.md) remains draft.
 
 ## Verification

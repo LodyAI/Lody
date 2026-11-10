@@ -157,43 +157,56 @@ window. Another OOM pair starts a fresh cooldown. Explicit start/restart recover
 immediately; stop cancels recovery. Authentication, protocol and ownership failures
 retain their existing terminal behavior.
 
-Remote upgrades install globally using the daemon's npm environment, resolve the
-installed package's declared CLI entry via `npm root -g`, and verify its version.
-The watchdog launches that entry explicitly and only reports upgrade success after
-the replacement reaches ready with the same version. A successful npm install alone
-does not prove that the running daemon upgraded. Verification or handoff failure is
-logged as failure; the existing restart recovery remains available.
+Interactive startup retains a three-minute hang backstop; see the
+[cold-start decision](../../.agents/notes/implemented/bug-fix/2026-10-16-daemon-ready-timeout-slow-cold-start.md).
 
-Autostart scripts, scheduled tasks, and service definitions must invoke the stable
-global installation, not an absolute `_npx` cache entry or a version-specific store
-path. This repository does not generate or rewrite user-owned autostart scripts.
-If an existing daemon was launched from such a pinned path:
+Managed daemon updates use a fixed SEA service entry and immutable SHA-256-checked releases.
+The entry holds the Host lease while replacing its Worker, using a pinned ordinary
+Node for external JavaScript. No remote `npm install`, login shell, system Node,
+native compilation or global prefix write is involved. The npm CLI remains JavaScript.
 
-1. In the same OS environment and user account as the daemon, install the desired
-   version globally. Windows and WSL have separate installations.
-2. Find the global prefix with `npm prefix -g`. On Windows the stable launcher is
-   `<prefix>\lody.cmd`; on Linux/WSL/macOS it is `<prefix>/bin/lody`.
-   Check that launcher's `--version` before using it. Use the same Node/npm
-   installation and preserve the script's environment and daemon arguments.
-3. Replace the old cache path in the autostart command with that absolute launcher.
-   In PowerShell invoke a quoted launcher with `&`. Ensure the task's PATH includes
-   the intended Node runtime; WSL tasks must use the launcher inside that distro.
-4. Use the verified launcher to run `daemon stop`, then `daemon start` with the
-   original options, and check `daemon status` and the startup log's CLI version.
-   Restart the watchdog too: restarting only its Worker leaves old upgrade code alive.
+The cloud connection dialog now provides a standalone Shell installer for
+macOS/Linux and a PowerShell installer for Windows. It checks the capsule's archive
+and raw hashes and lets the verified capsule install its exact ordinary Node. The
+credential stays out of public download URLs and autostart definitions. The script
+installs the fixed entry, signs in, registers future autostart where available, and
+waits for the initial daemon-ready handshake. With `--no-start`, only installation
+is performed. Autostart failure is reported separately; the current connection can
+still run. Existing/modified service definitions are preserved. Linux user services
+may require lingering to stay available after logout; Windows uses a current-user
+login task without the scheduler's default execution-time or battery stop limits.
 
-An already-running old watchdog cannot acquire this fix merely by downloading it;
-the one-time launcher correction and restart are needed for that deployment.
-Older releases without versioned readiness cannot be verified by the new remote
-handoff and must be started explicitly if a rollback is required.
+Existing npm daemons require one explicit local migration:
 
-The launcher waits up to three minutes for the new Worker to become ready.
-Releases before this change waited 30 seconds, and the old watchdog applies
-its own limit during the handoff. So on a machine where cold start exceeds
-30 seconds, remote upgrades from those releases keep falling back to the old
-version. They also fail `daemon start`. Install the fixed release globally,
-then run `daemon stop` and `daemon start` with its launcher (steps 2 and 4
-above). Later remote upgrades use the longer limit.
+1. Stop the identified old service and disable its autostart registration.
+2. Download the matching product/platform SEA from a trusted release source and
+   verify its SHA-256 and any supplied platform signature (required on macOS, optional
+   on Windows). Run `/absolute/path/to/daemon daemon install`.
+   This downloads the exact additional Node pinned in the executable; offline
+   installations can first run `__sea-install-node /absolute/path/to/node.gz`.
+3. Register the printed fixed executable with `daemon-runner` in your user service,
+   preserving arguments and `LODY_DATA_DIR`. Installation prints instructions and
+   never rewrites an arbitrary existing service or launches a second host.
+4. Run that fixed executable with `daemon start` and check `daemon status`.
+
+On a managed macOS/Linux glibc installation, `daemon upgrade` prepares a SHA-256-checked
+release while the old daemon serves, then waits for active turns to finish.
+`--immediate` explicitly interrupts work after preparation. `--channel nightly`
+selects Nightly; `--allow-channel-change` and `--allow-downgrade` confirm those
+changes. The UI chooses the initiating client's build channel and asks for
+confirmation. `daemon update-status [--request-id ID]` reads durable outcomes.
+A failed download leaves the old daemon running. Unconfirmed termination blocks
+replacement; a clean candidate failure restores the compatible retained release
+once. Remote disconnection does not roll back a locally healthy daemon.
+
+Windows automatic updates and encrypted remote lifecycle control are unavailable
+until their ownership/authorization contracts are implemented. Containers and
+external package managers retain update ownership. Fixed-entry upgrades remain
+an explicit local installer operation. Releases are retained without automatic
+cache collection. See [SEA packaging](scripts/sea/README.md) and the
+[installation contract](../../specs/daemon-upgrade-installation.md). The
+[ownership decision](../../.agents/notes/implemented/bug-fix/2026-10-03-daemon-upgrade-installation.md)
+explains why npm handoff and self-replacement were removed.
 
 ## Structured Session output
 

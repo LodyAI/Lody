@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, readdir, link, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -55,7 +56,7 @@ const machineKeyringOperation = (
       catch: () => failure('unavailable'),
     });
     const output = yield* runCommandOk({
-      command: process.execPath,
+      command: getCliNodeExecutable(),
       args: ['--input-type=module', '-e', keyringHelper],
       env: { ...process.env },
       input: JSON.stringify({ moduleUrl, account, operation, value }),
@@ -396,6 +397,12 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
       custody.createDevice(genesis, 'machine'),
     openDevice: (genesis: Parameters<typeof custody.openDevice>[0]) =>
       custody.openDevice(genesis, 'machine'),
+    /** Machine seed for the iroh endpoint only; see node custody `withTransportSeed`. */
+    withTransportSeed: <A>(
+      genesis: Parameters<typeof custody.withTransportSeed>[0],
+      signingKey: Parameters<typeof custody.withTransportSeed>[1],
+      open: (seed: Uint8Array) => Promise<A>
+    ) => custody.withTransportSeed(genesis, signingKey, open, 'machine'),
     prepareDeviceCredential: custody.prepareDeviceCredential,
     deviceCredential: custody.deviceCredential,
     installed: custody.installed,

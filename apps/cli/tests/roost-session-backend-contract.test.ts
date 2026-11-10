@@ -1139,7 +1139,9 @@ describe('Production Roost history semantics', () => {
       })
     );
     const before = await owner.backend.readHistory();
-    expect(before.map(({ id, userId, author }) => ({ id, userId, author }))).toEqual([
+    // The owner applies concurrent appends in arrival order; only the seed turn's place is fixed.
+    const [seed, ...added] = before.map(({ id, userId, author }) => ({ id, userId, author }));
+    expect([seed, ...added.sort((a, b) => a.id.localeCompare(b.id))]).toEqual([
       { id: 'remote-u', userId: 'test-user', author: undefined },
       ...devices.map(({ userId }, index) => ({
         id: `remote-added-${index}`,

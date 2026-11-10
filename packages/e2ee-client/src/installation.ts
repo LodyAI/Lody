@@ -369,12 +369,19 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
                 pairingSessionId: saved.offer.pairingSessionId,
                 purpose: 'approval',
               });
+              // A settled, never-admitted member join pins no membership: a replacement
+              // identity may request another one. Any other row pins this membership.
+              const endedMemberJoin =
+                settled &&
+                !approved &&
+                (yield* own(() => decode(claim!.original) as { kind?: unknown })).kind === 'member';
               // A wrapped candidate is still unresolved. Only its exact typed terminal exchange permits another offer.
               if (!sameBinding(binding, current.binding) && !settled)
                 return yield* fail('conflict');
               if (sameBinding(binding, current.binding)) {
                 if (!settled && !approved) return yield* fail('conflict');
                 if (
+                  !endedMemberJoin &&
                   Object.keys(saved.offer).some(
                     (k) =>
                       k !== 'pairingSessionId' &&
@@ -383,7 +390,8 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
                   )
                 )
                   return yield* fail('conflict');
-                if (settled && row.value.receipt)
+                // Its credential is pinned to the ended membership: a new one needs a new device.
+                if (settled && row.value.receipt && !endedMemberJoin)
                   previous = {
                     binding,
                     offer: saved.offer,

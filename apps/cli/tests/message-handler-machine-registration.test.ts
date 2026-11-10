@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type LocalProjectId,
@@ -7,6 +10,8 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
+import * as machineLifecycle from '../src/lib/machine-lifecycle';
+import type { MachineProcessLifecycleAction } from '../src/lib/machine-lifecycle';
 import { MessageHandler } from '../src/lib/message-handler';
 import { getHostMachineProtocolCapabilities } from '../src/agent/managed-agent-runtime';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -209,6 +214,7 @@ describe('MessageHandler machine registration', () => {
       expect(registeredMeta.protocolCapabilities).toEqual({
         multiRepoProject: 1,
         machineDiskStatus: 1,
+        managedDaemonUpdates: 1,
         machineIdentityRestore: 1,
         projectFileRoots: 1,
         projectRepositoryMembers: 1,
@@ -321,5 +327,104 @@ describe('MessageHandler machine registration', () => {
     expect(registerMachineAccess).toHaveBeenCalledTimes(1);
 
     await handler.cleanup();
+  });
+});
+
+describe('MessageHandler canceled managed update', () => {
+  it('releases only the abandoned operation so later owner actions can be accepted', async () => {
+    const dataDirectory = mkdtempSync(path.join(tmpdir(), 'lody-managed-lifecycle-test-'));
+    vi.stubEnv('LODY_DATA_DIR', dataDirectory);
+    const verification = vi
+      .spyOn(machineLifecycle, 'verifyMachineLifecycleRequest')
+      .mockResolvedValue({
+        ok: true,
+        executionToken: 'execution-fixture',
+        executionExpiresAtMs: 1_750_000_000_000,
+      });
+    const logger = createSilentLogger();
+    const workspaceDocument = {
+      sessions: new Map(),
+      repo: {
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        getDocMeta: vi.fn(async () => undefined),
+      },
+    };
+    const sessionManager = {
+      on: vi.fn(),
+      setRequestPermissionHandler: vi.fn(),
+      getSession: vi.fn(),
+      finishSession: vi.fn(),
+      cleanUp: vi.fn(async () => {}),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      hasSession: vi.fn(),
+      initialize: vi.fn(),
+      createSession: vi.fn(),
+      releaseGitHubRepoOwner: vi.fn(),
+    };
+    const actions: MachineProcessLifecycleAction[] = [];
+    const handler = new MessageHandler(
+      sessionManager as unknown as SessionManager,
+      workspaceDocument as unknown as LoroDocumentManager,
+      logger,
+      {
+        token: 'synthetic-token',
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        userId: 'synthetic-owner',
+        machineId: 'synthetic-machine' as MachineId,
+        machineName: 'Synthetic machine',
+        cliVersion: '1.2.3',
+        cloudPort: createTestCloudPort(),
+        machineLifecycleCapability: {
+          launchMode: 'daemon',
+          canRemoteRestart: true,
+          canRemoteUpgrade: true,
+        },
+        prepareManagedUpgrade: async () => '1.2.4',
+        onProcessLifecycleAction: (action) => {
+          actions.push(action);
+        },
+      }
+    );
+    const lifecycle = handler as unknown as {
+      prepareMachineUpgrade(args: {
+        requesterUserId: string;
+        requestToken: string;
+        requestId: string;
+        targetVersion: string;
+      }): Promise<{ accepted?: boolean; disposition?: string }>;
+      triggerPendingProcessLifecycleAction(requestId: string): void;
+    };
+    const request = (requestId: string) =>
+      lifecycle.prepareMachineUpgrade({
+        requesterUserId: 'synthetic-owner',
+        requestToken: 'signed-fixture',
+        requestId,
+        targetVersion: '1.2.4',
+      });
+    try {
+      expect((await request('first')).accepted).toBe(true);
+      lifecycle.triggerPendingProcessLifecycleAction('first');
+      const first = actions[0];
+      if (first?.action !== 'upgrade') throw new Error('Expected the first managed update');
+      expect((await request('second')).disposition).toBe('already_pending');
+      // The process owner invokes this for expiry, authority refusal or a canceled switch.
+      first.onAbandoned?.();
+      expect((await request('second')).accepted).toBe(true);
+      lifecycle.triggerPendingProcessLifecycleAction('second');
+      first.onAbandoned?.(); // A delayed old cancellation must not release the new fence.
+      expect((await request('third')).disposition).toBe('already_pending');
+      const second = actions[1];
+      if (second?.action !== 'upgrade') throw new Error('Expected the second managed update');
+      second.onAbandoned?.();
+      expect((await request('third')).accepted).toBe(true);
+      lifecycle.triggerPendingProcessLifecycleAction('first'); // A late ACK cannot replay it.
+      expect(actions.map((action) => action.requestId)).toEqual(['first', 'second']);
+    } finally {
+      verification.mockRestore();
+      await handler.cleanup();
+      vi.unstubAllEnvs();
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
   });
 });

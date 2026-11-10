@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import {
   accessSync,
   constants,
@@ -793,7 +794,7 @@ const buildGhShimSource = (realGhPath: string | null, brokerStateFilePath?: stri
 const buildWindowsLauncherSource = (): string =>
   windowsLauncherSourceTemplate
     .split(NODE_EXEC_PATH_PLACEHOLDER)
-    .join(escapeForDoubleQuotedCmdString(process.execPath));
+    .join(escapeForDoubleQuotedCmdString(getCliNodeExecutable()));
 
 const resolveRealGhPath = (brokerStateFilePath?: string): string | null =>
   resolveExecutableFromPath('gh', getGhShimHostPath(brokerStateFilePath));

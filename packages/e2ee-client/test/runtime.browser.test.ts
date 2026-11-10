@@ -1290,3 +1290,176 @@ async function savesSignedSchedule(page: Page) {
   );
   expect(Result.isSuccess(verified)).toBe(true);
 }
+
+it.each(['chromium', 'webkit'] as const)(
+  'a teammate joins from a link invitation on the portable runtime in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-member-join-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Ledger user ids encode Crockford base32 account ids; the owner is another account.
+      const teammate = 'teammate';
+      await page.evaluate(async (account) => {
+        localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot(
+          'create-or-open',
+          false,
+          'joiner',
+          account,
+          'abc'
+        );
+        await (globalThis as Surface).HostFixture.bootJoiner(account);
+      }, teammate);
+      const joining = async (action: string) => {
+        const result = await page.evaluate(
+          ([a, account]) => (globalThis as Surface).HostFixture.joinInvoke(a, account),
+          [action, teammate] as const
+        );
+        return result;
+      };
+      const ok = async (action: string) => {
+        const result = await joining(action);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        return (result as { value: unknown }).value;
+      };
+
+      const request = (await ok('prepare')) as { requestId: string; keyPackageHex: string };
+      expect(request).toMatchObject({ accountId: teammate, state: 'pending' });
+      // A retry resubmits the retained original; nothing is signed again.
+      expect(await ok('prepare')).toMatchObject({ keyPackageHex: request.keyPackageHex });
+      expect(await ok('submitted')).toEqual([request.keyPackageHex, request.keyPackageHex]);
+      expect(await ok('pending')).toMatchObject({
+        requestId: request.requestId,
+        offer: { mode: 'link', token: 'cd'.repeat(32) },
+      });
+      expect(await ok('claim')).toEqual({ ready: false, state: 'pending' });
+      // The relay's word is not admission: only the signed history can admit this device.
+      await ok('relayClaimsEarly');
+      expect((await joining('claim')).ok).toBe(false);
+      expect((await joining('open')).ok).toBe(false);
+      await ok('relayHonest');
+
+      await ok('ownerAdmits');
+      expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      expect(await ok('open')).toEqual({
+        deviceKind: 'personal',
+        memberRole: 'member',
+        membershipId: request.requestId,
+      });
+      // Accepted once; a later claim reuses the retained approval.
+      expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'a rejected teammate joins again from a new invitation in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-member-rejoin-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Ledger user ids encode Crockford base32 account ids; the owner is another account.
+      const teammate = 'teammate';
+      await page.evaluate(async (account) => {
+        localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot(
+          'create-or-open',
+          false,
+          'joiner',
+          account,
+          'abc'
+        );
+        await (globalThis as Surface).HostFixture.bootJoiner(account);
+      }, teammate);
+      const joining = async (action: string) => {
+        const result = await page.evaluate(
+          ([a, account]) => (globalThis as Surface).HostFixture.joinInvoke(a, account),
+          [action, teammate] as const
+        );
+        return result;
+      };
+      const ok = async (action: string) => {
+        const result = await joining(action);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        return (result as { value: unknown }).value;
+      };
+
+      const first = (await ok('prepare')) as { requestId: string };
+      const device = await ok('signingKey');
+      // A new invitation while the first request is still live keeps refusing.
+      await ok('secondInvite');
+      expect((await joining('prepare')).reason).toBe('conflict');
+      // Once the relay confirms the first request ended, a replacement identity asks for
+      // the new membership: the old device's credential stays pinned to the ended one.
+      await ok('relayRejects');
+      const second = (await ok('prepare')) as { requestId: string; state: string };
+      expect(second).toMatchObject({ state: 'pending' });
+      expect(second.requestId).not.toBe(first.requestId);
+      expect(await ok('signingKey')).not.toBe(device);
+      expect(await ok('retires')).toBe(2);
+      expect(await ok('pending')).toMatchObject({
+        requestId: second.requestId,
+        offer: { token: 'ef'.repeat(32) },
+      });
+      await ok('ownerAdmits');
+      expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      expect(await ok('open')).toEqual({
+        deviceKind: 'personal',
+        memberRole: 'member',
+        membershipId: second.requestId,
+      });
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
