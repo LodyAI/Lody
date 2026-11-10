@@ -57,9 +57,20 @@ encrypted workspaces once all platforms can use a device-to-device route.
 - **Capability boundary.** Relay URLs and the token come only from the official
   build composition. The local-only desktop and hosts without the native module
   have no iroh capability and keep the existing routes.
-- **Lifetimes.** The machine-side endpoint lives as long as the encrypted RPC
-  receiver started by `startRpc` in `apps/cli/src/lib/e2ee/workspace-legacy.ts`.
-  The desktop endpoint follows the workspace's reader leases.
+- **Lifetimes.** The machine-side endpoint is a separate fiber beside the Streams
+  listener started by `startRpc` in `apps/cli/src/lib/e2ee/workspace-legacy.ts`, so
+  either can fail and restart (iroh every 30 seconds) without the other; `stopRpc`
+  interrupts both and the endpoint closes in its finalizer. The desktop endpoint
+  opens on first use inside the workspace entry in
+  `apps/electron/src/main/services/e2ee-runtime.mts` and closes with it, so it
+  follows the reader leases without a separate idle timer.
+- **Scope of the first version.** Dispatch and single-frame feature requests use
+  iroh. Chunked feature requests stay on Streams, whose receiver reassembles chunks
+  across envelopes; carrying them on one QUIC stream needs a receiver change.
+- **Loading.** The JavaScript loader takes an explicit file. The cloud desktop build
+  ships `lody-iroh.<platform>-<arch>.node` in its resources directory; main loads it
+  there and passes `LODY_IROH_NATIVE_PATH` and the relay settings to the embedded
+  CLI. The public desktop and the standalone npm CLI ship no module.
 - **Native code.** `packages/iroh-native` holds the platform-neutral `lody-iroh`
   crate and a napi-rs binding. Mobile later adds a UniFFI binding of the same crate
   with port mapping disabled.
@@ -115,8 +126,19 @@ External facts:
 ## Verification
 
 - `packages/iroh-native/core/src/tests.rs` covers multi-reply calls, connection
-  reuse, dialing a peer homed on a relay the listener alone knows, the one-key
+  reuse, dialing a peer homed on a relay the dialer names among others, the one-key
   rule, oversized requests, unreachable peers and rejected streams.
-- Not yet verified: send-to-actual-start latency over direct, relay-only and
-  Streams routes; hole-punching rate; Windows firewall prompts on the listening
-  machine; native module loading in packaged installers on every platform.
+- `packages/iroh-native/test/endpoint.test.ts` covers the binding: seed wiping, the
+  one-key rule, invalid seeds and close.
+- `apps/cli/src/lib/e2ee/realtime-rpc.test.ts` serves one signed original through a
+  real iroh listener and the real receiver, verifies the ACK, then delivers the same
+  original over Streams and observes a single offer.
+- `apps/cli/tests/e2ee-runtime.test.ts` opens an endpoint through CLI custody and
+  checks that the EndpointId is the ledger device key and the seed is wiped.
+- `packages/components/tests/encrypted-dispatch-legacy.test.ts` covers route
+  selection: iroh with a live connection, Streams with the same original after no
+  connection, a failed call or no verifiable reply, and chunked originals.
+- Not yet verified: the desktop client against a deployed relay; send-to-actual-start
+  latency over direct, relay-only and Streams routes; hole-punching rate; Windows
+  firewall prompts on the listening machine; native module loading and macOS signing
+  in packaged installers on every platform.

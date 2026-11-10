@@ -45,9 +45,17 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
   不使用 n0 公共中继。
 - **能力边界。** 中继 URL 和 token 只来自官方发布构建的组合。仅本地运行的桌面版和
   没有原生模块的宿主没有 iroh 能力，继续使用现有路径。
-- **生命周期。** 机器端 Endpoint 与 `apps/cli/src/lib/e2ee/workspace-legacy.ts`
-  中 `startRpc` 启动的加密 RPC 接收器同生共死；桌面端 Endpoint 跟随工作区的
-  reader 租约。
+- **生命周期。** 机器端 Endpoint 是 `apps/cli/src/lib/e2ee/workspace-legacy.ts` 中
+  `startRpc` 在 Streams 监听旁另起的 fiber，两者各自失败、各自重启（iroh 每 30 秒
+  重试），互不影响；`stopRpc` 同时中断两者，Endpoint 在 finalizer 中关闭。桌面端
+  Endpoint 在 `apps/electron/src/main/services/e2ee-runtime.mts` 的工作区条目里首次
+  使用时打开、随条目关闭，因此跟随 reader 租约，不需要单独的空闲计时器。
+- **首版范围。** dispatch 和单帧 feature 请求走 iroh。分块的 feature 请求仍走
+  Streams，因为它的接收方要跨信封重组分块；要放进一条 QUIC 流需要改接收方。
+- **加载。** JavaScript 加载器只接受明确的文件路径。云端桌面构建把
+  `lody-iroh.<platform>-<arch>.node` 放进应用资源目录；主进程从那里加载，并把
+  `LODY_IROH_NATIVE_PATH` 和中继设置传给内嵌 CLI。公开桌面版和独立 npm CLI 不带
+  该模块。
 - **原生代码。** `packages/iroh-native` 包含与平台无关的 `lody-iroh` crate 和一个
   napi-rs 绑定。移动端以后为同一 crate 增加 UniFFI 绑定，并关闭端口映射。
 
@@ -95,7 +103,17 @@ iroh Endpoint，在 ALPN `lody/e2ee-rpc/1` 上传送相同的签名帧；Streams
 
 ## 验证
 
-- `packages/iroh-native/core/src/tests.rs` 覆盖多回复调用、连接复用、拨通只在监听方
-  知道的中继上挂着的对端、一钥一 Endpoint 规则、超大请求、不可达对端和被拒绝的流。
-- 尚未验证：直连、只走中继和 Streams 三种路径的发送到实际启动延迟；打洞成功率；
-  监听机器上的 Windows 防火墙弹窗；各平台安装包里原生模块的加载。
+- `packages/iroh-native/core/src/tests.rs` 覆盖多回复调用、连接复用、拨通挂在拨号方
+  所列中继之一上的对端、一钥一 Endpoint 规则、超大请求、不可达对端和被拒绝的流。
+- `packages/iroh-native/test/endpoint.test.ts` 覆盖绑定层：种子擦除、一钥一
+  Endpoint、无效种子和关闭。
+- `apps/cli/src/lib/e2ee/realtime-rpc.test.ts` 让一份签名原件经真实 iroh 监听器和
+  真实接收器处理并验证 ACK，再把同一原件经 Streams 送达，确认只 offer 一次。
+- `apps/cli/tests/e2ee-runtime.test.ts` 通过 CLI custody 打开 Endpoint，确认
+  EndpointId 就是账本设备密钥，且种子已被擦除。
+- `packages/components/tests/encrypted-dispatch-legacy.test.ts` 覆盖路径选择：有存活
+  连接时走 iroh；没有连接、调用失败或没有可验证回复时用同一原件改走 Streams；分块
+  原件留在 Streams。
+- 尚未验证：桌面客户端连接已部署的中继；直连、只走中继和 Streams 三种路径的发送
+  到实际启动延迟；打洞成功率；监听机器上的 Windows 防火墙弹窗；各平台安装包里原生
+  模块的加载和 macOS 签名。

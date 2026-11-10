@@ -134,6 +134,8 @@ denial/I/O failure cannot gate mailbox receipt. Show file protection; socket tim
 
 Only rotate resumes candidates. Keep errors transport-free.
 
+The iroh client (`e2ee-iroh.mts`) lives with its workspace entry and follows [these rules](../../../../../packages/iroh-native/AGENTS.md).
+
 Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
 Passive cache inspection uses existing entries only; never call openWorkspace or
 readMachineSharing from that path. Counts are diagnostic, not execution authority.
