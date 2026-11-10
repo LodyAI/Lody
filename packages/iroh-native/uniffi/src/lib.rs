@@ -122,8 +122,9 @@ impl MobileIrohEndpoint {
         }))
     }
 
-    /// Closes the endpoint and its connections. Idempotent.
-    pub async fn close(&self) {
+    /// Closes the endpoint and its connections. Idempotent. Not named `close`:
+    /// Kotlin bindings already generate `AutoCloseable.close()` on every object.
+    pub async fn shutdown(&self) {
         self.inner.close().await;
     }
 }
@@ -231,7 +232,7 @@ mod tests {
         let read = tokio::time::timeout(Duration::from_secs(20), reader).await;
         assert!(matches!(read, Ok(Ok(Ok(None)))));
         drop(held);
-        mobile.close().await;
+        mobile.shutdown().await;
         listener.close().await;
     }
 }
