@@ -19,6 +19,11 @@ class GitHubSettingsController: UIViewController {
   private var loadedAt: Double?
   private var version = 0
   private var observers: [NSObjectProtocol] = []
+  private let search = LodyNavigationSearch()
+  private var query = ""
+  /// The switch the user just flipped, shown at its new position until the write reads back;
+  /// a failed or unconfirmed write drops it, so the row returns to the last read value.
+  private var pending: (id: String, enabled: Bool)?
 
   init(
     workspace: String? = nil,
@@ -46,6 +51,17 @@ class GitHubSettingsController: UIViewController {
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
     list.setRefreshEnabled(true)
     view.addSubview(list)
+    search.configure(LodyNavigationSearch.Config(
+      placeholder: GitHubSettingsSections.text("search"), placement: "stacked", hideWhenScrolling: false,
+      autoCapitalize: "none", obscureBackground: false, hideNavigationBar: false
+    ))
+    search.emit = { [weak self] event, text in
+      guard let self, event == "change" || event == "cancel" else { return }
+      let next = event == "cancel" ? "" : text
+      guard next != query else { return }
+      query = next
+      render()
+    }
     if fixedWorkspace == nil {
       observers.append(NotificationCenter.default.addObserver(forName: .lodyCatalogDidChange, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.syncScope() }
@@ -57,6 +73,13 @@ class GitHubSettingsController: UIViewController {
     syncScope()
   }
 
+  override func didMove(toParent parent: UIViewController?) {
+    super.didMove(toParent: parent)
+    // Hosted pages write their bar items, including search, to the hosting page's item.
+    guard let item = parent?.navigationItem else { return }
+    LodyNavigationHeader.of(item).search = search
+  }
+
   private func syncScope() {
     let current = SettingsWorkspace.current
     let next = fixedWorkspace ?? current.workspaceId
@@ -65,6 +88,7 @@ class GitHubSettingsController: UIViewController {
     scope = key
     workspace = next
     value = nil
+    pending = nil
     failed = false
     unconfirmed = false
     pulled = false
@@ -107,8 +131,9 @@ class GitHubSettingsController: UIViewController {
     }
   }
 
-  private func perform(_ request: GitHubSettingsRequest) {
+  private func perform(_ request: GitHubSettingsRequest, showing shown: (id: String, enabled: Bool)? = nil) {
     guard !writing, !busy else { return }
+    pending = shown
     writing = true
     busy = true
     failed = false
@@ -132,6 +157,7 @@ class GitHubSettingsController: UIViewController {
         }
       }
       self.writing = false
+      self.pending = nil
       guard self.version == id else { return }
       self.busy = false
       self.render()
@@ -150,7 +176,18 @@ class GitHubSettingsController: UIViewController {
     list.setLoading(state.loading)
     list.setNotice(state.notice)
     list.setUnavailable(state.unavailable)
-    list.setSections(value.map { GitHubSettingsSections.make($0, enabled: !busy && !blocked) } ?? [])
+    list.setSections(shown.map { GitHubSettingsSections.make($0, enabled: !busy && !blocked, query: query) } ?? [])
+  }
+
+  /// The last read value with the in-flight switch applied.
+  private var shown: GitHubSettings? {
+    guard var next = value, let pending else { return value }
+    if pending.id == "preference" {
+      next.personal?.enabled = pending.enabled
+    } else if pending.id.hasPrefix("repo:"), let index = next.repositories?.firstIndex(where: { "repo:" + $0.repoFullName == pending.id }) {
+      next.repositories?[index].enabled = pending.enabled
+    }
+    return next
   }
 
   private func event(_ name: String, _ body: [String: Any]) {
@@ -163,15 +200,15 @@ class GitHubSettingsController: UIViewController {
       read()
     case "rowPress" where id == "install" && value?.canManage == true:
       perform(GitHubSettingsRequest(workspaceId: workspace, action: "install"))
-    case "rowAction":
-      guard let action = body["actionId"] as? String, ["enabled", "disabled"].contains(action), !blocked else { return }
-      let enabled = action == "enabled"
+    case "rowToggle":
+      guard let enabled = body["value"] as? Bool, !blocked else { return }
       let repo = id.hasPrefix("repo:") ? String(id.dropFirst(5)) : nil
-      if id == "preference", value?.personal?.enabled != enabled {
-        perform(GitHubSettingsRequest(workspaceId: workspace, action: "preference", enabled: enabled))
+      if id == "preference", let personal = value?.personal, personal.enabled != enabled,
+         !enabled || personal.authorization.state == .authorized {
+        perform(GitHubSettingsRequest(workspaceId: workspace, action: "preference", enabled: enabled), showing: (id, enabled))
       } else if let repo, value?.canManage == true,
                 value?.repositories?.contains(where: { $0.repoFullName == repo && $0.enabled != enabled }) == true {
-        perform(GitHubSettingsRequest(workspaceId: workspace, action: "repository", repoFullName: repo, enabled: enabled))
+        perform(GitHubSettingsRequest(workspaceId: workspace, action: "repository", repoFullName: repo, enabled: enabled), showing: (id, enabled))
       }
     default:
       break
