@@ -43,7 +43,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
       self.configured = self.sdkStarted
       if let delegate = self.sdkDelegate { UNUserNotificationCenter.current().delegate = delegate }
       if self.sdkStarted, let user = self.userId {
-        OneSignal.login(PushRegistration.externalID(user))
+        OneSignal.login(user)
         if self.registration.authorized { OneSignal.User.pushSubscription.optIn() }
         else { OneSignal.User.pushSubscription.optOut() }
         self.evaluateSubscription(OneSignal.User.pushSubscription.id)
