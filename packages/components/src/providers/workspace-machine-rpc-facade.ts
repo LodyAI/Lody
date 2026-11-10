@@ -16,6 +16,8 @@ import {
   MAIN_SESSION_FILE_ROOT_ID,
   MemoryProviderResponseSchema,
   ProjectProbeLocalMemberResultSchema,
+  isLocalOnlyMemoryProvider,
+  machineSupportsAccountMemoryProviders,
   machineSupportsBugReportClientLog,
   machineSupportsMemoryProviders,
   type BugReportClientLog,
@@ -1839,6 +1841,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       const capabilities = await deps.getMachineProtocolCapabilities(machineId);
       if (!machineSupportsMemoryProviders({ protocolCapabilities: capabilities ?? undefined }))
         return fail('Update this machine to use memory providers.');
+      if (
+        isLocalOnlyMemoryProvider(params.providerId) &&
+        !machineSupportsAccountMemoryProviders({ protocolCapabilities: capabilities ?? undefined })
+      )
+        return fail('Update Lody on this machine to use this memory provider.');
       const plane = targetRouter.getPlaneForMachine(machineId);
       if (plane === null) return fail('Machine RPC routing is not available.');
       if (plane === 'local') {

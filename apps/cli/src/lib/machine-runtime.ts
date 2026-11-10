@@ -2,6 +2,7 @@ import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
+  isLocalOnlyMemoryProvider,
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
   type LocalMachineRpcRequestValidated,
@@ -72,6 +73,10 @@ export class MachineRuntime {
         throw new Error('e2ee_feature_unavailable');
       return this.requireHandler().handleEncryptedAcpInteraction(request, context);
     }
+    // This ingress ends in the local dispatcher but arrives from another
+    // device, so account memory providers stay with the local channel.
+    if (request.method === 'machine/memory' && isLocalOnlyMemoryProvider(request.params.providerId))
+      throw new Error('e2ee_feature_unavailable');
     return this.dispatchLocalMachineRpc(request, context?.signal);
   }
   private handler: MessageHandler | null = null;

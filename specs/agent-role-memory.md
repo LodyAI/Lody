@@ -76,8 +76,19 @@ adapter and injects `NMEM_AGENT_ID=<memoryId>` for Nowledge Mem after environmen
 assembly. Changing identities between turns restarts the ACP process through the
 existing resume path; the environment of a live process cannot be changed.
 Forks and restores use their frozen history rather than rereading a mutable Role.
-Unknown providers fail explicitly. Other provider integrations and automatic
-installation/configuration of agent-side Mem plugins are outside this change.
+Unknown providers fail explicitly. Further providers, and installing Nowledge Mem's
+agent-side plugins, are outside this change.
+
+## EverMe
+
+EverMe holds one memory per account, so it has no identities to create, import or
+pick, and the Role editor does not offer it. Each agent on the machine is instead
+connected or disconnected on its own; a connected agent reads and writes that
+account's memory through its own configuration, and ACP startup injects nothing for
+EverMe. Sign-in, setup and agent connections happen only on the machine itself:
+Settings never sends them to another machine, and the daemon refuses them when they
+arrive over the workspace relay or the encrypted feature ingress, because an
+approval made elsewhere would bind this machine to whoever made it.
 
 ## Evidence
 
@@ -85,6 +96,8 @@ installation/configuration of agent-side Mem plugins are outside this change.
 - [Daemon adapter](../apps/cli/src/lib/memory-providers.ts)
 - [Settings](../packages/components/src/components/settings/memory-setting.tsx)
 - [Process boundary](../apps/cli/src/session/session.ts)
+- [EverMe adapter](../apps/cli/src/lib/everme-provider.ts)
+- [EverMe decision note](../.agents/notes/implemented/feature/2026-11-03-everme-memory-provider.md)
 
 The memory editor is window-centered, with a compact 900 × 600 px desktop size
 clamped to 96dvw × 92dvh.

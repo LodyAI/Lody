@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createNowledgeMemoryProvider,
   handleMemoryProviderRequest,
   memoryEnvironment,
 } from './memory-providers';
+import { createEverMeMemoryProvider } from './everme-provider';
 
 describe('Nowledge memory provider', () => {
   it.each(['ok', 'healthy'])(
@@ -92,4 +93,76 @@ describe('Nowledge memory provider', () => {
       'Unsupported memory provider'
     );
   });
+});
+
+describe('EverMe connection request budget', () => {
+  it.each(['connect', 'disconnect'] as const)(
+    'includes the login probe and defers %s before the RPC expires',
+    async (action) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      let connected = action === 'disconnect';
+      const provider = createEverMeMemoryProvider(async (args) => {
+        vi.setSystemTime(Date.now() + 19_000);
+        if (args[0] === 'auth')
+          return { stdout: JSON.stringify({ ok: true, data: { accountId: 'test-account' } }) };
+        if (args[1] === 'install' || args[1] === 'uninstall') {
+          connected = args[1] === 'install';
+          return { stdout: '{}' };
+        }
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            data: {
+              platforms: [{ platform: 'codex', installed: true, hasEverMeEntry: connected }],
+            },
+          }),
+        };
+      });
+      try {
+        const result = await handleMemoryProviderRequest(
+          { action, providerId: 'everme', targets: ['codex'] },
+          [provider]
+        );
+        expect(result.status).toBe('ready');
+        expect(result.agents?.find((agent) => agent.id === 'codex')).toMatchObject({
+          connected: action === 'disconnect',
+          notice: 'deferred',
+        });
+        expect(Date.now()).toBeLessThan(60_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+  it.each(['connect', 'disconnect'] as const)(
+    '%s succeeds when enough time remains',
+    async (action) => {
+      let connected = action === 'disconnect';
+      const provider = createEverMeMemoryProvider(async (args) => {
+        if (args[0] === 'auth')
+          return { stdout: JSON.stringify({ ok: true, data: { accountId: 'test-account' } }) };
+        if (args[1] === 'install' || args[1] === 'uninstall') {
+          connected = args[1] === 'install';
+          return { stdout: '{}' };
+        }
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            data: {
+              platforms: [{ platform: 'codex', installed: true, hasEverMeEntry: connected }],
+            },
+          }),
+        };
+      });
+      const result = await handleMemoryProviderRequest(
+        { action, providerId: 'everme', targets: ['codex'] },
+        [provider]
+      );
+      expect(result.agents?.find((agent) => agent.id === 'codex')).toMatchObject({
+        connected: action === 'connect',
+      });
+      expect(result.agents?.find((agent) => agent.id === 'codex')?.notice).toBeUndefined();
+    }
+  );
 });
