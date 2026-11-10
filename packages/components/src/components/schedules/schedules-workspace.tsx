@@ -1,3 +1,4 @@
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { ScheduleMentionForm } from './schedule-mention-form';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
@@ -178,6 +179,7 @@ function SupportedSchedulesWorkspace({
   const runtime =
     scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
   const user = useAtomValue(userAtom);
+  const { members } = useWorkspaceMembers();
   const slug = useAtomValue(currentWorkspaceSlugAtom);
   const navigate = useNavigate();
   const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
@@ -400,6 +402,7 @@ function SupportedSchedulesWorkspace({
     };
   };
   const contextForRow = (item: ScheduleRegistryRow): ScheduleRowContext => ({
+    owner: members.find((member) => member.userId === item.ownerId)?.name ?? item.ownerId,
     machine: machines.get(item.machineId as never)?.name ?? item.machineId,
     timeZone: machines.get(item.machineId as never)?.timeZone,
     agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
@@ -601,6 +604,7 @@ function SupportedSchedulesWorkspace({
   );
   const list = (
     <ScheduleListView
+      currentUserId={user?.id}
       {...registry}
       selectedId={scheduleId}
       onOpen={open}

@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  machineIdentityRestore: 'machineIdentityRestore',
   multiRepoProject: 'multiRepoProject',
   projectFolderSelection: 'projectFolderSelection',
   projectFileRoots: 'projectFileRoots',
@@ -40,6 +41,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   preparedSessionInput: 'preparedSessionInput',
   messageQuotes: 'messageQuotes',
   sessionInputAttachments: 'sessionInputAttachments',
+  localAttachmentDownload: 'localAttachmentDownload',
   localFileResources: 'localFileResources',
   fileDownload: 'fileDownload',
   markdownFileLinks: 'markdownFileLinks',
@@ -107,8 +109,8 @@ export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
 export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
-/** Native publication and watch are the history authority; no Loro cursor log. */
-export const SESSION_HISTORY_PROTOCOL_VERSION = 3;
+/** v4 adds purpose-bound member read/edit proofs; older strict payloads are incompatible. */
+export const SESSION_HISTORY_PROTOCOL_VERSION = 4;
 export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_WATCH_PROTOCOL_VERSION = 1;
 export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;
@@ -170,6 +172,7 @@ export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
 export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
 
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.machineIdentityRestore]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.codeCollabDiffBlobs]: CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION,
   // `session/live-status` accepts `includeActivity` and may answer with `activity`.
   [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,
@@ -208,6 +211,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.messageQuotes]: MESSAGE_QUOTES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localAttachmentDownload]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
     SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,

@@ -28,7 +28,8 @@ vi.mock('react-i18next', () => {
   const t = (key: string) => key;
   return { useTranslation: () => ({ t }) };
 });
-vi.mock('../src/components/settings/invite-member-dialog', () => ({
+vi.mock('../src/components/settings/invite-member-dialog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/components/settings/invite-member-dialog')>()),
   SeatCostNotice: ({ preview }: { preview: unknown }) => (
     <p>{preview ? 'seat quote' : 'quote loading'}</p>
   ),
@@ -180,6 +181,10 @@ describe('encrypted team joining', () => {
     await render(<E2eeMemberJoin {...props} />);
     await settle();
     expect(container.textContent).toContain('e2ee.team.waitingKey');
+    // Membership is approved; the one card now waits on key delivery.
+    expect(container.querySelector('[aria-current="step"]')?.getAttribute('data-join-step')).toBe(
+      'key'
+    );
     // Key delivery needs an administrator device; the joining member is told so.
     expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
     expect(button('e2ee.team.submit')).toBeUndefined();
@@ -249,7 +254,42 @@ describe('encrypted team joining', () => {
     await settle();
     expect(saved).toBe(true);
     expect(container.textContent).toContain('e2ee.team.waitingApproval');
+    expect(container.querySelector('[aria-current="step"]')?.getAttribute('data-join-step')).toBe(
+      'approval'
+    );
     expect(button('e2ee.team.submit')).toBeUndefined();
+  });
+  it('states the added seat cost beside approve when the workspace is billed', async () => {
+    await render(
+      <E2eeTeamSettings
+        workspaceId="team"
+        runtime={{
+          createMemberInvitation: async () => offer,
+          memberJoinRequests: async () => ({
+            ...empty,
+            items: [application('applicant', 'link')],
+            seatPreview: {
+              status: 'billed',
+              interval: 'month',
+              unitAmount: 1000,
+              proratedAmount: 973,
+              currentPeriodEnd: null,
+              seatCount: 2,
+              nextSeatCount: 3,
+              nextRenewalAmount: 3000,
+            },
+          }),
+          approveMemberJoin: async () => ({ admitted: true, keyPending: false }),
+          memberKeyDeliveries: async () => ({ items: [] }),
+          retryMemberKeyDelivery: async () => ({ requestId: 'applicant', state: 'pending' }),
+          rejectMemberJoin: async () => ({ state: 'rejected' }),
+          revokeMemberInvitation: async () => ({ revoked: true }),
+        }}
+      />
+    );
+    await settle();
+    const cost = container.querySelector('[data-testid="e2ee-join-approve-cost"]');
+    expect(cost?.textContent).toBe('e2ee.team.approveCost');
   });
   it('keeps a link request pending until the administrator approves the displayed request', async () => {
     const request = application('applicant', 'link');
@@ -258,8 +298,7 @@ describe('encrypted team joining', () => {
       requestId: string;
       state: 'pending' | 'delivering' | 'delivered' | 'failed';
       code?: string;
-    }[] =
-      [];
+    }[] = [];
     const retried: string[] = [];
     const confirmation = deferred<{
       admitted: boolean;

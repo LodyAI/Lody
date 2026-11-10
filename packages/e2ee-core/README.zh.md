@@ -9,16 +9,15 @@
 ## 可用范围
 
 服务架构已经支持复用，但当前仍是仓库内的私有包（`private: true`、版本 `0.0.0`），
-尚未发布为独立 SDK，生产 E2EE 组合也未启用。已有 Node SQLite、Loro Streams 与可选的浏览器账本/原件 IndexedDB
+尚未发布为独立 SDK。云组合把这些服务接入桌面、CLI 与移动端。公开的 OSS 桌面仍只在本地运行。新建加密工作区仍由开发者偏好控制。
+[引导](../../.agents/docs/e2ee-workspace-bootstrap.zh.md)。已有 Node SQLite、Loro Streams 与可选的浏览器账本/原件 IndexedDB
 适配器；其他存储和平台保护仍由宿主提供。后端端口与 `/host` 规定其他
 后端需要实现什么，并不负责部署服务器。
 
 protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
-判断。`readMachineSharingHistoryStep` 可在原 personal 签名者撤销后读取历史完整状态，
-供新所有者意图保留项目设置，不授予执行权。host 入口验证不解密的所有者帧，
-platform/cloud-api 定义对应 CAS DTO。这些原语
-尚未接入网络、UI 或执行路径；[共享策略提案](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)
-说明待批准 Spec 增量与后续宿主职责。
+判断。策略使用 current-only v3，包含独立的会话只读授权。客户端只验证最新原文和当前有效的
+所有者个人设备签名；本地最高版本 pin 拒绝回滚及同版本不同摘要。缺少旧策略版本不阻塞
+读取，父摘要仅用于服务端 CAS 写冲突检测。
 
 Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.md)及 services 入口的
 可选客户端保护/安装端口。可选适配器实现浏览器保护；这些声明不启用产品宿主或原生实现。
@@ -33,7 +32,7 @@ Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.m
 | 在某个平台上实现密钥托管 | [`DeviceIdentity`、`KeyProtector`、`CandidateProtector`](docs/services.zh.md#平台端口) |
 | 不用 SQLite，换别的存储 | [本地存储端口](docs/services.zh.md#本地存储端口) |
 | 评审或修改本包 | [架构](docs/architecture.zh.md)，然后读 [AGENTS.md](AGENTS.md) |
-| 看完整系统在真实故障下运行 | E2EE Lab，`packages/e2ee-lab`（本 PR 栈的后续层） |
+| 看完整系统在真实故障下运行 | E2EE Lab，[`packages/e2ee-lab`](../e2ee-lab/README.zh.md) |
 
 ## 入口
 
@@ -45,9 +44,11 @@ Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.m
 开放通道前须在可信宿主落实这些门槛。重试保留返回的原帧；再次运行 seal 会重新加密。
 本改动不启用产品传输。
 
-共享签名格式为 current-only v2；每份 scope 包含 generation，即连续原子替换链的
+共享策略只验证最新的服务端已接受原文及曾准入的所有者个人设备签名；签发设备撤销不清除
+授权，只提示检查及保留完整清单重签。新签署／提交仍要求有效设备，依赖服务端 commit
+准入可信。共享签名格式为 current-only v3；每份 scope 包含 generation，即连续原子替换链的
 首次机器签名公钥。`verifyMachineSharingGeneration` 通过真实账本位置验证准入原文链，
-其不透明 `machineGeneration` 证据必须传给签发、打开、历史读取、宿主准入和执行判断。
+其不透明 `machineGeneration` 证据必须传给签发、打开、宿主准入和执行判断。
 移除后重新准入使用新资源，从私有默认值和第 1 版开始；原子替换保留原代次。压缩视图
 若缺少这些账本检查点，需用完整已验证终点核验，不能相信服务端提示或旧策略高水位。
 

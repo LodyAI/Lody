@@ -2,6 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
+The 1,280-word ceiling preserves complete dispatch identity and output-lifetime rules alongside
+existing authorization and execution boundaries; the default ceiling had no room for those rules.
+
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
@@ -35,8 +38,8 @@
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
   handler; history sync is the durable fallback.
-- Missing-history recovery never advances `lastHandledUserMsgId`: set that turn's permanent
-  one-shot `lastMissingHistoryUserMsgId` ack and surface `chat_failed`.
+- Missing-history recovery never advances `lastHandledUserMsgId`: retain failed IDs in
+  `missingHistoryUserMsgIds`, read legacy acknowledgements, and surface `chat_failed`.
 - Retire a terminal stale activation into `settledActivationUserMsgId`; never claim the
   marker or rewrite `latestUserMsgId`, and report settled only if none survives.
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
@@ -49,7 +52,12 @@
 
 ## Turn execution
 
-- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
+- Machine identity recovery seals actual Turn admission before restart. Recheck after
+  pre-owner awaits; sealed requests retain pending history and Inbox inputs without
+  marking them handled, failed or canceled. Registered Turns block recovery even
+  before presence publication.
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), including pre-open
+  writes, never status/meta. Timeout preserves live metadata creation; disposal aborts it and releases waiters.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
   reusing an Agent. If release fails, detach that Agent, return the turn slot and report

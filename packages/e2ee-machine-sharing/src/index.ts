@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { Clock, Data, Effect, Fiber, Result, Scope, Semaphore } from 'effect';
+import { Clock, Data, Effect, Exit, Fiber, Result, Scope, Semaphore } from 'effect';
 import { z } from 'zod';
 import {
   Bytes,
@@ -12,15 +12,12 @@ import {
   machineSharingDigest,
   sealMachineSharingPolicy,
   openMachineSharingPolicy,
-  verifyMachineSharingHistoryStep,
-  readMachineSharingHistoryStep,
   authorizeMachineExecution,
   updateMachineSharingState,
   type DeviceSigner,
   type LedgerView,
   type MachineSharingBinding,
   type MachineSharingChange,
-  type MachineSharingPolicy,
   type MachineSharingHead,
   type VerifiedMachineSharingPolicy,
 } from '@lody/e2ee-core/protocol';
@@ -75,6 +72,9 @@ const matches = (binding: MachineSharingBinding, value: MachineSharingBinding) =
 const sameHead = (a: MachineSharingHead | null, b: MachineSharingHead | null) =>
   a?.revision === b?.revision && a?.digest === b?.digest;
 const ttl = 900_000;
+// Denials may trail a new grant by at most five seconds of local retry cooldown.
+// This limits head traffic per binding without shortening the accepted revocation TTL.
+const denialRefreshInterval = 5_000;
 type Stamp = { wall: number; mono: bigint };
 export const sharingStamp = Effect.gen(function* () {
   return { wall: yield* Clock.currentTimeMillis, mono: yield* Clock.monotonicTimeNanos };
@@ -318,9 +318,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     binding: MachineSharingBinding,
     version: E2eeMachineSharingVersion,
     machineGeneration: VerifiedMachineSharingGeneration,
-    previous: MachineSharingHead | null,
-    final: boolean,
-    management = false
+    previous: MachineSharingHead | null
   ) {
     if (!matches(binding, version)) return yield* fail('sharing_invalid');
     const frame = unhex(version.frameHex);
@@ -345,32 +343,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           expectedHead: version,
           previous,
         };
-        if (!final)
-          return {
-            head: yield* Effect.fromResult(verifyMachineSharingHistoryStep(input)),
-            policy: null,
-            state: null,
-          };
-        if (management) {
-          const active = openMachineSharingPolicy(input);
-          if (Result.isSuccess(active)) {
-            const body = active.success.inspect();
-            if (
-              body.requestId !== version.requestId ||
-              body.previousDigest !== version.previousDigest
-            )
-              return yield* fail('sharing_invalid');
-            return { head: active.success.head, policy: active.success, state: body };
-          }
-          const historical = yield* Effect.fromResult(readMachineSharingHistoryStep(input));
-          if (
-            historical.policy.requestId !== version.requestId ||
-            historical.policy.previousDigest !== version.previousDigest
-          )
-            return yield* fail('sharing_invalid');
-          return { head: historical.head, policy: null, state: historical.policy };
-        }
-        const policy = yield* Effect.fromResult(openMachineSharingPolicy(input));
+        const active = openMachineSharingPolicy(input);
+        const policy = yield* Effect.fromResult(active);
         const body = policy.inspect();
         if (body.requestId !== version.requestId || body.previousDigest !== version.previousDigest)
           return yield* fail('sharing_invalid');
@@ -382,8 +356,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     binding: MachineSharingBinding,
     remote: SharingRemote,
     machineGeneration: VerifiedMachineSharingGeneration,
-    force = false,
-    management = false
+    force = false
   ) {
     const token = invalidationToken;
     const resource = key(binding);
@@ -417,48 +390,29 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     }
     // Removal is terminal within a generation. Re-admission has a separate resource.
     if (saved?.head?.status === 'removed') return yield* fail('sharing_conflict');
-    let previous: MachineSharingHead | null = saved?.original
-      ? { revision: saved.original.revision, digest: saved.original.digest }
-      : null;
-    let policy: VerifiedMachineSharingPolicy | null = null;
-    let fullState: MachineSharingPolicy | null = null;
-    if (head.revision - (previous?.revision ?? 0) > 4096) return yield* fail('sharing_unavailable');
-    for (
-      let revision =
-        previous && previous.revision === head.revision
-          ? previous.revision
-          : (previous?.revision ?? 0) + 1;
-      revision <= head.revision;
-      revision++
-    ) {
-      if (!sharingFresh(started, yield* sharingStamp)) return yield* fail('sharing_unavailable');
-      const raw =
-        saved?.original?.revision === revision
-          ? saved.original
-          : yield* parse(
-              sharingReplySchemas.readVersion,
-              yield* remote.readVersion({ ...access, revision })
-            );
-      if (!raw || 'status' in raw || raw.revision !== revision)
-        return yield* fail('sharing_unavailable');
-      const read = yield* readFrame(
-        binding,
-        raw,
-        machineGeneration,
-        previous,
-        revision === head.revision,
-        management
-      );
-      previous = read.head;
-      policy = read.policy;
-      fullState = read.state;
-      if (revision === head.revision) {
-        if (!sameHead(read.head, head)) return yield* fail('sharing_conflict');
-        yield* guard();
-        if (read.policy) yield* remember(binding, head, raw);
-      }
-    }
-    if ((!policy && !management) || !fullState || !sharingFresh(started, yield* sharingStamp))
+    const raw =
+      saved?.original?.revision === head.revision
+        ? saved.original
+        : yield* parse(
+            sharingReplySchemas.readVersion,
+            yield* remote.readVersion({ ...access, revision: head.revision })
+          );
+    if (!raw || 'status' in raw || raw.revision !== head.revision)
+      return yield* fail('sharing_unavailable');
+    const read = yield* readFrame(
+      binding,
+      raw,
+      machineGeneration,
+      saved?.head?.status === 'active' ? saved.head : null
+    );
+    const policy = read.policy;
+    const fullState = read.state;
+    if (!sameHead(read.head, head)) return yield* fail('sharing_conflict');
+    yield* guard();
+    if (token !== invalidationToken || !sharingFresh(started, yield* sharingStamp))
+      return yield* fail('sharing_unavailable');
+    if (read.policy) yield* remember(binding, head, raw);
+    if (!policy || !fullState || !sharingFresh(started, yield* sharingStamp))
       return yield* fail('sharing_unavailable');
     if (policy)
       yield* sql(() => {
@@ -472,6 +426,61 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         cache.set(resource, { policy, stamp: started });
       });
     return { policy, state: fullState, head };
+  });
+  type Latest = Effect.Success<ReturnType<typeof latest>>;
+  type DenialRefresh = {
+    stamp: Stamp;
+    pending: boolean;
+    fiber?: Fiber.Fiber<Latest, unknown>;
+    result?: Latest;
+  };
+  const denialRefreshes = new Map<string, DenialRefresh>();
+  yield* Effect.addFinalizer(() => Effect.sync(() => denialRefreshes.clear()));
+  const refreshSerial = yield* Semaphore.make(1);
+  const coolingDown = (stamp: Stamp, now: Stamp) =>
+    now.wall >= stamp.wall &&
+    now.wall - stamp.wall < denialRefreshInterval &&
+    now.mono >= stamp.mono &&
+    now.mono - stamp.mono < BigInt(denialRefreshInterval) * 1_000_000n;
+  const refreshDenial = Effect.fnUntraced(function* (
+    binding: MachineSharingBinding,
+    remote: SharingRemote,
+    machineGeneration: VerifiedMachineSharingGeneration
+  ) {
+    // Only coordinate producer selection. Independent bindings never wait for I/O here.
+    const work = yield* refreshSerial.withPermit(
+      Effect.gen(function* () {
+        yield* guard();
+        const resource = key(binding);
+        const now = yield* sharingStamp;
+        const previous = denialRefreshes.get(resource);
+        if (previous?.pending && previous.fiber) return Fiber.join(previous.fiber);
+        if (previous && coolingDown(previous.stamp, now))
+          return previous.result
+            ? Effect.succeed(previous.result)
+            : Effect.fail(fail('sharing_unavailable'));
+        for (const [resource, entry] of denialRefreshes)
+          if (!entry.pending && !coolingDown(entry.stamp, now)) denialRefreshes.delete(resource);
+        const entry: DenialRefresh = { stamp: now, pending: true };
+        denialRefreshes.set(resource, entry);
+        const fiber = yield* Effect.forkIn(
+          latest(binding, remote, machineGeneration, true).pipe(
+            Effect.onExit((exit) =>
+              Effect.sync(() => {
+                entry.pending = false;
+                entry.fiber = undefined;
+                // A failure leaves only a retry timestamp, never policy evidence or a rejected fiber.
+                if (Exit.isSuccess(exit)) entry.result = exit.value;
+              })
+            )
+          ),
+          scope
+        );
+        entry.fiber = entry.pending ? fiber : undefined;
+        return Fiber.join(fiber);
+      })
+    );
+    return yield* work;
   });
   const read = Effect.fnUntraced(function* (
     machineId: string,
@@ -498,9 +507,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             ),
           };
         });
-        const checked = yield* Effect.result(
-          latest(binding, remote, machineGeneration, force, true)
-        );
+        const checked = yield* Effect.result(latest(binding, remote, machineGeneration, force));
         if (Result.isFailure(checked) && !unfinished) return yield* Effect.fail(checked.failure);
         const policy = Result.isSuccess(checked) ? checked.success.policy : null;
         const saved = yield* pin(binding);
@@ -529,7 +536,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           ownerMembershipId: binding.ownerMembershipId,
           generation: binding.generation,
           head:
-            Result.isSuccess(checked) && body
+            Result.isSuccess(checked) && checked.success.head
               ? {
                   revision: checked.success.head!.revision,
                   digest: checked.success.head!.digest as string,
@@ -537,24 +544,10 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
               : null,
           sharedWithTeam: body?.sharedWithTeam ?? false,
           projects: body?.projects ?? [],
+          sessions: body?.sessions ?? [],
           canManage,
           signer: body?.signer ?? null,
-          needsResign:
-            !!body &&
-            (!policy ||
-              (() => {
-                const signer = current.ledger.inspectState().devices.get(body.signer);
-                const permission = contentPermissions(
-                  current.ledger,
-                  Result.getOrThrow(Bytes.signingPublicKey(unhex(body.signer)))
-                );
-                return (
-                  signer?.kind !== 'personal' ||
-                  hex(signer.membershipId.toBytes()) !== binding.ownerMembershipId ||
-                  Result.isFailure(permission) ||
-                  !permission.success.mayWriteDocument
-                );
-              })()),
+          needsResign: !!body && !current.ledger.inspectState().devices.has(body.signer),
           ...(!decision.allowed ? { deniedReason: 'e2ee_machine_not_shared' as const } : {}),
           removed: saved?.head?.status === 'removed',
           ...(unfinished ? { pendingRequest: unfinished } : {}),
@@ -570,9 +563,9 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   ) => ReturnType<typeof authorizeMachineExecution>;
   // The resource's accepted pin advances only on a newer verified head, and a failed or
   // timed-out refresh never rewrites it. A pinned denial therefore stays known until a
-  // newer verified policy replaces it; it never grants anything. Its issuer only had to
-  // be eligible when it signed: a later revocation invalidates grants, never a denial.
-  const pinnedDenial = (initial: Target, decide: Decide, localProjectId: string | undefined) =>
+  // newer verified policy replaces it; it never grants anything. Historical owner-personal
+  // signers remain accepted after revocation, as for every other latest-policy read.
+  const pinnedDenial = (initial: Target, decide: Decide) =>
     Effect.gen(function* () {
       const saved = yield* pin(initial.binding);
       const original = saved?.original;
@@ -583,29 +576,25 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         original.digest !== saved.head.digest
       )
         return undefined;
-      const retained = yield* readFrame(
-        initial.binding,
-        original,
-        initial.machineGeneration,
-        { revision: original.revision, digest: original.digest },
-        true,
-        true
-      );
-      if (!retained.policy) {
-        // Historically authenticated owner-personal state: usable only as a denial.
-        if (!retained.state) return undefined;
-        if (!retained.state.sharedWithTeam)
-          return { allowed: false as const, reason: 'machine-not-shared' as const };
-        if (localProjectId !== undefined && !retained.state.projects.includes(localProjectId))
-          return { allowed: false as const, reason: 'project-not-shared' as const };
-        return undefined;
-      }
+      const retained = yield* readFrame(initial.binding, original, initial.machineGeneration, {
+        revision: original.revision,
+        digest: original.digest,
+      });
+      if (!retained.policy) return undefined;
       const decision = decide(yield* options.ledger(), retained.policy);
       return !decision.allowed &&
         (decision.reason === 'machine-not-shared' || decision.reason === 'project-not-shared')
         ? decision
         : undefined;
-    }).pipe(Effect.catch(() => Effect.succeed(undefined)));
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof ContentError && error.code === 'policy-signer-ineligible'
+            ? { allowed: false as const, reason: 'machine-not-shared' as const }
+            : undefined
+        )
+      )
+    );
   const decider = Effect.fnUntraced(function* (
     machineId: string,
     requester: string,
@@ -642,7 +631,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     if (yield* authorizeOwner(options, machineId, requester, localProjectId)) return undefined;
     const resolved = yield* decider(machineId, requester, localProjectId);
     if (!resolved || resolved.decide(resolved.initial.ledger, null).allowed) return undefined;
-    return yield* pinnedDenial(resolved.initial, resolved.decide, localProjectId);
+    return yield* pinnedDenial(resolved.initial, resolved.decide);
   });
   const authorize = Effect.fnUntraced(function* (
     machineId: string,
@@ -661,7 +650,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     if (own.reason !== 'policy-unavailable') return own;
     const unknown = () =>
       Effect.map(
-        pinnedDenial(initial, decide, localProjectId),
+        pinnedDenial(initial, decide),
         (denial) => denial ?? { allowed: false as const, reason: 'policy-unavailable' as const }
       );
     return yield* admitted(
@@ -673,11 +662,27 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
         );
         if (uncertain) return yield* unknown();
-        const refreshed = yield* Effect.result(
-          latest(initial.binding, remote, initial.machineGeneration)
+        const resource = key(initial.binding);
+        const cachedBefore = cache.get(resource);
+        const hadFreshCache =
+          !!cachedBefore && sharingFresh(cachedBefore.stamp, yield* sharingStamp);
+        let refreshed = yield* Effect.result(
+          !cachedBefore && denialRefreshes.has(resource)
+            ? refreshDenial(initial.binding, remote, initial.machineGeneration)
+            : latest(initial.binding, remote, initial.machineGeneration)
         );
+        if (hadFreshCache && Result.isSuccess(refreshed)) {
+          const decision = decide(yield* options.ledger(), refreshed.success.policy);
+          if (
+            !decision.allowed &&
+            (decision.reason === 'machine-not-shared' || decision.reason === 'project-not-shared')
+          )
+            refreshed = yield* Effect.result(
+              refreshDenial(initial.binding, remote, initial.machineGeneration)
+            );
+        }
         if (Result.isFailure(refreshed)) {
-          const denial = yield* pinnedDenial(initial, decide, localProjectId);
+          const denial = yield* pinnedDenial(initial, decide);
           if (denial) return denial;
           return yield* Effect.fail(refreshed.failure);
         }
@@ -703,6 +708,27 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         return { ...decide(ledger, policy), isCurrent };
       })
     );
+  });
+  // Native read admission carries its verified cache identity through long polls.
+  // The serializable view remains unchanged at platform/IPC boundaries.
+  const readSessionAccess = Effect.fnUntraced(function* (machineId: string, remote: SharingRemote) {
+    const view = yield* read(machineId, remote, false);
+    const { binding } = yield* target(machineId);
+    const cached = cache.get(key(binding));
+    const isCurrent = () =>
+      !closed &&
+      !!cached &&
+      !!view.head &&
+      cached.policy.head.revision === view.head.revision &&
+      cached.policy.head.digest === view.head.digest &&
+      binding.generation === view.generation &&
+      binding.ownerMembershipId === view.ownerMembershipId &&
+      cache.get(key(binding)) === cached &&
+      sharingFresh(cached.stamp, {
+        wall: clock.currentTimeMillisUnsafe(),
+        mono: clock.monotonicTimeNanosUnsafe(),
+      });
+    return { view, isCurrent };
   });
   const write = Effect.fnUntraced(function* (
     machineId: string,
@@ -744,10 +770,10 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
               .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
           );
           if (unfinished) return yield* fail('sharing_conflict');
-          const current = yield* latest(binding, remote, machineGeneration, true, true);
+          const current = yield* latest(binding, remote, machineGeneration, true);
           const expectedHead = current.head;
           if (expectedHead?.status === 'removed') return { status: 'removed', requestId: rid };
-          const state = current.state ?? { sharedWithTeam: false, projects: [] };
+          const state = current.state ?? { sharedWithTeam: false, projects: [], sessions: [] };
           const next = yield* Effect.fromResult(updateMachineSharingState(state, normalized));
           const view = yield* options.ledger();
           const epoch = view.inspectState().epoch.number;
@@ -845,7 +871,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
                   digest: original.request.expectedHead.digest as string,
                 }
               : null;
-          yield* readFrame(binding, version, machineGeneration, previous, true);
+          yield* readFrame(binding, version, machineGeneration, previous);
           yield* remember(
             binding,
             { ...binding, revision: version.revision, digest: version.digest, status: 'active' },
@@ -885,6 +911,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     /** Passive counts of retained policies/team grants, never current authorization. */
     inspectCache,
     read: (...args: Parameters<typeof read>) => owned(read(...args)),
+    readSessionAccess: (...args: Parameters<typeof readSessionAccess>) =>
+      owned(readSessionAccess(...args)),
     write: (...args: Parameters<typeof write>) => owned(write(...args)),
     authorize: (...args: Parameters<typeof authorize>) => owned(authorize(...args)),
     /** A retained verified denial, read locally; `undefined` is unknown, never permission. */
@@ -892,10 +920,12 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     invalidate: () => {
       invalidationToken = {};
       cache.clear();
+      denialRefreshes.clear();
     },
     stop: () => {
       closed = true;
       cache.clear();
+      denialRefreshes.clear();
     },
   };
 });
@@ -941,6 +971,11 @@ export const makeLazyMachineSharingHost = Effect.fnUntraced(function* (
     read: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['read']>
     ) => Effect.flatMap(get, (value) => value.read(...args)),
+    readSessionAccess: (
+      ...args: Parameters<
+        Effect.Success<ReturnType<typeof makeMachineSharingHost>>['readSessionAccess']
+      >
+    ) => Effect.flatMap(get, (value) => value.readSessionAccess(...args)),
     write: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['write']>
     ) => Effect.flatMap(get, (value) => value.write(...args)),

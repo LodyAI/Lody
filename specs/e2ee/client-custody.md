@@ -1,6 +1,9 @@
 # Web and mobile personal-device custody
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#same-origin-web-recovery)
+Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#browser-self-unlock)
+
+Previously approved baseline: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
 Translation: current
 
 [中文](client-custody.zh.md)
@@ -11,8 +14,8 @@ not admit it. Each installation owns independent Ed25519/X25519 keys; tabs and
 workers in one profile share one controlled installation. This Spec extends the
 platform boundary without changing ledger v1, HPKE, signed bytes or content formats.
 It does not enable a product composition. The [owner approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#client-custody-revision-approval)
-identifies the exact approved revision and its scope. Recovery vault remains
-draft and outside this work.
+identifies the exact approved revision and its scope. The recovery vault has
+its own approval and is outside this work.
 
 ## Trust and protection
 
@@ -172,6 +175,97 @@ create a persistent device identity or ask the account owner's devices to admit 
 recovery devices may not. Every other row and rule is unchanged: residual, retired,
 missing or uncertain state still reconciles from exact evidence and never generates an
 identity over it.
+
+## Open with passkey or recovery file in Web (2026-11-10 approved revision)
+
+Increment status: approved by zxch3n on 2026-11-10. Keep the passkey/file choice approved on 2026-11-09;
+the owner selected same-origin Web on 2026-11-10, superseding the dedicated origin
+and cross-page pairing direction. See the [recovery vault revision](recovery-vault.md#passkey-unlock).
+The changed security boundary is covered by the approval record above; this is not rollout approval.
+
+```mermaid
+flowchart LR
+  A[Sign in to lody.ai Web client] --> B[Confirm personal computer]
+  B --> C[Open with passkey or recovery file]
+  C --> D[Verify membership and authorization]
+  D --> E[Install keys on this browser and open content]
+```
+
+Use RP ID `lody.ai`. Opening, saving/reimporting the first recovery file and adding
+passkeys happen in the existing Web client. No isolated page, second browser
+identity, cross-page channel or manual pairing-code fallback remains for this path.
+Other-device approval is independent and reuses the same account-pairing protocol,
+including phone approval; do not invent a Web-specific protocol.
+
+### Secrets and service storage
+
+Reuse recovery U, V, per-workspace R and approved wrappers: random U in the file;
+a real user-verified PRF output with existing HKDF domains/vaultId wraps V; V protects
+R packages. Keep vault-v1 XChaCha20-Poly1305, purpose/AAD separation, index CAS,
+originals, readback and rollback checks. No password KDF, new wire format or migration.
+Account login alone cannot open content; a future login passkey requires a different
+RP ID, not a different path or label under the recovery RP.
+
+The service stores account association, routing, ciphertext and opaque index data,
+not plaintext U/V/R/PRF/device private keys. Ciphertext storage does not hide access
+metadata or remove first-device freshness assumptions. Persistent browser identity
+still uses IndexedDB's non-extractable AES-GCM KEK; V is not a KEK substitute. Failed
+protection probes do not fall back to plaintext or temporary identity.
+
+### First sign-in and workspace authority
+
+A user may explicitly create an **empty vault and recovery file** without workspace
+keys. Save and reimport the file; never silently overwrite an existing vault. An
+empty vault recovers no workspace. An admitted browser may enroll/test recovery and
+add passkeys. An unadmitted browser without a usable recovery package still needs
+another personal device's approval. **Browser-first encrypted-workspace creation
+remains unsupported.**
+
+### Recover within the existing device owner
+
+Authenticate the package before allocating identity, replay complete history from
+its genesis/checkpoint, and check account, membership, R and current key commitment.
+R admits this browser through existing recovery. A currently admitted identity with
+missing keys retains its exact offer/identity and is not admitted twice; revoked
+identities cannot regain access. Preserve originals, pins, custody and installation
+readback. Admission is not key receipt; content opens only after independent verified
+installation on this browser.
+
+One Web application owner retains its executor/host. Recovery borrows its current
+session and controlled installation capability. Never globally close existing readers
+for recovery setup. UI close releases only its own borrow; actually running native
+work retains complete ownership until settlement before secret cleanup. Cancellation,
+logout and account switches reject new work/late publication without deleting identity
+or changing namespaces. Workspaces report unfinished outcomes independently.
+
+### Broader trust boundary and copy
+
+Pages on `lody.ai` and every subdomain, including marketing/analytics scripts, can
+request ceremonies for this RP. System prompts and user verification remain barriers,
+but compromised client code can expose other vault workspaces after a ceremony or file
+selection. Files and transient V/R/PRF now enter ordinary Web memory: no logging,
+telemetry, clipboard or persistence; pause telemetry while recovery UI is present.
+Do not claim origin isolation protects these materials. Public computers and
+session-only temporary devices remain unsupported.
+
+Copy says “Open with passkey or recovery file”, “Save recovery file”, “Add passkey”,
+“Signing in alone cannot open encrypted content” and “This empty file has no workspace
+backup yet”. Say “security code” and “membership and authorization information”, never
+ledger/version/key generation. Independent content/approval stays available on partial
+failure. Default-off gates remain; deployed/native acceptance is separate evidence.
+
+### Verified comparison scope
+
+| Reference | Previously verified mechanism | Tradeoff |
+| --- | --- | --- |
+| 1Password | Distinct SRP authentication and password/Secret Key 2SKD | Borrow user-held-secret experience, not its login protocol; password/Secret Key was not selected |
+| Proton | Login and private-key wrapping have separate roles | Login does not grant content keys |
+| MetaMask | Browser vault encryption still trusts executing code | Accept the same-origin code boundary; file/PRF does not resist modified client code |
+| WhatsApp Web | An existing device approves a new device | Keep personal-device approval when no recovery package exists |
+
+The references below remain the recorded source basis, not fresh product acceptance.
+Latest RP/format only; no old-RP fallback or compatibility migration. The owner's
+pre-production premise is not a production-data audit.
 
 ## References
 

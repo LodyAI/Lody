@@ -515,6 +515,43 @@ describe('buildAcpSelectorOptions', () => {
     expect(legacy.capabilityAuthority).toBe('provisional');
   });
 
+  it('treats a persisted empty model select as degraded even when legacy models exist', () => {
+    // The picker renders the model select directly — an empty select is a
+    // broken catalog, not something the legacy `models` list can cover.
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'gpt-5.6-sol',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [{ modelId: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' }],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gpt-5.6-sol',
+              options: [],
+            },
+          ],
+          fetchedAt: 1,
+        },
+      }),
+    });
+
+    expect(options.capabilityAuthority).toBe('degraded');
+    // Degraded authority keeps the currently selected model visible instead of
+    // presenting an empty picker.
+    expect(options.modelOptions.map((option) => option.value)).toEqual(['gpt-5.6-sol']);
+  });
+
   it('keeps a provisional persisted value visible until runtime validation', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,

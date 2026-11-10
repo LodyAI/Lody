@@ -1,3 +1,4 @@
+import * as httpTransport from '../src/utils/http-transport';
 import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
@@ -16,12 +17,17 @@ import { SessionAttachmentTransfer } from '../src/lib/session-attachment-transfe
 import { downloadSessionImageForPrompt } from '../src/lib/session-image-download';
 import {
   createCommandAttachmentTransfer,
+  mintCliSessionHistoryReadProof,
+  canReadSessionForCliRequester,
   createCloudE2eePort,
   createCloudSessionSharingPort,
   createCloudStreamsTokenPort,
 } from '../src/lib/cloud-cli-port';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 it('preserves the client retry key and separate server ID through the real HTTP result parser', async () => {
   const requests = new Map<string, string>();
@@ -934,3 +940,65 @@ it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failur
     }
   }
 );
+
+it.each([false, true])(
+  'carries the source machine and exact target scope only over authenticated HTTPS (edit=%s)',
+  async (edit) => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
+    const input = {
+      token: 'synthetic-cli',
+      authBaseUrl: 'https://fixture.convex.cloud',
+      logger: { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger,
+      workspaceId: 'workspace',
+      machineId: 'target',
+      sessionId: 'tab',
+      sourceMachineId: 'source',
+      rootSessionId: 'root',
+      sessionOwnerUserId: 'owner',
+      localProjectId: 'project',
+      requester: { userId: 'reader', machineId: 'source' },
+      edit,
+      requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      intentDigest: 'ab'.repeat(32),
+    };
+    vi.stubGlobal('fetch', async (url: unknown, init: RequestInit) => {
+      expect(String(url)).toContain(edit ? '/request-edit-token-cli' : '/request-token-cli');
+      expect(init.headers).toMatchObject({ Authorization: 'Bearer synthetic-cli' });
+      expect(JSON.parse(init.body as string)).toEqual({
+        workspaceId: 'workspace',
+        machineId: 'target',
+        sessionId: 'tab',
+        sourceMachineId: 'source',
+        rootSessionId: 'root',
+        sessionOwnerUserId: 'owner',
+        localProjectId: 'project',
+        requester: input.requester,
+        ...(edit ? { requestId: input.requestId, intentDigest: input.intentDigest } : {}),
+      });
+      return Response.json({ requestToken: 'signed-dual-principal-proof' });
+    });
+    expect(await mintCliSessionHistoryReadProof(input)).toBe('signed-dual-principal-proof');
+  }
+);
+
+it('refuses remote history authorization without an injected endpoint before any network work', async () => {
+  vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => {
+    throw new Error('Missing configuration must not start HTTP');
+  });
+  const target = {
+    token: 'synthetic-cli',
+    workspaceId: 'workspace',
+    machineId: 'remote',
+    sessionId: 'session',
+    rootSessionId: 'session',
+    sourceMachineId: 'source',
+    requester: { userId: 'reader', machineId: 'source' },
+  };
+  expect(await canReadSessionForCliRequester(target)).toBe(false);
+  await expect(mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger })).rejects.toThrow(
+    'Cloud history authorization is unavailable'
+  );
+  await expect(
+    mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger, edit: true })
+  ).rejects.toThrow('Cloud history authorization is unavailable');
+});

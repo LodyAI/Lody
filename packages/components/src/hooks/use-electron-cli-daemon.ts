@@ -35,17 +35,20 @@ export function useElectronCliDaemon(): ElectronCliDaemon {
     if (!getIpcServices()) return undefined;
 
     let active = true;
+    let receivedPush = false;
+    const unsubscribe = onIpcEvent('cli.state', (next) => {
+      receivedPush = true;
+      if (active) setState(next);
+    });
+
     sendIpc('cli.subscribe', null);
     void getIpcServices()!
       .cli.getState()
       .then((next) => {
-        if (active) setState(next);
+        // The initial read only seeds state until the live stream takes over.
+        if (active && !receivedPush) setState(next);
       })
       .catch(() => undefined);
-
-    const unsubscribe = onIpcEvent('cli.state', (next) => {
-      if (active) setState(next);
-    });
 
     return () => {
       active = false;

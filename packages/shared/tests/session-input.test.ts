@@ -413,3 +413,24 @@ it('freezes a memory identity in turn input and restores the same identity from 
     ]).memory
   ).toBeUndefined();
 });
+
+it('retains local-only attachments across history and frozen execution input', () => {
+  const input = {
+    type: 'local_attachment' as const,
+    path: '/tmp/image.png',
+    machineId: 'machine',
+    kind: 'image' as const,
+    fileName: 'image.png',
+    mimeType: 'image/png',
+    sizeBytes: 10,
+  };
+  const items = inputBlocksToHistoryItems([input, { type: 'text', text: 'inspect' }]);
+  expect(historyItemsToInputBlocks(items)).toEqual([input, { type: 'text', text: 'inspect' }]);
+  expect(normalizeSessionTurnInputConfig({ inputBlocks: [input] })?.inputBlocks).toEqual([input]);
+  expect(() =>
+    normalizeSessionTurnInputConfig({
+      prompt: 'must not execute alone',
+      inputBlocks: [{ ...input, path: '' }],
+    })
+  ).toThrow();
+});

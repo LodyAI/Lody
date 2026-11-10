@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -93,6 +91,67 @@ describe('AgentRoleRow', () => {
     });
     return container as HTMLDivElement;
   };
+
+  it('renders advertised labels for encoded model IDs and pinned options', async () => {
+    const modelId = 'dsh-route:WyJzeW50aGV0aWMiLCJtb2RlbCJd';
+    const runConfig = {
+      modelId,
+      modeId: 'agent-full-access',
+      configOptionValues: { thought_level: 'high', fast_mode: true, disabled: false },
+    };
+    const selectorOptions: NonNullable<RowTarget['selectorOptions']> = {
+      modelOptions: [{ value: modelId, label: 'Example Model' }],
+      modeOptions: [{ value: 'agent-full-access', label: 'Full access' }],
+      configOptionSelectors: [
+        {
+          type: 'select',
+          configId: 'thought_level',
+          label: 'Reasoning',
+          currentValue: 'low',
+          options: [
+            { value: 'high', label: 'High' },
+            { value: 'low', label: 'Low' },
+          ],
+        },
+        {
+          type: 'boolean',
+          configId: 'fast_mode',
+          label: 'Fast mode',
+          currentValue: false,
+          options: [],
+        },
+      ],
+    };
+    const view = await render({ targets: [target({ runConfig, selectorOptions })] });
+    expect(view.textContent).toContain('Example Model · High · Full access · Fast mode');
+    expect(view.textContent).not.toContain(modelId);
+    expect(view.textContent).not.toContain('disabled');
+    expect(runConfig.modelId).toBe(modelId);
+
+    // Capability loss preserves the saved pins instead of substituting defaults.
+    await render({ targets: [target({ runConfig })] });
+    expect(view.textContent).toContain(modelId);
+    expect(view.textContent).toContain('agent-full-access');
+  });
+
+  it('does not collapse different model IDs that share a display name', async () => {
+    const selectorOptions = {
+      modelOptions: [
+        { value: 'route-a/model', label: 'Example Model' },
+        { value: 'route-b/model', label: 'Example Model' },
+      ],
+      modeOptions: [],
+      configOptionSelectors: [],
+    };
+    const view = await render({
+      targets: [
+        target({ runConfig: { modelId: 'route-a/model' }, selectorOptions }),
+        target({ ...linux, runConfig: { modelId: 'route-b/model' }, selectorOptions }),
+      ],
+    });
+    expect(view.textContent).toContain('Configured per machine');
+    expect(view.textContent).not.toContain('Example Model');
+  });
 
   it('names a reason about the binding, and leaves the machine to its dot', async () => {
     const missing = await render({

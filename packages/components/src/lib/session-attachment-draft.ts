@@ -1,3 +1,4 @@
+import { getDroppedFileLocalPath } from './dropped-local-path';
 import {
   buildPendingUserHistoryEntry,
   inputBlocksToHistoryItems,
@@ -12,6 +13,8 @@ export type SessionAttachmentDraft = {
   kind: 'image' | 'file';
   /** Released only when a durable ready receipt replaces every source. */
   source?: Blob;
+  localSourcePath?: string;
+  localImageId?: string;
   name: string;
   mimeType: string;
   lastModified: number;
@@ -37,6 +40,7 @@ function source(file: File, id: string) {
   return {
     id,
     source: file.slice(),
+    localSourcePath: getDroppedFileLocalPath(file) ?? undefined,
     name: file.name,
     mimeType: file.type,
     lastModified: file.lastModified,
@@ -72,11 +76,13 @@ export function preparedDraftInput(
     throw new Error('Every attachment must finish before submission');
   const ready = attachments.map((item) => item.ready!);
   const key = (block: SessionInputBlock) =>
-    block.type === 'file'
-      ? `file:${block.fileId}`
-      : block.type === 'image'
-        ? `image:${block.imageId}`
-        : null;
+    block.type === 'local_attachment'
+      ? `local:${JSON.stringify([block.machineId, block.path])}`
+      : block.type === 'file'
+        ? `file:${block.fileId}`
+        : block.type === 'image'
+          ? `image:${block.imageId}`
+          : null;
   const ids = new Set(ready.map(key));
   const original = normalizeSessionInputBlocks(config.inputBlocks, config.prompt ?? '').filter(
     (block) => !key(block) || !ids.has(key(block))

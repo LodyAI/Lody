@@ -1,0 +1,36 @@
+{
+  "name": "lody-ios",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "version": "0.111.0",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "pnpm --filter @lody-ios/ios start",
+    "ios": "pnpm --filter @lody-ios/ios ios",
+    "prebuild": "pnpm --filter @lody-ios/ios prebuild",
+    "bundle": "pnpm --filter @lody-ios/ios bundle",
+    "typecheck": "pnpm --filter @lody-ios/ios typecheck",
+    "check": "pnpm typecheck && pnpm contract:check && pnpm i18n:check && pnpm native:sources && pnpm licenses:check && pnpm format:check",
+    "contract": "node --experimental-strip-types packages/cloud-runtime/scripts/contract.mjs",
+    "contract:check": "node --experimental-strip-types packages/cloud-runtime/scripts/contract.mjs --check",
+    "i18n:check": "node apps/ios/scripts/check-locales.mjs",
+    "native:sources": "python3 apps/ios/scripts/check-native-sources.py",
+    "licenses:build": "pnpm --filter @lody-ios/ios licenses:build",
+    "licenses:check": "pnpm --filter @lody-ios/ios licenses:check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --test apps/ios/tests/**/*.test.mjs && python3 apps/ios/verification/ui/runner_test.py && python3 apps/ios/verification/simulator_test.py && python3 apps/ios/verification/build_test.py && python3 apps/ios/tests/backend-build_test.py",
+    "verify:build": "python3 apps/ios/verification/build.py",
+    "verify:ui": "python3 apps/ios/verification/ui/run.py",
+    "verify:native": "python3 apps/ios/verification/native.py",
+    "verify:simulator": "python3 apps/ios/verification/simulator.py",
+    "verify:clean": "python3 apps/ios/verification/clean.py"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "prettier": "3.9.6"
+  }
+}

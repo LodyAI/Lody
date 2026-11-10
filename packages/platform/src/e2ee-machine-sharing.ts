@@ -20,22 +20,12 @@ export interface E2eeMachineSharingTransport {
   commit(input: E2eeMachineSharingRequests['commit']): Promise<E2eeMachineSharingReplies['commit']>;
 }
 
-/** Separate account-authenticated display port. No device credential is accepted; only opaque ciphertext and
- * untrusted routing/head metadata are returned. This port cannot renew a machine's execution freshness. */
-export interface E2eeMachineSharingDisplayReader {
-  /** The server checks current account workspace membership. Clients still verify signatures/ledger before display. */
-  latestForMember(
-    input: E2eeMachineSharingRequests['latestForMember']
-  ): Promise<E2eeMachineSharingReplies['latestForMember']>;
-}
-
 export type {
   E2eeMachineSharingScope,
   E2eeMachineSharingHead,
   E2eeMachineSharingHeadState,
   E2eeMachineSharingRemovedHead,
   E2eeMachineSharingReadResult,
-  E2eeMachineSharingLatestForMember,
   E2eeMachineSharingVersion,
   E2eeMachineSharingRequests,
   E2eeMachineSharingReplies,
@@ -50,12 +40,18 @@ export interface E2eeMachineSharingView {
   head: { readonly revision: number; readonly digest: string } | null;
   sharedWithTeam: boolean;
   projects: readonly string[];
+  /** Current owner-signed conversation grants; these never grant machine execution. */
+  sessions: readonly {
+    readonly sessionId: string;
+    readonly audience: 'team' | { readonly userId: string };
+    readonly level: 'read';
+  }[];
   removed?: boolean;
   /** Current host personal-device authority, derived from the verified ledger. */
   canManage: boolean;
   /** Policy's actual signing device, including a historically admitted revoked device. */
   signer: string | null;
-  /** Historical state is display/re-sign input only; it grants no cross-member execution. */
+  /** Nonblocking review reminder; service-accepted grants remain effective after signer revocation. */
   needsResign: boolean;
   deniedReason?: 'e2ee_machine_not_shared' | 'e2ee_machine_not_owned';
   /** Discover an interrupted local intent so a new window can reconcile the same request. */
@@ -69,4 +65,10 @@ export type E2eeMachineSharingWriteResult = {
 };
 export type E2eeMachineSharingChange =
   | { readonly kind: 'machine'; readonly sharedWithTeam: boolean }
-  | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean };
+  | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean }
+  | {
+      readonly kind: 'session';
+      readonly sessionId: string;
+      readonly audience?: 'team' | { readonly userId: string };
+      readonly level: 'read' | null;
+    };

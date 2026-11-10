@@ -1,3 +1,4 @@
+import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
@@ -101,6 +102,8 @@ export type LoroSidebarWorkspace = {
   planTier?: 'plus' | 'enterprise' | null;
   /** Member count, when known (the active workspace). Shown in the switcher header. */
   memberCount?: number | null;
+  /** Listed as end-to-end encrypted: a lock beside the name, explained on hover. */
+  encrypted?: boolean;
 };
 
 export type LoroSidebarRepoItemDelta = {
@@ -172,6 +175,9 @@ export interface LoroSidebarProps {
    */
   workspaceSwitcherEnabled?: boolean;
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
+  /** Hover text for the Offline mark, supplied as a leaf so its clock never
+   * re-renders the sidebar. */
+  offlineDetail?: ReactNode;
   /**
    * The network may already be online while the target workspace runtime and
    * metadata are still converging. Keep that scoped readiness visible in the
@@ -511,12 +517,15 @@ type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing
 function ConnectionPill({
   state,
   labels,
+  offlineDetail,
 }: {
   state: WorkspaceIdentityStatus;
   labels: Pick<
     LoroSidebarLabels,
     'connectionLoading' | 'connectionReconnecting' | 'connectionOffline' | 'workspaceSyncing'
   >;
+  /** Hover text for Offline: how long, and what this machine can still do. */
+  offlineDetail?: ReactNode;
 }) {
   const isLoading = state !== 'offline';
   const label =
@@ -527,7 +536,7 @@ function ConnectionPill({
         : state === 'loading'
           ? labels.connectionLoading
           : labels.connectionOffline;
-  return (
+  const badge = (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
       icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
@@ -536,6 +545,15 @@ function ConnectionPill({
     >
       {label}
     </Badge>
+  );
+  if (state !== 'offline' || !offlineDetail) return badge;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span className="inline-flex">{badge}</span>} />
+      <Tooltip.Content side="bottom" className="max-w-[280px]">
+        {offlineDetail}
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -829,6 +847,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   scrollStateKey,
   workspaceSwitcherEnabled = true,
   connectionUiState,
+  offlineDetail,
   workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS: _isElectronMacOS = false,
@@ -1098,6 +1117,9 @@ export const LoroSidebar = memo(function LoroSidebar({
       : workspaceSyncing
         ? 'syncing'
         : null;
+  const currentWorkspaceEncrypted = workspaces.some(
+    (ws) => ws.id === currentWorkspaceId && ws.encrypted
+  );
   const workspaceIdentity = (
     <>
       <WorkspaceAvatar
@@ -1108,9 +1130,15 @@ export const LoroSidebar = memo(function LoroSidebar({
         size="small"
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
+        <span className="min-w-0 truncate font-medium">{workspaceName}</span>
+        {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
+        <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1129,9 +1157,15 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate">{workspaceName}</span>
+        <span className="min-w-0 truncate">{workspaceName}</span>
+        {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
+        <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1178,7 +1212,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1192,7 +1226,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
-                  data-testid={workspaceSyncing ? undefined : "workspace-ready"}
+                  data-testid={workspaceSyncing ? undefined : 'workspace-ready'}
                   data-workspace-switcher-trigger
                   data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                   aria-busy={workspaceSyncing || undefined}
@@ -1300,7 +1334,10 @@ export const LoroSidebar = memo(function LoroSidebar({
                           ) : null
                         }
                       >
-                        {ws.name}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate">{ws.name}</span>
+                          {ws.encrypted ? <EncryptedWorkspaceMark /> : null}
+                        </span>
                       </Menu.RadioItem>
                     );
 

@@ -5,7 +5,7 @@ import type {
   E2eeWorkspaceHistoryRequest,
 } from '@lody/cloud-api';
 import type { E2eeAccountPairingRuntime, E2eeWorkspaceRuntime } from '@lody/platform';
-import { decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
+import { accountUserId, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol';
 import type {
   AccountPairingApproverWorkspace,
   AccountPairingRequesterWorkspace,
@@ -131,7 +131,8 @@ export function makePortableAccountPairingRequester(input: {
   history: (
     request: E2eeWorkspaceHistoryRequest
   ) => Effect.Effect<E2eeWorkspaceHistoryPage, unknown>;
-  accountIdentity: () => Effect.Effect<{ readonly cryptoUserId: string }, unknown>;
+  /** The signed-in account; its encoded user ID finds this account's ledger member. */
+  accountId: string;
   diagnostics?: (tag: string, error: unknown) => void;
 }): () => Effect.Effect<readonly AccountPairingRequesterWorkspace[], unknown> {
   const remember = input.diagnostics ?? (() => {});
@@ -166,9 +167,10 @@ export function makePortableAccountPairingRequester(input: {
   const membership = Effect.fnUntraced(function* (
     view: Effect.Success<ReturnType<typeof verified>>['view']
   ) {
-    const { cryptoUserId } = yield* input.accountIdentity();
-    const mine = [...view.inspectState().members.entries()].filter(
-      ([, member]) => toHex(member.userId.toBytes()) === cryptoUserId
+    const userId = accountUserId(input.accountId);
+    if (Result.isFailure(userId)) return yield* Effect.fail(fail('missing-binding'));
+    const mine = [...view.inspectState().members.entries()].filter(([, member]) =>
+      member.userId.equals(userId.success)
     );
     if (mine.length !== 1) return yield* Effect.fail(fail('missing-binding'));
     return mine[0]![0];
@@ -329,6 +331,8 @@ export interface AccountPairingKeyDeliveryEvent {
   readonly code?: string;
 }
 /** The desktop's member delivery backoff: 10 s doubling to a 5 min cap, eight retries. */
+/** One ledger catch-up. Timing out cancels it and the round still runs. */
+export const ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS = 30_000;
 const KEY_DELIVERY_RETRY_DELAYS = [
   10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
 ] as const;
@@ -453,8 +457,17 @@ export function makePortableAccountPairingApprover(input: {
               );
             const release = (current: AccountPairingApproverSession) =>
               releaseQuietly(current, 'account-pairing-key-delivery-release');
-            const attempt = (current: AccountPairingApproverSession) =>
+            // The mailbox refuses a sender behind the ledger, so a retry catches up first.
+            // The round then resends the saved original or supersedes it from the new ledger;
+            // a failed or timed-out catch-up does not skip the round.
+            const attempt = (current: AccountPairingApproverSession, retry: number) =>
               Effect.gen(function* () {
+                if (retry > 0)
+                  yield* Effect.result(
+                    current
+                      .refresh()
+                      .pipe(Effect.timeoutOption(ACCOUNT_APPROVAL_REFRESH_TIMEOUT_MS))
+                  );
                 const round = yield* Effect.result(current.keyRound());
                 const evidence = yield* Effect.result(current.keyDeliveryEvidence(device));
                 if (Result.isSuccess(evidence) && evidence.success === 'delivered')
@@ -476,7 +489,7 @@ export function makePortableAccountPairingApprover(input: {
                   yield* release(current);
                   return report('ended', 'e2ee_key_delivery_owner_changed');
                 }
-                const code = yield* attempt(current);
+                const code = yield* attempt(current, retry);
                 if (code === 'delivered') return report('delivered');
                 if (TERMINAL_KEY_DELIVERY.has(code) || retry >= delays.length)
                   return report('ended', code);

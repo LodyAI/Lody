@@ -1,4 +1,5 @@
 import type { ManagedDaemonUpdateStatus } from '@lody/shared';
+import { MachineIdentityRestore } from './machine-identity-restore';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -408,6 +409,8 @@ export type MachineDetailPaneProps = {
     targetVersion: string,
     switchPolicy?: 'when-idle' | 'immediate'
   ) => Promise<void>;
+  onRestoreIdentity?: (source: MachineId, target: MachineId) => Promise<void>;
+  restoreIdentityCandidates?: MachineViewMeta[];
   canRevokeCredentials?: boolean;
   /** Must reject on failure so the confirm dialog stays open; the callback owns
    *  surfacing the error (toast) exactly once. */
@@ -1036,6 +1039,16 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
           />
         )}
       </div>
+
+      {mode === 'devices' && isOwn && !readOnly && props.onRestoreIdentity ? (
+        <MachineIdentityRestore
+          key={machine.id}
+          machine={machine}
+          candidates={props.restoreIdentityCandidates ?? []}
+          encryptedWorkspace={!ordinarySharing}
+          onRestore={props.onRestoreIdentity}
+        />
+      ) : null}
 
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialog.Content>

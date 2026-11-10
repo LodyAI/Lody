@@ -1,4 +1,5 @@
 import { reserveMachineTurn } from './machine-turn-admission';
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { verifyAutomationWorktreeHeads } from './automation-worktree';
 import { classifyCapacityFailure } from './acp-error-classification';
 import {
@@ -111,7 +112,9 @@ import {
   getServerNow,
   getSessionRoomId,
   hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
   hasRecentResumeNotice,
+  isReplayEntryExcluded,
   isSessionCollaborationStopped,
   type IssuePRMention,
   type LocalProjectId,
@@ -680,6 +683,7 @@ export type SessionExecutionServiceDeps = {
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
   buildAcpPromptBlocks: (args: {
+    requesterUserId?: string;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     /** The input's history turn; an agent author adds a provenance header. */
@@ -947,6 +951,17 @@ export class SessionExecutionService {
   }
 
   private readonly shutdownAbort = new AbortController();
+  private machineIdentityRestoreSealed = false;
+
+  isMachineIdentityRestoreIdle(): boolean {
+    // An execution owner can exist before its active presence is published.
+    return !this.machineIdentityRestoreSealed && this.turnRuntimeBySession.size === 0;
+  }
+
+  stopNewIdentityRestoreExecutions(): void {
+    this.machineIdentityRestoreSealed = true;
+  }
+
   private readonly ownedWork = new Set<Promise<unknown>>();
   private ownBookkeeping<T>(sessionId: SessionId, work: Promise<T>): Promise<T | undefined> {
     const observed = work.catch((error: unknown) => {
@@ -1206,7 +1221,7 @@ export class SessionExecutionService {
       const read = await (await createSessionBackend(doc)).readTurn(args.inputId);
       if (
         meta?.lastHandledUserMsgId === args.inputId ||
-        meta?.lastMissingHistoryUserMsgId === args.inputId ||
+        isMissingHistoryUserTurn(meta, args.inputId) ||
         (read.state === 'ready' &&
           (read.turn.role !== 'user' ||
             ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(read.turn.status ?? '')))
@@ -2403,6 +2418,7 @@ export class SessionExecutionService {
       const inputBlocks = resolveSessionExecutionInputBlocks(options.inputConfig);
       const promptBlocks = await wait(
         this.deps.buildAcpPromptBlocks({
+          requesterUserId: options.userId,
           workspaceId: this.deps.workspaceId,
           sessionId: options.sessionId,
           userTurnId: options.userTurnId,
@@ -4627,6 +4643,7 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
+    if (this.machineIdentityRestoreSealed) return 'identity-restore-pending';
     const { sessionId, sessionDoc, userTurnId } = options;
     const assistantEntryParentTurnId = options.assistantEntryParentTurnId ?? userTurnId;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
@@ -4757,6 +4774,13 @@ export class SessionExecutionService {
     let turnId!: string;
     let runtime!: TurnRuntimeState;
     try {
+      // Recheck after every pre-owner await has finished. No await may separate
+      // this check from registration: Fleet either sees this owner or seals first.
+      // Returning before ownership leaves pending input/history and Inbox intact.
+      if (this.machineIdentityRestoreSealed) {
+        span.end({ outcome: 'identity-restore-pending' });
+        return 'identity-restore-pending';
+      }
       turnId = this.deps.beginConversationTurn(sessionId, assistantEntryParentTurnId, {
         ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
         sessionDoc,
@@ -6151,6 +6175,68 @@ export class SessionExecutionService {
     return builder.finish();
   }
 
+  /**
+   * Create dispatch has no `meta.acpSessionId`, but that does not prove the
+   * conversation is empty: a first start can fail during process startup.
+   * Replay is best-effort. Wait briefly for earlier turns, but if the mirror or
+   * backend cannot provide them, start the requested turn without replay rather
+   * than blocking a session that otherwise could run.
+   */
+  private hasPriorCreateHistory(
+    meta: SessionMeta | undefined,
+    userTurnId: string | undefined
+  ): boolean {
+    if (!meta) return false;
+    if ((meta.externalHistory?.importedTurnCount ?? 0) > 0) return true;
+    return [meta.lastHandledUserMsgId, meta.processingUserMsgId, meta.latestUserMsgId].some(
+      (turnId) => !!turnId && turnId !== userTurnId
+    );
+  }
+
+  private async buildCreateHistoryReplay(args: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    userTurnId?: string;
+    meta?: SessionMeta;
+  }): Promise<ReplayPromptResult | undefined> {
+    const { sessionId, sessionDoc, userTurnId, meta } = args;
+    if (!userTurnId || !this.hasPriorCreateHistory(meta, userTurnId)) {
+      return undefined;
+    }
+
+    try {
+      const replayHistory = await this.waitForReplayableHistory({
+        sessionId,
+        sessionDoc,
+        excludeTurnId: userTurnId,
+      });
+      const hasReplayableEntry = replayHistory.some(
+        (entry) =>
+          !isReplayEntryExcluded(entry, userTurnId) &&
+          (entry.role === 'user' || entry.role === 'assistant')
+      );
+      if (!hasReplayableEntry) {
+        this.deps.logger.warn(
+          `[${sessionId}] Continuing create without history replay; prior turns were expected but none are replayable`
+        );
+        return undefined;
+      }
+      const replay = await this.buildHistoryReplay(sessionDoc, userTurnId);
+      if (replay.stats.messagesIncluded === 0) {
+        this.deps.logger.warn(
+          `[${sessionId}] Continuing create without history replay; replay contained no messages`
+        );
+        return undefined;
+      }
+      return replay;
+    } catch (error) {
+      this.deps.logger.warn(
+        `[${sessionId}] Continuing create without history replay: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async getSessionBackend(
     sessionDoc: SessionDocument,
     sessionId: SessionId
@@ -6186,7 +6272,8 @@ export class SessionExecutionService {
     ): boolean =>
       history.some(
         (entry) =>
-          entry.id !== args.excludeTurnId && (entry.role === 'user' || entry.role === 'assistant')
+          !isReplayEntryExcluded(entry, args.excludeTurnId) &&
+          (entry.role === 'user' || entry.role === 'assistant')
       );
 
     let latest = await this.getSessionHistoryQuery(args.sessionDoc);
@@ -6572,10 +6659,12 @@ export class SessionExecutionService {
     rawMessage: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    if (this.machineIdentityRestoreSealed) return;
     const message =
       dispatchOptions?.dispatchSource === 'inbox'
         ? rawMessage
         : await this.withVerifiedRequester(rawMessage);
+    if (this.machineIdentityRestoreSealed) return;
     if (
       dispatchOptions?.dispatchSource === 'inbox' &&
       (!dispatchOptions.inboxBatch || !this.operationInbox)
@@ -6583,6 +6672,7 @@ export class SessionExecutionService {
       throw new Error('INBOX_BATCH_REQUIRED');
     }
     const turn = await this.prepareContinueSessionTurn(message, dispatchOptions);
+    if (this.machineIdentityRestoreSealed) return;
     if (
       dispatchOptions?.dispatchSource !== 'inbox' &&
       (await this.markCancelledUserTurnBeforeOwner({
@@ -7078,6 +7168,7 @@ export class SessionExecutionService {
           { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
           async () =>
             await self.deps.buildAcpPromptBlocks({
+              requesterUserId: message.userId,
               workspaceId: message.workspaceId,
               sessionId,
               userTurnId: message.userTurnId,
@@ -7595,8 +7686,11 @@ export class SessionExecutionService {
     rawMessage: SessionCreateRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    if (this.machineIdentityRestoreSealed) return;
     const message = await this.withVerifiedRequester(rawMessage);
+    if (this.machineIdentityRestoreSealed) return;
     const turn = await this.prepareStartSessionTurn(message, dispatchOptions);
+    if (this.machineIdentityRestoreSealed) return;
     const userTurnId =
       typeof message.userTurnId === 'string' && message.userTurnId.trim()
         ? message.userTurnId.trim()
@@ -7866,6 +7960,15 @@ export class SessionExecutionService {
           });
 
           yield* abortIfCancelled();
+          const replayPromptResult = yield* self.tryPromise(() =>
+            self.buildCreateHistoryReplay({
+              sessionId,
+              sessionDoc,
+              userTurnId,
+              meta: existingMeta,
+            })
+          );
+          yield* abortIfCancelled();
           if (project?.kind === 'local') {
             if (!workdir) {
               yield* Effect.fail(
@@ -7954,9 +8057,15 @@ export class SessionExecutionService {
               { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
               async () =>
                 await self.deps.buildAcpPromptBlocks({
+                  requesterUserId: message.userId,
                   workspaceId,
                   sessionId,
+                  userTurnId,
                   inputBlocks: sessionInputBlocks,
+                  replayPromptText:
+                    replayPromptResult && replayPromptResult.stats.messagesIncluded > 0
+                      ? replayPromptResult.promptText
+                      : undefined,
                 })
             );
           };
@@ -8886,6 +8995,17 @@ export class SessionExecutionService {
             error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
           };
         }
+        if (hasEmptyModelSelectOption(refresh.capability?.configOptions)) {
+          // Auth worked, but the agent's catalog is still degraded: that is not
+          // a successful verification, and the caller must not mark the provider
+          // verified on the strength of the authentication alone.
+          return {
+            ...resolvedBase,
+            ...result,
+            capabilitiesRefreshed: false,
+            error: 'Authentication succeeded, but the provider reported no usable models',
+          };
+        }
         return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
       }
 
@@ -9219,6 +9339,12 @@ export class SessionExecutionService {
         message.configId,
         fingerprintAcpLaunchInputs(message)
       );
+      if (hasEmptyModelSelectOption(configOptions)) {
+        this.deps.logger.warn(
+          `[acp-refresh] ${message.cliType}/${message.agentType} advertised a model select with zero options; the persisted entry stays degraded and will be re-probed on the next refresh`,
+          { configId: message.configId }
+        );
+      }
 
       return {
         type: 'machine/acp-capabilities-refresh_response',

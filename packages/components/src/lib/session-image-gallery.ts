@@ -15,7 +15,11 @@ export type SessionImageGalleryEntry = {
   sessionId: SessionId;
   messageId: string;
   galleryGroupId: string;
+  localImageId?: string;
+  storageSessionId?: SessionId;
   imageId: string;
+  transport?: import('@lody/shared').SessionImagePayload['transport'];
+  machineId?: import('@lody/shared').SessionImagePayload['machineId'];
   mimeType: string;
   fileName?: string;
   sizeBytes: number;
@@ -46,6 +50,10 @@ export const createSessionImageGalleryEntry = ({
   messageId,
   galleryGroupId,
   imageId: image.imageId,
+  localImageId: image.localImageId,
+  storageSessionId: image.storageSessionId,
+  transport: image.transport,
+  machineId: image.machineId,
   encryption: image.encryption,
   mimeType: image.mimeType,
   fileName: image.fileName,

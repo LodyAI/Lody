@@ -1,0 +1,139 @@
+package app.lody.android.runtime
+import org.json.JSONObject
+import org.junit.Assert.*
+import org.junit.Test
+import java.io.File
+class RuntimeProtocolTest {
+ private val fixtures=JSONObject(File(System.getProperty("runtime.fixtures")).readText())
+ private fun operationMessages(items: String): List<SessionMessage> = (RuntimeProtocol.event(JSONObject().put("type", "session").put("sessionId", "s")
+  .put("session", """{"v":1,"status":"live","entries":[{"id":"event","role":"system","items":$items}]}""")) as RuntimeEvent.SessionUpdated).snapshot.messages
+ @Test fun operationProgressAndRepliesSurviveTheNativeSessionBoundary() {
+  val progress = operationMessages("""[{"itemId":"progress","rev":1,"type":"operation_progress","operation":{"cards":[{"id":"0","kind":"created","sessionId":"child","label":"Research","status":"running"}],"notices":[]}}]""").single()
+  assertEquals("system", progress.role)
+  assertEquals(OperationCard("child", "Research", "running", null), progress.operations.single().cards.single())
+  val reply = operationMessages("""[{"itemId":"receipt","rev":1,"type":"operation_completion","operation":{"cards":[{"id":"0","kind":"reply","sessionId":"child","status":"succeeded","reply":"The answer"}],"notices":[]}}]""").single().operations.single()
+  assertFalse(reply.creates)
+  assertEquals("The answer", reply.cards.single().reply)
+ }
+ @Test fun savedReplyRetainsFullMarkdownAndUpstreamTruncationIndependentlyOfDetail() {
+  val full = "# Saved answer\n\n" + "Long reply with **formatting**.\n".repeat(40)
+  val card = JSONObject().put("kind", "reply").put("sessionId", "deleted-target")
+   .put("status", "succeeded").put("detail", "Separate detail").put("reply", full).put("replyTruncated", true)
+  val item = JSONObject().put("type", "operation_completion").put("itemId", "saved")
+   .put("operation", JSONObject().put("cards", org.json.JSONArray().put(card)))
+  val decoded = operationMessages(org.json.JSONArray().put(item).toString()).single().operations.single().cards.single()
+  assertEquals(full, decoded.reply)
+  assertEquals("Separate detail", decoded.detail)
+  assertTrue(decoded.replyTruncated)
+  assertNull(app.lody.android.chat.SessionRelations.target(decoded.sessionId, emptyList()))
+  card.remove("replyTruncated")
+  assertFalse(operationMessages(org.json.JSONArray().put(item).toString()).single().operations.single().cards.single().replyTruncated)
+ }
+ @Test fun projectedSuppressionKeepsFailuresAndCancellationWithoutInventingTargets() {
+  val events = operationMessages("""[{"itemId":"receipt","rev":1,"type":"operation_completion","operation":{"cards":[],"notices":[{"kind":"partial"},{"kind":"failed","detail":"Second: Machine offline"},{"kind":"cancelled","detail":"Third"}]}}]""").single().operations
+  assertEquals(listOf("partial", "failed", "cancelled"), events.map { it.outcome })
+  assertEquals("Second: Machine offline", events[1].error)
+  assertTrue(events.all { it.cards.isEmpty() })
+  assertTrue(operationMessages("""[{"itemId":"suppressed","rev":1,"type":"operation_completion","operation":{"cards":[],"notices":[]}}]""").isEmpty())
+  val unknown = operationMessages("""[{"itemId":"batch","rev":1,"type":"operation_completion_batch","operation":{"cards":[],"notices":[{"kind":"batchUnknown","count":1}]}}]""").single().operations.single()
+  assertTrue(unknown.deliveryUnknown)
+  assertEquals(1, unknown.memberCount)
+ }
+ @Test fun batchProjectionPreservesMixedCreateReplyAndFailureDetails() {
+  val events = operationMessages("""[{"itemId":"batch","rev":2,"type":"operation_completion_batch","operation":{"cards":[{"id":"a/0","kind":"created","sessionId":"first","status":"failed","detail":"Dispatch failed"},{"id":"b/0","kind":"reply","sessionId":"second","status":"succeeded","reply":"Finished"}],"notices":[{"kind":"batch","count":3},{"kind":"failed","detail":"Cannot dispatch"}]}}]""").single().operations
+  assertEquals(3, events[0].memberCount)
+  assertEquals("Cannot dispatch", events[1].error)
+  assertTrue(events[2].creates)
+  assertEquals("Dispatch failed", events[2].cards.single().detail)
+  assertFalse(events[3].creates)
+  assertEquals("Finished", events[3].cards.single().reply)
+  assertTrue(operationMessages("""[{"type":"unknown"},{"type":"operation_completion"}]""").isEmpty())
+ }
+ @Test fun usageProjectionPrefersContextThenFiveHours() {
+  fun usage(json: String): SessionUsage? = (RuntimeProtocol.event(JSONObject().put("type", "session").put("sessionId", "s")
+   .put("session", """{"v":1,"status":"live","entries":[],"usage":$json}""")) as RuntimeEvent.SessionUpdated).snapshot.usage
+  val quota = """"quota":{"name":"Codex","windows":[{"duration":604800,"usedPercent":29},{"duration":18000,"usedPercent":0,"resetsAt":1900000000}]}"""
+  assertFalse(usage("{}")!!.visible)
+  assertFalse(usage("{$quota}")!!.visible)
+  val eligible = usage("{\"quotaEligible\":true,\"modelId\":\"codex-model\",\"modelLabel\":\"Selected model\",$quota}")!!
+  assertEquals("codex-model", eligible.modelId)
+  assertEquals("Selected model", eligible.quota!!.name)
+  assertEquals(0.0, eligible.triggerPercent!!, 0.0)
+  assertEquals(listOf(604800.0, 18000.0), eligible.windows.map { it.duration })
+  assertEquals(1900000000.0, eligible.windows.last().resetsAt!!, 0.0)
+  val context = usage("{\"context\":{\"used\":250,\"size\":200},$quota}")!!
+  assertEquals(100.0, context.triggerPercent!!, 0.0)
+  assertEquals(250.0, context.context!!.used, 0.0)
+  assertFalse(usage("{\"context\":{\"used\":20,\"size\":0}}")!!.visible)
+  assertTrue(usage("{\"isContextCompacting\":true}")!!.visible)
+  assertNull(usage("null"))
+ }
+ @Test fun malformedUsageDoesNotInventQuotaAndEmptyReportedPlanSurvives() {
+  val parsed = SessionUsageJson.parse(JSONObject("""{"quotaEligible":true,"context":{"size":100,"used":-1},"quota":{"windows":[{"usedPercent":"20"},{"usedPercent":120,"duration":-3,"resetsAt":0}]}}"""))!!
+  assertEquals(0.0, parsed.context!!.percent, 0.0)
+  assertEquals(100.0, parsed.windows.single().usedPercent, 0.0)
+  assertNull(parsed.windows.single().duration)
+  assertNull(parsed.windows.single().resetsAt)
+  val empty = SessionUsageJson.parse(JSONObject("""{"quotaEligible":true,"quota":{"windows":[]}}"""))!!
+  assertNotNull(empty.quota)
+  assertFalse(empty.visible)
+ }
+ @Test fun sessionTextKeepsOrderAndStreamingButOmitsToolPayloads() {
+  val body="""{"v":1,"status":"live","entries":[{"id":"u","role":"user","finished":true,"items":[{"type":"text","text":"hello"}]},{"id":"a","role":"assistant","finished":false,"items":[{"type":"text","text":"First"},{"type":"tool_call","title":"private payload"},{"type":"text","text":"Second"},{"type":"proposed_plan","status":"cleared","markdown":"old plan"}]}]}"""
+  val frame=JSONObject().put("type","session").put("sessionId","s").put("session",body)
+  val snapshot=(RuntimeProtocol.event(frame) as RuntimeEvent.SessionUpdated).snapshot
+  assertEquals("live",snapshot.status)
+  assertEquals(listOf(SessionMessage("u","user","hello",false),SessionMessage("a","assistant","First\n\nSecond",true)),snapshot.messages.map { it.copy(items = emptyList()) })
+ }
+ @Test fun fileOnlyTurnsRetainAllFilesAndStats() {
+  val files = org.json.JSONArray()
+  repeat(9) { files.put(JSONObject().put("path", "src/file$it.kt").put("add", it).put("del", 2)) }
+  files.put(JSONObject().put("path", ""))
+  val entry = JSONObject().put("id", "a").put("role", "assistant").put("finished", true).put("items", org.json.JSONArray()).put("fileDiffs", files)
+  val body = JSONObject().put("v", 1).put("status", "live").put("entries", org.json.JSONArray().put(entry))
+  val event = JSONObject().put("type", "session").put("sessionId", "s").put("session", body.toString())
+  val messages = (RuntimeProtocol.event(event) as RuntimeEvent.SessionUpdated).snapshot.messages
+  assertEquals(9, messages.single().files.size)
+  assertEquals(FileChange("src/file8.kt", 8, 2), messages.single().files.last())
+ }
+ @Test fun composerRoleIsKnownOnlyWhenTheLatestTurnSaysSo() {
+  fun composer(json: String) = (RuntimeProtocol.event(JSONObject().put("type","session").put("sessionId","s")
+   .put("session","""{"v":1,"status":"live","composer":$json,"entries":[]}""")) as RuntimeEvent.SessionUpdated).snapshot.composer!!
+  assertEquals(RunChoice(agentRoleId = "r", roleKnown = true), composer("""{"agentRoleId":"r"}"""))
+  assertEquals(RunChoice(roleKnown = true), composer("""{"agentRoleId":null}"""))
+  assertEquals(RunChoice(), composer("""{}"""))
+ }
+ @Test fun composerChoiceAndUserAttachmentsAreParsed() {
+  val body="""{"v":1,"status":"live","composer":{"modelId":"gpt","modeId":"plan","effort":"high","configOptionValues":{"fast":true}},"entries":[{"id":"u","role":"user","finished":true,"items":[{"type":"image_group","images":[{"id":"i1","fileName":"a.png"},{"id":"i2","fileName":"b.png"}]},{"type":"file","file":{"id":"f1","fileName":"notes.md"}}]}]}"""
+  val snapshot=(RuntimeProtocol.event(JSONObject().put("type","session").put("sessionId","s").put("session",body)) as RuntimeEvent.SessionUpdated).snapshot
+  // Agent switches (Fast) come back so the chip and sheet reopen on them; no Role was said.
+  assertEquals(RunChoice("gpt","plan","high",mapOf("fast" to true)),snapshot.composer)
+  // An attachment-only user turn stays in the transcript.
+  assertEquals(listOf(MessageAttachment("a.png",true),MessageAttachment("b.png",true),MessageAttachment("notes.md",false)),snapshot.messages.single().attachments)
+ }
+ @Test fun sessionProjectionIsNotDropped() {
+  val frame=JSONObject().put("type","session").put("sessionId","s").put("session", """{"v":1,"status":"live","entries":[]}""")
+  assertNotNull(RuntimeProtocol.event(frame))
+ }
+ @Test fun sharedFixturesDecodeToTypedResults() {
+  assertEquals(setOf("ping","setActive","probeSchema"),RuntimeProtocol.capabilities(fixtures.getJSONObject("hostReady")))
+  val event=RuntimeProtocol.event(fixtures.getJSONObject("catalog")) as RuntimeEvent.CatalogUpdated
+  assertEquals("中文 😀",event.snapshot.sessions.single().title);assertEquals(7L,event.snapshot.revision)
+  assertEquals(RuntimeEvent.Synced(7,2),RuntimeProtocol.event(fixtures.getJSONObject("synced")))
+  assertEquals(RuntimeEvent.GrantRequested,RuntimeProtocol.event(fixtures.getJSONObject("grant")))
+  assertEquals(setOf("m"),RuntimeProtocol.schema(fixtures.getJSONObject("schema")).machineIds)
+ }
+ @Test fun networkFailureCannotBeMistakenForLiveAndDoesNotLeakRemoteText() {
+  assertEquals(RuntimeEvent.SyncFailed("network_unavailable"),RuntimeProtocol.event(JSONObject("""{"type":"networkStatus","status":"unavailable"}""")))
+  assertEquals(RuntimeEvent.SyncFailed("sync_failed"),RuntimeProtocol.event(JSONObject("""{"type":"syncError","reason":"private server contents"}""")))
+ }
+ @Test fun incompatibleOrIncompleteHandshakeFailsClosed() {
+  assertThrows(Exception::class.java){RuntimeProtocol.capabilities(JSONObject("""{"protocol":1,"capabilities":["ping"]}"""))}
+  assertThrows(Exception::class.java){RuntimeProtocol.capabilities(JSONObject("""{"protocol":2,"capabilities":["ping"]}"""))}
+ }
+ @Test fun malformedRequiredFieldsAreRejectedButFutureEventsIgnored() {
+  assertThrows(Exception::class.java){RuntimeProtocol.event(JSONObject("""{"type":"synced","revision":"7","streams":2}"""))}
+  assertThrows(Exception::class.java){RuntimeProtocol.event(JSONObject("""{"type":"catalog","revision":7,"catalog":{}}"""))}
+  assertNull(RuntimeProtocol.event(JSONObject("""{"type":"futureEvent"}""")))
+ }
+}

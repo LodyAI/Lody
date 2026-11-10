@@ -1,3 +1,5 @@
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { getLatestPullRequestInfo } from '@/components/sessions/session-list-rows';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -56,6 +58,7 @@ import { MobileArchiveScreen } from '@/components/mobile/mobile-archive-screen';
 import { WebArchiveScreen } from './web-archive-screen';
 import {
   getMachineFlockLocalProjects,
+  getSessionGroupTitle,
   getSessionLaunchConfigLegacyFields,
   type MachineId,
   type PrStatus,
@@ -603,7 +606,7 @@ function sessionActivityTime(session: SessionMeta): number {
 }
 
 function sessionTitle(session: SessionMeta): string {
-  return session.title?.trim() || 'Untitled session';
+  return getSessionGroupTitle(session) || 'Untitled session';
 }
 
 function sortArchivedSessions(
@@ -758,7 +761,7 @@ function getArchivedSessionItemViewModel(
   session: SessionMeta,
   now: Date
 ): ArchivedSessionItemViewModel {
-  const title = session.title?.trim() || 'Untitled session';
+  const title = sessionTitle(session);
   const relativeTime = formatCompactRelativeTime(session.lastMessageAt, now);
   const branchName = session.branchName?.trim() || '';
   const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
@@ -1714,8 +1717,7 @@ export function ArchiveView() {
   } = useVisibleArchivedSessionMetas();
   const rejectHistoryWrite = useCallback(
     (ids: string[]) => {
-      if (!workspaceHistoryReadable || !ids.some((id) => historyOnlySessionIds.has(id)))
-        return false;
+      if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
       toast.info(t('sessions.historyMachineUnavailable'));
       return true;
     },
@@ -1730,6 +1732,7 @@ export function ArchiveView() {
   const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('project');
   const { activeOrganization } = useOrganization();
   const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const localMachineId = useAtomValue(localMachineIdAtom);
   const archivedLocalSessionMachineIds = useMemo(
     () =>
@@ -1780,11 +1783,13 @@ export function ArchiveView() {
 
   // Filter archived sessions based on scope (my/team + local privacy).
   const scopedArchivedSessions = useMemo(() => {
-    const userId = user?.id ?? null;
+    const userId = myAccountId;
     const base =
       archiveScope === 'my'
         ? userId
-          ? archivedSessions.filter((session) => session.userId === userId)
+          ? archivedSessions.filter((session) =>
+              isSessionInMyScope(session, userId, ownedMachineIds)
+            )
           : []
         : archivedSessions;
 
@@ -1802,17 +1807,19 @@ export function ArchiveView() {
       // Always allow local machine sessions (even if machine meta is missing ownerUserId due to older data).
       if (localMachineId && session.machineId === localMachineId) return true;
 
-      const machine = machineMetaMap.get(session.machineId);
-      if (machine?.ownerUserId === userId) return true;
+      if (ownedMachineIds.has(session.machineId)) return true;
 
       // My scope is already filtered by userId; keep local sessions visible even if owner meta hasn't updated yet.
-      if (archiveScope === 'my' && session.userId === userId) return true;
+      if (archiveScope === 'my' && isSessionInMyScope(session, userId, ownedMachineIds))
+        return true;
 
       return false;
     });
   }, [
     archivedSessions,
     archiveScope,
+    ownedMachineIds,
+    myAccountId,
     localMachineId,
     machineMetaMap,
     user?.id,
@@ -1867,7 +1874,7 @@ export function ArchiveView() {
 
   const canRestoreArchivedSession = useCallback(
     (session: SessionMeta): boolean => {
-      if (workspaceHistoryReadable && historyOnlySessionIds.has(session.id)) return false;
+      if (historyOnlySessionIds.has(session.id)) return false;
       const project = session.project;
       if (project?.kind !== 'local') return true;
       const key = `local:${session.machineId}:${project.localProjectId}`;

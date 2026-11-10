@@ -544,3 +544,25 @@ index 460bbb665e9dad4aa617a0b97c4eb3d650ef5c40..82a84eab0a85d41275993b2ee9417ee7
  }
  async function compressInCurrentThread(snapshot) {
  	return (await getZstdModule()).compress(snapshot);
+diff --git a/dist/upload-capability-DwA4z9F1.js b/dist/upload-capability-DwA4z9F1.js
+--- a/dist/upload-capability-DwA4z9F1.js
++++ b/dist/upload-capability-DwA4z9F1.js
+@@ -1483,12 +1483,13 @@
+ 			let req = HttpClientRequest.make(method)(routed).pipe(HttpClientRequest.setHeader(method === "GET" ? "accept" : "content-type", method === "GET" ? "text/event-stream" : "application/octet-stream"));
+ 			if (update != null) req = HttpClientRequest.bodyUint8Array(req, update);
+ 			if (bearer) req = HttpClientRequest.bearerToken(req, bearer);
+-			yield* timed(client.execute(req).pipe(Effect.provideService(HttpClient.TracerDisabledWhen, () => true), Effect.mapError((error) => error.reason._tag === "TransportError" && error.reason.cause instanceof EphemeralFailure ? error.reason.cause : failure(error, "fetch"))), "fetch");
++			const responseWrapper = yield* timed(client.execute(req).pipe(Effect.provideService(HttpClient.TracerDisabledWhen, () => true), Effect.mapError((error) => error.reason._tag === "TransportError" && error.reason.cause instanceof EphemeralFailure ? error.reason.cause : failure(error, "fetch"))), "fetch");
+ 			const response = responses.get(req);
+-			return {
+-				response,
+-				lease: leases.get(response)
+-			};
++			const lease = leases.get(response);
++			// Effect aborts an unscoped HTTP response when its wrapper is collected.
++			// Keep that wrapper with the body lease until EOF or confirmed cleanup.
++			if (lease != null) lease.responseWrapper = responseWrapper;
++			return { response, lease };
+ 		});
+ 		const firstToken = yield* token({ reason: "request" });
+ 		let result = yield* send(firstToken);

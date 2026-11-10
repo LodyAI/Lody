@@ -1,0 +1,4342 @@
+{
+  "protocol": 1,
+  "runtimeCalls": {
+    "agentProviderAuth": {
+      "params": "AgentProviderAuthParams",
+      "result": "AgentProviderAuthState",
+      "timeoutMs": 60000
+    },
+    "agentProviderDetail": {
+      "params": "AgentProviderDetailParams",
+      "result": "AgentProviderDetail",
+      "timeoutMs": 45000
+    },
+    "agentProviderOperation": {
+      "params": "AgentProviderOperationParams",
+      "result": "AgentProviderOperationResult",
+      "timeoutMs": 350000
+    },
+    "agentProviderProbe": {
+      "params": "AgentProviderProbeParams",
+      "result": "AgentProviderProbeResult",
+      "timeoutMs": 135000
+    },
+    "agentProviders": {
+      "params": "AgentProvidersParams",
+      "result": "AgentProvidersResult",
+      "timeoutMs": 135000
+    },
+    "agentRoles": {
+      "params": "AgentRolesParams",
+      "result": "AgentRoleSnapshot",
+      "timeoutMs": 45000
+    },
+    "archiveSession": {
+      "params": "ArchiveSessionParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "checkTurnQuota": {
+      "params": "CheckTurnQuotaParams",
+      "result": "CheckTurnQuotaResult",
+      "timeoutMs": 45000
+    },
+    "closeSession": {
+      "params": "Empty",
+      "result": "Empty",
+      "timeoutMs": 10000
+    },
+    "controlTurn": {
+      "params": "ControlTurnParams",
+      "result": "ControlTurnResult",
+      "timeoutMs": 45000
+    },
+    "conversationMarkdown": {
+      "params": "ConversationMarkdownParams",
+      "result": "ConversationMarkdownResult",
+      "timeoutMs": 15000
+    },
+    "createSession": {
+      "params": "CreateSessionParams",
+      "result": "CreateSessionResult",
+      "timeoutMs": 45000
+    },
+    "createTab": {
+      "params": "CreateTabParams",
+      "result": "CreateSessionResult",
+      "timeoutMs": 45000
+    },
+    "creationOptions": {
+      "params": "CreationOptionsParams",
+      "result": "CreationOptions",
+      "timeoutMs": 45000
+    },
+    "deleteSession": {
+      "params": "DeleteSessionParams",
+      "result": "DeleteSessionResult",
+      "timeoutMs": 45000
+    },
+    "editSession": {
+      "params": "EditSessionParams",
+      "result": "EditSessionResult",
+      "timeoutMs": 130000
+    },
+    "ensureSession": {
+      "params": "EnsureSessionParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "fileDiff": {
+      "params": "FileDiffParams",
+      "result": "DiffResult",
+      "timeoutMs": 45000
+    },
+    "forkSession": {
+      "params": "ForkSessionParams",
+      "result": "ForkSessionResult",
+      "timeoutMs": 130000
+    },
+    "hello": {
+      "params": "HelloParams",
+      "result": "HelloResult",
+      "timeoutMs": 10000
+    },
+    "iosSimulatorControl": {
+      "params": "IosSimulatorControlParams",
+      "result": "IosSimulatorControlResult",
+      "timeoutMs": 100000
+    },
+    "itemDetail": {
+      "params": "ItemDetailParams",
+      "result": "ItemDetail",
+      "timeoutMs": 45000
+    },
+    "listDir": {
+      "params": "ListDirParams",
+      "result": "DirectoryListing",
+      "timeoutMs": 45000
+    },
+    "localProjects": {
+      "params": "LocalProjectsParams",
+      "result": "LocalProjectsResult",
+      "timeoutMs": 130000
+    },
+    "markSessionRead": {
+      "params": "MarkSessionReadParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "mentionCatalog": {
+      "params": "MentionCatalogParams",
+      "result": "MentionCatalog",
+      "timeoutMs": 45000
+    },
+    "openSession": {
+      "params": "OpenSessionParams",
+      "result": "Empty",
+      "timeoutMs": 10000
+    },
+    "ping": { "params": "Empty", "result": "Empty", "timeoutMs": 5000 },
+    "pinSession": {
+      "params": "PinSessionParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "probeSchema": {
+      "params": "ProbeSchemaParams",
+      "result": "ProbeSchemaReport",
+      "timeoutMs": 45000
+    },
+    "projectGroups": {
+      "params": "ProjectGroupsParams",
+      "result": "ProjectGroupsResult",
+      "timeoutMs": 45000
+    },
+    "promptShortcuts": {
+      "params": "PromptShortcutsParams",
+      "result": "PromptShortcutsResult",
+      "timeoutMs": 130000
+    },
+    "publishedShares": {
+      "params": "PublishedSharesParams",
+      "result": "PublishedSharesResult",
+      "timeoutMs": 70000
+    },
+    "readFile": {
+      "params": "ReadFileParams",
+      "result": "FileContent",
+      "timeoutMs": 45000
+    },
+    "releaseReserve": {
+      "params": "ReleaseReserveParams",
+      "result": "Empty",
+      "timeoutMs": 10000
+    },
+    "remoteSettings": {
+      "params": "RemoteSettingsParams",
+      "result": "RemoteSettingsResult",
+      "timeoutMs": 45000
+    },
+    "renameSession": {
+      "params": "RenameSessionParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "respondPermission": {
+      "params": "RespondPermissionParams",
+      "result": "RespondPermissionResult",
+      "timeoutMs": 45000
+    },
+    "restoreSessions": {
+      "params": "RestoreSessionsParams",
+      "result": "Empty",
+      "timeoutMs": 10000
+    },
+    "scheduleCommand": {
+      "params": "ScheduleCommandParams",
+      "result": "ScheduleCommandResult",
+      "timeoutMs": 70000
+    },
+    "scheduleDetail": {
+      "params": "ScheduleDetailParams",
+      "result": "ScheduleDetail",
+      "timeoutMs": 45000
+    },
+    "schedules": {
+      "params": "SchedulesParams",
+      "result": "SchedulesResult",
+      "timeoutMs": 45000
+    },
+    "sendTurn": {
+      "params": "SendTurnParams",
+      "result": "SendTurnResult",
+      "timeoutMs": 45000
+    },
+    "sessionPreview": {
+      "params": "SessionPreviewParams",
+      "result": "SessionPreviewResult",
+      "timeoutMs": 330000
+    },
+    "sessionSharing": {
+      "params": "SessionSharingParams",
+      "result": "SessionSharingResult",
+      "timeoutMs": 130000
+    },
+    "sessionWorkspacePath": {
+      "params": "SessionWorkspacePathParams",
+      "result": "SessionWorkspacePathResult",
+      "timeoutMs": 15000
+    },
+    "setActive": {
+      "params": "SetActiveParams",
+      "result": "Empty",
+      "timeoutMs": 10000
+    },
+    "setSessionOwner": {
+      "params": "SetSessionOwnerParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "setTabClosed": {
+      "params": "SetTabClosedParams",
+      "result": "Empty",
+      "timeoutMs": 45000
+    },
+    "start": { "params": "StartParams", "result": "Empty", "timeoutMs": 10000 },
+    "turnDiff": {
+      "params": "TurnDiffParams",
+      "result": "DiffResult",
+      "timeoutMs": 45000
+    },
+    "workspaceChanges": {
+      "params": "WorkspaceChangesParams",
+      "result": "WorkspaceChanges",
+      "timeoutMs": 45000
+    }
+  },
+  "hostCalls": {
+    "githubMentions": {
+      "params": "GitHubMentionsParams",
+      "result": "GitHubMentionsResult",
+      "timeoutMs": 35000
+    },
+    "grant": { "params": "Empty", "result": "Grant", "timeoutMs": 30000 },
+    "shareRequest": {
+      "params": "ShareRequestParams",
+      "result": "ShareRequestResult",
+      "timeoutMs": 65000
+    },
+    "shortcutCloud": {
+      "params": "ShortcutCloudParams",
+      "result": "ShortcutCloudResult",
+      "timeoutMs": 20000
+    }
+  },
+  "events": {
+    "agentProviderAuthChanged": "AgentProviderAuthState",
+    "agentProviderOperationProgress": "AgentProviderOperationProgress",
+    "agentProvidersChanged": "AgentProvidersChangedEvent",
+    "catalog": "CatalogEvent",
+    "creationOptionsChanged": "Empty",
+    "diagnostic": "DiagnosticEvent",
+    "machinePresence": "MachinePresence",
+    "session": "SessionEvent",
+    "sessionCache": "SessionCacheEvent",
+    "sessionSubscriptions": "SessionSubscriptionsEvent",
+    "sessionTrace": "SessionTraceEvent",
+    "shareProgress": "ShareProgressEvent",
+    "synced": "SyncedEvent",
+    "syncError": "SyncErrorEvent"
+  },
+  "envelope": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "v": { "type": "number", "const": 1 },
+          "gen": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "method": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "const": "request" },
+          "id": { "type": "string", "minLength": 1 },
+          "payload": {}
+        },
+        "required": ["v", "gen", "method", "kind", "id", "payload"]
+      },
+      {
+        "type": "object",
+        "properties": {
+          "v": { "type": "number", "const": 1 },
+          "gen": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "method": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "const": "result" },
+          "id": { "type": "string", "minLength": 1 },
+          "payload": {}
+        },
+        "required": ["v", "gen", "method", "kind", "id", "payload"]
+      },
+      {
+        "type": "object",
+        "properties": {
+          "v": { "type": "number", "const": 1 },
+          "gen": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "method": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "const": "error" },
+          "id": { "type": "string", "minLength": 1 },
+          "error": { "$ref": "#/$defs/RuntimeError" }
+        },
+        "required": ["v", "gen", "method", "kind", "id", "error"]
+      },
+      {
+        "type": "object",
+        "properties": {
+          "v": { "type": "number", "const": 1 },
+          "gen": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "method": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "const": "event" },
+          "payload": {}
+        },
+        "required": ["v", "gen", "method", "kind", "payload"]
+      }
+    ],
+    "$defs": {
+      "RuntimeError": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "retryable": { "type": "boolean" },
+          "detail": { "type": "string" }
+        },
+        "required": ["code", "retryable"]
+      }
+    }
+  },
+  "types": {
+    "AgentProviderAuthParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "const": "start" },
+            "flowId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "methodId": { "type": "string", "maxLength": 1024 }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "machineId",
+            "id",
+            "action",
+            "flowId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "const": "status" },
+            "flowId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "machineId",
+            "id",
+            "action",
+            "flowId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "const": "cancel" },
+            "flowId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "machineId",
+            "id",
+            "action",
+            "flowId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "const": "submit" },
+            "flowId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "interactionId": { "type": "string", "maxLength": 1024 },
+            "values": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string", "maxLength": 32000 }
+            },
+            "authorizationCode": { "type": "string", "maxLength": 4096 },
+            "responseAction": {
+              "type": "string",
+              "enum": ["accept", "decline", "cancel"]
+            },
+            "methodId": { "type": "string", "maxLength": 1024 }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "machineId",
+            "id",
+            "action",
+            "flowId"
+          ]
+        }
+      ]
+    },
+    "AgentProviderAuthState": {
+      "type": "object",
+      "properties": {
+        "flowId": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "starting",
+            "verifying",
+            "method-required",
+            "authorization",
+            "input-required",
+            "authenticated",
+            "cancelled",
+            "error"
+          ]
+        },
+        "methods": {
+          "type": "array",
+          "items": { "$ref": "ProviderAuthMethod" }
+        },
+        "fields": { "type": "array", "items": { "$ref": "ProviderAuthField" } },
+        "interactionId": { "type": "string" },
+        "authorizationUrl": { "type": "string" },
+        "userCode": { "type": "string" },
+        "acceptsAuthorizationCode": { "type": "boolean" },
+        "requiresAuthorizationConsent": { "type": "boolean" },
+        "errorCode": { "type": "string" }
+      },
+      "required": [
+        "flowId",
+        "status",
+        "methods",
+        "fields",
+        "acceptsAuthorizationCode",
+        "requiresAuthorizationConsent"
+      ]
+    },
+    "AgentProviderDetail": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "machineId": { "type": "string" },
+        "revision": { "type": "string" },
+        "description": { "type": "string" },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "hasValue": { "type": "boolean" }
+            },
+            "required": ["key", "hasValue"]
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "value": { "type": "string" }
+            },
+            "required": ["key", "value"]
+          }
+        },
+        "runtimeOverrides": { "$ref": "ProviderRuntimeOverrides" },
+        "titleGeneration": {
+          "anyOf": [{ "$ref": "ProviderTitleGeneration" }, { "type": "null" }]
+        },
+        "codexAuth": { "$ref": "ProviderCodexAuth" },
+        "presetId": { "type": "string" },
+        "capabilities": { "$ref": "ProviderCapabilities" },
+        "supportsAuthentication": { "type": "boolean" },
+        "supportsMethodSelection": { "type": "boolean" },
+        "supportsCodexProfiles": { "type": "boolean" },
+        "supportsPiExtensions": { "type": "boolean" },
+        "supportsRateLimitsRefresh": { "type": "boolean" },
+        "unavailableActions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": { "type": "string" },
+              "reason": { "type": "string" }
+            },
+            "required": ["action", "reason"]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "revision",
+        "description",
+        "env",
+        "endpoints",
+        "runtimeOverrides",
+        "titleGeneration",
+        "capabilities",
+        "supportsAuthentication",
+        "supportsMethodSelection",
+        "supportsCodexProfiles",
+        "supportsPiExtensions",
+        "unavailableActions"
+      ]
+    },
+    "AgentProviderDetailParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "userId", "machineId", "id"]
+    },
+    "AgentProviderOperationParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "cliType": { "type": "string", "enum": ["builtin", "registry"] },
+            "agentType": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "action": { "type": "string", "const": "binary-status" }
+          },
+          "required": ["workspaceId", "userId", "machineId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "cliType": { "type": "string", "enum": ["builtin", "registry"] },
+            "agentType": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "action": { "type": "string", "const": "binary-install" }
+          },
+          "required": ["workspaceId", "userId", "machineId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "const": "pi-extension-scan" }
+          },
+          "required": ["workspaceId", "userId", "machineId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "const": "rate-limits-refresh" }
+          },
+          "required": ["workspaceId", "userId", "machineId", "id", "action"]
+        }
+      ]
+    },
+    "AgentProviderOperationProgress": {
+      "type": "object",
+      "properties": {
+        "machineId": { "type": "string" },
+        "id": { "type": "string" },
+        "status": { "type": "string" },
+        "percent": { "type": "number" }
+      },
+      "required": ["machineId", "id", "status"]
+    },
+    "AgentProviderOperationResult": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "success": { "type": "boolean" },
+        "status": { "type": "string" },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "name": { "type": "string" },
+              "source": { "type": "string" }
+            },
+            "required": ["path", "name"]
+          }
+        },
+        "version": { "type": "string" },
+        "current": { "type": "string" },
+        "required": { "type": "string" },
+        "errorCode": { "type": "string" }
+      },
+      "required": ["action", "success"]
+    },
+    "AgentProviderProbeParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "userId", "machineId", "id"]
+    },
+    "AgentProviderProbeResult": {
+      "type": "object",
+      "properties": {
+        "success": { "type": "boolean" },
+        "authRequired": { "type": "boolean" },
+        "capabilities": { "$ref": "ProviderCapabilities" }
+      },
+      "required": ["success", "authRequired", "capabilities"]
+    },
+    "AgentProvidersChangedEvent": {
+      "type": "object",
+      "properties": { "machineId": { "type": "string" } },
+      "required": ["machineId"]
+    },
+    "AgentProvidersParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "list" },
+            "machineId": { "type": "string", "minLength": 1 }
+          },
+          "required": ["workspaceId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "save" },
+            "machineId": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "base": {
+              "anyOf": [{ "$ref": "ProviderItem" }, { "type": "null" }]
+            },
+            "fields": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "prompt": { "type": "string", "maxLength": 32000 },
+                "cliType": { "type": "string", "minLength": 1 },
+                "agentType": { "type": "string", "minLength": 1 },
+                "command": { "type": "string", "maxLength": 4096 },
+                "args": {
+                  "maxItems": 128,
+                  "type": "array",
+                  "items": { "type": "string", "maxLength": 4096 }
+                },
+                "detailRevision": { "type": "string", "maxLength": 32000 },
+                "description": { "type": "string", "maxLength": 4096 },
+                "envPatch": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      { "type": "string", "maxLength": 32000 },
+                      { "type": "null" }
+                    ]
+                  }
+                },
+                "runtimeOverrides": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": { "type": "string", "const": "merge" },
+                        "value": { "$ref": "ProviderRuntimeOverrides" },
+                        "remove": {
+                          "maxItems": 7,
+                          "type": "array",
+                          "items": { "type": "string" }
+                        }
+                      },
+                      "required": ["action", "value", "remove"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": { "type": "string", "const": "clear" }
+                      },
+                      "required": ["action"]
+                    }
+                  ]
+                },
+                "titleGeneration": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": { "type": "string", "const": "set" },
+                        "value": { "$ref": "ProviderTitleGeneration" }
+                      },
+                      "required": ["action", "value"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": { "type": "string", "const": "clear" }
+                      },
+                      "required": ["action"]
+                    }
+                  ]
+                },
+                "codexAuth": { "$ref": "ProviderCodexAuth" },
+                "presetId": { "type": "string", "maxLength": 128 },
+                "presetModeId": { "type": "string", "maxLength": 128 },
+                "presetEndpoint": { "type": "string", "maxLength": 2048 }
+              },
+              "required": [
+                "name",
+                "prompt",
+                "cliType",
+                "agentType",
+                "command",
+                "args"
+              ]
+            }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "action",
+            "machineId",
+            "id",
+            "base",
+            "fields"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "delete" },
+            "base": { "$ref": "ProviderItem" }
+          },
+          "required": ["workspaceId", "userId", "action", "base"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "refresh" },
+            "base": { "$ref": "ProviderItem" }
+          },
+          "required": ["workspaceId", "userId", "action", "base"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "retrySetup" },
+            "setup": { "$ref": "ProviderSetup" }
+          },
+          "required": ["workspaceId", "userId", "action", "setup"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "deleteSetup" },
+            "setup": { "$ref": "ProviderSetup" }
+          },
+          "required": ["workspaceId", "userId", "action", "setup"]
+        }
+      ]
+    },
+    "AgentProvidersResult": {
+      "type": "object",
+      "properties": {
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "os": { "type": "string" },
+              "readOnly": { "type": "boolean" },
+              "online": { "type": "boolean" },
+              "supportsSetup": { "type": "boolean" },
+              "supportsCodexProfiles": { "type": "boolean" },
+              "supportsAuthentication": { "type": "boolean" },
+              "supportsPiExtensions": { "type": "boolean" }
+            },
+            "required": [
+              "id",
+              "name",
+              "os",
+              "readOnly",
+              "online",
+              "supportsSetup"
+            ]
+          }
+        },
+        "providers": { "type": "array", "items": { "$ref": "ProviderItem" } },
+        "setups": { "type": "array", "items": { "$ref": "ProviderSetup" } },
+        "catalog": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "cliType": { "type": "string" },
+              "agentType": { "type": "string" },
+              "presetId": { "type": "string" }
+            },
+            "required": ["id", "name", "cliType", "agentType"]
+          }
+        },
+        "presets": { "type": "array", "items": { "$ref": "ProviderPreset" } },
+        "authRequired": { "type": "boolean" }
+      },
+      "required": ["machines", "providers", "setups", "catalog"]
+    },
+    "AgentRoleItem": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "ownerUserId": { "type": "string", "minLength": 1 },
+        "visibility": { "type": "string", "enum": ["private", "workspace"] },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "promptPrefix": { "type": "string" },
+        "emoji": { "type": "string" },
+        "revision": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "updatedAt": { "type": "number" },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "machineId": { "type": "string", "minLength": 1 },
+              "agentConfigId": { "type": "string", "minLength": 1 },
+              "alias": { "type": "string" },
+              "runConfig": {
+                "type": "object",
+                "properties": {
+                  "modelId": { "type": "string" },
+                  "modeId": { "type": "string" },
+                  "configOptionValues": {
+                    "type": "object",
+                    "propertyNames": { "type": "string" },
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "machineName": { "type": "string" },
+              "agentName": { "type": "string" },
+              "state": {
+                "type": "string",
+                "enum": ["configured", "machineUnavailable", "agentUnavailable"]
+              }
+            },
+            "required": [
+              "machineId",
+              "agentConfigId",
+              "machineName",
+              "agentName",
+              "state"
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "ownerUserId",
+        "visibility",
+        "name",
+        "description",
+        "promptPrefix",
+        "revision",
+        "updatedAt",
+        "targets"
+      ]
+    },
+    "AgentRoleSnapshot": {
+      "type": "object",
+      "properties": {
+        "roles": { "type": "array", "items": { "$ref": "AgentRoleItem" } },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "machineId": { "type": "string" },
+              "machineName": { "type": "string" },
+              "cliType": { "type": "string" },
+              "agentType": { "type": "string" }
+            },
+            "required": ["id", "name", "machineId", "machineName"]
+          }
+        }
+      },
+      "required": ["roles", "agents"]
+    },
+    "AgentRolesParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "list" }
+          },
+          "required": ["workspaceId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "save" },
+            "id": { "type": "string", "minLength": 1 },
+            "base": {
+              "anyOf": [{ "$ref": "AgentRoleItem" }, { "type": "null" }]
+            },
+            "fields": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "promptPrefix": { "type": "string" },
+                "visibility": {
+                  "type": "string",
+                  "enum": ["private", "workspace"]
+                },
+                "emoji": { "type": "string" }
+              },
+              "required": ["name", "description", "promptPrefix", "visibility"]
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "machineId": { "type": "string", "minLength": 1 },
+                "agentConfigId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["machineId", "agentConfigId"]
+            }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "action",
+            "id",
+            "base",
+            "fields"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "delete" },
+            "base": { "$ref": "AgentRoleItem" }
+          },
+          "required": ["workspaceId", "userId", "action", "base"]
+        }
+      ]
+    },
+    "ArchiveSessionParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "archived": { "type": "boolean" }
+      },
+      "required": ["workspaceId", "sessionId", "archived"]
+    },
+    "BillingEntitlement": {
+      "type": "object",
+      "properties": {
+        "effectivePlanTier": {
+          "type": "string",
+          "enum": ["free", "plus", "enterprise"]
+        },
+        "checkoutPending": { "type": "boolean" }
+      },
+      "required": ["effectivePlanTier", "checkoutPending"]
+    },
+    "Capability": {
+      "type": "object",
+      "properties": {
+        "machineId": { "type": "string" },
+        "agentConfigId": { "type": "string" },
+        "cliType": { "type": "string" },
+        "agentType": { "type": "string" },
+        "models": { "type": "array", "items": { "$ref": "CapabilityChoice" } },
+        "modes": { "type": "array", "items": { "$ref": "CapabilityChoice" } },
+        "legacyModes": {
+          "type": "array",
+          "items": { "$ref": "CapabilityChoice" }
+        },
+        "fastModes": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "boolean" }
+        },
+        "reasoningEfforts": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "reasoningEffortConfigId": { "type": "string" },
+        "configOptions": {
+          "type": "array",
+          "items": { "$ref": "ConfigOption" }
+        },
+        "steer": { "type": "boolean" }
+      },
+      "required": [
+        "machineId",
+        "cliType",
+        "agentType",
+        "models",
+        "modes",
+        "reasoningEfforts",
+        "steer"
+      ]
+    },
+    "CapabilityChoice": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "CapabilityProbe": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "array", "items": { "type": "string" } },
+        "cliType": {},
+        "agentType": {},
+        "models": {},
+        "modes": {},
+        "modelReasoningEfforts": {},
+        "configOptionFields": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["key", "configOptionFields"]
+    },
+    "CatalogEvent": {
+      "type": "object",
+      "properties": {
+        "catalog": { "type": "string" },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["catalog", "revision"]
+    },
+    "CheckTurnQuotaParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "billingEntitlement": {
+          "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
+        }
+      },
+      "required": ["sessionId", "billingEntitlement"]
+    },
+    "CheckTurnQuotaResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "allowed" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "not_sent" },
+            "reason": { "$ref": "QuotaReason" }
+          },
+          "required": ["state", "reason"]
+        }
+      ]
+    },
+    "ClearableString": {
+      "type": "object",
+      "properties": { "value": { "type": ["string", "null"] } },
+      "required": ["value"]
+    },
+    "ConfigOption": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "category": { "type": "string" },
+            "options": {
+              "type": "array",
+              "items": { "$ref": "CapabilityChoice" }
+            },
+            "type": { "type": "string", "const": "select" },
+            "currentValue": { "type": "string" }
+          },
+          "required": ["id", "name", "options", "type"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "category": { "type": "string" },
+            "options": {
+              "type": "array",
+              "items": { "$ref": "CapabilityChoice" }
+            },
+            "type": { "type": "string", "const": "boolean" },
+            "currentValue": { "type": "boolean" }
+          },
+          "required": ["id", "name", "options", "type"]
+        }
+      ]
+    },
+    "ControlTurnParams": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "enum": ["stop", "steer"] },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 },
+        "turnId": { "type": "string", "minLength": 1 },
+        "messageId": { "type": "string" },
+        "interrupt": { "type": "boolean" }
+      },
+      "required": ["action", "sessionId", "machineId", "turnId"]
+    },
+    "ControlTurnResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "stopped" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "applied" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "not_applied" },
+            "reason": { "type": "string" }
+          },
+          "required": ["state"]
+        }
+      ]
+    },
+    "ConversationMarkdownParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "participants": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "incompleteNotice": { "type": "string" }
+      },
+      "required": [
+        "workspaceId",
+        "sessionId",
+        "participants",
+        "incompleteNotice"
+      ]
+    },
+    "ConversationMarkdownResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "empty" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "ready" },
+            "markdown": { "type": "string" },
+            "estimatedTokens": { "type": "number" },
+            "overBudget": { "type": "boolean" },
+            "toolCallsCollapsed": { "type": "boolean" },
+            "thinkingTruncated": { "type": "boolean" },
+            "terminalTrimmed": { "type": "boolean" },
+            "toolResultsTruncated": { "type": "number" }
+          },
+          "required": [
+            "state",
+            "markdown",
+            "estimatedTokens",
+            "overBudget",
+            "toolCallsCollapsed",
+            "thinkingTruncated",
+            "terminalTrimmed",
+            "toolResultsTruncated"
+          ]
+        }
+      ]
+    },
+    "CreatedSession": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "machineId": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "archived": { "type": "boolean" },
+        "pinned": { "type": "boolean" },
+        "projectId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "cliType": { "type": "string" },
+        "agentType": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "title",
+        "status",
+        "archived",
+        "pinned",
+        "projectId",
+        "createdAt"
+      ]
+    },
+    "CreateSessionParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "projectId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "machineId": { "type": "string" },
+        "agentConfigId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "branch": { "type": "string" },
+        "agentRoleId": { "type": "string", "minLength": 1 },
+        "agentRoleRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "projectGroupId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "billingEntitlement": {
+          "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
+        }
+      },
+      "required": [
+        "workspaceId",
+        "sessionId",
+        "machineId",
+        "agentConfigId",
+        "userId",
+        "title",
+        "billingEntitlement"
+      ]
+    },
+    "CreateSessionResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "created" },
+            "session": { "$ref": "CreatedSession" }
+          },
+          "required": ["state", "session"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "unknown" },
+            "session": { "$ref": "CreatedSession" }
+          },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "rejected" },
+            "reason": { "$ref": "QuotaReason" }
+          },
+          "required": ["state"]
+        }
+      ]
+    },
+    "CreateTabParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "parentSessionId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 }
+      },
+      "required": ["workspaceId", "sessionId", "parentSessionId", "title"]
+    },
+    "CreationOptions": {
+      "type": "object",
+      "properties": {
+        "availability": {
+          "type": "string",
+          "enum": ["online", "offline", "unknown"]
+        },
+        "onlineMachineIds": { "type": "array", "items": { "type": "string" } },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "project": { "$ref": "Project" },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "machineId": { "type": "string" },
+              "machineName": { "type": "string" },
+              "cliType": { "type": "string" },
+              "agentType": { "type": "string" }
+            },
+            "required": [
+              "id",
+              "name",
+              "machineId",
+              "machineName",
+              "cliType",
+              "agentType"
+            ]
+          }
+        },
+        "capabilities": { "type": "array", "items": { "$ref": "Capability" } }
+      },
+      "required": ["sessionId", "agents", "capabilities"]
+    },
+    "CreationOptionsParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "projectId": { "type": "string" },
+        "agentConfigId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId"]
+    },
+    "DeleteSessionParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "sessionIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["workspaceId", "sessionId", "sessionIds"]
+    },
+    "DeleteSessionResult": {
+      "type": "object",
+      "properties": {
+        "sessionIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["sessionIds"]
+    },
+    "DetailValue": {
+      "type": "object",
+      "properties": { "value": {} },
+      "required": ["value"]
+    },
+    "DiagnosticEvent": {
+      "type": "object",
+      "properties": {
+        "stage": { "type": "string", "minLength": 1 },
+        "stream": { "type": "string", "minLength": 1 }
+      },
+      "required": ["stage", "stream"]
+    },
+    "DiffBase": { "type": "string", "enum": ["turn", "current"] },
+    "DiffResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "const": "ok" },
+            "base": { "$ref": "DiffBase" },
+            "path": { "type": "string" },
+            "old": { "$ref": "DiffSide" },
+            "new": { "$ref": "DiffSide" },
+            "add": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "del": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["status", "base", "path", "old", "new"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "const": "unavailable" },
+            "base": { "$ref": "DiffBase" },
+            "path": { "type": "string" },
+            "reason": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["status", "base", "path", "reason"]
+        }
+      ]
+    },
+    "DiffSide": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["text", "missing", "binary", "too_large"]
+        },
+        "text": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
+    "DirectoryListing": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string", "enum": ["file", "directory"] }
+            },
+            "required": ["name", "type"]
+          }
+        },
+        "truncated": { "type": "boolean" }
+      },
+      "required": ["entries", "truncated"]
+    },
+    "EditAttachment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "editId": { "type": "string" },
+            "fileName": { "type": "string" },
+            "mimeType": { "type": "string" },
+            "sizeBytes": { "type": "number" },
+            "storageSessionId": { "type": "string" },
+            "type": { "type": "string", "const": "image" },
+            "imageId": { "type": "string" },
+            "width": { "type": "number" },
+            "height": { "type": "number" }
+          },
+          "required": ["editId", "type"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "editId": { "type": "string" },
+            "fileName": { "type": "string" },
+            "mimeType": { "type": "string" },
+            "sizeBytes": { "type": "number" },
+            "storageSessionId": { "type": "string" },
+            "type": { "type": "string", "const": "file" },
+            "fileId": { "type": "string" },
+            "sha256": { "type": "string" },
+            "textPreview": { "type": "boolean" },
+            "sourcePath": { "type": "string" },
+            "transport": { "type": "string" },
+            "machineId": { "type": "string" },
+            "uploadedAt": { "type": "number" }
+          },
+          "required": ["editId", "type"]
+        }
+      ]
+    },
+    "EditSessionParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "string", "minLength": 1 },
+            "expectedUserTurnId": { "type": "string" },
+            "id": { "type": "string" },
+            "userId": { "type": "string" },
+            "billingEntitlement": {
+              "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
+            },
+            "action": { "type": "string", "const": "read" }
+          },
+          "required": [
+            "sessionId",
+            "expectedUserTurnId",
+            "userId",
+            "billingEntitlement",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "string", "minLength": 1 },
+            "expectedUserTurnId": { "type": "string" },
+            "id": { "type": "string" },
+            "userId": { "type": "string" },
+            "billingEntitlement": {
+              "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
+            },
+            "action": { "type": "string", "const": "send" },
+            "backgroundTaskId": { "type": "string", "minLength": 1 },
+            "text": { "type": "string" },
+            "retainedIds": { "type": "array", "items": { "type": "string" } },
+            "attachmentBlocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "propertyNames": { "type": "string" },
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": [
+            "sessionId",
+            "expectedUserTurnId",
+            "userId",
+            "billingEntitlement",
+            "action"
+          ]
+        }
+      ]
+    },
+    "EditSessionResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "ready" },
+            "id": { "type": "string" },
+            "text": { "type": "string" },
+            "attachments": {
+              "type": "array",
+              "items": { "$ref": "EditAttachment" }
+            }
+          },
+          "required": ["state", "id", "text", "attachments"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "accepted" },
+            "id": { "type": "string" }
+          },
+          "required": ["state", "id"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "not_sent" },
+            "reason": { "type": "string" }
+          },
+          "required": ["state", "reason"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "unknown" },
+            "reason": { "type": "string" }
+          },
+          "required": ["state"]
+        }
+      ]
+    },
+    "Empty": { "type": "object", "properties": {} },
+    "EnsureSessionParams": {
+      "type": "object",
+      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "required": ["sessionId"]
+    },
+    "FileContent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "const": "ok" },
+            "path": { "type": "string" },
+            "kind": { "type": "string", "enum": ["text", "binary"] },
+            "text": { "type": "string" },
+            "base64": { "type": "string" },
+            "mimeType": { "type": "string" },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["status", "path", "kind", "bytes"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "const": "error" },
+            "path": { "type": "string" },
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["status", "path", "code"]
+        }
+      ]
+    },
+    "FileDiffParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" }
+      },
+      "required": ["sessionId", "path"]
+    },
+    "ForkSessionParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sourceSessionId": { "type": "string", "minLength": 1 },
+        "sourceTurnId": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "enum": ["read", "send"] },
+        "targetSessionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": ["workspaceId", "sourceSessionId", "sourceTurnId", "action"]
+    },
+    "ForkSessionResult": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["ready", "created", "rejected", "unknown"]
+        }
+      },
+      "required": ["state"]
+    },
+    "GitHubMentionsParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "repoFullName": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "repoFullName"]
+    },
+    "GitHubMentionsResult": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" },
+              "kind": { "type": "string", "enum": ["issue", "pr"] },
+              "subtitle": { "type": "string" },
+              "insertText": { "type": "string" }
+            },
+            "required": ["path", "name", "kind", "subtitle", "insertText"]
+          }
+        },
+        "truncated": { "type": "boolean" },
+        "incomplete": { "type": "boolean" }
+      },
+      "required": ["items", "truncated", "incomplete"]
+    },
+    "Grant": {
+      "type": "object",
+      "properties": {
+        "token": { "type": "string", "minLength": 1 },
+        "gatewayBaseUrl": { "type": "string", "minLength": 1 },
+        "expiresIn": { "type": "number", "exclusiveMinimum": 0 },
+        "shardHostSuffix": { "type": "string" }
+      },
+      "required": ["token", "gatewayBaseUrl", "expiresIn"]
+    },
+    "HelloParams": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "gen": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["protocol", "gen"]
+    },
+    "HelloResult": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "methods": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["protocol", "methods"]
+    },
+    "IosSimulatorControlParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "command": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": { "action": { "type": "string", "const": "list" } },
+              "required": ["action"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "exterior" },
+                "udid": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action", "udid"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "start" },
+                "udid": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action", "udid"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "status" },
+                "operationId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "const": "stop" },
+                "operationId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["action", "operationId"]
+            }
+          ]
+        }
+      },
+      "required": ["workspaceId", "sessionId", "userId", "command"]
+    },
+    "IosSimulatorControlResult": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "success": { "type": "boolean" },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "udid": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" },
+              "runtime": { "type": "string" },
+              "deviceType": { "type": "string" },
+              "state": { "type": "string" },
+              "available": { "type": "boolean" },
+              "unavailableReason": { "type": "string" },
+              "occupancy": {
+                "type": "string",
+                "enum": ["available", "this-session", "other-session"]
+              }
+            },
+            "required": [
+              "udid",
+              "name",
+              "runtime",
+              "deviceType",
+              "state",
+              "available",
+              "occupancy"
+            ]
+          }
+        },
+        "exterior": {
+          "type": "object",
+          "properties": {
+            "geometry": {
+              "type": "object",
+              "properties": {
+                "width": { "type": "number" },
+                "height": { "type": "number" },
+                "screen": {
+                  "type": "object",
+                  "properties": {
+                    "x": { "type": "number" },
+                    "y": { "type": "number" },
+                    "width": { "type": "number" },
+                    "height": { "type": "number" },
+                    "radius": { "type": "number" }
+                  },
+                  "required": ["x", "y", "width", "height", "radius"]
+                },
+                "buttons": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": { "type": "number" },
+                      "y": { "type": "number" },
+                      "width": { "type": "number" },
+                      "height": { "type": "number" },
+                      "button": {
+                        "type": "string",
+                        "enum": [
+                          "home",
+                          "lock",
+                          "volume-up",
+                          "volume-down",
+                          "action"
+                        ]
+                      }
+                    },
+                    "required": ["x", "y", "width", "height", "button"]
+                  }
+                }
+              },
+              "required": ["width", "height", "screen", "buttons"]
+            },
+            "pngBase64": { "type": "string" }
+          },
+          "required": ["geometry", "pngBase64"]
+        },
+        "preview": {
+          "type": "object",
+          "properties": {
+            "operationId": { "type": "string", "minLength": 1 },
+            "udid": { "type": "string", "minLength": 1 },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "preparing",
+                "booting",
+                "connecting",
+                "ready",
+                "closed",
+                "failed"
+              ]
+            },
+            "transport": { "type": "string", "enum": ["local", "remote"] },
+            "viewerUrl": { "type": "string", "minLength": 1 },
+            "message": { "type": "string" }
+          },
+          "required": ["operationId", "udid", "phase", "transport"]
+        },
+        "error": { "type": "string" },
+        "status": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "message": { "type": "string" },
+        "capabilities": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    "ItemDetail": {
+      "type": "object",
+      "properties": {
+        "itemId": { "type": "string" },
+        "rev": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "blocks": { "type": "array", "items": {} },
+        "rawInput": { "$ref": "DetailValue" },
+        "rawOutput": { "$ref": "DetailValue" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "optionId": { "type": "string" },
+              "name": { "type": "string" },
+              "kind": { "type": "string" }
+            },
+            "required": ["optionId", "name"]
+          }
+        },
+        "outcome": { "$ref": "DetailValue" },
+        "truncated": { "type": "boolean" },
+        "nextCursor": { "type": "string" }
+      },
+      "required": ["itemId", "rev", "blocks", "truncated"]
+    },
+    "ItemDetailParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 },
+        "cursor": { "type": "string" }
+      },
+      "required": ["sessionId", "entryId", "itemId"]
+    },
+    "ListDirParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "relativePath": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["workspaceId", "sessionId", "relativePath", "userId"]
+    },
+    "LocalProjectsParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "browserId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "cancel" }
+          },
+          "required": ["workspaceId", "browserId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "browserId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "machines" }
+          },
+          "required": ["workspaceId", "browserId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "browserId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "browse" },
+            "machineId": { "type": "string" },
+            "path": { "type": "string" },
+            "cursor": { "type": "string" }
+          },
+          "required": ["workspaceId", "browserId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "browserId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "add" },
+            "machineId": { "type": "string" },
+            "path": { "type": "string" }
+          },
+          "required": ["workspaceId", "browserId", "userId", "action"]
+        }
+      ]
+    },
+    "LocalProjectsResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "cancelled" }
+          },
+          "required": ["outcome"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "machines" },
+            "machines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "name": { "type": "string" }
+                },
+                "required": ["id", "name"]
+              }
+            }
+          },
+          "required": ["outcome", "machines"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "directory" },
+            "path": { "type": "string", "minLength": 1 },
+            "parentPath": { "type": ["string", "null"] },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "absolutePath": { "type": "string" },
+                  "error": { "type": "string" }
+                },
+                "required": ["name", "absolutePath"]
+              }
+            },
+            "truncated": { "type": "boolean" },
+            "nextCursor": { "type": "string" }
+          },
+          "required": ["outcome", "path", "parentPath", "entries", "truncated"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "project" },
+            "project": { "$ref": "Project" }
+          },
+          "required": ["outcome", "project"]
+        }
+      ]
+    },
+    "MachinePresence": {
+      "type": "object",
+      "properties": {
+        "state": { "type": "string", "enum": ["live", "unknown"] },
+        "onlineMachineIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "required": ["state", "onlineMachineIds"]
+    },
+    "MachineProbe": {
+      "type": "object",
+      "properties": {
+        "otherKeys": { "type": "array", "items": { "type": "string" } },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "CapabilityProbe" }
+        }
+      },
+      "required": ["otherKeys", "capabilities"]
+    },
+    "MarkSessionReadParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "lastReadAt": { "type": "number" }
+      },
+      "required": ["workspaceId", "sessionId", "lastReadAt"]
+    },
+    "MentionCatalog": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "name": { "type": "string" },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "file",
+                  "skill",
+                  "session",
+                  "role",
+                  "issue",
+                  "pr",
+                  "cmd",
+                  "directory"
+                ]
+              },
+              "subtitle": { "type": "string" },
+              "insertText": { "type": "string" },
+              "roleName": { "type": "string" },
+              "emoji": { "type": "string" }
+            },
+            "required": ["path", "name", "kind", "subtitle"]
+          }
+        },
+        "truncated": { "type": "boolean" },
+        "incomplete": { "type": "boolean" }
+      },
+      "required": ["items", "truncated", "incomplete"]
+    },
+    "MentionCatalogParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": ["file", "skill", "session", "role", "issue", "pr", "cmd"]
+        },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "projectId": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 },
+        "agentConfigId": { "type": "string", "minLength": 1 },
+        "cliType": { "type": "string" },
+        "agentType": { "type": "string" }
+      },
+      "required": ["workspaceId", "userId", "category"]
+    },
+    "OpenSessionParams": {
+      "type": "object",
+      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "required": ["sessionId"]
+    },
+    "PinSessionParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "pinned": { "type": "boolean" }
+      },
+      "required": ["workspaceId", "sessionId", "pinned"]
+    },
+    "ProbeSchemaParams": {
+      "type": "object",
+      "properties": { "workspaceId": { "type": "string", "minLength": 1 } },
+      "required": ["workspaceId"]
+    },
+    "ProbeSchemaReport": {
+      "type": "object",
+      "properties": {
+        "creationOptionsTrial": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "machines": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "MachineProbe" }
+        }
+      },
+      "required": ["creationOptionsTrial", "machines"]
+    },
+    "Project": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string" },
+        "name": { "type": "string" },
+        "rootPath": { "type": "string" },
+        "repoFullName": { "type": "string" }
+      },
+      "required": ["id", "machineId", "name", "rootPath"]
+    },
+    "ProjectGroupItem": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "machineId": { "type": ["string", "null"] },
+        "conflict": { "type": "boolean" },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "enum": ["github", "local"] },
+              "label": { "type": "string" },
+              "repoFullName": { "type": "string" },
+              "machineId": { "type": "string" },
+              "localProjectId": { "type": "string" },
+              "preferLocal": { "type": "boolean" },
+              "path": { "type": "string" }
+            },
+            "required": ["id", "kind", "label", "path"]
+          }
+        }
+      },
+      "required": ["id", "name", "machineId", "conflict", "members"]
+    },
+    "ProjectGroupsParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" }
+      },
+      "required": ["workspaceId", "userId"]
+    },
+    "ProjectGroupsResult": {
+      "type": "object",
+      "properties": {
+        "groups": { "type": "array", "items": { "$ref": "ProjectGroupItem" } }
+      },
+      "required": ["groups"]
+    },
+    "PromptShortcut": {
+      "type": "object",
+      "properties": {
+        "v": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "ownerUserId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "visibility": { "type": "string", "enum": ["private", "workspace"] },
+        "name": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string" },
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$" },
+        "description": { "type": "string" },
+        "scope": { "$ref": "PromptShortcutScope" },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "prompt": { "type": "string" },
+        "mentions": {
+          "type": "array",
+          "items": { "$ref": "PromptShortcutMention" }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "workspaceId",
+        "ownerUserId",
+        "visibility",
+        "name",
+        "slug",
+        "scope",
+        "revision",
+        "createdAt",
+        "updatedAt",
+        "prompt",
+        "mentions"
+      ]
+    },
+    "PromptShortcutIndexEntry": {
+      "type": "object",
+      "properties": {
+        "v": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "ownerUserId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "visibility": { "type": "string", "enum": ["private", "workspace"] },
+        "name": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string" },
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$" },
+        "description": { "type": "string" },
+        "scope": { "$ref": "PromptShortcutScope" },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "bodyDocId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "dependencySummary": {
+          "type": "array",
+          "items": { "$ref": "PromptShortcutTarget" }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "workspaceId",
+        "ownerUserId",
+        "visibility",
+        "name",
+        "slug",
+        "scope",
+        "revision",
+        "createdAt",
+        "updatedAt",
+        "bodyDocId",
+        "dependencySummary"
+      ]
+    },
+    "PromptShortcutMention": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "target": { "$ref": "PromptShortcutTarget" }
+      },
+      "required": ["start", "end", "label", "target"]
+    },
+    "PromptShortcutProject": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "github" },
+            "repository": {
+              "type": "string",
+              "pattern": "^[^/\\s]+\\/[^/\\s]+$"
+            }
+          },
+          "required": ["kind", "repository"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "local" },
+            "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "machineId": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          "required": ["kind", "id", "machineId"]
+        }
+      ]
+    },
+    "PromptShortcutScope": {
+      "type": "object",
+      "properties": {
+        "project": { "$ref": "PromptShortcutProject" },
+        "machineId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "providerKey": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "PromptShortcutsParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "list" }
+          },
+          "required": ["workspaceId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "read" },
+            "entry": { "$ref": "PromptShortcutIndexEntry" }
+          },
+          "required": ["workspaceId", "userId", "action", "entry"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "save" },
+            "entry": {
+              "anyOf": [
+                { "$ref": "PromptShortcutIndexEntry" },
+                { "type": "null" }
+              ]
+            },
+            "value": { "$ref": "PromptShortcut" },
+            "bodyDocId": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          "required": [
+            "workspaceId",
+            "userId",
+            "action",
+            "entry",
+            "value",
+            "bodyDocId"
+          ]
+        }
+      ]
+    },
+    "PromptShortcutsResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "const": "list" },
+            "entries": {
+              "type": "array",
+              "items": { "$ref": "PromptShortcutIndexEntry" }
+            }
+          },
+          "required": ["action", "entries"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "const": "read" },
+            "shortcut": { "$ref": "PromptShortcut" }
+          },
+          "required": ["action", "shortcut"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "const": "save" },
+            "entry": { "$ref": "PromptShortcutIndexEntry" }
+          },
+          "required": ["action", "entry"]
+        }
+      ]
+    },
+    "PromptShortcutTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "file" },
+            "project": { "$ref": "PromptShortcutProject" },
+            "path": { "type": "string", "minLength": 1 },
+            "directory": { "type": "boolean" }
+          },
+          "required": ["kind", "project", "path"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "skill" },
+            "source": {
+              "type": "string",
+              "enum": ["project", "global", "system"]
+            },
+            "project": { "$ref": "PromptShortcutProject" },
+            "machineId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "path": { "type": "string", "minLength": 1 },
+            "compatibleProviders": {
+              "minItems": 1,
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          },
+          "required": ["kind", "source", "path", "compatibleProviders"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "agent_role" },
+            "agentRoleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": ["kind", "agentRoleId"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "issue" },
+            "repository": {
+              "type": "string",
+              "pattern": "^[^/\\s]+\\/[^/\\s]+$"
+            },
+            "number": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["kind", "repository", "number"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "pull_request" },
+            "repository": {
+              "type": "string",
+              "pattern": "^[^/\\s]+\\/[^/\\s]+$"
+            },
+            "number": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["kind", "repository", "number"]
+        }
+      ]
+    },
+    "ProviderAuthField": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "secret", "select"] },
+        "required": { "type": "boolean" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "value": { "type": "string" },
+              "label": { "type": "string" }
+            },
+            "required": ["value", "label"]
+          }
+        }
+      },
+      "required": ["id", "label", "type", "required", "options"]
+    },
+    "ProviderAuthMethod": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "ProviderCapabilities": {
+      "type": "object",
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" }
+            },
+            "required": ["id", "name"]
+          }
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" }
+            },
+            "required": ["id", "name"]
+          }
+        },
+        "sessionTitle": { "type": "boolean" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "type": { "type": "string", "enum": ["select", "boolean"] },
+              "value": {},
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" }
+                  },
+                  "required": ["id", "name"]
+                }
+              }
+            },
+            "required": ["id", "name", "type", "choices"]
+          }
+        },
+        "authMethods": {
+          "type": "array",
+          "items": { "$ref": "ProviderAuthMethod" }
+        }
+      },
+      "required": ["models", "modes", "sessionTitle", "options", "authMethods"]
+    },
+    "ProviderCodexAuth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "const": "chatgpt" },
+            "profileId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": ["mode", "profileId"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "const": "api-key" },
+            "profileId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "baseUrl": { "type": "string", "maxLength": 2048 }
+          },
+          "required": ["mode", "profileId", "baseUrl"]
+        }
+      ]
+    },
+    "ProviderItem": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "prompt": { "type": "string", "maxLength": 32000 },
+        "cliType": { "type": "string", "minLength": 1 },
+        "agentType": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "maxLength": 4096 },
+        "args": {
+          "maxItems": 128,
+          "type": "array",
+          "items": { "type": "string", "maxLength": 4096 }
+        },
+        "readOnly": { "type": "boolean" }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "name",
+        "prompt",
+        "cliType",
+        "agentType",
+        "command",
+        "args",
+        "readOnly"
+      ]
+    },
+    "ProviderPreset": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "cliType": { "type": "string" },
+        "agentType": { "type": "string" },
+        "tokenEnvKey": { "type": "string" },
+        "protectedEnvKeys": { "type": "array", "items": { "type": "string" } },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "endpoint": { "type": "string" },
+              "tokenPrefix": { "type": "string" },
+              "customEndpoint": { "type": "boolean" },
+              "endpoints": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "url": { "type": "string" }
+                  },
+                  "required": ["id", "name", "url"]
+                }
+              }
+            },
+            "required": ["id", "name", "customEndpoint", "endpoints"]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "cliType",
+        "agentType",
+        "tokenEnvKey",
+        "protectedEnvKeys",
+        "modes"
+      ]
+    },
+    "ProviderRuntimeOverrides": {
+      "type": "object",
+      "properties": {
+        "codexPath": { "type": "string", "maxLength": 4096 },
+        "claudeCodeExecutable": { "type": "string", "maxLength": 4096 },
+        "kimiPath": { "type": "string", "maxLength": 4096 },
+        "grokPath": { "type": "string", "maxLength": 4096 },
+        "devinPath": { "type": "string", "maxLength": 4096 },
+        "piPath": { "type": "string", "maxLength": 4096 },
+        "piExtensions": {
+          "maxItems": 128,
+          "type": "array",
+          "items": { "type": "string", "maxLength": 4096 }
+        }
+      }
+    },
+    "ProviderSetup": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "agentType": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "preparing-runtime",
+            "verifying",
+            "awaiting-auth",
+            "failed"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "canRetry": { "type": "boolean" },
+        "canDelete": { "type": "boolean" },
+        "failureCode": { "type": "string" }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "name",
+        "agentType",
+        "status",
+        "attempt",
+        "canRetry",
+        "canDelete"
+      ]
+    },
+    "ProviderTitleGeneration": {
+      "type": "object",
+      "properties": {
+        "configOptionValues": {
+          "type": "object",
+          "propertyNames": { "type": "string", "maxLength": 128 },
+          "additionalProperties": {}
+        }
+      },
+      "required": ["configOptionValues"]
+    },
+    "PublishedSharesParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "list" },
+            "cursor": { "type": "string" }
+          },
+          "required": ["workspaceId", "userId", "action"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "shareId": { "type": "string", "minLength": 1 },
+            "rootSessionId": { "type": "string", "minLength": 1 },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "detail" }
+          },
+          "required": [
+            "workspaceId",
+            "shareId",
+            "rootSessionId",
+            "userId",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "shareId": { "type": "string", "minLength": 1 },
+            "rootSessionId": { "type": "string", "minLength": 1 },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "copy" }
+          },
+          "required": [
+            "workspaceId",
+            "shareId",
+            "rootSessionId",
+            "userId",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "shareId": { "type": "string", "minLength": 1 },
+            "rootSessionId": { "type": "string", "minLength": 1 },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "open" }
+          },
+          "required": [
+            "workspaceId",
+            "shareId",
+            "rootSessionId",
+            "userId",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "shareId": { "type": "string", "minLength": 1 },
+            "rootSessionId": { "type": "string", "minLength": 1 },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "revoke" }
+          },
+          "required": [
+            "workspaceId",
+            "shareId",
+            "rootSessionId",
+            "userId",
+            "action"
+          ]
+        }
+      ]
+    },
+    "PublishedSharesResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "page" },
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string", "minLength": 1 },
+            "page": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "shareId": { "type": "string", "minLength": 1 },
+                  "rootSessionId": { "type": "string", "minLength": 1 },
+                  "publisherUserId": { "type": "string", "minLength": 1 },
+                  "status": { "type": "string", "enum": ["active", "revoked"] },
+                  "title": { "type": "string" },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "credentialVersion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "createdAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "updatedAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "totalBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "conversationCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "canManage": { "type": "boolean" },
+                  "canRevoke": { "type": "boolean" },
+                  "hasLocalLink": { "type": "boolean" }
+                },
+                "required": [
+                  "shareId",
+                  "rootSessionId",
+                  "publisherUserId",
+                  "status",
+                  "title",
+                  "revision",
+                  "credentialVersion",
+                  "createdAt",
+                  "updatedAt",
+                  "canManage",
+                  "canRevoke",
+                  "hasLocalLink"
+                ]
+              }
+            },
+            "isDone": { "type": "boolean" },
+            "continueCursor": { "type": "string" }
+          },
+          "required": [
+            "outcome",
+            "workspaceId",
+            "userId",
+            "page",
+            "isDone",
+            "continueCursor"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "failed" },
+            "error": { "type": "string", "minLength": 1 }
+          },
+          "required": ["outcome", "error"]
+        }
+      ]
+    },
+    "QuotaReason": {
+      "type": "string",
+      "enum": [
+        "workspace_payment_required",
+        "free_session_limit_reached",
+        "free_session_turn_limit_reached"
+      ]
+    },
+    "ReadFileParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" }
+      },
+      "required": ["sessionId", "path"]
+    },
+    "ReleaseReserveParams": {
+      "type": "object",
+      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "required": ["sessionId"]
+    },
+    "RemoteSetting": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["machine", "agent"] },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "machineId": { "type": "string" },
+        "machineName": { "type": "string" },
+        "readOnly": { "type": "boolean" },
+        "detail": { "type": "string" },
+        "prompt": { "type": "string" }
+      },
+      "required": ["kind", "id", "name"]
+    },
+    "RemoteSettingsParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "kind": { "type": "string", "enum": ["machine", "agent"] },
+        "edit": {
+          "type": "object",
+          "properties": {
+            "item": { "$ref": "RemoteSetting" },
+            "name": { "type": "string" },
+            "prompt": { "type": "string" }
+          },
+          "required": ["item", "name"]
+        }
+      },
+      "required": ["workspaceId", "userId", "kind"]
+    },
+    "RemoteSettingsResult": {
+      "type": "object",
+      "properties": {
+        "settings": { "type": "array", "items": { "$ref": "RemoteSetting" } }
+      },
+      "required": ["settings"]
+    },
+    "RenameSessionParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" }
+      },
+      "required": ["workspaceId", "sessionId", "title"]
+    },
+    "RespondPermissionParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 },
+        "requestId": { "type": "string", "minLength": 1 },
+        "optionId": { "type": "string", "minLength": 1 },
+        "answers": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {}
+        }
+      },
+      "required": ["sessionId", "entryId", "itemId", "requestId", "optionId"]
+    },
+    "RespondPermissionResult": {
+      "type": "object",
+      "properties": {
+        "state": { "type": "string", "enum": ["accepted", "stale", "conflict"] }
+      },
+      "required": ["state"]
+    },
+    "RestoreSessionsParams": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "current": {
+          "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }]
+        },
+        "reserved": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "required": ["ids", "current", "reserved"]
+    },
+    "RuntimeError": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "retryable": { "type": "boolean" },
+        "detail": { "type": "string" }
+      },
+      "required": ["code", "retryable"]
+    },
+    "ScheduleCommandParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": ["create", "edit", "pause", "resume", "run", "delete"]
+        },
+        "scheduleId": { "type": "string", "minLength": 1 },
+        "requestId": { "type": "string", "minLength": 1 },
+        "draft": { "$ref": "ScheduleDraft" }
+      },
+      "required": ["workspaceId", "action", "scheduleId", "requestId"]
+    },
+    "ScheduleCommandResult": {
+      "type": "object",
+      "properties": { "scheduleId": { "type": "string" } },
+      "required": ["scheduleId"]
+    },
+    "ScheduleDetail": {
+      "type": "object",
+      "properties": {
+        "item": { "$ref": "ScheduleItem" },
+        "prompt": { "type": "string" },
+        "modelId": { "type": "string" },
+        "modeId": { "type": "string" },
+        "project": { "$ref": "ScheduleProject" }
+      },
+      "required": ["item", "prompt"]
+    },
+    "ScheduleDetailParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "scheduleId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "scheduleId"]
+    },
+    "ScheduleDraft": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "machineId": { "type": "string", "minLength": 1 },
+        "agentConfigId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string" },
+        "modeId": { "type": "string" },
+        "project": { "$ref": "ScheduleProject" },
+        "destination": {
+          "type": "string",
+          "enum": ["new_session", "own_session"]
+        },
+        "rule": { "$ref": "ScheduleRule" }
+      },
+      "required": [
+        "title",
+        "prompt",
+        "machineId",
+        "agentConfigId",
+        "destination",
+        "rule"
+      ]
+    },
+    "ScheduleItem": {
+      "type": "object",
+      "properties": {
+        "scheduleId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "isOwner": { "type": "boolean" },
+        "machineId": { "type": "string" },
+        "machineName": { "type": "string" },
+        "machineSupported": { "type": "boolean" },
+        "agentConfigId": { "type": "string" },
+        "agentName": { "type": "string" },
+        "agentType": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "scheduledMessage": { "type": "boolean" },
+        "rule": { "$ref": "ScheduleRule" },
+        "destination": {
+          "type": "string",
+          "enum": ["new_session", "own_session", "existing_session"]
+        },
+        "destinationSessionId": { "type": "string" },
+        "projectKind": { "type": "string", "enum": ["local", "github"] },
+        "projectKey": { "type": "string" },
+        "projectName": { "type": "string" },
+        "state": { "$ref": "ScheduleState" },
+        "lastRunAt": { "type": "number" },
+        "lastSessionId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": [
+        "scheduleId",
+        "title",
+        "ownerId",
+        "isOwner",
+        "machineId",
+        "machineSupported",
+        "agentConfigId",
+        "enabled",
+        "scheduledMessage",
+        "rule",
+        "destination",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ScheduleProject": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["local", "github"] },
+        "localProjectId": { "type": "string" },
+        "repoFullName": { "type": "string" },
+        "branch": { "type": "string" },
+        "useWorktree": { "type": "boolean" },
+        "name": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
+    "ScheduleRule": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "once",
+            "minutes",
+            "hours",
+            "daily",
+            "weekdays",
+            "weekly",
+            "monthly",
+            "unsupported"
+          ]
+        },
+        "every": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "hour": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "minute": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "weekdays": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "at": { "type": "number" },
+        "timeZone": { "type": "string" },
+        "summary": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
+    "SchedulesParams": {
+      "type": "object",
+      "properties": { "workspaceId": { "type": "string", "minLength": 1 } },
+      "required": ["workspaceId"]
+    },
+    "SchedulesResult": {
+      "type": "object",
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "ScheduleItem" } },
+        "deviceTimeZone": { "type": "string" },
+        "machineTimeZones": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "ownedMachineIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": [
+        "items",
+        "deviceTimeZone",
+        "machineTimeZones",
+        "ownedMachineIds"
+      ]
+    },
+    "ScheduleState": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string",
+          "enum": ["running", "paused", "attention", "ended"]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "sent",
+            "cancelled",
+            "notSent",
+            "cancelling",
+            "sendsAt",
+            "waitingToSend",
+            "paused",
+            "blocked",
+            "retrying",
+            "due",
+            "waitingForAgent",
+            "manual",
+            "runsAt",
+            "done",
+            "notScheduled"
+          ]
+        },
+        "at": { "type": "number" },
+        "blockedCode": { "type": "string" }
+      },
+      "required": ["group", "kind"]
+    },
+    "SendTurnParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "id": { "type": "string" },
+        "backgroundTaskId": { "type": "string", "minLength": 1 },
+        "queue": { "type": "boolean" },
+        "guide": { "type": "boolean" },
+        "machineId": { "type": "string" },
+        "userId": { "type": "string" },
+        "text": { "type": "string" },
+        "attachmentBlocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {}
+          }
+        },
+        "cliType": { "type": "string" },
+        "agentType": { "type": "string" },
+        "resume": { "type": "string" },
+        "modelId": { "$ref": "ClearableString" },
+        "modeId": { "type": "string" },
+        "reasoningEffort": { "$ref": "ClearableString" },
+        "reasoningEffortConfigId": { "type": "string" },
+        "configOptionValues": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {}
+        },
+        "agentRoleId": { "$ref": "ClearableString" },
+        "billingEntitlement": {
+          "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
+        }
+      },
+      "required": ["sessionId", "machineId", "text", "billingEntitlement"]
+    },
+    "SendTurnResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "not_sent" },
+            "reason": { "type": "string" },
+            "id": { "type": "string" }
+          },
+          "required": ["state", "reason"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "unknown" },
+            "id": { "type": "string" },
+            "reason": { "type": "string" }
+          },
+          "required": ["state", "id"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "uploaded" },
+            "id": { "type": "string" },
+            "reason": { "type": "string" },
+            "awaitingGuide": { "type": "boolean" }
+          },
+          "required": ["state", "id"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "queued" },
+            "id": { "type": "string" }
+          },
+          "required": ["state", "id"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "accepted" },
+            "id": { "type": "string" }
+          },
+          "required": ["state", "id"]
+        }
+      ]
+    },
+    "SessionBackgroundWork": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "state": {
+          "type": "string",
+          "enum": [
+            "syncing",
+            "sent",
+            "receiving",
+            "waiting",
+            "completed",
+            "failed"
+          ]
+        }
+      },
+      "required": ["id", "state"]
+    },
+    "SessionCacheEvent": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "session": { "type": "string" },
+        "synced": { "type": "boolean" },
+        "backgroundWork": { "$ref": "SessionBackgroundWork" }
+      },
+      "required": ["sessionId"]
+    },
+    "SessionEvent": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "session": { "type": "string" },
+        "synced": { "type": "boolean" },
+        "backgroundWork": { "$ref": "SessionBackgroundWork" }
+      },
+      "required": ["sessionId", "session", "synced"]
+    },
+    "SessionPreviewParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "action": { "type": "string", "enum": ["create", "revoke"] }
+      },
+      "required": ["sessionId", "userId"]
+    },
+    "SessionPreviewResult": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "error": { "type": "string" },
+        "message": { "type": "string" },
+        "status": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "SessionSharingParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "editorId": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": ["read", "publish", "reset", "revoke", "discard", "close"]
+        },
+        "selected": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "omissionText": { "type": "string" }
+      },
+      "required": ["workspaceId", "sessionId", "editorId", "action"]
+    },
+    "SessionSharingResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "outcome": { "type": "string", "const": "closed" } },
+          "required": ["outcome"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outcome": { "type": "string", "const": "state" },
+            "entry": {
+              "anyOf": [{ "$ref": "ShareEntry" }, { "type": "null" }]
+            },
+            "url": {
+              "anyOf": [
+                { "type": "string", "minLength": 1 },
+                { "type": "null" }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "title": { "type": "string" }
+                },
+                "required": ["id", "title"]
+              }
+            },
+            "selected": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "pending": { "type": "boolean" }
+          },
+          "required": [
+            "outcome",
+            "entry",
+            "url",
+            "candidates",
+            "selected",
+            "pending"
+          ]
+        }
+      ]
+    },
+    "SessionSubscriptionsEvent": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reserved": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "required": ["ids", "reserved"]
+    },
+    "SessionTraceEvent": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "event": {
+          "type": "string",
+          "enum": ["retry", "slow", "stalled", "status", "resume"]
+        },
+        "stage": { "type": "string", "enum": ["bootstrap", "catchup", "poll"] },
+        "status": { "type": "string" },
+        "code": { "type": "string" },
+        "ageMs": { "type": "number" },
+        "attempts": { "type": "number" }
+      },
+      "required": ["sessionId", "event"]
+    },
+    "SessionWorkspacePathParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId"]
+    },
+    "SessionWorkspacePathResult": {
+      "type": "object",
+      "properties": { "path": { "type": ["string", "null"] } },
+      "required": ["path"]
+    },
+    "SetActiveParams": {
+      "type": "object",
+      "properties": { "active": { "type": "boolean" } },
+      "required": ["active"]
+    },
+    "SetSessionOwnerParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId", "userId"]
+    },
+    "SetTabClosedParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "closed": { "type": "boolean" }
+      },
+      "required": ["workspaceId", "sessionId", "closed"]
+    },
+    "ShareEntry": {
+      "type": "object",
+      "properties": {
+        "shareId": { "type": "string", "minLength": 1 },
+        "rootSessionId": { "type": "string", "minLength": 1 },
+        "publisherUserId": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["draft", "active", "revoked"] },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "credentialVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "currentDeploymentId": { "type": "string", "minLength": 1 },
+        "sourceIds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sourceId": { "type": "string", "minLength": 1 },
+              "conversationId": { "type": "string", "minLength": 1 }
+            },
+            "required": ["sourceId", "conversationId"]
+          }
+        },
+        "selectedSourceIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "canManage": { "type": "boolean" },
+        "canRevoke": { "type": "boolean" }
+      },
+      "required": [
+        "shareId",
+        "rootSessionId",
+        "publisherUserId",
+        "status",
+        "revision",
+        "credentialVersion"
+      ]
+    },
+    "ShareProgressEvent": {
+      "type": "object",
+      "properties": {
+        "editorId": { "type": "string", "minLength": 1 },
+        "phase": {
+          "type": "string",
+          "enum": ["capturing", "uploading", "publishing"]
+        },
+        "percent": { "type": "integer", "minimum": 0, "maximum": 100 }
+      },
+      "required": ["editorId", "phase"]
+    },
+    "ShareRequestParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "api" },
+            "args": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": { "type": "string", "const": "getManagement" },
+                    "args": {
+                      "type": "object",
+                      "properties": {
+                        "workspaceId": { "type": "string", "minLength": 1 },
+                        "rootSessionId": { "type": "string", "minLength": 1 }
+                      },
+                      "required": ["workspaceId", "rootSessionId"]
+                    }
+                  },
+                  "required": ["method", "args"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": { "type": "string", "const": "beginDeployment" },
+                    "args": {
+                      "type": "object",
+                      "properties": {
+                        "workspaceId": { "type": "string", "minLength": 1 },
+                        "rootSessionId": { "type": "string", "minLength": 1 },
+                        "shareId": { "type": "string", "minLength": 1 },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "credentialHash": { "type": "string", "minLength": 1 },
+                        "uploadCredentialHash": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "requestId": { "type": "string", "minLength": 1 },
+                        "manifest": {},
+                        "sourceIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sourceId": { "type": "string", "minLength": 1 },
+                              "conversationId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["sourceId", "conversationId"]
+                          }
+                        }
+                      },
+                      "required": [
+                        "workspaceId",
+                        "rootSessionId",
+                        "uploadCredentialHash",
+                        "requestId",
+                        "manifest",
+                        "sourceIds"
+                      ]
+                    }
+                  },
+                  "required": ["method", "args"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "type": "string",
+                      "const": "publishDeployment"
+                    },
+                    "args": {
+                      "type": "object",
+                      "properties": {
+                        "deploymentId": { "type": "string", "minLength": 1 }
+                      },
+                      "required": ["deploymentId"]
+                    }
+                  },
+                  "required": ["method", "args"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": { "type": "string", "const": "resetCredential" },
+                    "args": {
+                      "type": "object",
+                      "properties": {
+                        "shareId": { "type": "string", "minLength": 1 },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "credentialHash": { "type": "string", "minLength": 1 }
+                      },
+                      "required": [
+                        "shareId",
+                        "expectedRevision",
+                        "credentialHash"
+                      ]
+                    }
+                  },
+                  "required": ["method", "args"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": { "type": "string", "const": "revoke" },
+                    "args": {
+                      "type": "object",
+                      "properties": {
+                        "shareId": { "type": "string", "minLength": 1 },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": ["shareId", "expectedRevision"]
+                    }
+                  },
+                  "required": ["method", "args"]
+                }
+              ]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "saveSecret" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "shareId": { "type": "string", "minLength": 1 },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "secret": { "type": "string", "minLength": 1 }
+              },
+              "required": ["shareId", "version", "secret"]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "readSecret" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "shareId": { "type": "string", "minLength": 1 },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["shareId", "version"]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "image" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "sessionId": { "type": "string", "minLength": 1 },
+                "imageId": { "type": "string", "minLength": 1 }
+              },
+              "required": ["sessionId", "imageId"]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "previewToken" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "intent": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": { "type": "string", "minLength": 1 },
+                    "machineId": { "type": "string", "minLength": 1 },
+                    "sessionId": { "type": "string", "minLength": 1 },
+                    "runtimeNonce": { "type": "string" },
+                    "requestId": { "type": "string", "minLength": 1 },
+                    "operation": {
+                      "type": "object",
+                      "propertyNames": { "type": "string" },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "machineId",
+                    "sessionId",
+                    "runtimeNonce",
+                    "requestId",
+                    "operation"
+                  ]
+                }
+              },
+              "required": ["intent"]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "management" },
+            "args": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": { "type": "string", "minLength": 1 },
+                    "action": { "type": "string", "const": "list" },
+                    "cursor": { "type": ["string", "null"] }
+                  },
+                  "required": ["workspaceId", "action", "cursor"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": { "type": "string", "minLength": 1 },
+                    "shareId": { "type": "string", "minLength": 1 },
+                    "rootSessionId": { "type": "string", "minLength": 1 },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "action": { "type": "string", "const": "detail" }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "shareId",
+                    "rootSessionId",
+                    "action"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": { "type": "string", "minLength": 1 },
+                    "shareId": { "type": "string", "minLength": 1 },
+                    "rootSessionId": { "type": "string", "minLength": 1 },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "action": { "type": "string", "const": "copy" }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "shareId",
+                    "rootSessionId",
+                    "action"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": { "type": "string", "minLength": 1 },
+                    "shareId": { "type": "string", "minLength": 1 },
+                    "rootSessionId": { "type": "string", "minLength": 1 },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "action": { "type": "string", "const": "open" }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "shareId",
+                    "rootSessionId",
+                    "action"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": { "type": "string", "minLength": 1 },
+                    "shareId": { "type": "string", "minLength": 1 },
+                    "rootSessionId": { "type": "string", "minLength": 1 },
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "action": { "type": "string", "const": "revoke" }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "shareId",
+                    "rootSessionId",
+                    "action"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        }
+      ]
+    },
+    "ShareRequestResult": {
+      "type": "object",
+      "properties": { "value": {} },
+      "required": ["value"]
+    },
+    "ShortcutCloudParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": {
+              "type": "string",
+              "const": "listAccessibleDocuments"
+            },
+            "args": { "type": "object", "properties": {} }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "getStreamToken" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "index" },
+                        "ownerUserId": { "type": "string", "minLength": 1 },
+                        "visibility": {
+                          "type": "string",
+                          "enum": ["private", "workspace"]
+                        }
+                      },
+                      "required": ["kind", "ownerUserId", "visibility"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "body" },
+                        "bodyDocId": { "type": "string", "minLength": 1 }
+                      },
+                      "required": ["kind", "bodyDocId"]
+                    }
+                  ]
+                },
+                "write": { "type": "boolean" }
+              },
+              "required": ["target", "write"]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "stageDocument" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "ownerUserId": { "type": "string", "minLength": 1 },
+                "shortcutId": { "type": "string", "minLength": 1 },
+                "bodyDocId": { "type": "string", "minLength": 1 },
+                "visibility": {
+                  "type": "string",
+                  "enum": ["private", "workspace"]
+                }
+              },
+              "required": [
+                "ownerUserId",
+                "shortcutId",
+                "bodyDocId",
+                "visibility"
+              ]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "activateDocument" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "bodyDocId": { "type": "string", "minLength": 1 },
+                "previousBodyDocId": {
+                  "anyOf": [
+                    { "type": "string", "minLength": 1 },
+                    { "type": "null" }
+                  ]
+                },
+                "previousRevision": {
+                  "anyOf": [
+                    { "type": "string", "minLength": 1 },
+                    { "type": "null" }
+                  ]
+                },
+                "revision": { "type": "string", "minLength": 1 },
+                "slug": { "type": "string", "minLength": 1 },
+                "indexBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "bodyDocId",
+                "previousBodyDocId",
+                "previousRevision",
+                "revision",
+                "slug",
+                "indexBytes"
+              ]
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        }
+      ]
+    },
+    "ShortcutCloudResult": {
+      "type": "object",
+      "properties": { "value": {} },
+      "required": ["value"]
+    },
+    "StartParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string" },
+        "active": { "type": "boolean" },
+        "knownRepos": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["workspaceId", "userId", "active"]
+    },
+    "SyncedEvent": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "streams": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["revision", "streams"]
+    },
+    "SyncErrorEvent": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": [
+            "catalog_limit",
+            "stream_closed",
+            "stalled_cursor",
+            "network_or_auth"
+          ]
+        },
+        "stream": { "type": "string", "minLength": 1 }
+      },
+      "required": ["reason", "stream"]
+    },
+    "TurnDiffParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" }
+      },
+      "required": ["sessionId", "entryId", "path"]
+    },
+    "WorkspaceChanges": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "const": "ok" },
+            "base": { "type": "string" },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "add": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "del": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": ["added", "deleted", "modified"]
+                  }
+                },
+                "required": ["path"]
+              }
+            }
+          },
+          "required": ["status", "base", "files"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "const": "unavailable" },
+            "reason": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["status", "reason"]
+        }
+      ]
+    },
+    "WorkspaceChangesParams": {
+      "type": "object",
+      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "required": ["sessionId"]
+    }
+  }
+}

@@ -91,7 +91,7 @@ type UploadSessionImageArgs = {
   attachmentToken?: () => Promise<string>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  token: string;
+  token: string | null;
   file: File;
   onProgress?: (percent: number) => void;
   signal?: AbortSignal;
@@ -129,6 +129,7 @@ export const uploadSessionImage = async ({
     return { imageId, mimeType: file.type, fileName: file.name, sizeBytes: file.size, encryption };
   }
   await authorizePlaintextAttachmentUpload(workspaceId, signal, accountId);
+  if (!token) throw new Error('Image transfer requires authentication');
   const formData = new FormData();
   formData.set('sessionId', sessionId);
   formData.set('file', file, file.name);

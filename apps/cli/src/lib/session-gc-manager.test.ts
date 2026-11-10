@@ -84,6 +84,8 @@ describe('SessionGCManager', () => {
       maxEvictionsPerCall: 100,
       pressureRecheckAttempts: 0,
       pressureRecheckDelayMs: 500,
+      wasmPressureHeapBytes: 3 * 1024 * 1024 * 1024,
+      wasmPressureIdleTimeoutMs: 2 * 60 * 1000,
       ...config,
     };
     return new SessionGCManager(
@@ -192,6 +194,33 @@ describe('SessionGCManager', () => {
       expect(cleanMock).toHaveBeenCalledWith(s1);
     });
 
+    it('shortens the idle timeout once the Loro WebAssembly heap nears its limit', async () => {
+      let heapBytes: number | null = 1024 ** 3;
+      const manager = createManager(undefined, 'linux', {
+        readWasmHeapBytes: () => heapBytes,
+        cleanSession: async (sessionId) => {
+          await cleanMock(sessionId);
+          sessionActivities.delete(sessionId);
+        },
+      });
+      const recent = 'recent' as SessionId;
+      const active = 'active' as SessionId;
+      sessionActivities.set(recent, Date.now() - 5 * 60_000);
+      sessionActivities.set(active, Date.now() - 10 * 60_000);
+      activeTurns.add(active);
+
+      // Host memory is plentiful; only the 32-bit heap is filling.
+      await manager.sweep();
+      expect(cleanMock).not.toHaveBeenCalled();
+
+      heapBytes = 3.5 * 1024 ** 3;
+      await manager.sweep();
+      await manager.sweep();
+      expect(cleanMock.mock.calls).toEqual([[recent]]);
+      // The heap never shrinks, so entering this mode is announced once, not per sweep.
+      expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    });
+
     it('does not clean sessions with active turns', async () => {
       const manager = createManager({ idleTimeoutMs: 1000 });
       const now = Date.now();
@@ -244,6 +273,35 @@ describe('SessionGCManager', () => {
       nativeWork.delete(s1);
       await manager.sweep();
       expect(cleanMock.mock.calls).toEqual([[s1]]);
+    });
+
+    it('retains a session that starts background work during the final eligibility read', async () => {
+      const sessionId = 'session-background-race' as SessionId;
+      sessionActivities.set(sessionId, Date.now() - 2000);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let reads = 0;
+      const manager = createManager(
+        { idleTimeoutMs: 1000, nativeBackgroundMaxIdleMs: 5000 },
+        'linux',
+        {
+          hasPendingUserWork: async () => {
+            if (++reads === 2) {
+              entered.resolve();
+              await release.promise;
+            }
+            return false;
+          },
+        }
+      );
+
+      const sweep = manager.sweep();
+      await entered.promise;
+      nativeWork.set(sessionId, 'background');
+      release.resolve();
+      await sweep;
+
+      expect(cleanMock).not.toHaveBeenCalled();
     });
 
     it('does not clean sessions in archive flight', async () => {

@@ -43,7 +43,7 @@ import {
   extendLedger,
   verifyLedger
 } from '@lody/e2ee-core/protocol'
-import { inspectContentFrame } from '@lody/e2ee-core/protocol'
+import { accountUserId, inspectContentFrame } from '@lody/e2ee-core/protocol'
 import { desktopE2eePorts, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
@@ -73,7 +73,7 @@ const safeStorage = {
   }
 }
 const intent = Object.freeze({
-  accountId: 'synthetic-account',
+  accountId: '2w8hg7s65mt3pgj9a1bnwsbcedx48wr',
   requestId: 'request-0123456789',
   name: 'Encrypted example',
   slug: 'encrypted-example'
@@ -96,12 +96,7 @@ const openOwner = (directory, override = (custody) => custody, registerIdentity 
       accountId: intent.accountId,
       custody: override(custody)
     })
-    if (registerIdentity)
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-    return { custody, bootstrap }
+    if (registerIdentity) return { custody, bootstrap }
   })
 
 const workspaceId = 'synthetic-workspace'
@@ -341,12 +336,8 @@ const memberWithHost = Effect.fnUntraced(function* (folder) {
   })
   const bootstrap = yield* makeDesktopE2eeBootstrap({
     directory: folder,
-    accountId: 'other-account',
+    accountId: 'acc2',
     custody
-  })
-  yield* bootstrap.recordAccountIdentity({
-    accountId: 'other-account',
-    cryptoUserId: 'bb'.repeat(32)
   })
   const host = yield* makeDesktopE2eeRuntimeHost({ directory: folder, custody, bootstrap })
   return { custody, bootstrap, host }
@@ -376,7 +367,7 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
       assert.deepEqual(yield* member.bootstrap.prepareMemberJoin(offer), original)
       assert.equal(
         hex(decodeMemberKeyPackage(original.keyPackageHex).request.userId.toBytes()),
-        'bb'.repeat(32)
+        hex(Result.getOrThrow(accountUserId('acc2')).toBytes())
       )
       assert.ok(Result.isFailure(yield* Effect.result(member.host.open(workspaceId))))
       yield* owner.host.inspectMemberAdmission(workspaceId, original.keyPackageHex)
@@ -703,6 +694,11 @@ for (const installation of ['member', 'personal-history', 'personal-snapshot']) 
         const nextOffer = yield* owner.host.memberOffer(workspaceId, 'email', 9_000_000_000_001)
         assert.notEqual(nextOffer.token, firstOffer.token)
         const nextRequest = yield* next.bootstrap.prepareMemberJoin(nextOffer)
+        // The rejoining account is recognizably the same person under a new membership.
+        assert.equal(
+          hex(decodeMemberKeyPackage(nextRequest.keyPackageHex).request.userId.toBytes()),
+          hex(decodeMemberKeyPackage(firstRequest.keyPackageHex).request.userId.toBytes())
+        )
         const proof = decodeMemberKeyPackage(nextRequest.keyPackageHex)
         assert.notEqual(hex(proof.request.signingPublicKey.toBytes()), original.signingPublicKey)
         assert.notEqual(
@@ -2453,34 +2449,6 @@ void test('terminal cancellation can archive a signed pre-reservation intent, wh
   )
 })
 
-void test('D03 unknown identity companion blocks only new signatures; existing workspace and signed originals reopen offline', async (t) => {
-  const directory = await fixture(t)
-  let original
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      original = yield* bind(owner)
-      yield* owner.host.open(workspaceId)
-    })
-  )
-  const protectedBytes = Buffer.from('{"version":99,"opaque":"future account identity"}')
-  await writeFile(join(directory, 'account-identity.json'), protectedBytes)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* openOwner(directory, (value) => value, false)
-      const host = yield* makeDesktopE2eeRuntimeHost({ directory, ...owner })
-      assert.equal((yield* host.open(workspaceId)).hasCurrentKey, true)
-      assert.equal(yield* owner.bootstrap.creationNeedsAccountIdentity(intent), false)
-      assert.deepEqual(yield* owner.bootstrap.prepareCreation(intent), original)
-      const next = { ...intent, requestId: 'another-request-01234567' }
-      const rejected = yield* Effect.result(owner.bootstrap.creationNeedsAccountIdentity(next))
-      assert.equal(rejected.failure.code, 'corrupt')
-      assert.equal((yield* host.status(workspaceId)).hasCurrentKey, true)
-    })
-  )
-  assert.deepEqual(await readFile(join(directory, 'account-identity.json')), protectedBytes)
-})
-
 for (const source of ['staging', 'temporary-io'])
   void test(`reopens without a candidate and installs the committed epoch via ${source}`, async (t) => {
     const directory = await fixture(t)
@@ -3850,6 +3818,72 @@ void test('member controls use ordinary durable records and keep the old epoch a
           .map((record) => Result.getOrThrow(decodeRecord(record)).body.operation.type),
         ['declareCapabilities', 'removeMember']
       )
+    })
+  )
+})
+
+void test('ownership transfer signs one ordinary record and leaves the former owner an admin', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const prepared = yield* bind(owner)
+      const records = yield* makeRecords(owner.custody, prepared, 2)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      const remote = () => ({
+        staging: () => ({
+          stageGroup: () => Effect.die('member commands must not stage a candidate'),
+          readGroup: () => Effect.die('member commands must not read a candidate'),
+          deleteGroup: () => Effect.die('member commands must not delete a candidate')
+        }),
+        mailbox: () => {
+          throw new Error('member commands must not receive a candidate')
+        },
+        log: {
+          read: () =>
+            Effect.sync(() => ({
+              records: records.map((x) => new Uint8Array(x)),
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            })),
+          appendCas: (_genesis, point, original) =>
+            Effect.sync(() => {
+              assert.equal(
+                hex(point.head.toBytes()),
+                hex(hashRecordBytes(records.at(-1)).toBytes())
+              )
+              records.push(new Uint8Array(original))
+            })
+        },
+        history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0))
+      })
+      const membershipId = '11'.repeat(16)
+      // A member that does not exist cannot receive ownership.
+      const missing = yield* Effect.result(
+        owner.host.manage(
+          workspaceId,
+          { type: 'transferOwner', membershipId: '99'.repeat(16) },
+          remote
+        )
+      )
+      assert.equal(missing._tag, 'Failure')
+      assert.equal(
+        yield* owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote),
+        'Committed'
+      )
+      assert.equal(
+        Result.getOrThrow(decodeRecord(records.at(-1))).body.operation.type,
+        'transferOwner'
+      )
+      const status = yield* owner.host.status(workspaceId)
+      assert.equal(status.memberRole, 'admin')
+      // Keys are unchanged: a transfer is not a removal.
+      assert.equal(status.rotationRequired, false)
+      // The former owner has no authority to transfer again.
+      const again = yield* Effect.result(
+        owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote)
+      )
+      assert.equal(again._tag, 'Failure')
     })
   )
 })

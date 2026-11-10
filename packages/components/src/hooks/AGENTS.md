@@ -143,3 +143,5 @@ visibility; skipping a catalog grants no machine or execution authority.
 - Compute nothing when disabled: both `iosLiveActivitiesEnabledAtom` and the native
   iOS shell are required, not equivalent. Derive activity id separately so disable
   and unmount can end an activity the payload no longer describes.
+
+Display-only member directories retain same-account/workspace labels on failure and expose the shared query owner’s retry without blocking grant controls.

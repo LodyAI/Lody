@@ -1,3 +1,4 @@
+import { accountIdFromUserId } from '@lody/e2ee-core/protocol';
 import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
 import {
   daemonLossObserver,
@@ -50,8 +51,13 @@ import {
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
+import { authorityStamp, type AuthorityStamp } from './authority-clock';
 import { makeCliE2eeRuntime } from './runtime';
-import { makeCliE2eeExecutionAuthorization } from './execution-authorization';
+import {
+  makeCliE2eeExecutionAuthorization,
+  authorizeCliE2eeSessionTarget,
+  type CliE2eeSessionReadTarget,
+} from './execution-authorization';
 import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
 
 /** Fast enough for the 900s client-loss envelope; a successful check refreshes the
@@ -448,6 +454,12 @@ type CliE2eeWorkspaceOptions = {
   expectedSigningPublicKey?: string;
   cloud: CloudE2eePort;
   onUnavailable: () => void;
+  /** A latest ledger read verified in full. `startedAt` was taken before its network I/O. */
+  onAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
+  onWindowNotice?: (
+    active: boolean,
+    window?: import('./execution-authorization').E2eeAccessWindow
+  ) => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
@@ -728,6 +740,36 @@ async function openWorkspaceOwned(
         workspaceId: options.workspaceId,
         credential,
         cloud: options.cloud,
+        sessionSharing: (requester, sessionId, sessionOwnerUserId) =>
+          Effect.gen(function* () {
+            const state = (yield* runtime.executionLedger()).inspectState();
+            const signer = state.devices.get(requester);
+            const member = signer && state.members.get(hex(signer.membershipId.toBytes()));
+            const account = member && accountIdFromUserId(member.userId);
+            if (account && Result.isSuccess(account) && account.success === sessionOwnerUserId)
+              return { allowed: true, isCurrent: () => true };
+            const machine = state.devices.get(hex(device.publicKey.toBytes()));
+            if (!sharingRemote || !sharing || machine?.kind !== 'machine' || !machine.machineId)
+              return { allowed: false, isCurrent: () => false };
+            const { view, isCurrent } = yield* sharing.readSessionAccess(
+              machine.machineId,
+              sharingRemote
+            );
+            return {
+              isCurrent,
+              allowed:
+                !view.removed &&
+                !view.unavailable &&
+                view.sessions.some(
+                  (row) =>
+                    row.sessionId === sessionId &&
+                    (row.audience === 'team' ||
+                      (account &&
+                        Result.isSuccess(account) &&
+                        row.audience.userId === account.success))
+                ),
+            };
+          }),
         onCredentialFailure: (cause) => credentialFailureHandler(cause),
         runtime,
         sharing: sharingRemote
@@ -783,6 +825,8 @@ async function openWorkspaceOwned(
   const epochTransition = createWorkspaceEpochTransitionLegacy({
     ...initialStatus,
     epoch: initialStatus.writeEpoch ?? initialStatus.epoch,
+    // Select the epoch a slow key install finished, through a fresh verified read.
+    onLateInstallation: () => void refreshInBackground(false),
   });
   epochTransition.observe(initialStatus);
   let ledgerBlocked = false;
@@ -1198,7 +1242,11 @@ async function openWorkspaceOwned(
     refresh = (async () => {
       while (pending && !isClosed()) {
         pending = false;
+        const startedAt = authorityStamp();
+        const confirmRead = opened.executionAuthorization.beginLatestRead();
         let status = await run(opened.runtime.status());
+        const trusted = status;
+        let movedBack = false;
         let cursor: string | undefined;
         let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
         do {
@@ -1225,6 +1273,18 @@ async function openWorkspaceOwned(
             });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
+          if (
+            page.checkpoint.length !== checkpoint.length ||
+            page.checkpoint.headHash !== checkpoint.headHash
+          ) {
+            opened.executionAuthorization.endOutageWindow();
+            throw new Error('e2ee_ledger_checkpoint_changed');
+          }
+          // Ingest accepts a known older prefix for overlapping reads; that proves nothing fresh.
+          movedBack ||=
+            page.checkpoint.length < trusted.length ||
+            (page.checkpoint.length === trusted.length &&
+              page.checkpoint.headHash !== trusted.headHash);
           status = await run(opened.runtime.ingest(page)).catch((error) => {
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
@@ -1236,6 +1296,12 @@ async function openWorkspaceOwned(
           epochTransition.observe(status);
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
+        // Later key work has its own failures; they do not undo this confirmation.
+        if (movedBack) opened.executionAuthorization.endOutageWindow();
+        else if (!cursor && !closed) {
+          confirmRead();
+          options.onAuthorityConfirmed?.(startedAt);
+        }
         if (!closed) {
           if (pairing) {
             await confirmPairing(pairing);
@@ -1244,8 +1310,14 @@ async function openWorkspaceOwned(
           if (epochTransition.needsUpdate()) {
             await epochTransition.transition({
               install: async () => {
-                await run(opened.runtime.receiveKeys());
-                const installed = await run(opened.runtime.status());
+                // The refresh above verified the ledger. If the key for its epoch is
+                // already installed, a slow earlier install finished: select it without
+                // waiting on the mailbox again, which on a slow link would time out again.
+                let installed = await run(opened.runtime.status());
+                if (!installed.hasCurrentKey) {
+                  await run(opened.runtime.receiveKeys());
+                  installed = await run(opened.runtime.status());
+                }
                 if (installed.hasCurrentKey && installed.epoch > epochTransition.epoch()) {
                   for (const token of tokensInUse) await run(token.invalidate());
                 }
@@ -1481,6 +1553,17 @@ async function openWorkspaceOwned(
           })
         ),
     },
+    authorizeSessionTarget: (target: CliE2eeSessionReadTarget) =>
+      authorizeCliE2eeSessionTarget(
+        {
+          runtime: opened.runtime,
+          sourceDevice: opened.signingPublicKey,
+          readPolicy: opened.sharingRemote
+            ? (machineId) => opened.sharing.read(machineId, opened.sharingRemote!)
+            : undefined,
+        },
+        target
+      ),
     authorizeMachineTarget: (machineId: string, localProjectId?: string) =>
       Effect.gen(function* () {
         const state = (yield* opened.runtime.executionLedger()).inspectState();
@@ -1507,7 +1590,10 @@ async function openWorkspaceOwned(
       machineId: string,
       offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
       trace?: (event: E2eeRpcTiming) => void,
-      handleFeature?: EncryptedFeatureHandler
+      handleFeature?: EncryptedFeatureHandler,
+      resolveHistoryTarget?: (
+        sessionId: string
+      ) => Promise<{ rootSessionId: string; sessionOwnerUserId?: string; localProjectId?: string }>
     ) =>
       run(
         Effect.gen(function* () {
@@ -1555,6 +1641,27 @@ async function openWorkspaceOwned(
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,
+                      authorizeHistoryRead: (workspaceId, requester, sessionId) =>
+                        Effect.gen(function* () {
+                          if (!resolveHistoryTarget)
+                            return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+                          const target = yield* Effect.tryPromise({
+                            try: () => resolveHistoryTarget(sessionId),
+                            catch: (cause) => cause,
+                          });
+                          const editing = yield* opened.executionAuthorization.authorizeExecution(
+                            workspaceId,
+                            requester,
+                            target.localProjectId
+                          );
+                          if (editing._tag === 'Authorized') return editing;
+                          return yield* opened.executionAuthorization.authorizeSessionRead(
+                            workspaceId,
+                            requester,
+                            target.rootSessionId,
+                            target.sessionOwnerUserId
+                          );
+                        }),
                       authoritySignal: () =>
                         AbortSignal.any([
                           opened.runtime.executionAuthoritySignal(),

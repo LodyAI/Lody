@@ -25,9 +25,12 @@ import {
   LedgerLogError,
   BackendError,
   EpochStagingStore,
-  KeyMailbox
+  KeyMailbox,
+  type RecoveryVaultStore
 } from '@lody/e2ee-core/services'
 import {
+  decodeRecoveryVaultCiphertext,
+  encodeRecoveryVaultCiphertext,
   decodeEpochStagedGroup,
   encodeEpochStagedGroup,
   ownEpochStagedGroup,
@@ -558,11 +561,6 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
   return Object.freeze({
     close,
     mailbox,
-    accountIdentity: () =>
-      request(
-        (client) => client.action(api.e2eeWorkspaces.accountIdentity, {}),
-        z.object({ accountId: z.string().min(1), cryptoUserId: hash })
-      ),
     memberCreateInvitation: (args: E2eeMemberRequests['createInvitation']) => {
       const original = {
         ...memberDeviceAccess(args),
@@ -879,7 +877,126 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         original.credential !== undefined
       )
     },
-    staging
+    staging,
+    /** Opaque recovery-vault ciphertext storage. Login gates retrieval only; the
+     * service never decrypts, selects ledger trust or proves an active Recovery device. */
+    /** The first page of account security events. Kinds this build does not know pass
+     * through as strings, and the caller ignores them. */
+    accountSecurityEvents: (signal?: AbortSignal) => () =>
+      request(
+        (client) => client.query(api.accountSecurityEvents.list, { limit: 20 }),
+        z.object({
+          events: z
+            .array(z.object({ id: z.string(), kind: z.string(), occurredAt: z.number() }))
+            .max(50),
+          nextCursor: z.string().nullable()
+        }),
+        signal
+      ),
+    /** Whole-vault replacement bookkeeping. State never decides trust; the ledger does. */
+    recoveryVaultReplacement: (signal?: AbortSignal) => {
+      const ok = z.object({ ok: z.literal(true) })
+      return {
+        state: () =>
+          request(
+            (client) => client.query(api.e2eeRecoveryVault.replacementState, {}),
+            z.object({ current: z.string().nullable(), replacing: z.string().nullable() }),
+            signal
+          ),
+        reserve: (vaultId: string) =>
+          request(
+            (client) => client.mutation(api.e2eeRecoveryVault.reserveReplacementVault, { vaultId }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid),
+        finish: (oldVaultId: string, newVaultId: string) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.finishReplacement, { oldVaultId, newVaultId }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid),
+        abandon: (vaultId: string) =>
+          request(
+            (client) => client.mutation(api.e2eeRecoveryVault.abandonReplacement, { vaultId }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid)
+      }
+    },
+    /** Encrypted workspaces this account can name, whether or not this device joined them. */
+    recoveryVaultAccountWorkspaces: (signal?: AbortSignal) =>
+      request(
+        (client) => client.query(api.e2eeMembers.workspaces, {}),
+        z.array(z.object({ id: z.string(), name: z.string(), genesisHash: hash })),
+        signal
+      ),
+    /** Whether this account already has a vault. One account has one vault. */
+    hasRecoveryVault: (signal?: AbortSignal) =>
+      request(
+        (client) => client.query(api.e2eeRecoveryVault.hasAccountVault, {}),
+        z.object({ exists: z.boolean() }),
+        signal
+      ).pipe(Effect.map((reply) => reply.exists)),
+    recoveryVault: (signal?: AbortSignal): RecoveryVaultStore['Service'] => {
+      const ciphertext = (value: unknown) => {
+        if (value === null) return Effect.succeed(null)
+        const decoded = decodeRecoveryVaultCiphertext(value)
+        return Result.isSuccess(decoded)
+          ? Effect.succeed(decoded.success)
+          : Effect.fail(
+              new BackendError({ service: 'RecoveryVaultStore', reason: 'invalid-response' })
+            )
+      }
+      const ok = z.object({ ok: z.literal(true) })
+      return {
+        putImmutable: (vaultId, entry) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.putImmutable, {
+                vaultId,
+                entry: encodeRecoveryVaultCiphertext(entry)
+              }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid),
+        readEntry: (vaultId, entryId) =>
+          request(
+            (client) => client.query(api.e2eeRecoveryVault.readEntry, { vaultId, entryId }),
+            z.unknown(),
+            signal
+          ).pipe(Effect.flatMap(ciphertext)),
+        readIndex: (vaultId) =>
+          request(
+            (client) => client.query(api.e2eeRecoveryVault.readIndex, { vaultId }),
+            z.unknown(),
+            signal
+          ).pipe(Effect.flatMap(ciphertext)),
+        compareAndSwapIndex: (vaultId, expected, next, referencedEntryIds) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.compareAndSwapIndex, {
+                vaultId,
+                expected: expected && { revision: expected.revision, digest: expected.digest },
+                next: encodeRecoveryVaultCiphertext(next),
+                referencedEntryIds: [...referencedEntryIds]
+              }),
+            z.object({ outcome: z.enum(['Committed', 'Conflict']) }),
+            signal
+          ).pipe(Effect.map((value) => value.outcome)),
+        deleteUnreferenced: (vaultId, entryId, expectedIndex) =>
+          request(
+            (client) =>
+              client.mutation(api.e2eeRecoveryVault.deleteUnreferenced, {
+                vaultId,
+                entryId,
+                expectedIndex: { revision: expectedIndex.revision, digest: expectedIndex.digest }
+              }),
+            ok,
+            signal
+          ).pipe(Effect.asVoid)
+      }
+    }
   })
 })
 export type E2eeCloudClient = Effect.Success<ReturnType<typeof makeE2eeCloudClient>>

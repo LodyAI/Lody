@@ -18,3 +18,10 @@ apply; read this file before changing a workflow.
 - Desktop journey authoring runs on a maintainer machine. GitHub workflows never
   receive Codex credentials or publish author output; an ordinary PR exposes the
   reviewed patch to the existing read-only code checks.
+
+## Darwin coverage
+
+`macos-product-tests.yml` preserves full Darwin product coverage on hosted ARM64 macOS
+for each main SHA. Keep read-only permissions, no production credentials, adapter
+preparation before tests, and non-canceling concurrency per SHA. Manual runs cannot
+replace main-push evidence.

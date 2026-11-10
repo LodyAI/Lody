@@ -6,6 +6,8 @@ import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { verifySignatureEffect } from '../src/internal/foundation/signature';
 import { signVerified } from '../src/internal/foundation/signing';
 import {
+  accountIdFromUserId,
+  accountUserId,
   Bytes,
   deviceCredentialBindingBytes,
   signDeviceCredentialBinding,
@@ -761,5 +763,66 @@ describe('device credential binding v1', () => {
     const badSignature = hex(signatureHex);
     badSignature[63] = 255;
     expect(Result.isFailure(verifyDeviceCredentialBinding(context, badSignature))).toBe(true);
+  });
+});
+
+describe('account user ID encoding', () => {
+  // Generated independently by Python's RFC 4648 base32, translated to the account
+  // alphabet. Frozen with ledger v1: a change here makes shipped ledgers unreadable.
+  const vectors = [
+    [
+      '2w8hg7s65mt3pgj9a1bnwsbcedx48wr',
+      '1f1711181f262d343b424950575e656c737a4473000000000000000000000000',
+    ],
+    [
+      'zzzzzzr7mppb7ep1s37xdqf4xfsfj0071reaj',
+      '25ffffffff07a5acb3bac1c8cfd6dde4ebf2f900070e1ca90000000000000000',
+    ],
+  ] as const;
+
+  it.each(vectors)('freezes the bytes and restores %s', (accountId, encoded) => {
+    const userId = ok(accountUserId(accountId));
+    expect(toHex(userId.toBytes())).toBe(encoded);
+    expect(ok(accountIdFromUserId(ok(Bytes.userId(hex(encoded)))))).toBe(accountId);
+  });
+
+  it('keeps every supported length and final bit pattern distinct', () => {
+    const seen = new Set<string>();
+    for (const accountId of [
+      '0',
+      '00',
+      'z',
+      'zz',
+      'z'.repeat(48),
+      'z'.repeat(49),
+      '0'.repeat(49),
+    ]) {
+      const userId = ok(accountUserId(accountId));
+      expect(ok(accountIdFromUserId(userId))).toBe(accountId);
+      seen.add(toHex(userId.toBytes()));
+    }
+    expect(seen.size).toBe(7);
+  });
+
+  it.each(['', 'z'.repeat(50), 'user-1', 'Abc', 'io', ' abc', 'abc\n'])(
+    'refuses %j instead of normalizing it',
+    (accountId) => {
+      const result = accountUserId(accountId);
+      expect(Result.isFailure(result) && result.failure.code).toBe('canonical');
+    }
+  );
+
+  it('refuses bytes no account ID produces', () => {
+    const decoded = (edit: (bytes: Uint8Array) => void) => {
+      const bytes = hex('02' + '00'.repeat(31));
+      edit(bytes);
+      const result = accountIdFromUserId(ok(Bytes.userId(bytes)));
+      return Result.isFailure(result) && result.failure.code;
+    };
+    expect(decoded((b) => (b[0] = 0))).toBe('canonical');
+    expect(decoded((b) => (b[0] = 50))).toBe('canonical');
+    // Two characters use ten bits: the rest of the second byte must be zero.
+    expect(decoded((b) => (b[2] = 1))).toBe('canonical');
+    expect(decoded((b) => (b[31] = 1))).toBe('canonical');
   });
 });

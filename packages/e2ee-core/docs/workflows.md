@@ -234,8 +234,16 @@ opens the new personal device's workspace with the recovered keys installed.
 
 `RecoveryVaults` (_requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`_)
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
-passkey PRF. `makeWorkspaceRecovery` keeps one workspace's recovery entry
-current (setup, test, replace, skip) and performs a restore. A recovery device
+passkey PRF. A passkey needs a registration that reported `enabled: true` and an
+authentication with user verification and a 32-byte `results.first`; WebAuthn never reports
+`enabled` at authentication. Every ceremony uses `vaultPrfInput()`, and `user.id` is
+`passkeyUserHandle(vaultId)`, so a new device without the file learns the vault from the
+ceremony. The encrypted index lists each passkey, and CAS references its wrap so the
+service cannot delete it as unreferenced. `makeWorkspaceRecovery` keeps one workspace's recovery entry
+current (setup, test, replace, skip) and performs a restore. `revokeOtherRecoveryDevices`
+revokes every other recovery device of the membership from the verified ledger, for
+whole-vault replacement. A restore stops unless the
+ledger contains the package's `head` and `length` checkpoint. A recovery device
 admits a new personal device, then that device installs every epoch key.
 Each private package is canonical CBOR with `formatVersion: 1`; a missing or
 other version, or private keys that are not the exact 48-byte RFC 8410 PKCS#8
@@ -312,3 +320,9 @@ does not need this proof. `test/foundation.test.ts` retains a fixed signing vect
 and checks substitution of every context field.
 
 Desktop error classification, independent paging and terminal acknowledgement are described in [key maintenance availability](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.md). `MailboxInstallError.cryptographicRejection` marks only a deterministic rejection at envelope verification; local writes, report signing and unknown native errors never authorize rejecting an envelope.
+
+A recovery restore may repair a currently admitted personal identity that has lost
+its installed keys. After verifying the recovery device, package checkpoint and
+current epoch envelope, it requires the exact current personal signing/encryption
+keys and membership. It installs through the caller's normal installed-key boundary
+without another admission; a revoked or mismatched identity gains no authority.

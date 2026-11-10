@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ConvexError } from 'convex/values';
 
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,7 +27,10 @@ vi.mock('../src/providers/convex-provider', () => ({
   useAuthClient: () => ({ useActiveOrganization: () => ({ data: null }) }),
 }));
 
-vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => false }));
+vi.mock('@/lib/electron', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/electron')>()),
+  isElectronRenderer: () => false,
+}));
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: vi.fn(async () => true) }));
 vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -57,7 +61,13 @@ function overview(patch: Partial<BillingOverviewData> = {}): BillingOverviewData
 type OverviewRef = { current: BillingOverviewData | undefined };
 type Reconcile = () => Promise<{ status: 'none' | 'pending' | 'paid' | 'expired' }>;
 
-function createPlatform(overviewRef: OverviewRef, reconcile: Reconcile): PlatformProvider {
+function createPlatform(
+  overviewRef: OverviewRef,
+  reconcile: Reconcile,
+  actions: Record<string, (...args: never[]) => Promise<unknown>> = {}
+): PlatformProvider {
+  const emptyInvoices = async () => ({ invoices: [], upcoming: null });
+  const noop = async () => null;
   return {
     kind: 'cloud',
     identity: {
@@ -77,13 +87,14 @@ function createPlatform(overviewRef: OverviewRef, reconcile: Reconcile): Platfor
       useQuery: (operation: { name: string }) =>
         operation.name === 'billing:getBillingOverview' ? overviewRef.current : undefined,
       useAction: (operation: { name: string }) => {
+        if (actions[operation.name]) return actions[operation.name];
         if (operation.name === 'billing:reconcileWorkspaceCheckout') {
           return reconcile;
         }
         if (operation.name === 'billing:listBillingInvoices') {
-          return async () => ({ invoices: [], upcoming: null });
+          return emptyInvoices;
         }
-        return async () => null;
+        return noop;
       },
       useMutation: () => async () => null,
     } as unknown as PlatformProvider['cloudApi'],
@@ -116,9 +127,10 @@ describe('billing checkout return confirmation', () => {
 
   async function renderBilling(
     overviewRef: OverviewRef,
-    reconcile: Reconcile = async () => ({ status: 'pending' })
+    reconcile: Reconcile = async () => ({ status: 'pending' }),
+    actions: Record<string, (...args: never[]) => Promise<unknown>> = {}
   ) {
-    const platform = createPlatform(overviewRef, reconcile);
+    const platform = createPlatform(overviewRef, reconcile, actions);
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-1');
     store.set(currentWorkspaceSlugAtom, 'acme');
@@ -141,8 +153,120 @@ describe('billing checkout return confirmation', () => {
         );
       });
     await rerender();
-    return rerender;
+    return Object.assign(rerender, { store });
   }
+
+  it('recovers an already switched interval and refreshes only through the read-only payment endpoint', async () => {
+    vi.useRealTimers();
+    const read = vi.fn().mockResolvedValue({
+      billingInterval: 'month',
+      effectiveAt: null,
+      payment: { status: 'checking' },
+    });
+    const write = vi.fn();
+    const rerender = await renderBilling(
+      {
+        current: overview({
+          effectivePlanTier: 'plus',
+          planTier: 'plus',
+          billingAccountId: 'a',
+          entitlementSource: 'stripe',
+          billingInterval: 'year',
+          subscriptionStatus: 'active',
+        }),
+      },
+      undefined,
+      {
+        'billing:previewSubscriptionIntervalChange': async () => {
+          throw new ConvexError({ code: 'interval_already_current' });
+        },
+        'billing:getSubscriptionPaymentStatus': read,
+        'billing:setSubscriptionInterval': write,
+      }
+    );
+    const button = (text: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+        (item) => item.textContent?.trim() === text
+      )!;
+    await act(async () => button('Switch to monthly').click());
+    expect(document.body.textContent).toContain('Billing interval updated');
+    const reads = read.mock.calls.length;
+    read.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => button('Check payment status').click());
+    expect(read).toHaveBeenCalledTimes(reads + 1);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Unable to refresh');
+    expect(write).not.toHaveBeenCalled();
+    await act(async () => rerender.store.set(currentWorkspaceIdAtom, 'workspace-2'));
+    await rerender();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('opens the specific outstanding invoice without relying on a truncated history page', async () => {
+    vi.useRealTimers();
+    const invoice = {
+      id: 'in_current',
+      number: 'OLD-1',
+      status: 'open',
+      amountPaid: 0,
+      amountRemaining: 100,
+      currency: 'usd',
+      periodStart: null,
+      periodEnd: null,
+      interval: 'month',
+      kind: 'subscription',
+      giftDurationMonths: null,
+      createdAt: 1,
+      hostedInvoiceUrl: null,
+    };
+    let firstInvoicePaid = false;
+    const detail = vi.fn().mockResolvedValue({ invoice, lines: [], canCancel: false });
+    await renderBilling(
+      {
+        current: overview({
+          effectivePlanTier: 'plus',
+          planTier: 'plus',
+          billingAccountId: 'a',
+          entitlementSource: 'stripe',
+          billingInterval: 'year',
+          subscriptionStatus: 'active',
+        }),
+      },
+      undefined,
+      {
+        'billing:previewSubscriptionIntervalChange': async () => {
+          throw new ConvexError({ code: 'interval_already_current' });
+        },
+        'billing:getSubscriptionPaymentStatus': async () => ({
+          billingInterval: 'month',
+          effectiveAt: null,
+          payment: {
+            status: 'required',
+            amountRemaining: 100,
+            currency: 'usd',
+            outstandingInvoices: [
+              {
+                id: firstInvoicePaid ? 'in_current' : 'in_old',
+                amountRemaining: 100,
+                currency: 'usd',
+                invoiceUrl: null,
+              },
+            ],
+          },
+        }),
+        'billing:getBillingInvoice': detail,
+      }
+    );
+    const button = (text: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+        (item) => item.textContent?.trim() === text
+      )!;
+    await act(async () => button('Switch to monthly').click());
+    firstInvoicePaid = true;
+    await act(async () => button('View outstanding invoice').click());
+    expect(detail).toHaveBeenCalledWith({ workspaceId: 'workspace-1', invoiceId: 'in_current' });
+    expect(document.body.textContent).toContain('Plus invoice');
+    expect(document.body.textContent).toContain('Amount due$1');
+  });
 
   it('keeps the activating Plus state across a transient reconcile miss, then settles', async () => {
     window.history.replaceState({}, '', '/acme/settings/billing?checkout=success');

@@ -298,6 +298,9 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    transport: block.transport,
+    machineId: block.machineId,
+    localImageId: block.localImageId,
     ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
@@ -468,6 +471,17 @@ export const normalizeSessionInputBlocks = (
   fallbackPrompt: string
 ): SessionInputBlock[] => {
   const parsedInputBlocks = SessionInputBlocksSchema.safeParse(inputBlocks);
+  if (
+    !parsedInputBlocks.success &&
+    Array.isArray(inputBlocks) &&
+    inputBlocks.some(
+      (block) =>
+        block?.type === 'local_attachment' ||
+        (block?.type === 'image' && block?.transport === 'local')
+    )
+  ) {
+    throw new Error('Invalid or unsupported local attachment input');
+  }
   if (parsedInputBlocks.success && parsedInputBlocks.data.length > 0) {
     const normalized: SessionInputBlock[] = [];
     for (const block of parsedInputBlocks.data) {
@@ -571,6 +585,11 @@ export const inputBlocksToHistoryItems = (
       continue;
     }
 
+    if (block.type === 'local_attachment') {
+      items.push({ ...block });
+      continue;
+    }
+
     if (block.type === 'file') {
       items.push({
         text: undefined,
@@ -602,6 +621,17 @@ export const historyItemsToInputBlocks = (
   const blocks: SessionInputBlock[] = [];
 
   for (const item of items) {
+    if (
+      typeof item === 'object' &&
+      item !== null &&
+      'type' in item &&
+      item.type === 'local_attachment'
+    ) {
+      const parsed = SessionInputBlocksSchema.safeParse([item]);
+      if (!parsed.success) throw new Error('Invalid local attachment');
+      blocks.push(...parsed.data);
+      continue;
+    }
     if (isTextHistoryItem(item)) {
       // `item` came out of the session document, where spans ride an untyped
       // catchall — whatever wrote them, including an older or newer client,

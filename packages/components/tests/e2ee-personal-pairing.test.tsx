@@ -7,7 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { E2eePersonalPairing } from '../src/components/pages/e2ee-personal-pairing';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('../src/components/pages/e2ee-ledger-verification', () => ({ LedgerQrCode: () => null }));
+const camera = vi.hoisted(() => ({ scan: (_value: string) => {} }));
+vi.mock('../src/components/pages/e2ee-ledger-verification', () => ({
+  LedgerQrCode: () => null,
+  useQrCamera: (_active: boolean, onCode: (value: string) => void) => {
+    camera.scan = onCode;
+    return { video: { current: null }, state: 'idle' };
+  },
+}));
 const offer = {
   version: 1 as const,
   workspaceId: 'w',
@@ -101,6 +108,62 @@ describe('personal desktop approval', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   };
+  it('scans a desktop offer without submitting until the person confirms, then waits for approval', async () => {
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: () => {} } });
+    try {
+      let prepared: unknown;
+      runtime.preparePersonalJoin = async (value) => {
+        prepared = value;
+        return { pairingSessionId: value.pairingSessionId, status: 'pending' };
+      };
+      await render(false);
+      await click('e2ee.pair.scan');
+      expect(container.querySelector('video')).not.toBeNull();
+      await act(async () => camera.scan(JSON.stringify(offer)));
+      expect(container.querySelector('video')).toBeNull();
+      expect(container.querySelector('textarea')!.value).toBe(JSON.stringify(offer));
+      expect(prepared).toBeUndefined();
+      await click('e2ee.pair.trust');
+      expect(prepared).toEqual(offer);
+      expect(container.textContent).toContain('e2ee.pair.waiting');
+      expect(container.textContent).toContain('e2ee.pair.claim');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('rejects unrelated and wrong-workspace QR codes before changing the local pairing identity', async () => {
+    runtime.preparePersonalJoin = async () => {
+      throw new Error('must not create an identity');
+    };
+    await render(false);
+    await act(async () => camera.scan('not a workspace offer'));
+    expect(container.textContent).toContain('e2ee.pair.invalidOffer');
+    await click('e2ee.pair.trust');
+    expect(container.textContent).not.toContain('e2ee.pair.error');
+    await act(async () => camera.scan(JSON.stringify({ ...offer, workspaceId: 'other' })));
+    await click('e2ee.pair.trust');
+    expect(container.textContent).toContain('e2ee.pair.wrongWorkspace');
+    expect(container.textContent).not.toContain('e2ee.pair.waiting');
+  });
+  it('exposes only recovery lifecycle and phase for diagnostics', async () => {
+    delete runtime.personalPairingOffer;
+    delete runtime.inspectPersonalJoin;
+    delete runtime.approvePersonalJoin;
+    const pending =
+      Promise.withResolvers<Awaited<ReturnType<NonNullable<Runtime['pendingPersonalJoin']>>>>();
+    runtime.pendingPersonalJoin = () => pending.promise;
+    await render(false);
+    const diagnostic = () =>
+      container.querySelector('[data-testid="e2ee-personal-pairing-state"]')!;
+    expect(diagnostic().getAttribute('data-phase')).toBe('idle');
+    expect(diagnostic().getAttribute('data-recovering')).toBe('true');
+    expect(diagnostic().getAttribute('data-recovery-started-at')).toMatch(/^\d{4}-/);
+    expect(diagnostic().getAttribute('data-recovery-finished-at')).toBeNull();
+    await act(async () => pending.resolve(null));
+    expect(diagnostic().getAttribute('data-recovering')).toBe('false');
+    expect(diagnostic().getAttribute('data-recovery-finished-at')).toMatch(/^\d{4}-/);
+    expect(diagnostic().outerHTML).not.toContain(offer.pairingSessionId);
+  });
   it.each([false, true])(
     'a request-only personal host can join with desktop approval even when ledger display allows approval (%s)',
     async (canApprove) => {

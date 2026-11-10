@@ -58,23 +58,21 @@ background agents keep running
   server-side 3xx, so a public page redirecting to loopback would otherwise
   commit here and never reach Managed Preview.
 
-Renderer `beforeunload` vetoes on product windows (close, reload, quit) surface
-through one native Stay/Leave confirmation (`../renderer-unload.ts`); Leave only
-ignores that document's veto. Quit closes product windows, and so gets unload
-approval, before it destroys relays or stops the CLI; Stay cancels quit with the
-app fully running. Quit veto confirmation uses an asynchronous sheet with a visible
-parent, so its fifteen-second deadline remains runnable. Leave retries only that
-document's close; navigation, timeout or destruction cancels the sheet and invalidates
-late replies. Non-quit close/reload keeps its existing confirmation behavior.
-A quit close whose renderer hangs or dies is destroyed so quit
-cannot wait forever. Never destroy a normally closing window or add a path that
-bypasses unrelated `beforeunload` guards such as unsaved editors.
+Product-window `beforeunload` vetoes always show native Stay/Leave confirmation
+(`../renderer-unload.ts`). Leave ignores only that document's veto. Quit closes
+windows before relays or CLI; Stay cancels quit with the app running. The asynchronous
+sheet has a visible parent. If unanswered after fifteen seconds, cancel quit and
+retain the window. Leave starts a fresh fifteen-second closing budget. Navigation,
+cancellation and destruction invalidate late answers. Non-quit close/reload behavior
+stays unchanged. A hung or dead renderer is destroyed so quit remains bounded.
+Never bypass unsaved-editor guards or destroy a normally closing window.
 A renderer-requested relaunch (`../relaunch-intent.ts`) calls `app.relaunch()` only at
 `will-quit`; a quit the barrier cancels settles `cancelled`, and the IPC caller
 withdraws any reset request it armed, so a later ordinary quit neither relaunches nor
 resets. Relaunching quits the embedded CLI: never make it a default recovery step.
 
-Quit bounds each renderer close and main-owned resource drain to fifteen seconds.
+Quit bounds each renderer closing attempt and main-owned resource drain to fifteen seconds.
+Unload diagnostics use fixed unsaved-editor, pending-send or unknown categories.
 Unconfirmed work keeps its original owner until main exits. Log it, give a
 presence-only warning marker at most one second to persist, then exit nonzero
 without terminal reporting UI. Next launch delivers a nonmodal native notification; failed

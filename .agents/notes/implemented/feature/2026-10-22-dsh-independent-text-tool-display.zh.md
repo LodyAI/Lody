@@ -9,8 +9,8 @@ Translation: current
 
 Lody 将 DSH 思考和工具放进同一组，因此原本展开的纯思考组可能在工具加入后收起。
 适配器没有混淆正文与推理类型；正文在每条 assistant 消息提交时发送，并非只在整轮结束时发送。
-DSH 文字现在独立可读，工具默认显示折叠摘要，同时保留思考语义和用户手动开合。
-DSH 不再使用外层已完成过程折叠，以保持原有顺序。适配器流式传输与持久化历史保持不变。
+DSH 思考和工具使用独立、默认收起的分组，同时保留思考语义和用户手动开合。
+完成的过程使用共用外层折叠，展开时保持原有顺序。适配器流式传输与持久化历史保持不变。
 
 ## 证据与职责
 
@@ -20,7 +20,7 @@ DSH 不再使用外层已完成过程折叠，以保持原有顺序。适配器�
   `text-delta`。现有 `src/adapter.test.ts` 记录了这两条路径。
 - Lody 的[分组构建器](../../../../packages/components/src/components/ai-gui/assistant-turn-render-blocks.ts)
   合并相邻思考和工具；[虚拟行构建器](../../../../packages/components/src/components/ai-gui/view.tsx)
-  仅默认展开 DSH 的纯思考组。完成后，过程内容还可能被外层 worked 折叠组隐藏。
+  默认收起思考和工具组。完成后，过程内容还可能被外层 worked 折叠组隐藏。
 - 2026-10-22 检查的上游 Web `master` 在
   [AssistantMarkdown](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx)
   展示普通 Markdown，在
@@ -34,12 +34,12 @@ DSH 不再使用外层已完成过程折叠，以保持原有顺序。适配器�
 ## 实现与限制
 
 只有 Session 元数据标识的 builtin DSH 启用独立思考布局。思考与工具之间的边界
-结束当前活动组，工具加入时保留前组的键。思考组默认展开，工具组默认收起；保留
-手动开合和搜索展开。DSH 跳过外层已完成过程折叠，保持中间正文可见及工具的原有
-位置，耗时由已有页脚展示。布局和虚拟行缓存均包含 Provider 策略；其他 Provider
+结束当前活动组，工具加入时保留前组的键。思考组和工具组默认收起；保留
+手动开合和搜索展开。完成过程使用共用外层折叠，展开时保持原有顺序，耗时遵循
+共用的页头和页脚规则。布局和虚拟行缓存均包含 Provider 策略；其他 Provider
 保留原有行为。
 
-相比上游 Think 折叠预览，这会占用更多纵向空间，但符合中间文字可直接阅读的要求。
+独立折叠组保留查看思考正文的入口，默认不占用正文空间。
 没有修改存储类型或 Provider 传输。普通正文仍等每条消息提交后发送；改成实时流式
 输出需要另行处理重试、中断和去重。
 

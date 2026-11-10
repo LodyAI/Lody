@@ -1,3 +1,6 @@
+import { accountUserId } from '@lody/e2ee-core/protocol';
+import { authorizeCliE2eeSessionTarget } from '../src/lib/e2ee/execution-authorization';
+import type { AuthorityStamp } from '../src/lib/e2ee/authority-clock';
 import {
   createDaemonLossRegistry,
   readDaemonLossAuthority,
@@ -19,7 +22,7 @@ import {
 import { ScheduleEngine, type ScheduleEnginePorts } from '../src/lib/schedules/schedule-engine';
 import { ScheduleStore } from '../src/lib/schedules/schedule-store';
 import { LoroRepo } from 'loro-repo';
-import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { SessionDocument, LoroDocumentManager } from '../src/lib/loro/doc';
 import { prepareSessionInput, resolveTurnDispatchConfig } from '../src/commands/session';
 import {
   materializePreparedSessionInput,
@@ -50,7 +53,7 @@ import {
   createCliSqliteRepoStore,
   type CliSqliteRepoStore,
 } from '../src/lib/loro/sqlite-repo-store';
-import { CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
+import { CloudE2eeLedgerOutage, CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
 import { randomUUID } from 'node:crypto';
 import { resetCliE2eeIdentity } from '../src/lib/e2ee/reset-identity';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
@@ -172,7 +175,8 @@ const setup = (
   machineDirectory = join(directory, 'machine'),
   includeRotation = false,
   publishRotation = false,
-  includeGuestMachine = false
+  includeGuestMachine = false,
+  accountIds = false
 ) =>
   Effect.gen(function* () {
     const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'owner'), wrapper });
@@ -183,7 +187,9 @@ const setup = (
       signer: prepared,
       encryptionPublicKey: prepared.enc,
       initialKey,
-      userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+      userId: Result.getOrThrow(
+        accountIds ? accountUserId('acct') : Bytes.userId(new Uint8Array(32).fill(30))
+      ),
       membershipId,
     });
     const owner = yield* custody.retainDevice(signed.genesis, prepared);
@@ -224,7 +230,9 @@ const setup = (
       const request = yield* prepareJoinRequest({
         genesis: signed.genesis,
         requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(50))),
-        userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(60))),
+        userId: Result.getOrThrow(
+          accountIds ? accountUserId('reader') : Bytes.userId(new Uint8Array(32).fill(60))
+        ),
         encryptionPublicKey: joining.enc,
         expiresAt: null,
         signer: joining,
@@ -430,6 +438,144 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it('selects the new epoch when every key install outlasts its deadline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-slow-key-install-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    let slow = false;
+    // Each slow mailbox page waits for the test, which first lets the 10 s deadline pass.
+    const pages: { entered: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> }[] =
+      [];
+    let slowFetches = 0;
+    const nextPage = () => {
+      const signals = {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      };
+      pages.push(signals);
+      return signals;
+    };
+    try {
+      const accountId = 'synthetic-slow-key-account';
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+      const stagedGroup = fixture.stagedGroup;
+      if (!stagedGroup) throw new Error('missing synthetic epoch publication');
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      });
+      const devicePublicKey = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.toBytes()),
+          signingPublicKey: devicePublicKey,
+        })
+      );
+      let history = page(fixture.records);
+      vi.stubGlobal('fetch', async () =>
+        Response.json({ status: 'success', value: encodeEpochStagedGroup(stagedGroup) })
+      );
+      const stagingPort = createCloudE2eePort({
+        authBaseUrl: 'https://synthetic-staging.convex.cloud',
+      });
+      const cloud = {
+        getHistory: async () => history,
+        readEpochGroup: stagingPort.readEpochGroup,
+        mailboxCall: async (
+          method: keyof E2eeMailboxRequests,
+          input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+        ) => {
+          if (method === 'fetch') {
+            // A slow link: every mailbox page takes longer than the install deadline.
+            if (slow) {
+              const page = pages[slowFetches++] ?? nextPage();
+              page.entered.resolve();
+              await page.release.promise;
+            }
+            return {
+              items:
+                (input as E2eeMailboxRequests['fetch']).epoch === 0
+                  ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                  : [],
+              next: null,
+            };
+          }
+          if (method === 'status')
+            return {
+              ...(input as E2eeMailboxRequests['status']).slot,
+              revision: 0,
+              status: 'EnvelopeStored',
+            };
+          if (method === 'report') return null;
+          throw new Error('unexpected mailbox operation');
+        },
+      } as CloudE2eePort;
+      host = await openCliE2eeWorkspaceLegacy({
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => {},
+      });
+      await host.refresh();
+      expect(await host.status()).toMatchObject({ epoch: 0, epochPhase: 'ready' });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      slow = true;
+      const first = nextPage();
+      const second = nextPage();
+      history = page([...fixture.records, ...fixture.rotationSuffix]);
+      void host.refresh();
+      await first.entered.promise;
+      // The install outlasts its deadline, and the 1 s retry finds it still running.
+      await vi.advanceTimersByTimeAsync(11_000);
+      first.release.resolve();
+      // A finished slow install must select the epoch, not fetch the mailbox again.
+      const selected = async () => {
+        for (let turn = 0; turn < 500; turn++) {
+          if ((await host!.status()).epochPhase === 'ready') return 'selected';
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        return 'still installing';
+      };
+      const outcome = await Promise.race([
+        second.entered.promise.then(() => 'fetched again'),
+        selected(),
+      ]);
+      second.release.resolve();
+      expect(outcome).toBe('selected');
+      expect(await host.status()).toMatchObject({
+        epoch: 1,
+        hasCurrentKey: true,
+        epochPhase: 'ready',
+      });
+    } finally {
+      for (const page of pages) page.release.resolve();
+      vi.useRealTimers();
+      await host?.close();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
     'receives the current RPC key through the real workspace with %s',
     async (mode) => {
@@ -695,6 +841,98 @@ describe('machine E2EE local runtime', () => {
     )
   );
 
+  effectIt.effect(
+    'reads the newest page first on every attempt, then continues the older scan',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-newest-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          // A long stream: 40 pages, newest first. The frame this machine just wrote
+          // is uploaded only after the first attempt has already scanned past the head.
+          const reads: (string | undefined)[] = [];
+          const recovery = makeExecutionOriginRecovery(
+            new ExecutionOrigins(join(directory, 'origins.sqlite')),
+            async (input) => {
+              reads.push(input.before);
+              const page = input.before === undefined ? 40 : Number(input.before);
+              return { messages: [], before: String(page - 1), atStart: page <= 1 };
+            },
+            { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+            `lody-e2ee:${'ab'.repeat(32)}`
+          );
+          const attempt = () =>
+            recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+              Effect.die('no frame')
+            );
+          yield* attempt();
+          expect(reads[0]).toBeUndefined();
+          const scanned = reads.length;
+          yield* attempt();
+          // The second attempt sees a frame uploaded since the first, then resumes.
+          expect(reads[scanned]).toBeUndefined();
+          expect(reads[scanned + 1]).toBe(String(40 - scanned));
+        })
+      )
+  );
+
+  effectIt.effect('keeps scanning older pages when every page is slow', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-slow-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        // Each page takes 1.6 s: the test answers it only after moving the clock.
+        const pending: { before?: string; answer: () => void }[] = [];
+        let arrived = Promise.withResolvers<void>();
+        const older: string[] = [];
+        const recovery = makeExecutionOriginRecovery(
+          new ExecutionOrigins(join(directory, 'origins.sqlite')),
+          (input, signal) =>
+            new Promise((resolve, reject) => {
+              const page = input.before === undefined ? 40 : Number(input.before);
+              pending.push({
+                before: input.before,
+                answer: () => {
+                  if (input.before !== undefined) older.push(input.before);
+                  resolve({ messages: [], before: String(page - 1), atStart: page <= 1 });
+                },
+              });
+              signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+              arrived.resolve();
+            }),
+          { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+          `lody-e2ee:${'ab'.repeat(32)}`
+        );
+        const attempt = Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(
+            recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+              Effect.die('no frame')
+            )
+          );
+          for (let step = 0; step < 20; step++) {
+            const next = yield* Effect.raceFirst(
+              Effect.promise(() => arrived.promise).pipe(Effect.as('read' as const)),
+              Fiber.await(fiber).pipe(Effect.as('done' as const))
+            );
+            if (next === 'done') return;
+            arrived = Promise.withResolvers<void>();
+            const read = pending.shift()!;
+            yield* TestClock.adjust(1600);
+            read.answer();
+            yield* Effect.yieldNow;
+          }
+        });
+        for (let round = 0; round < 4; round++) yield* attempt;
+        // Every attempt still moves the older scan forward despite rereading the head.
+        expect(new Set(older).size).toBeGreaterThanOrEqual(4);
+      })
+    )
+  );
+
   it('binds signed history to its device and ledger actor, independently of display account IDs', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
     const source = new LoroDoc();
@@ -840,13 +1078,39 @@ describe('machine E2EE local runtime', () => {
           expect(yield* resolveDerived({ origin: true })).toMatchObject({
             derivedFrom: { sessionId: 'session', userTurnId: 'active' },
           });
+          // Origin lookup must retain the signed row even with a cached dispatch.
+          const resolveCachedOrigin = makeVerifiedExecutionOriginal({
+            workspaceId: 'workspace',
+            selfDevice: hex(owner.publicKey.toBytes()),
+            isClosed: () => false,
+            origins: new ExecutionOrigins(originalsFile),
+            readIncoming: () => Effect.succeed({ frame: Uint8Array.of(1) }),
+            openDispatch: () => Effect.die('origin lookup must use signed history'),
+            ledger: () => Effect.succeed(view),
+            openContent: (_intent, request) => ownerBinding.openAuthenticated(request),
+          });
+          const cachedOrigin = () =>
+            resolveCachedOrigin(
+              {
+                workspaceId: 'workspace',
+                sessionId: 'session',
+                userTurnId: 'derived',
+              },
+              replica,
+              { origin: true }
+            );
+          expect(yield* cachedOrigin()).toMatchObject({
+            derivedFrom: { sessionId: 'session', userTurnId: 'active' },
+          });
           const derivedRow = replica.getList('history').get(4) as LoroMap;
           (derivedRow.get('derivedFrom') as LoroMap).set('userTurnId', 'revoked');
           replica.commit();
           expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          expect(yield* cachedOrigin()).toBeUndefined();
           derivedRow.delete('derivedFrom');
           replica.commit();
           expect(yield* resolveDerived({ origin: true })).toBeUndefined();
+          expect(yield* cachedOrigin()).toBeUndefined();
           const revokedKey = hex(other.publicKey.toBytes());
           const revocation = yield* signLedgerRecord(
             Result.getOrThrow(
@@ -996,6 +1260,8 @@ describe('machine E2EE local runtime', () => {
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      const authorityConfirmations: AuthorityStamp[] = [];
+      let mailboxDown = false;
       try {
         const accountId = 'ledger-retry-account';
         const root = join(
@@ -1024,6 +1290,7 @@ describe('machine E2EE local runtime', () => {
           JSON.stringify({ genesisHash: hex(fixture.genesis.toBytes()), signingPublicKey })
         );
         let history = page(fixture.records);
+        let pagedHistory: ReturnType<typeof page>[] = [];
         let reads = 0;
         let revision = 0;
         let retryFailed = () => {};
@@ -1031,12 +1298,13 @@ describe('machine E2EE local runtime', () => {
         const cloud = {
           getHistory: async () => {
             reads++;
-            return history;
+            return pagedHistory.shift() ?? history;
           },
           mailboxCall: async (
             method: keyof E2eeMailboxRequests,
             input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
           ) => {
+            if (mailboxDown) throw new Error('synthetic mailbox failure');
             if (method === 'fetch')
               return {
                 items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
@@ -1064,8 +1332,68 @@ describe('machine E2EE local runtime', () => {
           onUnavailable: () => {
             queueMicrotask(() => retryFailed());
           },
+          onAuthorityConfirmed: (startedAt) => authorityConfirmations.push(startedAt),
         });
         await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(0);
+        // Key work has its own failures: the verified read below still counts.
+        const beforeMailboxFailure = authorityConfirmations.length;
+        mailboxDown = true;
+        await host.refresh();
+        mailboxDown = false;
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeMailboxFailure);
+        await host.refresh();
+        // A signed older prefix is accepted as a no-op, but it is not a latest read.
+        const beforeOlderPrefix = authorityConfirmations.length;
+        history = page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(authorityConfirmations).toHaveLength(beforeOlderPrefix);
+        // The same checkpoint as the trusted head is an ordinary overlapping read.
+        history = page(fixture.records);
+        await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeOlderPrefix);
+        // Every page of one read has to name the checkpoint of the first page.
+        const beforeChangedCheckpoint = authorityConfirmations.length;
+        const unavailable = Promise.withResolvers<void>();
+        retryFailed = unavailable.resolve;
+        pagedHistory = [page(fixture.records, 0, 1), page(fixture.records.slice(0, -1), 1)];
+        await host.refresh();
+        await unavailable.promise;
+        retryFailed = () => {};
+        expect(authorityConfirmations).toHaveLength(beforeChangedCheckpoint);
+        await vi.advanceTimersByTimeAsync(250);
+        await host.refresh();
+        expect(authorityConfirmations.length).toBeGreaterThan(beforeChangedCheckpoint);
+        // A background read that moves back ends an outage window, and a later read reopens one.
+        const answer = cloud.getHistory;
+        const outageRead = async (): Promise<never> => {
+          throw new CloudE2eeLedgerOutage();
+        };
+        const authorize = () =>
+          Effect.runPromise(host!.authorizeExecution('workspace', fixture.sender));
+        cloud.getHistory = outageRead;
+        const held = await authorize();
+        if (held._tag !== 'Authorized') throw new Error('expected an outage authorization');
+        expect(held.isCurrent?.()).toBe(true);
+        cloud.getHistory = async () => page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(held.isCurrent?.()).toBe(false);
+        cloud.getHistory = outageRead;
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Denied' });
+        cloud.getHistory = async () => page(fixture.records);
+        await host.refresh();
+        cloud.getHistory = outageRead;
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Authorized' });
+        // An ordinary 15-minute grant does not depend on the window.
+        cloud.getHistory = async () => page(fixture.records);
+        await host.refresh();
+        const fresh = await authorize();
+        if (fresh._tag !== 'Authorized') throw new Error('expected a fresh authorization');
+        cloud.getHistory = async () => page(fixture.records.slice(0, -1));
+        await host.refresh();
+        expect(fresh.isCurrent?.()).toBe(true);
+        await expect(authorize()).resolves.toMatchObject({ _tag: 'Authorized' });
+        cloud.getHistory = answer;
         const verified = await host.status();
         if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
         const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
@@ -1092,6 +1420,7 @@ describe('machine E2EE local runtime', () => {
           };
         };
         history = rejectedHistory();
+        const confirmedBefore = authorityConfirmations.length;
         await host.refresh();
         const before = reads;
         for (const [index, delay] of [250, 1_000, 4_000].entries()) {
@@ -1108,7 +1437,9 @@ describe('machine E2EE local runtime', () => {
         history = page(fixture.records);
         await vi.advanceTimersByTimeAsync(100_000);
         expect(reads - before).toBe(3);
+        expect(authorityConfirmations).toHaveLength(confirmedBefore);
         await host.refresh(); // Explicit retry resets the bounded episode.
+        expect(authorityConfirmations.length).toBeGreaterThan(confirmedBefore);
         await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
         history = rejectedHistory();
         await host.refresh();
@@ -5445,9 +5776,21 @@ describe('remote machine command', () => {
   });
 });
 
-const executionFixture = Effect.fnUntraced(function* (directory: string, count = 2) {
+const executionFixture = Effect.fnUntraced(function* (
+  directory: string,
+  count = 2,
+  accountIds = false
+) {
   let observedAuthority: Parameters<typeof readDaemonLossAuthority>[0];
-  const fixture = yield* setup(directory, count);
+  const fixture = yield* setup(
+    directory,
+    count,
+    join(directory, 'machine'),
+    false,
+    false,
+    false,
+    accountIds
+  );
   const custody = yield* makeCliE2eeCustody({
     directory: join(directory, 'machine'),
     keyring: noKeyring,
@@ -5484,9 +5827,15 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
     monotonicTimeNanos: Effect.sync(() => BigInt(io.monotonic) * 1_000_000n),
     sleep: (duration) => baseClock.sleep(duration),
   };
-  const makeGate = (sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing']) =>
+  const makeGate = (
+    sharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sharing'],
+    onWindowNotice?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['onWindowNotice'],
+    sessionSharing?: Parameters<typeof makeCliE2eeExecutionAuthorization>[0]['sessionSharing']
+  ) =>
     makeCliE2eeExecutionAuthorization({
       sharing,
+      sessionSharing,
+      onWindowNotice,
       workspaceId: 'workspace',
       credential: fixture.credential,
       runtime,
@@ -5568,7 +5917,7 @@ const automationOrigin = {
 
 /** Real ledger, signed dispatch originals, watcher promotion and start claim. */
 const queuedInputHarness = Effect.fnUntraced(function* (directory: string, shared: boolean) {
-  const { fixture, runtime, makeGate, device } = yield* executionFixture(directory);
+  const { fixture, runtime, makeGate, device, io } = yield* executionFixture(directory);
   const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'member'), wrapper });
   const member = yield* custody.prepareDevice();
   const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(71)));
@@ -5963,6 +6312,9 @@ const queuedInputHarness = Effect.fnUntraced(function* (directory: string, share
     rewriteRow,
     writeMemberRow,
     execution,
+    fixture,
+    gate,
+    io,
     machineKey,
     member,
     memberRpc,
@@ -6424,6 +6776,50 @@ describe('encrypted queued input evidence', () => {
 });
 
 describe('machine execution authorization freshness', () => {
+  it('waits for a ledger read that is unavailable instead of refusing the turn', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-unavailable-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          let authorization: { _tag: 'Authorized' } | { _tag: 'Denied'; reason: 'unavailable' } = {
+            _tag: 'Denied',
+            reason: 'unavailable',
+          };
+          const gate = makeEncryptedAgentExecution({
+            machineUserId: 'synthetic-machine-account',
+            genesis: '11'.repeat(32),
+            workspaceId: 'workspace',
+            targetMachineId: 'machine',
+            journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 0),
+            resolveVerifiedOriginal: (input) =>
+              Effect.succeed({
+                requesterDevice: 'aa'.repeat(32),
+                requesterCryptoUserId: 'bb'.repeat(32),
+                // The original's own deadline bounds the wait.
+                expiresAt: input.userTurnId === 'expired' ? 1 : Number.MAX_SAFE_INTEGER,
+              }),
+            authorizeExecution: () => Effect.sync(() => authorization),
+          });
+          const intent = (userTurnId: string) => ({
+            workspaceId: 'workspace',
+            sessionId: 'session',
+            userTurnId,
+            requesterUserId: 'synthetic-member',
+            inputConfig: { prompt: userTurnId },
+          });
+          // A slow or failed read decides nothing: the turn waits inside its window.
+          expect((yield* gate.claim(intent('slow-backend'))).state).toBe('pending-evidence');
+          authorization = { _tag: 'Authorized' };
+          expect((yield* gate.claim(intent('slow-backend'))).state).toBe('claimed');
+          authorization = { _tag: 'Denied', reason: 'unavailable' };
+          expect((yield* gate.claim(intent('expired'))).state).toBe('expired');
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   effectIt.effect.each([
     'valid',
     'no-source-capability',
@@ -7452,6 +7848,313 @@ describe('machine execution authorization freshness', () => {
     }
   });
 
+  describe('backend outage windows', () => {
+    const FIFTEEN_MINUTES = 900_000;
+    const HOUR = 3_600_000;
+    const withOutage = (
+      body: (
+        input: Effect.Success<ReturnType<typeof executionFixture>>
+      ) => Effect.Effect<void, unknown>
+    ) =>
+      (async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'execution-outage-'));
+        try {
+          await execute(
+            Effect.gen(function* () {
+              const fixture = yield* executionFixture(directory);
+              const { gate, io } = fixture;
+              expect(
+                yield* gate.authorizeExecution('workspace', fixture.fixture.sender)
+              ).toMatchObject({ _tag: 'Authorized' });
+              io.respond = async () => {
+                throw new CloudE2eeLedgerOutage();
+              };
+              yield* body(fixture);
+            })
+          );
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      })();
+    const at = (io: { wall: number; monotonic: number }, ms: number) => {
+      io.wall = io.monotonic = ms;
+    };
+
+    it('keeps the same member executing for 4 hours from the last successful read', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+            principal: 'owner',
+          });
+          at(io, 4 * HOUR - 1);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          at(io, 4 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
+    it('keeps the same member reading for 24 hours from the last successful read', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 24 * HOUR - 1);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+          at(io, 24 * HOUR);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
+    it('ends a window on any other read failure until a read succeeds', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          io.respond = async () => {
+            throw new Error('e2ee_device_unauthorized');
+          };
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          at(io, FIFTEEN_MINUTES + 120_000);
+          io.respond = async () => {
+            throw new CloudE2eeLedgerOutage();
+          };
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('does not relax when no read has succeeded', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'execution-outage-cold-'));
+      try {
+        await execute(
+          Effect.gen(function* () {
+            const { fixture, gate, io } = yield* executionFixture(directory);
+            io.respond = async () => {
+              throw new CloudE2eeLedgerOutage();
+            };
+            expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it('ends a window when the clocks disagree about elapsed time', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          io.monotonic = FIFTEEN_MINUTES;
+          io.wall = 2 * HOUR;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+        })
+      ));
+
+    it('does not wait on the backend for every request during an outage', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          yield* gate.authorizeExecution('workspace', fixture.sender);
+          const reads = io.reads;
+          at(io, FIFTEEN_MINUTES + 1_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          expect(io.reads).toBe(reads);
+          at(io, FIFTEEN_MINUTES + 61_000);
+          yield* gate.authorizeExecution('workspace', fixture.sender);
+          yield* Effect.yieldNow;
+          expect(io.reads).toBe(reads + 1);
+        })
+      ));
+
+    it('counts a background ledger read as the last successful read', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 3 * HOUR);
+          gate.beginLatestRead()();
+          at(io, 6 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('reports the window while it is in use', () =>
+      withOutage(({ fixture, io, makeGate }) =>
+        Effect.gen(function* () {
+          const notices: boolean[] = [];
+          const windows: unknown[] = [];
+          const noticed = yield* makeGate(undefined, (notice, window) => {
+            notices.push(notice);
+            windows.push(window);
+          });
+          io.respond = async () => page(fixture.records);
+          // The window is measured from this last successful read, not from the outage.
+          const lastRead = io.wall;
+          yield* noticed.authorizeExecution('workspace', fixture.sender);
+          io.respond = async () => {
+            throw new CloudE2eeLedgerOutage();
+          };
+          at(io, FIFTEEN_MINUTES);
+          yield* noticed.authorizeExecution('workspace', fixture.sender);
+          expect(notices).toEqual([true]);
+          expect(windows).toEqual([
+            { executionUntilMs: lastRead + 4 * HOUR, readUntilMs: lastRead + 24 * HOUR },
+          ]);
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 120_000);
+          yield* noticed.authorizeExecution('workspace', fixture.sender);
+          expect(notices).toEqual([true, false]);
+        })
+      ));
+
+    it('invalidates an outage authorization when the window ends', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          expect(granted.isCurrent?.()).toBe(true);
+          io.respond = async () => {
+            throw new Error('e2ee_device_unauthorized');
+          };
+          at(io, FIFTEEN_MINUTES + 120_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(granted.isCurrent?.()).toBe(false);
+        })
+      ));
+
+    it('needs a successful read after the clocks disagree', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+          at(io, FIFTEEN_MINUTES + 120_000);
+          io.wall += 2 * HOUR;
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 360_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('ends the window when a held authorization sees the clocks disagree', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          io.wall += 2 * HOUR;
+          expect(granted.isCurrent?.()).toBe(false);
+          at(io, FIFTEEN_MINUTES + 120_000);
+          expect(granted.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'unavailable',
+          });
+          io.respond = async () => page(fixture.records);
+          at(io, FIFTEEN_MINUTES + 240_000);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps the read window after a held execution authorization expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES);
+          const granted = yield* gate.authorizeExecution('workspace', fixture.sender);
+          if (granted._tag !== 'Authorized') throw new Error('expected an outage authorization');
+          at(io, 5 * HOUR);
+          expect(granted.isCurrent?.()).toBe(false);
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps the longer read window after execution expires', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, 5 * HOUR);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeRead('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
+    it('keeps another member at 15 minutes', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'execution-outage-member-'));
+      try {
+        await execute(
+          Effect.gen(function* () {
+            const { gate, io, member } = yield* queuedInputHarness(directory, true);
+            const memberDevice = hex(member.publicKey.toBytes());
+            expect(yield* gate.authorizeExecution('workspace', memberDevice)).toMatchObject({
+              _tag: 'Authorized',
+              principal: 'member',
+            });
+            io.respond = async () => {
+              throw new CloudE2eeLedgerOutage();
+            };
+            at(io, FIFTEEN_MINUTES);
+            expect(yield* gate.authorizeExecution('workspace', memberDevice)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+            expect(yield* gate.authorizeRead('workspace', memberDevice)).toEqual({
+              _tag: 'Denied',
+              reason: 'unavailable',
+            });
+          })
+        );
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('shares concurrent refreshes, preserves siblings after cancellation, and retries a failed read', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-flight-'));
     try {
@@ -7807,6 +8510,172 @@ describe('machine execution authorization freshness', () => {
             _tag: 'Denied',
             reason: 'not-authorized',
           });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('fences source-side personal context reads when the actual human is removed while policy I/O yields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'source-history-removal-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime } = yield* executionFixture(directory, 3, true);
+          const member = [...fixture.current.inspectState().members.entries()].find(
+            ([, row]) => row.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const memberDevice = [...fixture.current.inspectState().devices.values()].find(
+            (row) => hex(row.membershipId.toBytes()) === member[0]
+          );
+          if (!memberDevice) throw new Error('missing reader');
+          let current = fixture.current;
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const original = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(current, fixture.owner.publicKey, command)),
+              fixture.owner
+            );
+            fixture.records.push(original);
+            current = Result.getOrThrow(
+              extendLedger(current, [original], {
+                length: fixture.records.length,
+                head: hashRecordBytes(original),
+              })
+            );
+            yield* runtime.ingest(page(fixture.records));
+          });
+          yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          let remove = false;
+          let teamRead = false;
+          let individualRead = true;
+          const options = {
+            runtime,
+            sourceDevice: hex(fixture.owner.publicKey.toBytes()),
+            readPolicy: () =>
+              Effect.gen(function* () {
+                if (remove) {
+                  yield* append({ _tag: 'RemoveMember', membershipId: memberDevice.membershipId });
+                }
+                return {
+                  machineId: 'machine',
+                  sharedWithTeam: teamRead,
+                  projects: [],
+                  sessions: individualRead
+                    ? [{ sessionId: 'shared-root', audience: { userId: 'reader' }, level: 'read' }]
+                    : [],
+                  canManage: false,
+                } as import('@lody/platform').E2eeMachineSharingView;
+              }),
+          };
+          const target = {
+            machineId: 'machine',
+            rootSessionId: 'shared-root',
+            requesterUserId: 'reader',
+          };
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(true);
+          expect(
+            yield* authorizeCliE2eeSessionTarget(options, { ...target, requesterUserId: 'other' })
+          ).toBe(false);
+          expect(
+            yield* authorizeCliE2eeSessionTarget(options, {
+              ...target,
+              rootSessionId: 'unshared-root',
+            })
+          ).toBe(false);
+          yield* append({
+            _tag: 'SetRole',
+            membershipId: memberDevice.membershipId,
+            role: 'guest',
+          });
+          teamRead = true;
+          individualRead = false;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+          individualRead = true;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(true);
+          remove = true;
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+          expect(yield* authorizeCliE2eeSessionTarget(options, target)).toBe(false);
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('limits an admitted encrypted reader to one shared history and honors revocation without enabling other machine methods', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'history-only-authority-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3);
+          const member = [...fixture.current.inspectState().members].find(
+            ([, entry]) => entry.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const requester = [...fixture.current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === member[0]
+          );
+          if (!requester) throw new Error('missing device');
+          const [device] = requester;
+          let shared = true;
+          const gate = yield* makeGate(undefined, undefined, (reader, session) =>
+            Effect.succeed({
+              allowed: shared && reader === device && session === 'shared-root',
+              isCurrent: () => shared,
+            })
+          );
+          const admittedRead = yield* gate.authorizeSessionRead('workspace', device, 'shared-root');
+          expect(admittedRead).toMatchObject({ _tag: 'Authorized' });
+          if (admittedRead._tag !== 'Authorized' || !admittedRead.isCurrent)
+            throw new Error('missing read fence');
+          expect(admittedRead.isCurrent()).toBe(true);
+          expect(yield* gate.authorizeSessionRead('workspace', device, 'other-root')).toMatchObject(
+            { _tag: 'Denied' }
+          );
+          expect(yield* gate.authorizeRead('workspace', device)).toMatchObject({ _tag: 'Denied' });
+          expect(yield* gate.authorizeOwnedExecution('workspace', device)).toMatchObject({
+            _tag: 'Denied',
+          });
+          expect(yield* gate.authorizeExecution('workspace', device)).toMatchObject({
+            _tag: 'Denied',
+          });
+          const capability = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(fixture.current, fixture.owner.publicKey, {
+                _tag: 'DeclareCapabilities',
+                capabilities: [1],
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(capability);
+          const declared = Result.getOrThrow(
+            extendLedger(fixture.current, [capability], {
+              length: fixture.records.length,
+              head: hashRecordBytes(capability),
+            })
+          );
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(declared, fixture.owner.publicKey, {
+                _tag: 'RemoveMember',
+                membershipId: Result.getOrThrow(Bytes.membershipId(Buffer.from(member[0], 'hex'))),
+              })
+            ),
+            fixture.owner
+          );
+          fixture.records.push(record);
+          yield* runtime.ingest(page(fixture.records));
+          expect(admittedRead.isCurrent()).toBe(false);
+          shared = false;
+          expect(admittedRead.isCurrent()).toBe(false);
+          expect(
+            yield* gate.authorizeSessionRead('workspace', device, 'shared-root')
+          ).toMatchObject({ _tag: 'Denied' });
         })
       );
     } finally {
@@ -8326,3 +9195,226 @@ it('revokes a real encrypted ACP owner when the verified runtime ledger changes'
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// The response stream can yield after the body has been sealed. No earlier
+// authorization, including a cached response, may bypass the final actual-target check.
+it.each([false, true])(
+  'drops a history reply when assigned access changes during stream creation (cached=%s)',
+  async (cached) => {
+    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+    const created = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const refused = Promise.withResolvers<void>();
+    let owner = 'reader';
+    const sent: unknown[] = [];
+    await execute(
+      Effect.gen(function* () {
+        const opened = {
+          requestId: 'history-proof',
+          requesterDevice: 'reader-device',
+          expiresAt: Date.now() + 60_000,
+          input: {
+            request: {
+              method: 'session/history-read',
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              params: { sessionId: 'root', query: { kind: 'count' } },
+            },
+          },
+        };
+        const native = {
+          openFeature: () => Effect.succeed(opened),
+          retainFeatureRequest: () => Effect.void,
+          readFeatureResponse: () => Effect.succeed(cached ? [Uint8Array.of(1)] : []),
+          sealFeatureResult: () => Effect.succeed([Uint8Array.of(1)]),
+          verifyFeatureRequest: () => Effect.void,
+          responseStream: () => 'response',
+        } as unknown as ReturnType<typeof makeE2eeRpcNative>;
+        const feature = yield* makeEncryptedFeatureReceiver({
+          workspaceId: 'workspace',
+          machineId: 'machine',
+          genesis: 'genesis',
+          native,
+          journal: () => {
+            throw new Error('history must not open the execution journal');
+          },
+          authorize: () => Effect.succeed({ _tag: 'Denied', reason: 'not-authorized' }),
+          authorizeRead: () => Effect.succeed({ _tag: 'Denied', reason: 'not-authorized' }),
+          authorizeHistoryRead: () =>
+            Effect.sync(() => {
+              if (owner !== 'reader') {
+                refused.resolve();
+                return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+              }
+              return { _tag: 'Authorized' as const, isCurrent: () => true };
+            }),
+          authoritySignal: () => new AbortController().signal,
+          isOpen: () => true,
+          handle: async () => ({ ok: true, result: { count: 123 } }),
+          client: {
+            ensureJsonStream: async () => {
+              created.resolve();
+              await resume.promise;
+            },
+            appendJson: async (_stream, value) => {
+              sent.push(value);
+              return '1';
+            },
+            readJsonLive: async () => {
+              throw new Error('unused');
+            },
+          },
+        });
+        yield* feature({ id: opened.requestId, frame: 'synthetic' });
+        yield* Effect.promise(() => created.promise);
+        owner = 'other-owner';
+        resume.resolve();
+        yield* Effect.promise(() => refused.promise);
+      })
+    );
+    expect(sent).toEqual([]);
+  }
+);
+
+it.each(['team', 'individual', 'private'] as const)(
+  'uses the same expiring session-read admission for the Roost history method (%s)',
+  async (audience) => {
+    const { makeEncryptedFeatureReceiver } = await import('../src/lib/e2ee/feature-rpc');
+    const { E2eeFeatureInputSchema } = await import('@lody/shared/e2ee-rpc');
+    const directory = await mkdtemp(join(tmpdir(), 'backend-neutral-history-'));
+    const outcome = Promise.withResolvers<'published' | 'denied'>();
+    const replies: unknown[] = [];
+    const bodies: unknown[] = [];
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, runtime, makeGate } = yield* executionFixture(directory, 3, true);
+          const member = [...fixture.current.inspectState().members].find(
+            ([, entry]) => entry.role === 'member'
+          );
+          if (!member) throw new Error('missing member');
+          const requester = [...fixture.current.inspectState().devices].find(
+            ([, device]) => hex(device.membershipId.toBytes()) === member[0]
+          );
+          if (!requester) throw new Error('missing requester');
+          const sessions = [
+            {
+              sessionId: 'roost-root',
+              audience:
+                audience === 'team'
+                  ? ('team' as const)
+                  : { userId: audience === 'private' ? 'acct' : 'reader' },
+              level: 'read' as const,
+            },
+          ];
+          const gate = yield* makeGate(undefined, undefined, (reader, session) =>
+            authorizeCliE2eeSessionTarget(
+              {
+                runtime,
+                sourceDevice: hex(fixture.owner.publicKey.toBytes()),
+                readPolicy: () =>
+                  Effect.succeed({
+                    machineId: 'machine',
+                    sharedWithTeam: false,
+                    projects: [],
+                    sessions,
+                    canManage: false,
+                  } as import('@lody/platform').E2eeMachineSharingView),
+              },
+              {
+                machineId: 'machine',
+                rootSessionId: session,
+                requesterUserId: reader === requester[0] ? 'reader' : 'other',
+              }
+            ).pipe(Effect.map((allowed) => ({ allowed, isCurrent: () => true })))
+          );
+          // This is the same wire method the Roost adapter uses, without a storage-kind flag.
+          const input = E2eeFeatureInputSchema.parse({
+            requestId: 'a'.repeat(32),
+            request: {
+              workspaceId: 'workspace',
+              machineId: 'machine',
+              method: 'session/history-read',
+              params: { sessionId: 'roost-root', query: { kind: 'count' } },
+            },
+          });
+          const opened = {
+            requestId: input.requestId,
+            requesterDevice: requester[0],
+            expiresAt: Date.now() + 60_000,
+            input,
+          };
+          const native = {
+            openFeature: () => Effect.succeed(opened),
+            retainFeatureRequest: () => Effect.void,
+            readFeatureResponse: () => Effect.succeed([]),
+            sealFeatureResult: (_machine: unknown, _opened: unknown, result: unknown) =>
+              Effect.sync(() => {
+                replies.push(result);
+                return [new Uint8Array(143).fill(1)];
+              }),
+            verifyFeatureRequest: () => Effect.void,
+            responseStream: () => 'history-response',
+          } as unknown as ReturnType<typeof makeE2eeRpcNative>;
+          const feature = yield* makeEncryptedFeatureReceiver({
+            workspaceId: 'workspace',
+            machineId: 'machine',
+            genesis: 'genesis',
+            native,
+            journal: () => {
+              throw new Error('history must not enter the execution journal');
+            },
+            // No general read/execution permission: only exact-session admission may pass.
+            authorize: gate.authorizeOwnedExecution,
+            authorizeRead: gate.authorizeRead,
+            authorizeHistoryRead: (workspace, device, session) =>
+              gate.authorizeSessionRead(workspace, device, session).pipe(
+                Effect.tap((verdict) =>
+                  Effect.sync(() => {
+                    if (verdict._tag === 'Denied') outcome.resolve('denied');
+                  })
+                )
+              ),
+            authoritySignal: () => new AbortController().signal,
+            isOpen: () => true,
+            handle: async (request, context) => {
+              if (request.method !== 'session/history-read' || !context.authority?.isCurrent())
+                throw new Error('missing exact-session authority');
+              const result = { backend: 'roost', count: 7 };
+              bodies.push(result);
+              return { ok: true, result };
+            },
+            client: {
+              ensureJsonStream: async () => {},
+              appendJson: async () => {
+                outcome.resolve('published');
+                return '1';
+              },
+              readJsonLive: async () => {
+                throw new Error('unused');
+              },
+            },
+          });
+          yield* feature({ id: input.requestId, frame: 'synthetic' });
+          expect(yield* Effect.promise(() => outcome.promise)).toBe(
+            audience === 'private' ? 'denied' : 'published'
+          );
+        })
+      );
+      if (audience === 'private') expect(bodies).toEqual([]);
+      else expect(bodies).toEqual([{ backend: 'roost', count: 7 }]);
+      if (audience === 'team' || audience === 'individual')
+        expect(replies).toEqual([{ ok: true, result: { backend: 'roost', count: 7 } }]);
+      // Admission readiness does not enable the currently unsupported storage backend.
+      await expect(
+        LoroDocumentManager.prototype.getOrCreateSessionDoc.call(
+          { encryptedWorkspace: true } as LoroDocumentManager,
+          'roost-root' as SessionId,
+          { historyBackend: 'roost' }
+        )
+      ).rejects.toThrow('e2ee_history_backend_unavailable');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);

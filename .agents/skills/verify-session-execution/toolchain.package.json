@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "effect": "4.0.2",
+    "esbuild": "0.28.2",
+    "zod": "4.3.6"
+  },
+  "name": "lody-inbox-verification-tools",
+  "version": "1.0.0",
+  "private": true
+}

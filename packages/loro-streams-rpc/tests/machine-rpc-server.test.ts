@@ -139,9 +139,16 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
-  it.each(['read', 'watch', 'write'] as const)(
-    'does not start history %s when the RPC expires during metadata readiness',
-    async (kind) => {
+  it.each([
+    ['read', 'metadata'],
+    ['watch', 'metadata'],
+    ['write', 'metadata'],
+    ['write', 'authorization'],
+    ['write', 'claim'],
+    ['write', 'proof'],
+  ] as const)(
+    'does not start history %s when its deadline expires during %s',
+    async (kind, phase) => {
       const fake = createFakeStreamClient();
       let now = 1;
       let entered!: () => void;
@@ -153,6 +160,16 @@ describe('LoroStreamsMachineRpcServer', () => {
         ready = resolve;
       });
       const operations: string[] = [];
+      const rejectionStore = createHistoryRejectionStore();
+      const put = rejectionStore.put;
+      rejectionStore.put = async (...args) => {
+        const result = await put(...args);
+        if (phase === 'claim') {
+          entered();
+          await metadata;
+        }
+        return result;
+      };
       const server = new LoroStreamsMachineRpcServer({
         workspaceId: 'synthetic-workspace' as WorkspaceId,
         machineId: 'synthetic-machine' as MachineId,
@@ -161,18 +178,28 @@ describe('LoroStreamsMachineRpcServer', () => {
         streamClient: fake.streamClient,
         getMachineStatus: vi.fn(),
         refreshMachineAcpCapabilities: vi.fn(),
-        historyRequestRejections: createHistoryRejectionStore(),
+        historyRequestRejections: rejectionStore,
         resolveSessionHistoryOwnerSessionId: async (id) => {
-          entered();
-          await metadata;
+          if (phase === 'metadata') {
+            entered();
+            await metadata;
+          }
           return id;
         },
+        authorizeSessionHistoryRead: async () => true,
         readSessionHistory: async ({ sessionId }) => {
           operations.push('read');
           return { type: 'session/history-read_response', sessionId, success: true, result: [] };
         },
         waitForSessionHistoryChanges: async () => {
           operations.push('watch');
+        },
+        authorizeSessionHistoryWrite: async () => {
+          if (phase === 'authorization' || phase === 'proof') {
+            entered();
+            await metadata;
+          }
+          return { expiresAt: phase === 'proof' ? 2 : Number.MAX_SAFE_INTEGER };
         },
         writeSessionHistory: async ({ sessionId, operation }) => {
           operations.push('write');
@@ -197,7 +224,7 @@ describe('LoroStreamsMachineRpcServer', () => {
                     ? 'session/history-read'
                     : 'session/history-write',
               sentAt: 1,
-              expiresAt: 2,
+              expiresAt: phase === 'proof' ? 30_001 : 2,
               params: await encryptCodeCollabV2RpcPayload(
                 'synthetic-session',
                 kind === 'read'
@@ -225,7 +252,11 @@ describe('LoroStreamsMachineRpcServer', () => {
           (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
         );
         expect(operations).toEqual([]);
-        expect(fake.appended).toEqual([]);
+        if (phase === 'proof')
+          expect(fake.appended[0]?.value).toMatchObject({
+            error: { code: 'session_history_write_denied' },
+          });
+        else expect(fake.appended).toEqual([]);
       } finally {
         ready();
         server.stop();
@@ -262,6 +293,7 @@ describe('LoroStreamsMachineRpcServer', () => {
             'Metadata is pending; history was not started.'
           );
         },
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
         writeSessionHistory: async ({ sessionId, operation }) => {
           stored.push(sessionId);
           return { type: 'session/history-write_response', sessionId, operation, success: true };
@@ -332,6 +364,7 @@ describe('LoroStreamsMachineRpcServer', () => {
         await metadata;
         return id;
       },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId, operation }) => {
         stored.push(sessionId);
         return { type: 'session/history-write_response', sessionId, operation, success: true };
@@ -423,6 +456,7 @@ describe('LoroStreamsMachineRpcServer', () => {
             );
           return sessionId;
         },
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
         writeSessionHistory: async ({ sessionId: id, operation }) => {
           stored.push(id);
           return {
@@ -508,6 +542,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           );
           entered();
         }),
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId, operation }) => {
         stored.push(sessionId);
         return {
@@ -600,6 +635,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           );
         return id;
       },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId: targetSessionId, operation }) => {
         records.push(targetSessionId);
         return {
@@ -1846,83 +1882,90 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('handles machine restart RPC requests and fires lifecycle hook after append', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    const appendedAtHook: unknown[] = [];
-    const onMachineLifecycleResponseSettled = vi.fn(() => {
-      appendedAtHook.push(...fake.appended.map((entry) => entry.value));
-    });
-    const restartMachine = vi.fn(async () => ({
-      type: 'machine/restart_response' as const,
-      machineId,
-      requestId: 'restart-1',
-      success: true,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
+  it.each([undefined, 'retired-machine'])(
+    'handles restart or identity restore %s before firing the lifecycle hook',
+    async (restoreMachineId) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      const appendedAtHook: unknown[] = [];
+      let resolveSettled!: () => void;
+      const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve;
+      });
+      let restoredIdentity: string | undefined;
+      const onMachineLifecycleResponseSettled = () => {
+        appendedAtHook.push(...fake.appended.map((entry) => entry.value));
+        resolveSettled();
+      };
+      const restartMachine = async (request: { restoreMachineId?: string }) => {
+        restoredIdentity = request.restoreMachineId;
+        return {
+          type: 'machine/restart_response' as const,
+          machineId,
+          requestId: 'restart-1',
+          success: true,
+          accepted: true,
+          disposition: 'accepted' as const,
+        };
+      };
 
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      restartMachine,
-      onMachineLifecycleResponseSettled,
-    });
+      const server = new LoroStreamsMachineRpcServer({
+        now: () => 1000,
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        restartMachine,
+        onMachineLifecycleResponseSettled,
+      });
 
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'req-1',
+            method: 'machine/restart',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: 1000,
+            expiresAt: 6000,
+            params: {
+              ...(restoreMachineId ? { restoreMachineId } : {}),
+              requesterUserId: 'user-1',
+              requestToken: 'signed-token',
+              requestId: 'restart-1',
+            },
+          },
+        ],
+        nextOffset: '1',
+        cursor: 'cursor-1',
+        upToDate: true,
+      });
+
+      await server.start();
+
+      await settled;
+      expect(restoredIdentity).toBe(restoreMachineId);
+      expect(appendedAtHook).toEqual([
+        expect.objectContaining({
           id: 'req-1',
           method: 'machine/restart',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1',
-          replyTo: 'workspace-1:rpc:res:machine-1',
-          sentAt: Date.now(),
-          expiresAt: Date.now() + 5000,
-          params: {
-            requesterUserId: 'user-1',
-            requestToken: 'signed-token',
+          result: expect.objectContaining({
+            type: 'machine/restart_response',
             requestId: 'restart-1',
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
-    });
-
-    await server.start();
-
-    await vi.waitFor(() => {
-      expect(onMachineLifecycleResponseSettled).toHaveBeenCalledTimes(1);
-    });
-
-    expect(restartMachine).toHaveBeenCalledWith({
-      requesterUserId: 'user-1',
-      requestToken: 'signed-token',
-      requestId: 'restart-1',
-    });
-    expect(appendedAtHook).toEqual([
-      expect.objectContaining({
-        id: 'req-1',
-        method: 'machine/restart',
-        result: expect.objectContaining({
-          type: 'machine/restart_response',
-          requestId: 'restart-1',
-          accepted: true,
+            accepted: true,
+          }),
         }),
-      }),
-    ]);
+      ]);
 
-    server.stop();
-  });
+      server.stop();
+    }
+  );
 
   describe.each(['restart', 'upgrade'] as const)('machine %s ACK delivery', (action) => {
     it.each([
@@ -3287,86 +3330,95 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('appends structured ACP authorization before the final auth response', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    const authenticateMachineAcp = vi.fn(
-      async ({ onProgress }): Promise<MachineAcpAuthenticateResponse> => {
-        onProgress?.({
-          type: 'machine/acp-authentication-progress',
-          machineId,
-          requestId: 'auth-1',
-          agentType: 'kimi',
-          status: 'authorization',
-          authorizationUrl: 'https://www.kimi.com/code/authorize_device?user_code=GI5T-ACD0',
-          userCode: 'GI5T-ACD0',
-          expiresInSeconds: 1800,
-        });
-        return {
-          type: 'machine/acp-authenticate_response',
-          machineId,
-          requestId: 'auth-1',
-          agentType: 'kimi',
-          success: true,
-          disposition: 'authenticated',
-        };
-      }
-    );
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      authenticateMachineAcp,
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: 'req-auth',
-          method: 'machine/acp-authenticate',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1',
-          replyTo: 'workspace-1:rpc:res:machine-1',
-          sentAt: Date.now(),
-          expiresAt: Date.now() + 5000,
-          params: {
+  it.each(['api-key', 'oauth', undefined])(
+    'forwards selected ACP method %s and appends authorization before the final response',
+    async (methodId) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      const authenticateMachineAcp = vi.fn(
+        async ({
+          onProgress,
+          methodId: selectedMethodId,
+        }): Promise<MachineAcpAuthenticateResponse> => {
+          expect(selectedMethodId).toBe(methodId);
+          onProgress?.({
+            type: 'machine/acp-authentication-progress',
+            machineId,
             requestId: 'auth-1',
-            action: 'start',
-            configId,
+            agentType: 'kimi',
+            status: 'authorization',
+            authorizationUrl: 'https://www.kimi.com/code/authorize_device?user_code=GI5T-ACD0',
+            userCode: 'GI5T-ACD0',
+            expiresInSeconds: 1800,
+          });
+          return {
+            type: 'machine/acp-authenticate_response',
+            machineId,
+            requestId: 'auth-1',
+            agentType: 'kimi',
+            success: true,
+            disposition: 'authenticated',
+          };
+        }
+      );
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        authenticateMachineAcp,
+      });
+
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'req-auth',
+            method: 'machine/acp-authenticate',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: {
+              requestId: 'auth-1',
+              action: 'start',
+              configId,
+              ...(methodId === undefined ? {} : { methodId }),
+            },
           },
-        },
-      ],
-      nextOffset: '5',
-      cursor: 'cursor-5',
-      upToDate: true,
-    });
+        ],
+        nextOffset: '5',
+        cursor: 'cursor-5',
+        upToDate: true,
+      });
 
-    await server.start();
+      await server.start();
 
-    await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(2);
-    });
+      await vi.waitFor(() => {
+        expect(fake.appended).toHaveLength(2);
+      });
 
-    expect(authenticateMachineAcp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: 'auth-1',
-        action: 'start',
-        configId,
-        onProgress: expect.any(Function),
-      })
-    );
-    expect(
-      fake.appended.map((entry) => (entry.value as { result?: { type?: string } }).result?.type)
-    ).toEqual(['machine/acp-authentication-progress', 'machine/acp-authenticate_response']);
+      expect(authenticateMachineAcp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 'auth-1',
+          action: 'start',
+          configId,
+          methodId,
+          onProgress: expect.any(Function),
+        })
+      );
+      expect(
+        fake.appended.map((entry) => (entry.value as { result?: { type?: string } }).result?.type)
+      ).toEqual(['machine/acp-authentication-progress', 'machine/acp-authenticate_response']);
 
-    server.stop();
-  });
+      server.stop();
+    }
+  );
 
   it('handles session preview create RPC requests', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
@@ -4005,6 +4057,7 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
       }
       if (signal?.aborted) throw signal.reason;
     },
+    authorizeSessionHistoryRead: async () => true,
     readSessionHistory: async ({ sessionId, query }) => ({
       type: 'session/history-read_response',
       sessionId,
@@ -4016,6 +4069,7 @@ it('bounds checkpoint waits separately from reads, sends and controls', async ()
           ? 1
           : { state: 'ready', checkpoint: 'checkpoint-2', ids: ['synthetic-body'] },
     }),
+    authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
     writeSessionHistory: async ({ sessionId, operation }) => ({
       type: 'session/history-write_response',
       sessionId,
@@ -4154,6 +4208,7 @@ it('negotiates the encrypted checkpoint watch method through the real Machine RP
       entered.resolve();
       await release.promise;
     },
+    authorizeSessionHistoryRead: async () => true,
     readSessionHistory: async ({ sessionId: targetSessionId, query }) => {
       expect(query.kind).toBe('readChanges');
       return {
@@ -4350,6 +4405,7 @@ it.each([1, 16])(
       },
       historyRequestRejections: createHistoryRejectionStore(),
       resolveSessionHistoryOwnerSessionId: async (id) => id,
+      authorizeSessionHistoryRead: async () => true,
       readSessionHistory: async ({ sessionId }) => {
         if (++activeReads === capacity) readStarted();
         await reads;
@@ -4362,6 +4418,7 @@ it.each([1, 16])(
           historyRevision: 1,
         };
       },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
       writeSessionHistory: async ({ sessionId, operation }) => {
         accepted.push('synthetic-input');
         return {
@@ -4531,3 +4588,208 @@ it('round trips Android commands and isolates unavailable and denied controls', 
     server.stop();
   }
 });
+
+it('admits a session-only read proof without lending it to another session or write; revocation rechecks', async () => {
+  const fake = createFakeStreamClient();
+  let granted = true;
+  const readIds: string[] = [],
+    writeIds: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId: 'synthetic-machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    historyRequestRejections: createHistoryRejectionStore(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    authorizeSessionHistoryRead: async ({ sessionId, readProof }) =>
+      granted && sessionId === 'shared-session' && readProof === 'synthetic-session-read-proof',
+    readSessionHistory: async ({ sessionId }) => {
+      readIds.push(sessionId);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        result: ['readable-history'],
+      };
+    },
+    authorizeSessionHistoryWrite: async () => null,
+    writeSessionHistory: async ({ sessionId, operation }) => {
+      writeIds.push(sessionId);
+      return { type: 'session/history-write_response', sessionId, operation, success: true };
+    },
+  });
+  const send = async (
+    id: string,
+    sessionId: string,
+    write = false,
+    proof: string | undefined = 'synthetic-session-read-proof'
+  ) => {
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id,
+          rpcVersion: '1',
+          workspaceId: 'synthetic-workspace',
+          machineId: 'synthetic-machine',
+          replyTo: 'native-query',
+          sentAt: 1,
+          expiresAt: 100,
+          method: write ? 'session/history-write' : 'session/history-read',
+          params: await encryptCodeCollabV2RpcPayload(sessionId, {
+            sessionId,
+            ...(write ? { operation: 'append', payload: {} } : { query: { kind: 'count' } }),
+            ...(proof ? { readProof: proof } : {}),
+          }),
+        },
+      ],
+      upToDate: true,
+    });
+  };
+  await server.start();
+  try {
+    await send('read', 'shared-session');
+    await fake.waitForAppendedCount(1);
+    expect(readIds).toEqual(['shared-session']);
+    await send('other', 'other-session');
+    await fake.waitForAppendedCount(2);
+    await send('write', 'shared-session', true, undefined);
+    await fake.waitForAppendedCount(3);
+    granted = false;
+    await send('revoked', 'shared-session');
+    await fake.waitForAppendedCount(4);
+    expect(readIds).toEqual(['shared-session']);
+    expect(writeIds).toEqual([]);
+    const replies = fake.appended.map((x) => x.value as { id: string; error?: { code: string } });
+    expect(replies.find((x) => x.id === 'other')?.error?.code).toBe('session_history_read_denied');
+    expect(replies.find((x) => x.id === 'revoked')?.error?.code).toBe(
+      'session_history_read_denied'
+    );
+    expect(replies.find((x) => x.id === 'write')?.error).toBeDefined();
+  } finally {
+    server.stop();
+  }
+});
+
+it('preserves encrypted history watch semantics through the real feature adapter without entering writes', async () => {
+  const observed: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'workspace' as WorkspaceId,
+    machineId: 'machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    waitForSessionHistoryChanges: async () => {
+      observed.push('wait');
+    },
+    readSessionHistory: async ({ sessionId, query }) => {
+      observed.push(query.kind);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyRevision: 1,
+        historyCount: 0,
+        result: { state: 'ready', checkpoint: 'next', ids: [] },
+      };
+    },
+    writeSessionHistory: async () => {
+      throw new Error('history read started a write');
+    },
+  });
+  try {
+    const result = await server.readFeatureQuery(
+      {
+        method: 'session/history-read',
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        params: {
+          sessionId: 'root' as SessionId,
+          query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
+        },
+      },
+      {
+        requestId: 'synthetic',
+        expiresAt: 1000,
+        signal: new AbortController().signal,
+        authority: { isCurrent: () => true, signal: new AbortController().signal },
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        type: 'session/history-read_response',
+        success: true,
+        result: { checkpoint: 'next' },
+      },
+    });
+    expect(observed).toEqual(['wait', 'readChanges']);
+  } finally {
+    server.stop();
+  }
+});
+
+it.each(['wait', 'read'] as const)(
+  'drops encrypted history when authority is withdrawn during %s',
+  async (phase) => {
+    let current = true;
+    const observed: string[] = [];
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'workspace' as WorkspaceId,
+      machineId: 'machine' as MachineId,
+      now: () => 1,
+      logger: createSilentLogger(),
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      waitForSessionHistoryChanges: async () => {
+        observed.push('wait');
+        if (phase === 'wait') current = false;
+      },
+      readSessionHistory: async ({ sessionId, query }) => {
+        observed.push(query.kind);
+        if (phase === 'read') current = false;
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: true,
+          historyRevision: 1,
+          historyCount: 0,
+          result: { state: 'ready', checkpoint: 'next', ids: [] },
+        };
+      },
+      writeSessionHistory: async () => {
+        throw new Error('history read started a write');
+      },
+    });
+    try {
+      const result = await server.readFeatureQuery(
+        {
+          method: 'session/history-read',
+          machineId: 'machine',
+          workspaceId: 'workspace',
+          params: {
+            sessionId: 'root' as SessionId,
+            query: { kind: 'watchChanges', checkpoint: 'previous', waitMs: 100 },
+          },
+        },
+        {
+          requestId: 'synthetic',
+          expiresAt: 1000,
+          signal: new AbortController().signal,
+          authority: { isCurrent: () => current, signal: new AbortController().signal },
+        }
+      );
+      expect(result).toMatchObject({ ok: false, code: 'session_history_read_denied' });
+      expect(JSON.stringify(result)).not.toContain('checkpoint');
+      expect(observed).toEqual(phase === 'wait' ? ['wait'] : ['wait', 'readChanges']);
+    } finally {
+      server.stop();
+    }
+  }
+);

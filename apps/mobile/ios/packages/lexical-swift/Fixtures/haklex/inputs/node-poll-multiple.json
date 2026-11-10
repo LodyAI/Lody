@@ -1,0 +1,56 @@
+{
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "detail": 0,
+            "format": 0,
+            "mode": "normal",
+            "style": "",
+            "text": "Which pets have you raised? (multi-select)",
+            "type": "text",
+            "version": 1
+          }
+        ],
+        "direction": "ltr",
+        "format": "",
+        "indent": 0,
+        "type": "paragraph",
+        "version": 1,
+        "textFormat": 0,
+        "textStyle": ""
+      },
+      {
+        "type": "poll",
+        "pollId": "p_demo_multi",
+        "question": "Which pets have you raised?",
+        "options": [
+          {
+            "id": "o_cat",
+            "label": "Cat"
+          },
+          {
+            "id": "o_dog",
+            "label": "Dog"
+          },
+          {
+            "id": "o_hamster",
+            "label": "Hamster"
+          },
+          {
+            "id": "o_fish",
+            "label": "Fish"
+          }
+        ],
+        "mode": "multiple",
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

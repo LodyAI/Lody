@@ -254,7 +254,9 @@ See [session relations](../../../../specs/session-relations.md).
   `lody_session_list`, and `lody_session_status_many`, use the daemon replica. They do not
   call Streams for the request. Background catalog sync stays with the daemon. Create
   options return local machines, agent configs, projects, and the current work context
-  when those rows are present. While the daemon baseline is not ready, an empty
+  when those rows are present. The `current` field includes `agentRoleId` when the
+  Session has one. This field does not include the Role name or prompt prefix. While
+  the daemon baseline is not ready, an empty
   agent-config catalog or a missing current or queried selection is retryable
   `SYNC_UNAVAILABLE`, so absence is not reported as a definitive empty result. A ready
   baseline may return an empty catalog. Role validation, explicit fresh-catalog discovery,
@@ -451,3 +453,14 @@ mention-compatible and at most 60 characters after trimming; descriptions allow 
 140 Unicode code points; instructions allow up to 32,768 characters before trimming.
 Machine/config IDs must be nonempty and at most 128 characters after trimming.
 Unsupported fields are rejected.
+
+## Session management authority
+
+Single/batch rename and archive derive the requester from the active Turn, then
+require current machine/project editing access before metadata writes. The daemon
+owner and SessionMeta assignment cannot substitute for the driving human. Standalone
+CLI rename, archive, restore and delete use the same admission; archive/restore/delete
+preflight every contained target before writes or cleanup and recheck each write.
+These metadata operations do not require machine presence or start execution.
+`SESSION_MANAGEMENT_DENIED` is nonretryable. A session-only read grant permits history
+reading, not these management operations.

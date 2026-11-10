@@ -111,7 +111,7 @@ async function workspaceFixture(
         getAgentConfigForMachineLaunch: async () => quota?.config,
       },
       hasAutomationSessionWork: () => false,
-      resolveSessionWorkdir: async () => root,
+      resolveAutomationWorkdir: async () => root,
       getAutomationSessionAuthority: () => authority,
     } as unknown as Lody,
     workspace: { id: 'workspace', name: 'synthetic', slug: 'synthetic' } as WorkspaceSummary,
@@ -129,6 +129,32 @@ async function workspaceFixture(
   return Object.assign(handle, { testRoot: root, testDocument: doc });
 }
 describe('Automation control authority', () => {
+  it('executes a registered condition in the Session workspace', async () => {
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: true,
+    });
+    const wait = host.ledger.registerWait(
+      {
+        program: `async ({ctx}) => {
+        const result = await ctx.exec({command: ${JSON.stringify(process.execPath)}, args: ['-e', 'process.stdout.write(process.cwd()); process.exitCode = 7']});
+        return result.exitCode === 7 ? {resumeText: 'Command completed', payload: result.stdout} : false;
+      }`,
+        intervalMs: 30000,
+      },
+      'session-a',
+      'user',
+      Date.now()
+    );
+    await host.wake();
+    await vi.waitFor(() => expect(host.ledger.wait(wait.id)?.state).toBe('matched'));
+    expect(host.ledger.wait(wait.id)?.result).toEqual({
+      resumeText: 'Command completed',
+      payload: await import('node:fs/promises').then((fs) => fs.realpath(host.testRoot)),
+    });
+  });
   it('queries capacity at the reset even when the exhausted snapshot is still fresh', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
@@ -619,30 +645,36 @@ describe('Automation control authority', () => {
     expect(host.ledger.wait(ready.id)?.state).toBe('cancelled');
     expect(host.ledger.wait(wait.id)?.consecutiveErrors).toBe(0);
   });
-  it('keeps each Session’s waits private and rejects cross-session registration', async () => {
-    const host = await workspaceFixture();
-    const foreign = host.ledger.registerWait(
-      { program: '() => false', intervalMs: 30000 },
-      'session-b',
-      'user',
-      1
+  it('manages an owned Session’s automations from another active Session', async () => {
+    const host = await workspaceFixture({
+      id: 'session-b',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const wait = (await host.command(
+      { type: 'register', sessionId: 'session-b', program: '() => false', intervalMs: 30000 },
+      'session-a'
+    )) as { id: string; sessionId: string };
+    expect(wait.sessionId).toBe('session-b');
+    expect(await host.command({ type: 'list', sessionId: 'session-b' }, 'session-a')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: wait.id })])
     );
-    await expect(host.command({ type: 'show', id: foreign.id }, 'session-a')).rejects.toThrow(
-      'AUTOMATION_NOT_FOUND'
-    );
-    await expect(host.command({ type: 'cancel', id: foreign.id }, 'session-a')).rejects.toThrow(
-      'AUTOMATION_NOT_FOUND'
-    );
-    await expect(
-      host.command(
-        { type: 'register', sessionId: 'session-b', program: '() => false', intervalMs: 30000 },
-        'session-a'
-      )
-    ).rejects.toThrow('AUTOMATION_SCOPE_EXCEEDS_AUTHOR');
-    expect(await host.command({ type: 'show', id: foreign.id })).toMatchObject({
+    expect(await host.command({ type: 'show', id: wait.id }, 'session-a')).toMatchObject({
       sessionId: 'session-b',
     });
-    expect(await host.command({ type: 'list' }, 'session-a')).toEqual([]);
+    await host.command(
+      { type: 'configure', sessionId: 'session-b', settings: { archiveAfterMerge: true } },
+      'session-a'
+    );
+    expect(
+      await host.command({ type: 'settings', sessionId: 'session-b' }, 'session-a')
+    ).toMatchObject({ archiveAfterMerge: true });
+    expect(
+      await host.command({ type: 'activities', sessionId: 'session-b' }, 'session-a')
+    ).toMatchObject({ items: expect.any(Array) });
+    await host.command({ type: 'cancel', id: wait.id }, 'session-a');
+    expect(host.ledger.wait(wait.id)?.state).toBe('cancelled');
     await expect(host.command({ type: 'list' }, 'inactive-session')).rejects.toThrow(
       'AUTOMATION_ACTIVE_AUTHOR_REQUIRED'
     );

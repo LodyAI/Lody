@@ -1,0 +1,58 @@
+# Attachment transport check
+
+From the repository root (automatically leases a Lody Verify Simulator):
+
+```sh
+pnpm verify:native --case attachments
+```
+
+Runs the production uploader against URLProtocol responses with synthetic auth.
+Checks image multipart encoding, file hashing, the 16 MiB part boundary, failed
+part cleanup, and rejection of files outside picker storage. `pnpm test` checks
+that attachment references reach both persisted history and Machine RPC and
+survive a lost append acknowledgement. These checks do not send a live cloud turn.
+
+Cloud limits: eight images (5 MiB each after conversion) and eight files
+(100 MiB each) per message. HEIC and oversized photos convert to JPEG at up to
+2048 pixels. Videos and other non-image types upload as files; a movie marked
+as an image is coerced onto the file route instead of extracting a still.
+Upload failure retains the pending turn for explicit retry. A definite failure
+does not disable the composer: submitting new content replaces that pending turn
+with a fresh message and only the newly selected attachments. Unconfirmed delivery
+still blocks another submission; no message dispatch is retried automatically.
+History displays image thumbnails above their text bubbles; files retain their names.
+
+Settings → Diagnostics → Export diagnostic file includes upload request start,
+success and failure events for images, files and multipart create/part/complete/abort.
+A random per-attachment attempt ID joins multipart requests without recording raw
+workspace/session IDs, filenames, URLs, attachment content or credentials. Failures
+include HTTP status, allowlisted server error categories (including authorization
+and storage quota), or native URL loading error codes. Unknown server error text
+and codes are omitted. Upload events retain request/response byte counts and
+monotonic elapsed milliseconds. `image_prepared` records allowlisted source/upload
+MIME types (`other` for unlisted types), original/encoded byte counts, conversion
+status, and a hashed session ID joined to the request by its attempt ID.
+HTTP responses record a coarse content type and validated trace headers (`CF-Ray`
+in hex-datacenter form, `X-Request-ID` only when it is a UUID). Failure diagnostics
+classify empty, oversized (over 64 KiB), invalid JSON, JSON object and other JSON
+bodies; `serverCodeState` distinguishes recognized, unrecognized and absent error
+categories. Known categories are checked across top-level and nested error codes
+and messages, so an unknown top-level code cannot mask a known nested category.
+Nonempty error bodies up to 64 KiB get a SHA-256 prefix fingerprint for comparing
+failures; the fingerprint cannot explain an unknown error by itself. Use the
+validated trace ID and timestamp for server-side investigation. No response body,
+arbitrary header, filename or credential is exported.
+
+Alerts classify invalid requests, authentication/access,
+storage quota, attachment size/format, rate limits, server availability and network
+failures, retaining HTTP status for support. Only allowlisted server categories
+override status-based explanations; response bodies never become alert text. Invalid
+JSON and incomplete upload responses are recorded separately. The native check exports the real on-disk diagnostics and verifies
+failure stages, multipart cleanup correlation and private-data exclusion.
+
+Attachment routes are hosted on `https://api.lody.ai`, separately from the
+`backend.lody.ai` auth/Streams token service. An unauthenticated POST to
+`/api/workspaces/test/session-images/upload`, `session-files/upload`, and
+`session-files/multipart/create` on that host returns 401; an unknown route
+returns 404. Verify this routing against the live host when changing endpoints;
+URLProtocol checks alone cannot establish deployment routing.

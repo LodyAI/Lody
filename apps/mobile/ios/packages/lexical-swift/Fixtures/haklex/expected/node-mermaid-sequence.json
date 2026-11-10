@@ -1,0 +1,16 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "mermaid",
+        "version": 1,
+        "diagram": "sequenceDiagram\n    participant Client\n    participant Server\n    participant DB\n    Client->>Server: POST /api/login\n    Server->>DB: Query user\n    DB-->>Server: User record\n    Server-->>Client: JWT token"
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

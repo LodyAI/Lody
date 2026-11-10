@@ -6,9 +6,11 @@ import {
 } from '@lody/e2ee-machine-sharing/schemas'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
+import { open as openFile, readFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { app, BrowserWindow, dialog } from 'electron'
 import {
   E2eeDeviceRevokedError,
   E2eeMemberRemovedError
@@ -16,6 +18,7 @@ import {
 import { Effect, Exit } from 'effect'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
+import type { RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { isLocalPlatform } from '../../platform'
 import {
   validateDesktopE2eeCreationIntent,
@@ -32,13 +35,41 @@ import {
   withDesktopE2eeAccount,
   cleanupRemovedDesktopWorkspace,
   publicAccessLoss,
-  desktopAccountPairingDatabase
+  desktopAccountPairingDatabase,
+  desktopE2eeHasWorkspaceIdentity,
+  desktopE2eeRecoveryJournalPath
 } from '../../services/e2ee-account-runtime'
 import {
   makeDesktopAccountPairingHost,
   type AccountPairingCloud,
   type AccountPairingWorkspaceHint
 } from '../../services/e2ee-account-pairing-host.mjs'
+import {
+  MAX_RECOVERY_FILE_BYTES,
+  abandonAccountVaultReplacement,
+  beginAccountVaultReplacement,
+  continueAccountVaultReplacement,
+  defaultPasskeyLabel,
+  enrollRecoveryPasskey,
+  listRecoveryPasskeys,
+  passkeyLabel,
+  removeRecoveryPasskey,
+  createAccountRecoveryVault,
+  inspectRecoveryFile,
+  recentAccountSecurityEvents,
+  recoveryReplacementPlan,
+  recoveryRestoreTarget,
+  recoveryVaultEnabled,
+  recoveryVaultFailure,
+  restoreAccountWorkspaces,
+  saveRecoveryFile,
+  setupWorkspaceRecovery,
+  setupWorkspacesRecovery,
+  type RecoveryUnlock,
+  type RecoveryVaultReplacement,
+  type RecoveryWorkspaceTarget
+} from '../../services/e2ee-recovery-vault.mjs'
+import { desktopPasskeyPort } from '../../services/e2ee-passkey-macos.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -71,6 +102,15 @@ const isAccessLossMessage = (error: unknown) =>
   error instanceof Error &&
   (error.message === 'e2ee_member_removed' || error.message === 'e2ee_device_revoked')
 type Owner = Parameters<Parameters<typeof withDesktopE2eeAccount>[0]>[0]
+/** Only the lifetime of one explicit personal approval, never a persistent gate. */
+type PersonalApproval = {
+  accountId: string
+  generation: number
+  workspaceId: string
+  owner?: Owner
+  cancelled: boolean
+}
+
 type RemovalFence = ReturnType<Owner['fenceLoss']>
 type LossAccess = {
   accountId: string
@@ -132,7 +172,6 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
         : Effect.fail(new Error('e2ee_account_mismatch'))
   )
   return {
-    accountIdentity: () => Effect.flatMap(current, (client) => client.accountIdentity()),
     history: (request) => Effect.flatMap(current, (client) => client.history(request)),
     appendRecord: (request) => Effect.flatMap(current, (client) => client.appendRecord(request)),
     keyServices: (access) =>
@@ -152,6 +191,7 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
   }
 }
 const PAIRING_REFUSALS = new Set([
+  'pairing-elsewhere',
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
@@ -342,10 +382,25 @@ export class E2eeIpc extends IpcService {
     },
     clear: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>)
   }
+  private readonly personalApprovals = new Set<PersonalApproval>()
+  private personalApprovalLive(approval: PersonalApproval, owner?: Owner) {
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    return (
+      !approval.cancelled &&
+      identity.userId === approval.accountId &&
+      identity.generation === approval.generation &&
+      (!owner ||
+        (owner.accountId === approval.accountId && (!approval.owner || owner === approval.owner)))
+    )
+  }
+  private assertPersonalApproval(approval: PersonalApproval) {
+    if (!this.personalApprovalLive(approval)) throw new Error('e2ee_account_mismatch')
+  }
   private readonly keyDeliveries = new Map<
     string,
     {
       requests: Map<string, MemberKeyDelivery>
+      generation: number | undefined
       running?: Promise<void>
       again: boolean
       timer?: unknown
@@ -357,8 +412,13 @@ export class E2eeIpc extends IpcService {
   private keyDeliverySlot(accountId: string, workspaceId: string) {
     const key = `${accountId}\n${workspaceId}`
     let slot = this.keyDeliveries.get(key)
+    const generation = this.keyDeliveryIdentity()?.generation
+    if (slot && slot.generation !== generation) {
+      this.dropKeyDeliverySlot(accountId, workspaceId)
+      slot = undefined
+    }
     if (!slot) {
-      slot = { requests: new Map(), again: false, autoRetries: 0 }
+      slot = { requests: new Map(), generation, again: false, autoRetries: 0 }
       this.keyDeliveries.set(key, slot)
     }
     return slot
@@ -373,17 +433,28 @@ export class E2eeIpc extends IpcService {
     slot.timer = undefined
     this.keyDeliveries.delete(key)
   }
-  /** The signed-in account, or undefined when it cannot be read. */
-  private keyDeliveryAccount() {
+  private keyDeliveryIdentity() {
     try {
-      return getIpcServiceDeps().authService.getCachedSessionIdentity().userId ?? undefined
+      return getIpcServiceDeps().authService.getCachedSessionIdentity()
     } catch {
       return undefined
     }
   }
+  /** Old delivery work never borrows a later login, even for the same account. */
+  private keyDeliveryCurrent(accountId: string, slot: { generation: number | undefined }) {
+    const identity = this.keyDeliveryIdentity()
+    return identity?.userId === accountId && identity.generation === slot.generation
+  }
   /** Drops every slot of a removed or reset workspace (all accounts when `accountId` is
    * absent, every workspace when `workspaceId` is too): nothing reopens it afterwards. */
   private dropKeyDeliveryWorkspace(workspaceId?: string, accountId?: string) {
+    // Invalidate pending approvals too: reset may arrive before any slot exists.
+    for (const approval of this.personalApprovals)
+      if (
+        (workspaceId === undefined || approval.workspaceId === workspaceId) &&
+        (accountId === undefined || approval.accountId === accountId)
+      )
+        approval.cancelled = true
     for (const key of [...this.keyDeliveries.keys()]) {
       const [account, workspace] = key.split('\n')
       if (
@@ -423,13 +494,7 @@ export class E2eeIpc extends IpcService {
       () => {
         if (this.keyDeliveries.get(key) !== slot) return
         slot.timer = undefined
-        let current: string | null | undefined
-        try {
-          current = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
-        } catch {
-          current = undefined
-        }
-        if (current !== accountId) {
+        if (!this.keyDeliveryCurrent(accountId, slot)) {
           this.dropKeyDeliverySlot(accountId, workspaceId)
           return
         }
@@ -464,6 +529,10 @@ export class E2eeIpc extends IpcService {
   }
   private retryDueKeyDeliveries(accountId: string, workspaceId: string) {
     const slot = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    if (slot && !this.keyDeliveryCurrent(accountId, slot)) {
+      this.dropKeyDeliverySlot(accountId, workspaceId)
+      return
+    }
     if (!slot || slot.running) return
     const now = this.keyDeliveryNow()
     if (
@@ -488,7 +557,7 @@ export class E2eeIpc extends IpcService {
       // A request admitted during a round gets one follow-up pass; later ones wait for a poll.
       for (let pass = 0; pass < 2; pass++) {
         // Sign-out or an account change ends this account's delivery at once.
-        if (!slot.aborted && this.keyDeliveryAccount() !== accountId)
+        if (!slot.aborted && !this.keyDeliveryCurrent(accountId, slot))
           this.dropKeyDeliverySlot(accountId, workspaceId)
         if (slot.aborted) return
         slot.again = false
@@ -522,11 +591,14 @@ export class E2eeIpc extends IpcService {
             accountId,
             workspaceId,
             new Set(covered.map((delivery) => delivery.device)),
-            () => slot.aborted === true
+            () => slot.aborted === true || !this.keyDeliveryCurrent(accountId, slot)
           )
         } catch (cause) {
           this.pairingFailure = cause
-          if (this.keyDeliveryAccount() !== accountId)
+          if (
+            !this.keyDeliveryCurrent(accountId, slot) &&
+            this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot
+          )
             this.dropKeyDeliverySlot(accountId, workspaceId)
           if (slot.aborted) return
           const code = keyDeliveryCode(cause)
@@ -541,6 +613,12 @@ export class E2eeIpc extends IpcService {
           for (const delivery of covered) retry(delivery, code)
           return
         }
+        if (!this.keyDeliveryCurrent(accountId, slot)) {
+          if (this.keyDeliveries.get(`${accountId}\n${workspaceId}`) === slot)
+            this.dropKeyDeliverySlot(accountId, workspaceId)
+          return
+        }
+        if (slot.aborted) return
         // Delivered only on positive per-device evidence; every other outcome retries.
         for (const delivery of covered) {
           const outcome = evidence.get(delivery.device) ?? KEY_DELIVERY_NOT_INGESTED
@@ -638,7 +716,23 @@ export class E2eeIpc extends IpcService {
       const credential = await scope((owner) => owner.bootstrap.deviceCredential(workspaceId))
       const mailbox = (signal: AbortSignal) =>
         cloud.client.mailbox({ workspaceId, credential }, signal)
-      // Distribution only: this device's own receive and repair run in full rounds.
+      // #2459: the control-only approver may not hold the current key yet.
+      // Receive on this main-owned reader, without putting it back on the approval wait.
+      if (!(await scope((owner) => owner.host.status(workspaceId))).hasCurrentKey) {
+        if (aborted()) return evidence
+        const receive = await scope((owner) =>
+          Effect.succeed(
+            owner.host
+              .receiveKeys(workspaceId, mailbox, (signal) =>
+                cloud.client.staging({ workspaceId, credential }, signal)
+              )
+              .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
+          )
+        )
+        await runDesktopE2eeOperation(accountId, receive)
+      }
+      if (aborted()) return evidence
+      // Distribution: report flush and repair remain owned by full rounds.
       const work = await scope((owner) =>
         Effect.succeed(
           owner.host
@@ -825,9 +919,12 @@ export class E2eeIpc extends IpcService {
     }
     return id
   }
-  private memberScope(workspaceId: string) {
+  /** `identity` lets one operation bind a later owner to the sign-in it started under. */
+  private memberScope(
+    workspaceId: string,
+    identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+  ) {
     const auth = getIpcServiceDeps().authService
-    const identity = auth.getCachedSessionIdentity()
     let original: Owner | undefined
     return <A>(work: (owner: Owner) => Effect.Effect<A, unknown>, create = false) =>
       withDesktopE2eeAccount(
@@ -949,11 +1046,59 @@ export class E2eeIpc extends IpcService {
       throw error
     })
   }
+  /** A new invitation can reach a removed member before any refresh or token request has
+   * told this device. Its accepted earlier join would refuse the offer as a conflict, so
+   * this device's credential confirms the removal first; local removal erases that join.
+   * A membership that is still current keeps the conflict. Returns whether it was removed.
+   * A removal this device already recorded but could not finish erasing (a busy lease or an
+   * unavailable key store) resumes from its durable receipt here: nothing else reopens a
+   * workspace the member has lost, so without this the new invitation would stay refused. */
+  private async endRemovedMemberJoin(
+    workspaceId: string,
+    scope: ReturnType<E2eeIpc['memberScope']>,
+    cloud: Awaited<ReturnType<typeof desktopE2eeCloudClient>>
+  ) {
+    const recorded = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? owner.bootstrap.removedReason(workspaceId)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (recorded) {
+      await cleanupRemovedDesktopWorkspace({
+        accountId: cloud.accountId,
+        workspaceId,
+        reason: recorded
+      })
+      return true
+    }
+    const access = await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? Effect.gen(function* () {
+            if (!(yield* owner.bootstrap.acceptedMemberJoin(workspaceId))) return null
+            return {
+              accountId: owner.accountId,
+              workspaceId,
+              credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+              status: yield* owner.host.status(workspaceId)
+            }
+          })
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    if (!access) return false
+    try {
+      await this.endOnAccessLoss(access, cloud, undefined, true)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_member_removed') return true
+      throw error
+    }
+    return false
+  }
   @IpcMethod()
   async prepareMemberJoin(source: E2eeMemberOffer) {
     sender()
     const offer = MemberOfferSchema.parse(source)
-    const scope = this.memberScope(offer.workspaceId)
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const scope = this.memberScope(offer.workspaceId, identity)
     const cloud = await desktopE2eeCloudClient()
     const pending = await scope(
       (owner) =>
@@ -978,23 +1123,12 @@ export class E2eeIpc extends IpcService {
           : Effect.fail(new Error('e2ee_account_mismatch'))
       )
     }
-    const needsIdentity = await scope((owner) =>
-      owner.accountId === cloud.accountId
-        ? owner.bootstrap.memberJoinNeedsAccountIdentity()
-        : Effect.fail(new Error('e2ee_account_mismatch'))
-    )
-    if (needsIdentity) {
-      const identity = await Effect.runPromise(cloud.client.accountIdentity())
-      await scope((owner) =>
-        owner.accountId === cloud.accountId
-          ? owner.bootstrap.recordAccountIdentity({
-              accountId: cloud.accountId,
-              cryptoUserId: identity.cryptoUserId
-            })
-          : Effect.fail(new Error('e2ee_account_mismatch'))
-      )
-    }
-    const original = await scope((owner) =>
+    // Removal cleanup replaces the account owner. The new join binds to the current owner,
+    // still under the sign-in generation this operation started with.
+    const joining = (await this.endRemovedMemberJoin(offer.workspaceId, scope, cloud))
+      ? this.memberScope(offer.workspaceId, identity)
+      : scope
+    const original = await joining((owner) =>
       owner.accountId === cloud.accountId
         ? owner.bootstrap.prepareMemberJoin(offer)
         : Effect.fail(new Error('e2ee_account_mismatch'))
@@ -1106,16 +1240,21 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async retryMemberKeyDelivery(workspaceId: string, requestId: string) {
-    // Member admissions use 32-hex ids; account pairing keeps its journaled admission id.
+    // Member admissions use 32-hex ids; account and personal pairing keep their journaled ids.
     if (
       typeof requestId !== 'string' ||
-      !/^(?:[0-9a-f]{32}|account-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
+      !/^(?:[0-9a-f]{32}|(?:account|personal)-device-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(
         requestId
       )
     )
       throw new Error('e2ee_invalid-input')
     const accountId = await this.readerAccount(workspaceId, sender())
-    const delivery = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)?.requests.get(requestId)
+    const current = this.keyDeliveries.get(`${accountId}\n${workspaceId}`)
+    if (current && !this.keyDeliveryCurrent(accountId, current)) {
+      this.dropKeyDeliverySlot(accountId, workspaceId)
+      throw new Error('e2ee_invalid-input')
+    }
+    const delivery = current?.requests.get(requestId)
     if (!delivery) throw new Error('e2ee_invalid-input')
     // An explicit retry skips the backoff wait, never the terminal access-loss result.
     if (delivery.state === 'failed') delivery.retryAt = 0
@@ -1546,11 +1685,25 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async inspectPersonalJoin(workspaceId: string, pairingSessionId: string) {
+    return (await this.readPersonalJoin(workspaceId, pairingSessionId)).preview
+  }
+  /** One immutable request read and its verified preview, reused by explicit approval. */
+  private async readPersonalJoin(
+    workspaceId: string,
+    pairingSessionId: string,
+    approval?: PersonalApproval
+  ) {
     const id = sender()
     pairingSession(pairingSessionId)
+    const service = this
     const access = await withDesktopE2eeAccount(
       (owner) =>
         Effect.gen(function* () {
+          if (approval) {
+            if (!service.personalApprovalLive(approval, owner))
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            approval.owner ??= owner
+          }
           if (!owner.readers.get(workspaceId)?.has(id))
             return yield* refuseUnopened(owner, workspaceId)
           return {
@@ -1561,15 +1714,20 @@ export class E2eeIpc extends IpcService {
       workspaceId,
       false
     )
+    if (approval) this.assertPersonalApproval(approval)
     const cloud = await desktopE2eeCloudClient()
+    if (approval) this.assertPersonalApproval(approval)
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
     const request = await Effect.runPromise(
       cloud.client.joinReadRequest({ workspaceId, pairingSessionId, credential: access.credential })
     )
+    if (approval) this.assertPersonalApproval(approval)
     if (request.status === 'cancelled') {
       await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          owner.accountId === access.accountId &&
+          owner.readers.get(workspaceId)?.has(id) &&
+          (!approval || service.personalApprovalLive(approval, owner))
             ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
             : Effect.fail(new Error('e2ee_account_mismatch')),
         workspaceId,
@@ -1587,7 +1745,9 @@ export class E2eeIpc extends IpcService {
       }
       await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          owner.accountId === access.accountId &&
+          owner.readers.get(workspaceId)?.has(id) &&
+          (!approval || service.personalApprovalLive(approval, owner))
             ? owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
             : Effect.fail(new Error('e2ee_account_mismatch')),
         workspaceId,
@@ -1595,89 +1755,145 @@ export class E2eeIpc extends IpcService {
       )
       throw new Error('e2ee_join_conflict')
     }
-    return withDesktopE2eeAccount(
+    const preview = await withDesktopE2eeAccount(
       (owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+        owner.accountId === access.accountId &&
+        owner.readers.get(workspaceId)?.has(id) &&
+        (!approval || service.personalApprovalLive(approval, owner))
           ? owner.host.previewPersonalAdmission(workspaceId, request.requestHex)
           : Effect.fail(new Error('e2ee_account_mismatch')),
       workspaceId,
       false
     )
+    return { preview, request }
   }
   @IpcMethod()
   async approvePersonalJoin(workspaceId: string, pairingSessionId: string) {
     const id = sender()
     pairingSession(pairingSessionId)
-    // The separate inspection call displays verified public evidence. This
-    // explicit operation is the only one permitted to sign an admission.
-    const preview = await this.inspectPersonalJoin(workspaceId, pairingSessionId)
-    if (preview.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
-    const cloud = await desktopE2eeCloudClient()
-    const access = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
-            return yield* Effect.fail(new Error('e2ee_not_open'))
-          return { credential: yield* owner.bootstrap.deviceCredential(workspaceId) }
-        }),
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    if (!identity.userId) throw new Error('e2ee_account_unavailable')
+    const approval: PersonalApproval = {
+      accountId: identity.userId,
+      generation: identity.generation,
       workspaceId,
-      false
-    )
-    const material = await Effect.runPromise(
-      cloud.client.joinReadRequest({ workspaceId, pairingSessionId, credential: access.credential })
-    )
-    const pending = await withDesktopE2eeAccount(
-      (owner) =>
-        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.preparePersonalAdmission(workspaceId, material.requestHex)
-          : Effect.fail(new Error('e2ee_account_mismatch')),
-      workspaceId,
-      false
-    )
-    let appendFailure: unknown
-    try {
-      await Effect.runPromise(cloud.client.appendRecord(pending))
-    } catch (error) {
-      appendFailure = error
+      cancelled: false
     }
+    this.personalApprovals.add(approval)
     try {
-      await this.refresh(workspaceId)
-    } catch (error) {
-      this.pairingFailure = error
-    }
-    let invitation
-    try {
-      invitation = await withDesktopE2eeAccount(
+      // The separate inspection call displays verified public evidence. This
+      // explicit operation is the only one permitted to sign an admission.
+      const { preview, request: material } = await this.readPersonalJoin(
+        workspaceId,
+        pairingSessionId,
+        approval
+      )
+      this.assertPersonalApproval(approval)
+      if (preview.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
+      const cloud = await desktopE2eeCloudClient()
+      this.assertPersonalApproval(approval)
+      const service = this
+      const access = await withDesktopE2eeAccount(
         (owner) =>
-          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? owner.host.personalInvitation(workspaceId, pairingSessionId)
+          Effect.gen(function* () {
+            if (
+              owner.accountId !== cloud.accountId ||
+              !owner.readers.get(workspaceId)?.has(id) ||
+              !service.personalApprovalLive(approval, owner)
+            )
+              return yield* Effect.fail(new Error('e2ee_not_open'))
+            return { credential: yield* owner.bootstrap.deviceCredential(workspaceId) }
+          }),
+        workspaceId,
+        false
+      )
+      const pending = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === cloud.accountId &&
+          owner.readers.get(workspaceId)?.has(id) &&
+          this.personalApprovalLive(approval, owner)
+            ? owner.host.preparePersonalAdmission(workspaceId, material.requestHex)
             : Effect.fail(new Error('e2ee_account_mismatch')),
         workspaceId,
         false
       )
-    } catch (error) {
-      this.pairingFailure = new AggregateError(
-        [...(appendFailure === undefined ? [] : [appendFailure]), error],
-        'e2ee_append_unconfirmed'
-      )
-      // Raw causes stay in main; the IPC decorator logs rejected Errors.
-      // eslint-disable-next-line preserve-caught-error
-      throw new Error('e2ee_append_unconfirmed')
-    }
-    if (invitation === null) return { admitted: true as const, invitationPublished: false }
-    try {
-      await Effect.runPromise(
-        cloud.client.joinPublish({
+      this.assertPersonalApproval(approval)
+      let appendFailure: unknown
+      try {
+        await Effect.runPromise(cloud.client.appendRecord(pending))
+      } catch (error) {
+        appendFailure = error
+      }
+      this.assertPersonalApproval(approval)
+      try {
+        // Admission must be verified locally before publishing its invitation. Own-key
+        // receive/repair and unrelated deliveries do not belong to this approval wait.
+        await this.refresh(workspaceId, { installKeys: false })
+      } catch (error) {
+        this.pairingFailure = error
+      }
+      this.assertPersonalApproval(approval)
+      let invitation
+      try {
+        invitation = await withDesktopE2eeAccount(
+          (owner) =>
+            owner.accountId === cloud.accountId &&
+            owner.readers.get(workspaceId)?.has(id) &&
+            this.personalApprovalLive(approval, owner)
+              ? owner.host.personalInvitation(workspaceId, pairingSessionId)
+              : Effect.fail(new Error('e2ee_account_mismatch')),
           workspaceId,
-          pairingSessionId,
-          credential: access.credential,
-          ...invitation
-        })
+          false
+        )
+      } catch (error) {
+        this.pairingFailure = new AggregateError(
+          [...(appendFailure === undefined ? [] : [appendFailure]), error],
+          'e2ee_append_unconfirmed'
+        )
+        // Raw causes stay in main; the IPC decorator logs rejected Errors.
+        // eslint-disable-next-line preserve-caught-error
+        throw new Error('e2ee_append_unconfirmed')
+      }
+      this.assertPersonalApproval(approval)
+      // Register before the publication await so reset/sign-out can fence this task;
+      // a late publication result must never register a fresh delivery after reset.
+      // The main-owned round is not awaited by approval, even if publication fails.
+      await withDesktopE2eeAccount(
+        (owner) =>
+          Effect.sync(() => {
+            if (!this.personalApprovalLive(approval, owner))
+              throw new Error('e2ee_account_mismatch')
+            this.trackKeyDelivery(
+              cloud.accountId,
+              workspaceId,
+              pending.requestId,
+              preview.signingPublicKey
+            )
+          }),
+        workspaceId,
+        false
       )
-      return { admitted: true as const, invitationPublished: true }
-    } catch (error) {
-      this.pairingFailure = error
-      return { admitted: true as const, invitationPublished: false }
+      this.assertPersonalApproval(approval)
+      let invitationPublished = false
+      if (invitation !== null) {
+        try {
+          await Effect.runPromise(
+            cloud.client.joinPublish({
+              workspaceId,
+              pairingSessionId,
+              credential: access.credential,
+              ...invitation
+            })
+          )
+          invitationPublished = true
+        } catch (error) {
+          this.pairingFailure = error
+        }
+      }
+      this.assertPersonalApproval(approval)
+      return { admitted: true as const, invitationPublished }
+    } finally {
+      this.personalApprovals.delete(approval)
     }
   }
   // ----- Account-wide personal device pairing (default off in the renderer) -----
@@ -1719,7 +1935,16 @@ export class E2eeIpc extends IpcService {
       })
       this.accountPairings.set(cloud.accountId, current)
     }
-    if (hints) current.hints = hints
+    if (hints) {
+      const retained = new Map(current.hints.map((hint) => [hint.workspaceId, hint]))
+      for (const hint of hints) {
+        const previous = retained.get(hint.workspaceId)
+        if (previous && previous.genesisHash !== hint.genesisHash)
+          throw new Error('e2ee_pairing-tampered')
+        if (!previous) retained.set(hint.workspaceId, { ...hint })
+      }
+      current.hints = [...retained.values()]
+    }
     return current.pairing
   }
   /** Only the typed refusals the UI explains leave main; causes stay here. */
@@ -1738,17 +1963,31 @@ export class E2eeIpc extends IpcService {
     }
   }
   @IpcMethod()
-  async requestAccountPairing(input: { pairingString?: string }, workspaces: unknown) {
+  async requestAccountPairing(
+    input: { pairingString?: string; expiresAt?: number; preserveExisting?: true },
+    workspaces: unknown
+  ) {
     sender()
     const hints = pairingHints(workspaces)
     if (input?.pairingString !== undefined && typeof input.pairingString !== 'string')
       throw new Error('e2ee_invalid-input')
+    if (input?.expiresAt !== undefined && !Number.isSafeInteger(input.expiresAt))
+      throw new Error('e2ee_invalid-input')
+    if (
+      input?.preserveExisting !== undefined &&
+      (input.preserveExisting !== true || hints.length !== 1)
+    )
+      throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing(hints)
     return this.pairingCall(() =>
       Effect.runPromise(
-        pairing.requestAccountPairing(
-          input?.pairingString === undefined ? {} : { pairingString: input.pairingString }
-        )
+        pairing.requestAccountPairing({
+          ...(input?.pairingString === undefined ? {} : { pairingString: input.pairingString }),
+          ...(input?.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+          ...(input?.preserveExisting
+            ? { preserveExisting: true as const, workspaceId: hints[0]!.workspaceId }
+            : {})
+        })
       )
     )
   }
@@ -1759,10 +1998,12 @@ export class E2eeIpc extends IpcService {
     return this.pairingCall(() => Effect.runPromise(pairing.accountPairingRequest()))
   }
   @IpcMethod()
-  async cancelAccountPairing() {
+  async cancelAccountPairing(input?: { expectedLookupId: string }) {
     sender()
+    if (input && !/^[0-9a-f]{32}$/.test(input.expectedLookupId))
+      throw new Error('e2ee_invalid-input')
     const pairing = await this.accountPairing()
-    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing()))
+    return this.pairingCall(() => Effect.runPromise(pairing.cancelAccountPairing(input)))
   }
   @IpcMethod()
   async accountPairingCode() {
@@ -2393,7 +2634,8 @@ export class E2eeIpc extends IpcService {
       if (retiring) retiring.failure = cause
       if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)
         throw new Error('e2ee_account_mismatch')
-      // Receipt survives a busy process lease or interrupted cleanup; the next open retries it.
+      // Receipt survives a busy process lease or interrupted cleanup; the next open of the
+      // workspace, or preparing a new invitation to it, resumes the erase.
       return true
     })
     if (deleted) {
@@ -2417,6 +2659,13 @@ export class E2eeIpc extends IpcService {
     )
       throw new Error('e2ee_invalid-input')
     await this.manage(workspaceId, { type: 'setRole', membershipId, role })
+  }
+  /** Owner-only: hands ownership to an existing member; this owner becomes an admin. */
+  @IpcMethod()
+  async transferOwnership(workspaceId: string, membershipId: string) {
+    if (typeof membershipId !== 'string' || !/^[0-9a-f]{32}$/.test(membershipId))
+      throw new Error('e2ee_invalid-input')
+    await this.manage(workspaceId, { type: 'transferOwner', membershipId })
   }
   @IpcMethod()
   async contentStreamsToken(
@@ -3149,7 +3398,9 @@ export class E2eeIpc extends IpcService {
     )
     if (result === 'Conflict')
       throw new Error(
-        command.type === 'removeMember' || command.type === 'setRole'
+        command.type === 'removeMember' ||
+          command.type === 'setRole' ||
+          command.type === 'transferOwner'
           ? 'e2ee_member_management_conflict'
           : 'e2ee_management_conflict'
       )
@@ -3206,5 +3457,539 @@ export class E2eeIpc extends IpcService {
       workspaceId,
       false
     )
+  }
+  private recoveryQueue: Promise<unknown> = Promise.resolve()
+  /** Gate, serialize and account-fence one recovery-vault operation. Network and
+   * file work run outside the account lock; only reason codes leave main. */
+  private async recoveryOperation<A>(
+    work: (input: {
+      accountId: string
+      store: RecoveryVaultStore['Service']
+      journalPath: string
+      client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client']
+      exists: Effect.Effect<boolean, unknown>
+      replacement: RecoveryVaultReplacement
+      accountWorkspaces: Effect.Effect<
+        readonly {
+          readonly id: string
+          readonly name: string
+          readonly genesisHash: string
+        }[],
+        unknown
+      >
+    }) => Effect.Effect<A, unknown>
+  ): Promise<A> {
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const run = this.recoveryQueue.then(async () => {
+      const { accountId, client } = await desktopE2eeCloudClient()
+      const result = await Effect.runPromise(
+        work({
+          accountId,
+          store: client.recoveryVault(),
+          journalPath: desktopE2eeRecoveryJournalPath(accountId),
+          client,
+          exists: client.hasRecoveryVault(),
+          replacement: client.recoveryVaultReplacement(),
+          accountWorkspaces: client.recoveryVaultAccountWorkspaces()
+        })
+      ).catch((error) => {
+        throw recoveryVaultFailure(error)
+      })
+      if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+        throw new Error('e2ee_account_mismatch')
+      return result
+    })
+    this.recoveryQueue = run.catch(() => undefined)
+    return run
+  }
+  /** Default-off post-MVP recovery vault: create the account vault, save its file
+   * where the user chooses and prove that file reopens it. The file never reaches the renderer. */
+  @IpcMethod()
+  async createRecoveryVault() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (await this.recoveryOperation(({ exists }) => exists))
+      throw new Error('e2ee_recovery_exists')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      defaultPath: 'lody-recovery.lodyrecovery',
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const target = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
+    if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
+    const path = target.filePath
+    const created = await this.recoveryOperation(({ store, journalPath, exists }) =>
+      createAccountRecoveryVault({
+        store,
+        journalPath,
+        exists,
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        persist: (file) =>
+          Effect.tryPromise(async () => {
+            await saveRecoveryFile(path, file)
+            return new Uint8Array(await readFile(path))
+          })
+      })
+    )
+    return { outcome: 'created' as const, vaultId: created.vaultId }
+  }
+  /** Default-off: recent account security events, for the security settings list. */
+  @IpcMethod()
+  async recentAccountSecurityEvents() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const { client } = await desktopE2eeCloudClient()
+    return Effect.runPromise(recentAccountSecurityEvents(client.accountSecurityEvents())).catch(
+      (error) => {
+        throw recoveryVaultFailure(error)
+      }
+    )
+  }
+  /** Default-off: what replacing the recovery file would cover from this device. */
+  @IpcMethod()
+  async recoveryReplacementPlan() {
+    sender()
+    return this.recoveryOperation(
+      ({ accountId, store, journalPath, replacement, accountWorkspaces }) =>
+        recoveryReplacementPlan({
+          store,
+          journalPath,
+          replacement,
+          accountWorkspaces,
+          hasIdentity: (workspaceId) =>
+            Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, workspaceId))
+        })
+    )
+  }
+  /** Default-off: save a new file and reserve its vault. The current vault keeps working. */
+  @IpcMethod()
+  async beginRecoveryReplacement() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      defaultPath: 'lody-recovery.lodyrecovery',
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const target = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
+    if (target.canceled || !target.filePath) return { outcome: 'cancelled' as const }
+    const path = target.filePath
+    const begun = await this.recoveryOperation(({ store, journalPath, replacement }) =>
+      beginAccountVaultReplacement({
+        store,
+        journalPath,
+        replacement,
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        persist: (file) =>
+          Effect.tryPromise(async () => {
+            await saveRecoveryFile(path, file)
+            return new Uint8Array(await readFile(path))
+          })
+      })
+    )
+    return { outcome: 'begun' as const, vaultId: begun.vaultId }
+  }
+  private passkeyPort() {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    return desktopPasskeyPort({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      window: () => {
+        if (!owner) throw new Error('e2ee_recovery_failed')
+        return owner.getNativeWindowHandle()
+      }
+    })
+  }
+  /** How the user chose to open the vault, or null when they cancel the file dialog. */
+  private async recoveryUnlock(method: 'file' | 'passkey'): Promise<RecoveryUnlock | null> {
+    if (method === 'passkey')
+      return {
+        passkey: this.passkeyPort(),
+        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+      }
+    const file = await this.chooseRecoveryFile()
+    return file ? { file } : null
+  }
+  /** Ask for a recovery file and read it, or null when the user cancels. */
+  private async chooseRecoveryFile() {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      properties: ['openFile' as const],
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const chosen = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = chosen.filePaths[0]
+    return chosen.canceled || !path ? null : this.readRecoveryFile(path)
+  }
+  /** Read a chosen recovery file, bounded before any parsing. */
+  private async readRecoveryFile(path: string) {
+    const handle = await openFile(path, 'r')
+    try {
+      const buffer = new Uint8Array(MAX_RECOVERY_FILE_BYTES + 1)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+      if (bytesRead > MAX_RECOVERY_FILE_BYTES) {
+        buffer.fill(0)
+        throw new Error('e2ee_recovery_invalid-input')
+      }
+      return buffer.subarray(0, bytesRead)
+    } finally {
+      await handle.close()
+    }
+  }
+  /** This device's recovery targets: the workspaces it holds an identity for. */
+  private async recoveryTargets(
+    accountId: string,
+    client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client'],
+    workspaces: readonly { readonly id: string; readonly name: string }[]
+  ) {
+    const targets: RecoveryWorkspaceTarget[] = []
+    for (const { id, name } of workspaces) {
+      if (!(await desktopE2eeHasWorkspaceIdentity(accountId, id))) continue
+      const { host, credential } = await withDesktopE2eeAccount(
+        (owner) =>
+          Effect.map(owner.bootstrap.deviceCredential(id), (credential) => ({
+            host: owner.host,
+            credential
+          })),
+        id,
+        false
+      )
+      targets.push({
+        id,
+        name,
+        append: (request) => client.appendRecord(request),
+        refresh: () => host.refreshWorkspaceLedger(id, (request) => client.history(request)),
+        mailbox: (recovery) => client.mailbox({ workspaceId: id, credential: recovery }),
+        deliver: () =>
+          Effect.asVoid(
+            host.keyRound(
+              id,
+              (signal) => client.mailbox({ workspaceId: id, credential }, signal),
+              (signal) => client.staging({ workspaceId: id, credential }, signal),
+              (signal) => (request) => client.history(request, signal)
+            )
+          ),
+        owner: (ports) => host.workspaceRecovery(id, ports),
+        abandonOwner: (ports) => host.workspaceRecoveryAbandon(id, ports)
+      })
+    }
+    return targets
+  }
+  /** Default-off: from the new file, prove every workspace, revoke old Rs and retire the
+   * old vault. A suspected leak revokes first. The file never reaches the renderer. */
+  @IpcMethod()
+  async continueRecoveryReplacement(input: { compromised: boolean }) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const compromised = input?.compromised === true
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
+    try {
+      return await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+              (workspaces) =>
+                continueAccountVaultReplacement({
+                  store,
+                  journalPath,
+                  replacement,
+                  workspaces,
+                  file,
+                  compromised
+                })
+            )
+          )
+      )
+    } finally {
+      file.fill(0)
+    }
+  }
+  /** Default-off: set up recovery for one workspace from the account's recovery file. */
+  @IpcMethod()
+  async setupWorkspaceRecovery(workspaceId: string, method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      return await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              Effect.promise(() =>
+                this.recoveryTargets(
+                  accountId,
+                  client,
+                  rows.filter((row) => row.id === workspaceId)
+                )
+              ),
+              ([target]) =>
+                target
+                  ? setupWorkspaceRecovery({ store, journalPath, replacement, target, unlock })
+                  : Effect.fail({ code: 'missing' })
+            )
+          )
+      )
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: set up recovery for several workspaces after one file or passkey unlock.
+   * Each workspace settles on its own; one that fails is reported and the rest continue. */
+  @IpcMethod()
+  async setupRecoveryForWorkspaces(
+    workspaceIds: readonly string[],
+    method: 'file' | 'passkey' = 'file'
+  ) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (
+      !Array.isArray(workspaceIds) ||
+      workspaceIds.length === 0 ||
+      workspaceIds.length > 256 ||
+      workspaceIds.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 128)
+    )
+      throw new Error('e2ee_recovery_invalid-input')
+    const wanted = new Set(workspaceIds)
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const results = await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              // A workspace whose target cannot be built is reported, not fatal to the rest.
+              Effect.forEach(
+                rows.filter((row) => wanted.has(row.id)),
+                (row) =>
+                  Effect.map(
+                    Effect.exit(
+                      Effect.tryPromise(() => this.recoveryTargets(accountId, client, [row]))
+                    ),
+                    (exit) => ({ row, targets: Exit.isSuccess(exit) ? exit.value : null })
+                  )
+              ),
+              (built) =>
+                Effect.map(
+                  setupWorkspacesRecovery({
+                    store,
+                    journalPath,
+                    replacement,
+                    unlock,
+                    targets: built.flatMap((entry) => entry.targets ?? [])
+                  }),
+                  (settled) => [
+                    ...settled,
+                    ...built
+                      .filter((entry) => entry.targets === null)
+                      .map((entry) => ({
+                        workspaceId: entry.row.id,
+                        outcome: 'Failed' as const,
+                        recoverable: false
+                      }))
+                  ]
+                )
+            )
+          )
+      )
+      return { outcome: 'settled' as const, results }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: list the vault's passkeys, opening it with the file or a passkey. */
+  @IpcMethod()
+  async listRecoveryPasskeys(method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const state = await this.recoveryOperation(({ store, journalPath }) =>
+        listRecoveryPasskeys({ store, journalPath, unlock })
+      )
+      return { outcome: 'listed' as const, ...state }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: remove one passkey. Removing changes the index, so V must open again. */
+  @IpcMethod()
+  async removeRecoveryPasskey(entryId: string, method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (typeof entryId !== 'string' || !/^[0-9a-f]{64}$/.test(entryId))
+      throw new Error('e2ee_recovery_invalid-input')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const { removed, ...state } = await this.recoveryOperation(({ store, journalPath }) =>
+        removeRecoveryPasskey({ store, journalPath, unlock, entryId })
+      )
+      return { outcome: removed ? ('removed' as const) : ('incomplete' as const), ...state }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: a readable default passkey name for this device. */
+  @IpcMethod()
+  async recoveryPasskeyDefaultLabel() {
+    sender()
+    return defaultPasskeyLabel({
+      platform: process.platform,
+      systemVersion: process.getSystemVersion()
+    })
+  }
+  /** Default-off: whether this device can attempt a passkey ceremony. */
+  @IpcMethod()
+  async recoveryPasskeyAvailable() {
+    sender()
+    return recoveryVaultEnabled() && this.passkeyPort().available()
+  }
+  /** Default-off: add a passkey. Adding one needs V, so the user picks the file first. */
+  @IpcMethod()
+  async addRecoveryPasskey(label: string) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const name = passkeyLabel(label)
+    const file = await this.chooseRecoveryFile()
+    if (!file) return { outcome: 'cancelled' as const }
+    const port = this.passkeyPort()
+    try {
+      const added = await this.recoveryOperation(({ store, journalPath }) =>
+        enrollRecoveryPasskey({ store, journalPath, file, port, label: name })
+      )
+      return { outcome: 'added' as const, passkeys: added.passkeys }
+    } finally {
+      file.fill(0)
+    }
+  }
+  /** Default-off: restore every workspace a file or passkey covers onto this device. */
+  @IpcMethod()
+  async restoreFromRecoveryFile(method: 'file' | 'passkey' = 'file') {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const results = await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, accountWorkspaces }) =>
+          Effect.flatMap(
+            Effect.flatMap(accountWorkspaces, (rows) =>
+              Effect.forEach(rows, (row) =>
+                Effect.map(
+                  // An identity that cannot be read right now (a removal still erasing, a busy
+                  // lease) is unknown: nothing is restored over it, it is reported as failed
+                  // for retry, and the other workspaces still restore.
+                  Effect.catch(
+                    Effect.tryPromise(() => desktopE2eeHasWorkspaceIdentity(accountId, row.id)),
+                    () => Effect.succeed('unknown' as const)
+                  ),
+                  (has) => ({ ...row, has })
+                )
+              )
+            ),
+            (rows) =>
+              restoreAccountWorkspaces({
+                store,
+                journalPath,
+                unlock,
+                workspaces: rows.map((row) =>
+                  recoveryRestoreTarget<E2eeWorkspaceHistoryPage>({
+                    ...row,
+                    hasIdentity: () => row.has,
+                    append: (request) => client.appendRecord(request),
+                    history: (next) => client.history({ workspaceId: row.id, ...next }),
+                    mailbox: (credential) => client.mailbox({ workspaceId: row.id, credential }),
+                    stagedGroup: (credential, key) =>
+                      client.staging({ workspaceId: row.id, credential }).readGroup(key),
+                    identity: (pin) =>
+                      Effect.tryPromise(() =>
+                        withDesktopE2eeAccount(
+                          (owner) => owner.bootstrap.recoveryIdentity(pin),
+                          row.id
+                        )
+                      ),
+                    adopt: (join) =>
+                      Effect.tryPromise(() =>
+                        withDesktopE2eeAccount(
+                          (owner) =>
+                            Effect.gen(function* () {
+                              yield* owner.bootstrap.preparePersonalJoin({
+                                version: 1,
+                                workspaceId: row.id,
+                                genesisHash: row.genesisHash,
+                                genesisRecordHex: join.genesisRecordHex,
+                                endorser: join.endorser,
+                                membershipId: join.membershipId,
+                                pairingSessionId: join.pairingSessionId
+                              })
+                              yield* owner.bootstrap.acceptPersonalHistory(row.id, join.pages)
+                              yield* owner.host.open(row.id)
+                              yield* owner.host.installRecoveredKeys(row.id, join.recovered)
+                            }),
+                          row.id
+                        )
+                      )
+                  })
+                )
+              })
+          )
+      )
+      return { outcome: 'restored' as const, results }
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: give up an unfinished replacement. Needs no file: this device's journal
+   * names each new R. */
+  @IpcMethod()
+  async abandonRecoveryReplacement() {
+    sender()
+    return this.recoveryOperation(
+      ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+        Effect.flatMap(accountWorkspaces, (rows) =>
+          Effect.flatMap(
+            Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+            (workspaces) =>
+              abandonAccountVaultReplacement({ store, journalPath, replacement, workspaces })
+          )
+        )
+    )
+  }
+  /** Default-off: open a vault from a chosen recovery file and authenticate its
+   * index. This checks the file; it neither restores a workspace nor admits a device. */
+  @IpcMethod()
+  async inspectRecoveryFile() {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options = {
+      properties: ['openFile' as const],
+      filters: [{ name: 'Lody recovery file', extensions: ['lodyrecovery'] }]
+    }
+    const chosen = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = chosen.filePaths[0]
+    if (chosen.canceled || !path) return { outcome: 'cancelled' as const }
+    const file = await this.readRecoveryFile(path)
+    try {
+      const inspected = await this.recoveryOperation(({ store, journalPath }) =>
+        inspectRecoveryFile({ store, journalPath, file })
+      )
+      return { outcome: 'opened' as const, ...inspected }
+    } finally {
+      file.fill(0)
+    }
   }
 }

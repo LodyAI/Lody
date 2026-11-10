@@ -308,6 +308,8 @@ export type MachineLifecycleDisposition =
 
 export interface MachineRestartRequest {
   type: 'machine/restart';
+  /** Restore an owned, retired installation identity before the next worker starts. */
+  restoreMachineId?: MachineId;
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requesterUserId: string;
@@ -772,6 +774,37 @@ export interface SessionFileUploadResponse {
  *
  * Mirrors `SessionFileUploadRequest`; the only difference is the message type.
  */
+export type SessionImagePrepareLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalRequestSchema
+>;
+export type SessionImagePrepareLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalResponseSchema
+>;
+export type SessionImageResolveLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalRequestSchema
+>;
+export type SessionImageResolveLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalResponseSchema
+>;
+
+export type SessionAttachmentPrepareRequest = {
+  type: 'session/attachment-prepare';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  path: string;
+  kind: 'file' | 'image';
+  fileName: string;
+  mimeType: string;
+};
+export type SessionAttachmentPrepareResponse = {
+  type: 'session/attachment-prepare_response';
+  sessionId: SessionId;
+  success: boolean;
+  error?: string;
+  attachment?: import('./ai').SessionLocalAttachment;
+};
+
 export interface SessionFileSendLocalRequest {
   type: 'session/file-send-local';
   machineId: MachineId;
@@ -970,6 +1003,9 @@ export type LocalSessionControlRequest =
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
+  | SessionImagePrepareLocalRequest
+  | SessionImageResolveLocalRequest
+  | SessionAttachmentPrepareRequest
   | SessionHistoryReadRequest
   | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
@@ -1001,6 +1037,9 @@ export type LocalSessionControlResponse =
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse
+  | SessionImagePrepareLocalResponse
+  | SessionImageResolveLocalResponse
+  | SessionAttachmentPrepareResponse
   | SessionHistoryReadResponse
   | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse

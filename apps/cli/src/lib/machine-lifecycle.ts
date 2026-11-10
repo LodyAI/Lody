@@ -86,6 +86,8 @@ const MachineLifecycleVerifyResponseSchema = z
     requesterUserId: z.string().trim().min(1),
     executionToken: z.string().min(1).optional(),
     executionExpiresAtMs: z.number().finite().positive().optional(),
+    requestId: z.string().trim().min(1).optional(),
+    restoreMachineId: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -117,6 +119,7 @@ export const verifyMachineLifecycleRequest = async (args: {
   requestToken: string;
   targetVersion?: string;
   upgrade?: ManagedDaemonUpgradeOptions;
+  restoreMachineId?: string;
   fetchImpl?: typeof fetch;
 }): Promise<
   | { ok: true; executionToken?: string; executionExpiresAtMs?: number }
@@ -143,6 +146,7 @@ export const verifyMachineLifecycleRequest = async (args: {
         requestId: args.requestId,
         requestToken: args.requestToken,
         ...(args.upgrade ? { upgrade: args.upgrade } : {}),
+        ...(args.restoreMachineId ? { restoreMachineId: args.restoreMachineId } : {}),
         ...(args.action === 'upgrade'
           ? { targetVersion: normalizeMachineUpgradeTargetVersion(args.targetVersion) }
           : {}),
@@ -166,10 +170,19 @@ export const verifyMachineLifecycleRequest = async (args: {
     if (parsed.data.requesterUserId !== args.requesterUserId) {
       return { ok: false, error: 'Machine lifecycle verification requester mismatch.' };
     }
+    if (
+      args.restoreMachineId &&
+      (parsed.data.requestId !== args.requestId ||
+        parsed.data.restoreMachineId !== args.restoreMachineId)
+    ) {
+      return { ok: false, error: 'The server did not confirm this identity restore reservation.' };
+    }
     return {
       ok: true,
-      executionToken: parsed.data.executionToken,
-      executionExpiresAtMs: parsed.data.executionExpiresAtMs,
+      ...(parsed.data.executionToken ? { executionToken: parsed.data.executionToken } : {}),
+      ...(parsed.data.executionExpiresAtMs
+        ? { executionExpiresAtMs: parsed.data.executionExpiresAtMs }
+        : {}),
     };
   } catch (error) {
     return {

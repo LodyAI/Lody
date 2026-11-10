@@ -1,4 +1,6 @@
 import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
 import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import {
   useLegacyWorkspaceMutation,
@@ -714,6 +716,7 @@ function WorkspaceChatLanding({
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const visibleMachineIndex = useVisibleMachineMetas({
     machineFlockFamilies: CHAT_LANDING_MACHINE_FLOCK_FAMILIES,
   });
@@ -733,14 +736,18 @@ function WorkspaceChatLanding({
     isLoading: visibleLocalProjectsLoading,
   } = visibleLocalProjects;
   const getProjectShareErrorMessage = useConvexErrorMessage();
-  const { sessions: visibleActiveSessions, allActiveSessions: visibleAllActiveSessions } =
-    useVisibleSessionMetas();
+  const {
+    sessions: visibleActiveSessions,
+    allActiveSessions: visibleAllActiveSessions,
+    historyOnlySessionIds: activeReadOnlyIds,
+  } = useVisibleSessionMetas();
   useReportVisibleSessionsForEagerSync(
     'chat-landing',
     visibleActiveSessions,
     visibleAllActiveSessions
   );
-  const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
+  const { archivedSessions: visibleArchivedSessions, historyOnlySessionIds: archivedReadOnlyIds } =
+    useVisibleArchivedSessionMetas();
   const showProjectSharing =
     legacyQueriesEnabled &&
     shouldShowSessionSharing({
@@ -4949,7 +4956,6 @@ function WorkspaceChatLanding({
      level (so the predicate reads from the same field accessors the
      grouping logic uses). Cap at 200. */
   const mobileHomeChats = useMemo<MobileConversationItem[]>(() => {
-    const myUserId = userId ?? null;
     /* `sessionListAtom` and `archivedSessionListAtom` live in
        different jotai atoms (see `atoms/doc-meta.ts`) — the active
        list excludes archived items and vice versa. Pick the right
@@ -4973,7 +4979,8 @@ function WorkspaceChatLanding({
     };
     return sourceSessions
       .filter((session) => {
-        if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+        if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId, ownedMachineIds))
+          return false;
         if (chatExcludedMachines.has(session.machineId)) return false;
         return true;
       })
@@ -5053,6 +5060,7 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
              merged: the precise opener drives navigation, the row id drives
@@ -5109,10 +5117,14 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    ownedMachineIds,
+    myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileHomeShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     showProjectSharing,
     t,
@@ -5325,6 +5337,8 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    ownedMachineIds,
+    myAccountId,
     chatViewMode,
     mobileHomeMachines,
     mobileSheetRecency,
@@ -5877,7 +5891,6 @@ function WorkspaceChatLanding({
      the list it's given. */
   const mobileProjectConversations = useMemo<MobileConversationItem[]>(() => {
     if (!mobileProjectContext) return [];
-    const myUserId = userId ?? null;
     /* See mobileHomeChats: archived sessions live in a separate atom,
        not in `visibleSessions`. Pick the right source so the toggle
        actually surfaces items instead of always rendering empty. */
@@ -5898,7 +5911,8 @@ function WorkspaceChatLanding({
       return activity;
     };
     const projectScopedSessions = sourceSessions.filter((session) => {
-      if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+      if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId, ownedMachineIds))
+        return false;
       if (mobileProjectContext.kind === 'local') {
         if (session.machineId !== mobileProjectContext.machineId) return false;
         const key = getSessionLocalProjectKey(session);
@@ -5971,6 +5985,7 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
              id for nesting. An opener outside this project simply leaves the
@@ -5993,11 +6008,15 @@ function WorkspaceChatLanding({
       });
   }, [
     chatScope,
+    ownedMachineIds,
+    myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileProjectContext,
     mobileProjectShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     t,
     teamMembersByUserId,
@@ -6132,6 +6151,8 @@ function WorkspaceChatLanding({
     chatExcludedPr,
     chatExcludedRunning,
     chatScope,
+    ownedMachineIds,
+    myAccountId,
     mobileHomeMachines,
     mobileProjectContext,
     setChatExcludedMachines,

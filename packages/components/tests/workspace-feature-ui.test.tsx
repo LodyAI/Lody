@@ -87,6 +87,7 @@ it('prepares and saves an encrypted scheduled message through the ordinary repos
   } as WorkspaceRuntime;
   try {
     const message = await prepareScheduledMessage({
+      scheduleId: "schedule",
       runtime,
       sessionId: 'session' as never,
       machineId: 'machine' as never,
@@ -143,6 +144,7 @@ it('retains the encrypted scheduled attachment draft when its attachment grant i
   try {
     await expect(
       prepareScheduledMessage({
+      scheduleId: "schedule",
         runtime,
         sessionId: 'session' as never,
         machineId: 'machine' as never,

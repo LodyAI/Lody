@@ -464,12 +464,19 @@ export function DesktopRunConfigMenu({
     if (availableAgentConfigs) {
       return availableAgentConfigs.map((config) => ({ config, machineName: '' }));
     }
+    // A scoped composer already owns its machine. Presence can lag or drop
+    // while editing a draft; it must not remove that machine's known Agents.
+    if (allowedMachineIds !== undefined) {
+      return executorConfigs
+        .filter((config) => allowedMachineIds.includes(config.machineId))
+        .map((config) => ({ config, machineName: '' }));
+    }
     const machineNames = new Map(onlineMachines.map((machine) => [machine.id, machine.name]));
     return executorConfigs.flatMap((config) => {
       const machineName = machineNames.get(config.machineId);
       return machineName ? [{ config, machineName }] : [];
     });
-  }, [availableAgentConfigs, executorConfigs, onlineMachines]);
+  }, [allowedMachineIds, availableAgentConfigs, executorConfigs, onlineMachines]);
   const selectedAgentConfig = useMemo(
     () =>
       agentSelection

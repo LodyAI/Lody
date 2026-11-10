@@ -4,9 +4,10 @@
 Parent `AGENTS.md` files also apply.
 
 Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
-Roles). The catalog's durability rule — a local Flock write is durable, and the
-upload that follows it is not something a settings surface waits on, reports, or
-rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
+Roles). Before saving a catalog row, follow the durability rule in
+[shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
+Lody Agent connections and Sorbet endpoints follow
+[Lody Agent setup](README.md#lody-agent-setup).
 
 ## Layout and components
 

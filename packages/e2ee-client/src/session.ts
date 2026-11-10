@@ -1,6 +1,7 @@
 import { makePersonalKeyMaintenance } from './maintenance';
 import {
   Cause,
+  Clock,
   Context,
   Effect,
   Exit,
@@ -12,6 +13,7 @@ import {
   Result,
 } from 'effect';
 import {
+  makeWorkspaceRecovery,
   InstalledEpochHistory,
   InstalledEpochKeys,
   KeyReceiver,
@@ -29,6 +31,7 @@ import {
   prepareLedgerCommand,
   signLedgerRecord,
   signLedgerSnapshot,
+  verifyDeviceCredentialBinding,
   type LedgerCommand,
   Bytes,
 } from '@lody/e2ee-core/protocol';
@@ -71,13 +74,16 @@ import {
 import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
 import { assertPersonalAdmission } from './admission';
 import { fail } from './errors';
+import type { PersonalRecoverySetupInput } from './recovery-restore';
 import { fromHex, toHex } from './bytes';
 import { encodePersonalInvitation } from './pairing';
+import { decodeMemberKeyPackage } from './member';
 
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
-  approval: PersonalApproval
+  approval: PersonalApproval,
+  recovered: readonly (readonly [number, Bytes.EpochKey])[] = []
 ) {
   const platform = yield* PersonalHostPlatform,
     installation = yield* ClientInstallationStore;
@@ -667,9 +673,211 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           )
         ),
     };
+    // Member invitations, admin side. This session's credential authenticates the relay and
+    // never leaves it. Each listed key package is pinned on first sight, so approval signs
+    // exactly the applicant that was shown and a later reply cannot swap it.
+    const memberPreviews = new Map<string, string>();
+    const memberAccess = () => ({
+      workspaceId: prepared.binding.workspaceId,
+      credential: toHex(credential),
+    });
+    const membersPort = () =>
+      platform.members ? Effect.succeed(platform.members) : Effect.fail(fail('unsupported'));
+    const memberProof = (keyPackageHex: string) =>
+      Effect.gen(function* () {
+        const proof = yield* Effect.try({
+          try: () => decodeMemberKeyPackage(keyPackageHex),
+          catch: (cause) => fail('invalid-input', cause),
+        });
+        yield* Effect.fromResult(
+          verifyDeviceCredentialBinding(
+            {
+              genesis: prepared.binding.genesis,
+              pairingSessionId: proof.request.requestId.toBytes(),
+              signingPublicKey: proof.request.signingPublicKey,
+              credentialHash: fromHex(proof.credentialHash),
+            },
+            fromHex(proof.bindingSignature)
+          )
+        ).pipe(Effect.mapError((cause) => fail('invalid-input', cause)));
+        return proof;
+      });
+    const admitMember = (request: import('@lody/e2ee-core/protocol').JoinRequest) =>
+      ({
+        _tag: 'AdmitMember',
+        membershipId: Result.getOrThrow(Bytes.membershipId(request.requestId.toBytes())),
+        request,
+      }) as const;
+    const members = {
+      /** A new invitation endorsed by this device; owner or admin personal devices only. */
+      invite: (mode: 'email' | 'link', email?: string) =>
+        run(
+          Effect.gen(function* () {
+            const port = yield* membersPort();
+            const view = yield* admitted(),
+              state = view.inspectState(),
+              own = state.devices.get(toHex(device.publicKey.toBytes()));
+            const role = own && state.members.get(toHex(own.membershipId.toBytes()))?.role;
+            if (own?.kind !== 'personal' || (role !== 'owner' && role !== 'admin'))
+              return yield* fail('unauthorized');
+            const token = globalThis.crypto.getRandomValues(new Uint8Array(32));
+            const offer = {
+              version: 1 as const,
+              workspaceId: prepared.binding.workspaceId,
+              genesisHash: toHex(prepared.binding.genesis.toBytes()),
+              genesisRecordHex: prepared.offer.genesisRecordHex,
+              endorser: toHex(device.publicKey.toBytes()),
+              token: toHex(token),
+              mode,
+              expiresAt: (yield* Clock.currentTimeMillis) + 48 * 60 * 60 * 1000,
+            };
+            const result = yield* port.createInvitation(memberAccess(), {
+              offer,
+              ...(email === undefined ? {} : { email }),
+            });
+            if (
+              result.offer.workspaceId !== offer.workspaceId ||
+              result.offer.genesisHash !== offer.genesisHash ||
+              result.offer.token !== offer.token
+            )
+              return yield* fail('conflict');
+            return result.offer;
+          })
+        ),
+      /** Waiting applicants this device can admit. A malformed, stale or swapped package is
+       * left out without hiding the others. */
+      pending: () =>
+        run(
+          Effect.gen(function* () {
+            const port = yield* membersPort();
+            yield* admitted();
+            const result = yield* port.pending(memberAccess());
+            const items: typeof result.items = [];
+            for (const item of result.items) {
+              if (item.workspaceId !== prepared.binding.workspaceId) return yield* fail('conflict');
+              const checked = yield* Effect.result(
+                Effect.gen(function* () {
+                  const proof = yield* memberProof(item.keyPackageHex);
+                  const view = yield* admitted();
+                  if (
+                    !view
+                      .inspectState()
+                      .devices.has(toHex(proof.request.signingPublicKey.toBytes()))
+                  )
+                    yield* Effect.fromResult(
+                      prepareLedgerCommand(view, device.publicKey, admitMember(proof.request))
+                    );
+                  // The listed id must be the signed request's own id: the pin is keyed by
+                  // the id an approval names, so no listed entry can stand for another.
+                  const id = toHex(proof.request.requestId.toBytes());
+                  if (item.requestId !== id) return yield* fail('conflict');
+                  const pinned = memberPreviews.get(id);
+                  if (pinned !== undefined && pinned !== item.keyPackageHex)
+                    return yield* fail('conflict');
+                  memberPreviews.set(id, item.keyPackageHex);
+                })
+              );
+              if (Result.isSuccess(checked)) items.push(item);
+            }
+            return { ...result, items };
+          })
+        ),
+      /** The ledger command admitting this listed request, or null when the verified ledger
+       * already admits exactly this device. Automatic mode is for accepted email invitations. */
+      admission: (requestId: string, mode: 'automatic' | 'explicit') =>
+        run(
+          Effect.gen(function* () {
+            const port = yield* membersPort();
+            const material = yield* port.read(memberAccess(), requestId);
+            if (
+              material.workspaceId !== prepared.binding.workspaceId ||
+              material.requestId !== requestId ||
+              (mode === 'automatic' && material.source !== 'email')
+            )
+              return yield* fail('conflict');
+            const proof = yield* memberProof(material.keyPackageHex);
+            // Only the package this session listed and showed for this very request may be
+            // signed: the signed request's id is the approved id, and its pin must match.
+            if (
+              toHex(proof.request.requestId.toBytes()) !== requestId ||
+              memberPreviews.get(requestId) !== material.keyPackageHex
+            )
+              return yield* fail('conflict');
+            const state = (yield* admitted()).inspectState();
+            const existing = state.devices.get(toHex(proof.request.signingPublicKey.toBytes()));
+            if (existing) {
+              const member = state.members.get(toHex(existing.membershipId.toBytes()));
+              if (
+                !member?.userId.equals(proof.request.userId) ||
+                !existing.encryptionPublicKey.equals(proof.request.encryptionPublicKey)
+              )
+                return yield* fail('conflict');
+              return null;
+            }
+            return admitMember(proof.request);
+          })
+        ),
+      read: (requestId: string) =>
+        run(Effect.flatMap(membersPort(), (port) => port.read(memberAccess(), requestId))),
+      reject: (requestId: string) =>
+        run(Effect.flatMap(membersPort(), (port) => port.reject(memberAccess(), requestId))),
+      revoke: (token: string) =>
+        run(Effect.flatMap(membersPort(), (port) => port.revoke(memberAccess(), token))),
+    };
+    if (recovered.length) {
+      yield* withKeys((ctx) =>
+        Effect.forEach(
+          recovered,
+          ([epoch, key]) => Context.get(ctx, InstalledEpochKeys).saveAndReload(epoch, key),
+          { discard: true }
+        )
+      );
+    }
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       accountApproval: Object.freeze(accountApproval),
+      members: Object.freeze(members),
+      /** Set up this workspace's recovery without exposing its signer or epoch keys. */
+      setupRecovery: (input: PersonalRecoverySetupInput) =>
+        run(
+          serial.withPermit(
+            withKeys((ctx) =>
+              Effect.gen(function* () {
+                yield* control.refresh();
+                const view = yield* admitted();
+                const workflow = yield* makeWorkspaceRecovery({
+                  vault: input.vault,
+                  local: input.local,
+                  genesis: prepared.binding.genesis,
+                  membershipId: Result.getOrThrow(
+                    Bytes.membershipId(fromHex(prepared.offer.membershipId))
+                  ),
+                  personalSigner: device,
+                  ledger: admitted,
+                  installed: Context.get(ctx, InstalledEpochKeys),
+                  trust: {
+                    source: 'personal-device',
+                    genesisRecord: fromHex(prepared.offer.genesisRecordHex),
+                    head: toHex(view.head.toBytes()),
+                    length: view.length,
+                  },
+                  submitOriginal: (record, registration) =>
+                    input
+                      .submitOriginal(record, registration)
+                      .pipe(Effect.tap(() => control.refresh())),
+                  fetchCurrentEnvelope: (...args) =>
+                    Effect.gen(function* () {
+                      // A failed independent receive/repair must not hide an already delivered R envelope.
+                      yield* Effect.exit(maintenance!(view.inspectState().epoch.number));
+                      return yield* input.fetchCurrentEnvelope(...args);
+                    }),
+                });
+                const result = yield* workflow.setup();
+                return { outcome: result.outcome, recoverable: result.status.recoverable };
+              }).pipe(Effect.scoped)
+            )
+          )
+        ),
       close: () => close,
       ledgerState: () =>
         run(
@@ -736,7 +944,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               : []
           )
         ),
-      refresh: () => run(serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())))),
+      refresh: (timeoutMs?: number) => {
+        const refresh = serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())));
+        return run(timeoutMs === undefined ? refresh : refresh.pipe(Effect.timeout(timeoutMs)));
+      },
       keyRound: () => run(keyRound()),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
       status: () => run(status()),

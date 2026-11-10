@@ -116,6 +116,7 @@ export async function protectedAttachmentBlob(
  * in protected history must carry a complete, matching secret manifest. */
 export function assertProtectedAttachmentReferences(blocks: readonly SessionInputBlock[]): void {
   for (const block of blocks) {
+    if (block.type === 'local_attachment') throw new Error('e2ee_attachment_unprotected');
     if (block.type !== 'image' && block.type !== 'file') continue;
     if (block.type === 'file' && block.transport === 'local') continue;
     if (!block.encryption) throw new Error('e2ee_attachment_unprotected');

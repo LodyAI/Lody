@@ -7,7 +7,7 @@ import { WorkspaceCard } from '../components/workspace-frame';
 import * as stylex from '@stylexjs/stylex';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
-import type { SessionHistory, SessionId } from '@lody/shared';
+import type { MachineId, SessionHistory, SessionId } from '@lody/shared';
 import { SessionHistoryView } from '../components/sessions/session-history-reader';
 import { createConversationViewFromHistory } from '../lib/conversation-view/create-conversation-view-from-history';
 
@@ -73,6 +73,19 @@ const meta = {
     title: 'Workspace history on an unavailable machine',
     history: view,
     ready: true,
+    machineName: 'Studio Mac',
+    onReference: fn(),
+    onTogglePin: fn(),
+    onMarkUnread: fn(),
+    sharing: {
+      visibility: 'team',
+      access: 'read',
+      canManage: false,
+      machineId: 'm' as MachineId,
+      localProjectId: null,
+      machineName: 'Studio Mac',
+      projectName: null,
+    },
     onCopy: fn(),
     onBack: fn(),
   },
@@ -110,7 +123,7 @@ export const MacWindow: Story = {
 export const MacWindowChinese: Story = {
   ...MacWindow,
   globals: { locale: 'zh_CN' },
-  args: { ...MacWindow.args, title: '未共享机器上的历史会话' },
+  args: { ...MacWindow.args, title: '未共享机器上的历史会话', machineName: 'Studio Mac' },
 };
 function NarrowWindow({ children }: { children: React.ReactNode }) {
   useLayoutEffect(() => {
@@ -146,3 +159,5 @@ export const NarrowMacWindowChinese: Story = {
   globals: { locale: 'zh_CN' },
   args: MacWindowChinese.args,
 };
+
+export const MissingMachineName: Story = { args: { machineName: undefined } };

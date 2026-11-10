@@ -20,6 +20,9 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   public managed-runtime artifact downloads are the explicit exception.
 - An absent platform selector resolves to `local`; public build scripts must
   not accept or discover staging/production deployment presets.
+- Dedicated release-CI configuration may compile an explicitly requested cloud
+  composition from a validated non-secret request. It must not discover deployment
+  presets, read private source or change the default local product commands.
 - Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
   unrelated PostHog variables exist in the caller's shell.
 
@@ -35,6 +38,9 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   matching account, route, workspace and verified plaintext descriptor may enable
   it; an ordinary provisional runtime or listing is not plaintext proof. Pause
   before switching targets and discard buffered work across that boundary.
+- Encrypted approval overlays on ordinary workspaces hold a private-surface lease
+  through actual DOM removal. Nested surfaces release only their own lease, and
+  a route commit cannot override an outstanding lease.
 - Automatic exceptions in those scopes use a fixed diagnostic vocabulary. Shared
   main/daemon processes cannot infer one workspace mode and always use that
   vocabulary. Preserve detailed local, user-submitted support reports.
@@ -89,7 +95,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   grant permissions, pin keys, identify the creator, or block ledger availability.
 - Account-only machine-policy display reads return opaque ciphertext and untrusted
   metadata. They never replace device-authenticated execution freshness, and a
-  server removal tombstone never substitutes for a verified policy-history pin.
+  server removal tombstone never substitutes for a verified latest-policy pin.
 
 - `e2eeMachineScope` is an explicit single-workspace machine-service composition.
   It has no ordinary Streams/account capabilities or account catalog bootstrap.

@@ -1,15 +1,17 @@
 import { verifyPersonalHistory } from '@lody/e2ee-client/history'
 import { PersonalHostError } from '@lody/e2ee-client/errors'
+import {
+  decodeMemberKeyPackage,
+  encodeMemberKeyPackage,
+  MemberOfferSchema
+} from '@lody/e2ee-client/member'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Result } from 'effect'
-import { z } from 'zod'
 import type { E2eeMemberOffer, E2eeWorkspaceHistoryPage } from '@lody/cloud-api'
 import {
   Bytes,
-  decodeCbor,
   decodeRecord,
-  encodeCbor,
   hashRecordBytes,
   prepareJoinRequest,
   prepareLedgerCommand,
@@ -18,39 +20,17 @@ import {
   verifyDeviceCredentialBinding,
   verifyLedgerEffect,
   type DeviceSigner,
-  type JoinRequest,
   type LedgerView
 } from '@lody/e2ee-core/protocol'
 import type { DesktopE2eeCustody } from '../e2ee-custody.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 
-const hash = z.string().regex(/^[0-9a-f]{64}$/)
-const bytes = z.string().regex(/^(?:[0-9a-f]{2})+$/)
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
 const ok = Result.getOrThrow
 const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code })
-export const MemberOfferSchema = z
-  .object({
-    version: z.literal(1),
-    workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
-    genesisHash: hash,
-    genesisRecordHex: bytes.max(16384),
-    endorser: hash,
-    token: hash,
-    mode: z.enum(['email', 'link']),
-    expiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
-  })
-  .strict()
-const packageSchema = z
-  .object({
-    version: z.literal(1),
-    requestHex: bytes.max(1024),
-    credentialHash: hash,
-    bindingSignature: z.string().regex(/^[0-9a-f]{128}$/)
-  })
-  .strict()
-const encode = (value: unknown) => hex(new TextEncoder().encode(JSON.stringify(value)))
+// One public format for desktop and the portable runtime.
+export { decodeMemberKeyPackage, MemberOfferSchema }
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
   return Effect.try({
     try: work,
@@ -59,24 +39,6 @@ function sql<A>(work: () => A): Effect.Effect<A, unknown> {
       return cause instanceof Error && 'code' in cause ? cause : fail('storage')
     }
   })
-}
-
-/** Decode public proof only. Genuine ledger admission verifies the consent signature. */
-export function decodeMemberKeyPackage(source: string) {
-  if (!bytes.max(8192).safeParse(source).success) throw fail('invalid-input')
-  const value = packageSchema.parse(JSON.parse(Buffer.from(source, 'hex').toString('utf8')))
-  const fields = ok(decodeCbor(raw(value.requestHex)))
-  if (!Array.isArray(fields) || fields.length !== 6) throw fail('invalid-input')
-  const request: JoinRequest = {
-    requestId: ok(Bytes.requestId(fields[0])),
-    userId: ok(Bytes.userId(fields[1])),
-    signingPublicKey: ok(Bytes.signingPublicKey(fields[2])),
-    encryptionPublicKey: ok(Bytes.encryptionPublicKey(fields[3])),
-    expiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(fields[4]),
-    signature: ok(Bytes.signature(fields[5]))
-  }
-  if (hex(ok(encodeCbor(fields))) !== value.requestHex) throw fail('invalid-input')
-  return { ...value, request }
 }
 
 /** Shared fixed full-history verification, preserving the native host's public error vocabulary. */
@@ -163,7 +125,7 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
         if (!row?.history || !row.key_package) return null
         return hex(decodeMemberKeyPackage(row.key_package).request.requestId.toBytes())
       }),
-    prepare: Effect.fnUntraced(function* (source: E2eeMemberOffer, cryptoUserId: string) {
+    prepare: Effect.fnUntraced(function* (source: E2eeMemberOffer, userId: Bytes.UserId) {
       const offer = yield* sql(() => MemberOfferSchema.parse(source))
       const genesis = ok(Bytes.genesisHash(raw(offer.genesisHash)))
       if (
@@ -192,7 +154,7 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
       const request = yield* prepareJoinRequest({
         genesis,
         requestId: ok(Bytes.requestId(randomBytes(16))),
-        userId: ok(Bytes.userId(raw(cryptoUserId))),
+        userId,
         encryptionPublicKey: device.enc,
         expiresAt: offer.expiresAt,
         signer: device
@@ -204,22 +166,10 @@ export function makeDesktopMemberJoins(input: { db: DatabaseSync; custody: Deskt
         credentialHash: raw(credential.credentialHash),
         signer: device
       })
-      const keyPackageHex = encode({
-        version: 1,
-        requestHex: hex(
-          ok(
-            encodeCbor([
-              request.requestId.toBytes(),
-              request.userId.toBytes(),
-              request.signingPublicKey.toBytes(),
-              request.encryptionPublicKey.toBytes(),
-              request.expiresAt,
-              request.signature.toBytes()
-            ])
-          )
-        ),
+      const keyPackageHex = encodeMemberKeyPackage({
+        request,
         credentialHash: credential.credentialHash,
-        bindingSignature: hex(binding.toBytes())
+        bindingSignature: binding.toBytes()
       })
       yield* sql(() => {
         db.prepare(

@@ -58,6 +58,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   exists and no storage schema or write validation depends on it.
 - Subagent events must preserve run identity and root ownership.
 
+Missing-history acknowledgements are exact-ID receipts; only the serialized host watcher adds them. `isMissingHistoryUserTurn`
+reads the retained map and legacy scalar; new activation must not clear old acknowledgements.
+
 ## Machine protocol negotiation
 
 - Sorbet credential metadata and per-provider logout use local Machine RPC or signed E2EE owned execution, gated remotely by `sorbetCredentialsRemote`. The target verifies the signing device belongs to its owner's membership; shared members and plaintext fallback are forbidden. Metadata does not imply credential validity or account identity.
@@ -107,3 +110,5 @@ Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on pub
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
 
 Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).
+
+Native `local_attachment` inputs require exact submission scope and explicit inheritance. Never backfill or silently discard them. [Contract](../../.agents/docs/cli-lib-session-files.md#native-local-references).

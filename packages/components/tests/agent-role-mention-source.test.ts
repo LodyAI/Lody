@@ -9,13 +9,19 @@ import {
   applyTextRewrites,
   resolveAgentRoleAvailability,
   type AgentConfigId,
+  type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
   type LocalProjectId,
   type MachineId,
+  type MachineViewMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import { buildAgentRoleCandidates } from '../src/components/mentions/mention-registry';
+import {
+  AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
+  createAgentRoleCapabilityResolver,
+} from '../src/lib/composer-agent-roles';
 import {
   buildAgentRoleMentionItems,
   buildAgentRoleMentionPrompt,
@@ -167,6 +173,62 @@ describe('agent role availability in mentions', () => {
 });
 
 describe('agent role menu rows', () => {
+  it('explains and blocks a Role whose agent retired its pinned model', () => {
+    const stale = role({ runConfig: { modelId: 'model-old' } });
+    const machine = {
+      name: 'MacBook',
+      acpCapabilities: {
+        'config-1': {
+          agentType: 'codex',
+          cliType: 'builtin',
+          provenance: 'runtime',
+          models: [{ modelId: 'model-new', name: 'New' }],
+          modes: [],
+          fetchedAt: 1,
+        },
+      },
+    } as unknown as MachineViewMeta;
+    const config = {
+      id: 'config-1',
+      name: 'Codex',
+      agentType: 'codex',
+      cliType: 'builtin',
+      machineId,
+    } as AgentConfigMeta;
+    const list = buildAgentRoleMentionItems([stale], {
+      availability: (entry) =>
+        resolveAgentRoleAvailability(entry, {
+          authorizedMachineIds: new Set([machineId]),
+          onlineMachineIds: new Set([machineId]),
+          agentConfigMachineIds: new Map([[config.id, machineId]]),
+          loadedAgentConfigMachineIds: new Set([machineId]),
+          runConfigCapability: createAgentRoleCapabilityResolver(
+            [config],
+            new Map([[machineId, machine]])
+          ),
+        }),
+      machine: () => machine,
+      agentConfig: () => config,
+    });
+    const [candidate] = buildAgentRoleCandidates(list, '', undefined, ({ availability }) =>
+      availability.kind === 'unavailable'
+        ? AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]
+        : undefined
+    );
+    expect(candidate).toMatchObject({
+      disabled: true,
+      subtitle: 'settings.agentRoles.unavailable.modelUnavailable',
+      subtitleTone: 'warning',
+    });
+    expect(
+      buildAgentRoleMentionRewrites(
+        '@Code-Reviewer',
+        [{ start: 0, end: 14, kind: 'agent_role', value: 'role-1' }],
+        list
+      )
+    ).toEqual([]);
+  });
+
   it.each([{ kind: 'unknown' }, { kind: 'unavailable', reason: 'machine_offline' }] as const)(
     'disables unavailable/loading rows and carries the reason below the title',
     (availability) => {

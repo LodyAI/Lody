@@ -52,3 +52,12 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   account and owner; retain incomplete failures until actual close confirmation.
   Account change retires the assembly permanently. Only real optional port Layers
   advertise RPC or machine sharing; no unsupported channel becomes plaintext.
+
+- `personalRuntimeRecovery` exposes only closed setup/restore commands on the
+  existing owned host. Setup requires an active reader; callers release only
+  their own reader. Recovery failure never retires unrelated content readers.
+
+- Member approval on the portable runtime uses the optional `members` platform port with
+  the session's own credential. A listed key package is pinned per session; approval
+  signs only that pinned package through the session's ledger journal, never re-signs on
+  a lost reply, and key delivery afterwards never holds or undoes the admission.

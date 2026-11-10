@@ -192,8 +192,10 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         close: () => closeSession(state),
         ledger: () => call(raw.ledger()),
         approvalOriginals: () => call(raw.approvalOriginals()),
-        refresh: () => call(raw.refresh()),
+        refresh: (...args: Parameters<RawSession['refresh']>) => call(raw.refresh(...args)),
         keyRound: () => call(raw.keyRound()),
+        setupRecovery: (...args: Parameters<RawSession['setupRecovery']>) =>
+          call(raw.setupRecovery(...args)),
         keyDeliveryEvidence: (...args: Parameters<RawSession['keyDeliveryEvidence']>) =>
           call(raw.keyDeliveryEvidence(...args)),
         status: () => call(raw.status()),
@@ -222,6 +224,19 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
           invitation: (...args: Parameters<RawSession['accountApproval']['invitation']>) =>
             call(raw.accountApproval.invitation(...args)),
           access: () => call(raw.accountApproval.access()),
+        }),
+        members: Object.freeze({
+          invite: (...args: Parameters<RawSession['members']['invite']>) =>
+            call(raw.members.invite(...args)),
+          pending: () => call(raw.members.pending()),
+          admission: (...args: Parameters<RawSession['members']['admission']>) =>
+            call(raw.members.admission(...args)),
+          read: (...args: Parameters<RawSession['members']['read']>) =>
+            call(raw.members.read(...args)),
+          reject: (...args: Parameters<RawSession['members']['reject']>) =>
+            call(raw.members.reject(...args)),
+          revoke: (...args: Parameters<RawSession['members']['revoke']>) =>
+            call(raw.members.revoke(...args)),
         }),
         acknowledgeRotation: (...args: Parameters<RawSession['acknowledgeRotation']>) =>
           call(raw.acknowledgeRotation(...args)),
@@ -300,6 +315,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
     begin: (...args: Parameters<RawHost['begin']>) => run(host!.begin(...args)),
     claim: (...args: Parameters<RawHost['claim']>) => run(host!.claim(...args)),
     cancel: (...args: Parameters<RawHost['cancel']>) => run(host!.cancel(...args)),
+    restoreRecovery: (...args: Parameters<RawHost['restoreRecovery']>) =>
+      run(host!.restoreRecovery(...args)),
     prepareAccount: (...args: Parameters<RawHost['prepareAccount']>) =>
       run(host!.prepareAccount(...args)),
     acceptAccount: (...args: Parameters<RawHost['acceptAccount']>) =>

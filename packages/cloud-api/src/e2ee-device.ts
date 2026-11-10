@@ -43,6 +43,8 @@ export type E2eeAppendRecordRequest = {
   requestId: string;
   recordHex: string;
   credentialHash?: string;
+  /** R's derived credential, when a recovery device signs this record. */
+  signerCredential?: string;
   /** Remote machine cancellation/admission fence. */
   machinePairingSessionId?: string;
   /** Personal join cancellation fence, consumed with the writer reservation. */

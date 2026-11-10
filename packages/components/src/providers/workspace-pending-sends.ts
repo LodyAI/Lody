@@ -1,3 +1,5 @@
+import { isElectronRenderer } from '../lib/electron';
+import { resolveAttachmentRoute } from '../lib/session-attachment-routing';
 import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
 import {
   getMachineRoomId,
@@ -189,13 +191,8 @@ export function createWorkspacePendingSends(args: {
   const admissionOrder = new Map<string, number>();
   let nextAdmission = 0;
   const held = createPendingSessionSends({
-    prepare: (send, signal, update) => {
-      let attachments = send.attachments;
-      const publish = (next: typeof attachments) => {
-        attachments = next;
-        update(next);
-      };
-      return prepareDraftAttachments({
+    prepare: (send, signal, update) =>
+      prepareDraftAttachments({
         content: { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
         record: send,
         signal,
@@ -203,15 +200,8 @@ export function createWorkspacePendingSends(args: {
         token: args.token,
         attachmentToken: runtime.attachmentToken,
         localMachineId: args.localMachineId,
-        update: publish,
-        report: (id, progress) =>
-          publish(
-            attachments.map((attachment) =>
-              attachment.id === id ? { ...attachment, progress } : attachment
-            )
-          ),
-      });
-    },
+        update,
+      }),
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {
         if (runtime.contentMode === 'e2ee')
@@ -271,6 +261,12 @@ export function createWorkspacePendingSends(args: {
     void inputOwner.refresh().catch(() => {});
   });
   return {
+    canPrepareAttachmentsLocally: (machineId: MachineId) =>
+      resolveAttachmentRoute({
+        native: isElectronRenderer(),
+        localMachineId: args.localMachineId(),
+        targetMachineId: machineId,
+      }) === 'local',
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);

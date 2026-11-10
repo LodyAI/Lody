@@ -1,0 +1,22 @@
+{
+  "name": "@lody-ios/lexical-swift",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fixtures": "node Fixtures/generate.mjs",
+    "fixtures:html": "node Fixtures/html.mjs",
+    "fixtures:markdown": "node Fixtures/markdown.mjs"
+  },
+  "devDependencies": {
+    "@haklex/rich-headless": "0.42.1",
+    "@lexical/code-core": "0.49.0",
+    "@lexical/headless": "0.49.0",
+    "@lexical/html": "0.49.0",
+    "@lexical/link": "0.49.0",
+    "@lexical/list": "0.49.0",
+    "@lexical/markdown": "0.49.0",
+    "@lexical/rich-text": "0.49.0",
+    "happy-dom": "21.0.4",
+    "lexical": "0.49.0"
+  }
+}

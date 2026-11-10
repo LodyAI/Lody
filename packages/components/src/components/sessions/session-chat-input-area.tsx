@@ -403,13 +403,8 @@ export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
 };
 
 const toImageInputBlock = (image: SessionImagePayload): SessionInputBlock => ({
+  ...image,
   type: 'image',
-  imageId: image.imageId,
-  mimeType: image.mimeType,
-  fileName: image.fileName,
-  sizeBytes: image.sizeBytes,
-  width: image.width,
-  height: image.height,
 });
 
 const toFileInputBlock = (file: SessionFilePayload): SessionInputBlock => ({

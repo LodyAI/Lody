@@ -92,13 +92,11 @@ readiness are separate. Credentials and private keys never cross this port.
 `E2eeMachineSharingTransport` is an unconnected host transport interface using the
 canonical `@lody/cloud-api` DTOs. It supplies no provider or renderer capability.
 The host retains exact original frames, reconciles uncertain writes, verifies
-consecutive policy versions and owns execution freshness before using the core
+only the latest v3 policy with monotonic local pins and owns execution freshness before using the core
 pure authorization decision. Every scope includes the ledger-qualified machine binding generation. Removal
 closes the old resource; readmission starts at revision one in a new resource,
 while atomic replacement preserves generation. Storage tombstones cannot replace
-verified history pins. The separate
-`E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
-only and returns ciphertext/untrusted metadata, with no execution freshness.
+verified policy pins.
 See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
 
 ## Portable personal-device runtime
@@ -109,3 +107,12 @@ pinned identity, real capability Layers and bounded retirement. Reader open neve
 creates an identity; the shared provider requires an eligible usable epoch before
 content opens. Preserve the returned readerOwner and expected account on release.
 No public local-only selector or authenticated product-cloud entry is changed.
+
+## Session access
+
+The optional capability-gated `sessionAccess` port lists and subscribes to
+owner-controlled root-session read grants in both workspace modes. Ordinary
+compositions use authoritative machine rows; encrypted compositions reread signed
+policies after version hints. Hints and SessionMeta never grant authority. Reads
+are scoped to the account/workspace and never expand machine execution access.
+See the draft [session access contract](../../specs/session-access.md).

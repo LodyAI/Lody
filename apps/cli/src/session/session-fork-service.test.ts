@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -1251,4 +1254,37 @@ describe('SessionForkService fork operation recovery', () => {
     );
     await vi.waitFor(() => expect(harness.markers).toEqual([]));
   });
+});
+
+it('preserves direct local file payloads in a same-machine fork', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fork-local-'));
+  const target = createLoroSessionData({ sessionId: targetSessionId, doc: new LoroDoc() });
+  try {
+    const source = path.join(root, 'input.txt');
+    await writeFile(source, 'synthetic');
+    const attachment = {
+      type: 'local_attachment' as const,
+      machineId,
+      path: source,
+      kind: 'file' as const,
+      fileName: 'input.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 9,
+    };
+    const history = structuredClone(sourceHistory);
+    history[0]!.items = [attachment];
+    history[0]!.inputConfig = { inputBlocks: [attachment] };
+    const harness = createForkHarness(undefined, {
+      sourceHistory: history,
+    });
+    harness.targetDoc.sessionData.snapshots.copyFrom = target.snapshots.copyFrom;
+    expect((await harness.service.fork(forkSpec)).success).toBe(true);
+    const inherited = (await target.history.readAll()).find((entry) => entry.id === 'user-1')!;
+    expect(inherited.items).toEqual([attachment]);
+    expect(inherited.inputConfig?.inputBlocks).toEqual([attachment]);
+    expect(history[0]!.items).toEqual([attachment]);
+  } finally {
+    target.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
 });

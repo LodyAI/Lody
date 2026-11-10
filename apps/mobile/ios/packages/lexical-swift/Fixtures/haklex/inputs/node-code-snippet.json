@@ -1,0 +1,27 @@
+{
+  "root": {
+    "children": [
+      {
+        "type": "code-snippet",
+        "files": [
+          {
+            "filename": "index.ts",
+            "code": "export function hello(name: string): string {\n  return `Hello, ${name}!`\n}",
+            "language": "typescript"
+          },
+          {
+            "filename": "test.ts",
+            "code": "import { hello } from './index'\n\nconsole.log(hello('World'))",
+            "language": "typescript"
+          }
+        ],
+        "version": 1
+      }
+    ],
+    "direction": "ltr",
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

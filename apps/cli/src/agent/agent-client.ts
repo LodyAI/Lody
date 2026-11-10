@@ -607,6 +607,7 @@ export interface AgentClientOptions {
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
   onThreadGoalCleared?(threadId: string): void;
   onSessionTitleUpdate?(title: string): void;
+  onNativeWorkChanged?(work: NativeAgentWork): void;
   onAgentWarning?(warning: AgentSessionWarning): void;
   /**
    * Starts loading the workspace MCP catalog. Invoked BEFORE `initialize`, so
@@ -1641,7 +1642,10 @@ export class AgentClient implements acp.Client {
           this.acpSessionId !== null &&
           event.update.sessionId === this.acpSessionId
         ) {
+          const previous = this.getNativeWork();
           this.nativeActivity = event.update;
+          const current = this.getNativeWork();
+          if (previous !== current) this.options.onNativeWorkChanged?.(current);
         }
         return;
       case 'rateLimits':
@@ -2497,9 +2501,12 @@ export class AgentClient implements acp.Client {
   }
 
   adoptPreparedSession(sessionResponse: acp.NewSessionResponse): void {
+    const previousWork = this.getNativeWork();
     this.availableCommands = undefined;
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
+    const currentWork = this.getNativeWork();
+    if (previousWork !== currentWork) this.options.onNativeWorkChanged?.(currentWork);
     this.devinSubagentTaskIds.clear();
     this.authenticationRequired = false;
     this.logger.debug(

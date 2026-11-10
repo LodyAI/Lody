@@ -84,15 +84,13 @@ export function MachineSharingPanel({
     issue === 'notOwned' ||
     issue === 'notShared';
   const pending = !!view?.pendingRequest || (!!retryable && issue !== 'conflict');
-  const effective =
-    !pending && !unavailable && !view.needsResign && !view.removed && view.sharedWithTeam;
+  const effective = !pending && !unavailable && !view.removed && view.sharedWithTeam;
   const disabled =
     busy ||
     loading ||
     unavailable ||
     !view?.canManage ||
     view?.removed ||
-    view?.needsResign ||
     !!view?.pendingRequest ||
     retryable ||
     (!!issue && issue !== 'generation');
@@ -108,11 +106,9 @@ export function MachineSharingPanel({
         ? 'unavailable'
         : pending
           ? 'pending'
-          : view.needsResign
-            ? 'needsResign'
-            : effective
-              ? 'shared'
-              : 'private';
+          : effective
+            ? 'shared'
+            : 'private';
   return (
     <div {...stylex.props(styles.root)} aria-busy={!!busy || !!loading}>
       <CompactSection title={t('e2ee.machineSharing.title')}>
@@ -133,13 +129,7 @@ export function MachineSharingPanel({
           {busy || loading ? <Spinner size="small" /> : null}
         </CompactRow>
         <CompactRow
-          label={t(
-            view?.needsResign
-              ? 'e2ee.machineSharing.recordedVersion'
-              : pending
-                ? 'e2ee.machineSharing.lastVersion'
-                : 'e2ee.machineSharing.version'
-          )}
+          label={t(pending ? 'e2ee.machineSharing.lastVersion' : 'e2ee.machineSharing.version')}
         >
           <span>{view?.head ? `v${view.head.revision}` : t('e2ee.machineSharing.noVersion')}</span>
         </CompactRow>
@@ -170,7 +160,7 @@ export function MachineSharingPanel({
               ) : (
                 <Badge>
                   {t(
-                    `e2ee.machineSharing.state.${unavailable ? 'unavailable' : view?.needsResign ? 'needsResign' : effective && stored ? 'shared' : 'private'}`
+                    `e2ee.machineSharing.state.${unavailable ? 'unavailable' : effective && stored ? 'shared' : 'private'}`
                   )}
                 </Badge>
               )}
@@ -191,6 +181,7 @@ export function MachineSharingPanel({
           ) : null}
           {view?.needsResign ? (
             <Alert.Root>
+              <Alert.Title>{t('e2ee.machineSharing.state.needsResign')}</Alert.Title>
               <Alert.Description>{t('e2ee.machineSharing.resignHint')}</Alert.Description>
             </Alert.Root>
           ) : null}
@@ -199,10 +190,16 @@ export function MachineSharingPanel({
               {t(
                 pendingChangeShown.kind === 'machine'
                   ? 'e2ee.machineSharing.pendingMachine'
-                  : 'e2ee.machineSharing.pendingProject',
+                  : pendingChangeShown.kind === 'session'
+                    ? 'e2ee.machineSharing.pendingSession'
+                    : 'e2ee.machineSharing.pendingProject',
                 {
                   action: t(
-                    pendingChangeShown.sharedWithTeam
+                    (
+                      pendingChangeShown.kind === 'session'
+                        ? pendingChangeShown.level === 'read'
+                        : pendingChangeShown.sharedWithTeam
+                    )
                       ? 'e2ee.machineSharing.enable'
                       : 'e2ee.machineSharing.disable'
                   ),
@@ -210,7 +207,9 @@ export function MachineSharingPanel({
                     pendingChangeShown.kind === 'project'
                       ? (rows.find((project) => project.id === pendingChangeShown.localProjectId)
                           ?.name ?? pendingChangeShown.localProjectId)
-                      : undefined,
+                      : pendingChangeShown.kind === 'session'
+                        ? pendingChangeShown.sessionId
+                        : undefined,
                 }
               )}
             </p>

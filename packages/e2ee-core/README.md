@@ -16,8 +16,10 @@ syncs through Loro / Durable Streams or a comparable append-only log.
 ## Availability
 
 The service architecture is reusable, but this is currently a private workspace
-package (`private: true`, version `0.0.0`), not a published SDK. Production E2EE
-composition is not enabled. Node SQLite, Loro Streams and opt-in browser ledger/original IndexedDB adapters
+package (`private: true`, version `0.0.0`), not a published SDK. Cloud composition
+wires these services for desktop, CLI and mobile. The public OSS desktop stays
+local-only. New encrypted-workspace creation stays behind the developer preference.
+[Bootstrap](../../.agents/docs/e2ee-workspace-bootstrap.md). Node SQLite, Loro Streams and opt-in browser ledger/original IndexedDB adapters
 are provided, together with opt-in browser custody and key/snapshot journals. Platform qualification remains a host responsibility. Backend ports and
 `/host` define what another backend must implement; they do not deploy a server.
 
@@ -54,19 +56,22 @@ running a seal again creates a new encryption. No product transport is enabled.
 
 The protocol entry also provides an owner-signed complete machine-sharing codec,
 resource binding, version verification and pure execution gate.
-`readMachineSharingHistoryStep` returns authenticated historical full state for
-fresh owner intent, including after its personal signer is revoked; it grants no
-execution authority. The backend
+Policies use current-only v3, with independent read-only session grants. Clients verify
+only the latest service-accepted original and its historically admitted owner-personal signer.
+Revoking that signer leaves grants effective and prompts nonblocking review/re-sign;
+new seals/commits still require an active device. This trusts commit-time service admission. Local high-water
+pins reject lower revisions and differing digests at the same revision; missing older
+policy revisions do not block reads. Parent digests remain server CAS metadata. The backend
 entry admits opaque owner frames; platform/cloud-api define the matching CAS
 DTOs. These are inert primitives, with no network, UI or execution integration.
 The [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
 records the pending Spec increment and remaining host responsibilities.
 
-The signed sharing format is current-only v2. Every scope includes a generation:
+The signed sharing format is current-only v3. Every scope includes a generation:
 the initial machine signing key of its uninterrupted atomic-replacement chain.
 `verifyMachineSharingGeneration` qualifies that chain's original admission records
 at their genuine ledger positions. Supply its opaque `machineGeneration` evidence
-to seal/open/history/admission/execution calls. Removal/readmission starts a new
+to seal/open/admission/execution calls. Removal/readmission starts a new
 resource at revision 1 with private defaults; atomic replacement retains the root.
 A compact view without those ledger checkpoints needs qualification against a
 full verified endpoint; server hints or removed-policy high waters are insufficient.

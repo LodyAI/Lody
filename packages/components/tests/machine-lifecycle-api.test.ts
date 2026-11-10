@@ -17,33 +17,59 @@ describe('isCliVersionOutdated', () => {
   });
 });
 
-it('uses the initiating channel hint and rejects a mismatched channel response', async () => {
+const release = {
+  format: 1,
+  product: 'lody-cloud',
+  distribution: 'lody-cloud-daemon',
+  version: '1.2.3-nightly.4',
+  channel: 'nightly',
+  platform: 'darwin-arm64',
+  serviceProtocol: 1,
+  dataFormat: 1,
+  source: 'a'.repeat(40),
+  payloadSha256: 'b'.repeat(64),
+  nodeVersion: '26.13.0',
+  capsule: {
+    file: 'daemon.gz',
+    sha256: 'c'.repeat(64),
+    size: 10,
+    contentSha256: 'd'.repeat(64),
+    contentSize: 20,
+  },
+  node: {
+    file: 'node.gz',
+    sha256: 'e'.repeat(64),
+    size: 10,
+    contentSha256: 'f'.repeat(64),
+    contentSize: 20,
+  },
+};
+it('reads the directly published SHA release manifest for the selected channel', async () => {
   vi.stubGlobal('fetch', async (url: string) => {
     expect(url).toContain('/lody-cloud-daemon/channels/darwin-arm64/nightly.json');
-    return new Response(
-      JSON.stringify({
-        payload: JSON.stringify({
-          product: 'lody-cloud',
-          version: '1.2.3-nightly.4',
-          channel: 'nightly',
-        }),
-      })
-    );
+    return Response.json(release);
   });
   expect(await fetchLatestDaemonVersion('nightly')).toMatchObject({
     ok: true,
-    latestVersion: '1.2.3-nightly.4',
+    latestVersion: release.version,
   });
-  vi.stubGlobal(
-    'fetch',
-    async () =>
-      new Response(
-        JSON.stringify({
-          payload: JSON.stringify({ product: 'lody-cloud', version: '1.2.3', channel: 'stable' }),
-        })
-      )
-  );
+});
+it.each([
+  { channel: 'stable' },
+  { distribution: 'lody-cloud-next-daemon' },
+  { product: 'lody-oss' },
+  { platform: 'linux-x64' },
+  { serviceProtocol: 2 },
+])('rejects release identity or compatibility mismatch: %j', async (change) => {
+  vi.stubGlobal('fetch', async () => Response.json({ ...release, ...change }));
   expect((await fetchLatestDaemonVersion('nightly')).ok).toBe(false);
+});
+it('reads next only from its own distribution', async () => {
+  vi.stubGlobal('fetch', async (url: string) => {
+    expect(url).toContain('/lody-cloud-next-daemon/channels/darwin-arm64/next.json');
+    return Response.json({ ...release, distribution: 'lody-cloud-next-daemon', channel: 'next' });
+  });
+  expect((await fetchLatestDaemonVersion('next')).ok).toBe(true);
 });
 
 it('sends timing and explicit downgrade/channel choices with the exact operation to be signed', async () => {

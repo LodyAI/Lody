@@ -1,3 +1,4 @@
+import { useVisibleSessionMetas } from '../src/hooks/use-visible-session-metas';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,7 +24,7 @@ import {
   buildTourStableSession,
 } from '../src/components/onboarding/tour/tour-fixtures';
 import { runtimeAtom } from '../src/atoms/runtime';
-import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import { docMetaCacheScopeAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { LoroRepo } from 'loro-repo';
 import {
   getSessionRoomId,
@@ -44,8 +45,10 @@ vi.hoisted(() => {
 });
 vi.mock('../src/hooks/useOrganization', () => ({
   useOrganization: () => ({
-    activeOrganization: { id: 'onboarding-tour-workspace', slug: 'onboarding-tour', members: [] },
-    organizations: [],
+    activeOrganization: { id: 'onboarding-tour-workspace', slug: 'your-workspace', members: [] },
+    organizations: [
+      { id: 'onboarding-tour-workspace', slug: 'your-workspace', name: 'Synthetic workspace' },
+    ],
     switchOrganization: async () => {},
   }),
 }));
@@ -81,7 +84,8 @@ vi.mock('../src/components/mobile/mobile-home-screen', () => ({
 }));
 import { ChatLanding } from '../src/components/chat/chat-landing';
 import { ArchiveView } from '../src/components/archive/archive-view';
-import { archiveScopeAtom } from '../src/atoms/sidebar-state';
+import { LoroAppSidebar } from '../src/components/loro-app-sidebar';
+import { chatScopeAtom, archiveScopeAtom } from '../src/atoms/sidebar-state';
 
 const previousScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
 let root: Root;
@@ -102,9 +106,14 @@ afterEach(async () => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
 });
 
+function SidebarReadAccessProbe() {
+  const access = useVisibleSessionMetas();
+  return <output data-read-only-ids>{JSON.stringify([...access.historyOnlySessionIds])}</output>;
+}
+
 async function renderLanding(
   configure?: (store: ReturnType<typeof createTourStore>) => void,
-  surface: 'chat' | 'archive' = 'chat'
+  surface: 'chat' | 'archive' | 'sidebar' = 'chat'
 ) {
   const store = createTourStore(DEFAULT_TOUR_IDENTITY);
   store.set(runtimeAtom, {
@@ -128,6 +137,13 @@ async function renderLanding(
     },
   });
   configure?.(store);
+  if (surface === 'sidebar')
+    store.set(docMetaCacheScopeAtom, {
+      runtime: store.get(runtimeAtom)!,
+      workspaceId: TOUR_WORKSPACE_ID,
+      workspaceSlug: TOUR_WORKSPACE_SLUG,
+      ready: true,
+    });
   const refused: string[] = [];
   const useQuery: CloudApi['useQuery'] = (operation, args) => {
     if (args !== 'skip' && /^(machines:|localProjects:|inbox:|github:)/.test(operation.name)) {
@@ -141,6 +157,24 @@ async function renderLanding(
     identity: {
       ...TEST_CLOUD_PLATFORM.identity,
       session: createStaticStore({ status: 'authenticated', user: { id: TOUR_USER_ID } }),
+    },
+    sessionAccess: {
+      list: async () => [
+        {
+          machineId: 'unshared-owner-machine',
+          canManage: false,
+          readSharedSessionIds: ['private-history', 'archived-private'],
+        },
+      ],
+      read: async (_workspace, machineId) => ({
+        machineId,
+        canManage: false,
+        readSharedSessionIds: ['private-history', 'archived-private'],
+      }),
+      set: async () => {
+        throw new Error('not-owner');
+      },
+      subscribe: () => () => {},
     },
     cloudApi: {
       useQuery,
@@ -160,7 +194,12 @@ async function renderLanding(
         getParentRoute: () => rootRoute,
         path: '/chat',
         component: () =>
-          surface === 'archive' ? (
+          surface === 'sidebar' ? (
+            <>
+              <SidebarReadAccessProbe />
+              <LoroAppSidebar />
+            </>
+          ) : surface === 'archive' ? (
             <ArchiveView />
           ) : (
             <ChatLanding workspaceSlug={TOUR_WORKSPACE_SLUG} />
@@ -198,7 +237,7 @@ it('renders the real encrypted chat controller without legacy machines, projects
 // Derived from the independent review probe; only the mobile view leaf is replaced.
 // The controller, action hook, writer, target discovery and LoroRepo are real.
 it.each(['Archive', 'Restore', 'Delete', 'Pin'])(
-  'mobile %s cannot manage another member’s unshared history or its child',
+  'mobile %s applies only permitted read preferences to shared history',
   async (operation) => {
     mobile.enabled = true;
     const repo = await LoroRepo.create({});
@@ -247,7 +286,11 @@ it.each(['Archive', 'Restore', 'Delete', 'Pin'])(
       for (const original of [meta, child]) {
         const entry = await repo.getDocMeta(getSessionRoomId(original.id));
         expect.soft(isLoroRepoDocDeleted(entry)).toBe(false);
-        expect.soft(entry?.meta).toEqual(original);
+        expect
+          .soft(entry?.meta)
+          .toEqual(
+            operation === 'Pin' && original.id === id ? { ...original, isPinned: true } : original
+          );
       }
     } finally {
       await repo.destroy();
@@ -294,6 +337,69 @@ it('desktop archive leaves history-only sessions and children intact when perman
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     for (const original of [meta, child])
       expect((await repo.getDocMeta(getSessionRoomId(original.id)))?.meta).toEqual(original);
+  } finally {
+    await repo.destroy();
+  }
+});
+
+it('desktop sidebar read-only pin and unread actions reach the checked preference writer', async () => {
+  const repo = await LoroRepo.create({});
+  const id = 'private-history' as SessionId;
+  const meta = {
+    id,
+    machineId: 'unshared-owner-machine',
+    userId: 'different-owner',
+    title: 'Shared sidebar history',
+    lastMessageAt: 100,
+    lastReadAt: 100,
+    cliType: 'builtin',
+    agentType: 'codex',
+    createdAt: '2026-10-01T00:00:00Z',
+  } as SessionMeta;
+  await repo.upsertDocMeta(getSessionRoomId(id), meta);
+  const writer = createDirectWorkspaceWriter({ repo } as never);
+  try {
+    await renderLanding((store) => {
+      store.set(chatScopeAtom, 'team');
+      store.set(sessionMetaCacheAtom, { [getSessionRoomId(id)]: meta });
+      store.set(runtimeAtom, {
+        ...store.get(runtimeAtom)!,
+        repo,
+        writer,
+        releaseSessionStore: async () => {},
+        readSessionOperationTargets: (target, kind) =>
+          readSessionOperationTargets(repo, target, kind),
+      });
+    }, 'sidebar');
+    expect(container.querySelector('[data-read-only-ids]')?.textContent).toContain(id);
+    for (const label of ['Pin Session', 'Mark as unread']) {
+      const row = container.querySelector(
+        '[data-sidebar-session-id="private-history"], [data-sidebar-updated-id="private-history"]'
+      );
+      expect(row).not.toBeNull();
+      await act(async () =>
+        row!.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: 10,
+            clientY: 10,
+          })
+        )
+      );
+      const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+      expect(items.some((item) => /Rename|Archive|Delete/.test(item.textContent ?? ''))).toBe(
+        false
+      );
+      const action = items.find((item) => item.textContent === label);
+      expect(action).toBeDefined();
+      await act(async () => action!.click());
+    }
+    expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+      title: meta.title,
+      isPinned: true,
+      lastReadAt: 99,
+    });
   } finally {
     await repo.destroy();
   }

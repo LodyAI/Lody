@@ -1,3 +1,4 @@
+import { DaemonReleaseSchema } from '@lody/shared';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { DEFAULT_RUNTIME_ARTIFACTS_BASE_URL } from '@lody/platform';
 import { z } from 'zod';
@@ -91,12 +92,14 @@ export async function mintMachineLifecycleRequestToken({
   requestId,
   targetVersion,
   upgrade,
+  restoreMachineId,
   sessionToken,
   authBaseUrl,
 }: {
   workspaceId: string;
   machineId: string;
   action: MachineLifecycleAction;
+  restoreMachineId?: string;
   requestId: string;
   targetVersion?: string;
   upgrade?: ManagedDaemonUpgradeOptions;
@@ -128,6 +131,7 @@ export async function mintMachineLifecycleRequestToken({
           requestId,
           ...(action === 'upgrade' && targetVersion ? { targetVersion } : {}),
           ...(action === 'upgrade' && upgrade ? { upgrade } : {}),
+          ...(restoreMachineId ? { restoreMachineId } : {}),
         }),
       }
     );
@@ -186,7 +190,7 @@ export async function fetchLatestCliVersion({
   }
 }
 
-/** Public release hint only. The target daemon verifies the signed manifest itself. */
+/** Public release hint only. The target daemon independently checks the release manifest and artifacts. */
 export async function fetchLatestDaemonVersion(
   channel: 'stable' | 'next' | 'nightly'
 ): Promise<FetchLatestCliVersionResult> {
@@ -194,20 +198,21 @@ export async function fetchLatestDaemonVersion(
     return { ok: false, error: 'missing_cloud_capability' };
   try {
     // Every channel moves only after all platform assets exist. This representative
-    // signed platform manifest supplies the common version, not execution authority.
+    // checksummed platform manifest supplies the common version, not execution authority.
     const response = await fetch(
       `${DEFAULT_RUNTIME_ARTIFACTS_BASE_URL}/api/runtimes/${channel === 'next' ? 'lody-cloud-next-daemon' : 'lody-cloud-daemon'}/channels/darwin-arm64/${channel}.json`,
       { signal: AbortSignal.timeout(15000), cache: 'no-store' }
     );
     if (!response.ok) throw new Error(`Daemon channel unavailable: ${response.status}`);
-    const envelope = z.object({ payload: z.string().max(65536) }).parse(await response.json());
-    const manifest = z
-      .object({
-        product: z.literal('lody-cloud'),
-        version: z.string().regex(/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/),
-        channel: z.literal(channel),
-      })
-      .parse(JSON.parse(envelope.payload));
+    const manifest = DaemonReleaseSchema.parse(await response.json());
+    const distribution = channel === 'next' ? 'lody-cloud-next-daemon' : 'lody-cloud-daemon';
+    if (
+      manifest.product !== 'lody-cloud' ||
+      manifest.distribution !== distribution ||
+      manifest.channel !== channel ||
+      manifest.platform !== 'darwin-arm64'
+    )
+      throw new Error('Daemon channel identity mismatch');
     return { ok: true, latestVersion: manifest.version, cacheTtlMs: 60000 };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

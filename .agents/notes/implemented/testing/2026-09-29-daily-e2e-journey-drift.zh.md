@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-桌面界面变化后，Desktop Daily 的 #507 持续失败：多处 Page Object 仍按已废弃的角色查找控件，或把共享状态标记误当成单一状态的证据。旅程现改为使用当前可访问控件、区分 Turn ACP Session 与标题生成 Session，并在终端 relay 短暂断线时继续等待，同时仍要求实际观察到清理完成。10 月 25 日运行在每个平台均通过 24 个旅程中的 22 个；Role 机器选择与归档确认修正保留了配置冻结和 Session 生命周期断言。本地完整回归还发现合成 ACP 在历史重放后选择响应错误，修正未改变产品行为。Issue 关闭前仍需一次新的三平台完整 Daily 运行。
+Desktop Daily 的 #507 多次暴露 Page Object 与当前界面和协议边界不一致。11 月 8 日运行仍在每个平台失败两个项目旅程和 Session 管理：空项目按设计不出现在侧栏，Archive 则遗漏了独立的会话组标题。旅程现通过选择器和设置操作，Archive 使用组标题，上下文复制等待菜单按钮完成交互初始化。四个相关旅程均已在 Linux Electron 定向运行中通过。关闭 issue 前仍需一次新的三平台完整 Daily。
 
 ## 证据与决定
 
@@ -45,8 +45,18 @@ Role Page Object 现从名为“机器”的 tablist 中选择唯一机器标签
 
 模拟器现仅在存在重放封装时按当前请求后缀分类，普通提示仍按原逻辑分类。真实的 Stop、重建、历史重放路径，以及现有的剪贴板前缀、未完成/完成响应和 Session 隔离断言全部保留。直接 ACP wire 检查证明普通富文本响应和恢复后的完成响应均正确。[修复 PR](https://github.com/LodyAI/Lody/pull/1868)包含此 fixture 修正，不改变 CLI 重放契约。
 
+## 11 月 8 日：空项目分组与会话组标题
+
+[11 月 8 日 Daily 运行](https://github.com/LodyAI/Lody/actions/runs/42463860106) 在 macOS 和 Windows 通过 24 个旅程中的 21 个，Linux 通过 20 个。两个项目旅程仍等待空本地项目出现在侧栏，但侧栏现在只显示有会话行的项目。旅程改为通过选择器选择空项目、通过设置移除项目，保留原目录安全和 catalog 身份检查。重新打开旅程同时验证空项目不出现在侧栏、但在选择器中恰好出现一次。registry 的操作、检查点、指纹和生成的覆盖表同步更新。
+
+Session 管理暴露了产品遗漏：侧栏改名写入 `groupTitle`，Archive 却仍显示根 tab 的 `title`。[组标题说明](../architecture/2026-11-05-session-group-titles.zh.md) 现在包含 Archive 的显示、搜索与排序，现有重命名标题断言保持不变。
+
+Linux 还出现点击 assistant 分叉按钮后菜单未打开。Page Object 现在等待选定按钮完整进入视口、并提供已启用的菜单角色后再点击，保留真实菜单操作和剪贴板断言。另外，`ubuntu-latest` 已升级到 Ubuntu 26.04，Playwright 1.58 的 FFmpeg 安装器不支持该主机。Daily 固定使用 Ubuntu 24.04，并按 `runner.os` 分支；只读运行器和 macOS 产物作为权威证据的策略保持不变。
+
 ## 验证与限制
 
 同样四处有界 Page Object 修正在 [PR #1175](https://github.com/LodyAI/Lody/pull/1175) 通过了远程静态检查、测试分片和桌面 smoke；[PR #1318](https://github.com/LodyAI/Lody/pull/1318) 在当前 `main` 基线上交付这些修正，并保留了前者的贡献归属。当前嵌套 worktree 按规则未安装依赖，`pnpm --filter @lody/e2e check` 因此无法启动；shell 还选中了不受支持的 Node.js 26.10.0。仓库指引要求此处跳过 `pnpm install`，所以构建后的 Electron 旅程交由 PR CI 验证。Issue #507 仍以 macOS、Linux 和 Windows 的完整 Daily 成功作为关闭信号。
 
 10 月 25 日本地验证：两个修复后的旅程在 Linux 上构建的 OSS Electron 桌面均通过（2 个场景、17 个步骤），包括原有清理断言。`pnpm --filter @lody/e2e check` 的套件契约、dry run、TypeScript 检查及 49 项支持测试通过。桌面构建、根格式化、变更文件格式化、文档检查（0 错误、73 条既有警告）、工作区类型检查、lint/Effect lint、国际化和全部边界检查通过。根 `pnpm check` 的测试遍历在未改动的 CLI Git/worktree 与 cloudflared fixture 出现无关失败后停止；单独重跑 SessionManager 本地副本用例，也在临时 fixture 中复现了 `fatal: not a git repository`。不声明全仓测试通过。三平台完整 Daily 恢复仍待验证。
+
+11 月 9 日在 `0c0b28eda` 加本次修复上验证：构建后的 OSS Electron 通过上下文复制、项目重新打开和 Session 管理旅程，随后全新运行的项目生命周期旅程也通过，包含原目录安全检查。E2E 套件契约、dry run、TypeScript 和支持测试通过；根格式化、文档和边界检查通过。完整 `pnpm check` 在类型检查和 lint 后进入测试阶段，但未改动的历史视图、mention 激活以及加密机器/RPC 集成 fixture 报告失败。历史视图单独重跑全部 12 个测试通过；不能据此声称全仓测试已绿。

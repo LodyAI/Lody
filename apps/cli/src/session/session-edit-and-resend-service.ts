@@ -341,6 +341,7 @@ export class SessionEditAndResendService {
           inputConfig.inputBlocks,
           inputConfig.prompt ?? ''
         );
+        inputConfig.inputBlocks = inputBlocks;
         const pending = buildPendingUserHistoryEntry({
           userId: spec.requestedByUserId,
           inputBlocks,
@@ -406,7 +407,6 @@ export class SessionEditAndResendService {
             lastHandledUserMsgId: previousUserId,
             processingUserMsgId: undefined,
             lastCanceledTurn: undefined,
-            lastMissingHistoryUserMsgId: undefined,
             lastMessageAt: getServerNow(),
           });
           await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
@@ -429,7 +429,6 @@ export class SessionEditAndResendService {
               lastHandledUserMsgId: commitMeta.lastHandledUserMsgId,
               processingUserMsgId: commitMeta.processingUserMsgId,
               lastCanceledTurn: commitMeta.lastCanceledTurn,
-              lastMissingHistoryUserMsgId: commitMeta.lastMissingHistoryUserMsgId,
               lastMessageAt: commitMeta.lastMessageAt,
             })
             .catch((rollbackError) => {

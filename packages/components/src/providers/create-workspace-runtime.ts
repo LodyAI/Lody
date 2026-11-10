@@ -2258,6 +2258,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     try {
       const client = await getMachineRpcClient(message.machineId);
       const response = await client.requestMachineRestart({
+        ...(message.restoreMachineId ? { restoreMachineId: message.restoreMachineId } : {}),
         requesterUserId: message.requesterUserId,
         requestToken: message.requestToken,
         requestId: message.requestId,

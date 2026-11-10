@@ -1,3 +1,14 @@
+import { localProbeResultAtom } from '../src/atoms/local-probe';
+import { SessionChatActionContext } from '../src/components/ai-gui/view';
+import {
+  resolveSessionFileOpenTarget,
+  resolveDirectMarkdownFileOpenTarget,
+} from '../src/lib/session-file-open-target';
+import { Provider, createStore } from 'jotai';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { currentWorkspaceIdAtom } from '../src/atoms';
+import { LocalAttachmentCard } from '../src/components/ai-gui/view';
+import * as fileSaver from '../src/lib/download-file';
 // @vitest-environment jsdom
 
 // The card's second action exists for exactly one gap: an HTML attachment's
@@ -161,3 +172,122 @@ describe('SessionFileCard download action', () => {
   const statusLine = (view: HTMLElement) =>
     view.querySelector('button[aria-label]')?.querySelector('[title]')?.textContent;
 });
+
+it('downloads a remote local attachment only after clicking its card', async () => {
+  await initI18n('en');
+  const store = createStore();
+  store.set(currentWorkspaceIdAtom, 'workspace' as never);
+  const finish = Promise.withResolvers<import('@lody/shared').FileDownloadResponse>();
+  let requested = false;
+  let saved: Uint8Array | undefined;
+  const save = vi.spyOn(fileSaver, 'downloadBytesAsFile').mockImplementation((_name, bytes) => {
+    saved = bytes;
+  });
+  store.set(runtimeAtom, {
+    requestFileDownloadChunk: async () => {
+      requested = true;
+      return finish.promise;
+    },
+  } as unknown as WorkspaceRuntime);
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(LocalAttachmentCard, {
+            sessionId: 'session' as never,
+            attachment: {
+              type: 'local_attachment',
+              path: '/synthetic/input.txt',
+              machineId: 'remote',
+              kind: 'file',
+              fileName: 'input.txt',
+              mimeType: 'text/plain',
+              sizeBytes: 5,
+            },
+          })
+        )
+      )
+    );
+    expect(container.textContent).toContain('Download from original computer');
+    expect(requested).toBe(false);
+    await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+    expect(container.textContent).toContain('Downloading from original computer');
+    expect(saved).toBeUndefined();
+    await act(async () =>
+      finish.resolve({
+        status: 'ok',
+        path: 'input.txt',
+        offset: 0,
+        revision: 'a'.repeat(64),
+        sizeBytes: 5,
+        data: btoa('hello'),
+      })
+    );
+    expect(Array.from(saved ?? [])).toEqual([104, 101, 108, 108, 111]);
+    expect(container.textContent).not.toContain('Downloading from original computer');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    save.mockRestore();
+  }
+});
+
+it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp/literal%20.txt'])(
+  'opens a local attachment with its exact canonical path %s',
+  async (filePath) => {
+    await initI18n('en');
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace' as never);
+    store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    let opened: string | undefined;
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(
+            Provider,
+            { store },
+            createElement(
+              SessionChatActionContext.Provider,
+              {
+                value: {
+                  openLocalFile: (path: string, options?: { pathKind?: 'canonical' }) => {
+                    opened = (
+                      options?.pathKind === 'canonical'
+                        ? resolveSessionFileOpenTarget({ rawPath: path, pathKind: 'canonical' })
+                        : resolveDirectMarkdownFileOpenTarget(path)
+                    )?.filePath;
+                  },
+                },
+              },
+              createElement(LocalAttachmentCard, {
+                sessionId: 'session' as never,
+                attachment: {
+                  type: 'local_attachment',
+                  path: filePath,
+                  machineId: 'local',
+                  kind: 'file',
+                  fileName: 'attachment',
+                  mimeType: 'text/plain',
+                  sizeBytes: 5,
+                },
+              })
+            )
+          )
+        )
+      );
+      await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+      expect(opened).toBe(filePath);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  }
+);

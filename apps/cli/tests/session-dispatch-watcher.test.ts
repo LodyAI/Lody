@@ -4667,6 +4667,7 @@ describe('SessionDispatchWatcher', () => {
       expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
         status: { type: 'idle' },
         lastMissingHistoryUserMsgId: 'turn-missing',
+        missingHistoryUserMsgIds: { 'turn-missing': true },
       });
       expect(recordChatFailure).toHaveBeenCalledWith(
         sessionDoc,

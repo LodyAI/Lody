@@ -4,6 +4,22 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Bound Session command access
+
+Ordinary daemon-hosted Session history and metadata management borrow the existing
+workspace admission. A same-account caller on that daemon's own machine can use its
+local owner capability, corroborated by the current machine row; Session authorship
+never supplies this permission. Revoked workspace access still refuses. Other
+accounts and target machines use control-plane authorization, and missing cloud
+configuration refuses only that dependent operation. Encrypted workspaces retain
+their verified-ledger path. Roost sessions owned by this daemon keep the installed
+local backend; remote history still requires a signed proof.
+
+Cloud authorization adapters own endpoint validation. Tests inject synthetic
+endpoints or the authorization adapter itself, so a mocked port is not gated by a
+process-global deployment variable. Release CLI builds inject cloud endpoints;
+embedded clients pass them at startup, while local builds do not require them.
+
 ## Local persistence
 
 - `local-workspace-catalog.ts` — cached workspace/identity discovery; mutations
@@ -14,6 +30,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   Only authenticated online-list reconciliation can archive a corrupt sidecar and
   rebuild it behind the invalid marker; offline and ordinary operations retain the error.
   [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-catalog-recovery.md).
+
+- `machine-identity-restore.ts` — retained daemon restart intent and credential
+  backup/publication. Only the next supervised daemon worker commits the accepted
+  cloud operation, before opening runtimes. Unknown results retain their original
+  request and credentials. This remains in the existing Promise-based startup and
+  lifecycle boundary; it does not migrate Fleet or restart ownership to Effect.
 
 ## Resource discovery
 

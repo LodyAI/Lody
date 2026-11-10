@@ -1,0 +1,41 @@
+{
+  "hostReady": {
+    "type": "hostReady",
+    "protocol": 2,
+    "capabilities": [
+      "ping",
+      "setActive",
+      "probeSchema"
+    ]
+  },
+  "catalog": {
+    "type": "catalog",
+    "revision": 7,
+    "catalog": "{\"projects\":[{\"id\":\"p\",\"machineId\":\"m\",\"name\":\"Example\",\"rootPath\":\"/example\"}],\"sessions\":[{\"id\":\"s\",\"machineId\":\"m\",\"projectId\":\"p\",\"title\":\"\u4e2d\u6587 \ud83d\ude00\",\"status\":\"idle\",\"archived\":false,\"pinned\":true,\"createdAt\":\"2026-10-28T00:00:00Z\"}],\"machineIds\":[\"m\"]}"
+  },
+  "synced": {
+    "type": "synced",
+    "revision": 7,
+    "streams": 2
+  },
+  "grant": {
+    "type": "grant"
+  },
+  "schema": {
+    "creationOptionsTrial": {
+      "p": "ok agents=1 capabilities=1"
+    },
+    "machines": {
+      "m": {
+        "otherKeys": [],
+        "capabilities": []
+      }
+    }
+  },
+  "sessionUsage": {
+    "type": "session",
+    "sessionId": "s",
+    "synced": true,
+    "session": "{\"v\":1,\"status\":\"live\",\"revision\":1,\"entries\":[],\"usage\":{\"context\":{\"used\":25000,\"size\":100000},\"isContextCompacting\":false,\"quotaEligible\":true,\"modelId\":\"gpt-standard\",\"modelLabel\":\"Standard\",\"quota\":{\"id\":\"codex\",\"provider\":\"codex\",\"agentConfigId\":\"official\",\"windows\":[{\"usedPercent\":0,\"duration\":18000,\"resetsAt\":1900000000}]}}}"
+  }
+}

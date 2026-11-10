@@ -50,6 +50,18 @@ function useCloudPlatformQuery<Args, Result>(
  * to this cloud assembly and can move to `platform-cloud` unchanged in Phase 1.
  */
 export const cloudPlatformApi: CloudApi = {
+  useOptionalAuthenticatedQuery: <Args, Result>(
+    operation: CloudQuery<Args, Result>,
+    args: Args | 'skip'
+  ) => {
+    if (operation.access !== 'authenticated')
+      throw new Error('Optional metadata requires an authenticated query');
+    return useOptionalRecoverableConvexQuery(queryReference(operation), args as never) as {
+      data: Result | undefined;
+      error: Error | null;
+      retry: () => void;
+    };
+  },
   useQuery: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args | 'skip') =>
     useCloudPlatformQuery(operation, args),
   useMutation: <Args, Result>(operation: CloudMutation<Args, Result>) =>
@@ -65,6 +77,12 @@ export function useCloudPlatformClient() {
   const client = useConvex();
   return useMemo(
     () => ({
+      /** Keep an optional app-owned query live; imperative reads then reuse its cache. */
+      subscribe: <Args, Result>(
+        operation: CloudQuery<Args, Result>,
+        args: Args,
+        changed: () => void
+      ) => client.watchQuery(queryReference(operation), args as never).onUpdate(changed),
       query: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args): Promise<Result> =>
         client.query(queryReference(operation), args as never) as Promise<Result>,
       mutation: <Args, Result>(

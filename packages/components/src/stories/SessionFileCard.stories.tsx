@@ -1,3 +1,9 @@
+import { localProbeResultAtom } from '@/atoms/local-probe';
+import { Provider, createStore } from 'jotai';
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { currentWorkspaceIdAtom } from '@/atoms';
+import { LocalAttachmentCard } from '@/components/ai-gui/view';
+import type { SessionId } from '@lody/shared';
 import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
 import { SESSION_FILE_RETENTION_MS } from '@/lib/session-file-presentation';
@@ -197,4 +203,82 @@ export const AggregatedList: Story = {
         />
       </SessionFileCardList>
     ),
+};
+
+const remoteAttachmentStore = createStore();
+remoteAttachmentStore.set(currentWorkspaceIdAtom, 'attachment-demo' as never);
+remoteAttachmentStore.set(runtimeAtom, {
+  requestFileDownloadChunk: async () => ({ status: 'error', code: 'machine_offline' }),
+} as unknown as WorkspaceRuntime);
+
+/** A second device explicitly downloads; this fixture demonstrates the offline result. */
+export const LocalOnlyAttachment: Story = {
+  args: { file: baseFile({ fileName: '设计说明.pdf' }) },
+  render: () => (
+    <Provider store={remoteAttachmentStore}>
+      {wrap(
+        <LocalAttachmentCard
+          sessionId={'local-preview' as SessionId}
+          attachment={{
+            type: 'local_attachment',
+            machineId: 'original-computer',
+            kind: 'file',
+            path: '/demo/设计说明.pdf',
+            fileName: '设计说明.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 24000,
+          }}
+        />
+      )}
+    </Provider>
+  ),
+};
+
+const localImageStore = createStore();
+localImageStore.set(currentWorkspaceIdAtom, 'attachment-demo' as never);
+localImageStore.set(localProbeResultAtom, { ok: true, machineId: 'original-computer' });
+
+/** The original desktop previews the local image without an upload or a click. */
+export const LocalImageAttachment: Story = {
+  args: { file: baseFile({ fileName: 'screenshot.png' }) },
+  beforeEach: () => {
+    const previous = window.ipc;
+    window.ipc = {
+      ...previous,
+      invoke: async (channel: string) => {
+        if (channel === 'machineRpc.previewFile')
+          return {
+            status: 'resource',
+            kind: 'binary',
+            url:
+              'data:image/svg+xml,' +
+              encodeURIComponent(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="#dbeafe"/><circle cx="240" cy="145" r="70" fill="#3b82f6"/><text x="240" y="265" text-anchor="middle" font-family="sans-serif" font-size="24">Local image preview</text></svg>'
+              ),
+          };
+        throw new Error('Unexpected story IPC');
+      },
+    } as typeof window.ipc;
+    return () => {
+      window.ipc = previous;
+    };
+  },
+  render: () => (
+    <Provider store={localImageStore}>
+      {wrap(
+        <LocalAttachmentCard
+          sessionId={'local-preview' as SessionId}
+          attachment={{
+            type: 'local_attachment',
+            machineId: 'original-computer',
+            kind: 'image',
+            path: '/demo/screenshot.png',
+            fileName: 'screenshot.png',
+            mimeType: 'image/png',
+            sizeBytes: 24000,
+          }}
+        />
+      )}
+    </Provider>
+  ),
 };

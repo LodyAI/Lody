@@ -4,6 +4,15 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Electron state snapshots
+
+`use-electron-updater-state.ts` and `use-electron-cli-daemon.ts` subscribe before
+requesting their initial IPC snapshot. The snapshot seeds a subscription only
+until its first push: a late initial response cannot replace live update progress
+or daemon readiness. Cleanup retires that subscription's response and listener;
+a later mount starts its own initial read. The main process remains the state
+owner; renderer observation neither restarts a process nor retries an update.
+
 ## Explicit plaintext copies
 
 `use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
@@ -193,7 +202,8 @@ own rendered row is a placeholder. See the
 
 ## `useWorkspaceBadge`
 
-`workspaceBadgeAtom` derives an absolute count from complete active-session metadata
+`createWorkspaceBadgeAtom` binds the workspace-local account and owned machine IDs
+from the visible access index, then derives an absolute count from active-session metadata
 and fresh presence, sharing the sidebar's parent/child activity summary. The elected
 workspace window publishes changes immediately, reasserts the snapshot every 30 seconds,
 and reconciles on focus or visibility restoration. The interval reads the current atom
@@ -343,3 +353,37 @@ are exhausted. Local changes preserve the warning and do not mark a retry active
 Only successful first sync clears the sync warning. An initial local scan failure
 releases the unusable observer so the next attempt can reopen it. Workspace changes
 or unmount release both subscriptions and retire pending results.
+
+## Read-only session actions and containment
+
+Sidebar pin/unread actions use `useSessionActions`' checked preference path, while
+read-only rows omit management controls. The action layer still refuses management
+writes and rechecks preference access after asynchronous reads.
+
+`isContainedSession` owns read-grant inheritance, history tab projection, deep-link
+selection and sharing-target resolution. It accepts direct same-machine containment:
+the existing sparse default is a Tab, and `side-panel` is the supported override.
+Unknown placements and nested/cross-machine links do not inherit. Opener provenance
+alone grants nothing; malformed parent links do not redirect a sharing mutation away
+from the current session. This client check cannot authenticate a forged otherwise
+valid containment relation or provide an authoritative session-to-machine binding.
+
+
+## Live member directory
+
+`useWorkspaceMembers` reads the capability-gated `workspaceMembers:list` descriptor
+through the existing shared authenticated query source. Convex dependency updates
+replace the whole directory on member joins, departures, replacements and profile
+changes. The response contains only account ID, display name (email fallback) and
+avatar; it is never a membership or sharing authority. Unsupported/local assemblies
+retain their existing organization projection.
+
+The directory query key includes the expected account, which the server compares
+with its authenticated user before any directory read. This prevents an old-account
+SDK cache from being accepted under a new account.
+
+Same-account/workspace labels survive optional-query failures. The sharing panel
+shows a local retry using the query owner's bounded retry budget, shared across all
+mounted consumers; no polling or second watch owner is added. Account, workspace or
+API changes discard retained labels. Team/public sharing and grant writes keep their
+independent permission checks even while labels are unavailable.

@@ -1,0 +1,23 @@
+name: LodyNativeProbe
+options:
+  bundleIdPrefix: app.innei
+packages:
+  Loro:
+    path: .work/loro-swift
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: '26.0'
+    SWIFT_VERSION: '5.9'
+targets:
+  LodyNativeProbe:
+    type: application
+    platform: iOS
+    sources: [App.swift, fixtures.json]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.lody.mobile-native-probe
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: Loro

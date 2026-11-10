@@ -68,6 +68,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'contentStreamsToken',
       'removeMember',
       'setMemberRole',
+      'transferOwnership',
       'refresh',
       'prepareCreation',
       'recordCreated',
@@ -81,7 +82,22 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'ledgerView',
       'managementState',
       'updateKeys',
-      'revokeDevice'
+      'revokeDevice',
+      'createRecoveryVault',
+      'inspectRecoveryFile',
+      'recoveryReplacementPlan',
+      'beginRecoveryReplacement',
+      'continueRecoveryReplacement',
+      'abandonRecoveryReplacement',
+      'recentAccountSecurityEvents',
+      'setupWorkspaceRecovery',
+      'setupRecoveryForWorkspaces',
+      'restoreFromRecoveryFile',
+      'recoveryPasskeyAvailable',
+      'addRecoveryPasskey',
+      'recoveryPasskeyDefaultLabel',
+      'listRecoveryPasskeys',
+      'removeRecoveryPasskey'
     ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }

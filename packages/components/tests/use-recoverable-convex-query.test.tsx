@@ -245,6 +245,48 @@ describe('useRecoverableConvexQuery', () => {
     expect(container.textContent).toContain('optional failed');
   });
 
+  it('lets a user retry one failed directory shared by mounted consumers without polling or disrupting sibling work', async () => {
+    vi.useFakeTimers();
+    mocks.queryResult = new Error('directory failed');
+    const memberQuery = makeFunctionReference<
+      'query',
+      { workspaceId: string; accountId: string },
+      Array<{ userId: string; name: string; image: null }>
+    >('workspaceMembers:list');
+    function Directory() {
+      const result = useOptionalRecoverableConvexQuery(memberQuery, {
+        workspaceId: 'workspace-1',
+        accountId: 'account-1',
+      });
+      return (
+        <div>
+          {result.data?.map((member) => member.name).join(',') ??
+            (result.error ? 'directory failed' : 'loading')}
+          <button onClick={result.retry}>Retry directory</button>
+        </div>
+      );
+    }
+    await act(async () =>
+      root.render(
+        <AuthenticatedConvexContext.Provider value={context}>
+          <span>sharing controls</span>
+          <Directory />
+          <Directory />
+        </AuthenticatedConvexContext.Provider>
+      )
+    );
+    expect(container.textContent?.match(/directory failed/g)?.length).toBe(2);
+    await act(async () => container.querySelector('button')!.click());
+    expect(container.textContent).toContain('sharing controls');
+    await act(async () => vi.advanceTimersByTime(1000));
+    await deliver([{ userId: 'joined', name: 'joined member', image: null }]);
+    expect(container.textContent?.match(/joined member/g)?.length).toBe(2);
+    const settledSubscriptions = mocks.subscriptions;
+    await act(async () => vi.advanceTimersByTime(60_000));
+    expect(mocks.subscriptions).toBe(settledSubscriptions);
+    expect(container.textContent?.match(/joined member/g)?.length).toBe(2);
+  });
+
   function serverError(requestId = 'synthetic-1'): Error {
     return new Error(
       `[CONVEX Q(test:get)] [Request ID: ${requestId}] Server Error\n  Called by client`

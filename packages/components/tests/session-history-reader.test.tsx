@@ -1,3 +1,5 @@
+import { chatLandingSessionStateAtomFamily } from '../src/atoms/local-storage-cache';
+import { buildChatLandingDraftKey } from '../src/atoms/chat-landing-draft';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,10 +19,29 @@ import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/w
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view/create-conversation-view-from-history';
-import { SessionHistoryReader } from '../src/components/sessions/session-history-reader';
+import {
+  SessionHistoryReader,
+  SessionHistoryView,
+} from '../src/components/sessions/session-history-reader';
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 
+vi.mock('../src/hooks/use-workspace-members', () => ({
+  useWorkspaceMembers: () => ({ members: [], isMultiMember: false }),
+}));
+vi.mock('../src/hooks/use-session-sharing', () => ({
+  useSessionSharing: () => ({
+    resolve: () => ({
+      visibility: 'team',
+      access: 'read',
+      canManage: false,
+      machineId: 'unshared-owner-machine',
+      localProjectId: null,
+      machineName: null,
+      projectName: null,
+    }),
+  }),
+}));
 vi.mock('@tanstack/react-router', () => ({ useRouter: () => ({ navigate: async () => {} }) }));
 // The browser story exercises the real windowed renderer; these tests exercise the
 // connected reader and real C1 export gate without a jsdom virtual viewport.
@@ -207,7 +228,7 @@ async function selectCopy() {
 it('reads history without a composer or machine operation and requires explicit consent for copying', async () => {
   await render();
   expect(container.textContent).toContain('Prior conversation');
-  expect(container.querySelector('[role="status"]')?.textContent).toContain('Read-only history');
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('Read-only');
   expect(container.querySelector('textarea, input, [contenteditable="true"]')).toBeNull();
   expect(
     container
@@ -290,7 +311,7 @@ it('does not announce an empty cold replica as ready before its first remote syn
   expect(machineOperations).toBe(0);
 });
 
-it('never opens a machine-owned history backend on an unavailable target', async () => {
+it('opens a read-only machine-owned history backend without exposing write controls', async () => {
   const cached = store.get(sessionMetaCacheAtom);
   store.set(sessionMetaCacheAtom, {
     [getSessionRoomId(sessionId)]: {
@@ -299,10 +320,96 @@ it('never opens a machine-owned history backend on an unavailable target', async
     },
   });
   await render();
-  expect(container.textContent).toContain('This history format requires machine access');
-  expect(container.querySelector('[data-window-session-ready]')).toBeNull();
+  expect(container.querySelector('[data-window-session-ready]')).not.toBeNull();
   expect(container.querySelector('textarea, [contenteditable="true"]')).toBeNull();
-  expect(documentAcquisitions).toBe(0);
+  expect(documentAcquisitions).toBe(1);
   expect(machineOperations).toBe(0);
   expect(writes).toEqual([]);
 });
+
+it.each([false, true])(
+  'references a read-shared session while preserving the draft; machine moved=%s',
+  async (moved) => {
+    const runtime = store.get(runtimeAtom)!;
+    let machineId = 'unshared-owner-machine';
+    const grant = { machineId, canManage: false, readSharedSessionIds: [sessionId] };
+    const meta = store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)];
+    Object.assign(runtime, {
+      repo: { getDocMeta: async () => ({ meta: { ...meta, machineId } }) },
+    });
+    platform.sessionAccess = {
+      list: async () => [grant],
+      read: async () => {
+        if (moved) machineId = 'different-machine';
+        return grant;
+      },
+      set: async () => {
+        throw new Error('not-owner');
+      },
+      subscribe: () => () => {},
+    };
+    const draftAtom = chatLandingSessionStateAtomFamily(
+      buildChatLandingDraftKey('member', 'encrypted-team')
+    );
+    store.set(draftAtom, { ...store.get(draftAtom), prompt: 'Keep my draft', mentionRanges: [] });
+    try {
+      await render();
+      await act(async () =>
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === 'Reference in a new session')!
+          .click()
+      );
+      const draft = store.get(draftAtom);
+      if (moved) expect(draft.prompt).toBe('Keep my draft');
+      else {
+        expect(draft.prompt).toMatch(/^Keep my draft @/);
+        expect(draft.mentionRanges).toEqual([
+          expect.objectContaining({ value: sessionId, kind: 'session' }),
+        ]);
+      }
+      expect(machineOperations).toBe(0);
+    } finally {
+      delete platform.sessionAccess;
+    }
+  }
+);
+
+it.each([false, true])(
+  'shows the current pin action and machine in the read-only footer; pinned=%s',
+  async (pinned) => {
+    let toggled = false;
+    await act(async () =>
+      root.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <SessionHistoryView
+              sessionId={sessionId}
+              title="Prior conversation"
+              history={view}
+              ready
+              machineName="Studio Mac"
+              pinned={pinned}
+              onTogglePin={() => {
+                toggled = true;
+              }}
+            />
+          </Provider>
+        </PlatformContext.Provider>
+      )
+    );
+    expect(container.querySelector('footer [role="status"]')?.textContent).toBe(
+      'Read-only · Runs on Studio Mac'
+    );
+    expect(container.querySelector('textarea, input, [contenteditable="true"]')).toBeNull();
+    expect(container.querySelector('footer button')).toBeNull();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!.click()
+    );
+    const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === (pinned ? 'Unpin Session' : 'Pin Session')
+    );
+    expect(action).toBeDefined();
+    await act(async () => action!.click());
+    expect(toggled).toBe(true);
+  }
+);

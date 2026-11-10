@@ -574,7 +574,7 @@ describe('resolveBuiltinACPSetting', () => {
       resolveRuntimeForLaunch: async () => ({
         runtimeName: 'devin',
         version: '3000.11.1',
-        targetVersion: '3000.11.3',
+        targetVersion: '3000.12.28',
         platformArch: 'darwin-arm64',
         command: '/managed/devin/bin/devin',
         updateAvailable: false,

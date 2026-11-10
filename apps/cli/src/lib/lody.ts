@@ -3,6 +3,7 @@ import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
+import type { AuthorityStamp } from './e2ee/authority-clock';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
 import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
@@ -41,6 +42,13 @@ const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
+  onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
+  /** True while execution relies on an outage window, with that window's ends. */
+  onEncryptedWindowNotice?: (
+    active: boolean,
+    window?: import('./e2ee/execution-authorization').E2eeAccessWindow
+  ) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -87,6 +95,8 @@ interface LodyOptions {
     reason: 'member-removed' | 'device-revoked'
   ) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
@@ -139,6 +149,8 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
+        onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
+        onWindowNotice: options.onEncryptedWindowNotice,
         onRemoved: async (reason, recorded) => {
           const owner = await removalOwner;
           if (!owner) return;
@@ -360,6 +372,8 @@ export class Lody {
         onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
+        isMachineIdentityRestoreIdle: options.isMachineIdentityRestoreIdle,
+        sealMachineIdentityRestore: options.sealMachineIdentityRestore,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         readWorkspaceAccess: options.readWorkspaceAccess,
         remoteAutomation: options.remoteAutomation,
@@ -390,7 +404,8 @@ export class Lody {
       this.machineId,
       (input) => this.runtime.offerEncryptedRpcTurn(input),
       (event) => this.logger.debug('[e2ee-rpc-timing]', event),
-      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context)
+      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context),
+      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
@@ -568,6 +583,7 @@ export class Lody {
   }
 
   prepareForShutdown = () => this.runtime.prepareForShutdown();
+  stopNewIdentityRestoreDispatch = () => this.runtime.stopNewIdentityRestoreDispatch();
 
   cleanup = async () => {
     this.cleanedUp = true;
@@ -619,6 +635,10 @@ export class Lody {
 
   getActiveSessionCount(): number {
     return this.runtime.getActiveSessionCount();
+  }
+
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.runtime.isMachineIdentityRestoreIdle();
   }
 
   async authorizeScheduleExecution(request: ScheduleAuthorizationRequest): Promise<boolean> {
@@ -711,8 +731,9 @@ export class Lody {
     return await this.runtime.resolveSessionWorkdir(sessionId);
   }
 
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    return this.runtime.onSessionTerminated(handler);
+  async resolveAutomationWorkdir(sessionId: SessionId): Promise<string | null> {
+    const manager = this.runtime.getSessionManager();
+    return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
   }
 
   getConnectedRoomCount(): number {

@@ -102,6 +102,37 @@ describe('encrypted workspace control page recovery', () => {
     expect(props.onRepairLocal).toHaveBeenCalledTimes(1);
   });
 
+  it('gives each failure one next step that does something, with diagnostics secondary', () => {
+    const tab = () =>
+      container!
+        .querySelector('[aria-current="page"][data-console-tab]')
+        ?.getAttribute('data-console-tab');
+    render({ failure: { kind: 'local-identity', code: 'missing' } });
+    expect(container!.textContent).toContain('e2ee.failure.identity.title');
+    act(() => button('e2ee.failure.action.devices')!.click());
+    expect(tab()).toBe('devices');
+    act(() => button('e2ee.failure.action.recovery')!.click());
+    expect(tab()).toBe('recovery');
+    act(() => root?.unmount());
+
+    // An update is offered only where the host can check for one.
+    render({ failure: { kind: 'upgrade', code: 'capability' } });
+    expect(button('e2ee.failure.action.update')).toBeUndefined();
+    expect(button('e2ee.control.copyDiagnostics')).toBeDefined();
+    act(() => root?.unmount());
+    const onCheckForUpdates = vi.fn();
+    render({ failure: { kind: 'upgrade', code: 'capability' }, onCheckForUpdates });
+    act(() => button('e2ee.failure.action.update')!.click());
+    expect(onCheckForUpdates).toHaveBeenCalledTimes(1);
+    act(() => root?.unmount());
+
+    const props = render({
+      failure: classifyE2eeControlFailure(new ClientCustodyError({ reason: 'locked' })),
+    });
+    act(() => button('e2ee.failure.action.refresh')!.click());
+    expect(props.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the diagnostics report when the clipboard is unavailable', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -147,16 +178,39 @@ describe('encrypted workspace control page reading', () => {
   it('names the genesis member after this account only when this device holds the pin', () => {
     const you = { name: 'Alex Chen' };
     const profiles = new Map([['03'.repeat(32), { name: 'Jordan Lee' }]]);
-    render({ history: history(vector.anchor), you });
+    render({ history: history(vector.anchor), you, initialTab: 'members' });
     let text = container!.textContent!;
     expect(text).toContain('Alex Chen');
     expect(text).toContain('e2ee.control.you');
-    expect(text).toContain('"actor":"Alex Chen"');
+    act(() =>
+      (container!.querySelector('[data-console-tab="security"]') as HTMLButtonElement).click()
+    );
+    expect(container!.textContent).toContain('"actor":"Alex Chen"');
     act(() => root?.unmount());
-    render({ history: history(null), you, memberProfiles: profiles });
+    render({ history: history(null), you, memberProfiles: profiles, initialTab: 'members' });
     text = container!.textContent!;
     expect(text).not.toContain('Alex Chen');
     expect(text).toContain('Jordan Lee');
+  });
+
+  it('shows getting started only on the creating device, with recovery only when known', () => {
+    render({ history: history(vector.anchor), recoveryReady: false });
+    const list = () => container!.querySelector('[data-testid="e2ee-getting-started"]');
+    expect(list()).not.toBeNull();
+    const item = (id: string) => list()!.querySelector(`[data-start-item="${id}"]`);
+    expect(item('create')?.getAttribute('data-done')).toBe('true');
+    expect(item('recovery')?.getAttribute('data-done')).toBe('false');
+    act(() => button('e2ee.console.start.recoveryAction')!.click());
+    expect(
+      container!.querySelector('[data-console-tab="recovery"]')?.getAttribute('aria-current')
+    ).toBe('page');
+    act(() => root?.unmount());
+    render({ history: history(vector.anchor) });
+    expect(list()?.querySelector('[data-start-item="recovery"]') ?? null).toBeNull();
+    act(() => root?.unmount());
+    // Another member's device cannot tell which member it is, so it shows no list.
+    render({ history: history(null), recoveryReady: false });
+    expect(list()).toBeNull();
   });
 
   it('maps profiles through verified crypto users without changing roles, members or verification', () => {
@@ -167,17 +221,41 @@ describe('encrypted workspace control page reading', () => {
       ['03'.repeat(32), forged],
       ['ff'.repeat(32), { name: 'Not a ledger member' }],
     ]);
-    render({ history: verified, memberProfiles: profiles, you: { name: 'Wrong creator' } });
+    render({
+      history: verified,
+      memberProfiles: profiles,
+      you: { name: 'Wrong creator' },
+      initialTab: 'members',
+    });
     const members = container!.querySelector('section[aria-label="e2ee.control.members"]')!;
     expect(members.querySelectorAll('li')).toHaveLength(2);
     expect(members.textContent).toContain('Display owner');
     expect(members.querySelector('li')!.textContent).toContain('e2ee.values.owner');
     expect(container!.textContent).not.toContain('Not a ledger member');
     expect(container!.textContent).not.toContain('Wrong creator');
+    act(() =>
+      (container!.querySelector('[data-console-tab="security"]') as HTMLButtonElement).click()
+    );
     expect(container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')!.textContent).toBe(
       before
     );
     expect(ledgerVerificationCode(verified).stateDigest).toBe(before);
+  });
+
+  it('lets two people compare by eye when scanning is not possible, with only equal or different', async () => {
+    render({ history: history(vector.anchor), initialTab: 'security' });
+    const button = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((node) => node.textContent === label);
+    await act(async () => button('e2ee.verify.scan')!.click());
+    expect(document.body.textContent).toContain('e2ee.verify.showMine');
+    // The dialog never asks anyone to type a code back in.
+    expect(document.body.querySelector('textarea')).toBeNull();
+    await act(async () => button('e2ee.verify.manualSame')!.click());
+    expect(document.body.textContent).toContain('e2ee.verify.result.matchTitle');
+    await act(async () => button('e2ee.verify.manualDiffer')!.click());
+    expect(document.body.textContent).not.toContain('e2ee.verify.result.matchTitle');
+    // By eye nobody can tell which side is older: refresh first, then stop if it persists.
+    expect(document.body.textContent).toContain('e2ee.verify.result.unknownTitle');
   });
 
   it('reads independent removal while preserving the published epoch', () => {
@@ -187,11 +265,14 @@ describe('encrypted workspace control page reading', () => {
       page(count, vector.records[count - 1]!.hash),
       expected(vector.anchor)
     );
-    render({ history: verified });
-    expect(container!.textContent).toContain('e2ee.summary.removeMember');
+    render({ history: verified, initialTab: 'members' });
     expect(
       container!.querySelectorAll('section[aria-label="e2ee.control.members"] li')
     ).toHaveLength(1);
+    act(() =>
+      (container!.querySelector('[data-console-tab="security"]') as HTMLButtonElement).click()
+    );
+    expect(container!.textContent).toContain('e2ee.summary.removeMember');
     expect(verified.view.inspectState().epoch).toMatchObject({ number: 2, rotationRequired: true });
   });
 
@@ -248,8 +329,9 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
       .querySelector('[data-testid="e2ee-member-remove-dialog"]')
       ?.getAttribute('data-membership-id')
   ).toBe(member.membershipId);
+  // The dialog states what removal cannot undo before anyone confirms.
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-    'e2ee.members.removeDescription'
+    'e2ee.members.removeEffectHistory'
   );
   const confirm = [...document.querySelectorAll('[role="dialog"] button')].find(
     (node) => node.textContent === 'e2ee.members.remove'
@@ -257,4 +339,110 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
   await act(async () => confirm.click());
   expect(remove.mock.calls).toEqual([[member.membershipId]]);
   expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('replaces the key after a confirmed removal by default, and a failed key update never reads as a failed removal', async () => {
+  const workspace = { removed: [] as string[], keyReplaced: 0, keyFails: false };
+  const member = {
+    ordinal: 2,
+    membershipId: '34'.repeat(16),
+    userId: '45'.repeat(32),
+    role: 'member' as const,
+    devices: [],
+  };
+  const management = {
+    actorRole: 'owner' as const,
+    remove: async (id: string) => {
+      workspace.removed.push(id);
+    },
+    setRole: async () => {},
+    rotate: async () => {
+      if (workspace.keyFails) throw new Error('e2ee_restart-required');
+      workspace.keyReplaced += 1;
+    },
+  };
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  const removeOnce = async (keepRotation: boolean) => {
+    act(() =>
+      root!.render(<E2eeMemberActions member={member} name="Sam" management={management} />)
+    );
+    await act(async () => container!.querySelector('button')!.click());
+    const remove = [...document.querySelectorAll('[role="menuitem"]')].find(
+      (node) => node.textContent === 'e2ee.members.remove'
+    ) as HTMLElement;
+    await act(async () => remove.click());
+    const rotate = document.querySelector(
+      '[data-testid="e2ee-member-remove-rotate"]'
+    ) as HTMLButtonElement;
+    expect(rotate.getAttribute('aria-checked')).toBe('true');
+    if (!keepRotation) await act(async () => rotate.click());
+    const confirm = document.querySelector(
+      '[data-testid="e2ee-member-remove-confirm"]'
+    ) as HTMLButtonElement;
+    await act(async () => confirm.click());
+  };
+  await removeOnce(true);
+  expect(workspace.removed).toEqual([member.membershipId]);
+  expect(workspace.keyReplaced).toBe(1);
+  expect(document.body.textContent).not.toContain('e2ee.members.rotateFailed');
+
+  await removeOnce(false);
+  expect(workspace.removed).toHaveLength(2);
+  expect(workspace.keyReplaced).toBe(1);
+
+  workspace.keyFails = true;
+  await removeOnce(true);
+  expect(workspace.removed).toHaveLength(3);
+  expect(document.body.textContent).toContain('e2ee.members.rotateFailed');
+  expect(document.body.textContent).not.toContain('e2ee.members.failed');
+});
+
+it('lets only the owner transfer ownership, after a confirmation that states the outcome', async () => {
+  const workspace = { owner: 'self' };
+  const member = {
+    ordinal: 2,
+    membershipId: '56'.repeat(16),
+    userId: '67'.repeat(32),
+    role: 'admin' as const,
+    devices: [],
+  };
+  const management = (actorRole: 'owner' | 'admin') => ({
+    actorRole,
+    remove: async () => {},
+    setRole: async () => {},
+    transfer: async (id: string) => {
+      workspace.owner = id;
+    },
+  });
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  const openMenu = async (actorRole: 'owner' | 'admin') => {
+    act(() =>
+      root!.render(
+        <E2eeMemberActions member={member} name="Jordan" management={management(actorRole)} />
+      )
+    );
+    const trigger = container!.querySelector('button');
+    if (trigger) await act(async () => trigger.click());
+  };
+  await openMenu('admin');
+  expect(document.querySelector('[data-testid="e2ee-member-transfer"]')).toBeNull();
+  await openMenu('owner');
+  await act(async () =>
+    (document.querySelector('[data-testid="e2ee-member-transfer"]') as HTMLElement).click()
+  );
+  expect(workspace.owner).toBe('self');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    'e2ee.members.transferEffectYou'
+  );
+  await act(async () =>
+    (
+      document.querySelector('[data-testid="e2ee-member-transfer-confirm"]') as HTMLButtonElement
+    ).click()
+  );
+  expect(workspace.owner).toBe(member.membershipId);
+  expect(document.querySelector('[data-testid="e2ee-member-transfer-dialog"]')).toBeNull();
 });

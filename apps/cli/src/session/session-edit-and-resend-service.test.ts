@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, rm, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -642,5 +645,43 @@ it.each([false, true])(
     ]);
     expect(harness.readStoredMeta()).toEqual(harness.meta);
     expect(harness.agentClient.closeDetachedSession).toHaveBeenCalledWith('acp-new');
+  }
+);
+
+it.each([false, true])(
+  'preserves direct local attachments on resend even when source is missing: %s',
+  async (missing) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'resend-local-'));
+    try {
+      const source = path.join(root, 'input.txt');
+      await writeFile(source, 'synthetic');
+      const attachment = {
+        type: 'local_attachment' as const,
+        machineId,
+        path: source,
+        kind: 'file' as const,
+        fileName: 'input.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 9,
+      };
+      const history = historyFixture();
+      history[2]!.items = [attachment];
+      const harness = createHarness({
+        history,
+      });
+      if (missing) await unlink(source);
+      const result = await harness.service.editAndResend({
+        ...spec,
+        inputConfig: { ...spec.inputConfig, inputBlocks: [attachment] },
+      });
+      expect(result.success).toBe(true);
+      const replacement = (await harness.realDoc.sessionData.history.readAll()).find(
+        (entry) => entry.id === 'user-3'
+      )!;
+      expect(replacement.items).toEqual([attachment]);
+      expect(replacement.inputConfig?.inputBlocks).toEqual([attachment]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 );

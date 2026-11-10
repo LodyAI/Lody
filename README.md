@@ -159,15 +159,33 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 
 - `apps/cli` — Connect machines and run coding agents
 - `apps/electron` — Lody desktop app
+- [`apps/mobile`](apps/mobile/README.md) — New native iOS and Android clients
 - `packages/components` — Shared workspace UI
 - `packages/ui` — Base UI primitives and StyleX design tokens
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
 - `packages/cloud-api` — Optional-cloud protocol names and DTOs
-- `packages/e2ee-core` — End-to-end encryption library: signed ledger, key delivery, services and adapters ([reading guide](packages/e2ee-core/README.md), not yet wired into the product)
+- `packages/e2ee-core` — End-to-end encryption library: signed ledger, key delivery, services and adapters ([reading guide](packages/e2ee-core/README.md)). Product hosts: [workspace bootstrap](.agents/docs/e2ee-workspace-bootstrap.md)
+- `packages/e2ee-client` — Personal-device E2EE host
+- `packages/e2ee-machine-sharing` — Machine-service sharing policy
 - `packages/e2ee-lab` — Local adversarial consumers and persistence probes for `@lody/e2ee-core`
+- `packages/turn-diff-store` — Local content-addressed turn snapshots
 - `packages/loro-streams-rpc` — RPC over Loro Streams
-- `packages/acp-extension-{core,kimi}` — ACP extension submodule workspaces
+- `packages/acp-extension-{core,kimi,pi}` — ACP extension submodule workspaces. Kimi and Pi stay outside the root pnpm graph
 - `site-docs` — Website, documentation, and blog
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and the community PR size policy.
+
+## Mobile and upstream credit
+
+Lody’s new native mobile clients live in [apps/mobile](apps/mobile/README.md).
+They are under active development and keep independent iOS and Android build
+toolchains; see the mobile README for setup and current scope.
+
+The iOS client is built directly on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**.
+We thank [Innei](https://github.com/Innei) and the upstream contributors for the
+native app, chat experience, application architecture, and Loro/Flock protocol
+runtime that made this work possible. Android also reuses a provenance-tracked
+snapshot of that runtime. This is substantial foundational work, not merely
+inspiration. Upstream licenses, notices, and additional acknowledgements are
+preserved in the [mobile credits](apps/mobile/README.md#credits-and-origins).

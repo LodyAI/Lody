@@ -38,11 +38,32 @@ sequenceDiagram
 
 The developer preference controls new creation, not access to existing workspaces or retry of an unresolved intent. Only a host with the persistent preparation capability offers creation. Desktop main verifies the signed-in account itself; IPC exposes neither arbitrary signing nor private-key export. The Ed25519 and X25519 private keys, and epoch zero, remain in desktop custody. Cloud creation receives public canonical signed bytes. Workspace names and slugs are ordinary cloud metadata in this preview.
 
-Each request ID freezes account, name, slug and genesis. An unknown cloud result retries the same bytes, and never switches mode or replaces identity. Independent windows retain independent pending requests; completing one must not remove another. Pending intents are parsed per canonical request key; malformed JSON or a mismatched key remains byte-for-byte in storage for reconciliation and cannot block healthy or new requests. Host storage owns interrupted key preparation. Missing protected material after an interrupted preparation fails visibly instead of silently creating replacement keys.
+The ledger user ID is the signed-in account ID in a frozen 32-byte encoding, computed locally before signing; the service checks it names the authenticated account ([decision](../notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md)). Each request ID freezes account, name, slug and genesis. An unknown cloud result retries the same bytes, and never switches mode or replaces identity. Independent windows retain independent pending requests; completing one must not remove another. Pending intents are parsed per canonical request key; malformed JSON or a mismatched key remains byte-for-byte in storage for reconciliation and cannot block healthy or new requests. Host storage owns interrupted key preparation. Missing protected material after an interrupted preparation fails visibly instead of silently creating replacement keys.
 
 The cloud response binds the product workspace ID to `contentMode=e2ee`, version 1 and `cryptoOrgId=genesisHash`. It identifies an encrypted organization within the existing cloud service; it does not select another deployment. The ordinary workspace-creation API cannot create or convert an encrypted workspace. Server account membership authorizes reading public control records, not decrypting content or enrolling a device.
 
 ## History and runtime boundary
+
+Desktop workspace-specific device approval reads and verifies one immutable join
+request, signs its admission, and confirms the admitted record through ledger-only
+refresh before publishing the invitation. The approval does not wait for a full
+key-maintenance round. The existing account/workspace-bound main delivery owner
+tracks the original admission request and recipient, retains its own reader, and
+retries distribution independently of the approving window. Invitation publication
+is not proof of key receipt or content readiness; an unconfirmed ledger cannot
+publish an invitation or start that delivery.
+
+Each explicit approval captures its account generation before its first await and
+its native owner on first access. An in-flight operation ticket is invalidated by
+matching workspace/account reset even before any delivery slot exists. Registration
+rechecks that ticket and original owner under the account lock; same-account login
+cannot reuse an earlier generation. Tickets are released when the call settles and
+never gate unrelated workspaces. A control-only sender receives its missing current
+key before distribution. Existing main retries retain admission, back off from ten
+seconds to five minutes for at most eight automatic retries, and stop on revoked or
+removed access. Delivery slots also retain their login generation, so an already
+registered retry cannot borrow a later same-account login. Explicit retry accepts
+the original `personal-device-<UUID>` id.
 
 History starts at genesis and follows a fixed advertised head/count across pages. The client checks every signature, chain transition, index and final checkpoint using the core verifier. Pagination cannot silently skip, reorder, duplicate, truncate or splice records. Rows explain each ledger operation and expose original public details for inspection. Creation starts at genesis; later accepted records appear through the same reader, without invented events.
 
@@ -117,3 +138,9 @@ are not revoked. Personal identities still require OS protection.
 ## Member controls and terminal local cleanup
 
 The native member controls sign ordinary `SetRole` and capability-1 `RemoveMember` commands through the existing `host.manage` entry and its durable submission journal. Only `rotate` recovers an uncommitted candidate; independent commands first reconcile any unknown CAS using its original bytes, then compare the full operation intent before reporting success. Role changes require Owner authority. Owner/Admin removal preserves the epoch and leaves rotation to the existing settings key-update entry. A `rotationRequired` hint never gates sending. Only a credential-authenticated whole-member removal response triggers automatic cleanup: match the original native account/device/credential, retain a terminal receipt, stop the workspace and drain its owners. The account coordinator then takes the exclusive identity lease before erasing native data. Renderer storage and cleanup share the exact account/workspace/genesis/signing-key namespace; replica/cursor/high-water state adds window scope, and pending inputs/locks/broadcasts share the identity instance across windows. A public retained locator handles cold-open removal without deleting another account or rejoined device. CLI content lives at `e2ee/<account-hash>/<workspace>/content/<genesis>/<signing-key>` under the same identity lease as its owner. Close waits for identity verification and the terminal receipt before releasing custody; full deletion remains independent of parent close. CLI execution drains before deletion and keeps user project directories. Busy/interrupted deletion retries on the next relevant workspace open; ordinary network and individual-device failures retain data. See [the decision and limits](../notes/proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.md).
+
+## Automatic personal-device request
+
+Native hosts with automatic pairing start a current-workspace request when an unapproved device opens that workspace. An existing same-account personal device displays a matching comparison code and one authorization action. Later retains a Device requests count in desktop and mobile chrome and resumes the same request. The dialog initially focuses its container, never the authorization button; another open dialog defers presentation. Manual invitation and recovery remain under help. Approval does not bypass the existing reader, ledger or current-key installation.
+
+The six-digit SAS compares a committed ephemeral channel; it does not carry the old pairing secret. See [the coordinator and limits](../../packages/e2ee-client/README.md#automatic-device-verification). Deploy the private discovery relay before clients and update an approving app too. A running background desktop shows a deduplicated generic OS notification and focuses only after its click. This path adds no APNs/FCM wakeup for suspended mobile apps.

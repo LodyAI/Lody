@@ -1183,10 +1183,12 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** User history entry id currently being processed by the machine. */
   processingUserMsgId?: string;
   /**
-   * Exact dispatch activation negatively acknowledged because its history
-   * payload never synced. It suppresses only a matching producer pointer.
+   * Legacy latest missing-history acknowledgement. Read with the retained map;
+   * producers must not clear this receipt when publishing a fresh activation.
    */
   lastMissingHistoryUserMsgId?: string;
+  /** Host-owned append-only acknowledgements; a newer timeout must not revive an older input. */
+  missingHistoryUserMsgIds?: Record<string, true>;
   /**
    * Exact dispatch activation retired because its history entry is already
    * terminal — the turn ran, only the pointer was stale. Recorded beside the
@@ -1256,25 +1258,36 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   autoReview?: { runId: string; t: number };
 };
 
+/** Match a retained missing-payload acknowledgement, including legacy metadata. */
+export function isMissingHistoryUserTurn(
+  meta: Pick<SessionMeta, 'lastMissingHistoryUserMsgId' | 'missingHistoryUserMsgIds'> | undefined,
+  turnId: string | undefined
+): boolean {
+  return (
+    !!turnId &&
+    (meta?.lastMissingHistoryUserMsgId === turnId ||
+      meta?.missingHistoryUserMsgIds?.[turnId] === true)
+  );
+}
+
 /**
  * Resolve the dispatch activation a machine still owes work for.
  *
- * The pointer pair alone is NOT the answer: two suppression slots retire an
+ * The pointer pair alone is NOT the answer: the negative-ack ledger and terminal slot retire an
  * activation without rewriting the producer-owned pointers, so raw
  * `latestUserMsgId !== lastHandledUserMsgId` reports pending work forever once
- * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
- * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
+ * either fires. `missingHistoryUserMsgIds` preserves every failed identity (including the legacy
+ * `lastMissingHistoryUserMsgId` marker); `settledActivationUserMsgId` retires a turn
  * whose history entry is already terminal. Every consumer that asks "does this
  * session still owe a turn?" — dispatch, idle GC, MCP status —
  * must go through here, or they disagree with the watcher and hang.
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
-  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
   const settledUserTurnId = meta.settledActivationUserMsgId;
   if (
     typeof meta.processingUserMsgId === 'string' &&
     meta.processingUserMsgId.length > 0 &&
-    meta.processingUserMsgId !== missingUserTurnId &&
+    !isMissingHistoryUserTurn(meta, meta.processingUserMsgId) &&
     meta.processingUserMsgId !== settledUserTurnId
   ) {
     return meta.processingUserMsgId;
@@ -1283,7 +1296,7 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
     typeof meta.latestUserMsgId === 'string' &&
     meta.latestUserMsgId.length > 0 &&
     meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
-    meta.latestUserMsgId !== missingUserTurnId &&
+    !isMissingHistoryUserTurn(meta, meta.latestUserMsgId) &&
     meta.latestUserMsgId !== settledUserTurnId
   ) {
     return meta.latestUserMsgId;
@@ -1291,7 +1304,7 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
   return Object.keys(meta.steerTurnStatuses ?? {}).find(
     (id) =>
       meta.steerTurnStatuses?.[id] === 'pending' &&
-      id !== missingUserTurnId &&
+      !isMissingHistoryUserTurn(meta, id) &&
       id !== settledUserTurnId
   );
 }

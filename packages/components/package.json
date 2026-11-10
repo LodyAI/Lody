@@ -61,7 +61,8 @@
     "./utils": "./src/utils.ts",
     "./window-globals": {
       "types": "./src/window-globals.d.ts"
-    }
+    },
+    "./lib/posthog-privacy": "./src/lib/posthog-privacy.ts"
   },
   "scripts": {
     "dev": "tsr generate && oxfmt src/routeTree.gen.ts",
@@ -145,7 +146,7 @@
     "debug": "^4.4.3",
     "effect": "catalog:",
     "emojibase-data": "^17.0.0",
-    "framer-motion": "^12.23.6",
+    "framer-motion": "^14.9.0",
     "frimousse": "^0.3.0",
     "github-slugger": "^2.0.0",
     "hast-util-from-dom": "5.0.1",

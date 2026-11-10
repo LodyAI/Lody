@@ -1,7 +1,7 @@
 # Workspace catalog durability and Role configuration
 
 Local catalog persistence and remote sharing finish at different times. This explains
-the [root catalog rules](../../AGENTS.md#repository-boundary); it does not introduce
+the [catalog write rule](../../packages/shared/src/AGENTS.md#workspace-mcp--roles); it does not introduce
 another catalog or write path.
 
 An MCP server or Agent Role row already exists once its local Flock write is durable.

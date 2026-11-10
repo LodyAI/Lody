@@ -782,7 +782,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const isMergeable =
     hasPr && session.prReadiness === 'y' && prStatus !== 'merged' && prStatus !== 'closed';
   const showMergeablePill = isMergeable && !isSelected;
-  const canArchive = typeof onArchiveSession === 'function';
+  const readOnly = session.sharing?.access === 'read';
+  const canArchive = !readOnly && typeof onArchiveSession === 'function';
+  const canRename = !readOnly && typeof onRenameSession === 'function';
   const canMarkUnread = typeof onMarkSessionUnread === 'function' && !session.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
   const isChatSession = groupKind === 'chat';
@@ -878,9 +880,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const openedByOpener = openedByTreeSlot?.kind === 'opener' ? openedByTreeSlot : null;
   const canToggleOpenedSessions = openedByOpener !== null;
   const hasStandardMenuActions = Boolean(
-    onRenameSession ||
+    canRename ||
     onTogglePinSession ||
-    onArchiveSession ||
+    canArchive ||
     canMarkUnread ||
     onCopySessionUrl ||
     shareMenuState ||
@@ -1148,7 +1150,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
             // Double-click to rename is scoped to the title only, so it can't
             // be triggered by double-clicking the Archive confirm button.
             onDoubleClick={(e) => {
-              if (typeof onRenameSession !== 'function') return;
+              if (!canRename) return;
               e.preventDefault();
               e.stopPropagation();
               beginRename(session.sessionId, session.title);
@@ -1250,7 +1252,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
             {contextMenuLabels.markUnread}
           </ContextMenu.Item>
         ) : null}
-        {onRenameSession ? (
+        {canRename ? (
           <ContextMenu.Item
             icon={Pencil}
             onClick={() => {
@@ -1260,7 +1262,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
             {contextMenuLabels.rename}
           </ContextMenu.Item>
         ) : null}
-        {(openedByOpener || onTogglePinSession || canMarkUnread || onRenameSession) &&
+        {(openedByOpener || onTogglePinSession || canMarkUnread || canRename) &&
         (onCopySessionUrl || session.branchName || shareMenuState) ? (
           <ContextMenu.Separator />
         ) : null}
@@ -1312,7 +1314,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         {(openedByOpener ||
           onTogglePinSession ||
           canMarkUnread ||
-          onRenameSession ||
+          canRename ||
           onCopySessionUrl ||
           session.branchName ||
           shareMenuState) &&
@@ -1354,17 +1356,17 @@ const SessionGroupRow = memo(function SessionGroupRow({
         {(openedByOpener ||
           onTogglePinSession ||
           canMarkUnread ||
-          onRenameSession ||
+          canRename ||
           onCopySessionUrl ||
           session.branchName ||
           shareMenuState ||
           (onOpenPullRequest && prUrl) ||
           (canGoToOpener && openerSessionId) ||
           isElectronRenderer()) &&
-        onArchiveSession ? (
+        canArchive ? (
           <ContextMenu.Separator />
         ) : null}
-        {onArchiveSession ? (
+        {canArchive ? (
           <ContextMenu.Item
             icon={Archive}
             onClick={() => {

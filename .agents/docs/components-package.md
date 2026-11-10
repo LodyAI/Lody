@@ -5,7 +5,8 @@ Scope: `packages/components`. The binding rules live in
 this page keeps the reasoning that would otherwise crowd them out.
 
 Native and opted-in browser notifications use the authenticated host operations
-in `lib/push-notifications.ts`; local Electron notifications remain host-owned.
+in `lib/push-notifications.ts`, selecting OneSignal unless the hosted configuration
+explicitly enables direct delivery; local Electron notifications remain host-owned.
 The [direct push client decision](../notes/implemented/architecture/2026-10-16-direct-push-client.md)
 explains registration ownership, logout fencing and the provider boundary.
 

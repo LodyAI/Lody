@@ -99,16 +99,58 @@ including the delivered row's insets. Progress overlays the bottom edge; it adds
 no height. Ready files show their size in the same subtitle slot. Failure reasons
 still belong to their affected card.
 
+`session-attachment-preparation.ts` owns attachment progress and ready receipts for
+both pending sends and schedules; callers only publish its snapshots. Admission
+and preparation use the same locality rule. Each preparation attempt selects its
+route once before processing unready attachments; ready-only sends skip selection.
+Successful items survive retries,
+while canceled work cannot publish progress or prepared references. The memory
+queue owns unfinished sources and ordering; the durable input owner takes over
+ready Roost inputs and their acceptance receipts.
+
 `session-attachment-preparation.ts` seeds `session-image-cache.ts` with each
-successful image upload before releasing its source. The pending image and
+successful image preparation before releasing its source. Same-desktop images
+remain image payloads with local transport; ordinary files carry their absolute path and owning machine. Generated files
+use the durable path returned by preparation; originals retain their selected path
+and file metadata directly, without preparation IPC or a registration RPC. Resend,
+fork, and queued inputs carry that payload unchanged, without inheritance mappings.
+The path identifies the file; it does not grant read access. Local preview uses the
+host's disk-machine authorization. Remote attachment downloads use the existing
+workspace-contained file reader, so generated files outside its allowed roots cannot
+be downloaded remotely. Local RPC downloads require machine-owner authorization;
+ACP path reads require the frozen requester to be the machine owner and reject the
+encrypted route.
+
+Local images need no cloud token or upload completion for sending or execution.
+Images are automatically published by the background upload owner when authorized
+cloud access is available, with retries after connectivity returns; publication
+never gates local execution. Sends, replay, and schedules preserve `transport`,
+`machineId`, and `localImageId` without checking daemon capability metadata.
+Desktop preparation uses the local host when its known machine ID matches the
+selected target; otherwise it transfers through the workspace's authorized path.
+Protected local preparation remains unavailable and cannot fall back to plaintext.
+Published `r2` images may target another machine while retaining their local identity.
+History, fullscreen, and queued previews resolve local images through scoped host
+IPC and its file-resource URL after a reload. They never build a cloud download
+URL for a pending local image. Local cache keys additionally include the owning
+machine and immutable `localImageId`. Preview callers retain the full image
+payload, including MIME, size and storage session. Published `r2` images with
+retained local identity prefer the scoped host file, preserving offline previews
+after backfill. If that file cannot be loaded, including on another device or
+without IPC, they use the normal workspace-authenticated cloud image path. A
+missing cloud token leaves a local miss unavailable. Pending local images remain
+host-only on any resolution or preview failure. Legacy local-attachment image
+rendering remains supported.
+
+The pending image and
 `view.tsx`'s delivered image read that workspace/session/image-scoped cache
 synchronously, so history publication needs no fresh thumbnail request or
 loading frame. Native iOS seeds a data URL before readiness to preserve its
 long-press sharing behavior. Browsers supporting `decode()` warm that URL before
 it becomes ready, avoiding a local decode flash. The existing 200 MiB memory bound and object URL
-cleanup remain; eviction/restart uses normal loading. Cancelled or cache-cleared
+cleanup remain; eviction/restart uses the image's local or uploaded transport. Cancelled or cache-cleared
 native conversions cannot publish late previews. Preview caching failures do
-not fail an otherwise successful upload.
+not fail otherwise successful preparation.
 
 Behavioral coverage: `tests/session-image-cache.test.ts`,
 `tests/session-attachment-preparation.test.ts`, and
@@ -167,3 +209,12 @@ the extra thumbnail-load gap documented in the
   bridge the handler must not `preventDefault()`: web keeps the browser's menu.
 - Still plain non-zoomable `<img>`, by scope not by accident: tool-call `image`
   content blocks in `view.tsx` and markdown images in `markdown-renderer.tsx`.
+
+Path-based local image attachments on the original desktop use their payload path
+and display an inline image through Electron’s file-resource URL, with the existing zoomable
+viewer on click. Failed preview or image loading shows an inline retry action. Ordinary
+local attachment cards open the payload path on the original desktop. On another
+device, clicking downloads current bytes through the existing authenticated file
+RPC; it never starts from rendering alone. Show a spinner during the request and
+an inline error on failure. Web/desktop uses a browser download, native mobile uses
+the existing share sheet. Anonymous shares retain no download action.

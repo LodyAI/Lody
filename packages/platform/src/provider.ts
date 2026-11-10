@@ -111,6 +111,8 @@ export interface PlatformProvider {
   workspaces: PlatformWorkspaces;
   /** Optional E2EE control plane; absent in the local OSS composition. */
   e2eeWorkspaces?: PlatformE2eeWorkspaces;
+  /** Optional team-only read grants. Absent in the local OSS composition. */
+  sessionAccess?: import('./session-access').SessionAccessPort;
   capabilities: PlatformCapabilities;
   /**
    * Present only on a cloud implementation. A capability claiming availability

@@ -150,7 +150,7 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 ## 恢复
 
-`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。passkey 需要一次报告 `enabled: true` 的注册，以及一次带用户验证并返回 32 字节 `results.first` 的认证；WebAuthn 在认证时从不报告 `enabled`。所有 ceremony 都使用 `vaultPrfInput()`，`user.id` 为 `passkeyUserHandle(vaultId)`，所以没有恢复文件的新设备可以从 ceremony 得知保险库。加密索引列出每个 passkey，CAS 引用它的包装，服务端不能把它当作未引用条目删除。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复。整库换新时，`revokeOtherRecoveryDevices` 依据已验证的账本撤销这个成员的其他恢复设备。恢复时：账本必须包含恢复包的 `head` 和 `length` 检查点，否则停止；恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。每个私有包是带 `formatVersion: 1` 的规范 CBOR；缺失或其他版本、或私钥不是 48 字节 RFC 8410 PKCS#8 Ed25519/X25519 精确编码时，上传前与读取时均以 `invalid-input` 失败。`deriveRecoveryAccessCredential` 派生 R 的服务访问凭据（对 R 的种子做 HKDF-SHA256，salt 为 genesis，info 为 `lody-e2ee/recovery-credential/v1\0` 加 R 的公钥）。设置流程提交 R 的接纳记录时把其 SHA-256 传给 `submitOriginal`，其他记录一律传 `null`；`E2eeWorkspace` 的账本端口不携带凭据，因此在提交前交给平台的 `registerRecoveryCredential`。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
 ## 文档
 
@@ -192,3 +192,8 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 `test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。
 
 桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。
+
+恢复也可以修复已获准、但本地工作区密钥丢失的个人设备。验证恢复设备、
+包内检查点与当前密钥信封后，必须匹配当前个人设备的签名、公钥和成员身份，
+再通过原有密钥安装边界恢复，不重复接纳设备。已撤销或身份不匹配的设备不会
+因此获得权限。

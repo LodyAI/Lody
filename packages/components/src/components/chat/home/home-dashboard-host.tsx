@@ -1,8 +1,9 @@
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { homeNowInputAtom } from '@/atoms/home-now';
-import { homeWeekInputAtom } from '@/atoms/home-week';
+import { createHomeNowInputAtom } from '@/atoms/home-now';
+import { createHomeWeekInputAtom } from '@/atoms/home-week';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useCodexResetForecast } from '@/hooks/use-codex-reset-forecast';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -75,8 +76,17 @@ export function HomeDashboardHost({
   onBoardChange?: (board: HomeBoard | null) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const weekInput = useAtomValue(homeWeekInputAtom);
-  const nowInput = useAtomValue(homeNowInputAtom);
+  const { currentUserId, ownedMachineIds } = useMySessionScope();
+  const weekAtom = useMemo(
+    () => createHomeWeekInputAtom(currentUserId, ownedMachineIds),
+    [currentUserId, ownedMachineIds]
+  );
+  const nowAtom = useMemo(
+    () => createHomeNowInputAtom(currentUserId, ownedMachineIds),
+    [currentUserId, ownedMachineIds]
+  );
+  const weekInput = useAtomValue(weekAtom);
+  const nowInput = useAtomValue(nowAtom);
   const clock = useStableNow(NOW_INTERVAL_MS);
   const nowMs = clock.getTime();
   const week = useMemo(() => buildHomeWeek(weekInput, clock), [weekInput, clock]);

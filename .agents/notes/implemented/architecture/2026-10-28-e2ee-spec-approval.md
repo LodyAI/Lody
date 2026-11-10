@@ -72,16 +72,16 @@ Machine sharing plan A is outside this revision. Approval records intent, not im
 
 On 2026-11-01, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, explicitly approved the account-wide personal device pairing increments of [PR #2182](https://github.com/LodyAI/Lody/pull/2182) at revision `65db7d694a6979a0dc8e380815ca033eeddb958c`.
 
-| File | Approved Git blob |
-| --- | --- |
-| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md) | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
-| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md) | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
-| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md) | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
+| File                                                                                                                                                | Approved Git blob                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee-foundations.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.md)               | `e43047a7ff7c05de6b256f7fb3a5b43318bfbdde` |
+| [`specs/e2ee-foundations.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee-foundations.zh.md)         | `01f22d4d70465eb6604452b397eed51f97e6a2d9` |
+| [`specs/e2ee/desktop-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.md)       | `2c37197221c7cdb962592c84f8e107b6f8a26840` |
 | [`specs/e2ee/desktop-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/desktop-custody.zh.md) | `c4b74bd01d78df7b1f01a43e114c7435d20c358d` |
-| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md) | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
-| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md) | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
-| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md) | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
-| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md) | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
+| [`specs/e2ee/client-custody.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.md)         | `422a7ffd3b25e4ecc4c04849c1746526d77257d8` |
+| [`specs/e2ee/client-custody.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/client-custody.zh.md)   | `7f0ce06045376377a086d821f70bfcc8625ca03b` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.md)                 | `3b15f26057a3b4616d22ca172853faba1e80ece8` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/65db7d694a6979a0dc8e380815ca033eeddb958c/specs/e2ee/whitepaper.zh.md)           | `dddb0b50c023d3b9474d88afccbef4f94e84a83e` |
 
 The approved revision is `65db7d69`. Later commits change only approval metadata in these files: increment headings and status lines, the whitepaper's approved-revision line, approval links, and the section anchors that follow the renamed headings. They do not change the approved requirements.
 
@@ -106,6 +106,96 @@ The scope covers these points:
 
 Approval records intent only, not implementation, deployment or real-device acceptance. Revocation and removal semantics are unchanged.
 
+## Recovery vault passkey unlock and trust anchor
+
+On 2026-11-06, owner Zixuan Chen (zxch3n), as relayed by the E2EE coordinator, approved [PR #2343](https://github.com/LodyAI/Lody/pull/2343) at head `dec61678ac7b63ebf7768a6986c1844b5f278ce9`. Their words were "批准 2343" (approve 2343). The approved files are:
+
+| File                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/recovery-vault.md)             | `adc4a96b31fc9eef0f0935d9f7a4001ec01145fb` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/recovery-vault.zh.md)       | `7709935680e641a5537168b5b3c326cdf7fd0af0` |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/permission-ledger.zh.md) | `211f81d09c67da2dd8e78586aab0e7ce2c273948` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/whitepaper.md)                     | `b7834f7922281ca5901cd98740294126fc346647` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/dec61678ac7b63ebf7768a6986c1844b5f278ce9/specs/e2ee/whitepaper.zh.md)               | `83fca1fe454e4c9bc8ef0c6bdd86be302b79ecae` |
+
+Later commits change only approval metadata in these files, and align the whitepaper's passkey wording and the client custody status line with the approved recovery vault text.
+
+The scope covers these points:
+
+- **Passkey unlock** on macOS, iPhone and Web. The RP host is `vault.lody.ai`; Web is an isolated unlock-only surface after macOS and iPhone, and it also accepts the recovery file; the feature requires iOS 18.4.
+- **Authenticators.** Standard WebAuthn with PRF and no allow-list. A registration that reports no PRF is refused with a plain message and a pointer to the recovery file. Lody promises and tests only iCloud Keychain.
+- **Trust anchor.** The genesis inside an authenticated recovery package is the anchor, and the user saves nothing extra. This replaces independent confirmation. Ledger verification and the current-epoch commitment check stay.
+- **Accepted residual risk.** A hostile operator or a Lody account takeover, plus a user tricked into a file or passkey the attacker made, can present a fake workspace. It never reaches the real keys.
+- **Timing.** Recovery and passkey work proceed in parallel, behind default-off gates.
+
+Ledger records and `formatVersion: 1` do not change. Approval records intent only, not implementation, deployment or real-device acceptance.
+
+## Ledger user ID is the account ID
+
+On 2026-11-06T19:47:07Z, the owner (Lody account `js7cxcb4nzj3dpht6gc9vq8n517xznbm`, message `ac3cc04f-be5d-4497-b9e6-e144bc7171f5`), as relayed by the E2EE coordinator (session `b12f1597`), approved [PR #2365](https://github.com/LodyAI/Lody/pull/2365) at head `0d35850c1b4dd1d9ed50ed39f51222ad740c60cb`. Their words were "批准 #2365，#2374 用别的办法" (approve #2365; use another approach for #2374). This record covers only the #2365 part. The approved files are:
+
+| File                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/permission-ledger.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/permission-ledger.zh.md) | `30b77b2ccedfdb6ef8a744e4c9565e962f082c68` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.md)                     | `ca583dec691023aa7d8aa0a8226335b7422e83b6` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/0d35850c1b4dd1d9ed50ed39f51222ad740c60cb/specs/e2ee/whitepaper.zh.md)               | `ddd77ddccf0b83f6f89f927124cd101fe743a5c1` |
+
+Later commits change only approval metadata in these files.
+
+The scope is the ledger user ID passages of the whitepaper and `permission-ledger`, and the encoding rule in the [decision](2026-11-06-e2ee-ledger-user-id.md):
+
+- **Meaning.** The stable ledger user ID encodes the account ID. It names an account and does not prove who holds a signing key.
+- **Encoding.** 32 bytes: byte 0 is the character count, then lowercase Crockford base32 characters at 5 bits each, most significant bit first, with zero fill. It freezes when production first enables encrypted workspace creation.
+
+Ledger records and their format do not change. Approval records intent only, not implementation, deployment or real-device acceptance.
+
+## Recovery vault whole-vault replacement
+
+On 2026-11-06, owner Zixuan Chen (zxch3n) approved [PR #2374](https://github.com/LodyAI/Lody/pull/2374) at head `5484218fd5157af1fd1d637865934db852e1cd96` in their own session `b12f1597-06ba-4a6e-944c-0395a7d58542` (account `js7cxcb4nzj3dpht6gc9vq8n517xznbm`, message `01a255e1-459c-4d10-947c-0210f3bcc9b1`) at 2026-11-06T18:22:22.775Z. Their words were "批准，16 份" (approve, 16). The approved files are:
+
+| File                                                                                                                                                    | Git blob                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`specs/e2ee/recovery-vault.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.md)             | `86953c0ea01020a5db93071e0dc1cf77eb0cb07b` |
+| [`specs/e2ee/recovery-vault.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/recovery-vault.zh.md)       | `3793c3de37195c93c4dcc294e1f89b608e40f758` |
+| [`specs/e2ee/whitepaper.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.md)                     | `e00735bcb501e5de1d95c440baa57b0e0b5c4a09` |
+| [`specs/e2ee/whitepaper.zh.md`](https://github.com/LodyAI/Lody/blob/5484218fd5157af1fd1d637865934db852e1cd96/specs/e2ee/whitepaper.zh.md)               | `a6362be095169d3840d81bac7f4f832b364ad5e7` |
+
+The closeout commit changes only approval metadata in these files and synchronizes the whitepaper with the same approved whole-vault replacement meaning; it does not change the approved requirements.
+
+The scope covers these points:
+
+- **Whole-vault replacement.** A user who lost the recovery file, or suspects it leaked, replaces the whole vault from a working personal device. The device creates and reopens the new file, admits and envelope-tests a new R in every workspace it can act on, revokes the old Rs through the ledger, then retires the old vault and makes the new one current. Routine replacement still needs V.
+- **States and the 16 limit.** A vault is `current`, `replacing` or `retired`; an account has at most one `current` and one `replacing`. Retired vaults count against a separate limit of 16, the number the owner approved; beyond that, replacement is refused until cleanup exists. Retired ciphertext stays readable and no entry is removed.
+- **Authority.** Retiring needs only the signed-in owner and a new index. A hijacked login can reserve, abandon and switch, but cannot revoke an R, read a vault, forge a package or stop the old file from opening. Restore ignores product state and is judged by the ledger.
+- **What the old file can still do.** For replaced workspaces, the old file can no longer admit devices or receive new keys, but anyone with the old file and the account can still open the keys it already has until rotation. Replacement does not erase copies. Passkeys must be enrolled again.
+- **Limits.** The flow needs a working personal device; a working passkey can restore one first. Workspaces the device cannot act on are named and may keep the old R. Ledger format and `formatVersion: 1` are unchanged, the flow is default-off, and the recovery vault remains outside the MVP. Approval records intent only, not implementation, deployment or real-device acceptance.
+
+## Execution freshness during a backend outage
+
+On 2026-11-07, owner Zixuan Chen (zxch3n) answered the open questions of [PR #2381](https://github.com/LodyAI/Lody/pull/2381) at head `eb0bb74d66905b59be7745ccf2386ce00bc49cfd` in their own session `b12f1597-06ba-4a6e-944c-0395a7d58542`, message `d1041859-25c8-47de-9dbc-96a8bd4e81f1`. The closeout commit writes those answers into [`specs/e2ee/execution-freshness-outage.md`](../../../../specs/e2ee/execution-freshness-outage.md) (blob `4d74fbbdf51b89def934b1f052870f4b68ee4c32` at that head), adds its Chinese version and sets its status.
+
+The scope covers these points:
+
+- **Windows.** When the latest ledger read gets no answer, the machine keeps deciding from its local verified ledger: reads by its own member for 24 hours, execution by its own member for 4 hours. Requests from other members stay at 15 minutes.
+- **Outage or refusal.** No reply, a timeout, a 5xx, a 429 and a server error with no business error code count as an outage. Removed, revoked and unauthorized end the window at once. A reply the client cannot understand is treated as a refusal.
+- **Expired sign-in.** Revised on 2026-11-07 by the owner in the same session, in message `042a6021-a85e-4ce1-973b-a32cf3a92e78` (04:29:38 UTC): it ends the window like unauthorized, because the service reports both the same way. Their first answer counted it as an outage.
+- **Visibility.** The user sees a notice while a window is in use.
+- **Consequence.** The longer bound replaces the 15-minute worst case for the same member's reads and execution, as the Spec's "Changed bound" section states. The implementation updates the 15-minute passages in the whitepaper and foundations to this meaning under this approval.
+
+Nothing here implements the change or approves the implementation.
+
 ## Machine sharing
 
 On 2026-11-02, owner Zixuan Chen (zxch3n) approved the [machine sharing Spec](../../../../specs/e2ee/machine-sharing.md) by merging [PR #2228](https://github.com/LodyAI/Lody/pull/2228) as merge commit `9b24c65eed8ff5a6459827e0df88acfbd38692d0`. The approved [English text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.md) has Git blob `37ce21f8e5a3db433b38ac0d2701fcacf6408080`; the approved [Chinese text](https://github.com/LodyAI/Lody/blob/9b24c65eed8ff5a6459827e0df88acfbd38692d0/specs/e2ee/machine-sharing.zh.md) has Git blob `c6377547e8dd34c2bc9fbc1d64117cf568aa6d56`. Later changes that only record this approval are editorial. The scope includes the owner's decision that withdrawal blocks new starts and further authorized actions without forcibly terminating running commands, and the 2026-10-28 acceptance that withdrawal has no strict upper bound if the server keeps withholding newer policies. Approval records intent, not deployment or two-member product acceptance.
+
+## Browser self-unlock
+
+On 2026-11-09 owner Zixuan Chen (zxch3n) approved recommendations in [#2489](https://github.com/LodyAI/Lody/pull/2489), exact head `07e231ceb86e20c8c849458e187639b0fbca16b6`, in source session `7feb7ec5-71fe-459f-a102-8f179831f131`, human message `3ebc9d48-2c78-4265-a60e-a1581194216e`. Lody history verified the human author and preceding PR recommendation table. Scope: PRF passkey plus recovery file, vault reuse, isolated C→ordinary Web B, coexisting device approval and recommended limits. Password plus Secret Key was not selected. First sign-in may create an empty vault; workspace recovery still requires admitted-device R enrollment and a real decryption test. This grants no Web workspace-creation capability. Approval is not implementation, deployment or device acceptance.
+
+## Same-origin Web recovery
+
+On 2026-11-10, owner Zixuan Chen (zxch3n) approved the RP/same-origin revision of [#2489](https://github.com/LodyAI/Lody/pull/2489) at exact head `47a15a00e313085e43aac1d4668016dbf8319b44` in the [source session](lody://session/7feb7ec5-71fe-459f-a102-8f179831f131?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm). Lody history verified human message `82150e0c-a3d6-4680-9193-75088329657b` at `2026-11-10T04:58:51.568Z`, whose complete text was “批准” (approve). The preceding question explicitly asked approval of #2489's change from `vault.lody.ai` to `lody.ai`, in-client Web recovery, and the stated trust costs.
+
+This supersedes only the earlier dedicated-RP/isolated-Web direction: Mac/iOS/Web use RP `lody.ai`; opening with passkey or recovery file, creating the first file and adding passkeys happen in the Web client, without an isolated page or cross-page handoff. Accepted costs are root/subdomain/marketing/analytics code being able to request the parent RP's ceremony, with system confirmation/user verification still required, and future login passkeys needing a different RP and compatible origin. Different login RPs do not prevent compromised subdomains from requesting the parent RP. Native associations remain webcredentials-only; App Links are not restored.
+
+The approved revision retains personal-computer consent, the empty-vault versus workspace-backup distinction, no browser-first encrypted-workspace creation, and latest-only pre-production formats. This commit changes approval metadata only. Feature gates remain default-off; other PR heads/statuses, implementation acceptance, deployment and real-device validation are not approved by this record.

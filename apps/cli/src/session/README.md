@@ -15,6 +15,18 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Machine identity recovery admission
+
+Fleet checks both active presence and registered execution owners before accepting
+identity recovery. It then synchronously seals every execution service. A queued
+request or preparation that resumes after the seal returns without starting a
+Turn, consuming its Inbox input or advancing history/dispatch status. The final
+check and Turn registration have no intervening await: registration makes Fleet
+refuse recovery, while a preceding seal prevents registration. Ordinary Stop and
+cleanup retain their existing cancellation/release behavior. The session rule
+budget allows 50 extra words for this cross-entry safety contract so existing
+binding rules remain complete.
+
 ## Automation ownership
 
 [Session authority](session-automation-authority.ts) admits actions requested by
@@ -23,6 +35,18 @@ Inbox release; the durable source reconciles release without replaying requests.
 Native recovery preserves the exact conversation and launch binding. Archive uses
 existing admission/rewrite barriers, including parent admission held by child
 executions; it never treats an idle metadata label as release proof.
+
+## Context after startup failure
+
+A new send after failed first startup still uses create dispatch when no native
+ACP session id exists. Create preserves workspace preparation and includes earlier
+history as prompt context, excluding the current user turn and its assistant entry.
+When metadata or imported history proves earlier turns exist, it waits briefly for
+the local mirror to sync, then proceeds without replay if no replayable content
+arrives. A genuinely new turn skips that history read. The
+[context recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-oauth-expiry-context-loss.md)
+explains why missing native state does not imply an empty conversation.
+
 ## ACP command exit
 
 `terminal-manager.ts` records the direct process's `exit` status immediately.
@@ -163,8 +187,13 @@ would let a send published between the read and the write lose its activation an
 and unrun. The `settledActivationUserMsgId` slot may be replaced freely because the turn it
 names is terminal.
 
-The renderer derives a visible "not delivered" label for a marked entry from the marker plus
-its non-terminal status — no CLI repair write, no schema change. Recovery is a fresh send: the
+The host retains every negatively acknowledged input in `missingHistoryUserMsgIds`, alongside the
+legacy `lastMissingHistoryUserMsgId` scalar. Only its serialized watcher appends entries; producers
+publish fresh activation IDs without clearing these receipts. A timeout cannot mark a newer
+activation that arrived during recovery. [The storage decision](../../../../.agents/notes/implemented/bug-fix/2026-11-10-missing-history-acknowledgements.md) explains compatibility, retention and the single-host assumption.
+
+The renderer derives a visible "not delivered" label for a marked entry from these receipts plus
+its non-terminal status, without a CLI history-repair write or history-schema migration. Recovery is a fresh send: the
 label opens a confirmation dialog that re-sends the SAME content as a brand-new message
 through the ordinary producer path. The renderer retains the marker as a tombstone and
 supersedes the abandoned entry to `canceled`; it must never revive the old turn.
@@ -197,7 +226,12 @@ that follows another one in the chain yields one macrotask first
 Turn-scoped history LIST writes (assistant entry, ACP flushes, finalization, failure notices)
 wait until the user turn entry has synced into the CLI-local doc, because concurrent Loro list
 inserts can otherwise permanently order the reply before the user message. Status and meta map
-writes are never gated; some sit on the prompt critical path.
+writes are never gated; some sit on the prompt critical path. The original 20-second gate deadline
+also bounds its pre-open assistant-entry callback. Disposal releases existing waiters immediately.
+The deadline keeps the live callback eligible to add author/model metadata. Only disposal aborts
+later callback steps, even if timeout already opened the gate; already-issued writes remain
+owned and observed, and a late completion cannot release a successor gate. Finalization disposes
+its captured gate before persisting `finish-assistant`, closing the gap before turn-state cleanup.
 
 ### Why the pointer write is bundled with the history append
 

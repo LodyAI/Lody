@@ -4,9 +4,9 @@ import * as stylex from '@stylexjs/stylex';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
-import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { Check, Copy, Server } from 'lucide-react';
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'beginRemoteMachinePairing'
@@ -15,10 +15,36 @@ type Runtime = Pick<
   | 'cancelRemoteMachinePairing'
 >;
 type Preview = Awaited<ReturnType<NonNullable<Runtime['inspectRemoteMachinePairing']>>>;
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 const styles = stylex.create({
+  body: { display: 'flex', flexDirection: 'column', gap: space[3] },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
-  code: { fontFamily: 'monospace', overflowWrap: 'anywhere', userSelect: 'all' },
-  message: { color: colors.secondaryLabel },
+  // One command line on dark ground, as it will look in the machine's terminal.
+  command: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    paddingBlock: space[2],
+    paddingInlineStart: space[3],
+    paddingInlineEnd: space[1],
+    borderRadius: radius.medium,
+    backgroundColor: '#1e1e1e',
+    color: '#e8e8e8',
+    fontFamily: MONO,
+    fontSize: text.footnoteSize,
+  },
+  commandText: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere', userSelect: 'all' },
+  copy: { color: '#e8e8e8' },
+  machine: { display: 'flex', alignItems: 'center', gap: space[2] },
+  machineName: { fontWeight: 600 },
+  code: {
+    fontFamily: MONO,
+    fontSize: text.headlineSize,
+    letterSpacing: '0.04em',
+    overflowWrap: 'anywhere',
+    userSelect: 'all',
+  },
+  message: { margin: 0, color: colors.secondaryLabel, fontSize: text.footnoteSize },
 });
 /** An expiring command transfers pins. A separate, material-bound click grants consent. */
 export function E2eeRemoteMachinePairing({
@@ -34,6 +60,7 @@ export function E2eeRemoteMachinePairing({
   );
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   // A revoked identity cannot be readmitted; the machine must create a new one.
   const [error, setError] = useState<false | 'generic' | 'key-revoked'>(false);
   const active = useRef(true);
@@ -87,7 +114,7 @@ export function E2eeRemoteMachinePairing({
         <Card.Title>{t('e2ee.remoteMachine.title')}</Card.Title>
         <Card.Description>{t('e2ee.remoteMachine.description')}</Card.Description>
       </Card.Header>
-      <div>
+      <div {...stylex.props(styles.body)}>
         {error && (
           <p role="alert">
             {t(
@@ -97,22 +124,46 @@ export function E2eeRemoteMachinePairing({
         )}
         {session && (
           <>
-            <Textarea
-              aria-label={t('e2ee.remoteMachine.command')}
-              value={session.command}
-              readOnly
-            />
+            <div {...stylex.props(styles.command)}>
+              <span
+                aria-label={t('e2ee.remoteMachine.command')}
+                {...stylex.props(styles.commandText)}
+              >
+                {session.command}
+              </span>
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t(copied ? 'e2ee.verify.copied' : 'e2ee.remoteMachine.copyCommand')}
+                onClick={() => {
+                  void navigator.clipboard.writeText(session.command).then(
+                    () => {
+                      if (active.current) setCopied(true);
+                    },
+                    // Denied clipboard: the command stays selectable.
+                    () => undefined
+                  );
+                }}
+                {...stylex.props(styles.copy)}
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+              </Button>
+            </div>
             <p {...stylex.props(styles.message)}>{t('e2ee.remoteMachine.commandHelp')}</p>
           </>
         )}
         {preview && <p role="status">{t(`e2ee.remoteMachine.status.${preview.status}`)}</p>}
         {preview?.summary && (
           <>
-            <p>{t('e2ee.remoteMachine.machine', { id: preview.material?.machineId })}</p>
-            <p data-testid="e2ee-remote-machine-summary" {...stylex.props(styles.code)}>{preview.summary}</p>
-            <p>{t('e2ee.remoteMachine.location', { location })}</p>
-            <p {...stylex.props(styles.message)}>{t('e2ee.remoteMachine.locationHelp')}</p>
-            <p>
+            <div {...stylex.props(styles.machine)}>
+              <Server size={16} aria-hidden="true" />
+              <span {...stylex.props(styles.machineName)}>
+                {t('e2ee.remoteMachine.machine', { id: preview.material?.machineId })}
+              </span>
+            </div>
+            <p {...stylex.props(styles.message)}>
+              {t('e2ee.remoteMachine.location', { location })} ·{' '}
               {t(
                 preview.material?.protection === 'file'
                   ? 'e2ee.localAgent.fileProtection'
@@ -120,6 +171,10 @@ export function E2eeRemoteMachinePairing({
               )}
             </p>
             <p>{t('e2ee.remoteMachine.compare')}</p>
+            <p data-testid="e2ee-remote-machine-summary" {...stylex.props(styles.code)}>
+              {preview.summary}
+            </p>
+            <p {...stylex.props(styles.message)}>{t('e2ee.remoteMachine.locationHelp')}</p>
           </>
         )}
         <div {...stylex.props(styles.actions)}>

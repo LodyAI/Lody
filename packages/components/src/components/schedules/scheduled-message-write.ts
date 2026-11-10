@@ -32,6 +32,7 @@ export function scheduledAttachmentProgress(attachments: SessionAttachmentDraft[
 /** Use the same owned attachment transfers as Send, without publishing a user turn. */
 export async function prepareScheduledMessage(args: {
   runtime: WorkspaceRuntime;
+  scheduleId: string;
   sessionId: SessionId;
   machineId: MachineId;
   actorId: string;
@@ -51,7 +52,6 @@ export async function prepareScheduledMessage(args: {
     args.inputBlocks.some((block) => block.type === 'file' || block.type === 'image')
   )
     requireWorkspaceFeature(content, 'attachments');
-  let attachments = args.attachments;
   const prepared = await prepareDraftAttachments({
     content,
     resources: args.runtime.sendResources,
@@ -62,9 +62,9 @@ export async function prepareScheduledMessage(args: {
       workspaceId: args.runtime.workspaceId,
       sessionId: args.sessionId,
       targetMachineId: args.machineId,
-      attachments,
+      attachments: args.attachments,
       entry: {
-        id: 'scheduled-draft',
+        id: 'schedule:' + args.scheduleId,
         role: 'user',
         userId: args.actorId,
         timestamp: new Date(getServerNow()).toISOString(),
@@ -74,15 +74,9 @@ export async function prepareScheduledMessage(args: {
         inputConfig: { inputBlocks: args.inputBlocks },
       },
     },
-    update: (next) => {
-      attachments = next;
-      args.onAttachments(next);
-    },
-    report: (id, progress) =>
-      args.onAttachments(
-        attachments.map((item) => (item.id === id ? { ...item, progress } : item))
-      ),
+    update: args.onAttachments,
   });
+
   return ScheduledMessageSchema.parse({
     ...args.message,
     inputBlocks: prepared.entry.inputConfig?.inputBlocks,
@@ -103,6 +97,7 @@ export async function saveScheduledMessage(args: {
   const now = args.now ?? getServerNow();
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
+
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>

@@ -7,13 +7,12 @@ Translation: current
 
 ## Abstract
 
-Shared notification settings previously loaded a vendor SDK and delegated device
-identity to it. The client now registers native tokens or browser subscriptions
-through injected authenticated platform operations.
+Shared notification settings select OneSignal by default and direct registration
+only when the hosted configuration explicitly enables it. Direct mode registers
+native tokens or browser subscriptions through injected authenticated operations.
 Native shells and explicitly opted-in, capable browsers are supported. Web uses
 a configured VAPID public key and a dedicated Service Worker. The private native shell owns
-OS registration and ActivityKit; the hosted backend owns delivery. This removes
-vendor runtime dependencies while retaining existing settings and local Electron
+OS registration and ActivityKit; the hosted backend owns delivery. The provider facade retains existing settings and local Electron
 notifications. Provider acceptance and native device delivery remain separate
 verification boundaries.
 
@@ -29,11 +28,11 @@ apps without putting provider credentials or configuration in shared code. The
 host must allowlist app identities; the client field is not app attestation.
 
 Permission and opt-in preference are distinct from confirmed registration.
-Settings report success only after a backend save in the current generation;
+In direct mode, settings report success only after a backend save in the current generation;
 native hosts await the initial OS token/upload and serialize local commands without
 queuing logout behind network uploads. Logout revokes native registration even
 before the authenticated port or delayed login exists, and invalidates scheduled
-login tasks. Hosts must bind subscriptions to the actual login session and reject
+login tasks. Direct hosts must bind subscriptions to the actual login session and reject
 sends after session revocation/expiry; bounded client cleanup alone is not authorization.
 
 Account changes invalidate old callbacks; sign-out stops local registration and
@@ -46,9 +45,51 @@ even before delayed in-memory login. Focus and subscription-change messages
 reconcile rotated keys/endpoints; closed workers never store session credentials.
 A browser requiring a fresh user gesture can require explicit re-enablement.
 
-Keeping the old SDK would preserve third-party identity and script loading;
-a separate shared backend client would violate the platform boundary. The chosen
-facade preserves the current settings contract without either dependency.
+The restored SDK preserves third-party identity and script loading as a deliberate
+rollback option. A separate shared backend client would violate the platform boundary,
+so provider selection still arrives through the authenticated route's injected port.
+OneSignal login and hosted delivery use the original verified `userId` unchanged.
+A version prefix disconnects existing subscriptions from their delivery target, so
+clients and senders must not transform the account identity. Existing subscriptions
+remain addressable by that account ID; restoring delivery does not require a new
+identity namespace.
+Opt-out and logout revoke both providers. An absent Web preference preserves an
+existing OneSignal subscription, while new Web subscriptions require explicit opt-in.
+
+OneSignal retains its SDK-managed identity lifetime: it does not inherit the direct
+backend's session-revocation guarantee. A server-side session-bound enrollment scheme
+would be required for that guarantee. Provider switching requires current clients;
+offline clients cannot install a removed SDK from a remote configuration change.
+
+## Native mobile clients
+
+The independent Swift and Kotlin clients under `apps/mobile` do not consume the
+shared Web/Capacitor facade. Their process-owned notification coordinators read
+`pushSubscriptions:configuration` and select OneSignal unless the successful
+response explicitly enables direct delivery. Query failures do not authorize a
+provider change. Native OneSignal logins use the original verified account ID
+directly; payload recipient checks and navigation require that same ID. No identity
+wrapper or versioned namespace is involved. Foreground display and click routing
+still reject missing or mismatched recipients, including after account changes.
+
+Direct registration uses a stable installation UUID and the authenticated app
+session. iOS submits its actual Bundle ID, while Android supplies a token from
+its configured Firebase project. Provider secrets remain server-owned. The
+notification coordinator owns credential snapshots, serializes cleanup against
+registration and fences retired local account work. A transport timeout is not proof
+of server cancellation or commit order: ambiguous writes can race later server
+operations. These clients do not add server-side registration generations.
+Notification failures are isolated
+from sign-in and conversation availability; foreground/auth refresh retries
+registration rather than replaying notifications. iOS does not restore removed
+Live Activities.
+
+A backend switch alone cannot re-enroll offline devices. Accepted OS/provider
+messages can arrive after logout, and OneSignal does not inherit direct delivery's
+server-side session revocation guarantees. Keep this limitation distinct from
+client click ownership checks. Native checks cover the lifecycle and routing
+boundaries; real provider credentials, OS permission/signing and device delivery
+still require platform acceptance tests.
 
 ## Verification
 

@@ -46,6 +46,7 @@ export type PushMessageQueueInput = Omit<
 };
 
 export type UseSessionDocResult = {
+  loadError?: boolean;
   /** Control-plane state (session, queue, preview, fork, cursor, runtime config). */
   doc: SessionDocState;
   /**
@@ -140,6 +141,7 @@ export function useSessionDoc(
     () => (enabled && runtime?.peekSessionStore?.(sessionId)) || null
   );
   const [ready, setReady] = useState(() => loadedStore !== null);
+  const [loadError, setLoadError] = useState(false);
   const [syncState, setSyncState] = useState<RoomSyncState>(
     () => loadedStore?.getSyncState() ?? 'idle'
   );
@@ -148,6 +150,7 @@ export function useSessionDoc(
   );
   useEffect(() => {
     let cancelled = false;
+    setLoadError(false);
     let acquiredStore = false;
     let unsubscribe: (() => void) | null = null;
     let unsubscribeSyncState: (() => void) | null = null;
@@ -222,6 +225,7 @@ export function useSessionDoc(
           },
         });
       } catch (error) {
+        if (!cancelled) setLoadError(true);
         console.error('Failed to load session doc', { sessionId, error });
       }
     })();
@@ -460,6 +464,7 @@ export function useSessionDoc(
 
   return {
     doc: state,
+    loadError,
     history,
     addHistory,
     pushMessageQueue,

@@ -1,0 +1,23 @@
+{
+  "name": "lody-android-runtime-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "snapshot:check": "node snapshot.mjs"
+  },
+  "dependencies": {
+    "@loro-dev/flock-wasm": "0.4.3",
+    "@loro-dev/streams-client": "0.7.0",
+    "@loro-dev/streams-crdt": "0.16.1",
+    "fzstd": "0.1.1",
+    "loro-crdt": "1.15.1",
+    "loro-mirror": "2.3.2",
+    "remend": "1.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

@@ -203,10 +203,8 @@ reinsert ciphertext. Keep lightweight original-intent digests to reject altered
 requestId reuse. Purged version reads may return null; old readHead retains its
 removed high water as storage evidence only, never a client verification pin.
 
-`latestForMember` remains an independent account-authenticated query for current
-workspace members, returning ciphertext/untrusted metadata only. It accepts no
-device credential and cannot renew execution freshness; machines use their own
-credential-authenticated latest-head action.
+There is no account-authenticated read of sharing ciphertext. Machines and clients
+use the credential-authenticated latest-head action.
 
 Local cache age is strictly less than 15 minutes from before latest-read I/O,
 intersected with ledger/request deadlines. A server withholding newer versions

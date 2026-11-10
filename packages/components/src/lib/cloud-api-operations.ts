@@ -96,9 +96,12 @@ function capabilityForOperation(name: string): PlatformCapability {
     name.startsWith('e2eeMembers:') ||
     // Personal device pairing relays: account-scoped, never on local composition.
     name.startsWith('e2eeAccountPairing:') ||
+    name.startsWith('e2eeAutomaticPairing:') ||
     name.startsWith('e2eeJoinMailbox:')
   )
     return 'multiWorkspace';
+  if (name.startsWith('workspaceMembers:')) return 'teamSharing';
+  if (name.startsWith('e2eeMachineSharing:')) return 'teamSharing';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
@@ -110,6 +113,8 @@ function capabilityForOperation(name: string): PlatformCapability {
   if (name.startsWith('machineCredentials:') || name.startsWith('machinePairing:')) {
     return 'remoteMachines';
   }
+  if (name === 'machines:listSessionAccess' || name === 'machines:setSessionReadSharedWithTeam')
+    return 'teamSharing';
   if (name === 'machines:setMachineSharedWithTeam') return 'teamSharing';
   if (name.startsWith('machines:')) return 'remoteMachines';
   if (name.startsWith('localProjects:') || name.startsWith('sessionSharing:')) return 'teamSharing';
@@ -146,6 +151,11 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  e2eeMachineSharing: {
+    listVersions: query<ConvexApi['e2eeMachineSharing']['listVersions']>(
+      'e2eeMachineSharing:listVersions'
+    ),
+  },
   /** Account-wide pairing relay for portable hosts. Opaque bytes; hosts verify every tag. */
   e2eeAccountPairing: {
     submit: mutation<ConvexApi['e2eeAccountPairing']['submit']>('e2eeAccountPairing:submit'),
@@ -170,6 +180,13 @@ export const cloudOperations = {
       import('@lody/cloud-api').E2eeMemberRequests['preview'],
       import('@lody/cloud-api').E2eeMemberReplies['preview']
     >('teamSharing', 'e2eeMembers:preview'),
+  },
+  e2eeAutomaticPairing: {
+    pending: query<ConvexApi['e2eeAutomaticPairing']['pending']>('e2eeAutomaticPairing:pending'),
+    read: query<ConvexApi['e2eeAutomaticPairing']['read']>('e2eeAutomaticPairing:read'),
+    exchange: mutation<ConvexApi['e2eeAutomaticPairing']['exchange']>(
+      'e2eeAutomaticPairing:exchange'
+    ),
   },
   e2eeWorkspaces: {
     memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
@@ -224,6 +241,7 @@ export const cloudOperations = {
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
+  workspaceMembers: { list: query<ConvexApi['workspaceMembers']['list']>('workspaceMembers:list') },
   auth: {
     transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
       'auth:transferWorkspaceOwnership'
@@ -244,6 +262,10 @@ export const cloudOperations = {
     ),
   },
   pushSubscriptions: {
+    configuration: defineCloudQuery<Record<string, never>, { selfHostedEnabled: boolean }>(
+      'cloudAccount',
+      'pushSubscriptions:configuration'
+    ),
     register: defineCloudMutation<PushRegistration, null>(
       'cloudAccount',
       'pushSubscriptions:register'
@@ -358,6 +380,9 @@ export const cloudOperations = {
     setSubscriptionCancelAtPeriodEnd: action<
       ConvexApi['billing']['setSubscriptionCancelAtPeriodEnd']
     >('billing:setSubscriptionCancelAtPeriodEnd'),
+    getSubscriptionPaymentStatus: action<ConvexApi['billing']['getSubscriptionPaymentStatus']>(
+      'billing:getSubscriptionPaymentStatus'
+    ),
     setSubscriptionInterval: action<ConvexApi['billing']['setSubscriptionInterval']>(
       'billing:setSubscriptionInterval'
     ),
@@ -434,6 +459,12 @@ export const cloudOperations = {
     ),
   },
   machines: {
+    listSessionAccess: query<ConvexApi['machines']['listSessionAccess']>(
+      'machines:listSessionAccess'
+    ),
+    setSessionReadSharedWithTeam: mutation<ConvexApi['machines']['setSessionReadSharedWithTeam']>(
+      'machines:setSessionReadSharedWithTeam'
+    ),
     listVisibleMachines: query<ConvexApi['machines']['listVisibleMachines']>(
       'machines:listVisibleMachines'
     ),

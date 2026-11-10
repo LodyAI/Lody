@@ -2,6 +2,25 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only. Parent main-process rules apply.
 
+## Personal-device approval
+
+Confirm the signed admission through ledger-only refresh before publishing its
+invitation. Key distribution belongs to the existing account/workspace-bound main
+owner and must not block the approval response. Register that delivery before the
+publication await so reset or sign-out can stop it; a late publication result must
+never recreate a stopped task. Invitation publication is not key receipt or content
+readiness.
+
+Capture a personal approval's account generation before its first await and its
+original native owner on first access. Reset invalidates matching in-flight
+approvals even without a delivery slot. Check that operation and owner while
+registering delivery under the account lock; same-account re-login cannot revive
+it. Retire the operation ticket on settlement without gating other workspaces.
+Control-only senders receive a missing current key before distributing; failed
+key delivery retains the approved admission and its bounded retry owner. Delivery
+slots retain their login generation; starts, retries and result settlement cannot
+borrow a later same-account login.
+
 ## E2EE access loss
 
 Only parsed HTTP 560 codes `e2ee_member_removed`/`e2ee_device_revoked` from explicitly

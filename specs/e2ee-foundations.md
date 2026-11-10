@@ -3,9 +3,14 @@
 Status: approved
 Translation: current
 
-Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
-Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
-(session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
+Approved revision: [`623d2ed750adef6e87f20631faf45bee8ae69121`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+Approval: 2026-11-10, the owner approved this revision: retain the latest policy
+and remind the user to review and re-sign after signer revocation; verify only the
+latest signed version. [Revision and approval record](https://github.com/LodyAI/Lody/pull/2487).
+
+Original approval: 2026-10-28, reviewed and approved by the owner-authorized
+coordinator (session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894),
+[original approved revision](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862).
 
 [中文](e2ee-foundations.zh.md)
 
@@ -241,7 +246,7 @@ a new root/resource even for the same member/machineId. The old generation remai
 terminal. New sharing requires new explicit owner intent and starts at revision
 1/null parent, without importing old grants, pins or deleted policy history.
 
-Signed current-only policy v2 binds workspace ID, pinned genesis, machineId,
+Signed current-only policy v3 binds workspace ID, pinned genesis, machineId,
 owner membership instance, generation, revision/previous original-frame digest,
 requestId, complete state, personal signer and descriptive issuedAt. A distinct
 business signature/AAD domain and generation-qualified resource use existing
@@ -255,14 +260,22 @@ substitute for verified pins. Exact retry receipts never resurrect cleaned frame
 
 Before each start and later authorized action, check current ledger eligibility,
 actual machine key/generation and the current owner-personal policy; actual local
-projects also need their own switch. A revoked signer invalidates execution on
-its old policy. Historical owner-personal data may preserve state for a new
-explicit same-generation intent, but cannot grant execution or skip history.
+projects also need their own switch. Verify only the latest original: its signature,
+resource/binding/generation, and a revision no lower than the local pin; equal
+revisions require equal digests. Intermediate policy history is not required.
+The latest service-accepted policy signed by a historically admitted owner-personal
+device keeps authorizing after that device is revoked. Settings show a nonblocking
+review-and-re-sign reminder; a current personal device re-signs the complete list
+unchanged, or edits it first. This relies on the service checking current device
+eligibility at commit time, refusing revoked devices, and not maliciously accepting
+or withholding policies. That is an owner-accepted service-trust premise, not a
+cryptographic proof of signing time.
 Withdrawal blocks new starts/later actions without killing already running tasks.
 A separate account display query returns only ciphertext/untrusted metadata.
 
 Observed withdrawal invalidates authorization immediately. A strictly less than
-15-minute memory cache bounds time since this machine's authenticated latest read
+15-minute memory cache (see [outage windows](e2ee/execution-freshness-outage.md) for
+the machine's own member) bounds time since this machine's authenticated latest read
 started, intersected with ledger/request deadlines. It does **not** prove an unknown
 withdrawal takes effect within 15 minutes if the server continuously withholds new
 heads: signatures/chains detect known rollback/forks, not globally latest state.
@@ -300,7 +313,9 @@ The execution machine initiates its own authenticated latest-ledger read and
 records local start time **before network I/O**. Verify through that read's latest
 boundary; cache only the remaining part of a maximum **15 minutes from that
 start**, in memory. Slow or failed reads and forwarded/cached pages cannot renew
-it. Intersect with request/upstream deadlines and reserve clock/stop margin;
+it. When a read gets no answer, the machine's own member keeps the longer windows of
+[execution freshness during a backend outage](e2ee/execution-freshness-outage.md),
+counted from the same start. Intersect with request/upstream deadlines and reserve clock/stop margin;
 never wait on network under a global account lock. Restart discards this grant
 and requires online authenticated revalidation before new remote execution.
 Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
@@ -404,7 +419,7 @@ product channels or establish runtime acceptance.
 
 ## Format compatibility
 
-**Freeze point.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) becomes permanent when a production deployment first enables encrypted workspace creation, because only then can a ledger exist that must never break. Merging code does not freeze it. Until that point the format may still change, but only with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault and trust-anchor encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. After the freeze the vector is never regenerated.
+**Freeze point.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) becomes permanent when a production deployment first enables encrypted workspace creation, because only then can a ledger exist that must never break. Merging code does not freeze it. Until that point the format may still change, but only with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. After the freeze the vector is never regenerated.
 
 **What freezes.** Every record that v1 accepts at a position must stay accepted by every later client, with the same bytes, hashes and resulting ledger state. New behavior, including relaxed or extended permissions, takes effect only through records after a capability declaration; it never changes how an existing record verifies.
 
@@ -666,3 +681,7 @@ transaction, retaining offset, signer, SHA-256 digest, original credential windo
 and phase. Archived identities remain idempotent, reject different bytes at the
 same offset and can never become current again. Capacity budgets count retained
 bodies rather than archived identities.
+
+## Automatic current-workspace pairing (draft increment, 2026-11-10)
+
+The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; the person compares six-digit codes and approves once on an existing personal device. Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison is mandatory: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment is draft and has no independent cryptographic approval. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.
