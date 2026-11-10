@@ -1,5 +1,6 @@
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
 import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
@@ -3153,6 +3154,11 @@ export function LoroAppSidebar({
                       {section.machineId && section.kind === 'remote' ? (
                         <SidebarMachineOfflinePill machineId={section.machineId} />
                       ) : null}
+                      {/* Only an encrypted workspace's outage window has an entry, so this
+                          renders nothing for ordinary workspaces. */}
+                      {section.kind === 'local' ? (
+                        <E2eeMachineWindowPill workspaceId={scopedWorkspaceId} />
+                      ) : null}
                     </span>
                   }
                   collapsed={sectionCollapsed}
@@ -3934,6 +3940,7 @@ export function LoroAppSidebar({
         scrollStateKey={workspaceSlug}
         workspaceSwitcherEnabled={multiWorkspaceAvailable}
         connectionUiState={connectionUiState}
+        offlineDetail={<E2eeOfflineSummary workspaceId={resolvedWorkspaceId} />}
         workspaceSyncing={sessionsListLoading}
         isElectron={isElectron}
         // Traffic lights auto-hide in native fullscreen — drop the reserved

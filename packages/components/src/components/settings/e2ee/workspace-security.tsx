@@ -145,7 +145,10 @@ function SecuritySettings({
                     </E2eeConsoleSection>
                     <E2eeConsoleSection tab="recovery">
                       {/* Remount per account: no plan, failure, retry or dialog state crosses accounts. */}
-                      <RecoveryVaultSection key={scope.accountId ?? ''} />
+                      <RecoveryVaultSection
+                        key={scope.accountId ?? ''}
+                        accountId={scope.accountId}
+                      />
                     </E2eeConsoleSection>
                   </>
                 }

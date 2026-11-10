@@ -324,6 +324,20 @@ export const CliRuntimeStateSchema = z
       })
       .strict()
       .optional(),
+    /** Encrypted workspaces whose execution relies on the backend-outage window of
+     * specs/e2ee/execution-freshness-outage.md, keyed by workspace ID. Wall-clock ends
+     * of the window from the last successful ledger read; display only, never authority. */
+    e2eeAccessWindows: z
+      .record(
+        z.string().min(1),
+        z
+          .object({
+            executionUntilMs: z.number().int().nonnegative(),
+            readUntilMs: z.number().int().nonnegative(),
+          })
+          .strict()
+      )
+      .optional(),
     machineId: z.string().min(1).optional(),
     pid: z.number().int(),
     updatedAtMs: z.number(),

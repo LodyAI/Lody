@@ -14,6 +14,7 @@ import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-v
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
+import { E2eeSecurityPanel } from '../src/components/settings/e2ee/security-panel';
 const navigation = vi.hoisted(() => ({ target: null as unknown }));
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => async (target: unknown) => {
@@ -303,6 +304,33 @@ describe('recovery vault settings actions', () => {
     }
   });
 
+  it('shows when this device last checked the recovery file', async () => {
+    const view = await mount(
+      {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'verified', update: 1 })],
+        uncovered: [],
+      },
+      {
+        'e2ee.inspectRecoveryFile': () => ({
+          outcome: 'opened',
+          vaultId: 'v'.repeat(32),
+          workspaces: 1,
+        }),
+      }
+    );
+    try {
+      expect(view.text).toContain('e2ee.recovery.fileSaved');
+      expect(view.text).not.toContain('e2ee.recovery.fileSavedChecked');
+      await view.click('e2ee.recovery.check');
+      expect(view.text).toContain('e2ee.recovery.fileSavedChecked');
+    } finally {
+      view.done();
+    }
+  });
+
   it('keeps read-only actions and offers retry when the recovery state cannot be read', async () => {
     let fail = true;
     const view = await mount(async () => {
@@ -335,6 +363,50 @@ describe('recovery vault settings actions', () => {
       expect(view.text).toContain('e2ee.recovery.workspace.saved');
     } finally {
       view.done();
+    }
+  });
+});
+
+describe('encrypted workspace settings entry failures', () => {
+  it('states what happened and offers the one step that helps', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const opened: unknown[] = [];
+    const retried: unknown[] = [];
+    const render = (error: string) =>
+      act(async () =>
+        root.render(
+          <E2eeSecurityPanel
+            error={error}
+            onUpdate={() => {}}
+            onRetry={() => retried.push(error)}
+            onOpenConsole={(tab) => opened.push(tab)}
+          />
+        )
+      );
+    const button = (label: string) =>
+      [...container.querySelectorAll('button')].find((b) => b.textContent === label);
+    try {
+      // A lost identity is repaired from the console, with another authorized device.
+      await render('e2ee_missing-binding');
+      expect(container.textContent).toContain('e2ee.security.error.identity.title');
+      const consoleButtons = [...container.querySelectorAll('button')].filter(
+        (b) => b.textContent === 'e2ee.security.openConsole'
+      );
+      await act(async () => consoleButtons.at(-1)!.click());
+      expect(opened).toEqual([undefined]);
+      // A conflict only needs another look.
+      await render('e2ee_management_conflict');
+      await act(async () => button('e2ee.failure.action.refresh')!.click());
+      expect(retried).toEqual(['e2ee_management_conflict']);
+      // Restarting is the person's step; the card offers no button that cannot do it.
+      await render('e2ee_restart-required');
+      expect(container.textContent).toContain('e2ee.security.error.restart.title');
+      expect(button('e2ee.failure.action.refresh')).toBeUndefined();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
     }
   });
 });
@@ -671,7 +743,7 @@ describe('encrypted workspace settings', () => {
     expect(container.querySelector('[role=status]')).not.toBeNull();
     fail = true;
     await click('e2ee.security.complete');
-    expect(container.textContent).toContain('e2ee.security.retryHint');
+    expect(container.textContent).toContain('e2ee.security.error.retry.title');
     await openConsole('devices');
     expect(page()).toContain('synthetic-machine');
     expect(signed).toBe(false);

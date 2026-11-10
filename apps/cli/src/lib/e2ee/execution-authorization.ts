@@ -35,6 +35,8 @@ const OUTAGE_READ_WINDOW_MS = 24 * 60 * 60_000;
 /** A failed read is not repeated for this long, so an outage does not delay every request. */
 const OUTAGE_RETRY_MS = 60_000;
 type Stamp = AuthorityStamp;
+/** Wall-clock ends of the outage window, for the person to see; never authority. */
+export type E2eeAccessWindow = { readonly executionUntilMs: number; readonly readUntilMs: number };
 
 /** One workspace/device-identity lifetime. This gate grants admission only for the
  * immediate new execution; callers must authenticate the frame and claim its journal
@@ -54,8 +56,9 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       sessionOwnerUserId?: string
     ) => Effect.Effect<{ allowed: boolean; isCurrent: () => boolean }, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
-    /** True while a window is in use, false once access is confirmed or refused again. */
-    onWindowNotice?: (active: boolean) => void;
+    /** True while a window is in use, with its wall-clock ends (display only); false once
+     * access is confirmed or refused again. */
+    onWindowNotice?: (active: boolean, window?: E2eeAccessWindow) => void;
     runtime: Pick<
       Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
       'status' | 'ingest' | 'executionLedger' | 'executionGeneration'
@@ -343,7 +346,11 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (relaxed) {
           if (!noticed) {
             noticed = true;
-            options.onWindowNotice?.(true);
+            // The window runs from the last successful latest read, never from now.
+            options.onWindowNotice?.(true, {
+              executionUntilMs: grantedFrom.wall + OUTAGE_EXECUTION_WINDOW_MS,
+              readUntilMs: grantedFrom.wall + OUTAGE_READ_WINDOW_MS,
+            });
           }
         } else grants.set(requesterDevice, grantedFrom);
         if (access === 'read') return { _tag: 'Authorized' };

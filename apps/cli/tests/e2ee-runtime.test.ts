@@ -8006,8 +8006,14 @@ describe('machine execution authorization freshness', () => {
       withOutage(({ fixture, io, makeGate }) =>
         Effect.gen(function* () {
           const notices: boolean[] = [];
-          const noticed = yield* makeGate(undefined, (notice) => notices.push(notice));
+          const windows: unknown[] = [];
+          const noticed = yield* makeGate(undefined, (notice, window) => {
+            notices.push(notice);
+            windows.push(window);
+          });
           io.respond = async () => page(fixture.records);
+          // The window is measured from this last successful read, not from the outage.
+          const lastRead = io.wall;
           yield* noticed.authorizeExecution('workspace', fixture.sender);
           io.respond = async () => {
             throw new CloudE2eeLedgerOutage();
@@ -8015,6 +8021,9 @@ describe('machine execution authorization freshness', () => {
           at(io, FIFTEEN_MINUTES);
           yield* noticed.authorizeExecution('workspace', fixture.sender);
           expect(notices).toEqual([true]);
+          expect(windows).toEqual([
+            { executionUntilMs: lastRead + 4 * HOUR, readUntilMs: lastRead + 24 * HOUR },
+          ]);
           io.respond = async () => page(fixture.records);
           at(io, FIFTEEN_MINUTES + 120_000);
           yield* noticed.authorizeExecution('workspace', fixture.sender);
