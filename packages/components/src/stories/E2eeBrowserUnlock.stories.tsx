@@ -7,9 +7,10 @@ const meta = {
   component: E2eeAccountPairingRequest,
   args: {
     autoStart: false,
+    workspaceId: 'synthetic',
     onJoined: () => {},
     runtime: {
-      openBrowserUnlock: () => {},
+      openBrowserRecovery: async () => false,
       accountPairingRequest: async () => state,
       requestAccountPairing: async () =>
         (state = {

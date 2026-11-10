@@ -78,6 +78,7 @@ import {
 import {
   makeOwnedPersonalDeviceHost,
   makePersonalWorkspaceRuntime,
+  personalRuntimeRecovery,
   type PersonalHostPorts,
   PersonalMachineSharing,
   PersonalCloseIncomplete,
@@ -1867,6 +1868,7 @@ export async function recoverBrowser(
     repair?: boolean;
     revokePersonal?: boolean;
     setup?: boolean;
+    runtime?: boolean;
   } = {}
 ) {
   await boot('create-or-open', false, 'recovery', options.wrongAccount ? 'def' : 'abc', 'abc');
@@ -2000,8 +2002,25 @@ export async function recoverBrowser(
             },
           ]);
         failKeys = options.failInstall ?? false;
+        let recoveryRuntime: E2eeWorkspaceRuntime | undefined;
+        if (options.runtime) {
+          yield* host.close();
+          recoveryRuntime = yield* makePersonalWorkspaceRuntime({
+            accountId: 'abc',
+            workspaceId: offer.workspaceId,
+            genesisHash: offer.genesisHash,
+            ports: runtimePorts,
+            retainedOffer: () => Effect.succeed(offer),
+            account: () => Effect.succeed({ userId: 'abc', source: 'network' as const }),
+            ledgerRecords: () =>
+              Effect.succeed(records.map((record, position) => ({ record, position }))),
+            run: Effect.runPromise,
+          });
+        }
         const restore = () =>
-          host.restoreRecovery({
+          (recoveryRuntime
+            ? personalRuntimeRecovery(recoveryRuntime)!.restore
+            : host.restoreRecovery)({
             vault,
             local,
             reference,
@@ -2029,6 +2048,51 @@ export async function recoverBrowser(
           };
         offer = result.success.offer;
         localStorage.setItem('recovery-offer', JSON.stringify(offer));
+        if (recoveryRuntime) {
+          const runtime = recoveryRuntime;
+          const readerA = yield* Effect.tryPromise(() =>
+            runtime.open(offer.workspaceId, undefined, 'abc', 'content-reader')
+          );
+          const readerB = yield* Effect.tryPromise(() =>
+            runtime.open(offer.workspaceId, undefined, 'abc', 'recovery-reader')
+          );
+          const before = yield* Effect.tryPromise(() => runtime.status(offer.workspaceId));
+          const backedUp = yield* personalRuntimeRecovery(runtime)!.setup({
+            vault,
+            local,
+            fetchCurrentEnvelope: envelope,
+            submitOriginal: (record) =>
+              Effect.sync(() => {
+                if (!records.some((old) => toHex(old) === toHex(record)))
+                  records.push(record.slice());
+                retain();
+                return { outcome: 'Committed' as const, record: record.slice() };
+              }),
+          });
+          yield* Effect.tryPromise(() =>
+            runtime.close(offer.workspaceId, 'abc', readerB.readerOwner)
+          );
+          const after = yield* Effect.tryPromise(() => runtime.status(offer.workspaceId));
+          const sealed = yield* Effect.tryPromise(() =>
+            runtime.seal(offer.workspaceId, {
+              epoch: 0,
+              room: { kind: 'doc', docId: 'retained-reader' },
+              context: runtimeContext,
+              plaintext: new TextEncoder().encode('content after recovery'),
+              additionalData: new Uint8Array(),
+            })
+          );
+          yield* Effect.tryPromise(() =>
+            runtime.close(offer.workspaceId, 'abc', readerA.readerOwner)
+          );
+          return {
+            ok: true,
+            outcome: result.success.outcome,
+            sealed: sealed.sealed.length > 64,
+            recoveryVerified: backedUp.recoverable,
+            sameIdentity: before.signingPublicKey === after.signingPublicKey,
+          };
+        }
         session = yield* host.open(offer, false, true);
         let recoveryVerified = false;
         if (options.setup) {

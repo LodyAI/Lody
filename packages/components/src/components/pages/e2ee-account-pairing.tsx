@@ -97,7 +97,7 @@ type RequestRuntime = Pick<
   | 'requestAccountPairing'
   | 'accountPairingRequest'
   | 'cancelAccountPairing'
-  | 'openBrowserUnlock'
+  | 'openBrowserRecovery'
   | 'requirePersonalComputer'
 >;
 
@@ -123,7 +123,7 @@ export function E2eeAccountPairingRequest(props: {
   const [error, setError] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
   const [personalComputer, setPersonalComputer] = useState(false);
-  const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserUnlock);
+  const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
   const [input, setInput] = useState('');
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
@@ -226,14 +226,22 @@ export function E2eeAccountPairingRequest(props: {
             {t('e2ee.browserUnlock.personal')}
           </label>
           <p {...stylex.props(styles.muted)}>{t('e2ee.browserUnlock.risk')}</p>
-          {runtime.openBrowserUnlock && (
+          {runtime.openBrowserRecovery && props.workspaceId && (
             <Button
               variant="secondary"
               disabled={!personalComputer || phase === 'busy' || phase === 'loading'}
               onClick={() =>
                 void run(async () => {
-                  runtime.openBrowserUnlock!();
-                  accept(await runtime.requestAccountPairing!({}));
+                  if (
+                    props.workspaceId &&
+                    (await runtime.openBrowserRecovery!(props.workspaceId))
+                  ) {
+                    if (live.current && !joined.current) {
+                      joined.current = true;
+                      props.onJoined();
+                    }
+                  }
+                  if (live.current) setPhase(state ? 'ready' : 'idle');
                 })
               }
             >

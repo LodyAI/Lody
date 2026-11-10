@@ -811,6 +811,16 @@ it.each(['chromium', 'webkit'] as const)(
 
 it.each([
   { options: {}, expected: { ok: true, outcome: 'Committed', sealed: true } },
+  {
+    options: { runtime: true },
+    expected: {
+      ok: true,
+      outcome: 'Committed',
+      sealed: true,
+      recoveryVerified: true,
+      sameIdentity: true,
+    },
+  },
   { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
   { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
   { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
@@ -839,7 +849,7 @@ it.each([
         write: false,
         logLevel: 'silent',
       });
-      await page.route('https://vault.lody.ai/**', (route) =>
+      await page.route('https://lody.ai/**', (route) =>
         route.fulfill({
           contentType: 'text/html',
           body:
@@ -848,7 +858,7 @@ it.each([
             '</script>',
         })
       );
-      await page.goto('https://vault.lody.ai/');
+      await page.goto('https://lody.ai/');
       expect(
         await page.evaluate(
           (input) => (globalThis as HostGlobal).HostFixture.recoverBrowser(input),

@@ -37,6 +37,8 @@ export {
 export {
   makePersonalWorkspaceRuntime,
   personalRuntimeAccountRequester,
+  personalRuntimeRecovery,
+  type PersonalRuntimeRecovery,
   type PersonalRuntimeOptions,
 } from './runtime';
 export { PersonalMachineSharing } from './platform';

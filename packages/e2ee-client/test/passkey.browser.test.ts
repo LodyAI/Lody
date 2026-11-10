@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 type Fixture = typeof import('./browser/passkey-fixture');
 type Surface = typeof globalThis & { PasskeyFixture: Fixture };
-const ORIGIN = 'https://vault.lody.ai';
+const ORIGIN = 'https://lody.ai';
 
 let browser: Browser;
 let script: string;

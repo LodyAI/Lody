@@ -304,7 +304,7 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 `browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
 It reports what the browser returned and decides nothing: a browser without PRF reports
 `prfEnabled: false` and no result, and `passkey-unlock` refuses it. Its test runs real
-Chromium on the `vault.lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
+Chromium on the `lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
 
 ## Verification and limits
 
@@ -337,8 +337,10 @@ real recovery test. `restoreRecovery` accepts an exact retained offer for a devi
 whose protected identity remains but workspace keys are missing; package pins still
 must match, and recovery never replaces the identity.
 
-`personalRuntimeAccountRequester` adapts the existing runtime owner for account
-pairing, without creating another host. Platforms may opt into the isolated Web
-unlock entry through `openBrowserUnlock`; the shared pairing page then requires
-explicit personal-computer consent before creating a request. The ordinary
-device-approval path remains available. The optional hook transfers no secrets.
+`personalRuntimeAccountRequester` and `personalRuntimeRecovery` adapt the existing
+runtime owner for account pairing and closed recovery commands. They do not create a
+second host or export private keys. Recovery setup borrows an approved session;
+its caller releases only its own reader after completion. Web's optional
+`openBrowserRecovery(workspaceId)` opens an in-app surface after personal-computer
+consent and returns true only for a ready workspace. It never starts account pairing.
+Other-device approval remains a separate choice.

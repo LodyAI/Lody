@@ -27,6 +27,14 @@ export const personalRuntimeAccountRequester = (runtime: E2eeWorkspaceRuntime) =
 
 type Host = Effect.Success<ReturnType<typeof makeOwnedPersonalDeviceHost>>;
 type Session = Effect.Success<ReturnType<Host['open']>>;
+/** Recovery uses the same identity owner as content and account approval. */
+export interface PersonalRuntimeRecovery {
+  restore(input: Parameters<Host['restoreRecovery']>[0]): ReturnType<Host['restoreRecovery']>;
+  setup(input: Parameters<Session['setupRecovery']>[0]): ReturnType<Session['setupRecovery']>;
+}
+const recoveries = new WeakMap<E2eeWorkspaceRuntime, PersonalRuntimeRecovery>();
+export const personalRuntimeRecovery = (runtime: E2eeWorkspaceRuntime) =>
+  recoveries.get(runtime) ?? null;
 /** Real application ports for one pinned workspace. No backend or identity creation is implicit. */
 export interface PersonalRuntimeOptions<E> {
   readonly accountId: string;
@@ -818,5 +826,9 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   };
   const exposed = Object.assign(runtime, { accountRequester });
   requesters.set(exposed, accountRequester);
+  recoveries.set(exposed, {
+    restore: (input) => checked(host.restoreRecovery(input)),
+    setup: (input) => withSession(workspaceId, (session) => session.setupRecovery(input)),
+  });
   return Object.freeze(exposed);
 });

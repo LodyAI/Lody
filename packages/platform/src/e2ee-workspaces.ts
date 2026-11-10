@@ -163,10 +163,10 @@ export interface E2eeAccountApprovalSession {
 /** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime
   extends E2eeAccountPairingRuntime, E2eeAutomaticPairingRuntime {
-  /** Explicit user gesture only: open the isolated browser unlock surface. Never sends pairing secrets or unlock material in a URL. */
-  openBrowserUnlock?(): void;
+  /** Explicit user gesture: open recovery inside this application. True means the requested workspace is ready. */
+  openBrowserRecovery?(workspaceId: string): Promise<boolean>;
   /** Browser device admission requires explicit personal-computer consent even
-   * when the isolated automatic opening entry is unavailable. */
+   * when opening through recovery or another device. */
   requirePersonalComputer?: boolean;
   /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
   readonly readerLeases?: 'preallocated-v1';

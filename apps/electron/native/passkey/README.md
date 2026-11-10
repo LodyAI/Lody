@@ -22,7 +22,7 @@ The cloud build owns these, because the public build has no vault:
 - Ship `build/Release/passkey_bridge.node` to `Contents/Resources/passkey_bridge.node`, signed by
   the same team. The main app keeps library validation.
 - Add to the main app's entitlements only, never the inherit plist:
-  `com.apple.developer.associated-domains` with `webcredentials:vault.lody.ai`,
+  `com.apple.developer.associated-domains` with `webcredentials:lody.ai`,
   `com.apple.application-identifier` with `YTRMX32C99.ai.lody.desktop`, and
   `com.apple.developer.team-identifier` with `YTRMX32C99`.
 - Embed a Developer ID provisioning profile with Associated Domains for `ai.lody.desktop`.

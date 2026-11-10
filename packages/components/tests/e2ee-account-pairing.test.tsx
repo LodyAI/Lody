@@ -738,34 +738,59 @@ describe('automatic pairing product flow', () => {
   });
 });
 
-it('browser self-unlock requires consent before either entry creates an identity, then shows only its pairing code', async () => {
+it('in-app recovery requires consent and never starts pairing; only a completed workspace resumes content', async () => {
   const host = requesterHost();
   const opened: string[] = [];
+  let joined = false;
   const runtime = {
     ...host.runtime,
-    openBrowserUnlock: () => {
-      opened.push('isolated-unlock');
+    openBrowserRecovery: async (id: string) => {
+      opened.push(id);
+      return true;
     },
   };
   await act(async () =>
     root.render(
-      <E2eeAccountPairingRequest runtime={runtime} autoStart={false} onJoined={() => {}} />
+      <E2eeAccountPairingRequest
+        runtime={runtime}
+        autoStart={false}
+        workspaceId="workspace-A"
+        onJoined={() => {
+          joined = true;
+        }}
+      />
     )
   );
-  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(true);
   expect((button('e2ee.browserUnlock.open') as HTMLButtonElement).disabled).toBe(true);
   expect(host.state).toBeNull();
-  expect(opened).toEqual([]);
-  const consent = container.querySelector('[role="checkbox"]') as HTMLElement;
-  await act(async () => consent.click());
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
   await click('e2ee.browserUnlock.open');
-  expect(text()).toContain('e2ee.browserUnlock.risk');
-  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
-    CODE
+  expect(opened).toEqual(['workspace-A']);
+  expect(joined).toBe(true);
+  expect(host.state).toBeNull();
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')).toBeNull();
+});
+
+it('cancelled recovery keeps the device approval choice usable without creating a request', async () => {
+  const host = requesterHost();
+  let joined = false;
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={{ ...host.runtime, openBrowserRecovery: async () => false }}
+        autoStart={false}
+        workspaceId="workspace-A"
+        onJoined={() => {
+          joined = true;
+        }}
+      />
+    )
   );
-  expect(opened).toEqual(['isolated-unlock']);
-  await act(async () => consent.click());
-  expect((button('e2ee.accountPair.request.restart') as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.browserUnlock.open');
+  expect(joined).toBe(false);
+  expect(host.state).toBeNull();
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('browser device requests retain personal-computer consent while automatic opening is unavailable', async () => {
