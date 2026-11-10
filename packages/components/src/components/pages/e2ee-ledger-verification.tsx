@@ -393,9 +393,9 @@ function VerifyDialog(props: {
 /** Public docs section that explains how the security code works. */
 export function securityCodeDocsUrl(language: string | undefined): string {
   const path = language?.toLowerCase().startsWith('zh')
-    ? '/zh/docs/encrypted-workspaces'
-    : '/docs/encrypted-workspaces';
-  return `https://lody.ai${path}#security-code`;
+    ? '/zh/docs/encrypted-workspaces-security-code'
+    : '/docs/encrypted-workspaces-security-code';
+  return `https://lody.ai${path}`;
 }
 
 /** The ledger's verification code: what members compare out of band. */

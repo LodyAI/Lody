@@ -1,57 +1,63 @@
 ---
 title: End-to-End Encrypted Workspaces
-description: How Lody end-to-end encrypted workspaces work - content is decrypted only on authorized devices, member and device changes are confirmed by signed records, and security codes let teammates compare them.
+description: A plain-language guide to Lody end-to-end encrypted workspaces - who can see content, inviting teammates and adding devices, and what happens if you lose your devices.
 ---
 
 # End-to-End Encrypted Workspaces
 
-In an end-to-end encrypted workspace, conversations, files and agent output are decrypted only on devices you have authorized. Lody's servers relay and store the data, but only ever see ciphertext they cannot read.
+In an end-to-end encrypted workspace, conversations, files and agent output **can only be read on devices you have authorized**. Lody's servers relay and store the data, but only ever see data they cannot read.
 
 <Callout type="warn">
-If you lose every authorized device and have no recovery file or passkey, the workspace can never be opened again, and Lody cannot recover it. Set up a recovery file in the encryption console soon after you create the workspace.
+If you lose every authorized device and have no recovery file, the workspace can never be opened again, and Lody cannot recover it. Set up a recovery file soon after you create the workspace.
 </Callout>
 
-## How content is encrypted
+## How it differs from a standard workspace
 
-- Each workspace has a **workspace key**. Content is encrypted with it on your device before it is sent.
-- Each authorized device has its own device keys, kept in the operating system's secure storage (for example the macOS Keychain). The workspace key is only ever delivered to authorized devices, encrypted.
-- The server never receives the workspace key, so it can relay and store content but cannot read it.
+| | Standard workspace | End-to-end encrypted workspace |
+| --- | --- | --- |
+| Who can read content | Members with access, and Lody's servers | Only authorized devices |
+| Using a new device | Sign in | Sign in, then approve it from an authorized device |
+| Web app | Works right away | The browser must be authorized first |
+| Losing every device | Sign in again | Needs a recovery file or passkey |
 
-## Signed records decide who is in
+## Everyday tasks
 
-Inviting a member, approving a device, removing a member and transferring ownership are each written as a **signed record**, signed by a permitted member on their own device. Every device checks these records itself:
+<Steps>
+<Step>
 
-- A bad signature, a reordered history or an action someone was not allowed to take is rejected, and inviting and approving pause.
-- The server only passes records along and cannot sign for anyone, so it cannot quietly add a member or a device.
+**Recognize an encrypted workspace**: a lock appears next to its name. Hover the lock for an explanation.
 
-You can read these records under **Security code & history** in the encryption console, for example "Jordan Lee joined the workspace (approved by Alex Chen)".
+</Step>
+<Step>
 
-## Adding a new device
+**Invite a teammate**: send an invitation under Settings › General › Open encryption console › Members & invitations. Once an administrator approves, their device receives the key.
 
-When a new device opens the encrypted workspace it sends a request automatically. Your authorized computer or phone shows an approval window; check that the numbers on both screens match and choose **Authorize**. The new device receives the key and opens the workspace. The server only relays the request and cannot approve it for you.
+</Step>
+<Step>
 
-## Removing members and replacing the key
+**Open it on a new device**: the new device sends a request automatically. Your authorized computer or phone shows an approval window; check the numbers match on both screens and choose Authorize.
 
-A removed member's devices lose access immediately and cannot see anything new. When you remove someone, also **replace the workspace key** so that an old device holding the old key cannot decrypt new content. History already downloaded to their devices cannot be taken back.
+</Step>
+<Step>
 
-## Security code [#security-code]
+**Compare with teammates**: under Security code & history, compare security codes to confirm everyone sees the same members and devices.
 
-The security code is a string of digits computed from the workspace's current member and authorization information. It lets you confirm that the members and devices you see are exactly what everyone else sees.
+</Step>
+<Step>
 
-- If your code **matches** what other members, and your other devices, show, the workspace member and authorization information is consistent: nobody was shown a different record by the server.
-- If it **differs**, both refresh and compare again (codes also differ when one side is out of date). If it still differs, do not invite or approve anyone, and tell the workspace owner.
+**Set up recovery**: under Recovery, save a recovery file or add a passkey so you can still open the workspace if every device is lost.
 
-To compare, open **Security code & history → Compare with a teammate** in the encryption console and scan the QR code on their screen, or read the groups of digits aloud. In person, on video or by phone all work; avoid sending the code only through Lody itself.
+</Step>
+</Steps>
 
-<Callout type="info">
-A matching code proves you all see the same member and authorization records. It does not prove that someone is who they claim to be; make sure you are comparing with the teammate you know.
-</Callout>
+## Learn more
 
-## Recovery
-
-Under **Recovery** in the encryption console you can save a recovery file or add a supported passkey. If you lose every device, use them to open the workspace again on a new one. Keep the recovery file offline: anyone with both the file and your account can read your encrypted workspaces.
+<Cards>
+  <Card title="How the permission ledger works" href="/docs/encrypted-workspaces-ledger" description="Who can add members and devices, and why the server cannot quietly add anyone." />
+  <Card title="What the security code proves" href="/docs/encrypted-workspaces-security-code" description="How the code is computed and what a match or mismatch means." />
+</Cards>
 
 ## Known limits
 
 - In a browser, security depends on the code the Lody website serves not being tampered with. If that matters to you, use the desktop or mobile app.
-- When the server is unreachable, your machines can keep working for a limited time with the member information they already confirmed; inviting, approving devices and replacing keys wait until you are back online.
+- When the server is unreachable, your machines can keep working for a limited time; inviting, approving devices and replacing keys wait until you are back online.
