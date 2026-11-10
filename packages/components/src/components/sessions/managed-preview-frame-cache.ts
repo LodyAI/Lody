@@ -48,9 +48,6 @@ const supportsStatePreservingMove = (): boolean =>
   typeof HTMLElement !== 'undefined' &&
   typeof (HTMLElement.prototype as StatePreservingParent).moveBefore === 'function';
 
-export const supportsCredentiallessManagedPreviewFrames = (): boolean =>
-  typeof HTMLIFrameElement !== 'undefined' && 'credentialless' in HTMLIFrameElement.prototype;
-
 const cancelDormantEviction = (entry: ManagedPreviewFrameEntry): void => {
   if (entry.evictionTimer === null) return;
   clearTimeout(entry.evictionTimer);
@@ -122,7 +119,11 @@ const createEntry = (
     // storage, clipboard, fullscreen, or top-navigation privileges.
     iframe.setAttribute('sandbox', 'allow-scripts');
     // If source JavaScript navigates the iframe despite the self-contained
-    // contract, keep the resulting request in a credentialless context.
+    // contract, keep the resulting request in a credentialless context where the
+    // engine supports it. Engines without it (WebKit, so every iOS browser) still
+    // run the document in an opaque origin under the policy-owned CSP, which has
+    // no access to Lody's cookies, storage, or network; the attribute only adds
+    // defense in depth, so it is not required for executable previews.
     iframe.setAttribute('credentialless', '');
     iframe.referrerPolicy = 'no-referrer';
     iframe.setAttribute(
@@ -191,9 +192,6 @@ export const acquireManagedPreviewFrame = ({
   host: HTMLElement;
   documentHtml?: string;
 }): { iframe: HTMLIFrameElement; loaded: boolean } => {
-  if (documentHtml !== undefined && !supportsCredentiallessManagedPreviewFrames()) {
-    throw new Error('Static HTML preview requires credentialless iframe support.');
-  }
   // Static documents can execute arbitrary user-authored JavaScript. Never
   // park them in the dormant-frame cache where they could keep running after
   // the file tab or rendered mode is no longer visible.

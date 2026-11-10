@@ -1285,48 +1285,39 @@ describe('SessionFileContentView', () => {
     );
   });
 
-  it('opens mobile HTML without credentialless support and toggles source without executing it', async () => {
+  it('runs HTML scripts in the managed preview without credentialless support', async () => {
     delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
       .credentialless;
-    const text = '<h1>Preview</h1><script>window.executed = true</script>';
-    const provider = createFakeSessionFileProvider({
-      files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
-      snapshots: { 'result.html': { kind: 'text', text } },
-    });
-    const renderView = (active = true) =>
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'result.html',
-        fileProvider: provider,
-        fileProviderPending: false,
-        defaultHtmlPreview: true,
-        active,
+    try {
+      const text = '<h1>Preview</h1><script>window.executed = true</script>';
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'result.html': { kind: 'text', text } },
       });
-    const view = await render(renderView());
-    await flushMicrotasks();
-    const frame = view.querySelector('iframe');
-    expect(frame?.getAttribute('sandbox')).toBe('');
-    expect(frame?.srcdoc).toContain('<h1>Preview</h1>');
-    expect(frame?.srcdoc).not.toContain('<script>');
-    expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
-    expect(view.querySelector('button[aria-label="Reload"]')).toBeNull();
-    await act(async () =>
-      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click()
-    );
-    expect(view.querySelector('iframe')).toBeNull();
-    expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
-      text
-    );
-    await act(async () =>
-      view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]')?.click()
-    );
-    expect(view.querySelector('iframe')).not.toBeNull();
-    await rerender(renderView(false));
-    expect(view.querySelector('iframe')).toBeNull();
-    await rerender(renderView());
-    expect(view.querySelector('iframe')).not.toBeNull();
-    installCredentiallessIframeSupportForTest();
+      const renderView = (active = true) =>
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'result.html',
+          fileProvider: provider,
+          fileProviderPending: false,
+          defaultHtmlPreview: true,
+          active,
+        });
+      const view = await render(renderView());
+      await flushMicrotasks();
+      const preview = view.querySelector('[data-testid="managed-html-preview"]');
+      expect(preview).not.toBeNull();
+      expect(preview?.getAttribute('data-document-html')).toContain(
+        '<script>window.executed = true</script>'
+      );
+      expect(view.querySelector('iframe[sandbox=""]')).toBeNull();
+      expect(view.querySelector('button[aria-label="Reload"]')).not.toBeNull();
+      await rerender(renderView(false));
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
+    } finally {
+      installCredentiallessIframeSupportForTest();
+    }
   });
 
   it('does not preview a truncated HTML snapshot even with mobile default preview', async () => {

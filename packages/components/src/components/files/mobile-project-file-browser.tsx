@@ -22,7 +22,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { ReadOnlyHtmlPreview } from '@/components/sessions/read-only-html-preview';
+import { ScriptedHtmlPreview } from '@/components/sessions/scripted-html-preview';
 import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
@@ -833,7 +833,7 @@ function MobileTextPreview({
           </Button>
         </div>
         {showHtml ? (
-          <ReadOnlyHtmlPreview text={text} />
+          <ScriptedHtmlPreview text={text} />
         ) : (
           <SessionMonacoTextViewer
             key={path}

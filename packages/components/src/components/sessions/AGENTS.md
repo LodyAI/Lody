@@ -42,8 +42,10 @@ Read parent rules and linked context.
   (`fromPageContent`) never opens private LAN; only the address bar may.
 - Preload one bounded frame after live confirmation; require atomic moves, no
   polling, and cleanup safe after Browser takeover.
-- Static HTML requires policy-owned `srcdoc`. Scripts require credentialless and
-  `allow-scripts` only; otherwise use navigation-stripped HTML with an empty sandbox.
+- Static HTML requires policy-owned `srcdoc` and runs scripts with `allow-scripts`
+  only (opaque origin + policy CSP). `credentialless` is set as defense in depth but
+  is not required, so WebKit/iOS still runs scripts. Navigation-stripped HTML with an
+  empty sandbox is only for attachment previews.
   Never preview truncated text; static frames die with their tab.
 - Encrypted remote preview controls require the existing protected feature host
   and verified write role; never fall back to ordinary preview proofs. Explain

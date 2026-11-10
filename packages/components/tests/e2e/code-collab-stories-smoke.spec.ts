@@ -273,7 +273,9 @@ test('undo to saved text clears dirty state, redo restores it, and Save advances
   await expect(editorText).toHaveText(draft);
 });
 
-test('mobile HTML opens as a readonly preview on WebKit and toggles source', async ({ page }) => {
+test('mobile HTML runs scripts without credentialless frames (WebKit) and toggles source', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // Exercise the unsupported-engine path in Chromium runs too.
   await page.addInitScript(() => {
@@ -285,9 +287,9 @@ test('mobile HTML opens as a readonly preview on WebKit and toggles source', asy
   await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute('sandbox', '');
+  await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute('sandbox', 'allow-scripts');
   await frame.getByRole('button', { name: 'Clicked 0 times' }).click();
-  await expect(frame.getByRole('button', { name: 'Clicked 0 times' })).toBeVisible();
+  await expect(frame.getByRole('button', { name: 'Clicked 1 times' })).toBeVisible();
   await frame.getByText('Try blocked navigation').click();
   await expect(frame.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible();
   await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
@@ -305,7 +307,10 @@ test('mobile project HTML opens from its file row and toggles back to the origin
   await page.getByRole('button', { name: 'preview.html', exact: true }).click();
   const frame = page.frameLocator('iframe[title="Preview"]');
   await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
-  await expect(frame.locator('body')).not.toHaveAttribute('data-executed', 'yes');
+  await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute('sandbox', 'allow-scripts');
+  await expect(frame.locator('body')).toHaveAttribute('data-executed', 'yes');
+  await frame.getByRole('button', { name: 'Run script' }).click();
+  await expect(frame.getByRole('button', { name: 'Script ran' })).toBeVisible();
   await frame.getByText('External link').click();
   await expect(frame.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
   await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
