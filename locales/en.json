@@ -1,4 +1,10 @@
 {
+  "schedules.filter.owner": "Owner",
+  "schedules.filter.allOwners": "Everyone",
+  "schedules.filter.mine": "Mine",
+  "schedules.filter.others": "Other members",
+  "schedules.owner.you": "You",
+  "schedules.owner.label": "Owner: {{name}}",
   "sessions.localAttachmentDownload": "Download from original computer",
   "sessions.localAttachmentDownloading": "Downloading from original computer…",
   "sessions.localAttachmentDownloadFailed": "Cannot download. Check that the original computer is online and the file still exists.",

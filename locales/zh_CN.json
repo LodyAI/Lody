@@ -1,4 +1,10 @@
 {
+  "schedules.filter.owner": "归属",
+  "schedules.filter.allOwners": "全部",
+  "schedules.filter.mine": "我的",
+  "schedules.filter.others": "其他成员",
+  "schedules.owner.you": "我",
+  "schedules.owner.label": "归属：{{name}}",
   "sessions.localAttachmentDownload": "从原电脑下载",
   "sessions.localAttachmentDownloading": "正在从原电脑下载…",
   "sessions.localAttachmentDownloadFailed": "无法下载，请确认原电脑在线且文件仍然存在。",
