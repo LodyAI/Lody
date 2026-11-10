@@ -1,3 +1,4 @@
+import { forgetSettings } from '../settings';
 import {
   closeSession,
   ensureSession,
@@ -27,8 +28,10 @@ export function registerLifecycle(ctx: RuntimeContext) {
     'start',
     async ({ workspaceId, userId, active, knownRepos }) => {
       const version = ++scopeStartVersion;
-      if (workspaceId !== state.workspace || userId !== state.userId)
+      if (workspaceId !== state.workspace || userId !== state.userId) {
+        forgetSettings();
         await ctx.disposeProviderOperations?.();
+      }
       if (version !== scopeStartVersion) return {};
       state.workspace = workspaceId;
       state.userId = userId;

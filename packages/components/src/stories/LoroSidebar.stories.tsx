@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { Button } from '@lody/ui/button';
@@ -592,6 +593,22 @@ export const EncryptedWorkspace: Story = {
       { id: 'ws-2', name: 'Lody' },
     ],
     currentWorkspaceId: 'ws-e2ee',
+  },
+};
+
+/** The encrypted workspace cannot reach the server: hover "离线" for how long, and how
+ * long this machine can keep working from its outage window. */
+export const EncryptedWorkspaceOffline: Story = {
+  ...EncryptedWorkspace,
+  args: {
+    ...EncryptedWorkspace.args,
+    connectionUiState: 'offline',
+    offlineDetail: (
+      <E2eeOfflineSummaryText
+        window={{ executionUntilMs: 3 * 3_600_000 + 12 * 60_000, offlineSinceMs: -48 * 60_000 }}
+        now={0}
+      />
+    ),
   },
 };
 

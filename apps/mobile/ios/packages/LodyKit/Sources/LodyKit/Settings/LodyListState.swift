@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 struct LodyListState {
   var loading = false
@@ -63,23 +64,41 @@ enum LodyRelativeTime {
   private static let hour = 60 * minute
   private static let day = 24 * hour
 
+  private struct DateFormat {
+    let locale: Locale
+    let timeZone: TimeZone
+    let formatter: DateFormatter
+  }
+
+  // Keep one configuration; serialize both replacement and use of the mutable formatter.
+  private static let dateFormat = Mutex<DateFormat?>(nil)
+
+  private static func date(_ value: Double, locale: Locale, timeZone: TimeZone) -> String {
+    dateFormat.withLock { cached in
+      if cached?.locale != locale || cached?.timeZone != timeZone {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        cached = DateFormat(locale: locale, timeZone: timeZone, formatter: formatter)
+      }
+      return cached!.formatter.string(from: Date(timeIntervalSince1970: value / 1000))
+    }
+  }
+
   static func now() -> Double { Date().timeIntervalSince1970 * 1000 }
 
-  static func compact(_ value: Double, now: Double = now(), calendar: Calendar = .current) -> String {
+  static func compact(_ value: Double, now: Double = now(), calendar: Calendar = .current, locale: Locale? = nil) -> String {
     guard value.isFinite else { return "" }
     let elapsed = now - value
     if elapsed < minute { return String(localized: "time.compact.now", bundle: .lody) }
     if elapsed < hour { return String.localizedStringWithFormat(String(localized: "time.compact.minutes", bundle: .lody), Int(elapsed / minute)) }
     if elapsed < day { return String.localizedStringWithFormat(String(localized: "time.compact.hours", bundle: .lody), Int(elapsed / hour)) }
     if elapsed < 7 * day { return String.localizedStringWithFormat(String(localized: "time.compact.days", bundle: .lody), Int(elapsed / day)) }
-    let formatter = DateFormatter()
-    formatter.locale = LodyFormat.locale
-    formatter.timeZone = calendar.timeZone
-    formatter.setLocalizedDateFormatFromTemplate("MMMd")
-    return formatter.string(from: Date(timeIntervalSince1970: value / 1000))
+    return date(value, locale: locale ?? LodyFormat.locale, timeZone: calendar.timeZone)
   }
 
-  static func text(_ value: Double, now: Double = now(), calendar: Calendar = .current) -> String {
+  static func text(_ value: Double, now: Double = now(), calendar: Calendar = .current, locale: Locale? = nil) -> String {
     guard value.isFinite else { return "" }
     let elapsed = now - value
     if elapsed < minute { return String(localized: "time.justNow", bundle: .lody) }
@@ -87,11 +106,7 @@ enum LodyRelativeTime {
     let today = calendar.startOfDay(for: Date(timeIntervalSince1970: now / 1000)).timeIntervalSince1970 * 1000
     if value >= today { return String.localizedStringWithFormat(String(localized: "time.hoursAgo", bundle: .lody), Int(elapsed / hour)) }
     if value >= today - day { return String(localized: "time.yesterday", bundle: .lody) }
-    let formatter = DateFormatter()
-    formatter.locale = LodyFormat.locale
-    formatter.timeZone = calendar.timeZone
-    formatter.setLocalizedDateFormatFromTemplate("MMMd")
-    return formatter.string(from: Date(timeIntervalSince1970: value / 1000))
+    return date(value, locale: locale ?? LodyFormat.locale, timeZone: calendar.timeZone)
   }
 }
 

@@ -14,7 +14,14 @@ import {
   Duration,
 } from 'effect';
 import { importBrowserDevice, type BrowserDevice } from '@lody/e2ee-core/adapters/browser-crypto';
-import { verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
+import {
+  verifyWorkspaceInvitationSnapshot,
+  RecoveryVaults,
+  makeWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
+} from '@lody/e2ee-core';
+import { RecoveryVaultStore, RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
+import { accountUserId } from '@lody/e2ee-core/protocol';
 import { makePortableAccountPairingApprover } from '../../src/account-requester';
 import { decodePersonalInvitation } from '../../src/pairing';
 import {
@@ -71,6 +78,8 @@ import {
 import {
   makeOwnedPersonalDeviceHost,
   makePersonalWorkspaceRuntime,
+  personalRuntimeRecovery,
+  personalRuntimeAccountRequester,
   type PersonalHostPorts,
   PersonalMachineSharing,
   PersonalCloseIncomplete,
@@ -171,7 +180,9 @@ const retain = () => localStorage.setItem('remote-records', JSON.stringify(recor
 export async function boot(
   input: typeof mode = 'create-or-open',
   controlledClose = false,
-  prefix = 'personal'
+  prefix = 'personal',
+  recoveryAccount?: string,
+  genesisAccount = recoveryAccount
 ) {
   graceElapsed = 0;
   databasePrefix = prefix;
@@ -249,7 +260,9 @@ export async function boot(
         encryptionPublicKey: owner.enc,
         initialKey: key,
         membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10))),
-        userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(8))),
+        userId: genesisAccount
+          ? Result.getOrThrow(accountUserId(genesisAccount))
+          : Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(8))),
       });
       offer = {
         version: 1,
@@ -266,17 +279,24 @@ export async function boot(
       const ws = Layer.succeed(WorkspaceScope, { genesis: genesis.genesis });
       const options = {
         databaseName: `${databasePrefix}-ledger`,
-        accountId: 'account',
+        accountId: recoveryAccount ?? 'account',
         workspaceId: offer.workspaceId,
         mode,
       };
       const base = Layer.mergeAll(
         indexedDbClientStores(options),
         indexedDbClientInstallationStore({ ...options, databaseName: `${databasePrefix}-custody` }),
-        browserClientWriter({ accountId: 'account', workspaceId: offer.workspaceId })
+        browserClientWriter({
+          accountId: recoveryAccount ?? 'account',
+          workspaceId: offer.workspaceId,
+        })
       ).pipe(Layer.provide(ws));
       const platform = PersonalHostPlatform.of({
-        scope: { accountId: 'account', workspaceId: offer.workspaceId, genesis: genesis.genesis },
+        scope: {
+          accountId: recoveryAccount ?? 'account',
+          workspaceId: offer.workspaceId,
+          genesis: genesis.genesis,
+        },
         protection: 'web-crypto',
         contentToken: (binding, credential, request) =>
           Effect.gen(function* () {
@@ -507,7 +527,7 @@ export async function boot(
         drainOld: () => (session ? session.close() : Effect.void),
       });
       const remote = PersonalHostRemote.of({
-        accountId: 'account',
+        accountId: recoveryAccount ?? 'account',
         ...(localStorage.getItem('qualify-approval-history')
           ? {
               history: (_credential: Uint8Array) =>
@@ -571,7 +591,7 @@ export async function boot(
                 : null;
             return {
               version: 1,
-              accountId: foreign ? 'foreign' : 'account',
+              accountId: foreign ? 'foreign' : (recoveryAccount ?? 'account'),
               workspaceId: offer.workspaceId,
               genesisHash: offer.genesisHash,
               pairingSessionId: request.pairingSessionId,
@@ -1339,7 +1359,11 @@ export async function bootRuntime(withSharing = false) {
                               .credentialHash
                         )
                           return yield* Effect.fail(new Error('wrong sharing assembly binding'));
-                        let state = { sharedWithTeam: false, projects: [] as readonly string[] };
+                        let state: import('@lody/e2ee-core/protocol').MachineSharingState = {
+                          sharedWithTeam: false,
+                          projects: [],
+                          sessions: [],
+                        };
                         const read = Effect.fnUntraced(function* (machineId: string) {
                           const policyLedger = yield* ledger.current(),
                             machines = [...policyLedger.inspectState().devices].filter(
@@ -1454,6 +1478,17 @@ export async function runtimeInvoke(action: string) {
   try {
     let value: unknown;
     switch (action) {
+      case 'accountRequester': {
+        const exposed = (
+          runtime as typeof runtime & {
+            accountRequester: NonNullable<ReturnType<typeof personalRuntimeAccountRequester>>;
+          }
+        ).accountRequester;
+        if (!exposed || exposed !== personalRuntimeAccountRequester(runtime))
+          throw new Error('requester must borrow the guarded runtime owner');
+        value = await Effect.runPromise(exposed.pendingPersonalJoin());
+        break;
+      }
       case 'observeCheckpoint':
         value = {
           genesisHash: offer.genesisHash,
@@ -1866,3 +1901,355 @@ export const runtimeReader = {
   status: () => runtime.status(offer.workspaceId),
   close: () => runtime.close(offer.workspaceId, 'account', runtimeLease),
 };
+
+/** Real vault/R crypto, recovered personal admission, protected keys and offline reopen.
+ * Remote maps are synthetic; custody/installation are actual browser IndexedDB. */
+export async function recoverBrowser(
+  options: {
+    wrongAccount?: boolean;
+    failInstall?: boolean;
+    resume?: boolean;
+    revokedRecovery?: boolean;
+    tamperedPackage?: boolean;
+    repair?: boolean;
+    revokePersonal?: boolean;
+    setup?: boolean;
+    runtime?: boolean;
+  } = {}
+) {
+  await boot('create-or-open', false, 'recovery', options.wrongAccount ? 'def' : 'abc', 'abc');
+  const entries = new Map<
+    string,
+    { readonly entryId: string; readonly revision: number; readonly body: Uint8Array }
+  >();
+  const journal = new Map<string, Uint8Array>();
+  let index: {
+    readonly entryId: string;
+    readonly revision: number;
+    readonly body: Uint8Array;
+  } | null = null;
+  const store: RecoveryVaultStore['Service'] = {
+    putImmutable: (_id, entry) =>
+      Effect.sync(() => {
+        entries.set(entry.entryId, entry);
+      }),
+    readEntry: (_id, id) => Effect.succeed(entries.get(id) ?? null),
+    readIndex: () => Effect.sync(() => index),
+    compareAndSwapIndex: (_id, _expected, next) =>
+      Effect.sync(() => {
+        index = next;
+        return 'Committed' as const;
+      }),
+    deleteUnreferenced: () => Effect.void,
+  };
+  const local: RecoveryVaultLocalStore['Service'] = {
+    read: (key) => Effect.sync(() => journal.get(key)?.slice() ?? null),
+    compareAndSwap: (key, expected, next) =>
+      Effect.sync(() => {
+        const old = journal.get(key) ?? null;
+        if (
+          (old === null) !== (expected === null) ||
+          (old && expected && toHex(old) !== toHex(expected))
+        )
+          return 'Conflict' as const;
+        journal.set(key, next.slice());
+        return 'Committed' as const;
+      }),
+    list: (prefix) =>
+      Effect.sync(() =>
+        [...journal]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({ key, value: value.slice() }))
+      ),
+  };
+  const layers = RecoveryVaults.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(RecoveryVaultStore, store),
+        Layer.succeed(RecoveryVaultLocalStore, local)
+      )
+    )
+  );
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const vault = (yield* (yield* RecoveryVaults).create({ locator: 'abc' })).vault;
+        const sourceKeys = memoryRecoveryEpochKeys();
+        yield* Effect.addFinalizer(() => Effect.sync(() => sourceKeys.dispose()));
+        yield* sourceKeys.saveAndReload(0, key);
+        const envelope: import('@lody/e2ee-core').WorkspaceRecoveryInput['fetchCurrentEnvelope'] = (
+          recipient,
+          _epoch,
+          identity,
+          credential
+        ) =>
+          prepareEpochEnvelope({
+            context: {
+              genesis: view().genesis,
+              epoch: Result.getOrThrow(Bytes.epochNumber(0)),
+              sender: owner.publicKey,
+              recipient,
+            },
+            key,
+            signer: owner,
+            ledger: () => Effect.succeed(view()),
+          }).pipe(
+            Effect.map((frame) => ({ sender: owner.publicKey, frame })),
+            Effect.ensuring(Effect.sync(() => credential.fill(0)))
+          );
+        const setup = yield* makeWorkspaceRecovery({
+          vault,
+          local,
+          genesis: view().genesis,
+          membershipId: Result.getOrThrow(Bytes.membershipId(fromHex(offer.membershipId))),
+          personalSigner: owner,
+          ledger: () => Effect.succeed(view()),
+          installed: sourceKeys,
+          trust: {
+            source: 'synthetic-owner',
+            genesisRecord: records[0],
+            head: toHex(view().head.toBytes()),
+            length: view().length,
+          },
+          fetchCurrentEnvelope: envelope,
+          submitOriginal: (record) =>
+            Effect.sync(() => {
+              records.push(record.slice());
+              retain();
+              return { outcome: 'Committed' as const, record: record.slice() };
+            }),
+        });
+        yield* setup.setup();
+        const reference = (yield* vault.readIndex()).value.entries[0];
+        if (options.revokedRecovery) {
+          const recovery = [...view().inspectState().devices].find(
+            ([, row]) => row.kind === 'recovery'
+          )![0];
+          const proposal = yield* Effect.fromResult(
+            prepareLedgerCommand(view(), owner.publicKey, {
+              _tag: 'RevokeDevice',
+              target: Result.getOrThrow(Bytes.signingPublicKey(fromHex(recovery))),
+            })
+          );
+          records.push(yield* signLedgerRecord(proposal, owner));
+          retain();
+        }
+        if (options.tamperedPackage) entries.get(reference.entryId)!.body[25] ^= 1;
+        const pages = () =>
+          Effect.succeed([
+            {
+              workspaceId: offer.workspaceId,
+              genesisHash: offer.genesisHash,
+              checkpoint: { length: view().length, headHash: toHex(view().head.toBytes()) },
+              startIndex: 0,
+              recordsHex: records.map(toHex),
+              position: 'recovery/full',
+              nextCursor: null,
+            },
+          ]);
+        failKeys = options.failInstall ?? false;
+        let recoveryRuntime: E2eeWorkspaceRuntime | undefined;
+        if (options.runtime) {
+          yield* host.close();
+          recoveryRuntime = yield* makePersonalWorkspaceRuntime({
+            accountId: 'abc',
+            workspaceId: offer.workspaceId,
+            genesisHash: offer.genesisHash,
+            ports: runtimePorts,
+            retainedOffer: () => Effect.succeed(offer),
+            account: () => Effect.succeed({ userId: 'abc', source: 'network' as const }),
+            ledgerRecords: () =>
+              Effect.succeed(records.map((record, position) => ({ record, position }))),
+            run: Effect.runPromise,
+          });
+        }
+        const restore = () =>
+          (recoveryRuntime
+            ? personalRuntimeRecovery(recoveryRuntime)!.restore
+            : host.restoreRecovery)({
+            vault,
+            local,
+            reference,
+            pages,
+            fetchCurrentEnvelope: envelope,
+            submitOriginalAsRecovery: (record, _identity, credential) =>
+              Effect.sync(() => {
+                credential.fill(0);
+                if (!records.some((old) => toHex(old) === toHex(record)))
+                  records.push(record.slice());
+                retain();
+                return { outcome: 'Committed' as const, record: record.slice() };
+              }),
+          });
+        let result = yield* Effect.result(restore());
+        const admittedCount = records.length;
+        if (Result.isFailure(result) && options.resume) {
+          failKeys = false;
+          result = yield* Effect.result(restore());
+        }
+        if (Result.isFailure(result))
+          return {
+            ok: false,
+            phase: (yield* Context.get(baseContext, ClientInstallationStore).read())?.phase ?? null,
+          };
+        offer = result.success.offer;
+        localStorage.setItem('recovery-offer', JSON.stringify(offer));
+        if (recoveryRuntime) {
+          const runtime = recoveryRuntime;
+          const readerA = yield* Effect.tryPromise(() =>
+            runtime.open(offer.workspaceId, undefined, 'abc', 'content-reader')
+          );
+          const readerB = yield* Effect.tryPromise(() =>
+            runtime.open(offer.workspaceId, undefined, 'abc', 'recovery-reader')
+          );
+          const before = yield* Effect.tryPromise(() => runtime.status(offer.workspaceId));
+          const backedUp = yield* personalRuntimeRecovery(runtime)!.setup({
+            vault,
+            local,
+            fetchCurrentEnvelope: envelope,
+            submitOriginal: (record) =>
+              Effect.sync(() => {
+                if (!records.some((old) => toHex(old) === toHex(record)))
+                  records.push(record.slice());
+                retain();
+                return { outcome: 'Committed' as const, record: record.slice() };
+              }),
+          });
+          yield* Effect.tryPromise(() =>
+            runtime.close(offer.workspaceId, 'abc', readerB.readerOwner)
+          );
+          const after = yield* Effect.tryPromise(() => runtime.status(offer.workspaceId));
+          const sealed = yield* Effect.tryPromise(() =>
+            runtime.seal(offer.workspaceId, {
+              epoch: 0,
+              room: { kind: 'doc', docId: 'retained-reader' },
+              context: runtimeContext,
+              plaintext: new TextEncoder().encode('content after recovery'),
+              additionalData: new Uint8Array(),
+            })
+          );
+          yield* Effect.tryPromise(() =>
+            runtime.close(offer.workspaceId, 'abc', readerA.readerOwner)
+          );
+          return {
+            ok: true,
+            outcome: result.success.outcome,
+            sealed: sealed.sealed.length > 64,
+            recoveryVerified: backedUp.recoverable,
+            sameIdentity: before.signingPublicKey === after.signingPublicKey,
+          };
+        }
+        session = yield* host.open(offer, false, true);
+        let recoveryVerified = false;
+        if (options.setup) {
+          const setupResult = yield* session.setupRecovery({
+            vault,
+            local,
+            fetchCurrentEnvelope: envelope,
+            submitOriginal: (record) =>
+              Effect.sync(() => {
+                if (!records.some((old) => toHex(old) === toHex(record)))
+                  records.push(record.slice());
+                retain();
+                return { outcome: 'Committed' as const, record: record.slice() };
+              }),
+          });
+          recoveryVerified = setupResult.recoverable;
+        }
+        if (options.repair) {
+          // No prior restore intent: model an identity admitted through ordinary pairing.
+          for (const name of journal.keys()) if (name.endsWith('/restore')) journal.delete(name);
+          yield* session.close();
+          session = undefined;
+          yield* Effect.tryPromise({
+            try: () =>
+              new Promise<void>((resolve, reject) => {
+                const request = indexedDB.open(`${databasePrefix}-custody`);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                  const db = request.result,
+                    tx = db.transaction('data', 'readwrite');
+                  const cursor = tx.objectStore('data').openCursor();
+                  cursor.onsuccess = () => {
+                    const row = cursor.result;
+                    if (!row) return;
+                    if (row.value.namespace === 'installed') row.delete();
+                    row.continue();
+                  };
+                  tx.oncomplete = () => {
+                    db.close();
+                    resolve();
+                  };
+                  tx.onabort = () => {
+                    db.close();
+                    reject(tx.error);
+                  };
+                };
+              }),
+            catch: (cause) => cause,
+          });
+          if (options.revokePersonal) {
+            const installed = yield* Context.get(baseContext, ClientInstallationStore).read();
+            const command = yield* Effect.fromResult(
+              prepareLedgerCommand(view(), owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: installed!.binding.device,
+              })
+            );
+            records.push(yield* signLedgerRecord(command, owner));
+            retain();
+          }
+          const repaired = yield* Effect.result(
+            host.restoreRecovery({
+              offer,
+              vault,
+              local,
+              reference,
+              pages,
+              fetchCurrentEnvelope: envelope,
+              submitOriginalAsRecovery: (record, _identity, credential) =>
+                Effect.sync(() => {
+                  credential.fill(0);
+                  if (!records.some((old) => toHex(old) === toHex(record)))
+                    records.push(record.slice());
+                  retain();
+                  return { outcome: 'Committed' as const, record: record.slice() };
+                }),
+            })
+          );
+          if (Result.isFailure(repaired)) return { ok: false };
+          if (repaired.success.offer.pairingSessionId !== offer.pairingSessionId)
+            throw new Error('replaced offer');
+          session = yield* host.open(offer, false, true);
+        }
+        const current = yield* session.ledgerState();
+        const document = yield* session.document('document:recovered', 'loro');
+        const frame = yield* document.seal({
+          context: {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch',
+          },
+          plaintext: new TextEncoder().encode('recovered browser content'),
+          additionalData: () => new Uint8Array(),
+        });
+        return {
+          ok: true,
+          outcome: result.success.outcome,
+          length: current.view.length,
+          sealed: frame.sealed.length > 64,
+          noDuplicateAdmission: records.length === admittedCount,
+          recoveryVerified,
+        };
+      }).pipe(Effect.provide(layers))
+    )
+  );
+}
+
+export async function reopenRecoveredBrowser() {
+  await stop();
+  await boot('open-existing', false, 'recovery', 'abc');
+  offer = JSON.parse(localStorage.getItem('recovery-offer')!);
+  session = await Effect.runPromise(host.open(offer, false, true));
+  return Effect.runPromise(session.status());
+}

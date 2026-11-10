@@ -38,6 +38,43 @@ updates.finish(success: true)
 check(bar(updates.apply(session)).pullRequest?.status == "merged", "success survives old catalog frames")
 print("PASS: optimistic PR transitions roll back on failure")
 
+// Ready for review on a draft (no catalog merge state): Merge appears from GitHub's own read.
+updates = SessionPullRequestUpdates()
+let pendingDraft = SessionPullRequest(repository: "owner/repo", number: 7, status: "draft")
+session.pullRequests = [pendingDraft]
+updates.confirm(pendingDraft, merged: false)
+check(bar(updates.apply(session)).actions.isEmpty, "a ready PR without a merge state offers no Merge yet")
+updates.observeMerge(pendingDraft, merge: "c")
+check(bar(updates.apply(session)).actions == [.merge], "GitHub's clean state offers Merge before the catalog catches up")
+session.pullRequests[0].status = "open"
+check(bar(updates.apply(session)).actions == [.merge], "an open catalog frame still lacking merge keeps the read state")
+session.pullRequests[0].merge = "b"
+check(bar(updates.apply(session)).actions.isEmpty, "the catalog's own merge state wins")
+session.pullRequests[0].merge = nil
+check(bar(updates.apply(session)).actions.isEmpty, "a read state is dropped once the catalog reported one")
+updates.observeMerge(pendingDraft, merge: "c")
+session.pullRequests[0].status = "draft"
+check(bar(updates.apply(session)).actions == [.readyForReview], "a re-drafted PR drops the read state")
+session.pullRequests[0].status = "open"
+check(bar(updates.apply(session)).actions.isEmpty, "the dropped read state does not return")
+
+check(PullRequestMergeSettle.code(state: "clean", mergeable: true, draft: false) == "c", "clean maps to c")
+check(PullRequestMergeSettle.code(state: "has_hooks", mergeable: true, draft: false) == "u", "has_hooks maps to u")
+check(PullRequestMergeSettle.code(state: "unknown", mergeable: nil, draft: false) == nil, "unknown is still pending")
+check(PullRequestMergeSettle.code(state: "unknown", mergeable: false, draft: false) == "d", "unknown + not mergeable is a conflict")
+check(PullRequestMergeSettle.code(state: "clean", mergeable: true, draft: true) == nil, "a draft has no merge state")
+
+var reads: [String?] = [nil, nil, "c"]
+var sleeps = 0
+var settled = await PullRequestMergeSettle.run(read: { reads.removeFirst() }, sleep: { sleeps += 1 })
+check(settled == "c" && sleeps == 2, "settling stops at the first computed state")
+sleeps = 0
+settled = await PullRequestMergeSettle.run(attempts: 3, read: { nil }, sleep: { sleeps += 1 })
+check(settled == nil && sleeps == 2, "settling is bounded")
+settled = await PullRequestMergeSettle.run(read: { throw NSError(domain: "synthetic-read", code: 1) }, sleep: { sleeps += 1 })
+check(settled == nil, "a failed read ends settling")
+print("PASS: merge state read after Ready for review until the catalog converges")
+
 // Release the pending write explicitly after navigation, without clocks or network.
 @MainActor final class ArchiveGate {
   var continuation: CheckedContinuation<Void, Error>?

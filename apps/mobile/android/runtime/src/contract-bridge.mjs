@@ -1,11 +1,13 @@
 // Translate Android's native command surface to the shared runtime envelope contract.
 export function contractBridge(runtime, emit) {
- const pending=new Map(), grants=new Map(); let serial=0, workspace='';
+ const pending=new Map(), grants=new Map(), clouds=new Map(); let serial=0, workspace='';
+ // Prompt shortcut Convex calls the runtime asks the native host to make (iOS `shortcutCloud`).
+ const cloudOperations=new Set(['listAccessibleDocuments','getStreamToken','stageDocument','activateDocument']);
  const receive=envelope=>runtime.receive(JSON.stringify(envelope));
  function call(method,payload={}) {
   const id=`android-${++serial}`;
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{pending.delete(id);reject(Error('runtime_timeout'));},method==='agentProviderOperation' ? 355000 : method==='agentProviderAuth' ? 65000 : method==='agentProviderProbe' || method==='agentProviders' ? 140000 : method==='editSession' || method==='forkSession' ? 130000 : method==='scheduleCommand' ? 75000 : 45000);
+   const timer=setTimeout(()=>{pending.delete(id);reject(Error('runtime_timeout'));},method==='agentProviderOperation' ? 355000 : method==='agentProviderAuth' ? 65000 : method==='agentProviderProbe' || method==='agentProviders' ? 140000 : method==='editSession' || method==='forkSession' || method==='promptShortcuts' ? 130000 : method==='scheduleCommand' ? 75000 : 45000);
    pending.set(id,{resolve,reject,timer,method});
    receive({v:1,gen:1,kind:'request',id,method,payload});
   });
@@ -21,8 +23,21 @@ export function contractBridge(runtime, emit) {
   } else if(e.kind==='event')emit({type:e.method,...e.payload,...(e.method==='machinePresence'?{presence:JSON.stringify(e.payload)}:{})});
   else if(e.kind==='request') {
    if(e.method==='grant'){grants.set(e.id,e);emit({type:'grant'});}
+   else if(e.method==='shortcutCloud' && workspace && e.payload?.workspaceId===workspace && cloudOperations.has(e.payload.operation) && clouds.size<8) {
+    // Always answered: native replies within its own deadline, or this fails it (e.g. backgrounded).
+    clouds.set(e.id,{e,timer:setTimeout(()=>shortcutCloud(e.id,null),75000)});
+    emit({type:'shortcutCloud',requestId:e.id,operation:e.payload.operation,args:JSON.stringify(e.payload.args??{})});
+   }
    else receive({...e,kind:'error',payload:undefined,error:{code:'unsupported_method',retryable:false}});
   }
+  return true;
+ }
+ // The native reply to one shortcutCloud request: {value} on success, null on any failure.
+ function shortcutCloud(requestId,reply){
+  const item=clouds.get(requestId);if(!item)return false;clouds.delete(requestId);clearTimeout(item.timer);
+  const e=item.e;
+  if(reply && typeof reply==='object' && Object.hasOwn(reply,'value'))receive({...e,kind:'result',payload:{value:reply.value}});
+  else receive({...e,kind:'error',payload:undefined,error:{code:'shortcut_unavailable',retryable:false}});
   return true;
  }
  globalThis.androidRuntimeMessage=message;
@@ -62,6 +77,7 @@ export function contractBridge(runtime, emit) {
   schedules:args=>invoke('schedules',args),
   scheduleDetail:args=>invoke('scheduleDetail',args),
   scheduleCommand:args=>invoke('scheduleCommand',args),
+  shortcutCloud,
   grant(value){for(const e of grants.values())receive(value?{...e,kind:'result',payload:value}:{...e,kind:'error',payload:undefined,error:{code:'grant_unavailable',retryable:true}});grants.clear();return true;},
  };
 }

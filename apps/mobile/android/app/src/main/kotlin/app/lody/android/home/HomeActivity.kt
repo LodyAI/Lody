@@ -139,7 +139,7 @@ class HomeActivity : ComponentActivity() {
                         app.notifications.consumeClick()
                     }
                 }
-                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments) }
+                val repository = remember { ChatRepository(app.runtimeOwner, app.pullRequests, app.attachments, app.mergeStates, app.branches) }
                 val selectedSession = catalog.snapshot?.sessions?.firstOrNull { it.id == selectedId }
                 LaunchedEffect(selectedSession, activeScope, resumed) {
                     if (resumed && activeScope != null && selectedSession != null) {
@@ -192,6 +192,8 @@ class HomeActivity : ComponentActivity() {
                                 schedules = app.schedules,
                                 creation = creator,
                                 agentProviders = remember { RuntimeAgentProviderService(app.runtimeOwner) },
+                                roleSettings = remember { RuntimeRoleSettingsService(app.runtimeOwner) },
+                                shortcutSettings = remember { RuntimeShortcutSettingsService(app.runtimeOwner) },
                                 scope = workspace?.let { RuntimeScope(user.id, it.id) },
                                 onOpenSession = { id -> selectedId = id; selectedTitle = "" },
                             )

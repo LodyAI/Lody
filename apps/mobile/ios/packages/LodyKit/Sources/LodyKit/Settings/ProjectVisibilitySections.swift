@@ -96,22 +96,6 @@ enum ProjectVisibilitySections {
       }
       append(row, to: item.machineId)
     }
-    for project in catalog.projects {
-      let prefix = "\(project.machineId):local:"
-      guard project.id.hasPrefix(prefix) else { continue }
-      let local = String(project.id.dropFirst(prefix.count))
-      if snapshot?.rows.contains(where: { $0.machineId == project.machineId && $0.localProjectId == local }) == true { continue }
-      var row = LodyListRow()
-      row.id = "unknown:\(project.id)"
-      row.title = project.name
-      row.subtitle = project.rootPath
-      row.subtitleMono = true
-      row.image = "folder"
-      row.value = text("unknownShort")
-      row.valueSymbol = "questionmark.circle"
-      row.accessibilityValue = text("unknown")
-      append(row, to: project.machineId)
-    }
     return order.compactMap { groups[$0] }
   }
 

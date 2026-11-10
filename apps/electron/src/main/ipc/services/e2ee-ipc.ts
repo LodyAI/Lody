@@ -64,6 +64,7 @@ import {
   restoreAccountWorkspaces,
   saveRecoveryFile,
   setupWorkspaceRecovery,
+  setupWorkspacesRecovery,
   type RecoveryUnlock,
   type RecoveryVaultReplacement,
   type RecoveryWorkspaceTarget
@@ -3757,6 +3758,69 @@ export class E2eeIpc extends IpcService {
             )
           )
       )
+    } finally {
+      if ('file' in unlock) unlock.file.fill(0)
+    }
+  }
+  /** Default-off: set up recovery for several workspaces after one file or passkey unlock.
+   * Each workspace settles on its own; one that fails is reported and the rest continue. */
+  @IpcMethod()
+  async setupRecoveryForWorkspaces(
+    workspaceIds: readonly string[],
+    method: 'file' | 'passkey' = 'file'
+  ) {
+    sender()
+    if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    if (
+      !Array.isArray(workspaceIds) ||
+      workspaceIds.length === 0 ||
+      workspaceIds.length > 256 ||
+      workspaceIds.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 128)
+    )
+      throw new Error('e2ee_recovery_invalid-input')
+    const wanted = new Set(workspaceIds)
+    const unlock = await this.recoveryUnlock(method)
+    if (!unlock) return { outcome: 'cancelled' as const }
+    try {
+      const results = await this.recoveryOperation(
+        ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
+          Effect.flatMap(accountWorkspaces, (rows) =>
+            Effect.flatMap(
+              // A workspace whose target cannot be built is reported, not fatal to the rest.
+              Effect.forEach(
+                rows.filter((row) => wanted.has(row.id)),
+                (row) =>
+                  Effect.map(
+                    Effect.exit(
+                      Effect.tryPromise(() => this.recoveryTargets(accountId, client, [row]))
+                    ),
+                    (exit) => ({ row, targets: Exit.isSuccess(exit) ? exit.value : null })
+                  )
+              ),
+              (built) =>
+                Effect.map(
+                  setupWorkspacesRecovery({
+                    store,
+                    journalPath,
+                    replacement,
+                    unlock,
+                    targets: built.flatMap((entry) => entry.targets ?? [])
+                  }),
+                  (settled) => [
+                    ...settled,
+                    ...built
+                      .filter((entry) => entry.targets === null)
+                      .map((entry) => ({
+                        workspaceId: entry.row.id,
+                        outcome: 'Failed' as const,
+                        recoverable: false
+                      }))
+                  ]
+                )
+            )
+          )
+      )
+      return { outcome: 'settled' as const, results }
     } finally {
       if ('file' in unlock) unlock.file.fill(0)
     }

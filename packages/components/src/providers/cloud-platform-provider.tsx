@@ -54,6 +54,7 @@ import { installAttachmentWorkspaceAccess } from '@/lib/attachment-workspace-acc
 import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
+import { createCloudSessionAccess } from './cloud-session-access';
 import { mintAutomationControlProof } from '@/lib/automation-control-api';
 
 const CLOUD_HTTP_PORT = {
@@ -472,6 +473,42 @@ export function CloudPlatformProvider({
     [automaticPairing, baseE2eeWorkspaces]
   );
 
+  const sessionAccess = useMemo(
+    () =>
+      createCloudSessionAccess({
+        client: cloudClient,
+        runtime: e2eeWorkspaces.runtime,
+        assertScope: (workspaceId) => {
+          const runtime = atomStore.get(activeWorkspaceRuntimeAtom);
+          const accountId = atomStore.get(userAtom)?.id ?? runtime?.accountId;
+          const identity = sessionStore.get();
+          if (
+            !runtime ||
+            !accountId ||
+            runtime.workspaceId !== workspaceId ||
+            atomStore.get(currentWorkspaceIdAtom) !== workspaceId ||
+            (runtime.accountId && runtime.accountId !== accountId) ||
+            (identity.status === 'authenticated' && identity.user.id !== accountId) ||
+            (identity.status === 'unauthenticated' && !identity.uncertain)
+          )
+            throw new Error('session_access_scope_changed');
+          if (runtime.contentMode !== 'e2ee')
+            assertLegacyWorkspaceAccess({
+              workspaceId,
+              platformKind: 'cloud',
+              mode: atomStore.get(workspaceContentModeAtom),
+              runtime,
+              accountId,
+              currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
+              routeSlug: atomStore.get(currentWorkspaceSlugAtom),
+              workspacesState: workspacesStore.get(),
+            });
+          return { encrypted: runtime.contentMode === 'e2ee', accountId, token: runtime };
+        },
+      }),
+    [cloudClient, e2eeWorkspaces, atomStore, sessionStore, workspacesStore]
+  );
+
   const provider = useMemo<PlatformProvider>(
     () => ({
       kind: 'cloud',
@@ -480,6 +517,7 @@ export function CloudPlatformProvider({
         signOut: () => signOutRef.current(),
       },
       e2eeWorkspaces,
+      sessionAccess,
       workspaces: {
         state: workspacesStore,
         retry: async () => {
@@ -527,7 +565,14 @@ export function CloudPlatformProvider({
         mode: localAgentSyncMode,
       },
     }),
-    [e2eeWorkspaces, localAgentSyncMode, readOrganization, sessionStore, workspacesStore]
+    [
+      e2eeWorkspaces,
+      sessionAccess,
+      localAgentSyncMode,
+      readOrganization,
+      sessionStore,
+      workspacesStore,
+    ]
   );
 
   useEffect(() => installAttachmentWorkspaceAccess(provider), [provider]);

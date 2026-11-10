@@ -139,4 +139,99 @@ describe('sidebar share-only context menus', () => {
     });
     expect(onShareItemWithTeam).toHaveBeenCalledWith('updated-session');
   });
+  it.each(['sessions', 'updated'] as const)(
+    'hides management controls but retains read preferences in %s rows',
+    (surface) => {
+      const sharing: SessionSharingState = {
+        ...PRIVATE_SHARING,
+        visibility: 'team',
+        access: 'read',
+        canManage: false,
+      };
+      const actions = { pin: false, unread: false };
+      const forbidden = () => {
+        throw new Error('management must stay hidden');
+      };
+      flushSync(() =>
+        root?.render(
+          surface === 'sessions' ? (
+            <SessionList
+              sessions={[
+                {
+                  sessionId: 'read-only',
+                  title: 'Read-only conversation',
+                  repoFullName: null,
+                  branchName: '',
+                  latestMessageAt: 100,
+                  addedLines: 0,
+                  deletedLines: 0,
+                  isWorking: false,
+                  hasUnreadMessages: false,
+                  isOffline: false,
+                  isWaitingPermission: false,
+                  sharing,
+                },
+              ]}
+              repos={[]}
+              onArchiveSession={forbidden}
+              onRenameSession={forbidden}
+              onTogglePinSession={() => {
+                actions.pin = true;
+              }}
+              onMarkSessionUnread={() => {
+                actions.unread = true;
+              }}
+            />
+          ) : (
+            <SidebarUpdatedSessionList
+              items={[
+                {
+                  id: 'read-only',
+                  kind: 'local',
+                  title: 'Read-only conversation',
+                  sectionLabel: 'Local',
+                  latestMessageAt: new Date(100),
+                  sharing,
+                },
+              ]}
+              onArchiveItem={forbidden}
+              onRenameItem={forbidden}
+              onTogglePinItem={() => {
+                actions.pin = true;
+              }}
+              onMarkItemUnread={() => {
+                actions.unread = true;
+              }}
+            />
+          )
+        )
+      );
+      const row =
+        container?.querySelector(
+          '[data-sidebar-session-id="read-only"], [data-sidebar-updated-id="read-only"]'
+        ) ?? null;
+      expect(
+        row?.querySelector('[aria-label="Archive session"], [aria-label="Archive Session"]')
+      ).toBeNull();
+      for (const label of ['Pin Session', 'Mark as unread']) {
+        openContextMenu(row);
+        const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+        expect(
+          items
+            .map((item) => item.textContent)
+            .some((text) => /Rename|Archive|Delete/.test(text ?? ''))
+        ).toBe(false);
+        const action = items.find((item) => item.textContent === label);
+        expect(action).toBeDefined();
+        flushSync(() => action!.click());
+      }
+      expect(actions).toEqual({ pin: true, unread: true });
+      const title = [...row!.querySelectorAll('span')].find(
+        (node) => node.textContent === 'Read-only conversation'
+      );
+      expect(title).toBeDefined();
+      flushSync(() => title!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    }
+  );
 });

@@ -12,6 +12,7 @@ import {
   Result,
 } from 'effect';
 import {
+  makeWorkspaceRecovery,
   InstalledEpochHistory,
   InstalledEpochKeys,
   KeyReceiver,
@@ -72,6 +73,7 @@ import {
 import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
 import { assertPersonalAdmission } from './admission';
 import { fail } from './errors';
+import type { PersonalRecoverySetupInput } from './recovery-restore';
 import { fromHex, toHex } from './bytes';
 // The subpath, never the package index: this host runs in browsers.
 import {
@@ -84,7 +86,8 @@ import { encodePersonalInvitation } from './pairing';
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
-  approval: PersonalApproval
+  approval: PersonalApproval,
+  recovered: readonly (readonly [number, Bytes.EpochKey])[] = []
 ) {
   const platform = yield* PersonalHostPlatform,
     installation = yield* ClientInstallationStore;
@@ -680,9 +683,59 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           )
         ),
     };
+    if (recovered.length) {
+      yield* withKeys((ctx) =>
+        Effect.forEach(
+          recovered,
+          ([epoch, key]) => Context.get(ctx, InstalledEpochKeys).saveAndReload(epoch, key),
+          { discard: true }
+        )
+      );
+    }
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       accountApproval: Object.freeze(accountApproval),
+      /** Set up this workspace's recovery without exposing its signer or epoch keys. */
+      setupRecovery: (input: PersonalRecoverySetupInput) =>
+        run(
+          serial.withPermit(
+            withKeys((ctx) =>
+              Effect.gen(function* () {
+                yield* control.refresh();
+                const view = yield* admitted();
+                const workflow = yield* makeWorkspaceRecovery({
+                  vault: input.vault,
+                  local: input.local,
+                  genesis: prepared.binding.genesis,
+                  membershipId: Result.getOrThrow(
+                    Bytes.membershipId(fromHex(prepared.offer.membershipId))
+                  ),
+                  personalSigner: device,
+                  ledger: admitted,
+                  installed: Context.get(ctx, InstalledEpochKeys),
+                  trust: {
+                    source: 'personal-device',
+                    genesisRecord: fromHex(prepared.offer.genesisRecordHex),
+                    head: toHex(view.head.toBytes()),
+                    length: view.length,
+                  },
+                  submitOriginal: (record, registration) =>
+                    input
+                      .submitOriginal(record, registration)
+                      .pipe(Effect.tap(() => control.refresh())),
+                  fetchCurrentEnvelope: (...args) =>
+                    Effect.gen(function* () {
+                      // A failed independent receive/repair must not hide an already delivered R envelope.
+                      yield* Effect.exit(maintenance!(view.inspectState().epoch.number));
+                      return yield* input.fetchCurrentEnvelope(...args);
+                    }),
+                });
+                const result = yield* workflow.setup();
+                return { outcome: result.outcome, recoverable: result.status.recoverable };
+              }).pipe(Effect.scoped)
+            )
+          )
+        ),
       close: () => close,
       ledgerState: () =>
         run(

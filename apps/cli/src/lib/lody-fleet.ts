@@ -1025,8 +1025,12 @@ export class LodyFleet {
           logger: workspaceLogger,
           onEncryptedAuthorityConfirmed: (startedAt) =>
             this.confirmEncryptedAuthority(workspace.id, startedAt),
-          onEncryptedWindowNotice: (active) => {
+          onEncryptedWindowNotice: (active, window) => {
             const code = `e2ee_access_unconfirmed:${workspace.id}`;
+            this.runtimeStateReporter.setE2eeAccessWindow(
+              workspace.id,
+              active ? window : undefined
+            );
             if (active)
               this.runtimeStateReporter.upsertIssue({
                 code,
@@ -1367,6 +1371,9 @@ export class LodyFleet {
 
     this.encryptedAuthorityConfirmedAt.delete(workspaceId);
     this.suspendedEncryptedWorkspaces.delete(workspaceId);
+    // A stopped runtime no longer relies on its outage window.
+    this.runtimeStateReporter.setE2eeAccessWindow(workspaceId, undefined);
+    this.runtimeStateReporter.clearIssue(`e2ee_access_unconfirmed:${workspaceId}`);
     const state = this.runtimes.get(workspaceId);
     if (!state) return;
     await this.cleanupWorkspaceRuntime(state);

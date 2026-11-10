@@ -9,6 +9,7 @@ import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { Children, Fragment, isValidElement, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Check,
   ChevronLeft,
   CircleHelp,
   LayoutDashboard,
@@ -351,6 +352,20 @@ const styles = stylex.create({
     cursor: 'pointer',
   },
   quickIcon: { color: colors.secondaryLabel },
+  checkMark: {
+    display: 'inline-grid',
+    placeItems: 'center',
+    flexShrink: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    color: '#ffffff',
+  },
+  checkMarkDone: { borderColor: colors.success, backgroundColor: colors.success },
+  checkDoneText: { color: colors.secondaryLabel },
   linkButton: {
     marginInlineStart: 'auto',
     borderWidth: 0,
@@ -396,24 +411,84 @@ function sectionsByTab(children: ReactNode) {
   return byTab;
 }
 
-const failureMessage: Record<E2eeControlFailure['kind'], string> = {
-  'approval-required': 'e2ee.pair.help',
-  'local-identity': 'e2ee.identity.localFailure',
-  ...custodyFailureMessages,
-  network: 'e2ee.control.failure.network',
-  auth: 'e2ee.control.failure.auth',
-  server: 'e2ee.control.failure.server',
-  mode: 'e2ee.control.failure.mode',
-  upgrade: 'e2ee.control.failure.upgrade',
-  'identity-conflict': 'e2ee.control.failure.identityConflict',
-  'progress-conflict': 'e2ee.control.failure.progressConflict',
-  'local-corrupt': 'e2ee.control.failure.localCorrupt',
+type FailureAction = 'refresh' | 'devices' | 'recovery' | 'security' | 'repair' | 'update';
+
+/** One card per failure: a conclusion, one reason that says what is still safe, and
+ * the single next step. Diagnostics stay available but secondary. */
+const failureCards: Record<
+  E2eeControlFailure['kind'],
+  { title: string; body: string; action?: FailureAction; secondary?: FailureAction }
+> = {
+  'approval-required': {
+    title: 'e2ee.pair.desktopApprovalRequired',
+    body: 'e2ee.pair.help',
+    action: 'devices',
+  },
+  'local-identity': {
+    title: 'e2ee.failure.identity.title',
+    body: 'e2ee.failure.identity.body',
+    action: 'devices',
+    secondary: 'recovery',
+  },
+  'custody-locked': {
+    title: 'e2ee.custody.locked.title',
+    body: custodyFailureMessages['custody-locked'],
+    action: 'refresh',
+  },
+  'custody-indeterminate': {
+    title: 'e2ee.custody.indeterminate.title',
+    body: custodyFailureMessages['custody-indeterminate'],
+    action: 'refresh',
+  },
+  'custody-unavailable': {
+    title: 'e2ee.custody.unavailable.title',
+    body: custodyFailureMessages['custody-unavailable'],
+    action: 'update',
+  },
+  network: {
+    title: 'e2ee.control.status.unreachable',
+    body: 'e2ee.control.failure.network',
+    action: 'refresh',
+  },
+  auth: { title: 'e2ee.failure.auth.title', body: 'e2ee.control.failure.auth' },
+  server: {
+    title: 'e2ee.failure.server.title',
+    body: 'e2ee.control.failure.server',
+    action: 'refresh',
+  },
+  mode: {
+    title: 'e2ee.control.status.stopped',
+    body: 'e2ee.control.failure.mode',
+    action: 'refresh',
+  },
+  upgrade: {
+    title: 'e2ee.failure.upgrade.title',
+    body: 'e2ee.control.failure.upgrade',
+    action: 'update',
+  },
+  'identity-conflict': {
+    title: 'e2ee.failure.identityConflict.title',
+    body: 'e2ee.control.failure.identityConflict',
+    action: 'security',
+  },
+  'progress-conflict': {
+    title: 'e2ee.failure.progressConflict.title',
+    body: 'e2ee.control.failure.progressConflict',
+  },
+  'local-corrupt': {
+    title: 'e2ee.failure.localCorrupt.title',
+    body: 'e2ee.control.failure.localCorrupt',
+    action: 'repair',
+  },
 };
 
-const custodyTitle: Partial<Record<E2eeControlFailure['kind'], string>> = {
-  'custody-locked': 'e2ee.custody.locked.title',
-  'custody-indeterminate': 'e2ee.custody.indeterminate.title',
-  'custody-unavailable': 'e2ee.custody.unavailable.title',
+const failureActionLabel: Record<FailureAction, string> = {
+  refresh: 'e2ee.failure.action.refresh',
+  devices: 'e2ee.failure.action.devices',
+  recovery: 'e2ee.failure.action.recovery',
+  security: 'e2ee.failure.action.security',
+  repair: 'e2ee.control.repairLocal',
+  update: 'e2ee.failure.action.update',
 };
 
 /** Network and sign-in problems clear on their own; the rest stop verification. */
@@ -427,11 +502,16 @@ function FailurePanel(props: {
   diagnostics: () => string;
   onRepairLocal: () => void;
   onResetProgress: () => void;
+  onRefresh: () => void;
+  onNavigate: (tab: E2eeConsoleTab) => void;
+  /** Absent where the host cannot check for app updates; the card then has no update button. */
+  onCheckForUpdates?: () => void;
 }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState<'idle' | 'copied' | 'shown'>('idle');
   const [confirmReset, setConfirmReset] = useState(false);
   const [report, setReport] = useState<string | null>(null);
+  const card = failureCards[props.failure.kind];
   const copy = async () => {
     const text = props.diagnostics();
     setReport(text);
@@ -443,20 +523,27 @@ function FailurePanel(props: {
       setCopied('shown');
     }
   };
+  const handlers: Record<FailureAction, (() => void) | undefined> = {
+    refresh: props.onRefresh,
+    devices: () => props.onNavigate('devices'),
+    recovery: () => props.onNavigate('recovery'),
+    security: () => props.onNavigate('security'),
+    repair: props.onRepairLocal,
+    update: props.onCheckForUpdates,
+  };
+  // Only actions that do something are shown.
+  const actionButton = (action: FailureAction | undefined, variant: 'primary' | 'secondary') => {
+    const run = action ? handlers[action] : undefined;
+    return action && run ? (
+      <Button variant={variant} data-failure-action={action} onClick={run}>
+        {t(failureActionLabel[action])}
+      </Button>
+    ) : null;
+  };
   return (
-    <Alert.Root tone={failureTone(props.failure.kind)}>
-      <Alert.Title>
-        {custodyTitle[props.failure.kind]
-          ? t(custodyTitle[props.failure.kind]!)
-          : props.failure.kind === 'approval-required'
-            ? t('e2ee.pair.desktopApprovalRequired')
-            : failureTone(props.failure.kind) === 'warning'
-              ? t('e2ee.control.status.unreachable')
-              : t('e2ee.control.status.stopped')}
-      </Alert.Title>
-      <Alert.Description>
-        {t(failureMessage[props.failure.kind], { code: props.failure.code })}
-      </Alert.Description>
+    <Alert.Root tone={failureTone(props.failure.kind)} data-failure-kind={props.failure.kind}>
+      <Alert.Title>{t(card.title)}</Alert.Title>
+      <Alert.Description>{t(card.body, { code: props.failure.code })}</Alert.Description>
       {confirmReset && (
         <Alert.Description>{t('e2ee.control.resetProgressWarning')}</Alert.Description>
       )}
@@ -472,16 +559,16 @@ function FailurePanel(props: {
           </>
         ) : (
           <>
-            <Button variant="secondary" onClick={() => void copy()}>
+            {actionButton(card.action, 'primary')}
+            {actionButton(card.secondary, 'secondary')}
+            <Button
+              variant={card.action && handlers[card.action] ? 'ghost' : 'secondary'}
+              onClick={() => void copy()}
+            >
               {copied === 'copied'
                 ? t('e2ee.control.diagnosticsCopied')
                 : t('e2ee.control.copyDiagnostics')}
             </Button>
-            {props.failure.kind === 'local-corrupt' && (
-              <Button variant="secondary" onClick={props.onRepairLocal}>
-                {t('e2ee.control.repairLocal')}
-              </Button>
-            )}
             {props.failure.kind === 'progress-conflict' && (
               <Button variant="ghost" onClick={() => setConfirmReset(true)}>
                 {t('e2ee.control.resetProgress')}
@@ -684,6 +771,11 @@ export interface E2eeWorkspaceControlPageProps {
   onBack: () => void;
   /** Present only after the owning host accepted this device's read-open. */
   onOpen?: () => void;
+  /** Present where the host can check for app updates (desktop). */
+  onCheckForUpdates?: () => void;
+  /** Whether this workspace can be restored from the account recovery file or passkey.
+   * Undefined when recovery is unavailable on this host or its state is unknown. */
+  recoveryReady?: boolean;
   /** Host-owned content; wrap it in `E2eeConsoleSection` to place it on a tab. */
   children?: ReactNode;
 }
@@ -737,6 +829,9 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           diagnostics={props.diagnostics}
           onRepairLocal={props.onRepairLocal}
           onResetProgress={props.onResetProgress}
+          onRefresh={props.onRefresh}
+          onNavigate={setTab}
+          {...(props.onCheckForUpdates ? { onCheckForUpdates: props.onCheckForUpdates } : {})}
         />
       )}
       {history?.upgradeRequiredAt !== undefined && (
@@ -845,6 +940,69 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
     { tab: 'recovery', label: t('e2ee.console.quick.recovery'), icon: LifeBuoy },
   ];
 
+  // Getting started follows creation, so it is shown only on the creating device, the one
+  // place this account's membership is known from the ledger itself.
+  const genesis = overview?.events[0];
+  const creator =
+    history?.locallyPinned === true && genesis?.type === 'genesis'
+      ? overview?.members.find((member) => member.membershipId === genesis.actor.membershipId)
+      : undefined;
+  const checklist: { id: string; done: boolean; tab?: E2eeConsoleTab }[] =
+    creator && overview
+      ? [
+          { id: 'create', done: true },
+          { id: 'invite', done: overview.members.length > 1, tab: 'members' },
+          {
+            id: 'device',
+            done: creator.devices.filter((device) => device.kind === 'personal').length > 1,
+            tab: 'devices',
+          },
+          ...(props.recoveryReady === undefined
+            ? []
+            : [{ id: 'recovery', done: props.recoveryReady, tab: 'recovery' as const }]),
+        ]
+      : [];
+  const checklistDone = checklist.filter((item) => item.done).length;
+  const gettingStarted = checklist.length > 0 && checklistDone < checklist.length && (
+    <section
+      data-testid="e2ee-getting-started"
+      aria-label={t('e2ee.console.start.title')}
+      {...stylex.props(styles.section)}
+    >
+      <h2 {...stylex.props(styles.sectionHeading)}>
+        {t('e2ee.console.start.title')}
+        <span {...stylex.props(styles.count)}>
+          {checklistDone} / {checklist.length}
+        </span>
+      </h2>
+      <ul {...stylex.props(styles.list)}>
+        {checklist.map((item) => (
+          <li
+            key={item.id}
+            data-start-item={item.id}
+            data-done={item.done}
+            {...stylex.props(styles.memberRow)}
+          >
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.checkMark, item.done && styles.checkMarkDone)}
+            >
+              {item.done ? <Check size={12} strokeWidth={3} /> : null}
+            </span>
+            <span {...stylex.props(styles.eventText, item.done && styles.checkDoneText)}>
+              {t(`e2ee.console.start.${item.id}`)}
+            </span>
+            {!item.done && item.tab && (
+              <Button size="small" variant="secondary" onClick={() => setTab(item.tab!)}>
+                {t(`e2ee.console.start.${item.id}Action`)}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+
   const panels: Record<E2eeConsoleTab, ReactNode> = {
     overview: (
       <>
@@ -865,6 +1023,7 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </div>
         )}
         {sections.get('overview')}
+        {gettingStarted}
         {history && overview && (
           <section aria-label={t('e2ee.console.quick.title')} {...stylex.props(styles.section)}>
             <h2 {...stylex.props(styles.sectionHeading)}>{t('e2ee.console.quick.title')}</h2>

@@ -66,9 +66,8 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 - Control handlers stay fast: `session/dispatch-turn` stashes/wakes, never executes
   an agent inline. Its TTL equals the client deadline, bounding restart replay.
   Stop fences queued handlers; retain started work until its raw completion.
-- History writes require durable precondition-refusal retention before replying.
-  Replayed IDs keep that refusal until expiry; conflicting ID reuse and unavailable
-  request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
+- Ordinary history proofs require both proxy principals; encrypted reads retain exact-session fences through sending. Writes require intent-bound editing proofs and durable claims until proof expiry; uncertain outcomes never replay. Recheck cancellation and deadlines after authorization and persistence.
+- Keep precondition refusals until expiry. Conflicting IDs and unavailable request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
   Automation controls require target-verified operation-bound proof.

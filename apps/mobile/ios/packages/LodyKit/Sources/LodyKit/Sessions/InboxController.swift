@@ -22,6 +22,7 @@ final class InboxController: UIViewController {
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
   private var observers: [NSObjectProtocol] = []
+  private var renderedInput: (userId: String, workspaceId: String, catalog: SessionCatalog)?
 
   init(source: SessionSource = .live) {
     self.source = source
@@ -49,7 +50,9 @@ final class InboxController: UIViewController {
     wireChrome()
     observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-        MainActor.assumeIsolated { self?.render() }
+        MainActor.assumeIsolated {
+          self?.render(onlyIfContentChanged: name == .lodyCatalogDidChange || name == .lodySessionCatalogPreviewDidChange)
+        }
       }
     }
     registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in self.render() }
@@ -75,9 +78,29 @@ final class InboxController: UIViewController {
     }
   }
 
-  func render() {
+  func render(onlyIfContentChanged: Bool = false) {
     guard isViewLoaded else { return }
     let state = source.state
+    let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if state.userId.isEmpty {
+      chrome.update(nil)
+      list.setPlaceholder("")
+    } else {
+      chrome.update(InboxChrome.Model(
+        accountEmail: state.accountEmail,
+        workspaces: state.workspaces, selected: state.workspace,
+        devices: InboxDevices(catalog: state.catalog, presence: state.presence),
+        running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
+        mode: mode, sort: sort, connection: syncState(state)
+      ))
+      if term.isEmpty { list.setPlaceholder(listPlaceholder(state)) }
+    }
+    // Presence and connection updates still refresh chrome, but cannot change rows.
+    // Explicit renders bypass this guard for search results, identities and watermarks.
+    if onlyIfContentChanged, let renderedInput,
+      renderedInput.userId == state.userId, renderedInput.workspaceId == state.workspaceId,
+      renderedInput.catalog == state.catalog { return }
+    renderedInput = (state.userId, state.workspaceId, state.catalog)
     if memberScope != state.key {
       memberTask?.cancel()
       memberScope = state.key
@@ -104,28 +127,17 @@ final class InboxController: UIViewController {
     list.setProjectIndexEnabled(!state.userId.isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && traitCollection.horizontalSizeClass != .regular && HomeGrouping.stored == .project)
     guard !state.userId.isEmpty else {
-      chrome.update(nil)
-      list.setPlaceholder("")
       list.setSections([])
       return
     }
     let catalog = state.catalog.viewed(views)
-    chrome.update(InboxChrome.Model(
-      accountEmail: state.accountEmail,
-      workspaces: state.workspaces, selected: state.workspace,
-      devices: InboxDevices(catalog: state.catalog, presence: state.presence),
-      running: state.catalog.sessions.filter { !$0.archived && SessionState($0) == .live }.count,
-      mode: mode, sort: sort, connection: syncState(state)
-    ))
     list.setPreviewUserId(state.userId)
     list.setPreviewWorkspaceId(state.workspaceId)
-    let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
     list.setPinsGroupLabels(term.isEmpty)
     guard term.isEmpty else {
       renderSearch(term, state: state, catalog: catalog)
       return
     }
-    list.setPlaceholder(listPlaceholder(state))
     // iPhone Home groups by the view menu's choice (time / project / status).
     if traitCollection.horizontalSizeClass != .regular {
       let owner = HomeScope.stored == .mine ? state.userId : nil

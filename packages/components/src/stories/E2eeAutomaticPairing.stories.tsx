@@ -8,7 +8,14 @@ import {
 } from '@/components/pages/e2ee-automatic-pairing';
 
 /** Production components over a synthetic capability; never performs cryptographic approval. */
-function Preview({ mode }: { mode: 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous' }) {
+function Preview({
+  mode,
+  backup = false,
+}: {
+  mode: 'waiting' | 'expired' | 'syncing' | 'approval' | 'previous';
+  /** This host can restore from a backup: "No other authorized device?" offers it. */
+  backup?: boolean;
+}) {
   const runtime = useMemo(() => {
     const state: E2eeAutomaticPairingReview = {
       id: 'synthetic-only',
@@ -79,6 +86,22 @@ function Preview({ mode }: { mode: 'waiting' | 'expired' | 'syncing' | 'approval
       onJoined={() => {}}
       onBack={() => {}}
       onManual={() => {}}
+      {...(backup
+        ? {
+            lostAll: {
+              passkeyAvailable: true,
+              restore: async () => ({
+                outcome: 'restored' as const,
+                results: [
+                  { workspaceId: 'preview', name: 'Lody Design', outcome: 'Committed' },
+                  { workspaceId: 'platform', name: 'Platform', outcome: 'Committed' },
+                  { workspaceId: 'archive', name: 'Archive', outcome: 'Failed' },
+                ],
+              }),
+              onRecovered: () => {},
+            },
+          }
+        : {})}
     />
   );
 }
@@ -90,6 +113,8 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const PhoneWaiting: Story = { args: { mode: 'waiting' } };
+/** Open "没有其他已授权设备？" → "用备份找回" for the passkey / file / neither choice. */
+export const PhoneWaitingWithBackup: Story = { args: { mode: 'waiting', backup: true } };
 export const PhoneExpired: Story = { args: { mode: 'expired' } };
 export const PhoneSyncing: Story = { args: { mode: 'syncing' } };
 /** Open “Restart this device’s previous pairing” to inspect its confirmation. */

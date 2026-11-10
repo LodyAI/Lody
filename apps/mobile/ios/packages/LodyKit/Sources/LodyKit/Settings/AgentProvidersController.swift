@@ -42,6 +42,11 @@ final class AgentProvidersController: UIViewController {
   private var observer: NSObjectProtocol?
   private var providersObserver: NSObjectProtocol?
   private var pendingMachines: Set<String> = []
+  /// Whether the shown list came from a live read this session; a cached list never authorizes writes.
+  private var live = false
+  private var store: SettingsSnapshotStore<AgentProviderSnapshot> {
+    SettingsSnapshotStore(kind: "agent-providers", userId: scope.userId, workspaceId: scope.workspaceId)
+  }
 
   init(scope: SettingsActor, service: @escaping AgentProviderService = AgentProvidersController.cloud, details: ProviderDetailService = .cloud) {
     self.scope = scope
@@ -72,7 +77,8 @@ final class AgentProvidersController: UIViewController {
       self.busy = false
       self.loading = false
       self.loadedAt = nil
-      self.refresh()
+      self.live = false
+      self.restoreThenRefresh()
     }
     providersObserver = NotificationCenter.default.addObserver(forName: .lodyProvidersChanged, object: nil, queue: .main) { [weak self] notification in
       guard let event = notification.object as? RuntimeContract.AgentProvidersChangedEvent else { return }
@@ -89,7 +95,27 @@ final class AgentProvidersController: UIViewController {
         self.refresh()
       }
     }
-    refresh()
+    restoreThenRefresh()
+  }
+
+  override func didMove(toParent parent: UIViewController?) {
+    super.didMove(toParent: parent)
+    renderHeader()
+  }
+
+  /// Shows the last accepted list at once, then reads the live one behind it.
+  private func restoreThenRefresh() {
+    let key = scope.key, store = store, version = generation
+    guard scope.valid else { return refresh() }
+    Task { [weak self] in
+      let cached = await store.read()
+      guard let self, self.scope.key == key, self.generation == version else { return }
+      if let cached, self.snapshot == nil {
+        self.snapshot = cached
+        self.selectedID = AgentProviderSections.selected(cached, id: self.selectedID)?.id
+      }
+      self.refresh()
+    }
   }
 
   private var machine: AgentProviderMachine? {
@@ -132,6 +158,10 @@ final class AgentProvidersController: UIViewController {
     selectedID = AgentProviderSections.selected(next, id: selectedID)?.id
     loadedAt = LodyRelativeTime.now()
     failed = false
+    live = true
+    var saved = next
+    saved.authRequired = nil
+    store.write(saved)
   }
 
   private func render() {
@@ -145,24 +175,33 @@ final class AgentProvidersController: UIViewController {
       title: String(localized: "settings.unavailable.agent", bundle: .lody), hasData: snapshot != nil,
       loading: loading, failed: failed, syncedAt: loadedAt
     ), to: list)
-    list.setRefreshing(loading && snapshot != nil)
+    list.setRefreshing(false)
     list.setPlaceholder(snapshot?.machines.isEmpty == true ? AgentProviderSections.text("noMachines") : "")
-    list.setSections(snapshot.map { AgentProviderSections.make($0, selectedID: selectedID, busy: busy || loading || failed, usage: RemoteSettingsContext.current().agentUsage) } ?? [])
+    list.setSections(snapshot.map { AgentProviderSections.make($0, selectedID: selectedID, busy: busy || !live, usage: RemoteSettingsContext.current().agentUsage) } ?? [])
+    renderHeader()
+  }
+
+  private func renderHeader() {
+    let add = LodyFormController.barButton(symbol: "plus", label: AgentProviderSections.text("add")) { [weak self] in
+      self?.edit(nil)
+    }
+    add.accessibilityIdentifier = "provider-add"
+    add.isEnabled = live && !busy && machine.map { !$0.readOnly && $0.online } == true
+    parent?.navigationItem.rightBarButtonItems = [add]
   }
 
   private func event(_ name: String, _ body: [String: Any]) {
     if ["refresh", "noticeAction", "unavailableAction"].contains(name) { refresh(); return }
     guard let id = body["id"] as? String else { return }
     if name == "rowPress", id == "provider-machine-picker" { pickMachine(); return }
-    guard !busy, !loading, !failed, let machine else { return }
-    if name == "rowPress", id == "provider-add" { edit(nil); return }
+    guard !busy, let machine else { return }
     if let item = snapshot?.providers.first(where: { "provider:\($0.id)" == id && $0.machineId == machine.id }) {
       let action = name == "rowAction" ? body["actionId"] as? String : "edit"
       switch action {
       case "edit": edit(item)
-      case "delete" where !item.readOnly && !machine.readOnly:
+      case "delete" where live && !item.readOnly && !machine.readOnly:
         confirmDelete(name: item.name) { [weak self] in self?.mutate("delete", item: item) }
-      case "refresh" where machine.online && !item.readOnly && !machine.readOnly:
+      case "refresh" where live && machine.online && !item.readOnly && !machine.readOnly:
         mutate("refresh", item: item)
       default: break
       }
@@ -191,9 +230,25 @@ final class AgentProvidersController: UIViewController {
 
   private func edit(_ item: AgentProviderItem?) {
     guard let machine, !busy else { return }
-    if item == nil && (machine.readOnly || !machine.online) { return }
+    if item == nil && (!live || machine.readOnly || !machine.online) { return }
     let key = scope.key
     let editor = AgentProviderEditorController(machine: machine, item: item, catalog: (snapshot?.catalog ?? []).filter { $0.cliType != "custom" && (machine.supportsSetup || $0.cliType != "builtin" || $0.agentType == "deepseek") } + [AgentProviderCatalogItem(id: "custom", name: AgentProviderSections.text("custom"), cliType: "custom", agentType: "custom")], scope: scope, service: service, details: details, presets: snapshot?.presets ?? [])
+    editor.willSave = { [weak self] provisional in
+      guard let self, self.scope.key == key, var current = self.snapshot else { return }
+      // Shown at once; the editor's reply (or a fresh read after a failure) replaces it.
+      current.providers.removeAll { $0.id == provisional.id && $0.machineId == provisional.machineId }
+      current.providers.append(provisional)
+      self.snapshot = current
+      self.render()
+    }
+    editor.saveFailed = { [weak self] in
+      guard let self, self.scope.key == key else { return }
+      self.refresh()
+    }
+    editor.deleteRequested = { [weak self] target in
+      guard let self, self.scope.key == key else { return }
+      self.mutate("delete", item: target)
+    }
     editor.saved = { [weak self] next in
       guard let self, self.scope.key == key else { return }
       self.generation += 1
@@ -214,9 +269,17 @@ final class AgentProvidersController: UIViewController {
   }
 
   private func mutate(_ action: String, item: AgentProviderItem? = nil, setup: AgentProviderSetup? = nil) {
-    guard !busy, !loading, !failed, let machine, !machine.readOnly else { return }
+    guard !busy, live, let machine, !machine.readOnly else { return }
     generation += 1
     let version = generation, key = scope.key
+    let previous = snapshot
+    if action == "delete", let item, var current = snapshot {
+      current.providers.removeAll { $0.id == item.id && $0.machineId == item.machineId }
+      snapshot = current
+    } else if action == "deleteSetup", let setup, var current = snapshot {
+      current.setups.removeAll { $0.id == setup.id && $0.machineId == setup.machineId }
+      snapshot = current
+    }
     busy = true
     render()
     let request = AgentProviderRequest(workspaceId: scope.workspaceId, action: action, machineId: machine.id,
@@ -234,9 +297,11 @@ final class AgentProvidersController: UIViewController {
       } catch {
         guard let self, self.generation == version, self.scope.key == key else { return }
         self.busy = false
-        self.failed = true
+        // Roll the optimistic change back, then read again: the write may still have landed.
+        self.snapshot = previous
         LodyToastOverlay.shared.show(message: AgentProviderSections.text("writeFailed"), kind: .error)
         self.render()
+        self.refresh()
       }
     }
   }

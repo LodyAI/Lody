@@ -8,6 +8,8 @@ import {createCommands} from './create-commands.mjs';
 import {controlTurn,itemDetail,sendTurn,stopSessions} from '../vendor/cloud-runtime/src/runtime/session.ts';
 import {cloudCommands} from './cloud-commands.mjs';
 import {providerCommands} from './provider-commands.mjs';
+import {roleCommands} from './role-commands.mjs';
+import {shortcutCommands} from './shortcut-commands.mjs';
 import {scheduleCommands} from './schedule-commands.mjs';
 const emit=message=>globalThis.webkit.messageHandlers.dataRuntime.postMessage(message);
 const access=createReadAccess(globalThis.fetch.bind(globalThis),emit);
@@ -17,6 +19,8 @@ globalThis.XMLHttpRequest=undefined;globalThis.WebSocket=undefined;globalThis.Ev
 const runtime=contractBridge(globalThis.dataRuntime,emit);
 const core={ping:()=>runtime.ping(),probeSchema:()=>runtime.probeSchema(),setActive:active=>{access.setActive(active);if(!active)stopSessions();return runtime.setActive(active);}};
 const cloud=cloudCommands(runtime,access,stopSessions);
+// Native answers a shortcutCloud request it received as an event.
+cloud.shortcutCloudReply=(requestId,reply)=>runtime.shortcutCloud(requestId,reply);
 let identity;
 const connect=cloud.connect;cloud.connect=(workspaceId,gateway,userId)=>{const result=connect(workspaceId,gateway,userId);identity={workspaceId,userId};return result;};
 // A tool step's detail (command, output, diff) reads the watched session's local replica only.
@@ -39,5 +43,5 @@ const sendWithReferences = args => sendTurn(args, async text => {
  });
  return {text:expanded,spans:referenceSpans(expanded,items)};
 });
-globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...detail});
-emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation']});
+globalThis.androidDispatch=createDispatcher(core,emit,{...cloud,...createCommands(runtime,sendWithReferences,()=>identity),...scheduleCommands(runtime,()=>identity),...providerCommands(runtime,()=>identity),...roleCommands(runtime,()=>identity),...shortcutCommands(runtime,()=>identity),...detail});
+emit({type:'hostReady',protocol:HOST_PROTOCOL,capabilities:[...CORE_CAPABILITIES,'connect','grant','watchSession','closeSession','creationOptions','createAndSend','sendText','itemDetail','createTab','turnDiff','controlTurn','agentRoles','mentionCatalog','localProjects','shortcutBody','projectGroups','messageAction','setTabClosed','schedules','scheduleDetail','scheduleCommand','agentProviders','agentProviderDetail','agentProviderProbe','agentProviderAuth','agentProviderOperation','agentRoleSettings','shortcutCloudReply','shortcutSettings']});

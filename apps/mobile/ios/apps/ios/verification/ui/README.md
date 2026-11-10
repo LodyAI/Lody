@@ -52,6 +52,15 @@ per batch, then launches a fresh app for each case. Run English only (`en`,
 | Individual iPad cases                   | Adaptive split, creation, chrome, sidebar, devices, search, deletion and wide panels                                                                    |
 | `toast`                                 | Archive/restore completion, archive failure, warning and copy notifications: localized accessibility labels, rendered glyph colors and dismissal        |
 
+`home-grouping-crash` (also in `pages`) launches the offline Home fixture with
+`--ui-verify-sticky-groups`: 54 conversations across three projects. It switches
+time/project/status grouping eight times while scrolled and checks that rows,
+semantic headings and the app process survive. Run it in light and dark with:
+
+```sh
+pnpm verify:ui --case home-grouping-crash --require-video --app /absolute/path/to/Lody.app
+```
+
 The native boundaries are `LodyShell`, `AuthSession`, `CatalogSession`,
 `OutboxSession`, `LodyCore.AppRouting`, and feature preview controllers.
 Add checks to the runner inventory and exercise production controllers.

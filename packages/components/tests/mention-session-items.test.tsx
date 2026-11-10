@@ -7,6 +7,7 @@ import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getSessionRoomId,
+  getMachineRoomId,
   type MachineId,
   type SessionId,
   type SessionMeta,
@@ -43,7 +44,7 @@ vi.mock('@/hooks/use-machine-flock-rows', () => machineFlockMocks);
 vi.mock('../src/hooks/use-machine-flock-rows', () => machineFlockMocks);
 
 import { userAtom } from '../src/atoms';
-import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import { machineMetaCacheAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { useSessionMentionItems } from '../src/components/mentions/mention-session-source';
 import { TestCloudPlatformProvider } from './test-platform';
@@ -86,7 +87,9 @@ describe('useSessionMentionItems', () => {
 
   beforeEach(() => {
     snapshot = undefined;
-    queryMocks.machineRows = [];
+    queryMocks.machineRows = [
+      { machineId: 'own-machine', ownerUserId: 'viewer-user', sharedWithTeam: false, updatedAt: 1 },
+    ];
     queryMocks.localProjectRows = [];
     queryMocks.useQuery.mockReset();
     queryMocks.useQuery.mockImplementation((query) => {
@@ -104,6 +107,13 @@ describe('useSessionMentionItems', () => {
       email: 'viewer@example.com',
     });
     store.set(currentWorkspaceIdAtom, 'workspace-mentions' as WorkspaceId);
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId('own-machine' as MachineId)]: {
+        id: 'own-machine',
+        ownerUserId: 'viewer-user',
+        name: 'Viewer machine',
+      } as never,
+    });
   });
 
   afterEach(async () => {

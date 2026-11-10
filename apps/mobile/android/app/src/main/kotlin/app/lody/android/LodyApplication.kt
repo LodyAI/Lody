@@ -20,6 +20,8 @@ open class LodyApplication : Application() {
     lateinit var creation: app.lody.android.create.CreationService
     val submissions by lazy { app.lody.android.create.CreationSubmissions(applicationScope) { scope, request -> creation.create(scope, request) } }
     lateinit var pullRequests: app.lody.android.chat.PullRequestWriter
+    lateinit var mergeStates: app.lody.android.chat.PullRequestMergeReader
+    lateinit var branches: app.lody.android.chat.PullRequestBranches
     lateinit var attachments: app.lody.android.chat.AttachmentUploader
         private set
     lateinit var members: WorkspaceMembers
@@ -33,6 +35,7 @@ open class LodyApplication : Application() {
     lateinit var schedules: app.lody.android.schedules.ScheduleService
         private set
     private var prepared: Pair<RuntimeScope, ShortLivedGrant>? = null
+    private val shortcutCloud by lazy { app.lody.android.cloud.PromptShortcutCloud() }
     protected open fun createRuntime(scope: RuntimeScope): CloudRuntime {
         val ready = prepared?.takeIf { it.first == scope }
         if (ready != null) {
@@ -40,6 +43,8 @@ open class LodyApplication : Application() {
             return ReadOnlyCloudRuntime(this, scope, ready.second, GrantProvider { key ->
                 try { account.grant(key) }
                 catch (error: AuthFailure) { throw app.lody.android.runtime.RuntimeException(RuntimeFault(error.code, if (error.code == "network_unavailable") RuntimeErrorCategory.NETWORK else RuntimeErrorCategory.AUTH)) }
+            }, app.lody.android.runtime.ShortcutCloudProvider { key, operation, args ->
+                account.withVerifiedAccount(key) { credential -> shortcutCloud.call(credential, key.workspaceId, operation, args) }
             })
         }
         return createOfflineRuntime(scope)
@@ -61,6 +66,15 @@ open class LodyApplication : Application() {
                 if (method != null) writes.merge(credential, scope.workspaceId, repo, number, method)
                 else writes.markReady(credential, scope.workspaceId, repo, number)
             }
+        }
+        mergeStates = app.lody.android.chat.PullRequestMergeReader { scope, repo, number ->
+            account.withVerifiedAccount(scope) { credential -> writes.mergeState(credential, scope.workspaceId, repo, number) }
+        }
+        branches = object : app.lody.android.chat.PullRequestBranches {
+            override suspend fun exists(scope: RuntimeScope, repository: String, number: Int) =
+                account.withVerifiedAccount(scope) { credential -> writes.headBranchExists(credential, scope.workspaceId, repository, number) }
+            override suspend fun delete(scope: RuntimeScope, repository: String, number: Int) =
+                account.withVerifiedAccount(scope) { credential -> writes.deleteBranch(credential, scope.workspaceId, repository, number) }
         }
         val uploads = app.lody.android.chat.SessionAttachmentUploads(contentResolver)
         attachments = app.lody.android.chat.AttachmentUploader { scope, sessionId, items ->

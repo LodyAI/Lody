@@ -1,5 +1,5 @@
-/** Restore from an unlocked vault with nothing known about the workspace. No
- * product flow calls this yet, so it changes no create, join or pairing path. */
+/** Authenticated recovery helpers for personal-device hosts. Explicit recovery
+ * preserves admission and custody checks; product rollout belongs to the host. */
 import { Effect, Exit, Result, type Scope } from 'effect';
 import {
   Bytes,
@@ -192,7 +192,11 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
   readonly local: WorkspaceRecoveryInput['local'];
   readonly targets: readonly RecoveryRestoreTarget[];
 }) {
-  const results: { readonly name: string; readonly outcome: string }[] = [];
+  const results: {
+    readonly workspaceId: string;
+    readonly name: string;
+    readonly outcome: string;
+  }[] = [];
   for (const reference of yield* listVaultWorkspaces(input.vault)) {
     const target = input.targets.find((row) => row.genesisHash === reference.genesis);
     if (!target) continue;
@@ -200,7 +204,7 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     const progress = yield* input.local.read(key);
     const identity = target.hasIdentity();
     if (identity === 'unknown' && !isOpen(progress)) {
-      results.push({ name: target.name, outcome: 'Failed' });
+      results.push({ workspaceId: target.id, name: target.name, outcome: 'Failed' });
       continue;
     }
     if (identity === true && !isOpen(progress)) continue;
@@ -237,7 +241,35 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
       })
     );
     const exit = yield* Effect.exit(attempt);
-    results.push({ name: target.name, outcome: Exit.isSuccess(exit) ? exit.value : 'Failed' });
+    results.push({
+      workspaceId: target.id,
+      name: target.name,
+      outcome: Exit.isSuccess(exit) ? exit.value : 'Failed',
+    });
   }
   return results;
 });
+
+/** Restore transport for a personal host. The host owns identity and installation;
+ * these ports relay only signed history, R envelopes and the exact admission. */
+export interface PersonalHostRecoveryInput {
+  /** Exact retained offer when repairing an already admitted installation. It cannot replace package pins. */
+  readonly offer?: import('./pairing').PersonalPairingOffer;
+  readonly vault: RecoveryVault;
+  readonly local: WorkspaceRecoveryInput['local'];
+  readonly reference: RecoveryEntryReference;
+  readonly pages: () => Effect.Effect<import('./admission').PersonalHistoryPages, unknown>;
+  readonly fetchCurrentEnvelope: WorkspaceRecoveryInput['fetchCurrentEnvelope'];
+  readonly submitOriginalAsRecovery: (
+    ...args: [
+      ...Parameters<WorkspaceRestorePlan['submitOriginalAsRecovery']>,
+      deviceCredentialHash: string,
+    ]
+  ) => ReturnType<WorkspaceRestorePlan['submitOriginalAsRecovery']>;
+}
+
+/** Vault setup transports; personal signing and installed keys remain in the admitted session. */
+export type PersonalRecoverySetupInput = Pick<
+  WorkspaceRecoveryInput,
+  'vault' | 'local' | 'submitOriginal' | 'fetchCurrentEnvelope'
+>;

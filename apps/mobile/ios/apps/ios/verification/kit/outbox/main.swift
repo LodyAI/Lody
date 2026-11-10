@@ -476,7 +476,41 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     ack.open()
     await settle()
     precondition(network.sent.count == 1 && phases(store) == ["accepted"], "a page opened mid-send leaves the background write alone")
+    try await pageWakesAfterBackgroundRelease()
     print("PASS: the page and background dispatchers hand a session over without dispatching the same id twice")
+  }
+
+  /// A page opened while the background dispatcher still holds its session must settle the record
+  /// once that hold ends, even when nothing else on the page changes afterwards.
+  @MainActor static func pageWakesAfterBackgroundRelease() async throws {
+    let network = Network()
+    let ack = Gate()
+    network.send = { _ in try await ack.wait(); throw OutboxError.invalidRecord }
+    let disk = Disk()
+    disk.values["pending-sends:u1:w"] = OutboxRecord.encode([record("s1", sendId: "R")])
+    let stores = OutboxStores(persistence: disk.persistence, awaitingConfirmation: { "send.reason.awaitingConfirmation" })
+    let store = stores.store(user: "u1", workspace: "w")!
+    let inflight = OutboxInflight()
+    let global = OutboxDispatcher(services: network.services, inflight: inflight, text: { $0 })
+    let owned = OutboxDispatcher(services: network.services, inflight: inflight, foreground: "s1", text: { $0 })
+    stores.onChange = { [weak global, weak owned] _ in global?.schedule(); owned?.schedule() }
+    global.update(store: store, inputs: .init(userId: "u1", connected: true, latestUserMessages: ["s1": ""]))
+    await settle()
+    precondition(network.sent.count == 1 && phases(store) == ["sending"], "the background dispatcher sends first")
+    // The reply is already on the page; the background result's write is still in flight when the page runs.
+    let entries: [[String: Any]] = [["id": "R", "role": "user"], ["id": "a1", "role": "assistant", "userTurnId": "R", "finished": true]]
+    global.update(store: store, inputs: .init(userId: "u1", connected: true, foregroundSessionId: "s1", latestUserMessages: ["s1": ""]))
+    owned.update(store: store, inputs: page(entries))
+    let write = Gate()
+    disk.block = write
+    ack.open()
+    await settle()
+    precondition(phases(store) == ["unknown"] && inflight.contains("s1"), "the ambiguous result is published while its write is pending")
+    write.open()
+    await settle()
+    precondition(phases(store).isEmpty && network.sent.count == 1,
+      "the page clears a replied turn once the background hold ends instead of staying on confirming: \(phases(store))")
+    stores.onChange = nil
   }
 }
 

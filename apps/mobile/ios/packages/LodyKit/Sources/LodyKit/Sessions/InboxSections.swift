@@ -96,15 +96,13 @@ enum InboxSections {
   ) -> [LodyListSection] {
     var catalog = catalog
     if let owner { catalog.sessions = owned(catalog.sessions, by: owner) }
-    let home = HomeRows(catalog, now: now)
-    let pinned = home.families.filter { ([$0.session] + $0.children).contains(where: \.pinned) }
-      .flatMap { [$0.session] + $0.children }
-    let pinnedIds = Set(pinned.map(\.id))
-    catalog.sessions.removeAll { pinnedIds.contains($0.id) }
+    var home = HomeRows(catalog, now: now)
+    let pinned = home.families.filter { $0.session.pinned || $0.children.contains(where: \.pinned) }
+    home.families.removeAll { $0.session.pinned || $0.children.contains(where: \.pinned) }
     let sections: [LodyListSection] = switch grouping {
-    case .time: timeline(catalog, now: now)
-    case .project: byProject(catalog, now: now)
-    case .status: byStatus(catalog, idleExpanded: idleExpanded, now: now)
+    case .time: timeline(home)
+    case .project: byProject(home)
+    case .status: byStatus(home, idleExpanded: idleExpanded)
     }
     guard !pinned.isEmpty else { return sections }
     return [section(pinnedId, header: String(localized: "inbox.section.pinned", bundle: .lody), rows: home.rows(pinned))] + sections
@@ -112,11 +110,11 @@ enum InboxSections {
 
   /// Keep complete families containing the owner's chats, including parent context.
   static func owned(_ sessions: [SessionItem], by owner: String) -> [SessionItem] {
-    let included = Set(SessionRows.tree(sessions, all: sessions).flatMap { family in
+    let indexed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let included = Set(SessionRows.tree(sessions, indexed: indexed).flatMap { family in
       let members = [family.session] + family.children
       return members.contains { $0.userId == owner } ? members.map(\.id) : []
     })
-    let indexed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     return sessions.filter { included.contains(DirectoryTabs.root($0, indexed: indexed)) }
   }
 
@@ -126,10 +124,13 @@ enum InboxSections {
 
   /// Activity buckets only (no pinned / status groups).
   static func timeline(_ catalog: SessionCatalog, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
-    let home = HomeRows(catalog, now: now)
-    var buckets: [String: [SessionItem]] = [:]
+    timeline(HomeRows(catalog, now: now))
+  }
+
+  private static func timeline(_ home: HomeRows) -> [LodyListSection] {
+    var buckets: [String: [SessionRows.Family]] = [:]
     for family in home.families {
-      buckets[activityBucket(family.session.activityAt, now: now), default: []] += [family.session] + family.children
+      buckets[activityBucket(family.session.activityAt, now: home.now), default: []].append(family)
     }
     return ["today", "yesterday", "week", "month", "older"].compactMap { id in
       guard let sessions = buckets[id], !sessions.isEmpty else { return nil }
@@ -140,13 +141,16 @@ enum InboxSections {
   /// One group per project, most recently active first; unassigned chats form the "Chat" group.
   /// The header names the project, so rows drop it from their detail line.
   static func byProject(_ catalog: SessionCatalog, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
-    let home = HomeRows(catalog, now: now)
+    byProject(HomeRows(catalog, now: now))
+  }
+
+  private static func byProject(_ home: HomeRows) -> [LodyListSection] {
     var order: [String] = []
-    var groups: [String: [SessionItem]] = [:]
+    var groups: [String: [SessionRows.Family]] = [:]
     for family in home.families {
       let key = SessionRows.isChat(family.session.projectId) ? chatId : family.session.projectId
       if groups[key] == nil { order.append(key) }
-      groups[key, default: []] += [family.session] + family.children
+      groups[key, default: []].append(family)
     }
     return order.map { key in
       let header = key == chatId ? String(localized: "inbox.section.chat", bundle: .lody) : home.names[key] ?? ""
@@ -156,16 +160,19 @@ enum InboxSections {
 
   /// `HomeStatusGroup` order; the idle group shows `idleLimit` chats until expanded.
   static func byStatus(_ catalog: SessionCatalog, idleExpanded: Bool = false, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
-    let home = HomeRows(catalog, now: now)
-    var groups: [HomeStatusGroup: [SessionItem]] = [:]
+    byStatus(HomeRows(catalog, now: now), idleExpanded: idleExpanded)
+  }
+
+  private static func byStatus(_ home: HomeRows, idleExpanded: Bool) -> [LodyListSection] {
+    var groups: [HomeStatusGroup: [SessionRows.Family]] = [:]
     for family in home.families {
-      groups[HomeStatusGroup(family.session, attention: home.attention[family.session.id]), default: []] += [family.session] + family.children
+      groups[HomeStatusGroup(family.session, attention: home.attention[family.session.id]), default: []].append(family)
     }
     return HomeStatusGroup.allCases.compactMap { group in
       guard let sessions = groups[group], !sessions.isEmpty else { return nil }
       let header = String(localized: String.LocalizationValue("home.group." + group.rawValue), bundle: .lody)
       guard group == .idle else { return section(group.rawValue, header: header, rows: home.rows(sessions)) }
-      let roots = SessionRows.tree(sessions, all: catalog.sessions).count
+      let roots = sessions.count
       var rows = home.rows(sessions, maxRoots: idleExpanded ? .max : idleLimit)
       if roots > idleLimit {
         var toggle = LodyListRow()
@@ -182,31 +189,27 @@ enum InboxSections {
 
   /// Shared row building for the Home groupings.
   private struct HomeRows {
-    let catalog: SessionCatalog
     let now: Double
     let names: [String: String]
     let repos: Set<String>
     let repositories: [String: String]
-    let visible: [SessionItem]
+    var families: [SessionRows.Family]
     let attention: [String: SessionRows.ListAttention]
 
     init(_ catalog: SessionCatalog, now: Double) {
-      self.catalog = catalog
-      attention = SessionRows.conversationAttention(catalog.sessions)
+      let indexed = Dictionary(catalog.sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+      attention = SessionRows.conversationAttention(catalog.sessions, indexed: indexed)
       self.now = now
       names = InboxSections.projectNames(catalog)
       repositories = Dictionary(catalog.projects.compactMap { project in project.repoFullName.map { (project.id, $0) } }, uniquingKeysWith: { first, _ in first })
       repos = Set(catalog.projects.filter { !($0.repoFullName ?? "").isEmpty }.map(\.id))
-      visible = catalog.sessions.filter { !$0.archived }.sorted { $0.activityAt > $1.activityAt }
+      let visible = catalog.sessions.filter { !$0.archived }.sorted { $0.activityAt > $1.activityAt }
+      families = SessionRows.tree(visible, indexed: indexed)
     }
 
-    var families: [(session: SessionItem, children: [SessionItem])] {
-      SessionRows.tree(visible, all: catalog.sessions)
-    }
-
-    func rows(_ sessions: [SessionItem], showsPlace: Bool = true, maxRoots: Int = .max) -> [LodyListRow] {
-      let rootProjects = Set(SessionRows.tree(sessions, all: catalog.sessions).map { $0.session.projectId })
-      return SessionRows.treeRows(sessions, all: catalog.sessions, maxRoots: maxRoots) { session in
+    func rows(_ families: [SessionRows.Family], showsPlace: Bool = true, maxRoots: Int = .max) -> [LodyListRow] {
+      let rootProjects = Set(families.map { $0.session.projectId })
+      return SessionRows.treeRows(families, attention: attention, maxRoots: maxRoots) { session in
         var row = SessionRows.row(session, projectName: InboxSections.place(session, names), now: now)
         row.place = (showsPlace || !rootProjects.contains(session.projectId)) && !SessionRows.isChat(session.projectId) ? names[session.projectId] ?? "" : ""
         row.placeIsRepo = repos.contains(session.projectId)
@@ -289,11 +292,31 @@ enum InboxSections {
 
   static func sortProjects(_ projects: [SessionProject], sessions: [SessionItem], sort: InboxSort) -> [SessionProject] {
     let owned = projects.filter { !SessionRows.isChat($0.id) }
-    let grouped = Dictionary(owned.map { project in
-      (project.id, sessions.filter { $0.projectId == project.id && !$0.archived })
-    }, uniquingKeysWith: { first, _ in first })
+    var latest: [String: Double] = [:]
+    var urgency: [String: Int] = [:]
+    if sort != .name {
+      for session in sessions where !session.archived {
+        latest[session.projectId] = max(latest[session.projectId] ?? 0, session.activityAt)
+        if sort == .urgency {
+          let state = SessionState(session)
+          let rank: Int
+          if state == .attention || state == .failed { rank = 0 }
+          else if state == .live { rank = 1 }
+          else { rank = 2 }
+          urgency[session.projectId] = min(urgency[session.projectId] ?? 2, rank)
+        }
+      }
+    }
     return owned.sorted { left, right in
-      compare((left.name, grouped[left.id] ?? []), (right.name, grouped[right.id] ?? []), sort: sort)
+      if sort != .name {
+        if sort == .urgency {
+          let rank = (urgency[left.id] ?? 2) - (urgency[right.id] ?? 2)
+          if rank != 0 { return rank < 0 }
+        }
+        let activity = (latest[right.id] ?? 0) - (latest[left.id] ?? 0)
+        if activity != 0 { return activity < 0 }
+      }
+      return left.name.localizedCompare(right.name) == .orderedAscending
     }
   }
 
@@ -304,28 +327,6 @@ enum InboxSections {
     if value >= today - 7 * day { return "week" }
     if value >= today - 30 * day { return "month" }
     return "older"
-  }
-
-  private static func compare(_ left: (name: String, sessions: [SessionItem]), _ right: (name: String, sessions: [SessionItem]), sort: InboxSort) -> Bool {
-    if sort != .name {
-      if sort == .urgency {
-        let rank = urgency(left.sessions) - urgency(right.sessions)
-        if rank != 0 { return rank < 0 }
-      }
-      let activity = latest(right.sessions) - latest(left.sessions)
-      if activity != 0 { return activity < 0 }
-    }
-    return left.name.localizedCompare(right.name) == .orderedAscending
-  }
-
-  private static func urgency(_ sessions: [SessionItem]) -> Int {
-    let states = sessions.map(SessionState.init)
-    if states.contains(where: { $0 == .attention || $0 == .failed }) { return 0 }
-    return states.contains(.live) ? 1 : 2
-  }
-
-  private static func latest(_ sessions: [SessionItem]) -> Double {
-    sessions.reduce(0) { max($0, $1.activityAt) }
   }
 
   private static func group(_ session: SessionItem, now: Double) -> String {

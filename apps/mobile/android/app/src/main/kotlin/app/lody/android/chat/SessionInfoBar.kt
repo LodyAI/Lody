@@ -5,6 +5,8 @@ import app.lody.android.runtime.CatalogSession
 
 class SessionPullRequestUpdates {
     private val confirmed = mutableMapOf<Pair<String, Int>, String>()
+    /** Merge states read straight from GitHub after Ready for review, until the catalog has one. */
+    private val merges = mutableMapOf<Pair<String, Int>, String>()
     private var pending: Pair<CatalogPullRequest, Boolean>? = null
     fun begin(pr: CatalogPullRequest, merged: Boolean) { pending = pr to merged }
     fun finish(success: Boolean) {
@@ -16,6 +18,14 @@ class SessionPullRequestUpdates {
     fun confirm(pr: CatalogPullRequest, merged: Boolean) {
         confirmed[key(pr)] = if (merged) "merged" else "open"
     }
+    /**
+     * A draft has no merge state, and the computer's poller may not refresh the PR for minutes,
+     * so the merge state GitHub computes after Ready for review is read directly (web
+     * `useGitHubPrDetails` does the same) and held until the catalog reports one of its own.
+     */
+    fun observeMerge(pr: CatalogPullRequest, merge: String) {
+        if (merge in setOf("c", "b", "d", "h", "u")) merges[key(pr)] = merge
+    }
     fun apply(session: CatalogSession): CatalogSession = session.copy(pullRequests = session.pullRequests.map { pr ->
         val id = key(pr)
         val status = confirmed[id] ?: return@map pr
@@ -24,10 +34,49 @@ class SessionPullRequestUpdates {
             pr
         } else pr.copy(status = status)
     }.map { pr ->
+        val id = key(pr)
+        val merge = merges[id] ?: return@map pr
+        // The catalog's own state wins once it has one; a closed, merged or re-drafted PR drops it.
+        if (pr.merge != null || pr.status != "open") {
+            merges.remove(id)
+            pr
+        } else pr.copy(merge = merge)
+    }.map { pr ->
         val (target, merged) = pending ?: return@map pr
         if (key(pr) == key(target) && (merged || pr.status == "draft")) pr.copy(status = if (merged) "merged" else "open")
         else pr
     })
+}
+
+/**
+ * Reads GitHub's merge state after Ready for review. GitHub computes it in the background
+ * (`unknown` meanwhile), so a few spaced reads replace waiting on the computer's PR poller.
+ * Bounded; a failed read ends it quietly, since the catalog still converges on its own. iOS:
+ * `PullRequestMergeSettle`.
+ */
+object PullRequestMergeSettle {
+    const val ATTEMPTS = 15
+    const val INTERVAL_MS = 2_000L
+    private val Known = mapOf("clean" to "c", "blocked" to "b", "dirty" to "d", "behind" to "h", "unstable" to "u", "has_hooks" to "u")
+
+    /** GitHub REST `mergeable_state` mapped like the CLI poller's `mapMergeState`; null while pending. */
+    fun code(state: String?, mergeable: Boolean?, draft: Boolean): String? = when {
+        draft -> null
+        state != null && state in Known -> Known.getValue(state)
+        mergeable == false -> "d"
+        else -> null
+    }
+
+    suspend fun run(attempts: Int = ATTEMPTS, read: suspend () -> String?, sleep: suspend () -> Unit): String? {
+        repeat(attempts) { attempt ->
+            try {
+                if (attempt > 0) sleep()
+                read()?.let { return it }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { return null }
+        }
+        return null
+    }
 }
 
 /**

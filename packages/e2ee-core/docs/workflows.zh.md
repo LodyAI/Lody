@@ -201,3 +201,8 @@ UTF-8 字段（工作区 ID、目标机器 ID、作用域、消息 ID，各不�
 `test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。
 
 桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。
+
+恢复也可以修复已获准、但本地工作区密钥丢失的个人设备。验证恢复设备、
+包内检查点与当前密钥信封后，必须匹配当前个人设备的签名、公钥和成员身份，
+再通过原有密钥安装边界恢复，不重复接纳设备。已撤销或身份不匹配的设备不会
+因此获得权限。

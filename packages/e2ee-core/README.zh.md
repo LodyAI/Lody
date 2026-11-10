@@ -15,11 +15,9 @@
 后端需要实现什么，并不负责部署服务器。
 
 protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
-判断。`readMachineSharingHistoryStep` 可在原 personal 签名者撤销后读取历史完整状态，
-供新所有者意图保留项目设置，不授予执行权。host 入口验证不解密的所有者帧，
-platform/cloud-api 定义对应 CAS DTO。宿主策略在
-[`@lody/e2ee-machine-sharing`](../e2ee-machine-sharing/AGENTS.md)，已批准合同是
-[机器共享 Spec](../../specs/e2ee/machine-sharing.zh.md)。
+判断。策略使用 current-only v3，包含独立的会话只读授权。客户端只验证最新原文和当前有效的
+所有者个人设备签名；本地最高版本 pin 拒绝回滚及同版本不同摘要。缺少旧策略版本不阻塞
+读取，父摘要仅用于服务端 CAS 写冲突检测。
 
 Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.md)及 services 入口的
 可选客户端保护/安装端口。可选适配器实现浏览器保护；这些声明不启用产品宿主或原生实现。
@@ -46,9 +44,11 @@ Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.m
 开放通道前须在可信宿主落实这些门槛。重试保留返回的原帧；再次运行 seal 会重新加密。
 本改动不启用产品传输。
 
-共享签名格式为 current-only v2；每份 scope 包含 generation，即连续原子替换链的
+共享策略只验证最新的服务端已接受原文及曾准入的所有者个人设备签名；签发设备撤销不清除
+授权，只提示检查及保留完整清单重签。新签署／提交仍要求有效设备，依赖服务端 commit
+准入可信。共享签名格式为 current-only v3；每份 scope 包含 generation，即连续原子替换链的
 首次机器签名公钥。`verifyMachineSharingGeneration` 通过真实账本位置验证准入原文链，
-其不透明 `machineGeneration` 证据必须传给签发、打开、历史读取、宿主准入和执行判断。
+其不透明 `machineGeneration` 证据必须传给签发、打开、宿主准入和执行判断。
 移除后重新准入使用新资源，从私有默认值和第 1 版开始；原子替换保留原代次。压缩视图
 若缺少这些账本检查点，需用完整已验证终点核验，不能相信服务端提示或旧策略高水位。
 

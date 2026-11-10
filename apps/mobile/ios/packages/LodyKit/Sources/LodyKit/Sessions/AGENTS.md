@@ -25,6 +25,8 @@
 
 - The Chats view-menu toggles are built when the menu opens (uncached) and close it on tap; a kept-open menu (`keepsMenuPresented`) never redrew the checkmark.
 
+- Presence and connection-only catalog notifications update Home chrome and empty-state text without rebuilding unchanged conversation content. Account/workspace changes, read watermarks, search results, members, preferences, traits and foreground refreshes must still invalidate content. Build Home's session index, attention summary and families once per projection, and carry whole families through pinning and grouping.
+
 ## Project index
 
 - The compact Chats project index appears while scrolling over the full-width list, accepts direct tap/scrub only inside its visible opaque rail, and resolves jumps against committed rendered sections. Never attach an index long-press recognizer to the list. Linger dismissal must be invalidated by renewed scrolling/touch, snapshot replacement, backgrounding and detachment; search and other groupings retain their existing behavior.

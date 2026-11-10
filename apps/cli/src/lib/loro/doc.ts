@@ -378,6 +378,7 @@ export interface LoroDocumentManagerOptions {
     | 'attachmentToken'
     | 'signMachineInput'
     | 'authorizeMachineTarget'
+    | 'authorizeSessionTarget'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -462,6 +463,7 @@ export class LoroDocumentManager {
     | 'attachmentToken'
     | 'signMachineInput'
     | 'authorizeMachineTarget'
+    | 'authorizeSessionTarget'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -472,6 +474,14 @@ export class LoroDocumentManager {
   /** Reader interest belongs to the daemon, never to a discovery request. */
   isEncryptedWorkspace(): boolean {
     return this.encryptedWorkspace !== undefined;
+  }
+
+  /** Exact-session read authority for the actual invoking human, with a fresh policy read. */
+  async authorizeEncryptedSessionRead(
+    target: Parameters<CliE2eeWorkspaceLegacy['authorizeSessionTarget']>[0]
+  ): Promise<boolean> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_access_unavailable');
+    return Effect.runPromise(this.encryptedWorkspace.authorizeSessionTarget(target));
   }
 
   /** Encrypted workspaces: a one-shot command's machine access, from this process's ledger. */
@@ -543,6 +553,7 @@ export class LoroDocumentManager {
         | 'attachmentToken'
         | 'signMachineInput'
         | 'authorizeMachineTarget'
+        | 'authorizeSessionTarget'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;

@@ -1,10 +1,11 @@
+import * as cloudCliPort from '../src/lib/cloud-cli-port';
 import {
   readSessionTranscript,
   toSessionTranscriptEntries,
   selectSessionTranscriptEntries,
 } from '../src/commands/session';
 import { buildReplayPromptFromHistory, createReplayPromptBuilder } from '@lody/shared';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,6 +72,12 @@ import { MachineRuntime } from '../src/lib/machine-runtime';
 import { getDefaultLogger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
 import { createCommandSessionHistoryFactory, type AuthContext } from '../src/lib/command-runtime';
+
+beforeEach(() => {
+  vi.spyOn(cloudCliPort, 'mintCliSessionHistoryReadProof').mockResolvedValue(
+    'synthetic-history-proof'
+  );
+});
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
   createRoostDirectoryRow,
@@ -557,6 +564,46 @@ describe('Production Roost history semantics', () => {
       controller.abort();
       await fixture.close();
     }
+  });
+
+  it('retains an admitted edit proof past the original RPC deadline and rejects renewed envelopes after reopen', async () => {
+    const filename = join(nativeDirectory, `rpc-claim-${ordinal++}.sqlite3`);
+    const request: SessionHistoryRpcRequest = {
+      jsonrpc: '2.0',
+      id: 'claimed-edit',
+      rpcVersion: '1',
+      workspaceId: 'synthetic-workspace' as never,
+      machineId: 'synthetic-machine' as never,
+      replyTo: 'reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload('session', {
+        sessionId: 'session',
+        operation: 'append',
+        payload: {},
+      }),
+    };
+    const claim = {
+      code: 'session_history_write_already_claimed',
+      message: 'Outcome may be unknown.',
+    } as const;
+    await Effect.runPromise(putSessionHistoryRpcRejection(filename, request, claim, 1, 60_001));
+    expect(
+      await Effect.runPromise(getSessionHistoryRpcRejection(filename, request, 31_001))
+    ).toEqual(claim);
+    await expect(
+      Effect.runPromise(
+        getSessionHistoryRpcRejection(
+          filename,
+          { ...request, sentAt: 31_001, expiresAt: 61_001 },
+          31_001
+        )
+      )
+    ).rejects.toMatchObject({ code: 'rpc_request_identity_mismatch' });
+    expect(
+      await Effect.runPromise(getSessionHistoryRpcRejection(filename, request, 60_001))
+    ).toBeNull();
   });
 
   it('retains rejected RPC identity across SQLite reopen, isolates targets, and removes expired refusals', async () => {
@@ -3466,6 +3513,8 @@ describe('Production Roost history semantics', () => {
               putSessionHistoryRpcRejection(refusalPath, request, refusal, Date.now())
             ),
         },
+        authorizeSessionHistoryRead: async () => true,
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Date.now() + 60_000 }),
         resolveSessionHistoryOwnerSessionId: (id, options) =>
           fixture.rpc.resolveSessionHistoryOwnerSessionId(id, options),
         readSessionHistory: ({ sessionId: id, query, signal }) =>

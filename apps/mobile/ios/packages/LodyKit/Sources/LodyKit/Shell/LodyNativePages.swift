@@ -90,8 +90,6 @@ enum LodyNativePages {
     "diagnostics": { _ in DiagnosticsController() },
     "diagnostics-preview": { _ in DiagnosticsPreviewController() },
     "picker": { params in LodyNativePages.picker(params) },
-    "project-history": { params in ProjectHistoryController(scope: .live(params)) },
-    "project-history-preview": { _ in ProjectHistoryPreview.make() },
     "directory-preview": { _ in DirectoryPreviewController() },
     "project": { params in ProjectController(projectId: params["projectId"] as? String ?? "") },
     "project-preview": { params in

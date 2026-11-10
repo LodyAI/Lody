@@ -59,6 +59,7 @@ import app.lody.android.auth.Account
 import app.lody.android.designsystem.*
 import app.lody.android.runtime.*
 import app.lody.android.home.AgentMark
+import app.lody.android.home.AppPreferences
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.time.Instant
@@ -356,7 +357,10 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         val role = SessionRoles.send(roles != null, activeRole, pickedRole, durableRole)
         val switches = if (chosen) chosenOptions else emptyMap()
         coroutines.launch {
-            val queue = session.status in RunningStatuses
+            val busy = session.status in RunningStatuses
+            // The Guide preference steers the running reply when the agent can; otherwise it queues.
+            val guide = busy && capability?.steer == true && AppPreferences.queuedMessageBehavior(appContext) == AppPreferences.GUIDE
+            val queue = busy && !guide
             val blocks = try { repository.upload(scope, id, files) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
@@ -370,7 +374,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 repository.send(scope, SendTextRequest(
                     id, turnId, text, session.machineId, session.cliType!!, session.agentType!!, session.resume, queue = queue,
                     modelId = choice.first, modeId = choice.second, effort = choice.third, explicitChoice = explicit, attachments = blocks,
-                    role = role, agentConfigId = session.agentConfigId, configOptionValues = switches,
+                    role = role, agentConfigId = session.agentConfigId, configOptionValues = switches, guide = guide,
                 )).state
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { "unknown" }
@@ -432,8 +436,13 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         Unit
     }
     val prUpdates = remember(scope, id) { SessionPullRequestUpdates() }
+    // Bumped when a merge state read after Ready for review lands, so the bar recomposes.
+    var mergeObserved by remember(scope, id) { mutableIntStateOf(0) }
     val hasRelations = remember(id, context.relatedSessions) { SessionRelations.rows(id, context.relatedSessions).isNotEmpty() }
-    val bar = session?.let { SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend) }
+    val bar = session?.let {
+        mergeObserved // read so a landed merge state recomposes the bar
+        SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend)
+    }
     // Merge / Ready for review go straight to GitHub, one at a time, never retried.
     var merging by remember(id) { mutableStateOf(false) }
     var writing by remember(scope, id) { mutableStateOf<SessionInfoBar.Action?>(null) }
@@ -458,6 +467,17 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 else repository.markReady(scope, pr.repository, pr.number)
                 prUpdates.finish(success = true)
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
+                // Merge appears once GitHub computes the merge state, not when the computer's
+                // PR poller next refreshes the catalog. Cancelled with the screen.
+                if (method == null) coroutines.launch {
+                    PullRequestMergeSettle.run(
+                        read = { repository.mergeState(scope, pr.repository, pr.number) },
+                        sleep = { kotlinx.coroutines.delay(PullRequestMergeSettle.INTERVAL_MS) },
+                    )?.let { merge ->
+                        prUpdates.observeMerge(pr, merge)
+                        mergeObserved++
+                    }
+                }
                 if (method != null) writeTexts.mergeDone else null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
@@ -483,6 +503,41 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 merging = false
                 prefs.edit().putString("prMergeMethod", method).apply()
                 writePullRequest(method)
+            },
+        )
+    }
+    val deleteTexts = listOf(
+        stringResource(R.string.pr_delete_branch_done), stringResource(R.string.pr_delete_branch_error),
+        stringResource(R.string.pr_error_delete_unknown), stringResource(R.string.pr_error_branch_protected),
+    )
+    // The PR panel (web's PR tab on mobile): Merge while open, Delete branch once merged.
+    val pullRequestPanel = bar?.pullRequest?.let { pr ->
+        PullRequestPanel(
+            canMerge = pr.status == "open" && writing == null,
+            merging = writing == SessionInfoBar.Action.Merge,
+            onMerge = { if (writing == null) merging = true },
+            branchExists = { repository.headBranchExists(scope, pr.repository, pr.number) },
+            deleteBranch = { done ->
+                // Outlives the sheet; one request, never retried.
+                coroutines.launch {
+                    val (deleted, message) = try {
+                        repository.deleteBranch(scope, pr.repository, pr.number)
+                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
+                        true to deleteTexts[0]
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) {
+                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Reject)
+                        val code = (error as? GitHubWriteFailure)?.code
+                        false to when (code) {
+                            "delete_unknown" -> deleteTexts[2]
+                            "branch_protected", "branch_not_deletable" -> deleteTexts[3]
+                            else -> code?.let { writeTexts.errors[it] } ?: deleteTexts[1]
+                        }
+                    }
+                    done(deleted)
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar(message)
+                }
             },
         )
     }
@@ -549,6 +604,7 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 ChatActionBar(
                     bar,
                     writing = writing,
+                    pullRequestPanel = pullRequestPanel,
                     relations = if (hasRelations) ({ SessionRelationsChip(id, context.relatedSessions, onSelectTab) }) else null,
                     onAction = { action ->
                         // Only while still offered, so a menu left open cannot act for a state that moved on.
@@ -1101,6 +1157,7 @@ internal fun ChatActionBar(
     onCopied: (String) -> Unit,
     writing: SessionInfoBar.Action? = null,
     relations: (@Composable () -> Unit)? = null,
+    pullRequestPanel: PullRequestPanel? = null,
 ) {
     val context = bar.pullRequest != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val diff = bar.added + bar.removed > 0
@@ -1108,7 +1165,7 @@ internal fun ChatActionBar(
     @Composable fun Leading(diffDot: Boolean, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {
             relations?.invoke()
-            if (context || diff) ContextItem(bar, diffDot, onCopied)
+            if (context || diff) ContextItem(bar, diffDot, onCopied, pullRequestPanel)
         }
     }
     @Composable fun Action() {
@@ -1228,7 +1285,7 @@ private fun MachineItem(name: String, online: Boolean?, load: suspend () -> Mach
  * capsule (a dot when space is short; the counts then lead the menu). CI trouble tints the glyph.
  */
 @Composable
-private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String) -> Unit, panel: PullRequestPanel?, modifier: Modifier = Modifier) {
     val colors = LodyTheme.colors
     val type = LodyTheme.typography
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -1250,8 +1307,8 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
     val showsContext = pr != null || bar.branch.isNotEmpty() || bar.repository.isNotEmpty()
     val description = listOfNotNull(bar.repository, bar.branch, label, verdict, counts.takeIf { diff })
         .filter { it.isNotEmpty() }.distinct().joinToString(", ")
-    var panel by remember { mutableStateOf(false) }
-    if (panel && pr != null) PullRequestSheet(bar, pr, verdict, onCopied) { panel = false }
+    var sheet by remember { mutableStateOf(false) }
+    if (sheet && pr != null) PullRequestSheet(bar, pr, verdict, onCopied, panel) { sheet = false }
     Box(modifier.barCapsule(colors)) {
         // Always choose a destination before opening the PR or inspecting changes.
         BarCell(
@@ -1306,7 +1363,7 @@ private fun ContextItem(bar: SessionInfoBar, diffDot: Boolean, onCopied: (String
                         }
                     },
                     leadingIcon = { app.lody.android.designsystem.LodyPullRequestIcon(pr.status, pr.ci, size = LodyIconSize.md) },
-                    onClick = { open = false; panel = true },
+                    onClick = { open = false; sheet = true },
                 )
             }
             if (diff) {
@@ -1482,9 +1539,23 @@ private fun MergeSheet(title: String, preferred: String, onDismiss: () -> Unit, 
 }
 
 /**
+ * What the PR panel may do, from the conversation (web's mobile PR tab): Merge while the PR is
+ * open — [onMerge] opens [MergeSheet], whose method choice is the confirmation — and, once
+ * merged, Delete branch while the PR's own head branch still exists. Both go straight to GitHub
+ * and are never retried; [deleteBranch] reports through the screen's snackbar and outlives the sheet.
+ */
+internal class PullRequestPanel(
+    val canMerge: Boolean,
+    val merging: Boolean,
+    val onMerge: () -> Unit,
+    val branchExists: suspend () -> Boolean?,
+    val deleteBranch: (done: (Boolean) -> Unit) -> Unit,
+)
+
+/**
  * The PR panel the context capsule opens: a native bottom sheet with what the catalog knows (state,
- * CI, conflicts, branch, ±diff), opening the PR on GitHub and copying the branch. iOS opens its
- * native PR page as a sheet.
+ * CI, conflicts, branch, ±diff), opening the PR on GitHub and copying the branch, plus Merge (with
+ * the method sheet) while open and Delete branch once merged. iOS opens its native PR page as a sheet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1493,6 +1564,7 @@ private fun PullRequestSheet(
     pr: CatalogPullRequest,
     verdict: String?,
     onCopied: (String) -> Unit,
+    panel: PullRequestPanel?,
     onDismiss: () -> Unit,
 ) {
     val colors = LodyTheme.colors
@@ -1507,6 +1579,29 @@ private fun PullRequestSheet(
             "draft" -> R.string.home_pr_draft
             else -> R.string.home_pr_open
         },
+    )
+    // Web probes the head branch only once merged; unknown keeps Delete branch hidden.
+    var branchExists by remember(pr.repository, pr.number) { mutableStateOf<Boolean?>(null) }
+    var deleting by remember(pr.repository, pr.number) { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+    if (panel != null && pr.status == "merged") LaunchedEffect(pr.repository, pr.number) {
+        branchExists = try { panel.branchExists() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+    }
+    if (confirmingDelete && panel != null) AlertDialog(
+        onDismissRequest = { confirmingDelete = false },
+        title = { Text(stringResource(R.string.pr_delete_branch_title)) },
+        text = { Text(stringResource(R.string.pr_delete_branch_message, bar.branch)) },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmingDelete = false
+                deleting = true
+                panel.deleteBranch { deleted ->
+                    deleting = false
+                    if (deleted) branchExists = false
+                }
+            }) { Text(stringResource(R.string.pr_delete_branch), color = colors.dangerDefault) }
+        },
+        dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text(stringResource(R.string.pr_delete_branch_cancel)) } },
     )
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.bgBase) {
         Column(Modifier.padding(horizontal = LodySpacing.lg).padding(bottom = LodySpacing.xl), verticalArrangement = Arrangement.spacedBy(LodySpacing.md)) {
@@ -1527,6 +1622,33 @@ private fun PullRequestSheet(
                         Text("+${bar.added}", style = style, color = colors.diffAddedText)
                         Text("−${bar.removed}", style = style, color = colors.diffRemovedText)
                     }
+                }
+            }
+            if (panel != null && pr.status == "open") {
+                Button(
+                    onClick = { onDismiss(); panel.onMerge() },
+                    enabled = panel.canMerge,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (panel.merging) CircularProgressIndicator(Modifier.size(LodyIconSize.sm), strokeWidth = 2.dp, color = LocalContentColor.current)
+                    else Icon(LodyIcons.Merge, contentDescription = null, modifier = Modifier.size(LodyIconSize.sm))
+                    Spacer(Modifier.width(LodySpacing.xs))
+                    Text(stringResource(if (panel.merging) R.string.bar_merge_pending else R.string.pr_merge), style = type.subhead)
+                    Spacer(Modifier.width(LodySpacing.xs))
+                    Icon(LodyIcons.Expand, contentDescription = null, modifier = Modifier.size(LodyIconSize.sm))
+                }
+            }
+            if (panel != null && pr.status == "merged" && bar.branch.isNotEmpty() && (branchExists == true || deleting)) {
+                Button(
+                    onClick = { confirmingDelete = true },
+                    enabled = !deleting,
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.fillSecondary, contentColor = colors.dangerDefault),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (deleting) CircularProgressIndicator(Modifier.size(LodyIconSize.sm), strokeWidth = 2.dp, color = LocalContentColor.current)
+                    else Icon(LodyIcons.Trash, contentDescription = null, modifier = Modifier.size(LodyIconSize.sm))
+                    Spacer(Modifier.width(LodySpacing.xs))
+                    Text(stringResource(if (deleting) R.string.pr_deleting_branch else R.string.pr_delete_branch), style = type.subhead)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(LodySpacing.sm)) {

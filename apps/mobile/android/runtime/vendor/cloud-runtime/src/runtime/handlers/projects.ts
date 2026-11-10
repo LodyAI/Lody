@@ -9,7 +9,6 @@ import {
   registerProject,
 } from '../local-projects';
 import { availableCreationOptions } from '../machine-presence';
-import { projectHistory } from '../project-history';
 import { readWorkspaceProjects } from '../project-groups';
 import { projectGroupItems } from '../../protocol/project-groups.ts';
 import type { RuntimeContext } from './context.ts';
@@ -99,23 +98,6 @@ export function registerProjects(ctx: RuntimeContext) {
     }
     if (!state.metaReplica || state.unhealthy.size)
       throw new Error('metadata_not_ready');
-    if (args.action === 'history') {
-      const value = await projectHistory(
-        args.history,
-        workspace,
-        args.userId,
-        state.metaReplica.flock,
-        machineReplicas,
-        getGrant,
-        AbortSignal.any([
-          browserSignal(args.browserId),
-          AbortSignal.timeout(120000),
-        ]),
-      );
-      return Array.isArray(value)
-        ? { outcome: 'targets', targets: value }
-        : { outcome: 'history', ...value };
-    }
     if (args.action === 'machines') {
       const meta = state.metaReplica.flock;
       return {

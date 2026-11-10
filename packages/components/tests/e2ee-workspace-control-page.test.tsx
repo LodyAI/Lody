@@ -102,6 +102,37 @@ describe('encrypted workspace control page recovery', () => {
     expect(props.onRepairLocal).toHaveBeenCalledTimes(1);
   });
 
+  it('gives each failure one next step that does something, with diagnostics secondary', () => {
+    const tab = () =>
+      container!
+        .querySelector('[aria-current="page"][data-console-tab]')
+        ?.getAttribute('data-console-tab');
+    render({ failure: { kind: 'local-identity', code: 'missing' } });
+    expect(container!.textContent).toContain('e2ee.failure.identity.title');
+    act(() => button('e2ee.failure.action.devices')!.click());
+    expect(tab()).toBe('devices');
+    act(() => button('e2ee.failure.action.recovery')!.click());
+    expect(tab()).toBe('recovery');
+    act(() => root?.unmount());
+
+    // An update is offered only where the host can check for one.
+    render({ failure: { kind: 'upgrade', code: 'capability' } });
+    expect(button('e2ee.failure.action.update')).toBeUndefined();
+    expect(button('e2ee.control.copyDiagnostics')).toBeDefined();
+    act(() => root?.unmount());
+    const onCheckForUpdates = vi.fn();
+    render({ failure: { kind: 'upgrade', code: 'capability' }, onCheckForUpdates });
+    act(() => button('e2ee.failure.action.update')!.click());
+    expect(onCheckForUpdates).toHaveBeenCalledTimes(1);
+    act(() => root?.unmount());
+
+    const props = render({
+      failure: classifyE2eeControlFailure(new ClientCustodyError({ reason: 'locked' })),
+    });
+    act(() => button('e2ee.failure.action.refresh')!.click());
+    expect(props.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the diagnostics report when the clipboard is unavailable', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -160,6 +191,26 @@ describe('encrypted workspace control page reading', () => {
     text = container!.textContent!;
     expect(text).not.toContain('Alex Chen');
     expect(text).toContain('Jordan Lee');
+  });
+
+  it('shows getting started only on the creating device, with recovery only when known', () => {
+    render({ history: history(vector.anchor), recoveryReady: false });
+    const list = () => container!.querySelector('[data-testid="e2ee-getting-started"]');
+    expect(list()).not.toBeNull();
+    const item = (id: string) => list()!.querySelector(`[data-start-item="${id}"]`);
+    expect(item('create')?.getAttribute('data-done')).toBe('true');
+    expect(item('recovery')?.getAttribute('data-done')).toBe('false');
+    act(() => button('e2ee.console.start.recoveryAction')!.click());
+    expect(
+      container!.querySelector('[data-console-tab="recovery"]')?.getAttribute('aria-current')
+    ).toBe('page');
+    act(() => root?.unmount());
+    render({ history: history(vector.anchor) });
+    expect(list()?.querySelector('[data-start-item="recovery"]') ?? null).toBeNull();
+    act(() => root?.unmount());
+    // Another member's device cannot tell which member it is, so it shows no list.
+    render({ history: history(null), recoveryReady: false });
+    expect(list()).toBeNull();
   });
 
   it('maps profiles through verified crypto users without changing roles, members or verification', () => {

@@ -95,7 +95,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
   grant permissions, pin keys, identify the creator, or block ledger availability.
 - Account-only machine-policy display reads return opaque ciphertext and untrusted
   metadata. They never replace device-authenticated execution freshness, and a
-  server removal tombstone never substitutes for a verified policy-history pin.
+  server removal tombstone never substitutes for a verified latest-policy pin.
 
 - `e2eeMachineScope` is an explicit single-workspace machine-service composition.
   It has no ordinary Streams/account capabilities or account catalog bootstrap.

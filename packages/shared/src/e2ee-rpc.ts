@@ -57,6 +57,7 @@ export type E2eeFeatureInput = { requestId: string; request: LocalMachineRpcRequ
 
 /** Closed set of reads with no machine writes or execution claims. */
 export const E2EE_READ_QUERY_METHODS = [
+  'session/history-read',
   'machine/status',
   'machine/ping',
   'machine/acp-binary-status',

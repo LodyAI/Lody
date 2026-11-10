@@ -17,7 +17,8 @@ function installIpc(plan: PlanAnswer): void {
         return plan;
       }
       // The theme provider mirrors the committed theme to the desktop.
-      if (channel === 'app.setNativeTheme') return undefined;
+      if (channel === 'app.setNativeTheme' || channel === 'app.setStartupThemeSource')
+        return undefined;
       if (channel === 'e2ee.recentAccountSecurityEvents') return [];
       if (channel === 'e2ee.recoveryPasskeyAvailable') return true;
       throw new Error(`unexpected invoke ${channel}`);
@@ -77,6 +78,22 @@ export const Ready: Story = {
         workspace('e', 'Operations', { kind: 'unknown' }),
       ],
       uncovered: [workspace('d', 'Archive', { kind: 'notSet' })],
+    },
+  },
+};
+
+// Every workspace covered: no warning, checking the saved file is the one primary action.
+export const AllCovered: Story = {
+  args: {
+    plan: {
+      hasVault: true,
+      replaceable: true,
+      replacing: false,
+      covered: [
+        workspace('b', 'Platform', { kind: 'saved' }),
+        workspace('c', 'Research', { kind: 'verified', update: 3 }),
+      ],
+      uncovered: [],
     },
   },
 };

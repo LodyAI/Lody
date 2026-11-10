@@ -1,3 +1,4 @@
+import { accountIdFromUserId } from '@lody/e2ee-core/protocol';
 import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
 import {
   daemonLossObserver,
@@ -49,7 +50,11 @@ import {
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
 import { authorityStamp, type AuthorityStamp } from './authority-clock';
 import { makeCliE2eeRuntime } from './runtime';
-import { makeCliE2eeExecutionAuthorization } from './execution-authorization';
+import {
+  makeCliE2eeExecutionAuthorization,
+  authorizeCliE2eeSessionTarget,
+  type CliE2eeSessionReadTarget,
+} from './execution-authorization';
 import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
 
 /** Fast enough for the 900s client-loss envelope; a successful check refreshes the
@@ -450,7 +455,10 @@ type CliE2eeWorkspaceOptions = {
   onUnavailable: () => void;
   /** A latest ledger read verified in full. `startedAt` was taken before its network I/O. */
   onAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
-  onWindowNotice?: (active: boolean) => void;
+  onWindowNotice?: (
+    active: boolean,
+    window?: import('./execution-authorization').E2eeAccessWindow
+  ) => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
@@ -731,6 +739,36 @@ async function openWorkspaceOwned(
         workspaceId: options.workspaceId,
         credential,
         cloud: options.cloud,
+        sessionSharing: (requester, sessionId, sessionOwnerUserId) =>
+          Effect.gen(function* () {
+            const state = (yield* runtime.executionLedger()).inspectState();
+            const signer = state.devices.get(requester);
+            const member = signer && state.members.get(hex(signer.membershipId.toBytes()));
+            const account = member && accountIdFromUserId(member.userId);
+            if (account && Result.isSuccess(account) && account.success === sessionOwnerUserId)
+              return { allowed: true, isCurrent: () => true };
+            const machine = state.devices.get(hex(device.publicKey.toBytes()));
+            if (!sharingRemote || !sharing || machine?.kind !== 'machine' || !machine.machineId)
+              return { allowed: false, isCurrent: () => false };
+            const { view, isCurrent } = yield* sharing.readSessionAccess(
+              machine.machineId,
+              sharingRemote
+            );
+            return {
+              isCurrent,
+              allowed:
+                !view.removed &&
+                !view.unavailable &&
+                view.sessions.some(
+                  (row) =>
+                    row.sessionId === sessionId &&
+                    (row.audience === 'team' ||
+                      (account &&
+                        Result.isSuccess(account) &&
+                        row.audience.userId === account.success))
+                ),
+            };
+          }),
         onCredentialFailure: (cause) => credentialFailureHandler(cause),
         runtime,
         sharing: sharingRemote
@@ -1535,6 +1573,17 @@ async function openWorkspaceOwned(
           })
         ),
     },
+    authorizeSessionTarget: (target: CliE2eeSessionReadTarget) =>
+      authorizeCliE2eeSessionTarget(
+        {
+          runtime: opened.runtime,
+          sourceDevice: opened.signingPublicKey,
+          readPolicy: opened.sharingRemote
+            ? (machineId) => opened.sharing.read(machineId, opened.sharingRemote!)
+            : undefined,
+        },
+        target
+      ),
     authorizeMachineTarget: (machineId: string, localProjectId?: string) =>
       Effect.gen(function* () {
         const state = (yield* opened.runtime.executionLedger()).inspectState();
@@ -1560,7 +1609,10 @@ async function openWorkspaceOwned(
       machineId: string,
       offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
       trace?: (event: E2eeRpcTiming) => void,
-      handleFeature?: EncryptedFeatureHandler
+      handleFeature?: EncryptedFeatureHandler,
+      resolveHistoryTarget?: (
+        sessionId: string
+      ) => Promise<{ rootSessionId: string; sessionOwnerUserId?: string; localProjectId?: string }>
     ) =>
       run(
         Effect.gen(function* () {
@@ -1612,6 +1664,27 @@ async function openWorkspaceOwned(
                       journal: rpcJournal,
                       authorize: opened.executionAuthorization.authorizeOwnedExecution,
                       authorizeRead: opened.executionAuthorization.authorizeRead,
+                      authorizeHistoryRead: (workspaceId, requester, sessionId) =>
+                        Effect.gen(function* () {
+                          if (!resolveHistoryTarget)
+                            return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+                          const target = yield* Effect.tryPromise({
+                            try: () => resolveHistoryTarget(sessionId),
+                            catch: (cause) => cause,
+                          });
+                          const editing = yield* opened.executionAuthorization.authorizeExecution(
+                            workspaceId,
+                            requester,
+                            target.localProjectId
+                          );
+                          if (editing._tag === 'Authorized') return editing;
+                          return yield* opened.executionAuthorization.authorizeSessionRead(
+                            workspaceId,
+                            requester,
+                            target.rootSessionId,
+                            target.sessionOwnerUserId
+                          );
+                        }),
                       authoritySignal: () =>
                         AbortSignal.any([
                           opened.runtime.executionAuthoritySignal(),

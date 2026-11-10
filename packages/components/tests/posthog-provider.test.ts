@@ -91,6 +91,29 @@ describe('PostHog provider options', () => {
     });
   });
 
+  it('keeps recovery recordings and late exceptions private until both UI and command settle', () => {
+    const releaseUI = holdPrivateTelemetrySurface();
+    const releaseCommand = holdPrivateTelemetrySurface();
+    const prepared = postHogPrivacy.prepareException([new Error('recovery-secret')]);
+    releaseUI();
+    setTelemetryRouteTarget('test', true);
+    expect(
+      runBeforeSend({ event: '$snapshot', properties: { $snapshot_data: ['recovery-secret'] } })
+    ).toBeNull();
+    releaseUI(); // releasing one holder twice cannot release the pending command
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    releaseCommand();
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    const late = runBeforeSend({
+      event: '$exception',
+      properties: {
+        ...(prepared[1] as Record<string, unknown>),
+        $exception_list: [{ value: 'recovery-secret' }],
+      },
+    });
+    expect(JSON.stringify(late)).not.toContain('recovery-secret');
+  });
+
   it('keeps delayed exceptions redacted across unknown and returning plaintext scopes', () => {
     const plaintext = postHogPrivacy.prepareException([
       new Error('private-before-switch'),

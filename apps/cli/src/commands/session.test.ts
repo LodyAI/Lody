@@ -53,6 +53,7 @@ import {
   MachineFlockReadUnavailableError,
   readAgentAcpCapability,
   runSessionOperationWithSyncedMetadata,
+  assertSessionManagementAccess,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
   filterAuthorizedMachineMetas,
@@ -1035,6 +1036,55 @@ describe('session command helpers', () => {
   });
 
   it.each(['archive', 'restore', 'delete'] as const)(
+    'requires editing authority before CLI %s writes or cleanup',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'read-only-target' as SessionId;
+      const meta = createSessionMeta({
+        id,
+        isArchived: operation !== 'archive',
+        title: 'Original',
+      });
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+        cleanSessionDoc: async () => {},
+      } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
+      const auth = { token: 'synthetic', userId: 'reader', machineId: 'caller' } as Parameters<
+        typeof assertSessionManagementAccess
+      >[0]['auth'];
+      const workspace = { id: 'workspace' } as Parameters<
+        typeof assertSessionManagementAccess
+      >[0]['workspace'];
+      let canEdit = false;
+      const run = () =>
+        runWithEncryptedCommandAccess(
+          async () => (canEdit ? { allowed: true } : { allowed: false, reason: 'not_visible' }),
+          () =>
+            runSessionOperationWithSyncedMetadata(manager, id, operation, (targetId) =>
+              assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
+            )
+        );
+      try {
+        await expect(run()).rejects.toMatchObject({
+          code: 'SESSION_MANAGEMENT_DENIED',
+          retryable: false,
+        });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+        canEdit = true;
+        await run();
+        const entry = await repo.getDocMeta(getSessionRoomId(id));
+        if (operation === 'delete') expect(isLoroRepoDocDeleted(entry)).toBe(true);
+        else expect(entry?.meta.isArchived).toBe(operation === 'archive');
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it.each(['archive', 'restore', 'delete'] as const)(
     'synchronizes the %s snapshot and changes only the selected containment tree',
     async (operation) => {
       const root = createSessionMeta({
@@ -1084,7 +1134,12 @@ describe('session command helpers', () => {
             cleaned.push(id);
           },
         } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
-        const result = runSessionOperationWithSyncedMetadata(manager, root.id, operation);
+        const result = runSessionOperationWithSyncedMetadata(
+          manager,
+          root.id,
+          operation,
+          async () => {}
+        );
         const rejected = expect(result).rejects.toThrow('metadata unavailable');
         await started.promise;
         expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
@@ -1094,7 +1149,7 @@ describe('session command helpers', () => {
         expect(cleaned).toEqual([]);
         failSync = false;
         await expect(
-          runSessionOperationWithSyncedMetadata(manager, root.id, operation)
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
         ).resolves.toEqual([child.id]);
         for (const session of [root, child]) {
           const entry = await repo.getDocMeta(getSessionRoomId(session.id));
@@ -1133,13 +1188,13 @@ describe('session command helpers', () => {
         } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
         const listDoc = vi.spyOn(repo, 'listDoc').mockRejectedValueOnce(new Error('query failed'));
         await expect(
-          runSessionOperationWithSyncedMetadata(manager, root.id, operation)
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
         ).rejects.toThrow('query failed');
         expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
         listDoc.mockRestore();
         await repo.deleteDoc(getSessionRoomId(root.id));
         await expect(
-          runSessionOperationWithSyncedMetadata(manager, root.id, operation)
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
         ).rejects.toThrow('Session metadata missing');
         expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(root.id)))).toBe(true);
       } finally {
@@ -1167,12 +1222,12 @@ describe('session command helpers', () => {
       } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
       const deleteDoc = vi.spyOn(repo, 'deleteDoc').mockRejectedValueOnce(new Error('disk full'));
       await expect(
-        runSessionOperationWithSyncedMetadata(manager, root.id, 'delete')
+        runSessionOperationWithSyncedMetadata(manager, root.id, 'delete', async () => {})
       ).rejects.toThrow('disk full');
       for (const session of [root, child])
         expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toEqual(session);
       deleteDoc.mockRestore();
-      await runSessionOperationWithSyncedMetadata(manager, root.id, 'delete');
+      await runSessionOperationWithSyncedMetadata(manager, root.id, 'delete', async () => {});
       for (const session of [root, child])
         expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(session.id)))).toBe(
           true

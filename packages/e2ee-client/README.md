@@ -304,7 +304,7 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 `browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
 It reports what the browser returned and decides nothing: a browser without PRF reports
 `prfEnabled: false` and no result, and `passkey-unlock` refuses it. Its test runs real
-Chromium on the `vault.lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
+Chromium on the `lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
 
 ## Verification and limits
 
@@ -319,3 +319,28 @@ with private-key use, as the [approved custody Spec](../../specs/e2ee/client-cus
 requires. The runtime factory is opt-in; no product composition is enabled by its export. [Ownership rationale](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md#personal-device-product-composition).
 
 Automatic requests never replace another window's pending native request. Each request fixes its workspace before identity preparation; automatic cancellation and expiry cleanup carry the original lookup ID, so a refused or stale window cannot cancel a different request. Explicit manual cancellation keeps its existing account-wide behavior.
+
+## Vault admission
+
+The host's explicit `restoreRecovery` command authenticates a vault package before
+preparing a personal identity, checks its pinned genesis and account membership,
+and runs existing R admission with durable originals. It replays signed history
+and installs recovered opaque keys through the normal `InstalledEpochKeys`
+commitment/protection/readback boundary. Failed installation remains retryable on
+the same identity. No signer, private key, R or V is returned. The application owns
+vault session lifetime, transports, account guards, entry pins and product rollout.
+Recovery remains opt-in; opening an existing identity does not trigger it.
+
+An admitted session exposes explicit `setupRecovery`: signing and installed keys
+stay inside its owned boundary, and the result is recoverable only after core's
+real recovery test. `restoreRecovery` accepts an exact retained offer for a device
+whose protected identity remains but workspace keys are missing; package pins still
+must match, and recovery never replaces the identity.
+
+`personalRuntimeAccountRequester` and `personalRuntimeRecovery` adapt the existing
+runtime owner for account pairing and closed recovery commands. They do not create a
+second host or export private keys. Recovery setup borrows an approved session;
+its caller releases only its own reader after completion. Web's optional
+`openBrowserRecovery(workspaceId)` opens an in-app surface after personal-computer
+consent and returns true only for a ready workspace. It never starts account pairing.
+Other-device approval remains a separate choice.

@@ -10,6 +10,7 @@ const view = (machineId: string, projects: string[] = []): E2eeMachineSharingVie
   head: { revision: 1, digest: '33'.repeat(32) },
   sharedWithTeam: true,
   projects,
+  sessions: [],
   canManage: false,
   signer: null,
   needsResign: false,

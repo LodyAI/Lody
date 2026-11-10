@@ -15,10 +15,19 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   workspace, machine and verified generation. Render native ownership hints;
   main rechecks authority. Retry an unknown result with its original requestId
   and change; only explicit retry after confirmed conflict creates a new intent.
-  Historical signer-revoked state is display/re-sign input, never execution evidence.
+  Signer revocation preserves accepted grants; review/re-sign is nonblocking and preserves the list.
   [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 
 - Remote device pages retain the protected sharing panel without a local agent;
   this never enables general machine RPC or ordinary machine-sharing controls. Team management requires the current
   host's verified personal-device role and credential; replacement runtimes must
   qualify again before showing retained management controls.
+
+- The recovery tab sets up every uncovered workspace through
+  `setupRecoveryForWorkspaces`, which unlocks the vault once and reports each
+  workspace separately; one failed workspace never stops or rolls back the others.
+  Only a committed, verified setup counts as done: pending, conflicting, unverified
+  or missing results stay unfinished, and a saved but unverified workspace keeps its
+  continue action.
+  Keep exactly one primary action on the tab, and give every failure card one next
+  step that does something, with diagnostics secondary.

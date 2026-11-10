@@ -94,7 +94,11 @@ function useLive() {
 
 type RequestRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'requestAccountPairing' | 'accountPairingRequest' | 'cancelAccountPairing'
+  | 'requestAccountPairing'
+  | 'accountPairingRequest'
+  | 'cancelAccountPairing'
+  | 'openBrowserRecovery'
+  | 'requirePersonalComputer'
 >;
 
 /**
@@ -110,6 +114,8 @@ export function E2eeAccountPairingRequest(props: {
   onJoined: () => void;
   workspaceId?: string;
   pollMs?: number;
+  /** Consent-first browser choice; approval then uses the existing automatic flow. */
+  onRequestApproval?: () => void;
 }) {
   const { runtime } = props;
   const { t } = useTranslation();
@@ -118,6 +124,8 @@ export function E2eeAccountPairingRequest(props: {
   const [phase, setPhase] = useState<'loading' | 'idle' | 'busy' | 'ready'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
+  const [personalComputer, setPersonalComputer] = useState(false);
+  const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
   const [input, setInput] = useState('');
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
@@ -143,9 +151,13 @@ export function E2eeAccountPairingRequest(props: {
       setPhase((current) => (current === 'busy' ? (state ? 'ready' : 'idle') : current));
     }
   };
-  const start = (pairingString?: string) =>
-    run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
+  const start = (pairingString?: string) => {
+    if (personalRequired && !personalComputer) return Promise.resolve();
+    if (props.onRequestApproval) { props.onRequestApproval(); return Promise.resolve(); }
+    return run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
+  };
   useEffect(() => {
+    if (props.onRequestApproval) { setPhase('idle'); return undefined; }
     // Approver-only portable hosts must not start an unsupported requester.
     if (!runtime.requestAccountPairing) return undefined;
     let cancelled = false;
@@ -197,10 +209,49 @@ export function E2eeAccountPairingRequest(props: {
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
         <>
-          <p {...stylex.props(styles.muted)}>{t('e2ee.accountPair.request.web')}</p>
+          <p {...stylex.props(styles.muted)}>
+            {t(personalRequired ? 'e2ee.browserUnlock.help' : 'e2ee.accountPair.request.web')}
+          </p>
           <div {...stylex.props(styles.actions)}>
-            <Button onClick={() => void start()}>{t('e2ee.accountPair.request.start')}</Button>
+            <Button disabled={personalRequired && !personalComputer} onClick={() => void start()}>
+              {t('e2ee.accountPair.request.start')}
+            </Button>
           </div>
+        </>
+      )}
+      {personalRequired && state?.status !== 'joined' && (
+        <>
+          <label {...stylex.props(styles.actions)}>
+            <Checkbox
+              checked={personalComputer}
+              aria-label={t('e2ee.browserUnlock.personal')}
+              onCheckedChange={(checked) => setPersonalComputer(checked === true)}
+            />
+            {t('e2ee.browserUnlock.personal')}
+          </label>
+          <p {...stylex.props(styles.muted)}>{t('e2ee.browserUnlock.risk')}</p>
+          {runtime.openBrowserRecovery && props.workspaceId && (
+            <Button
+              variant="secondary"
+              disabled={!personalComputer || phase === 'busy' || phase === 'loading'}
+              onClick={() =>
+                void run(async () => {
+                  if (
+                    props.workspaceId &&
+                    (await runtime.openBrowserRecovery!(props.workspaceId))
+                  ) {
+                    if (live.current && !joined.current) {
+                      joined.current = true;
+                      props.onJoined();
+                    }
+                  }
+                  if (live.current) setPhase(state ? 'ready' : 'idle');
+                })
+              }
+            >
+              {t('e2ee.browserUnlock.open')}
+            </Button>
+          )}
         </>
       )}
       {state?.status === 'waiting' && state.pairingString && (
@@ -253,7 +304,12 @@ export function E2eeAccountPairingRequest(props: {
             }}
           />
           <div {...stylex.props(styles.actions)}>
-            <Button disabled={!input.trim() || phase === 'busy'} onClick={enterCode}>
+            <Button
+              disabled={
+                !input.trim() || phase === 'busy' || (personalRequired && !personalComputer)
+              }
+              onClick={enterCode}
+            >
               {t('e2ee.accountPair.request.useCode')}
             </Button>
           </div>
@@ -261,11 +317,15 @@ export function E2eeAccountPairingRequest(props: {
       )}
       <div {...stylex.props(styles.actions)}>
         {state && state.status !== 'joined' && (
-          <Button variant="secondary" disabled={phase === 'busy'} onClick={() => void restart()}>
+          <Button
+            variant="secondary"
+            disabled={phase === 'busy' || (personalRequired && !personalComputer)}
+            onClick={() => void restart()}
+          >
             {t('e2ee.accountPair.request.restart')}
           </Button>
         )}
-        {!entering && state?.status !== 'joined' && (
+        {!props.onRequestApproval && !entering && state?.status !== 'joined' && (
           <Button variant="ghost" disabled={phase === 'busy'} onClick={() => setEntering(true)}>
             {t('e2ee.accountPair.request.haveCode')}
           </Button>

@@ -10,7 +10,9 @@ import {
   Semaphore,
   Result,
 } from 'effect';
-import { VerifiedLedger } from '@lody/e2ee-core';
+import { VerifiedLedger, makeWorkspaceRecovery, memoryRecoveryEpochKeys } from '@lody/e2ee-core';
+import { wipeRecoveryPackage, accountUserId } from '@lody/e2ee-core/protocol';
+import { prepareVaultRestore, type PersonalHostRecoveryInput } from './recovery-restore';
 import { Bytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
 import {
   ClientApprovalEvidenceStore,
@@ -544,9 +546,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     genesisRecordHex: string;
     membershipId: string;
     pages: unknown;
+    offer?: PersonalPairingOffer;
   }) =>
     Effect.gen(function* () {
-      const p = yield* prepare(accountPairingOffer(platform.scope, input));
+      const p = yield* prepare(input.offer ?? accountPairingOffer(platform.scope, input));
       if (yield* pairings.load(key(p, 'approval'))) return yield* loadApproval(p);
       const pages = yield* Effect.fromResult(captureHistoryPages(input.pages));
       const descriptor = { kind: 'history' as const };
@@ -572,8 +575,91 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         })
       );
     });
+  const restoreRecovery = (input: PersonalHostRecoveryInput) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Package authentication precedes allocating a local device or accepting server pins.
+        const pin = yield* Effect.acquireUseRelease(
+          input.vault.readEntry(input.reference),
+          (bundle) =>
+            Effect.succeed({
+              genesisHash: bundle.genesis,
+              genesisRecordHex: toHex(bundle.trust.genesisRecord),
+              membershipId: bundle.membershipId,
+            }),
+          (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
+        );
+        if (pin.genesisHash !== toHex(platform.scope.genesis.toBytes()))
+          return yield* fail('scope-mismatch');
+        const offer = input.offer ? { ...input.offer } : accountPairingOffer(platform.scope, pin);
+        if (
+          offer.workspaceId !== platform.scope.workspaceId ||
+          offer.genesisHash !== pin.genesisHash ||
+          offer.genesisRecordHex !== pin.genesisRecordHex ||
+          offer.membershipId !== pin.membershipId
+        )
+          return yield* fail('scope-mismatch');
+        const current = () =>
+          Effect.flatMap(input.pages(), (pages) => verifyPersonalHistory(offer, pages));
+        const initial = yield* current();
+        const user = yield* Effect.fromResult(accountUserId(platform.scope.accountId));
+        const member = initial.inspectState().members.get(pin.membershipId);
+        if (!member || !member.userId.equals(user)) return yield* fail('scope-mismatch');
+        const p = yield* prepare(offer);
+        return yield* withIdentity(p, (identity) =>
+          Effect.gen(function* () {
+            const keys = memoryRecoveryEpochKeys();
+            yield* Effect.addFinalizer(() => Effect.sync(() => keys.dispose()));
+            const plan = yield* prepareVaultRestore({
+              vault: input.vault,
+              local: input.local,
+              reference: input.reference,
+              ports: (anchor) =>
+                Effect.gen(function* () {
+                  if (
+                    !anchor.genesis.equals(p.binding.genesis) ||
+                    toHex(anchor.membershipId.toBytes()) !== pin.membershipId
+                  )
+                    return yield* fail('scope-mismatch');
+                  return {
+                    personalSigner: identity.device,
+                    ledger: current,
+                    fetchCurrentEnvelope: input.fetchCurrentEnvelope,
+                    installed: keys,
+                    submitOriginalAsRecovery: (record, recovery, credential) =>
+                      input.submitOriginalAsRecovery(
+                        record,
+                        recovery,
+                        credential,
+                        identity.request.credentialHash
+                      ),
+                    acquirePersonal: () => Effect.fail(fail('unsupported')),
+                  };
+                }),
+            });
+            const workflow = yield* makeWorkspaceRecovery(plan.workflow);
+            const result = yield* workflow.restoreFromRecovery({
+              personal: { ...identity.device, encryptionPublicKey: identity.device.enc },
+              submitOriginalAsRecovery: plan.submitOriginalAsRecovery,
+            });
+            if (result.outcome !== 'Committed') return { outcome: result.outcome, offer };
+            const approval = yield* acceptAccountHistory({
+              ...pin,
+              offer,
+              pages: yield* input.pages(),
+            });
+            // Only the admitted session installs recovered opaque keys, through the same
+            // InstalledEpochKeys commitment/protection/readback boundary as normal reception.
+            yield* openPersonalSession(p, approval, keys.entries()).pipe(Effect.provide(base));
+            return { outcome: 'Committed' as const, offer };
+          })
+        );
+      })
+    );
   return Object.freeze({
     close: () => close,
+    /** Recover this pinned workspace from an authenticated vault; no private key escapes. */
+    restoreRecovery: (input: PersonalHostRecoveryInput) => run(restoreRecovery(input)),
     /** Account pairing: create or reuse this workspace's identity for a verified
      * genesis record and membership. Protection comes from the platform's custody. */
     prepareAccount: (pin: { genesisRecordHex: string; membershipId: string }) =>

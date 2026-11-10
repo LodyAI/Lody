@@ -8,13 +8,14 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 - Derive generation only from core-verified local admission originals. Scope originals,
   requests, pins and caches by generation; never migrate grants on readmission.
 - Persist resource-bound high water and ciphertext, never credentials or freshness.
-  Restart requires authenticated latest reads. Historical steps grant no execution.
+  Restart requires authenticated latest v3 reads. Verify only the latest original against
+  a historically admitted owner-personal signer and local high-water pin; revision gaps are allowed.
 - Recheck the current ledger and actual local project before admitting new work.
   Known withdrawal denies immediately; unknown changes have a RAM-only read-start
   lifetime strictly shorter than 15 minutes on wall and monotonic clocks.
 - A verified denial in the accepted pin stays known through failed refreshes and restarts;
-  only a newer verified head releases it. It needs only historical issuer authority, so a
-  later signer revocation does not void it. It never grants execution.
+  only a newer verified head releases it. Signer revocation alone preserves grants and advises review.
+  Re-signing preserves the complete current list; new writes require an active owner device.
 - An authenticated read finding no policy for the current generation, or its removal, is
   the private default and a known denial, never an unknown outcome.
 
@@ -27,3 +28,5 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 - Reuse fresh cached grants. Before a cached machine/project sharing refusal, refresh
   the authenticated policy with per-binding concurrent sharing and a five-second
   read-start cooldown. Failed attempts never supply policy evidence or advance pins.
+
+- Native session-read fences bind the returned view to the same verified cache object and freshness; ledger generation is fenced by the caller through response publication.

@@ -66,23 +66,48 @@ export function shortcutAccess(
     )
       throw new Error('shortcut_changed');
   };
+  // One stream token serves every request of this call until shortly before it expires.
+  const tokens = new Map<
+    string,
+    { value: Promise<{ token: string; gatewayBaseUrl: string }>; until: number }
+  >();
   const grant =
     (streamId: string, target: object, write: boolean) => async () => {
       signal.throwIfAborted();
-      const value = z
-        .object({
-          token: z.string().min(1),
-          expiresIn: z.number().positive(),
-          gatewayBaseUrl: z
-            .string()
-            .url()
-            .refine((url) => url.startsWith('https://')),
-          streamId: z.literal(streamId),
-        })
-        .parse(await cloud('getStreamToken', { target, write }));
-      signal.throwIfAborted();
-      return value;
+      const key = `${write}:${streamId}`;
+      const cached = tokens.get(key);
+      if (cached && cached.until > Date.now()) return cached.value;
+      const value = fetchGrant(streamId, target, write).catch((error) => {
+        tokens.delete(key);
+        throw error;
+      });
+      tokens.set(key, { value, until: Date.now() + 30000 });
+      const resolved = await value;
+      tokens.set(key, {
+        value,
+        until: Date.now() + Math.max(0, resolved.expiresIn * 1000 - 30000),
+      });
+      return resolved;
     };
+  const fetchGrant = async (
+    streamId: string,
+    target: object,
+    write: boolean,
+  ) => {
+    const value = z
+      .object({
+        token: z.string().min(1),
+        expiresIn: z.number().positive(),
+        gatewayBaseUrl: z
+          .string()
+          .url()
+          .refine((url) => url.startsWith('https://')),
+        streamId: z.literal(streamId),
+      })
+      .parse(await cloud('getStreamToken', { target, write }));
+    signal.throwIfAborted();
+    return value;
+  };
   const index = async (
     ownerUserId: string,
     visibility: 'private' | 'workspace',
@@ -105,33 +130,34 @@ export function shortcutAccess(
       });
       if (!created.ok) throw new Error('shortcut_write_unknown');
     }
-    return openSettings(stream, getGrant, signal);
+    return openSettings(stream, getGrant, signal, { cached: !write });
   };
   const list = async () => {
     const rows = await directory();
     const domains = new Map(
       rows.map((row) => [`${row.ownerUserId}:${row.visibility}`, row]),
     );
-    const entries: PromptShortcutIndexEntry[] = [];
-    for (const row of domains.values()) {
-      const { flock } = await index(row.ownerUserId, row.visibility);
-      entries.push(
-        ...new PromptShortcutCatalog(flock)
-          .list()
-          .filter(
-            (entry) =>
-              entry.workspaceId === workspaceId &&
-              entry.ownerUserId === row.ownerUserId &&
-              entry.visibility === row.visibility &&
-              rows.some(
-                (access) =>
-                  access.shortcutId === entry.id &&
-                  access.bodyDocId === entry.bodyDocId &&
-                  access.revision === entry.revision,
-              ),
-          ),
-      );
-    }
+    const entries: PromptShortcutIndexEntry[] = (
+      await Promise.all(
+        [...domains.values()].map(async (row) => {
+          const { flock } = await index(row.ownerUserId, row.visibility);
+          return new PromptShortcutCatalog(flock)
+            .list()
+            .filter(
+              (entry) =>
+                entry.workspaceId === workspaceId &&
+                entry.ownerUserId === row.ownerUserId &&
+                entry.visibility === row.visibility &&
+                rows.some(
+                  (access) =>
+                    access.shortcutId === entry.id &&
+                    access.bodyDocId === entry.bodyDocId &&
+                    access.revision === entry.revision,
+                ),
+            );
+        }),
+      )
+    ).flat();
     const fresh = await directory();
     if (
       fresh.some(

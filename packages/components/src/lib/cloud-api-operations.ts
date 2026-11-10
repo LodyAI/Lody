@@ -100,6 +100,8 @@ function capabilityForOperation(name: string): PlatformCapability {
     name.startsWith('e2eeJoinMailbox:')
   )
     return 'multiWorkspace';
+  if (name.startsWith('workspaceMembers:')) return 'teamSharing';
+  if (name.startsWith('e2eeMachineSharing:')) return 'teamSharing';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
@@ -111,6 +113,8 @@ function capabilityForOperation(name: string): PlatformCapability {
   if (name.startsWith('machineCredentials:') || name.startsWith('machinePairing:')) {
     return 'remoteMachines';
   }
+  if (name === 'machines:listSessionAccess' || name === 'machines:setSessionReadSharedWithTeam')
+    return 'teamSharing';
   if (name === 'machines:setMachineSharedWithTeam') return 'teamSharing';
   if (name.startsWith('machines:')) return 'remoteMachines';
   if (name.startsWith('localProjects:') || name.startsWith('sessionSharing:')) return 'teamSharing';
@@ -147,6 +151,11 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  e2eeMachineSharing: {
+    listVersions: query<ConvexApi['e2eeMachineSharing']['listVersions']>(
+      'e2eeMachineSharing:listVersions'
+    ),
+  },
   /** Account-wide pairing relay for portable hosts. Opaque bytes; hosts verify every tag. */
   e2eeAccountPairing: {
     submit: mutation<ConvexApi['e2eeAccountPairing']['submit']>('e2eeAccountPairing:submit'),
@@ -232,6 +241,7 @@ export const cloudOperations = {
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
+  workspaceMembers: { list: query<ConvexApi['workspaceMembers']['list']>('workspaceMembers:list') },
   auth: {
     transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
       'auth:transferWorkspaceOwnership'
@@ -449,6 +459,12 @@ export const cloudOperations = {
     ),
   },
   machines: {
+    listSessionAccess: query<ConvexApi['machines']['listSessionAccess']>(
+      'machines:listSessionAccess'
+    ),
+    setSessionReadSharedWithTeam: mutation<ConvexApi['machines']['setSessionReadSharedWithTeam']>(
+      'machines:setSessionReadSharedWithTeam'
+    ),
     listVisibleMachines: query<ConvexApi['machines']['listVisibleMachines']>(
       'machines:listVisibleMachines'
     ),

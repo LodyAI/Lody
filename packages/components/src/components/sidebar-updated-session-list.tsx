@@ -840,10 +840,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       }
     : undefined;
 
-  const canArchive = typeof onArchive === 'function';
+  const readOnly = item.sharing?.access === 'read';
+  const canArchive = !readOnly && typeof onArchive === 'function';
   const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
-  const canRename = typeof onRename === 'function';
+  const canRename = !readOnly && typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
   const canCopyUrl = typeof onCopyUrl === 'function';
   // Copy URL stays available for private sessions (the link still works for

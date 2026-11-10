@@ -14,7 +14,9 @@ import {
 } from '@/lib/e2ee-member-removal';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
+import { getIpcServices } from '@/lib/electron-ipc-client';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeRuntimeStatus } from '@lody/platform';
@@ -80,6 +82,10 @@ export interface E2eeWorkspaceConsoleProps {
   initialTab?: E2eeConsoleTab;
   /** Host-owned content for console tabs, wrapped in `E2eeConsoleSection`. */
   sections?: ReactNode;
+  /** Host app-update check, shown on failures that an update resolves. */
+  onCheckForUpdates?: () => void;
+  /** Host-known recovery state for the getting-started list; see the control page. */
+  recoveryReady?: boolean;
 }
 
 /** The encryption console. It owns its account/workspace control reader and the
@@ -90,6 +96,8 @@ export function E2eeWorkspaceConsole({
   onClose,
   initialTab,
   sections,
+  onCheckForUpdates,
+  recoveryReady,
 }: E2eeWorkspaceConsoleProps) {
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -99,6 +107,23 @@ export function E2eeWorkspaceConsole({
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
+  // Restoring from a backup is a desktop capability while the recovery switch is on.
+  const recoveryEnabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
+  const [desktopE2ee] = useState(() => getIpcServices()?.e2ee);
+  const [passkeyAvailable, setPasskeyAvailable] = useState(false);
+  useEffect(() => {
+    if (!recoveryEnabled || !desktopE2ee) return undefined;
+    let live = true;
+    void desktopE2ee.recoveryPasskeyAvailable().then(
+      (available) => {
+        if (live) setPasskeyAvailable(available);
+      },
+      () => undefined
+    );
+    return () => {
+      live = false;
+    };
+  }, [recoveryEnabled, desktopE2ee]);
   useLayoutEffect(() => {
     // The standalone page has no workspace; the modal stays inside the open one.
     if (presentation === 'page') clearWorkspace({ slug: null, workspaceId: null });
@@ -664,6 +689,16 @@ export function E2eeWorkspaceConsole({
         onRetryKeys={retryAccountPairingKey}
         onBack={backToWorkspaces}
         onManual={() => setShowDetails(true)}
+        {...(recoveryEnabled && desktopE2ee
+          ? {
+              lostAll: {
+                passkeyAvailable,
+                restore: (method: 'file' | 'passkey') =>
+                  desktopE2ee.restoreFromRecoveryFile(method),
+                onRecovered: refresh,
+              },
+            }
+          : {})}
       />
     );
   if (awaitingApproval && !showDetails && port?.runtime && accountId)
@@ -750,6 +785,8 @@ export function E2eeWorkspaceConsole({
         }
         presentation={presentation}
         initialTab={initialTab}
+        {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
+        {...(recoveryReady === undefined ? {} : { recoveryReady })}
         memberRole={
           current?.scope === scope && !current.failure
             ? current.nativeStatus?.memberRole

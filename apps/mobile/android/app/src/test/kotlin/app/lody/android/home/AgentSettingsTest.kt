@@ -74,7 +74,8 @@ class AgentSettingsTest {
         assertTrue(state.busy)
         val refreshing = async { state.refresh(machine.id) }
         assertFalse(state.perform(ProviderAction.Delete(provider)))
-        assertEquals(listOf(provider), state.snapshot?.providers)
+        // The pending delete already shows: the provider leaves the list before the write lands.
+        assertEquals(emptyList<AgentProvider>(), state.snapshot?.providers)
         finish.complete(Unit)
         assertTrue(writing.await())
         refreshing.await()

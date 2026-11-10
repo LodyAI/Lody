@@ -72,6 +72,58 @@ export interface CloudCliPortOptions {
   logger: Logger;
 }
 
+/** Source CLI credential stays on HTTPS; relay only this exact-session read proof. */
+export async function mintCliSessionHistoryReadProof(options: {
+  token: string;
+  authBaseUrl?: string;
+  authSiteUrl?: string;
+  logger: Logger;
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  sourceMachineId: string;
+  rootSessionId: string;
+  sessionOwnerUserId?: string;
+  localProjectId?: string;
+  requester?: { userId: string; machineId: string };
+  edit?: boolean;
+  requestId?: string;
+  intentDigest?: string;
+}): Promise<string> {
+  if (!options.authBaseUrl) throw new Error('Cloud history authorization is unavailable');
+  const response = await getCliHttpFetch({ logger: options.logger })(
+    new URL(
+      options.edit
+        ? '/api/session-history/request-edit-token-cli'
+        : '/api/session-history/request-token-cli',
+      options.authSiteUrl?.trim() || deriveConvexSiteUrl(options.authBaseUrl)
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.token}` },
+      body: JSON.stringify({
+        workspaceId: options.workspaceId,
+        machineId: options.machineId,
+        sessionId: options.sessionId,
+        sourceMachineId: options.sourceMachineId,
+        rootSessionId: options.rootSessionId,
+        sessionOwnerUserId: options.sessionOwnerUserId,
+        localProjectId: options.localProjectId,
+        ...(options.requester ? { requester: options.requester } : {}),
+        ...(options.edit
+          ? { requestId: options.requestId, intentDigest: options.intentDigest }
+          : {}),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    }
+  );
+  if (!response.ok) throw new Error('Session history authorization was refused.');
+  return z
+    .object({ requestToken: z.string().min(1).max(8192) })
+    .strict()
+    .parse(await response.json()).requestToken;
+}
+
 export function createCloudSessionSharingPort(options: {
   token: string;
   authBaseUrl: string;
@@ -472,6 +524,53 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     sessionSharing: createCloudSessionSharingPort(options),
     identity: options.identity,
     access: {
+      verifySessionHistoryRead: async (request) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL(
+            '/api/session-history/verify',
+            options.authSiteUrl?.trim() || deriveConvexSiteUrl(options.authBaseUrl)
+          ),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(request),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!response.ok) return false;
+        return z
+          .object({ allowed: z.boolean() })
+          .strict()
+          .parse(await response.json()).allowed;
+      },
+      verifySessionHistoryWrite: async (request) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL(
+            '/api/session-history/verify-edit',
+            options.authSiteUrl?.trim() || deriveConvexSiteUrl(options.authBaseUrl)
+          ),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(request),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!response.ok) return null;
+        const value = z
+          .object({ allowed: z.boolean(), expiresAt: z.number().int().nonnegative().optional() })
+          .strict()
+          .parse(await response.json());
+        return value.allowed && value.expiresAt !== undefined
+          ? { expiresAt: value.expiresAt }
+          : null;
+      },
       watchWorkspaceAccess: (listener, onError) =>
         subscriptionClient.onUpdate(
           api.deviceAuth.listMyWorkspacesForCliToken,
@@ -847,4 +946,29 @@ export function createCloudRemoteMachinePairingClaim(options: {
     if (!response.ok) throw new Error('e2ee_pairing_unavailable_retry_same_command');
     return response.json();
   };
+}
+
+/** Ordinary source-daemon preflight; metadata is routing evidence under the UI trust model. */
+export async function canReadSessionForCliRequester(input: {
+  token: string;
+  authBaseUrl?: string;
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  rootSessionId: string;
+  sessionOwnerUserId?: string;
+  localProjectId?: string;
+  requester: { userId: string; machineId: string };
+}): Promise<boolean> {
+  const { token, authBaseUrl, ...target } = input;
+  if (!authBaseUrl) return false;
+  return z
+    .object({ allowed: z.boolean() })
+    .strict()
+    .parse(
+      await new ConvexHttpClient(normalizeBaseUrl(authBaseUrl)).query(
+        api.machines.canRequestSessionReadFromCliToken,
+        { ...target, cliToken: token }
+      )
+    ).allowed;
 }

@@ -693,6 +693,34 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
+  if (
+    value.type === 'session/image-prepare-local' ||
+    value.type === 'session/image-resolve-local'
+  ) {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].trim().length > 0
+      )
+    )
+      return false;
+    if (value.type === 'session/image-resolve-local') return isSessionImagePayload(value.image);
+    const source = value.source;
+    return (
+      typeof value.imageId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.imageId) &&
+      typeof value.fileName === 'string' &&
+      value.fileName.trim().length > 0 &&
+      typeof value.mimeType === 'string' &&
+      SESSION_IMAGE_ALLOWED_MIME_TYPES.has(value.mimeType) &&
+      isObjectRecord(source) &&
+      Object.keys(source).length === 1 &&
+      ((typeof source.path === 'string' && source.path.trim().length > 0) ||
+        (typeof source.base64 === 'string' &&
+          source.base64.length > 0 &&
+          source.base64.length <= 27962028))
+    );
+  }
+
   if (value.type === 'session/attachment-prepare') {
     if (
       !['machineId', 'workspaceId', 'sessionId'].every(
@@ -1163,6 +1191,26 @@ export function isLocalSessionControlResponse(
               isSessionFilePayload(item) &&
               typeof item.downloadUrl === 'string'
           )))
+    );
+  }
+
+  if (value.type === 'session/image-prepare-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (typeof value.image === 'undefined' || isSessionImagePayload(value.image)) &&
+      (!value.success || isSessionImagePayload(value.image))
+    );
+  }
+
+  if (value.type === 'session/image-resolve-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      isOptionalString(value.path) &&
+      (!value.success || (typeof value.path === 'string' && value.path.trim().length > 0))
     );
   }
 

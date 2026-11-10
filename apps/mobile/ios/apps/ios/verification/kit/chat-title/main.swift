@@ -384,3 +384,21 @@ button.titleHost.setNeedsLayout()
 button.titleHost.layoutIfNeeded()
 precondition(button.titleHost.layer.mask == nil, "A fitting title removes the overflow fade")
 print("PASS: overflowing titles retain full text with directional fade; fitting titles stay unmasked")
+
+// Inbox search: UIKit clears the field when it dismisses the controller (the iOS 26 integrated
+// button collapsing, or a pushed chat) without calling `textDidChange`. The reported query must
+// still follow the bar, or the chat list stays filtered behind an empty search button.
+let search = LodyNavigationSearch()
+var searchEvents: [(String, String)] = []
+search.emit = { event, text in searchEvents.append((event, text)) }
+let bar = search.controller.searchBar
+bar.text = "deploy"
+search.searchBar(bar, textDidChange: "deploy")
+precondition(search.reportedText == "deploy" && searchEvents.last! == ("change", "deploy"), "Typing reports the query")
+bar.text = ""
+search.updateSearchResults(for: search.controller)
+precondition(search.reportedText == "", "A UIKit-side clear reports the empty query")
+search.didDismissSearchController(search.controller)
+precondition(searchEvents.map(\.0) == ["change", "change", "cancel"], "Dismissal ends search once, without duplicate changes")
+precondition(searchEvents.filter { $0.0 == "change" }.map(\.1) == ["deploy", ""])
+print("PASS: navigation search reports UIKit-side clears so the inbox returns to the normal list")

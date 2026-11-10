@@ -46,6 +46,13 @@ export const StagingRetry: Story = {
 };
 export const NoAdministrator: Story = { args: { state: { ...state, mayRotate: false } } };
 export const IdentityLost: Story = { args: { state: undefined } };
+/** The entry card's failure in the console's card format: one step that helps. */
+export const IdentityLostError: Story = {
+  args: { state: undefined, error: 'e2ee_missing-binding', onOpenConsole: () => {} },
+};
+export const RestartRequired: Story = {
+  args: { state: { ...state, updatePending: true }, error: 'e2ee_restart-required' },
+};
 export const CandidateRecovery: Story = {
   args: {
     error: 'e2ee_rotation_candidate_unavailable',
