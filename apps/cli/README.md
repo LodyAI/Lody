@@ -112,7 +112,9 @@ Original ciphertext receipts live in `execution-origins.sqlite`; snapshot author
 cannot substitute for the original turn signer. Snapshot recovery backfills retained
 signed updates from Streams. Missing originals keep the turn pending and retryable
 until its original window expires; they never grant a start. Each backfill attempt
-has a three-second/eight-page bound; stop cancels the watcher's delayed retry.
+has a three-second/eight-page bound. A received frame for the session, or a confirmed
+ledger read, rechecks a waiting turn at once; a fallback timer doubles from one second
+to at most five minutes. Stop cancels the watcher's delayed retry.
 Confirmed whole-member removal or machine-device revocation during backfill is
 terminal: it immediately fences new execution and invalidates cached grants before
 the existing owner drain. Late authorization results cannot claim a journal start.

@@ -4078,6 +4078,9 @@ export class MessageHandler {
               userTurnId: string;
               inputConfig?: unknown;
             }) => await Effect.runPromise(this.encryptedExecution!.resolveRequester(intent)),
+            ...(this.encryptedExecution.subscribeEvidence
+              ? { subscribeExecutionEvidence: this.encryptedExecution.subscribeEvidence }
+              : {}),
           }
         : {}),
       // P5/D11 snapshot bookkeeping for the watcher's background owner

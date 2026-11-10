@@ -837,6 +837,30 @@ async function openWorkspaceOwned(
     );
   };
   let originWriteFailed = false;
+  // Waiting encrypted turns recheck on these events; their timer is only a fallback.
+  // A room ID names one document's new frame; none means a confirmed ledger read.
+  const evidenceListeners = new Set<(roomId?: string) => void>();
+  const pendingEvidence = new Set<string | undefined>();
+  let evidenceTimer: ReturnType<typeof setImmediate> | undefined;
+  const notifyExecutionEvidence = (roomId?: string) => {
+    if (closed || evidenceListeners.size === 0) return;
+    pendingEvidence.add(roomId);
+    // After the current import completes, and once per batch of frames.
+    evidenceTimer ??= setImmediate(() => {
+      evidenceTimer = undefined;
+      const rooms = [...pendingEvidence];
+      pendingEvidence.clear();
+      const all = rooms.includes(undefined);
+      for (const listener of [...evidenceListeners]) {
+        try {
+          if (all) listener();
+          else for (const room of rooms) listener(room);
+        } catch {
+          /* A subscriber fault cannot break decryption or the ledger refresh. */
+        }
+      }
+    });
+  };
   const executionOrigins = new ExecutionOrigins(
     join(
       repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
@@ -954,6 +978,7 @@ async function openWorkspaceOwned(
               try {
                 executionOrigins.retain(descriptor.resource, originalFrame, result.plaintext);
                 originWriteFailed = false;
+                notifyExecutionEvidence(descriptor.resource.slice(4));
               } catch {
                 if (!originWriteFailed)
                   console.warn('[e2ee] execution origin unavailable; affected turns cannot start');
@@ -1292,6 +1317,8 @@ async function openWorkspaceOwned(
         }
         refreshRetryAttempts = 0;
         clearRefreshRetry();
+        // A confirmed read, and any key it installed, may admit a waiting turn.
+        if (!cursor && !movedBack) notifyExecutionEvidence();
       }
     })()
       .catch(async (error: unknown) => {
@@ -1374,6 +1401,9 @@ async function openWorkspaceOwned(
   };
   const close = () => {
     closed = true;
+    if (evidenceTimer !== undefined) clearImmediate(evidenceTimer);
+    evidenceTimer = undefined;
+    evidenceListeners.clear();
     opened.executionAuthorization.invalidate();
     opened.sharing.stop();
     clearLedgerRetry();
@@ -1635,6 +1665,13 @@ async function openWorkspaceOwned(
       ),
     stopRpc,
     isExecutionOpen: () => !closed,
+    /** New execution evidence: a document's frame (room ID) or a confirmed ledger read. */
+    subscribeExecutionEvidence: (listener: (roomId?: string) => void) => {
+      evidenceListeners.add(listener);
+      return () => {
+        evidenceListeners.delete(listener);
+      };
+    },
     readMachineSharing: (machineId: string) =>
       opened.sharingRemote
         ? run(opened.sharing.read(machineId, opened.sharingRemote))

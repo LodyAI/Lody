@@ -1459,6 +1459,7 @@ describe('SessionDispatchWatcher', () => {
     recordChatFailure?: WatcherDeps['recordChatFailure'];
     onFatalAuthFailure?: WatcherDeps['onFatalAuthFailure'];
     dispatchPrepared?: SessionExecutionService['dispatchPreparedSessionTurn'];
+    subscribeExecutionEvidence?: WatcherDeps['subscribeExecutionEvidence'];
   }) => {
     const startSession = vi.fn(async () => {});
     const continueSession = vi.fn(async () => {});
@@ -1531,6 +1532,9 @@ describe('SessionDispatchWatcher', () => {
       canUseMachine: opts.canUseMachine,
       recordChatFailure: opts.recordChatFailure,
       onFatalAuthFailure: opts.onFatalAuthFailure,
+      ...(opts.subscribeExecutionEvidence
+        ? { subscribeExecutionEvidence: opts.subscribeExecutionEvidence }
+        : {}),
     });
 
     return withHistoryPort({
@@ -1624,6 +1628,67 @@ describe('SessionDispatchWatcher', () => {
       originalAvailable = true;
       await vi.advanceTimersByTimeAsync(1000);
       expect(starts).toBe(1);
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rechecks a waiting turn when its evidence arrives, with a timer fallback capped at five minutes', async () => {
+    vi.useFakeTimers();
+    const listeners = new Set<(roomId?: string) => void>();
+    let attempts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      subscribeExecutionEvidence: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      dispatchPrepared: async (options) => {
+        attempts += 1;
+        await options.onExecutionDeferred?.();
+      },
+    });
+    const evidence = (roomId?: string) => {
+      for (const listener of listeners) listener(roomId);
+    };
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(attempts).toBe(1);
+      // The fallback doubles from one second and never waits longer than five minutes.
+      for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000]) {
+        const before = attempts;
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(attempts).toBe(before);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(attempts).toBe(before + 1);
+      }
+      for (let round = 0; round < 2; round += 1) {
+        const before = attempts;
+        await vi.advanceTimersByTimeAsync(299_999);
+        expect(attempts).toBe(before);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(attempts).toBe(before + 1);
+      }
+      // A new frame for another document does not touch this turn; its own frame,
+      // or a confirmed ledger read (no document), rechecks it at once.
+      let before = attempts;
+      evidence('session-other');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(before);
+      evidence(h.roomId);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(before + 1);
+      before = attempts;
+      evidence();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(before + 1);
+      h.watcher.stop();
+      before = attempts;
+      evidence(h.roomId);
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(attempts).toBe(before);
+      expect(listeners.size).toBe(0);
     } finally {
       h.watcher.stop();
       vi.useRealTimers();

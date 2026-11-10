@@ -85,6 +85,9 @@ type SessionDispatchWatcherDeps = {
     userTurnId: string;
     inputConfig?: unknown;
   }) => Promise<{ state: 'pending' | 'denied' } | { userId?: string }>;
+  /** Encrypted only: new execution evidence arrived, for one session document
+   * (its room ID) or, without one, for every waiting turn (ledger or key update). */
+  subscribeExecutionEvidence?: (listener: (roomId?: string) => void) => () => void;
   logger: Logger;
   machineId: MachineId;
   workspaceId: WorkspaceId;
@@ -147,7 +150,13 @@ type SessionDispatchWatcherDeps = {
 type AccessRetryHandle = {
   turnId: string;
   fiber: Fiber.Fiber<void, never>;
+  /** A turn waiting for execution evidence, which new evidence wakes at once. */
+  evidence?: true;
 };
+/** Fallback recheck for a waiting encrypted turn: doubles from 1 s, capped at 5 min
+ * (owner decision 2026-11-10). Evidence events are the primary trigger. */
+const EVIDENCE_RETRY_FIRST_MS = 1_000;
+const EVIDENCE_RETRY_MAX_MS = 5 * 60_000;
 
 type WatchedSession = {
   unsubscribe: () => void;
@@ -450,6 +459,11 @@ export class SessionDispatchWatcher {
    * when the session stops needing an active watch.
    */
   private readonly accessFibers = new Map<SessionId, AccessRetryHandle>();
+  private readonly evidenceRetryAttempts = new Map<
+    SessionId,
+    { turnId: string; attempts: number }
+  >();
+  private detachExecutionEvidence: (() => void) | null = null;
 
   private metadataWatchHandle: RepoWatchHandle | null = null;
   private readonly userResolver: SessionUserResolverLike;
@@ -548,6 +562,9 @@ export class SessionDispatchWatcher {
     for (const sessionId of [...this.accessFibers.keys()]) {
       this.interruptAccessRetry(sessionId);
     }
+    this.detachExecutionEvidence?.();
+    this.detachExecutionEvidence = null;
+    this.evidenceRetryAttempts.clear();
     this.userResolver.clear();
   }
 
@@ -1845,7 +1862,15 @@ export class SessionDispatchWatcher {
 
   private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string): void {
     this.interruptAccessRetry(sessionId);
-    const program = Effect.sleep('1 second').pipe(
+    const previous = this.evidenceRetryAttempts.get(sessionId);
+    const attempts = previous?.turnId === turnId ? Math.min(previous.attempts + 1, 16) : 0;
+    this.evidenceRetryAttempts.set(sessionId, { turnId, attempts });
+    if (!this.detachExecutionEvidence && this.deps.subscribeExecutionEvidence)
+      this.detachExecutionEvidence = this.deps.subscribeExecutionEvidence((roomId) =>
+        this.wakeExecutionEvidence(roomId)
+      );
+    const delay = Math.min(EVIDENCE_RETRY_FIRST_MS * 2 ** attempts, EVIDENCE_RETRY_MAX_MS);
+    const program = Effect.sleep(delay).pipe(
       Effect.andThen(
         Effect.sync(() => {
           this.clearAccessFiberIf(sessionId, turnId);
@@ -1855,7 +1880,17 @@ export class SessionDispatchWatcher {
     );
     // Share the existing per-session admission-retry owner and its lifecycle
     // cancellation. Never wake the withdrawn Inbox in a tight release loop.
-    this.accessFibers.set(sessionId, { turnId, fiber: Effect.runFork(program) });
+    this.accessFibers.set(sessionId, { turnId, fiber: Effect.runFork(program), evidence: true });
+  }
+
+  /** Recheck waiting turns now instead of at their fallback timer. */
+  private wakeExecutionEvidence(roomId?: string): void {
+    for (const [sessionId, handle] of [...this.accessFibers]) {
+      if (!handle.evidence) continue;
+      if (roomId !== undefined && roomId !== getSessionRoomId(sessionId)) continue;
+      this.interruptAccessRetry(sessionId);
+      void this.enqueueSessionCheck(sessionId);
+    }
   }
 
   /**

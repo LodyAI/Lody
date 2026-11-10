@@ -93,8 +93,10 @@ turn's origin. Local receipt hits do no backfill I/O.
 
 Missing originals remain pending without a journal start, failure marker, handled
 pointer or completed Inbox input. The watcher reuses its per-session admission
-retry owner, with a one-second delay; stop, unwatch and ownership changes cancel
-that owner. Each backfill attempt is limited to eight backward pages and three
+retry owner. Since the owner decision of 2026-11-10, new evidence wakes it at once:
+the host reports each received frame for its document and each confirmed ledger read.
+The timer is only a fallback, doubling from one second up to five minutes. Stop,
+unwatch and ownership changes cancel that owner. Each backfill attempt is limited to eight backward pages and three
 seconds of cooperative I/O, retaining only its scan continuation in memory.
 Another attempt resumes an incomplete scan; a retained-start miss is not cached.
 Expired snapshot turns stop retrying at their timestamp's original window, and a

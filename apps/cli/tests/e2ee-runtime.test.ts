@@ -1327,7 +1327,12 @@ describe('machine E2EE local runtime', () => {
           },
           onAuthorityConfirmed: (startedAt) => authorityConfirmations.push(startedAt),
         });
+        // A confirmed ledger read wakes every waiting turn (no document named).
+        const woken: Array<string | undefined> = [];
+        host.subscribeExecutionEvidence((roomId) => woken.push(roomId));
         await host.refresh();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(woken).toContain(undefined);
         expect(authorityConfirmations.length).toBeGreaterThan(0);
         // Key work has its own failures: the verified read below still counts.
         const beforeMailboxFailure = authorityConfirmations.length;
@@ -1798,11 +1803,17 @@ describe('machine E2EE local runtime', () => {
           const turnProtection = host.content.resolve({ kind: 'doc', docId: 'session-origin' });
           if (turnProtection.mode !== 'protected') throw new Error('missing turn protection');
           const original = await turnProtection.config.provider.seal({ ...input, plaintext });
+          // A received frame wakes the turns waiting in its own document.
+          const woken: Array<string | undefined> = [];
+          const detachEvidence = host.subscribeExecutionEvidence((roomId) => woken.push(roomId));
           await turnProtection.config.provider.open({
             ...original,
             context: input.context,
             additionalData: new Uint8Array([...original.header, 9]),
           });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          detachEvidence();
+          expect(woken).toContain('session-origin');
           expect(
             await Effect.runPromise(
               host.resolveVerifiedExecutionOriginal(

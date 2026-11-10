@@ -117,6 +117,8 @@ export function makeEncryptedAgentExecution(options: {
   };
   /** Whether this machine's own device may reach another machine. */
   authorizeMachineTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
+  /** New execution evidence: one document's frame (room ID) or a confirmed ledger read. */
+  subscribeEvidence?: (listener: (roomId?: string) => void) => () => void;
   /** Observation only, after the committed actual-start claim. */
   onClaim?: (userTurnId: string) => void;
 }) {
@@ -349,7 +351,7 @@ export function makeEncryptedAgentExecution(options: {
     const authorizeTargets = (authorize: AuthorizeEncryptedExecution) =>
       authorizeAll(authorize, intent.workspaceId, authorityDevice, intent.localProjectIds);
     // A ledger read that could not complete decides nothing: the turn waits inside
-    // its signed window and the watcher retries, as for missing evidence.
+    // its signed window (if any) and the watcher rechecks, as for missing evidence.
     const unavailable = Effect.fnUntraced(function* () {
       return {
         state:
@@ -475,6 +477,7 @@ export function makeEncryptedAgentExecution(options: {
     resolveRequester,
     verifyRequesterAccess,
     verifyMachineTarget,
+    subscribeEvidence: options.subscribeEvidence,
   };
 }
 export type EncryptedAgentExecution = ReturnType<typeof makeEncryptedAgentExecution>;
