@@ -1494,9 +1494,13 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 local: r.local,
                 targets: [target],
               });
-            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
+            expect(yield* run()).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' },
+            ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
-            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Committed' }]);
+            expect(yield* run()).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+            ]);
             expect(adoptions).toBe(2);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             expect(yield* run()).toEqual([]);
@@ -1559,7 +1563,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
               restoreVaultWorkspaces({ vault, local: r.local, targets: [target()] });
             // The old vault restores and finishes.
             expect(yield* run(r.oldVault.vault)).toEqual([
-              { name: 'Workspace', outcome: 'Committed' },
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             // Finished work is not repeated.
@@ -1571,13 +1575,13 @@ describe('encrypted recovery vault and genuine workflow', () => {
             device = second;
             failInstall = true;
             expect(yield* run(r.newVault.vault)).toEqual([
-              { name: 'Workspace', outcome: 'Failed' },
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' },
             ]);
             expect(hasIdentity).toBe(true);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(true);
             failInstall = false;
             expect(yield* run(r.newVault.vault)).toEqual([
-              { name: 'Workspace', outcome: 'Committed' },
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
             ]);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             expect(yield* run(r.newVault.vault)).toEqual([]);
@@ -1613,7 +1617,7 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 local: refusing,
                 targets: [target],
               })
-            ).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
+            ).toEqual([{ workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' }]);
             expect(connected).toBe(0);
           })
         )
@@ -1662,12 +1666,16 @@ describe('encrypted recovery vault and genuine workflow', () => {
                 targets: [target],
               });
             // Reported for retry, and nothing is restored over an identity it cannot see.
-            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Failed' }]);
+            expect(yield* run()).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Failed' },
+            ]);
             expect(connected).toBe(0);
             expect(yield* recoveryRestoreIncomplete(r.local, 'workspace')).toBe(false);
             // Once the check works again, the retry restores it.
             identity = false;
-            expect(yield* run()).toEqual([{ name: 'Workspace', outcome: 'Committed' }]);
+            expect(yield* run()).toEqual([
+              { workspaceId: 'workspace', name: 'Workspace', outcome: 'Committed' },
+            ]);
             expect(connected).toBe(1);
           })
         )

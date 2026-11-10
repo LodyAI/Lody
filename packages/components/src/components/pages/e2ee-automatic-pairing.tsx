@@ -21,6 +21,21 @@ import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
 import { E2eeAccountPairingRequest } from './e2ee-account-pairing';
 import { holdPrivateTelemetrySurface } from '@/lib/posthog-privacy';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { E2eeLostAllRecovery, type E2eeLostAllRecoveryProps } from './e2ee-lost-all-recovery';
+
+/** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
+function useSecondsLeft(expiresAt: number | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (expiresAt === undefined) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
+  return expiresAt === undefined ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
+}
+const clock = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
 function usePairingPrivacy() {
   useLayoutEffect(() => {
@@ -61,6 +76,7 @@ export function E2eeAutomaticPairingPage({
   onManual,
   keyFailure,
   onRetryKeys,
+  lostAll,
 }: {
   runtime: E2eeWorkspaceRuntime;
   workspaceId: string;
@@ -69,13 +85,23 @@ export function E2eeAutomaticPairingPage({
   onManual?: () => void;
   keyFailure?: boolean;
   onRetryKeys?: () => void;
+  /** Present where this host can restore from a backup (desktop with recovery on). */
+  lostAll?: Omit<E2eeLostAllRecoveryProps, 'workspaceId'>;
 }) {
   usePairingPrivacy();
-  const { t } = useTranslation();
-  const [approvalChoice, setApprovalChoice] = useState<{ runtime: E2eeWorkspaceRuntime; workspaceId: string } | null>(null);
+  const { t, i18n } = useTranslation();
+  const [lostAllOpen, setLostAllOpen] = useState(false);
+  const [approvalChoice, setApprovalChoice] = useState<{
+    runtime: E2eeWorkspaceRuntime;
+    workspaceId: string;
+  } | null>(null);
   const needsChoice = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
-  const canStart = !needsChoice || (approvalChoice?.runtime === runtime && approvalChoice.workspaceId === workspaceId);
+  const canStart =
+    !needsChoice ||
+    (approvalChoice?.runtime === runtime && approvalChoice.workspaceId === workspaceId);
   const [state, setState] = useState<E2eeAutomaticPairingState | null>(null);
+  // Before any early return: every render calls the same hooks.
+  const secondsLeft = useSecondsLeft(state?.expiresAt);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [generation, setGeneration] = useState(0);
@@ -246,14 +272,35 @@ export function E2eeAutomaticPairingPage({
       if (sameOwner(owner)) setBusy(false);
     }
   };
-  if (!canStart) return (
-    <main className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-      <Button variant="ghost" onClick={onBack}><ChevronLeft size={16} />{t('e2ee.control.back')}</Button>
-      <E2eeAccountPairingRequest key={workspaceId} runtime={runtime} workspaceId={workspaceId}
-        autoStart={false} onJoined={onJoined}
-        onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })} />
-    </main>
-  );
+  if (!canStart)
+    return (
+      <main className="h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+        <Button variant="ghost" onClick={onBack}>
+          <ChevronLeft size={16} />
+          {t('e2ee.control.back')}
+        </Button>
+        <E2eeAccountPairingRequest
+          key={workspaceId}
+          runtime={runtime}
+          workspaceId={workspaceId}
+          autoStart={false}
+          onJoined={onJoined}
+          onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
+        />
+      </main>
+    );
+  const formatTime = (value: number) =>
+    new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value));
+  const recovered = () => {
+    setLostAllOpen(false);
+    // Reached only when this workspace's own restore committed: its pending request is
+    // no longer needed. Another workspace's success keeps this request.
+    void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
+    lostAll?.onRecovered();
+  };
   const receiving = state?.phase === 'syncing' || state?.phase === 'joined';
   const terminal = state && ['declined', 'expired', 'cancelled'].includes(state.phase);
   return (
@@ -305,6 +352,11 @@ export function E2eeAutomaticPairingPage({
                 {t('e2ee.auto.preparing')}
               </p>
             )}
+            {state?.comparisonCode && (
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                {t('e2ee.auto.waiting.help')}
+              </p>
+            )}
             <details className="mt-4 text-sm text-muted-foreground">
               <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
                 {t('e2ee.auto.noRequest')}
@@ -320,6 +372,23 @@ export function E2eeAutomaticPairingPage({
                 </Button>
               )}
             </details>
+            <details
+              className="mt-2 text-sm text-muted-foreground"
+              data-testid="e2ee-lost-all-entry"
+            >
+              <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
+                {t('e2ee.auto.noOtherDevice')}
+                <ChevronDown size={14} />
+              </summary>
+              <p className="mt-3 text-left leading-relaxed">
+                {t(lostAll ? 'e2ee.auto.noOtherDevice.help' : 'e2ee.auto.noOtherDevice.elsewhere')}
+              </p>
+              {lostAll && (
+                <Button variant="link" disabled={busy} onClick={() => setLostAllOpen(true)}>
+                  {t('e2ee.auto.noOtherDevice.restore')}
+                </Button>
+              )}
+            </details>
           </>
         )}
         {error && (
@@ -332,10 +401,7 @@ export function E2eeAutomaticPairingPage({
             <p>
               {t('e2ee.auto.previous.help', {
                 names: blocked.workspaces.map((w) => w.name).join(', '),
-                time: new Date(blocked.expiresAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
+                time: formatTime(blocked.expiresAt),
               })}
             </p>
             {confirmRestart ? (
@@ -363,12 +429,9 @@ export function E2eeAutomaticPairingPage({
           <div className="mt-auto pt-10 text-xs text-muted-foreground">
             {state && (
               <p>
-                {t('e2ee.auto.expiry', {
-                  time: new Date(state.expiresAt).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-                })}
+                {secondsLeft !== null && secondsLeft < 60 * 60
+                  ? t('e2ee.auto.expiresIn', { time: clock(secondsLeft) })
+                  : t('e2ee.auto.expiry', { time: formatTime(state.expiresAt) })}
               </p>
             )}
             <Button variant="ghost" disabled={busy} onClick={() => void cancel()}>
@@ -377,7 +440,33 @@ export function E2eeAutomaticPairingPage({
           </div>
         )}
       </section>
+      {lostAll && (
+        <Dialog.Root open={lostAllOpen} onOpenChange={setLostAllOpen}>
+          <Dialog.Content width={480} className="max-h-[90dvh] overflow-y-auto">
+            <Dialog.Title>{t('e2ee.lostAll.title')}</Dialog.Title>
+            <E2eeLostAllRecovery
+              workspaceId={workspaceId}
+              passkeyAvailable={lostAll.passkeyAvailable}
+              restore={lostAll.restore}
+              onRecovered={recovered}
+            />
+          </Dialog.Content>
+        </Dialog.Root>
+      )}
     </main>
+  );
+}
+
+function ApprovalExpiry({ expiresAt }: { expiresAt: number }) {
+  const { t } = useTranslation();
+  const seconds = useSecondsLeft(expiresAt);
+  if (seconds === null || seconds >= 60 * 60) return null;
+  return (
+    <p data-testid="e2ee-approval-expiry" className="text-xs text-muted-foreground">
+      {seconds === 0
+        ? t('e2ee.auto.expired.short')
+        : t('e2ee.auto.expiresIn', { time: clock(seconds) })}
+    </p>
   );
 }
 
@@ -566,6 +655,7 @@ export function E2eeAutomaticPairingInbox({
                 <p className="text-xs text-muted-foreground">
                   {t('e2ee.auto.currentWorkspaceOnly')}
                 </p>
+                <ApprovalExpiry expiresAt={current.expiresAt} />
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                   <Button
                     variant="secondary"
@@ -590,6 +680,9 @@ export function E2eeAutomaticPairingInbox({
                     {t('e2ee.auto.approvalRetry')}
                   </p>
                 )}
+                <p className="text-center text-xs text-muted-foreground">
+                  {t('e2ee.auto.laterHint')}
+                </p>
               </>
             )}
           </PrivatePairingSurface>

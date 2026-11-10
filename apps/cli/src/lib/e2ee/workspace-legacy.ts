@@ -456,7 +456,10 @@ type CliE2eeWorkspaceOptions = {
   onUnavailable: () => void;
   /** A latest ledger read verified in full. `startedAt` was taken before its network I/O. */
   onAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
-  onWindowNotice?: (active: boolean) => void;
+  onWindowNotice?: (
+    active: boolean,
+    window?: import('./execution-authorization').E2eeAccessWindow
+  ) => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight.
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;

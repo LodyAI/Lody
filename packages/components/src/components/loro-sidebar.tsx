@@ -175,6 +175,9 @@ export interface LoroSidebarProps {
    */
   workspaceSwitcherEnabled?: boolean;
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
+  /** Hover text for the Offline mark, supplied as a leaf so its clock never
+   * re-renders the sidebar. */
+  offlineDetail?: ReactNode;
   /**
    * The network may already be online while the target workspace runtime and
    * metadata are still converging. Keep that scoped readiness visible in the
@@ -514,12 +517,15 @@ type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing
 function ConnectionPill({
   state,
   labels,
+  offlineDetail,
 }: {
   state: WorkspaceIdentityStatus;
   labels: Pick<
     LoroSidebarLabels,
     'connectionLoading' | 'connectionReconnecting' | 'connectionOffline' | 'workspaceSyncing'
   >;
+  /** Hover text for Offline: how long, and what this machine can still do. */
+  offlineDetail?: ReactNode;
 }) {
   const isLoading = state !== 'offline';
   const label =
@@ -530,7 +536,7 @@ function ConnectionPill({
         : state === 'loading'
           ? labels.connectionLoading
           : labels.connectionOffline;
-  return (
+  const badge = (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
       icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
@@ -539,6 +545,15 @@ function ConnectionPill({
     >
       {label}
     </Badge>
+  );
+  if (state !== 'offline' || !offlineDetail) return badge;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span className="inline-flex">{badge}</span>} />
+      <Tooltip.Content side="bottom" className="max-w-[280px]">
+        {offlineDetail}
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -832,6 +847,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   scrollStateKey,
   workspaceSwitcherEnabled = true,
   connectionUiState,
+  offlineDetail,
   workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS: _isElectronMacOS = false,
@@ -1118,7 +1134,11 @@ export const LoroSidebar = memo(function LoroSidebar({
         {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
         <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>
@@ -1141,7 +1161,11 @@ export const LoroSidebar = memo(function LoroSidebar({
         {currentWorkspaceEncrypted ? <EncryptedWorkspaceMark /> : null}
         <span className="flex-1" />
         {workspaceIdentityStatus ? (
-          <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
+          <ConnectionPill
+            state={workspaceIdentityStatus}
+            labels={mergedLabels}
+            offlineDetail={offlineDetail}
+          />
         ) : null}
       </span>
     </>

@@ -77,6 +77,7 @@ const createRuntimeStateReporter = () => ({
   setConnectedWorkspaces: vi.fn(),
   upsertIssue: vi.fn(),
   clearIssue: vi.fn(),
+  setE2eeAccessWindow: vi.fn(),
 });
 
 const catalogSnapshot = (overrides: {

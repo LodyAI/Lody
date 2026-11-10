@@ -54,21 +54,25 @@ function Glyph(props: { children: ReactNode; tone?: 'secure' | 'attention' }) {
   );
 }
 
-function errorMessageKey(error: string): string {
-  if (error === 'e2ee_restart-required') return 'e2ee.security.restartRequired';
+type ErrorAction = 'retry' | 'console';
+/** One card per failure: a conclusion, the reason with what is still safe, and the one
+ * next step that does something. Restart and operator work have no button here. */
+function errorCard(error: string): { kind: string; action?: ErrorAction } {
+  if (error === 'e2ee_restart-required') return { kind: 'restart' };
   if (error === 'e2ee_local-history-recovery-required' || error === 'e2ee_trusted-pin-unavailable')
-    return 'e2ee.security.localRecovery';
-  if (error === 'e2ee_management_operator_required') return 'e2ee.security.operatorRequired';
+    return { kind: 'localRecovery', action: 'console' };
+  if (error === 'e2ee_management_operator_required') return { kind: 'operator' };
   if (
     /e2ee_(?:custody_unavailable|missing-binding|account_unavailable|not_open|account_mismatch)/.test(
       error
     )
   )
-    return 'e2ee.security.identityMissing';
-  if (error === 'e2ee_rotation_candidate_unavailable') return 'e2ee.security.candidateUnavailable';
-  if (error === 'e2ee_management_unauthorized') return 'e2ee.security.useManager';
-  if (error === 'e2ee_management_conflict') return 'e2ee.security.conflict';
-  return 'e2ee.security.retryHint';
+    return { kind: 'identity', action: 'console' };
+  if (error === 'e2ee_rotation_candidate_unavailable')
+    return { kind: 'candidate', action: 'retry' };
+  if (error === 'e2ee_management_unauthorized') return { kind: 'manager' };
+  if (error === 'e2ee_management_conflict') return { kind: 'conflict', action: 'retry' };
+  return { kind: 'retry', action: 'retry' };
 }
 
 interface PanelState {
@@ -131,16 +135,36 @@ export function E2eeAttentionRows({
   );
 }
 
-function ErrorRow(props: { error: string; busy?: boolean; onRetry: () => void }) {
+function ErrorRow(props: {
+  error: string;
+  busy?: boolean;
+  onRetry: () => void;
+  /** Absent inside the console itself. */
+  onOpenConsole?: () => void;
+}) {
   const { t } = useTranslation();
+  const card = errorCard(props.error);
+  // Inside the console the console step is already taken; fall back to checking again.
+  const action = card.action === 'console' && !props.onOpenConsole ? 'retry' : card.action;
   return (
     <div {...stylex.props(styles.error)}>
-      <Alert.Root>
-        <Alert.Description>{t(errorMessageKey(props.error))}</Alert.Description>
+      <Alert.Root tone="warning" data-security-error={card.kind}>
+        <Alert.Title>{t(`e2ee.security.error.${card.kind}.title`)}</Alert.Title>
+        <Alert.Description>{t(`e2ee.security.error.${card.kind}.body`)}</Alert.Description>
+        {action && (
+          <Alert.Actions>
+            {action === 'console' ? (
+              <Button disabled={props.busy} onClick={props.onOpenConsole}>
+                {t('e2ee.security.openConsole')}
+              </Button>
+            ) : (
+              <Button variant="secondary" disabled={props.busy} onClick={props.onRetry}>
+                {t('e2ee.failure.action.refresh')}
+              </Button>
+            )}
+          </Alert.Actions>
+        )}
       </Alert.Root>
-      <Button variant="secondary" disabled={props.busy} onClick={props.onRetry}>
-        {t('e2ee.security.refresh')}
-      </Button>
     </div>
   );
 }
@@ -166,6 +190,9 @@ export function E2eeSecurityPanel({
 }) {
   const { t } = useTranslation();
   const error = effectiveError(state, actionError);
+  // When the failure card's one step is the console, the status row neither repeats
+  // the explanation nor offers a second console button.
+  const cardOpensConsole = !!error && errorCard(error).action === 'console' && !!onOpenConsole;
   return (
     <div {...stylex.props(styles.panel)}>
       <CompactSection title={t('e2ee.security.title')}>
@@ -175,7 +202,9 @@ export function E2eeSecurityPanel({
               {state ? <ShieldCheck size={16} /> : <ShieldQuestion size={16} />}
             </Glyph>
           }
-          label={t(state ? 'e2ee.security.current' : 'e2ee.security.identityMissing')}
+          label={t(
+            state || cardOpensConsole ? 'e2ee.security.current' : 'e2ee.security.identityMissing'
+          )}
         >
           {state && (
             <Tooltip.Root>
@@ -189,7 +218,7 @@ export function E2eeSecurityPanel({
               <Tooltip.Content side="left">{t('e2ee.security.aboutHelp')}</Tooltip.Content>
             </Tooltip.Root>
           )}
-          {onOpenConsole && (
+          {onOpenConsole && !cardOpensConsole && (
             <Button disabled={busy} onClick={() => onOpenConsole()}>
               {t('e2ee.security.openConsole')}
             </Button>
@@ -202,7 +231,14 @@ export function E2eeSecurityPanel({
           onUpdate={onUpdate}
           onReview={onOpenConsole && (() => onOpenConsole('members'))}
         />
-        {error && <ErrorRow error={error} busy={busy} onRetry={onRetry} />}
+        {error && (
+          <ErrorRow
+            error={error}
+            busy={busy}
+            onRetry={onRetry}
+            {...(onOpenConsole ? { onOpenConsole: () => onOpenConsole() } : {})}
+          />
+        )}
       </CompactSection>
     </div>
   );

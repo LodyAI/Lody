@@ -10,6 +10,29 @@ import { AlertDialog } from '@/ui/dialog';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+
+/** When this device last opened the account's recovery file successfully. Display only:
+ * it proves nothing about other devices and is cleared when the file is replaced. */
+const checkedKey = (accountId: string) => `lody:e2ee:recovery-checked:${accountId}`;
+function readChecked(accountId: string | null | undefined): number | null {
+  if (!accountId) return null;
+  try {
+    const value = Number(localStorage.getItem(checkedKey(accountId)));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+function writeChecked(accountId: string | null | undefined, at: number | null) {
+  if (!accountId) return;
+  try {
+    if (at === null) localStorage.removeItem(checkedKey(accountId));
+    else localStorage.setItem(checkedKey(accountId), String(at));
+  } catch {
+    // Storage can be unavailable; the date is only a convenience.
+  }
+}
 import { CompactRow, CompactSection } from '../compact-layout';
 
 const styles = stylex.create({
@@ -124,8 +147,13 @@ const statusBadge: Record<WorkspaceStatus['kind'], { key: string; tone: BadgeTon
  * switch are on; main additionally refuses unless started with the env gate.
  * Main owns the file dialogs and bytes; this view receives only outcomes.
  */
-export function RecoveryVaultSection() {
-  const { t } = useTranslation();
+export function RecoveryVaultSection({ accountId }: { accountId?: string | null } = {}) {
+  const { t, i18n } = useTranslation();
+  const [checkedAt, setCheckedAt] = useState(() => readChecked(accountId));
+  const markChecked = (at: number | null) => {
+    writeChecked(accountId, at);
+    setCheckedAt(at);
+  };
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
   // The proxy is new on every call; keep one so the loading effect runs once.
   const [e2ee] = useState(() => getIpcServices()?.e2ee);
@@ -206,8 +234,11 @@ export function RecoveryVaultSection() {
   };
   const finishReplacement = async (compromised: boolean): Promise<Result | undefined> => {
     const finished = await e2ee.continueRecoveryReplacement({ compromised });
-    if (finished.outcome === 'Committed')
+    if (finished.outcome === 'Committed') {
+      // The old file stopped working; its check says nothing about the new one.
+      markChecked(null);
       return { kind: 'notice', key: 'e2ee.recovery.replaceFinished' };
+    }
     return finished.outcome === 'Pending'
       ? { kind: 'notice', key: 'e2ee.recovery.replacePending' }
       : undefined;
@@ -305,7 +336,16 @@ export function RecoveryVaultSection() {
           label={t('e2ee.recovery.file')}
           helper={
             mode === 'ready' || mode === 'replacing'
-              ? t(mode === 'replacing' ? 'e2ee.recovery.fileReplacing' : 'e2ee.recovery.fileSaved')
+              ? mode === 'replacing'
+                ? t('e2ee.recovery.fileReplacing')
+                : checkedAt
+                  ? t('e2ee.recovery.fileSavedChecked', {
+                      date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+                        month: 'short',
+                        day: 'numeric',
+                      }).format(new Date(checkedAt)),
+                    })
+                  : t('e2ee.recovery.fileSaved')
               : mode === 'none'
                 ? t('e2ee.recovery.fileNone')
                 : t('e2ee.recovery.offlineHint')
@@ -321,9 +361,10 @@ export function RecoveryVaultSection() {
                 onClick={() =>
                   void run(async () => {
                     const created = await e2ee.createRecoveryVault();
-                    return created.outcome === 'created'
-                      ? { kind: 'created', vaultId: created.vaultId }
-                      : undefined;
+                    if (created.outcome !== 'created') return undefined;
+                    // Creation saves and reads the file back, so it counts as a check.
+                    markChecked(Date.now());
+                    return { kind: 'created', vaultId: created.vaultId };
                   })
                 }
               >
@@ -340,9 +381,9 @@ export function RecoveryVaultSection() {
                 onClick={() =>
                   void run(async () => {
                     const opened = await e2ee.inspectRecoveryFile();
-                    return opened.outcome === 'opened'
-                      ? { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces }
-                      : undefined;
+                    if (opened.outcome !== 'opened') return undefined;
+                    markChecked(Date.now());
+                    return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
                   })
                 }
               >

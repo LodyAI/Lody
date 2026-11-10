@@ -24,6 +24,10 @@ export const createFileRoute = () => (options: { component: () => ReactNode }) =
 });
 export const useNavigate = () => noop;
 export const useSetAtom = () => noop;
+// The recovery switch is off here, so the console offers no backup restore.
+export const useAtomValue = () => false;
+export const e2eeRecoveryVaultFeatureEnabledAtom = {};
+export const getIpcServices = () => undefined;
 export const isElectronRenderer = () => false;
 export const isNativeAppShell = () => false;
 export const setWorkspaceContextAtom = {};
