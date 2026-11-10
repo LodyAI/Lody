@@ -27,17 +27,18 @@ async function state(page: Page): Promise<EditorState> {
 async function open(page: Page, url = BEHAVIOUR) {
   await page.goto(url);
   const input = editor(page);
-  await expect(input).toBeVisible();
+  // The first story load also pays the dev server's cold start.
+  await expect(input).toBeVisible({ timeout: 30_000 });
   await input.click();
   return input;
 }
 
-/** Type `$kill`, then pick the highlighted skill: a committed chip plus its space. */
+/** Type `$kill`, then pick the skill: a committed chip plus its trailing space. */
 async function insertSkill(page: Page) {
   await page.keyboard.type('$kill');
-  await expect(page.getByRole('option').first()).toBeVisible();
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Enter');
+  const option = page.getByRole('option', { name: /kill-ai-slop/ });
+  await expect(option).toBeVisible();
+  await option.click();
   await expect.poll(async () => (await state(page)).mentions.length).toBeGreaterThan(0);
 }
 
@@ -176,49 +177,64 @@ test('the composer exposes a labelled, expandable combobox', async ({ page }) =>
   await expect(input).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('the menu opens at the visible trigger while the composer overflows', async ({
+test('a click on a visible glyph puts the caret there while the composer overflows', async ({
   playwright,
   browserName,
   baseURL,
 }) => {
+  test.setTimeout(240_000);
   // Headless Chromium hides classic scrollbars, which also removes their layout width.
   const browser = await playwright[browserName].launch(
     browserName === 'chromium' ? { ignoreDefaultArgs: ['--hide-scrollbars'] } : {}
   );
   try {
-    const page = await browser.newPage({ baseURL, viewport: { width: 640, height: 720 } });
-    await page.goto(OVERFLOW);
-    const input = editor(page);
-    await expect(input).toBeVisible();
-    await input.click();
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End');
-    await page.keyboard.type(' $');
-    const menu = page.getByRole('listbox');
-    await expect(menu).toBeVisible();
-    // The last visible `$` glyph is the trigger the user just typed.
-    const glyph = await page.getByTestId('editor-frame').evaluate((frame) => {
-      const walker = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
-      let last: DOMRect | null = null;
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const text = node.textContent ?? '';
-        const index = text.lastIndexOf('$');
-        if (index === -1) continue;
-        const range = document.createRange();
-        range.setStart(node, index);
-        range.setEnd(node, index + 1);
-        const rect = range.getBoundingClientRect();
-        if (rect.height > 0) last = rect;
+    const page = await browser.newPage({ baseURL });
+    const misplaced: string[] = [];
+    // Line wrapping differs width by width, so cover a spread of composer widths.
+    for (let width = 400; width <= 720; width += 16) {
+      await page.setViewportSize({ width, height: 720 });
+      await page.goto(OVERFLOW);
+      const input = editor(page);
+      await expect(input).toBeVisible({ timeout: 30_000 });
+      await input.click();
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End');
+      const { value } = await state(page);
+      const target = value.length - 30;
+      // Where the composer visibly paints the character at `target`.
+      const box = await page.getByTestId('editor-frame').evaluate((frame, target) => {
+        const walker = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
+        const text = (document.querySelector('[data-testid="editor-state"]') as HTMLElement)
+          .textContent!;
+        const source: string = JSON.parse(text).value;
+        let seen = 0;
+        const wanted = source.slice(0, target + 1).replace(/\n/g, '').length - 1;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const content = (node.textContent ?? '').replace(/\n/g, '');
+          if (node.parentElement?.closest('output, textarea')) continue;
+          if (seen + content.length > wanted) {
+            const index = wanted - seen;
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + 1);
+            const rect = range.getBoundingClientRect();
+            return { x: rect.left + rect.width * 0.75, y: rect.top + rect.height / 2 };
+          }
+          seen += content.length;
+        }
+        return null;
+      }, target);
+      if (!box) {
+        misplaced.push(`${width}px: glyph not painted`);
+        continue;
       }
-      return last && { top: last.top, bottom: last.bottom };
-    });
-    expect(glyph).not.toBeNull();
-    const menuBox = (await menu.boundingBox())!;
-    // The menu opens against the caret line that holds the glyph, on either side.
-    const gap = Math.min(
-      Math.abs(menuBox.y - glyph!.bottom),
-      Math.abs(menuBox.y + menuBox.height - glyph!.top)
-    );
-    expect(gap).toBeLessThan(16);
+      await page.mouse.click(box.x, box.y);
+      await page.keyboard.type('Ж');
+      await expect.poll(async () => (await state(page)).value.includes('Ж')).toBe(true);
+      const landed = (await state(page)).value.indexOf('Ж');
+      if (landed !== target + 1)
+        misplaced.push(`${width}px: caret at ${landed}, glyph ${target + 1}`);
+    }
+    expect(misplaced).toEqual([]);
   } finally {
     await browser.close();
   }
