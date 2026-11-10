@@ -1,7 +1,8 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
 import { useState } from 'react';
 import { Dialog } from '@lody/ui/dialog';
-import { RecoveryVaultSection, useWorkspaceRecoveryReady } from './recovery-vault-section';
+import { useWorkspaceRecoveryReady } from './recovery-vault-section';
+import { useE2eeRecoverySection } from './recovery-host';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { E2eeAttentionRows, E2eeDevicesPanel, E2eeSecurityPanel } from './security-panel';
 import { useMemberJoinAttention, useSecurityState } from './security-state';
@@ -43,6 +44,7 @@ function SecuritySettings({
   );
   // The proxy is new on every call; keep one.
   const [updater] = useState(() => getIpcServices()?.updater);
+  const RecoverySection = useE2eeRecoverySection();
   const joinRequests = useMemberJoinAttention(
     scope.native,
     scope.workspaceId,
@@ -143,13 +145,12 @@ function SecuritySettings({
                         }}
                       />
                     </E2eeConsoleSection>
-                    <E2eeConsoleSection tab="recovery">
-                      {/* Remount per account: no plan, failure, retry or dialog state crosses accounts. */}
-                      <RecoveryVaultSection
-                        key={scope.accountId ?? ''}
-                        accountId={scope.accountId}
-                      />
-                    </E2eeConsoleSection>
+                    {RecoverySection && (
+                      <E2eeConsoleSection tab="recovery">
+                        {/* Remount per account: no plan, failure, retry or dialog state crosses accounts. */}
+                        <RecoverySection key={scope.accountId ?? ''} accountId={scope.accountId} />
+                      </E2eeConsoleSection>
+                    )}
                   </>
                 }
               />

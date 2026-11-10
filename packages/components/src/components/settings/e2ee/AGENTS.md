@@ -31,3 +31,7 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   continue action.
   Keep exactly one primary action on the tab, and give every failure card one next
   step that does something, with diagnostics secondary.
+- The console's Recovery tab comes from `useE2eeRecoverySection`: a browser-shaped
+  host (Web, the mobile webview) supplies its own section through
+  `E2eeRecoveryHostContext`, desktop uses its main-process vault, and a host with
+  neither shows where recovery can be set up instead of an empty tab.

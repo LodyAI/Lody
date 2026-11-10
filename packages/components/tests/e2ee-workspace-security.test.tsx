@@ -11,6 +11,7 @@ import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
 import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
+import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recovery-host';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
@@ -570,6 +571,36 @@ describe('encrypted workspace settings', () => {
       }
     }
   );
+
+  it('tells a host without recovery controls where to set recovery up instead of an empty tab', async () => {
+    store.set(developerModeEnabledAtom, true);
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    await render();
+    await openConsole('recovery');
+    expect(page()).toContain('e2ee.console.recoveryElsewhere');
+  });
+
+  it("shows a browser-shaped host's own recovery section for the current account", async () => {
+    const host = {
+      Section: ({ accountId }: { accountId?: string | null }) => (
+        <p>host recovery for {accountId}</p>
+      ),
+    };
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <PlatformContext.Provider value={platform}>
+            <E2eeRecoveryHostContext.Provider value={host}>
+              <WorkspaceSettings />
+            </E2eeRecoveryHostContext.Provider>
+          </PlatformContext.Provider>
+        </Provider>
+      )
+    );
+    await openConsole('recovery');
+    expect(page()).toContain('host recovery for account');
+    expect(page()).not.toContain('e2ee.console.recoveryElsewhere');
+  });
 
   const renderSharing = () =>
     act(async () =>
