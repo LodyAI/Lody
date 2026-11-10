@@ -1,4 +1,6 @@
 vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
+// The security-code card links to public docs; the route never opens it here.
+vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => true }));
 // @vitest-environment jsdom
 // @vitest-environment jsdom
 import { act, createElement, Fragment, type ReactNode } from 'react';
