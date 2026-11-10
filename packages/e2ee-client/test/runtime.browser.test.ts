@@ -285,6 +285,7 @@ it.each(['chromium', 'webkit'] as const)(
       });
       expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 0 });
       expect(await good(page, 'capabilities')).toEqual({
+        iroh: true,
         rpc: true,
         sharing: false,
         manager: true,
@@ -313,6 +314,23 @@ it.each(['chromium', 'webkit'] as const)(
       await good(page, 'refresh');
       const rpc = await good(page, 'rpc');
       expect(await good(page, 'rpc')).toEqual(rpc);
+      // Native iroh port: no connection yet, so this request uses Streams and a
+      // background dial starts; the next request uses iroh.
+      expect(await good(page, 'irohReady')).toBe(false);
+      expect(await good(page, 'irohReady')).toBe(true);
+      expect(await good(page, 'irohCall')).toEqual(['cd'.repeat(150)]);
+      const iroh = (await good(page, 'irohEvidence')) as {
+        opener: string;
+        device: string;
+        seedWiped: boolean;
+        targets: string[];
+        machine: string;
+      };
+      // The endpoint key is this device's ledger key; the dialed target is the
+      // ledger-admitted machine device, resolved from the verified ledger.
+      expect(iroh.opener).toBe(iroh.device);
+      expect(iroh.seedWiped).toBe(true);
+      expect(iroh.targets).toEqual([iroh.machine]);
       expect((await raw(page, 'rotateRemote')).ok).toBe(true);
       expect(await good(page, 'refresh')).toMatchObject({
         epoch: 1,

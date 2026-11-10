@@ -1,15 +1,16 @@
 # E2EE 基础模块边界
 
-Status: approved
+Status: draft
 Translation: current
 
-Approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
-批准：2026-11-10，owner 批准把 iroh 定为加密 RPC 首选通道（iroh → Streams RPC →
-持久派发，过渡期使用 n0 公共中继）；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)。
-上一版：[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
-（2026-11-10，[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准：2026-10-28，
-owner 授权总调度（会话 `b12f1597`），[PR #1894](https://github.com/LodyAI/Lody/pull/1894)，
-[版本 `e4351fda`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)。
+此前批准的版本：[`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.zh.md)
+（2026-11-10，owner；[批准记录](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#iroh-首选通道)）。
+更早：[`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+（[PR #2487](https://github.com/LodyAI/Lody/pull/2487)）；原批准 2026-10-28，
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894)。
+
+本次修订允许移动端 WebView 中的 portable host 经一个用途受限的原生插件交出一次设备
+种子（owner 决定，2026-11-10），因此回到 draft，等 owner 在 PR 中批准。
 
 [English](e2ee-foundations.md)
 
@@ -264,9 +265,11 @@ Owner 于 2026-10-28 将 iroh 移出 MVP，又于 **2026-11-10** 将其定为首
 已验证绑定、当前权限、新鲜度和执行 journal 检查。传输层认证从不构成授权。
 
 - **身份。** iroh 复用工作区账本设备的 Ed25519 身份，EndpointId 等于其签名公钥。
-  只有可信原生宿主（Electron 主进程、CLI，以及以后的移动端原生壳）把种子交给原生
-  传输层，Endpoint 关闭时由其擦除。不向 renderer 或 WebView 导出，不开放任意签名
-  接口。同一进程内每把设备密钥最多一个存活的 Endpoint。该密钥只签 TLS 1.3 握手和
+  只有可信宿主把种子交给原生传输层，Endpoint 关闭时由其擦除自己的副本：Electron
+  主进程和 CLI 在进程内交接；移动端由本来就持有种子的 WebView portable host 每个
+  会话经一个用途受限的原生插件交出一次，插件只提供打开、连接状态、发送和接收。这次
+  bridge 调用会把种子序列化成无法擦除的 JavaScript 字符串，直到被垃圾回收；bridge
+  日志保持关闭。不向桌面 renderer 导出，种子不回传给 JavaScript，不开放任意签名接口。同一进程内每把设备密钥最多一个存活的 Endpoint。该密钥只签 TLS 1.3 握手和
   中继握手，两者都有域分隔；不使用地址查找记录。
 - **不经控制面的可达性。** 拨号方用全部已配置中继寻址目标，首包会到达对端选作
   主中继的那一个；不向后端发布任何地址。打洞成功后走直连。在 Lody 自营中继上线
@@ -277,7 +280,8 @@ Owner 于 2026-10-28 将 iroh 移出 MVP，又于 **2026-11-10** 将其定为首
   加密 Streams RPC 和持久派发。建立 iroh 连接从不拖住可用的后续路径：没有存活连接
   时，请求先走 Streams RPC，同时准备连接。
 - **退役 Streams RPC。** 在所有支持的平台都迁移到 iroh 并验证兼容之前，保留加密
-  Streams RPC；下掉它需要再次修订本 Spec。浏览器版 iroh 不在范围内。
+  Streams RPC；下掉它需要再次修订本 Spec。浏览器版 iroh 不在范围内；移动端 WebView
+  只经其原生插件使用 iroh。
 
 实现理由与依据：[iroh 传输决定](../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.zh.md)。
 

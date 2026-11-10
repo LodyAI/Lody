@@ -64,6 +64,30 @@ afterEach(() => {
 });
 
 describe('opt-in browser curve capabilities', () => {
+  it('hands the transport opener a wiped copy of its seed and refuses after close', async () => {
+    const { getPublicKey } = await import('@noble/ed25519');
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const d = yield* device();
+          let handed: Uint8Array | undefined;
+          const endpointId = yield* d.withTransportSeed(async (seed) => {
+            handed = seed;
+            return Buffer.from(getPublicKey(seed)).toString('hex');
+          });
+          // The opener derives the device's own ledger signing key (the iroh EndpointId).
+          expect(endpointId).toBe(Buffer.from(d.publicKey.toBytes()).toString('hex'));
+          expect(handed?.every((byte) => byte === 0)).toBe(true);
+          // The device keeps its own secret and still signs.
+          yield* d.sign(new Uint8Array([1]));
+          yield* d.close;
+          const refused = yield* Effect.exit(d.withTransportSeed(async () => 'opened'));
+          expect(Exit.isFailure(refused)).toBe(true);
+        })
+      )
+    );
+  });
+
   it('owns independent imported private bytes, matches RFC Ed25519 and exposes no raw private handle', async () => {
     const signing = seed(),
       encryption = bytes(v.skR);

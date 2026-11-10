@@ -930,6 +930,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     scope: platform.scope,
     capabilities: Object.freeze({
       rpc: !!platform.rpc,
+      iroh: !!(platform.rpc && platform.iroh),
       contentToken: !!platform.contentToken,
       machineSharing: !!platform.machineSharing,
       members: !!platform.members,

@@ -1,17 +1,17 @@
 # E2EE foundation boundary
 
-Status: approved
+Status: draft
 Translation: current
 
-Approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.md)
-Approval: 2026-11-10, the owner approved iroh as the preferred encrypted RPC route
-(iroh → Streams RPC → durable dispatch, interim n0 public relays);
-[approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#iroh-preferred-route).
-Previous: [`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
-(2026-11-10, [PR #2487](https://github.com/LodyAI/Lody/pull/2487)); original approval
-2026-10-28 by the owner-authorized coordinator (session `b12f1597`),
-[PR #1894](https://github.com/LodyAI/Lody/pull/1894),
-[revision `e4351fda`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862).
+Previously approved revision: [`4d7b46d4`](https://github.com/LodyAI/Lody/blob/4d7b46d41165e062f8b0ed942a7e5c2fa088d4b9/specs/e2ee-foundations.md)
+(2026-11-10, owner; [approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#iroh-preferred-route)).
+Earlier: [`623d2ed7`](https://github.com/LodyAI/Lody/commit/623d2ed750adef6e87f20631faf45bee8ae69121)
+([PR #2487](https://github.com/LodyAI/Lody/pull/2487)); original approval 2026-10-28,
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894).
+
+This revision lets the mobile WebView portable host hand the device seed once over
+a purpose-limited native plugin (owner decision, 2026-11-10); it returns to draft
+until the owner approves it in its pull request.
 
 [中文](e2ee-foundations.zh.md)
 
@@ -364,10 +364,14 @@ verified-binding, current-permission, freshness and execution-journal checks.
 Transport authentication is never authority.
 
 - **Identity.** Iroh reuses the workspace ledger device's Ed25519 identity, so
-  EndpointId equals its signing public key. Only the trusted native host (Electron
-  main process, CLI, and later the native mobile shell) hands the seed to the native
-  transport, which wipes it when the endpoint closes. There is no renderer or WebView
-  export and no arbitrary-sign interface. One device key has at most one live
+  EndpointId equals its signing public key. Only the trusted host hands the seed to
+  the native transport, which wipes its copy when the endpoint closes: the Electron
+  main process and the CLI in-process, and on mobile the WebView portable host, which
+  already holds the seed, once per session over one purpose-limited native plugin
+  that exposes only open, connection status, send and receive. That bridge call
+  serializes the seed into a JavaScript string that cannot be wiped and lives until
+  garbage collection; bridge logging stays off. There is no desktop renderer export,
+  no seed returned to JavaScript and no arbitrary-sign interface. One device key has at most one live
   endpoint per process. The key signs only TLS 1.3 handshakes and relay handshakes,
   both domain-separated; address-lookup records are not used.
 - **Reachability without the control plane.** A dialer addresses the target with
@@ -384,7 +388,8 @@ Transport authentication is never authority.
   connection a request uses Streams RPC while the connection is prepared.
 - **Retiring Streams RPC.** Encrypted Streams RPC stays until every supported platform
   has migrated to iroh and compatibility is verified; removing it needs a further
-  revision of this Spec. Browser iroh is out of scope.
+  revision of this Spec. Browser iroh is out of scope; the mobile WebView reaches
+  iroh only through its native plugin.
 
 Implementation rationale and evidence:
 [iroh transport decision](../.agents/notes/proposed/architecture/2026-11-10-e2ee-iroh-transport.md).

@@ -78,6 +78,8 @@ import type { PersonalRecoverySetupInput } from './recovery-restore';
 import { fromHex, toHex } from './bytes';
 import { encodePersonalInvitation } from './pairing';
 import { decodeMemberKeyPackage } from './member';
+import { irohTargetDevice, makePersonalIrohRoute } from './iroh-route';
+import type { PersonalIrohEndpoint } from './platform';
 
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
@@ -445,6 +447,27 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           run(original.openAuthenticated(input), (opened) => opened.plaintext.fill(0)),
       });
     });
+    let irohEndpoint: PersonalIrohEndpoint | undefined;
+    const irohSerial = yield* Semaphore.make(1);
+    const irohWarming = new Set<string>();
+    // Opens once per session: the seed copy goes to the native opener only and is
+    // wiped when it settles. The endpoint closes with the session owner.
+    const irohOwner = () =>
+      irohSerial.withPermit(
+        Effect.gen(function* () {
+          yield* admitted();
+          if (irohEndpoint) return irohEndpoint;
+          const port = platform.iroh;
+          if (!port || !platform.rpc) return yield* fail('unsupported');
+          const opened = yield* device.withTransportSeed((seed) => port.open(seed));
+          irohEndpoint = opened;
+          yield* Scope.provide(
+            Effect.addFinalizer(() => Effect.promise(() => opened.close().catch(() => undefined))),
+            owner
+          );
+          return opened;
+        })
+      );
     let rpc: ReturnType<typeof makeE2eeRpcClient> | undefined;
     const rpcSerial = yield* Semaphore.make(1);
     const rpcOwner = () =>
@@ -1019,6 +1042,16 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       acceptFeatureResponse: (
         ...args: Parameters<ReturnType<typeof makeE2eeRpcClient>['acceptFeatureResponse']>
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.acceptFeatureResponse(...args))),
+      /** Resolves the machine's route from the admitted ledger; callers run the
+       * returned route's network waits outside every session lock. */
+      irohRoute: (machineId: string) =>
+        run(
+          Effect.gen(function* () {
+            const key = irohTargetDevice(yield* admitted(), machineId);
+            if (!key) return yield* fail('unsupported');
+            return makePersonalIrohRoute(yield* irohOwner(), key, irohWarming);
+          })
+        ),
     });
   });
   return yield* Scope.provide(work, owner).pipe(
