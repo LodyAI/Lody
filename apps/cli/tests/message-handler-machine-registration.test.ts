@@ -214,6 +214,7 @@ describe('MessageHandler machine registration', () => {
       expect(registeredMeta.protocolCapabilities).toEqual({
         multiRepoProject: 1,
         machineDiskStatus: 1,
+        managedDaemonUpdates: 1,
         machineIdentityRestore: 1,
         projectFileRoots: 1,
         projectRepositoryMembers: 1,
