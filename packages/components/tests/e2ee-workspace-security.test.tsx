@@ -25,10 +25,18 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/settings/account-setting', () => ({
-  AccountSettingsComponent: (props: { encryptedTeamManagement?: boolean }) => (
+  AccountSettingsComponent: (props: {
+    encryptedTeamManagement?: boolean;
+    onOpenEncryptionConsole?: () => void;
+  }) => (
     <p>
       ordinary settings
       {props.encryptedTeamManagement === false ? ' without team management' : ''}
+      {props.onOpenEncryptionConsole && (
+        <button type="button" onClick={props.onOpenEncryptionConsole}>
+          danger zone transfer
+        </button>
+      )}
     </p>
   ),
 }));
@@ -81,18 +89,23 @@ describe('recovery vault settings', () => {
 
 describe('recovery vault settings actions', () => {
   // A plan given as a function is asked again on every load, so it can fail and then recover.
-  const mount = async (plan: unknown) => {
+  const mount = async (
+    plan: unknown,
+    handlers: Record<string, (...args: unknown[]) => unknown> = {}
+  ) => {
     const answers: Record<string, unknown> = {
       'e2ee.recentAccountSecurityEvents': [],
       'e2ee.recoveryPasskeyAvailable': true,
     };
     vi.stubGlobal('ipc', {
-      invoke: async (channel: string) =>
+      invoke: async (channel: string, ...args: unknown[]) =>
         channel === 'e2ee.recoveryReplacementPlan'
           ? typeof plan === 'function'
             ? plan()
             : plan
-          : answers[channel],
+          : handlers[channel]
+            ? handlers[channel](...args)
+            : answers[channel],
       on: () => () => {},
     });
     const store = createStore();
@@ -241,6 +254,46 @@ describe('recovery vault settings actions', () => {
     });
     try {
       expect(view.text).toContain('e2ee.recovery.workspace.unknown');
+    } finally {
+      view.done();
+    }
+  });
+
+  it('sets up every uncovered workspace with one unlock and names those that did not finish', async () => {
+    const requests: unknown[][] = [];
+    const view = await mount(
+      {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [
+          workspace('a', { kind: 'notSet' }),
+          workspace('b', { kind: 'notSet' }),
+          workspace('c', { kind: 'verified', update: 2 }),
+        ],
+        uncovered: [],
+      },
+      {
+        'e2ee.setupRecoveryForWorkspaces': (...args) => {
+          requests.push(args);
+          return {
+            outcome: 'settled',
+            results: [
+              { workspaceId: 'a', outcome: 'Committed', recoverable: true },
+              { workspaceId: 'b', outcome: 'Failed', recoverable: false },
+            ],
+          };
+        },
+      }
+    );
+    try {
+      expect(view.text).toContain('e2ee.recovery.uncoveredTitle');
+      expect(view.primary).toEqual(['e2ee.recovery.setupAll']);
+      await view.click('e2ee.recovery.setupAll');
+      // One request for both uncovered workspaces; the covered one is left alone.
+      expect(requests).toEqual([[['a', 'b'], 'file']]);
+      expect(view.text).toContain('e2ee.recovery.setupAllPartial');
+      expect(view.text).not.toContain('e2ee.recovery.setupAllDone');
     } finally {
       view.done();
     }
@@ -667,6 +720,15 @@ describe('encrypted workspace settings', () => {
     // The console opens over Settings instead of leaving the workspace.
     expect(navigation.target).toBeNull();
     expect(document.body.querySelector('[data-testid="e2ee-workspace-console"]')).not.toBeNull();
+  });
+  it('sends encrypted ownership transfer from the danger zone to the console members page', async () => {
+    state = { ...state, rotationRequired: false };
+    await render();
+    await click('danger zone transfer');
+    expect(navigation.target).toBeNull();
+    expect(
+      document.body.querySelector('[data-console-tab="members"]')?.getAttribute('aria-current')
+    ).toBe('page');
   });
   it('turns a waiting link request into a review item that opens the console', async () => {
     state = { ...state, rotationRequired: false };

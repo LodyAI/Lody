@@ -538,6 +538,48 @@ export const setupWorkspaceRecovery = (
     }).pipe(Effect.provide(vaults(io)))
   )
 
+/** Set up recovery for several workspaces with one vault open, so a passkey or file
+ * unlocks once. Each workspace settles on its own: a failure is reported for that
+ * workspace and the rest continue. A vault that is not the current one fails the call. */
+export const setupWorkspacesRecovery = (
+  io: RecoveryVaultIo & {
+    readonly unlock: RecoveryUnlock
+    readonly replacement: Pick<RecoveryVaultReplacement, 'state'>
+    readonly targets: readonly RecoveryWorkspaceTarget[]
+  }
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const vault = yield* openVault(io.unlock)
+      const { current } = yield* io.replacement.state()
+      if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
+      const local = yield* RecoveryVaultLocalStore
+      return yield* Effect.forEach(io.targets, (target) =>
+        Effect.map(
+          Effect.exit(
+            Effect.flatMap(
+              target.owner({
+                vault,
+                local,
+                submitOriginal: submitFor(target),
+                fetchCurrentEnvelope: recoveryFetchEnvelope(target)
+              }),
+              (owner) => owner.setup()
+            )
+          ),
+          (exit) =>
+            Exit.isSuccess(exit)
+              ? {
+                  workspaceId: target.id,
+                  outcome: exit.value.outcome,
+                  recoverable: exit.value.status.recoverable
+                }
+              : { workspaceId: target.id, outcome: 'Failed' as const, recoverable: false }
+        )
+      )
+    }).pipe(Effect.provide(vaults(io)))
+  )
+
 /** Build a restore target from the service and this device's identity store. */
 export const recoveryRestoreTarget = <P extends RecoveryHistoryPage>(input: {
   readonly id: string

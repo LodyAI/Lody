@@ -1,7 +1,8 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
 import { useState } from 'react';
 import { Dialog } from '@lody/ui/dialog';
-import { RecoveryVaultSection } from './recovery-vault-section';
+import { RecoveryVaultSection, useWorkspaceRecoveryReady } from './recovery-vault-section';
+import { getIpcServices } from '@/lib/electron-ipc-client';
 import { E2eeAttentionRows, E2eeDevicesPanel, E2eeSecurityPanel } from './security-panel';
 import { useMemberJoinAttention, useSecurityState } from './security-state';
 import { AccountSettingsComponent } from '../account-setting';
@@ -24,11 +25,24 @@ const KNOWN_ERRORS = [
   'account_mismatch',
 ];
 
-function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState> }) {
+function SecuritySettings({
+  scope,
+  consoleTab,
+  setConsoleTab,
+}: {
+  scope: ReturnType<typeof useSecurityState>;
+  /** The console owns its own control reader; it exists only while open. */
+  consoleTab: E2eeConsoleTab | null;
+  setConsoleTab: (tab: E2eeConsoleTab | null) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  // The console owns its own control reader; it exists only while open.
-  const [consoleTab, setConsoleTab] = useState<E2eeConsoleTab | null>(null);
+  const recoveryReady = useWorkspaceRecoveryReady(
+    consoleTab === null ? undefined : scope.workspaceId,
+    scope.accountId
+  );
+  // The proxy is new on every call; keep one.
+  const [updater] = useState(() => getIpcServices()?.updater);
   const joinRequests = useMemberJoinAttention(
     scope.native,
     scope.workspaceId,
@@ -98,6 +112,8 @@ function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState
                 presentation="modal"
                 initialTab={consoleTab}
                 onClose={() => setConsoleTab(null)}
+                {...(recoveryReady === undefined ? {} : { recoveryReady })}
+                {...(updater ? { onCheckForUpdates: () => void updater.checkForUpdates() } : {})}
                 sections={
                   <>
                     {(panelState.state?.rotationRequired ||
@@ -144,12 +160,26 @@ function SecuritySettings({ scope }: { scope: ReturnType<typeof useSecurityState
 
 export function WorkspaceSettings() {
   const scope = useSecurityState();
+  const key = `${scope.accountId}:${scope.workspaceId}`;
+  // Keyed by account and workspace: an open console never carries over to another one.
+  const [open, setOpen] = useState<{ key: string; tab: E2eeConsoleTab } | null>(null);
+  const consoleTab = open?.key === key ? open.tab : null;
+  const setConsoleTab = (tab: E2eeConsoleTab | null) => setOpen(tab ? { key, tab } : null);
   // An encrypted workspace keeps the ordinary General page (name, icon, members,
   // danger zone). Encryption management lives in the console the entry card opens.
   return scope.encrypted ? (
     <>
-      <SecuritySettings key={`${scope.accountId}:${scope.workspaceId}`} scope={scope} />
-      <AccountSettingsComponent surface="workspace" encryptedTeamManagement={false} />
+      <SecuritySettings
+        key={key}
+        scope={scope}
+        consoleTab={consoleTab}
+        setConsoleTab={setConsoleTab}
+      />
+      <AccountSettingsComponent
+        surface="workspace"
+        encryptedTeamManagement={false}
+        onOpenEncryptionConsole={scope.workspaceId ? () => setConsoleTab('members') : undefined}
+      />
     </>
   ) : (
     <AccountSettingsComponent surface="workspace" />

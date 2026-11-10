@@ -61,6 +61,10 @@ export const VerifiedLocalGenesis: Story = {
     }),
   },
 };
+// Right after creation on the creating device: the getting-started list leads the overview.
+export const GettingStarted: Story = {
+  args: { ...VerifiedLocalGenesis.args, workspaceName: 'Cipher Lab', recoveryReady: false },
+};
 export const UnconfirmedGenesis: Story = {
   args: {
     history: appendLedgerHistory(null, page, {
@@ -185,6 +189,12 @@ export const OwnerMemberControls: Story = {
 
 export const CustodyLocked: Story = {
   args: { failure: { kind: 'custody-locked', code: 'locked' } },
+};
+export const IdentityLost: Story = {
+  args: { failure: { kind: 'local-identity', code: 'missing' } },
+};
+export const UpdateRequired: Story = {
+  args: { failure: { kind: 'upgrade', code: 'capability' }, onCheckForUpdates: fn() },
 };
 export const CustodyIndeterminate: Story = {
   args: { failure: { kind: 'custody-indeterminate', code: 'indeterminate' } },
