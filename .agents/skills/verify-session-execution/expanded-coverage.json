@@ -1,6 +1,6 @@
 {
   "system": "Session Inbox delivery, admission, submission and continuation scheduling",
-  "syncCommit": "4804795ef5aa31e8ff0fd67bcd58b16d0e18930a",
+  "syncCommit": "3e5bead3df94f96fca0de3b683f2e34a64b2a657",
   "sources": [
     {
       "path": "apps/cli/src/session/session-dispatch-logic.ts",
@@ -12,7 +12,7 @@
     },
     {
       "path": "apps/cli/src/session/session-execution-service.ts",
-      "sha256": "e37088f0e57fc380af4b197952814944fb5aff336ce9990240af5679f452856d"
+      "sha256": "25316b3f435f24c4fd377b9995beb3fbae1e440f5cc518d6ba581a7e6e91ea2f"
     },
     {
       "path": "apps/cli/src/session/turn-history-gate.ts",
@@ -20,7 +20,7 @@
     },
     {
       "path": "apps/cli/src/lib/message-handler.ts",
-      "sha256": "b946ad29bc58eae8e1dfcd24c9a2cbb5a53e85ca6ba050831bc0b3cc7b2fd346"
+      "sha256": "cc6ea5508497ca78aedafb24c52d3a45114b0de3e3b9d882de3e83baa66b1803"
     },
     {
       "path": "apps/cli/src/orchestration/inbox/sqlite.ts",
@@ -108,7 +108,8 @@
     "Execution host handoff occurs only after the prior physical host lease/process-exit barrier. This barrier is assumed, not produced by tests.",
     "Fair delivery profiles assume enabled arrival and local processing steps eventually run. Permanent partition profile intentionally disables both payload sources for input 1; it checks input 2 progress, not impossible input 1 execution.",
     "Receipt presence is not cryptographic authorization; execution still requires existing verified signer, principal, access and durable admission. These are outside this model and never bypassed.",
-    "Delivery and output are separate slices of the same system, not a proved full composition/refinement of the watcher, SQL, provider and frontend."
+    "Delivery and output are separate slices of the same system, not a proved full composition/refinement of the watcher, SQL, provider and frontend.",
+    "These slices describe an active workspace; daemon identity-restoration sealing/restart and cache GC remain outside the modeled lifecycle. The merged production changes retain the existing delivery selection, receipts and Stop/start fences."
   ],
   "limits": "Finite slices, not a proof of full implementation composition. No actual Loro/Roost replication/reconnect, E2EE/revocation, host-lease producer, real provider, OS disk exhaustion or UI/device acceptance. Declarations and recovery/RPC-selection methods are compiled unchanged with actual policy helpers and synthetic document ports. The complete assistant-entry writer is also compiled unchanged; its tested existing-author branch uses a synthetic SQLite history port and a diagnostic span stub. This is a cancellation-fence witness, not full HistoryWriter acceptance. Host epochs assume an already-safe handoff. Per-ID receipts grow with failed identities; only the serialized host appends them. The default checks current finite temporal properties; source-only and safety-only cannot replace that result. Full workspace checks require dependencies absent from this nested checkout.",
   "properties": {

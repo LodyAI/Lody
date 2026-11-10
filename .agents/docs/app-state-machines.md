@@ -79,7 +79,7 @@ stateDiagram-v2
 
 [投递失败确认](../notes/implemented/bug-fix/2026-11-10-missing-history-acknowledgements.md) 使用 `missingHistoryUserMsgIds`，同时读取旧标量。只有同一会话串行的主机 watcher 增加记录，生产者只发布新激活，不再清除旧失败。正文/RPC 选择、待执行判断、持久接纳、Roost 激活和界面使用同一个精确 ID 判断。两次失败后，迟到的旧消息仍被排除，新 ID 仍可使用。旧超时也不能误判恢复期间刚到的新激活。
 
-[回复等待器](../../apps/cli/src/session/turn-history-gate.ts) 在写入前回调等待期间保留原始截止时间。到期立即放行等待者，但让存活中的回调继续补齐作者和模型。只有结束这一轮时才给回调发送取消信号，即使超时已放行也要取消。[MessageHandler](../../apps/cli/src/lib/message-handler.ts) 在异步读取后、实际写入前检查该信号，防止迟到回调重新打开已结束的回复条目。已经发出的写入不被当作已取消；结果继续被观察。下面也是 pstack 生成的当前图：
+[回复等待器](../../apps/cli/src/session/turn-history-gate.ts) 在写入前回调等待期间保留原始截止时间。到期立即放行等待者，但让存活中的回调继续补齐作者和模型。只有结束这一轮时才给回调发送取消信号，即使超时已放行也要取消。[MessageHandler](../../apps/cli/src/lib/message-handler.ts) 在异步读取后、实际写入前检查该信号，防止迟到回调重新打开已结束的回复条目。finalization 在写入结束标记之前就取消本次捕获的 gate，不等到清理轮次状态，避免结束后的迟到回调重新打开条目。已经发出的写入不被当作已取消；结果继续被观察。下面也是 pstack 生成的当前图：
 
 ```mermaid
 ---
