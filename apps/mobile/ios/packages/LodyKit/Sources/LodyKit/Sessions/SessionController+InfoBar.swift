@@ -14,6 +14,8 @@ extension SessionController {
       githubScope = state.key
       githubUpdates = SessionPullRequestUpdates()
       githubOperation = nil
+      githubSettle?.cancel()
+      githubSettle = nil
     }
     let session = githubUpdates.apply(session)
     let project = state.catalog.projects.first { $0.id == session.projectId }
@@ -177,12 +179,31 @@ extension SessionController {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         if operation == "merge" {
           LodyToastOverlay.shared.show(message: String(localized: "bar.merge.done", bundle: .lody), kind: .neutral)
+        } else {
+          self.settleMergeState(pr, workspaceId: state.workspaceId, scope: state.key)
         }
       } catch {
         guard let self, self.source.state.key == state.key else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)
         LodyToastOverlay.shared.show(message: Self.writeError(error, operation: operation), kind: .error)
       }
+    }
+  }
+
+  /// After Ready for review, read GitHub's merge state directly so Merge appears as soon as
+  /// GitHub has computed it, instead of when the computer's PR poller next refreshes the catalog.
+  private func settleMergeState(_ pr: SessionPullRequest, workspaceId: String, scope: String) {
+    githubSettle?.cancel()
+    let payload = Self.json(["workspaceId": workspaceId, "repository": pr.repository, "number": pr.number, "operation": "mergeState"])
+    githubSettle = Task { @MainActor [weak self] in
+      let merge = await PullRequestMergeSettle.run(read: { [weak self] in
+        guard let self, self.source.state.key == scope else { throw CancellationError() }
+        let raw = try await GitHubPullRequests.run(payload)
+        return (try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])?["merge"] as? String
+      }, sleep: { try await Task.sleep(for: PullRequestMergeSettle.interval) })
+      guard let self, let merge, !Task.isCancelled, self.source.state.key == scope else { return }
+      self.githubUpdates.observeMerge(pr, merge: merge)
+      self.renderComposer()
     }
   }
 

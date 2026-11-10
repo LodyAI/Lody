@@ -51,14 +51,24 @@ internal class GitHubPullRequestWrites(private val http: GitHubHttp = GitHubHttp
         if ((result.optJSONArray("errors")?.length() ?: 0) > 0) throw GitHubWriteFailure("request_failed")
     }
 
-    private suspend fun grant(credential: Credential, workspace: String, repo: String, number: Int): String {
+    /** GitHub's merge state for an open PR (`c`, `b`, `d`, `h`, `u`), or null while it is computed. A read grant. */
+    suspend fun mergeState(credential: Credential, workspace: String, repo: String, number: Int): String? {
+        val token = grant(credential, workspace, repo, number, operation = "read")
+        val pr = read("https://api.github.com/repos/$repo/pulls/$number", token)
+        if (pr.optString("state") != "open" || pr.optBoolean("merged")) return null
+        val mergeable = if (pr.has("mergeable") && !pr.isNull("mergeable")) pr.optBoolean("mergeable") else null
+        val state = if (pr.isNull("mergeable_state")) null else pr.optString("mergeable_state")
+        return PullRequestMergeSettle.code(state, mergeable, pr.optBoolean("draft"))
+    }
+
+    private suspend fun grant(credential: Credential, workspace: String, repo: String, number: Int, operation: String = "write"): String {
         if (!repo.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) || repo.substringAfter('/') in listOf(".", "..") || number <= 0) {
             throw GitHubWriteFailure("invalid_request")
         }
         val auth = JSONObject(expect(http.request("GET", "${app.lody.android.BackendEnvironment.site}/api/auth/convex/token", credential.token, null), null))
         val broker = JSONObject(expect(http.request("POST", "${app.lody.android.BackendEnvironment.convex}/api/action", auth.getString("token"),
             JSONObject().put("path", "github:getOperationAccessTokenByRepoNameForClient").put("format", "convex_encoded_json")
-                .put("args", JSONArray().put(JSONObject().put("workspaceId", workspace).put("repoFullName", repo).put("operation", "write")))), null))
+                .put("args", JSONArray().put(JSONObject().put("workspaceId", workspace).put("repoFullName", repo).put("operation", operation)))), null))
         val value = broker.optJSONObject("value")
         if (broker.optString("status") != "success" || value?.optBoolean("success") != true) throw GitHubWriteFailure("authorization_required")
         return value.optString("token").ifEmpty { throw GitHubWriteFailure("authorization_required") }

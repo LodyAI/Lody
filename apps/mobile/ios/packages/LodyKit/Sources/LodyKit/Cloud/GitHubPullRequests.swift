@@ -10,10 +10,10 @@ import Foundation
           repo.range(of: #"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil,
           ![".", ".."].contains(repo.components(separatedBy: "/").last ?? ""),
           let number = args["number"] as? Int, number > 0,
-          let operation = args["operation"] as? String, ["read", "comment", "merge", "ready"].contains(operation)
+          let operation = args["operation"] as? String, ["read", "mergeState", "comment", "merge", "ready"].contains(operation)
     else { throw failure("invalid_request") }
     guard let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure("unauthorized") }
-    let writing = operation != "read"
+    let writing = !["read", "mergeState"].contains(operation)
     let body = (args["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     if operation == "comment" && (body.isEmpty || body.count > 65536) { throw failure("invalid_comment") }
     let auth = try await request("\(BackendEnvironment.site)/api/auth/convex/token", token: credential)
@@ -30,6 +30,15 @@ import Foundation
     let base = "https://api.github.com/repos/\(repo)"
     if operation == "merge" || operation == "ready" {
       return try await transition(operation, base: base, number: number, method: args["method"] as? String, token: token, credential: credential)
+    }
+    if operation == "mergeState" {
+      let pr = try await request("\(base)/pulls/\(number)", token: token)
+      try checkIdentity(credential)
+      let open = pr["state"] as? String == "open" && pr["merged"] as? Bool != true
+      let merge = open ? PullRequestMergeSettle.code(
+        state: pr["mergeable_state"] as? String, mergeable: pr["mergeable"] as? Bool, draft: pr["draft"] as? Bool == true
+      ) : nil
+      return String(decoding: try JSONSerialization.data(withJSONObject: ["merge": merge.map { $0 as Any } ?? NSNull()]), as: UTF8.self)
     }
     if writing {
       // A transport failure may follow a successful write. Never replay it.
