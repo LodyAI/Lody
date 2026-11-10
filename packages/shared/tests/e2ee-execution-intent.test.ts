@@ -54,7 +54,12 @@ describe('encrypted execution intent', () => {
         scheduleRun: { scheduleId: 's', turnId: 't', title: 'x' },
       })
     ).not.toBe(digest);
-    expect(turnExecutionDigest({ inputConfig: { prompt: '' } })).toBeUndefined();
+    expect(turnExecutionDigest({ inputConfig: undefined })).toBeUndefined();
+    expect(turnExecutionDigest({ inputConfig: 'text' })).toBeUndefined();
+    // An input that leaves its agent to the Session still signs exactly what it carries.
+    const partial = turnExecutionDigest({ inputConfig: { prompt: 'partial', resume: 'any' } });
+    expect(partial).toBe(turnExecutionDigest({ inputConfig: { prompt: 'partial' } }));
+    expect(partial).not.toBe(turnExecutionDigest({ inputConfig: { prompt: 'other' } }));
   });
 
   it('encodes a strict 98-byte record and survives a real document write', () => {

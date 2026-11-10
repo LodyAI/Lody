@@ -2,6 +2,10 @@ import { sha256Hex } from './incremental-sha256';
 import { scheduleDefinitionFingerprint } from './schedule-registry';
 import type { ScheduleDocument } from './schedule-types';
 import { queuedInputEvidence } from './session-input';
+import {
+  normalizeLegacyAcpSessionConfig,
+  SessionHistoryInputConfigSchema,
+} from './message-schemas';
 
 /**
  * Encrypted execution intent (owner decision 2026-11-10). Every executable input
@@ -131,11 +135,19 @@ export function turnExecutionContent(input: {
   readonly derivedFrom?: unknown;
   readonly scheduleRun?: unknown;
 }): string | undefined {
-  const evidence = queuedInputEvidence(input.inputConfig);
-  if (evidence === undefined) return undefined;
+  // Exactly what the history writer stores: its legacy normalization, then its schema.
+  // Both are idempotent, so a signer and a verifier reading the stored row agree.
+  const normalized = normalizeLegacyAcpSessionConfig(input.inputConfig);
+  const parsed = SessionHistoryInputConfigSchema.safeParse(normalized);
+  const config: unknown = parsed.success ? parsed.data : normalized;
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return undefined;
+  // A complete composer input uses its normalized projection; an input that leaves its
+  // agent to the Session (a machine-prepared run) signs its own fields as written.
+  const evidence = queuedInputEvidence(config);
+  const { resume: _resume, ...chosen } = config as Record<string, unknown>;
   return canonicalIntentJson({
     v: 1,
-    input: JSON.parse(evidence) as unknown,
+    input: evidence === undefined ? chosen : (JSON.parse(evidence) as unknown),
     derivedFrom: input.derivedFrom,
     scheduleRun: input.scheduleRun,
   });
