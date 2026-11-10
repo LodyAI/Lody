@@ -202,7 +202,8 @@ own rendered row is a placeholder. See the
 
 ## `useWorkspaceBadge`
 
-`workspaceBadgeAtom` derives an absolute count from complete active-session metadata
+`createWorkspaceBadgeAtom` binds the workspace-local account and owned machine IDs
+from the visible access index, then derives an absolute count from active-session metadata
 and fresh presence, sharing the sidebar's parent/child activity summary. The elected
 workspace window publishes changes immediately, reasserts the snapshot every 30 seconds,
 and reconciles on focus or visibility restoration. The interval reads the current atom

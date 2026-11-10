@@ -441,7 +441,11 @@ import { resolveSessionLiveStatus } from './session-live-status';
 import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
 import { truncateToolTitleForHistory } from '@lody/shared';
 import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
-import type { MemoryPressureEvictionResult } from './session-gc-manager';
+import {
+  combineGCSessionSources,
+  type MemoryPressureEvictionResult,
+  type SessionGCDeps,
+} from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import { precheckLocalProjectHistoryRequest } from '@/lib/local-project-history-precheck';
@@ -699,6 +703,8 @@ export interface MessageHandlerConfig {
    * process boundary owns the actual exit/restart behavior.
    */
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   /** The fleet's access verdict for this workspace; cloud daemon commands resolve from it. */
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
@@ -793,6 +799,8 @@ export class MessageHandler {
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
+  private readonly isMachineIdentityRestoreIdle?: () => boolean;
+  private readonly sealMachineIdentityRestore?: () => boolean;
   private readonly store = new SessionTransientStore();
   private readonly historyOwnerAbort = new AbortController();
   private readonly historyWatchAbort = new AbortController();
@@ -3212,6 +3220,8 @@ export class MessageHandler {
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
+    this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
+    this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
     this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
       launchMode: 'foreground',
@@ -3728,8 +3738,9 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             requestId,
           }),
-        restartMachine: async ({ requesterUserId, requestToken, requestId }) =>
+        restartMachine: async ({ requesterUserId, requestToken, requestId, restoreMachineId }) =>
           await this.prepareMachineRestart({
+            restoreMachineId,
             requesterUserId,
             requestToken,
             requestId,
@@ -9977,6 +9988,7 @@ export class MessageHandler {
   }
 
   private async prepareMachineRestart(args: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -10003,11 +10015,26 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId && args.requesterUserId !== this.userId) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the signed-in daemon owner can restore its machine identity.'
+      );
+    }
+    if (args.restoreMachineId && !this.isMachineIdentityRestoreIdle?.()) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'error',
+        'Stop all tasks on this daemon before restoring its identity.'
+      );
+    }
     const verified = await verifyMachineLifecycleRequest({
       token: this.token,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       action: 'restart',
+      restoreMachineId: args.restoreMachineId,
       requesterUserId: args.requesterUserId,
       requestId: args.requestId,
       requestToken: args.requestToken,
@@ -10021,6 +10048,41 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId) {
+      if (!this.isMachineIdentityRestoreIdle?.()) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'Stop all tasks on this daemon before restoring its identity.'
+        );
+      }
+      const { prepareMachineIdentityRestore, cancelPreparedMachineIdentityRestore } =
+        await import('./machine-identity-restore');
+      const prepared = await prepareMachineIdentityRestore({
+        workspaceId: this.workspaceId,
+        sourceMachineId: this.machineId,
+        targetMachineId: args.restoreMachineId,
+        requestId: args.requestId,
+        requesterUserId: args.requesterUserId,
+      });
+      if (!prepared) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'already_pending',
+          'This identity restore is already pending.'
+        );
+      }
+      // Recheck after disk I/O and synchronously close every workspace's intake.
+      // No task can enter between this acceptance and the bounded restart ACK.
+      if (!this.sealMachineIdentityRestore?.()) {
+        await cancelPreparedMachineIdentityRestore(args.requestId);
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'The daemon started another task. Stop all tasks and retry recovery.'
+        );
+      }
+    }
     this.pendingProcessLifecycleAction = {
       action: 'restart',
       exitCode: EXIT_CODE_REMOTE_RESTART,
@@ -10142,9 +10204,10 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
     const response = await this.prepareMachineRestart(message);
-    dispatchContext.send(response);
-    if (response.accepted) {
-      this.triggerPendingProcessLifecycleAction(response.requestId);
+    try {
+      dispatchContext.send(response);
+    } finally {
+      if (response.accepted) this.triggerPendingProcessLifecycleAction(response.requestId);
     }
   }
 
@@ -11603,9 +11666,18 @@ export class MessageHandler {
     };
   }
 
-  /**
-   * Flush pending ACP updates and tear down session resources.
-   */
+  /** Stop intake synchronously after the daemon-wide idle check wins. */
+  stopNewIdentityRestoreDispatch(): void {
+    this.executionService.stopNewIdentityRestoreExecutions();
+    this.sessionDispatchWatcher.stop();
+    void this.operationCoordinator
+      .stop()
+      .catch((cause) =>
+        this.logger.warn('Identity restore retains Inbox shutdown for cleanup', cause)
+      );
+  }
+
+  /** Flush pending ACP updates and tear down session resources. */
   async prepareForShutdown(): Promise<void> {
     this.acpInteractionStopping = true;
     await (await this.acpInteractionOwner)?.close();
@@ -11956,7 +12028,10 @@ export class MessageHandler {
    * ACP process would discard that resumable session state.
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
-    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    // Peek first: GC asks this of cached docs, and an open would count as an access.
+    const sessionDoc =
+      this.workspaceDocument.peekSessionDoc(sessionId) ??
+      (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
@@ -12015,6 +12090,22 @@ export class MessageHandler {
    */
   getTrackedSessionIds(): SessionId[] {
     return this.store.sessionIds();
+  }
+
+  /** GC candidates and idle clocks: tracked sessions plus every cached Session doc. */
+  getGCSessionSources(): Pick<SessionGCDeps, 'getSessionIds' | 'getSessionLastActivity'> {
+    return combineGCSessionSources(
+      {
+        sessionIds: () => this.store.sessionIds(),
+        has: (sessionId) => this.store.has(sessionId),
+        lastActivityMs: (sessionId) => this.getLastActivity(sessionId),
+      },
+      {
+        sessionIds: () => this.workspaceDocument.cachedSessionDocIds(),
+        lastActivityMs: (sessionId) =>
+          this.workspaceDocument.cachedSessionDocLastAccessMs(sessionId),
+      }
+    );
   }
 
   /** Host-local admission snapshot; durable pending input is checked by its caller. */
@@ -12086,6 +12177,10 @@ export class MessageHandler {
     return this.sessionActivePresence.activeSessionCount();
   }
 
+  isIdentityRestoreExecutionIdle(): boolean {
+    return this.getActiveTurnCount() === 0 && this.executionService.isMachineIdentityRestoreIdle();
+  }
+
   private logCodeCollabDebug(message: string): void {
     this.logger.debug(message);
   }
@@ -12096,6 +12191,8 @@ export class MessageHandler {
    */
   async cleanSessionForGC(sessionId: SessionId): Promise<void> {
     this.logger.debug(`[GC] Cleaning session ${sessionId}`);
+    // Read before cleanup: later steps may create tracking state lazily.
+    const tracked = this.store.has(sessionId);
 
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
@@ -12112,8 +12209,11 @@ export class MessageHandler {
       await this.sessionManager.terminateSession(sessionId, true);
     }
 
-    // 3. Clean Loro documents (main memory savings)
-    await this.workspaceDocument.cleanSessionDoc(sessionId);
+    // 3. Clean Loro documents (main memory savings). A doc that is only cached
+    //    never ran a turn here, so its synced status is not this machine's to reset.
+    await this.workspaceDocument.cleanSessionDoc(sessionId, {
+      preserveStatus: !tracked,
+    });
 
     // 4. Drop transient tracking last — only after all cleanup succeeded,
     //    so getTrackedSessionIds() can still see it for retry if steps above throw.

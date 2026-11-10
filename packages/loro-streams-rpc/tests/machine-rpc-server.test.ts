@@ -1846,83 +1846,90 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('handles machine restart RPC requests and fires lifecycle hook after append', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    const appendedAtHook: unknown[] = [];
-    const onMachineLifecycleResponseSettled = vi.fn(() => {
-      appendedAtHook.push(...fake.appended.map((entry) => entry.value));
-    });
-    const restartMachine = vi.fn(async () => ({
-      type: 'machine/restart_response' as const,
-      machineId,
-      requestId: 'restart-1',
-      success: true,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
+  it.each([undefined, 'retired-machine'])(
+    'handles restart or identity restore %s before firing the lifecycle hook',
+    async (restoreMachineId) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      const appendedAtHook: unknown[] = [];
+      let resolveSettled!: () => void;
+      const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve;
+      });
+      let restoredIdentity: string | undefined;
+      const onMachineLifecycleResponseSettled = () => {
+        appendedAtHook.push(...fake.appended.map((entry) => entry.value));
+        resolveSettled();
+      };
+      const restartMachine = async (request: { restoreMachineId?: string }) => {
+        restoredIdentity = request.restoreMachineId;
+        return {
+          type: 'machine/restart_response' as const,
+          machineId,
+          requestId: 'restart-1',
+          success: true,
+          accepted: true,
+          disposition: 'accepted' as const,
+        };
+      };
 
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      restartMachine,
-      onMachineLifecycleResponseSettled,
-    });
+      const server = new LoroStreamsMachineRpcServer({
+        now: () => 1000,
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        restartMachine,
+        onMachineLifecycleResponseSettled,
+      });
 
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'req-1',
+            method: 'machine/restart',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: 1000,
+            expiresAt: 6000,
+            params: {
+              ...(restoreMachineId ? { restoreMachineId } : {}),
+              requesterUserId: 'user-1',
+              requestToken: 'signed-token',
+              requestId: 'restart-1',
+            },
+          },
+        ],
+        nextOffset: '1',
+        cursor: 'cursor-1',
+        upToDate: true,
+      });
+
+      await server.start();
+
+      await settled;
+      expect(restoredIdentity).toBe(restoreMachineId);
+      expect(appendedAtHook).toEqual([
+        expect.objectContaining({
           id: 'req-1',
           method: 'machine/restart',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1',
-          replyTo: 'workspace-1:rpc:res:machine-1',
-          sentAt: Date.now(),
-          expiresAt: Date.now() + 5000,
-          params: {
-            requesterUserId: 'user-1',
-            requestToken: 'signed-token',
+          result: expect.objectContaining({
+            type: 'machine/restart_response',
             requestId: 'restart-1',
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
-    });
-
-    await server.start();
-
-    await vi.waitFor(() => {
-      expect(onMachineLifecycleResponseSettled).toHaveBeenCalledTimes(1);
-    });
-
-    expect(restartMachine).toHaveBeenCalledWith({
-      requesterUserId: 'user-1',
-      requestToken: 'signed-token',
-      requestId: 'restart-1',
-    });
-    expect(appendedAtHook).toEqual([
-      expect.objectContaining({
-        id: 'req-1',
-        method: 'machine/restart',
-        result: expect.objectContaining({
-          type: 'machine/restart_response',
-          requestId: 'restart-1',
-          accepted: true,
+            accepted: true,
+          }),
         }),
-      }),
-    ]);
+      ]);
 
-    server.stop();
-  });
+      server.stop();
+    }
+  );
 
   describe.each(['restart', 'upgrade'] as const)('machine %s ACK delivery', (action) => {
     it.each([
@@ -3294,7 +3301,10 @@ describe('LoroStreamsMachineRpcServer', () => {
       const machineId = 'machine-1' as MachineId;
       const fake = createFakeStreamClient();
       const authenticateMachineAcp = vi.fn(
-        async ({ onProgress, methodId: selectedMethodId }): Promise<MachineAcpAuthenticateResponse> => {
+        async ({
+          onProgress,
+          methodId: selectedMethodId,
+        }): Promise<MachineAcpAuthenticateResponse> => {
           expect(selectedMethodId).toBe(methodId);
           onProgress?.({
             type: 'machine/acp-authentication-progress',

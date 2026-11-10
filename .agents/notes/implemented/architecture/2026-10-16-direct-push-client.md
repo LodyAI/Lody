@@ -48,9 +48,11 @@ A browser requiring a fresh user gesture can require explicit re-enablement.
 The restored SDK preserves third-party identity and script loading as a deliberate
 rollback option. A separate shared backend client would violate the platform boundary,
 so provider selection still arrives through the authenticated route's injected port.
-OneSignal login uses `lody-push-v2:<userId>`: only devices that reopen the restored
-client join this namespace; identities abandoned by direct-only clients cannot be
-reactivated by a provider switch. The host must use the same namespace for delivery.
+OneSignal login and hosted delivery use the original verified `userId` unchanged.
+A version prefix disconnects existing subscriptions from their delivery target, so
+clients and senders must not transform the account identity. Existing subscriptions
+remain addressable by that account ID; restoring delivery does not require a new
+identity namespace.
 Opt-out and logout revoke both providers. An absent Web preference preserves an
 existing OneSignal subscription, while new Web subscriptions require explicit opt-in.
 
@@ -65,10 +67,10 @@ The independent Swift and Kotlin clients under `apps/mobile` do not consume the
 shared Web/Capacitor facade. Their process-owned notification coordinators read
 `pushSubscriptions:configuration` and select OneSignal unless the successful
 response explicitly enables direct delivery. Query failures do not authorize a
-provider change. Native OneSignal logins map raw account IDs to
-`lody-push-v2:<userId>`; payload recipient checks and navigation retain raw IDs.
-Mixing these namespaces silently leaves a valid SDK subscription unreachable by
-the sender. Old provider identities are not merged into the new namespace.
+provider change. Native OneSignal logins use the original verified account ID
+directly; payload recipient checks and navigation require that same ID. No identity
+wrapper or versioned namespace is involved. Foreground display and click routing
+still reject missing or mismatched recipients, including after account changes.
 
 Direct registration uses a stable installation UUID and the authenticated app
 session. iOS submits its actual Bundle ID, while Android supplies a token from

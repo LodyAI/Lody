@@ -1,4 +1,6 @@
 import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
+import type { MachineVisibilityAccess } from './visible-machine-index';
+import type { LocalProjectVisibilityAccess } from './visible-local-project-index';
 import { getLocalProjectVisibilityKey } from './visible-local-project-index';
 
 export type SessionListEntry = SessionMeta & { id: SessionId };
@@ -20,6 +22,7 @@ type SessionVisibilityOptions = {
   localProjectVisibilityLoading?: boolean;
   currentUserId?: string | null;
   workspaceHistoryReadable?: boolean;
+  ownedMachineIds?: ReadonlySet<MachineId>;
 };
 
 export function isLocalProjectSession(
@@ -67,12 +70,18 @@ export function isSessionVisibleToUser(
   session: SessionMachineRecord,
   visibleMachineIds: ReadonlySet<MachineId>,
   visibleLocalProjectKeys: ReadonlySet<string>,
-  currentUserId?: string | null
+  currentUserId?: string | null,
+  ownedMachineIds?: ReadonlySet<MachineId>
 ): boolean {
   if (typeof session.machineId !== 'string') {
     return false;
   }
-  if (currentUserId && session.userId === currentUserId) {
+  // Legacy metadata has no immutable creator: retain the owner fallback for
+  // authors whose machine access was revoked. Owner transfer separately requires access.
+  if (
+    currentUserId &&
+    (session.userId === currentUserId || ownedMachineIds?.has(session.machineId as MachineId))
+  ) {
     return true;
   }
   if (isLocalProjectSession(session)) {
@@ -98,7 +107,8 @@ export function resolveSessionVisibilityState(
       session,
       visibleMachineIds,
       visibleLocalProjectKeys,
-      options.currentUserId
+      options.currentUserId,
+      options.ownedMachineIds
     )
   ) {
     return 'visible';
@@ -123,7 +133,8 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
   visibleLocalProjectKeys: ReadonlySet<string>,
   machineVisibilityLoading = false,
   currentUserId?: string | null,
-  workspaceHistoryReadable = false
+  workspaceHistoryReadable = false,
+  ownedMachineIds?: ReadonlySet<MachineId>
 ): T[] {
   if (sessions.length === 0) return [];
   if (
@@ -140,6 +151,39 @@ export function filterSessionsByVisibility<T extends SessionMachineRecord>(
         machineVisibilityLoading,
         currentUserId,
         workspaceHistoryReadable,
+        ownedMachineIds,
       }) === 'visible'
   );
+}
+
+/** My scope is responsibility plus the machines I own, independent of sharing. */
+export function isSessionInMyScope(
+  session: SessionMachineRecord,
+  currentUserId: string | null | undefined,
+  ownedMachineIds: ReadonlySet<MachineId>
+): boolean {
+  return (
+    !!currentUserId &&
+    (session.userId === currentUserId || ownedMachineIds.has(session.machineId as MachineId))
+  );
+}
+
+/** Assignment may use existing access only; it never changes sharing. */
+export function getSessionOwnerAccessReason(
+  session: SessionMachineRecord,
+  candidateUserId: string,
+  machines: ReadonlyMap<MachineId, MachineVisibilityAccess>,
+  projects: ReadonlyMap<string, LocalProjectVisibilityAccess>
+): 'machineUnavailable' | 'machineNotShared' | 'projectNotShared' | null {
+  const machine = machines.get(session.machineId as MachineId);
+  if (!machine) return 'machineUnavailable';
+  if (machine.ownerUserId === candidateUserId) return null;
+  if (!machine.sharedWithTeam) return 'machineNotShared';
+  if (isLocalProjectSession(session)) {
+    const project = projects.get(
+      getLocalProjectVisibilityKey(session.machineId!, session.project.localProjectId)
+    );
+    if (!project?.sharedWithTeam) return 'projectNotShared';
+  }
+  return null;
 }

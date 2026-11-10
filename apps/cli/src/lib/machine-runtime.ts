@@ -22,6 +22,7 @@ import { Logger } from '@/utils/logger';
 import { traceAsync } from '@/utils/trace-span';
 import { CliResourceMonitor } from '@/monitor/cli-resource-monitor';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
+import { readLoroWasmHeapBytes } from '@/lib/loro/wasm-runtime-health';
 
 export interface MachineRuntimeOptions {
   sessionManagerFactory: () => SessionManager;
@@ -195,6 +196,10 @@ export class MachineRuntime {
     return this.handler?.getActiveTurnCount() ?? 0;
   }
 
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.handler?.isIdentityRestoreExecutionIdle() ?? false;
+  }
+
   isRemoteBridgeAttached(): boolean {
     return this.remoteBridgeAttached;
   }
@@ -272,6 +277,11 @@ export class MachineRuntime {
       await handler.cancelActiveTurnsForRemoteRevocation();
       handler.recheckPendingSessionAccess('remote-access-revoked');
     });
+  }
+
+  stopNewIdentityRestoreDispatch(): void {
+    this.messageProcessor.stop();
+    this.handler?.stopNewIdentityRestoreDispatch();
   }
 
   async prepareForShutdown(): Promise<void> {
@@ -411,7 +421,7 @@ export class MachineRuntime {
     const gcConfig = loadGCConfig();
 
     this.gcManager = new SessionGCManager(gcConfig, {
-      getSessionLastActivity: (sessionId) => handler.getLastActivity(sessionId),
+      ...handler.getGCSessionSources(),
       getNativeWork: (sessionId) => handler.getNativeWork(sessionId),
       hasActiveTurn: (sessionId) => handler.hasActiveTurn(sessionId),
       hasActiveGoal: async (sessionId) => await handler.hasActiveGoal(sessionId),
@@ -419,8 +429,8 @@ export class MachineRuntime {
       hasPendingUserWork: async (sessionId) => await handler.hasPendingUserWork(sessionId),
       isArchiveInFlight: (sessionId) => handler.isArchiveInFlight(sessionId),
       cleanSession: (sessionId) => handler.cleanSessionForGC(sessionId),
-      getSessionIds: () => handler.getTrackedSessionIds(),
       memoryPressure: this.options.memoryPressure,
+      readWasmHeapBytes: readLoroWasmHeapBytes,
       logger: this.options.logger,
     });
 

@@ -2568,6 +2568,7 @@ describe('Production Roost history semantics', () => {
     };
     const ports = {
       workspaceDocument: {
+        peekSessionDoc: () => undefined,
         getOrCreateSessionDoc: async () => ({ getMetaState: async () => ({ latestGoal: legacy }) }),
       },
       getSessionBackend: async () => fixture.backend,

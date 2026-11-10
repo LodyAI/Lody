@@ -36,7 +36,7 @@ The native app supports OneSignal (default) and direct FCM. Only the backend
 FCM; confirmed `false` selects OneSignal. A failed query or malformed response
 reports `unavailable` and preserves the last provider selection; it never silently
 falls back. Build properties never override that choice. The OneSignal external
-identity is `lody-push-v2:<verified user ID>`.
+identity is the original verified user ID, unchanged.
 
 OneSignal uses public app ID `e383bf31-7c8e-4641-b3f6-3486e77b9a82`; override with
 Gradle property `LODY_ONESIGNAL_APP_ID` for a separately provisioned app. Its

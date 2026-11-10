@@ -390,7 +390,7 @@ const oneSignalClient: typeof client = {
         (await getOneSignalPushSubscriptionOptedIn(sdk))
       )
         localStorage.setItem(enabledKey, 'true');
-      await sdk.login(`lody-push-v2:${id}`);
+      await sdk.login(id);
       if (epoch !== generation) return;
       await sdk.User.setLanguage(language === 'zh' ? 'zh' : 'en');
       if (!enabled()) await sdk.User.PushSubscription.optOut();

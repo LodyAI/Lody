@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
-import { filterSessionsByVisibility, isSessionVisibleToUser } from '../src/lib/session-visibility';
+import {
+  filterSessionsByVisibility,
+  isSessionVisibleToUser,
+  getSessionOwnerAccessReason,
+} from '../src/lib/session-visibility';
 import { getLocalProjectVisibilityKey } from '../src/lib/visible-local-project-index';
 
 const m1 = 'machine-1' as MachineId;
@@ -121,4 +125,53 @@ describe('session visibility', () => {
       )
     ).toEqual(['s-owner']);
   });
+});
+
+describe('owner transfer never grants machine or project access', () => {
+  const session = { machineId: m1, userId: 'a', project: { kind: 'local', localProjectId: p1 } };
+  const machine = { machineId: m1, ownerUserId: 'a', sharedWithTeam: false, updatedAt: 1 };
+  const project = { ...machine, localProjectId: p1 };
+  const key = getLocalProjectVisibilityKey(m1, p1);
+  it('allows the machine owner and refuses a colleague on a private machine', () => {
+    expect(
+      getSessionOwnerAccessReason(session, 'a', new Map([[m1, machine]]), new Map())
+    ).toBeNull();
+    expect(
+      getSessionOwnerAccessReason(session, 'b', new Map([[m1, machine]]), new Map([[key, project]]))
+    ).toBe('machineNotShared');
+  });
+  it('requires both machine and local project sharing, regardless of current session owner', () => {
+    const machines = new Map([[m1, { ...machine, sharedWithTeam: true }]]);
+    expect(
+      getSessionOwnerAccessReason(
+        { ...session, userId: 'b' },
+        'b',
+        machines,
+        new Map([[key, project]])
+      )
+    ).toBe('projectNotShared');
+    expect(
+      getSessionOwnerAccessReason(
+        session,
+        'b',
+        machines,
+        new Map([[key, { ...project, sharedWithTeam: true }]])
+      )
+    ).toBeNull();
+    expect(getSessionOwnerAccessReason(session, 'b', new Map(), new Map())).toBe(
+      'machineUnavailable'
+    );
+  });
+});
+
+it('keeps transferred local-project history visible to the machine owner after the project is removed', () => {
+  expect(
+    isSessionVisibleToUser(
+      { machineId: m1, userId: 'b', project: { kind: 'local', localProjectId: p1 } },
+      new Set([m1]),
+      new Set(),
+      'a',
+      new Set([m1])
+    )
+  ).toBe(true);
 });

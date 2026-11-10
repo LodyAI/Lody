@@ -409,6 +409,7 @@ type RpcServerDeps = {
   }) => Promise<RemoteAutomationRpcResult>;
   pingMachine?: (args: { requestId: string }) => Promise<MachinePingResponse>;
   restartMachine?: (args: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -1272,6 +1273,9 @@ export class LoroStreamsMachineRpcServer {
             return;
           }
           const response = await this.deps.restartMachine({
+            ...(request.params.restoreMachineId
+              ? { restoreMachineId: request.params.restoreMachineId }
+              : {}),
             requesterUserId: request.params.requesterUserId,
             requestToken: request.params.requestToken,
             requestId: request.params.requestId,
