@@ -306,6 +306,18 @@ rebuild from originals or read a suffix to prove the existing pin; never lower i
 `InstalledEpochKeys.check(epoch)` verifies a stored key's current eligibility and
 commitment, disposing its temporary material instead of returning a secret to a status reader.
 
+## Execution intent
+
+`executionIntentBytes`, `signExecutionIntent` and `verifyExecutionIntent` sign what an
+encrypted input will run (owner decision 2026-11-10). The bytes are UTF-8
+`lody-e2ee/execution-intent/v1` followed by a zero byte, then the kind (1 member input,
+2 machine input, 3 schedule declaration), the pinned genesis (32 bytes), four
+u16be-length-prefixed UTF-8 fields (workspace ID, target machine ID, scope, message ID,
+each at most 1,024 bytes) and the 32-byte SHA-256 of the canonical content. Nothing
+depends on a document operation, frame or epoch. A valid signature proves authorship
+only; the verifier still checks the signer's current membership and permissions, and
+the execution journal still starts each message ID once.
+
 ## Device credential binding
 
 `deviceCredentialBindingBytes`, `signDeviceCredentialBinding` and

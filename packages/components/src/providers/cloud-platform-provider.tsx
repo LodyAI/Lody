@@ -359,6 +359,8 @@ export function CloudPlatformProvider({
                 native.updateMachineSharing(workspaceId, machineId, generation, requestId, change),
               prepareDispatch: (workspaceId, machineId, input) =>
                 native.prepareDispatch(workspaceId, machineId, input),
+              signScheduleDeclaration: (workspaceId, document, manualRunKey) =>
+                native.signScheduleDeclaration(workspaceId, document, manualRunKey),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
                 native.acceptDispatchResponse(workspaceId, machineId, input, frame),
               irohReady: (workspaceId, machineId) => native.irohReady(workspaceId, machineId),

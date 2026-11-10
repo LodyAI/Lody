@@ -220,6 +220,7 @@ function SupportedSchedulesWorkspace({
       runtime
         ? new ScheduleRepository(runtime.repo, runtime.workspaceId, {
             protectedContent: runtime.contentMode === 'e2ee',
+            signDeclaration: runtime.signScheduleDeclaration,
           })
         : null,
     [runtime]
@@ -875,6 +876,7 @@ function ScheduleEditor({
         () =>
           new ScheduleRepository(runtime.repo, runtime.workspaceId, {
             protectedContent: runtime.contentMode === 'e2ee',
+            signDeclaration: runtime.signScheduleDeclaration,
           }).save({
             ...identity,
             actorId: user.id,

@@ -15,6 +15,9 @@ export type E2eePreparedDispatch = {
   frames?: string[];
   requesterDevice: string;
   expiresAt: number;
+  /** Dispatch only: the signed execution intent the caller stores with the turn or queue
+   * item in the same commit (`e2ee-execution-intent.ts`). */
+  e2eeIntent?: string;
 };
 /** Delivery receipt only. Actual execution remains behind the shared agent-start claim. */
 export type E2eeDispatchAck = {

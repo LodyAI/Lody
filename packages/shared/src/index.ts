@@ -60,6 +60,7 @@ export * from './schedule-recurrence';
 export * from './schedule-registry';
 export * from './schedule-schema';
 export * from './schedule-authorization';
+export * from './e2ee-execution-intent';
 export * from './schedule-repository';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';

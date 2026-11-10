@@ -220,6 +220,32 @@ type FinalizeTurnContext = {
 
 type InboxExecutionHandle = Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
 
+/** One message per definite encrypted refusal; only a sender without rights reads as one. */
+function encryptedRefusalMessage(
+  reason: Exclude<
+    Extract<
+      import('@/lib/e2ee/agent-execution').EncryptedExecutionClaim,
+      { state: 'denied' }
+    >['reason'],
+    undefined
+  >
+): string {
+  switch (reason) {
+    case 'e2ee_machine_not_shared':
+      return 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。';
+    case 'e2ee_sender_not_authorized':
+      return 'e2ee_sender_not_authorized: The sender is not authorized to run turns in this encrypted workspace now, so this turn will not run.';
+    case 'e2ee_machine_not_member':
+      return 'e2ee_machine_not_member: This machine is no longer a member of this encrypted workspace, so it cannot run this turn.';
+    case 'e2ee_signature_missing':
+      return 'e2ee_signature_missing: This encrypted turn has no signature, so it will not run. Send it again.';
+    case 'e2ee_signature_invalid':
+      return 'e2ee_signature_invalid: This encrypted turn does not match its signature, so it will not run.';
+    case 'e2ee_scope_mismatch':
+      return 'e2ee_scope_mismatch: This encrypted turn was signed for another conversation or machine, so it will not run here.';
+  }
+}
+
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
 /** Trailing history rows searched for the last assistant turn and its user input. */
 const DEAD_TURN_SCAN_ROWS = 64;
@@ -5426,11 +5452,9 @@ export class SessionExecutionService {
                     ? 'Result unknown. This encrypted turn may already have started and will not be started again. Send a new turn to continue.'
                     : result.state === 'completed'
                       ? 'This encrypted turn already finished and will not be started again.'
-                      : result.state === 'expired'
-                        ? 'This encrypted turn expired before execution. Send a new turn to continue.'
-                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_shared'
-                          ? 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。'
-                          : 'This encrypted turn is not authorized for execution.',
+                      : result.state === 'denied' && result.reason
+                        ? encryptedRefusalMessage(result.reason)
+                        : 'This encrypted turn is not authorized for execution.',
               });
             });
 

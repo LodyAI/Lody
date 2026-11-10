@@ -70,6 +70,7 @@ describe('Owned-chat schedule handoff', () => {
         },
         flush: async () => {},
       },
+      isEncryptedWorkspace: () => false,
       getOrCreateSessionDoc: async (id: string) => {
         if (!mirrors.has(id))
           mirrors.set(

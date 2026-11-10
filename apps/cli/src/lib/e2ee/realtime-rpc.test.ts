@@ -239,7 +239,7 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     ]);
   });
 
-  it('rejects expired/revoked/bad requests and admits the next legitimate call without a workspace fence', async () => {
+  it('rejects revoked/bad requests, admits a late delivery and the next legitimate call without a workspace fence', async () => {
     const f = fixture();
     const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
     const frame = { id: original.requestId, frame: original.frameHex };
@@ -250,17 +250,19 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     await expect(
       Effect.runPromise(f.receiver()({ ...frame, id: 'ff'.repeat(16) }))
     ).rejects.toThrow();
-    f.now(original.expiresAt);
+    // Signed originals carry no deadline: three days late, it still starts once.
+    const late = Date.parse(f.input.timestamp) + 3 * 24 * 60 * 60_000;
+    f.now(late);
     await Effect.runPromise(f.receiver()(frame));
-    expect(f.offers()).toBe(0);
+    expect(f.offers()).toBe(1);
     const nextInput = {
       ...f.input,
       userTurnId: 'new-turn',
-      timestamp: new Date(original.expiresAt).toISOString(),
+      timestamp: new Date(late).toISOString(),
     };
     const next = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, nextInput));
     await Effect.runPromise(f.receiver()({ id: next.requestId, frame: next.frameHex }));
-    expect(f.offers()).toBe(1);
+    expect(f.offers()).toBe(2);
   });
 });
 

@@ -1533,6 +1533,14 @@ export async function appendUserPromptHistory(args: {
   steer?: boolean;
   /** Encrypted shared-member derivation origin; part of the signed input. */
   derivedFrom?: { sessionId: string; userTurnId: string };
+  /** Encrypted: this machine's signed intent for the input, written in the same commit. */
+  signMachineInput?: (input: {
+    sessionId: string;
+    targetMachineId: string;
+    userTurnId: string;
+    inputConfig: unknown;
+    derivedFrom?: unknown;
+  }) => Promise<string | undefined>;
 }): Promise<{
   id: string;
   timestamp: string;
@@ -1586,6 +1594,19 @@ export async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
+  if (args.signMachineInput && inputConfig) {
+    const meta = await sessionDoc.getMetaState();
+    const e2eeIntent = meta?.machineId
+      ? await args.signMachineInput({
+          sessionId: meta.id,
+          targetMachineId: meta.machineId,
+          userTurnId: historyId,
+          inputConfig,
+          ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
+        })
+      : undefined;
+    if (e2eeIntent) entry.e2eeIntent = e2eeIntent;
+  }
   if (args.steer) await backend.appendHistoryTurn(entry);
   else await backend.appendUserTurn(entry);
   return {
@@ -4355,6 +4376,9 @@ export async function sendSessionChatResult(
   const userTurn = await appendUserPromptHistory({
     steer: steerTurnId !== undefined,
     ...(derivedFrom ? { derivedFrom } : {}),
+    ...(manager.isEncryptedWorkspace()
+      ? { signMachineInput: (input) => manager.signMachineInput(input) }
+      : {}),
     inputBlocks,
     sessionDoc,
     prompt,

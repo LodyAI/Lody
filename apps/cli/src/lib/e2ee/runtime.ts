@@ -20,8 +20,10 @@ import {
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   verifyLedgerEffect,
+  signExecutionIntent,
   type RetainedLedgerState,
 } from '@lody/e2ee-core/protocol';
+import type { E2eeIntentSigningRequest } from '@lody/loro-streams-rpc/e2ee-client';
 import {
   CandidateProtector,
   DeviceIdentity,
@@ -603,6 +605,12 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             ),
         readEpochKey: (epoch) => history.read(epoch),
       }).pipe(Effect.provideService(VerifiedLedger, verified)),
+    /** This device's execution intent signature (owner decision 2026-11-10). */
+    signExecutionIntent: (request: E2eeIntentSigningRequest) =>
+      guard().pipe(
+        Effect.andThen(signExecutionIntent({ ...request, genesis, signer: options.device })),
+        Effect.map((signature) => signature.toBytes())
+      ),
     realtimeBinding: (resource: string) =>
       makeRealtimeContentBinding({
         genesis,

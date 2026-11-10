@@ -19,8 +19,14 @@ export type ExecutionAuthorization =
       readonly _tag: 'Denied';
       readonly reason:
         | 'invalid-request'
+        /** The signer has no write authority in the current ledger. */
         | 'not-authorized'
+        /** This machine's own device is no longer a member. */
+        | 'e2ee_machine_not_member'
         | 'e2ee_machine_not_owned'
+        | 'e2ee_schedule_not_authorized'
+        | 'e2ee_signature_missing'
+        | 'e2ee_signature_invalid'
         | 'e2ee_machine_not_shared'
         | 'unavailable'
         | 'closed';
@@ -229,7 +235,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         const state = view.inspectState();
         const local = state.devices.get(self);
         if (!local || !state.members.has(Buffer.from(local.membershipId.toBytes()).toString('hex')))
-          return denied('not-authorized');
+          return denied('e2ee_machine_not_member');
         const permissions = yield* Effect.fromResult(contentPermissions(view, requester.success));
         const reader = state.devices.get(requesterDevice);
         const mayRead =
@@ -327,7 +333,10 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           const signer = latest.devices.get(requesterDevice);
           if (
             !machine ||
-            !latest.members.has(Buffer.from(machine.membershipId.toBytes()).toString('hex')) ||
+            !latest.members.has(Buffer.from(machine.membershipId.toBytes()).toString('hex'))
+          )
+            return denied('e2ee_machine_not_member');
+          if (
             !signer ||
             Buffer.from(signer.membershipId.toBytes()).equals(
               Buffer.from(machine.membershipId.toBytes())

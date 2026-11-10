@@ -1,6 +1,7 @@
 # Queued input evidence in encrypted workspaces
 
 Status: implemented
+Archived: 2026-11-10
 Translation: current
 
 [中文](2026-11-05-e2ee-queued-input-evidence.zh.md)
@@ -62,15 +63,15 @@ change.
 
 ## Alternatives
 
-- *Bind the queue row's writer to the frame's signer.* Tried and removed: it refused ordinary
+- _Bind the queue row's writer to the frame's signer._ Tried and removed: it refused ordinary
   sends under normal sync and snapshot delivery. Do not reintroduce it in another form.
 
-- *Refuse at promotion.* A refused row would need its own terminal path and could stall the
+- _Refuse at promotion._ A refused row would need its own terminal path and could stall the
   queue, and every promotion route would need the check. The start gate already has one
   visible refusal path.
-- *Sign nothing new and trust `queuedItem.userId`.* That field is display data.
-- *Use the frame's config in place of the row's.* It would hide a mismatch rather than refuse it.
-- *Map the verified signer to an account.* The machine has no such directory, and the ledger
+- _Sign nothing new and trust `queuedItem.userId`._ That field is display data.
+- _Use the frame's config in place of the row's._ It would hide a mismatch rather than refuse it.
+- _Map the verified signer to an account._ The machine has no such directory, and the ledger
   user ID is not an account ID.
 
 ## Consequences and limits
@@ -81,10 +82,12 @@ change.
   it has a receipt in the older digest, so it is refused too. This is not migrated: the window
   is the input's 15 minutes, E2EE is at the test-build stage, and a recurring rule's next run
   requeues. A one-off or manual run has no such guarantee.
-- A queued input keeps its original 15-minute window, as before.
+- A queued input signed by a member's device has no deadline since the owner decision of
+  2026-11-10 (see the [foundation Spec draft](../../../../specs/e2ee-foundations.md)); a
+  machine-authored queued input keeps its receipt's 15-minute window.
 - An exhausted signal leaves the row unseen by an idle Session until something else checks it,
   such as a reconnect or the next send. There is no upper bound, but metadata writes here are
-  local, so this needs a failing local store, and the row expires at its deadline.
+  local, so this needs a failing local store; a machine-authored row expires at its deadline.
 - Follow-up: the queue edit path has no such retry or typed signal failure, and no test runs a
   real promoted row through this failure path.
 - Frames grow the Session document, as `rpcDispatchOriginals` already does; nothing is pruned.
