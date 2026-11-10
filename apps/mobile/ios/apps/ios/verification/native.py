@@ -102,7 +102,7 @@ checks = {
     'chat-title': ['LodyLocalization.swift', 'LodyUIVerify.swift', 'LodyTint.swift', 'Chrome/LodyNavigationHeader.swift', 'Chrome/LodyNavigationSearch.swift', 'Chat/ChatNavigationTitle.swift'],
     'page-progress': ['List/LodyPageProgress.swift'],
     'create-session': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift'],
-    'session-info-bar': ['LodyLocalization.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionInfoBar.swift'],
+    'session-info-bar': ['LodyLocalization.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionInfoBar.swift', 'Sessions/SessionArchive.swift'],
     'session-roles': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift', 'Sessions/SessionRoles.swift'],
     'unified-patch': ['Diff/UnifiedPatch.swift'],
     'create-draft': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift', 'Outbox/OutboxRecord.swift', 'CreateSession/CreateDraftRecord.swift'],

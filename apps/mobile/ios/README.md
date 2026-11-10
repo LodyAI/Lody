@@ -413,3 +413,11 @@ This supersedes the optional pure-black background described in the historical
 Home design and settings migration documents. Masks, scrims, shadows, media
 content and foreground colors remain unchanged. The native `design` check tests
 legacy values, both themes and increased contrast, including text readability.
+
+Conversation More → Archive returns to Home immediately while the write continues.
+Success is silent; a failed write shows a warning only while its original Home,
+account and workspace remain active. Unarchive stays on the conversation.
+The existing native session suite can isolate these menu actions with
+`LODY_VERIFY_SESSION_ARCHIVE_ONLY=1 pnpm verify:ui --case session-native --require-video --app /absolute/path/to/Lody.app`.
+The `session-info-bar` native check explicitly holds and releases archive writes
+to verify immediate navigation, silent delayed success and scoped delayed failure.

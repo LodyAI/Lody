@@ -574,7 +574,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   func perform(_ action: String) {
     let scope = source.state.key
     let visit = navigationVisit
-    actions.perform(action, row: sessionId, from: self) { [weak self] in
+    let returnToList: @MainActor () -> Void = { [weak self] in
       guard let self, self.source.state.key == scope, self.navigationVisit == visit,
         self.browsingVisible, self.viewIfLoaded?.window != nil,
         let navigation = self.navigationController,
@@ -587,6 +587,27 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         LodyShell.shared.popToRoot()
       }
     }
+    guard action == "archive", let session = source.state.catalog.session(sessionId), !session.archived else {
+      actions.perform(action, row: sessionId, from: self)
+      return
+    }
+    let source = source
+    let workspace = source.state.workspaceId
+    let id = sessionId
+    let generation = LocalStore.shared.generation
+    weak var home = HomeController.current
+    let hadHome = home != nil
+    SessionArchive.start(
+      isCurrent: {
+        guard source.state.key == scope, !scope.isEmpty, LocalStore.shared.generation == generation else { return false }
+        return !hadHome || (home != nil && HomeController.current === home && home?.source.state.key == scope)
+      },
+      write: { try await source.write(workspace, id, .archive(true)) },
+      returnToList: returnToList,
+      failed: {
+        LodyToastOverlay.shared.show(message: String(localized: "session.toast.archiveFailed", bundle: .lody), kind: .warning)
+      }
+    )
   }
 
   func find(query: String, keyboard: Bool) {
