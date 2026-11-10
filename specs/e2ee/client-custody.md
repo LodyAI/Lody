@@ -267,6 +267,52 @@ The references below remain the recorded source basis, not fresh product accepta
 Latest RP/format only; no old-RP fallback or compatibility migration. The owner's
 pre-production premise is not a production-data audit.
 
+
+## Automatic browser opening handoff revision (owner decision pending)
+
+Increment status: draft. Existing passkey/file and custody approval remains valid;
+this section does not approve a new channel. User copy says “Open with passkey or
+recovery file”. Browser-first workspace creation remains unsupported. Manual code
+copy is only a popup-blocked fallback, never the normal flow.
+
+B and C have different origins. B `same-origin-allow-popups` with C `same-origin`
+severs the opener relationship; origin/source/nonce checks cannot repair a missing
+channel. COOP is a document response policy, not a per-call JS setting. Do not
+silently weaken C or put pairing secrets in a URL to obtain postMessage.
+
+| Option | Interaction | Isolation and tradeoff | State |
+| --- | --- | --- | --- |
+| Relax B only, keep C same-origin | Intended automatic return | Window references are severed | Not implementable |
+| Also relax C for postMessage | Open with passkey/file, verify and confirm | Exact origin/source, one-use nonce, account, B keys and scope still required; loses C isolation and must handle OAuth navigation | Not recommended; renewed approval required |
+| Reuse M2–M5 ephemeral handshake and six comparison digits (recommended) | B opens C; after passkey/file opening, both show matching digits; the person compares and approves once | Keep both same-origin policies; reuse commitment/reveal, P-256 ECDH, HKDF and existing pairing authentication. Relay holds public originals, never the derived pairing or vault secrets. Human comparison remains mandatory | Pending approval and integration |
+
+The recommendation changes the approved no-server/window-source-authentication
+guarantee. Its authentication instead relies on the ephemeral exchange and a person
+comparing six digits. Encryption alone does not authenticate substituted relay keys.
+Reuse the M2–M5 protocol and public DTOs, not a Web-specific approval protocol. Bind
+request/challenge, account, current workspace/genesis, both ephemeral keys and original
+deadline, then B's request digest and device keys. An optional public routing ID in
+the popup fragment is not authority and is removed immediately. No S, V, R, PRF, file
+or long-lived private key enters a URL or relay. Refuse expiry/replay/replacement,
+account changes and cancellation; never implicitly renew or create another request.
+
+Phone approval uses the same automatic inbox: explicit personal-computer consent
+and a current-workspace browser request, then foreground comparison and approval on
+an admitted same-account phone. Background notifications are advisory, never focus
+or authorization. Admission and key installation remain separate, with B verifying
+both before content access. Existing QR approval does not prove automatic mobile
+inbox/six-digit integration; report source, deployment and phone acceptance separately.
+
+Until approval and implementation, the ordinary app does not expose a passkey/file
+main entry that falls back to manual copying. Retain consent and existing other-device
+approval without introducing new gates on already admitted content.
+
+Evidence: a synthetic two-origin Chromium/WebKit check on 2026-11-10 returned
+`opener=null` and `handle.closed=true` for B allow-popups/C same-origin; unsafe-none C
+controls retained references in both engines. This is browser-policy evidence, not
+Lody handoff or phone acceptance. See [HTML COOP](https://html.spec.whatwg.org/multipage/browsers.html#cross-origin-opener-policies)
+and [MDN COOP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cross-Origin-Opener-Policy).
+
 ## References
 
 - [Client ports](../../packages/e2ee-core/src/services/client-custody.ts), [existing service contracts](../../packages/e2ee-core/docs/services.md), [desktop custody](desktop-custody.md).

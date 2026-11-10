@@ -94,7 +94,11 @@ function useLive() {
 
 type RequestRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'requestAccountPairing' | 'accountPairingRequest' | 'cancelAccountPairing' | 'openBrowserUnlock'
+  | 'requestAccountPairing'
+  | 'accountPairingRequest'
+  | 'cancelAccountPairing'
+  | 'openBrowserUnlock'
+  | 'requirePersonalComputer'
 >;
 
 /**
@@ -119,6 +123,7 @@ export function E2eeAccountPairingRequest(props: {
   const [error, setError] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
   const [personalComputer, setPersonalComputer] = useState(false);
+  const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserUnlock);
   const [input, setInput] = useState('');
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
@@ -145,7 +150,7 @@ export function E2eeAccountPairingRequest(props: {
     }
   };
   const start = (pairingString?: string) => {
-    if (runtime.openBrowserUnlock && !personalComputer) return Promise.resolve();
+    if (personalRequired && !personalComputer) return Promise.resolve();
     return run(async () => accept(await runtime.requestAccountPairing!({ pairingString })));
   };
   useEffect(() => {
@@ -201,21 +206,16 @@ export function E2eeAccountPairingRequest(props: {
       {phase === 'idle' && !state && (
         <>
           <p {...stylex.props(styles.muted)}>
-            {t(
-              runtime.openBrowserUnlock ? 'e2ee.browserUnlock.help' : 'e2ee.accountPair.request.web'
-            )}
+            {t(personalRequired ? 'e2ee.browserUnlock.help' : 'e2ee.accountPair.request.web')}
           </p>
           <div {...stylex.props(styles.actions)}>
-            <Button
-              disabled={Boolean(runtime.openBrowserUnlock) && !personalComputer}
-              onClick={() => void start()}
-            >
+            <Button disabled={personalRequired && !personalComputer} onClick={() => void start()}>
               {t('e2ee.accountPair.request.start')}
             </Button>
           </div>
         </>
       )}
-      {runtime.openBrowserUnlock && state?.status !== 'joined' && (
+      {personalRequired && state?.status !== 'joined' && (
         <>
           <label {...stylex.props(styles.actions)}>
             <Checkbox
@@ -226,20 +226,19 @@ export function E2eeAccountPairingRequest(props: {
             {t('e2ee.browserUnlock.personal')}
           </label>
           <p {...stylex.props(styles.muted)}>{t('e2ee.browserUnlock.risk')}</p>
-          <Button
-            variant="secondary"
-            disabled={!personalComputer || phase === 'busy' || phase === 'loading'}
-            onClick={() =>
-              void run(async () => {
-                runtime.openBrowserUnlock!();
-                accept(await runtime.requestAccountPairing!({}));
-              })
-            }
-          >
-            {t('e2ee.browserUnlock.open')}
-          </Button>
-          {state?.status === 'waiting' && state.pairingString && (
-            <p>{t('e2ee.browserUnlock.transfer')}</p>
+          {runtime.openBrowserUnlock && (
+            <Button
+              variant="secondary"
+              disabled={!personalComputer || phase === 'busy' || phase === 'loading'}
+              onClick={() =>
+                void run(async () => {
+                  runtime.openBrowserUnlock!();
+                  accept(await runtime.requestAccountPairing!({}));
+                })
+              }
+            >
+              {t('e2ee.browserUnlock.open')}
+            </Button>
           )}
         </>
       )}
@@ -295,9 +294,7 @@ export function E2eeAccountPairingRequest(props: {
           <div {...stylex.props(styles.actions)}>
             <Button
               disabled={
-                !input.trim() ||
-                phase === 'busy' ||
-                (Boolean(runtime.openBrowserUnlock) && !personalComputer)
+                !input.trim() || phase === 'busy' || (personalRequired && !personalComputer)
               }
               onClick={enterCode}
             >
@@ -310,7 +307,7 @@ export function E2eeAccountPairingRequest(props: {
         {state && state.status !== 'joined' && (
           <Button
             variant="secondary"
-            disabled={phase === 'busy' || (Boolean(runtime.openBrowserUnlock) && !personalComputer)}
+            disabled={phase === 'busy' || (personalRequired && !personalComputer)}
             onClick={() => void restart()}
           >
             {t('e2ee.accountPair.request.restart')}

@@ -213,6 +213,47 @@ Web 应用拥有唯一宿主和执行器。恢复命令借用它已有的会话�
 上表依据仍为下方已记录的公开资料，未重新验收这些产品。本修订只认当前 RP/格式，
 不做旧 RP 或旧格式兼容；owner 提供的上线前状态不是一次生产数据审计。
 
+
+## 网页自动打开交接修订（待 owner 决策）
+
+补充修订状态：draft。既有 passkey＋恢复文件与保管批准继续有效；本节不批准新的通道。
+用户文案统一为“用 passkey 或恢复文件打开”。“第一台设备就是浏览器”的工作区创建
+暂不支持。手动复制配对码不得作为正常流程，只能作为弹窗被拦截时的备用入口。
+
+普通网页 B 与隔离页面 C 是不同 origin。仅将 B 改为 `same-origin-allow-popups`，
+同时令 C 保持 `same-origin`，不能保留窗口通道：C 的 opener 被切断，B 的句柄显示
+已关闭；给消息增加 origin/source/nonce 校验也无法恢复这个通道。COOP 由文档响应
+决定，不能在已有页面中仅为一次 JS 调用临时修改。不得为得到 postMessage 而暗中
+降低 C 的隔离，或将配对秘密放进 URL。
+
+| 方案 | 用户操作 | 隔离与取舍 | 状态 |
+| --- | --- | --- | --- |
+| B 放宽、C 保持 same-origin | 预期自动回传 | 浏览器会切断窗口引用，无法实现 | 不可实施 |
+| C 也放宽以保留 postMessage | 用 passkey/文件后核对并确认 | 可严格校验精确 origin/source、一次性 nonce、账号、B 公钥与范围，但降低隔离；OAuth 跳转也会改变窗口关系 | 不推荐，需重新批准隔离取舍 |
+| 复用 M2–M5 临时密钥握手与 6 位核对数字（推荐） | B 打开弹窗；C 用 passkey/文件打开后，两页自动显示相同数字，用户核对并点一次授权 | 两页保留 same-origin；复用承诺－揭示、P-256 ECDH、HKDF 和既有配对认证，中继只保存公共原件，不持有配对秘密或保险库秘密；人必须核对数字，不能把服务端 pending 当作授权 | 待批准与接线 |
+
+推荐项改变了已批准正文“交接不经服务器、以精确窗口来源认证”的保证；新的认证
+依赖临时密钥握手和人对两端 6 位数字的核对。因此本节保持 draft，不把“临时加密”
+说成能自动消除恶意中继替换公钥的风险。实现须复用 M2–M5 协议与公开 DTO，不另造
+网页专用审批；复用的上下文必须绑定本次请求/挑战、同一账号、当前工作区与 genesis、
+双方临时公钥、原期限，并继续绑定 B 的请求摘要和设备公钥。公开路由 ID 可以进入
+弹窗 fragment 并立即清除，但不是授权凭证；S、V、R、PRF、文件和长期私钥不得进入 URL
+或中继。到期、重放、请求替换、账号切换和取消必须拒绝；不隐式新建请求或延长期限。
+
+手机批准网页也复用同一自动审批入口：网页先明确确认自己的电脑并发出当前工作区
+申请；同账号、已获准的手机前台显示审批，用户核对两端数字后授权。后台通知只是提示，
+不得抢焦点或授予权限。已接纳与密钥安装分别确认，最后由 B 独立验证后开放内容。
+原有扫码批准能力不等于自动弹窗和 6 位核对已接通；合入、部署和手机实测分别报告。
+
+自动方案获批并实现前，普通页不发布会落到手动复制的 passkey/文件主入口；保留个人
+电脑确认和既有其他设备批准路径，已有工作区内容不增加新的门槛。
+
+证据：2026-11-10 在合成双 origin 页面运行 Chromium 与 WebKit：B allow-popups /
+C same-origin 均得到 `opener=null`、`handle.closed=true`；C unsafe-none 对照组均保留
+引用。这是浏览器规则复现，不是 Lody 自动交接或手机验收。标准：
+[HTML COOP](https://html.spec.whatwg.org/multipage/browsers.html#cross-origin-opener-policies)、
+[MDN COOP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cross-Origin-Opener-Policy)。
+
 ## 依据
 
 - [Client 端口](../../packages/e2ee-core/src/services/client-custody.ts)、[既有服务合同](../../packages/e2ee-core/docs/services.zh.md)、[桌面保管](desktop-custody.zh.md)。

@@ -760,11 +760,30 @@ it('browser self-unlock requires consent before either entry creates an identity
   await act(async () => consent.click());
   await click('e2ee.browserUnlock.open');
   expect(text()).toContain('e2ee.browserUnlock.risk');
-  expect(text()).toContain('e2ee.browserUnlock.transfer');
   expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
     CODE
   );
   expect(opened).toEqual(['isolated-unlock']);
   await act(async () => consent.click());
   expect((button('e2ee.accountPair.request.restart') as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('browser device requests retain personal-computer consent while automatic opening is unavailable', async () => {
+  const host = requesterHost();
+  await act(async () =>
+    root.render(
+      <E2eeAccountPairingRequest
+        runtime={{ ...host.runtime, requirePersonalComputer: true }}
+        autoStart={false}
+        onJoined={() => {}}
+      />
+    )
+  );
+  expect((button('e2ee.accountPair.request.start') as HTMLButtonElement).disabled).toBe(true);
+  expect(host.state).toBeNull();
+  await act(async () => (container.querySelector('[role="checkbox"]') as HTMLElement).click());
+  await click('e2ee.accountPair.request.start');
+  expect(container.querySelector('[data-testid="e2ee-account-pairing-string"]')?.textContent).toBe(
+    CODE
+  );
 });
