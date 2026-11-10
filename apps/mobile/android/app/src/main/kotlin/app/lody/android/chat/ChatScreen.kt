@@ -436,8 +436,13 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
         Unit
     }
     val prUpdates = remember(scope, id) { SessionPullRequestUpdates() }
+    // Bumped when a merge state read after Ready for review lands, so the bar recomposes.
+    var mergeObserved by remember(scope, id) { mutableIntStateOf(0) }
     val hasRelations = remember(id, context.relatedSessions) { SessionRelations.rows(id, context.relatedSessions).isNotEmpty() }
-    val bar = session?.let { SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend) }
+    val bar = session?.let {
+        mergeObserved // read so a landed merge state recomposes the bar
+        SessionInfoBar.of(prUpdates.apply(it), context.repository, busy = running || !canSend)
+    }
     // Merge / Ready for review go straight to GitHub, one at a time, never retried.
     var merging by remember(id) { mutableStateOf(false) }
     var writing by remember(scope, id) { mutableStateOf<SessionInfoBar.Action?>(null) }
@@ -462,6 +467,17 @@ fun ChatScreen(repository: ChatRepository, scope: RuntimeScope, id: String, cont
                 else repository.markReady(scope, pr.repository, pr.number)
                 prUpdates.finish(success = true)
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
+                // Merge appears once GitHub computes the merge state, not when the computer's
+                // PR poller next refreshes the catalog. Cancelled with the screen.
+                if (method == null) coroutines.launch {
+                    PullRequestMergeSettle.run(
+                        read = { repository.mergeState(scope, pr.repository, pr.number) },
+                        sleep = { kotlinx.coroutines.delay(PullRequestMergeSettle.INTERVAL_MS) },
+                    )?.let { merge ->
+                        prUpdates.observeMerge(pr, merge)
+                        mergeObserved++
+                    }
+                }
                 if (method != null) writeTexts.mergeDone else null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {

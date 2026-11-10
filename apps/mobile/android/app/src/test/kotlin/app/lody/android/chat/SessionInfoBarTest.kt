@@ -3,7 +3,11 @@ package app.lody.android.chat
 import app.lody.android.chat.SessionInfoBar.Action
 import app.lody.android.runtime.CatalogPullRequest
 import app.lody.android.runtime.CatalogSession
+import app.lody.android.auth.Credential
+import kotlinx.coroutines.test.runTest
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,6 +44,61 @@ class SessionInfoBarTest {
         ready.confirm(draft, merged = false)
         assertEquals(listOf(Action.FixCi), actions(ready.apply(session(pr = pr(ci = "f")))))
         assertEquals(listOf(Action.ReadyForReview), actions(ready.apply(stale)))
+    }
+
+    @Test fun mergeAppearsFromGitHubsReadStateUntilTheCatalogHasItsOwn() {
+        val updates = SessionPullRequestUpdates()
+        val draft = pr("draft")
+        updates.confirm(draft, merged = false)
+        assertTrue(actions(updates.apply(session(pr = draft))).isEmpty())
+        updates.observeMerge(draft, "c")
+        assertEquals(listOf(Action.Merge), actions(updates.apply(session(pr = draft))))
+        assertEquals(listOf(Action.Merge), actions(updates.apply(session(pr = pr("open")))))
+        assertTrue(actions(updates.apply(session(pr = pr("open", merge = "b")))).isEmpty())
+        assertTrue(actions(updates.apply(session(pr = pr("open")))).isEmpty())
+
+        val redrafted = SessionPullRequestUpdates()
+        redrafted.observeMerge(draft, "c")
+        assertEquals(listOf(Action.ReadyForReview), actions(redrafted.apply(session(pr = draft))))
+        assertTrue(actions(redrafted.apply(session(pr = pr("open")))).isEmpty())
+    }
+
+    @Test fun mergeStateSettlesOnTheFirstComputedReadAndIsBounded() = runTest {
+        val reads = ArrayDeque(listOf(null, null, "c"))
+        var sleeps = 0
+        assertEquals("c", PullRequestMergeSettle.run(read = { reads.removeFirst() }, sleep = { sleeps++ }))
+        assertEquals(2, sleeps)
+        sleeps = 0
+        assertNull(PullRequestMergeSettle.run(attempts = 3, read = { null }, sleep = { sleeps++ }))
+        assertEquals(2, sleeps)
+        assertNull(PullRequestMergeSettle.run(read = { throw GitHubWriteFailure("rate_limited") }, sleep = {}))
+    }
+
+    @Test fun mergeStateReadsThePullRequestWithAReadGrant() = runTest {
+        var grantOperation: String? = null
+        var pull = JSONObject().put("state", "open").put("draft", false).put("mergeable", JSONObject.NULL).put("mergeable_state", "unknown")
+        val writes = GitHubPullRequestWrites { method, url, _, body ->
+            when {
+                url.endsWith("/api/auth/convex/token") -> 200 to JSONObject().put("token", "jwt").toString()
+                url.endsWith("/api/action") -> {
+                    grantOperation = body!!.getJSONArray("args").getJSONObject(0).getString("operation")
+                    200 to JSONObject().put("status", "success").put("value", JSONObject().put("success", true).put("token", "grant")).toString()
+                }
+                method == "GET" && url == "https://api.github.com/repos/lody/zed/pulls/7" -> 200 to pull.toString()
+                else -> error("unexpected $method $url")
+            }
+        }
+        val credential = Credential("synthetic-session")
+        assertNull(writes.mergeState(credential, "w", "lody/zed", 7))
+        assertEquals("read", grantOperation)
+        pull = pull.put("mergeable", true).put("mergeable_state", "clean")
+        assertEquals("c", writes.mergeState(credential, "w", "lody/zed", 7))
+        pull = pull.put("mergeable", false).put("mergeable_state", "unknown")
+        assertEquals("d", writes.mergeState(credential, "w", "lody/zed", 7))
+        pull = pull.put("draft", true).put("mergeable_state", "draft")
+        assertNull(writes.mergeState(credential, "w", "lody/zed", 7))
+        pull = pull.put("draft", false).put("state", "closed").put("mergeable_state", "clean")
+        assertNull(writes.mergeState(credential, "w", "lody/zed", 7))
     }
 
     private fun session(

@@ -43,6 +43,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var githubOperation: String?
   var githubScope = ""
   var githubUpdates = SessionPullRequestUpdates()
+  var githubSettle: Task<Void, Never>?
   private let initialChoice: ModelChoice?
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0
@@ -107,6 +108,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   isolated deinit {
     memberTask?.cancel()
+    githubSettle?.cancel()
     feed?.finish()
     simulator?.finish()
     if sender != nil { environment.foreground(sessionId, false) }

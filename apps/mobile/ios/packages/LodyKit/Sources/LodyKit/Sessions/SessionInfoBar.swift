@@ -2,6 +2,8 @@ import Foundation
 
 struct SessionPullRequestUpdates {
   private var confirmed: [String: String] = [:]
+  /// Merge states read straight from GitHub after Ready for review, until the catalog has one.
+  private var merges: [String: String] = [:]
   private var pending: (pr: SessionPullRequest, merged: Bool)?
   mutating func begin(_ pr: SessionPullRequest, merged: Bool) { pending = (pr, merged) }
   mutating func finish(success: Bool) {
@@ -13,6 +15,14 @@ struct SessionPullRequestUpdates {
   /// Only called after GitHub acknowledges the write; retain it across stale catalog frames.
   mutating func confirm(_ pr: SessionPullRequest, merged: Bool) {
     confirmed[key(pr)] = merged ? "merged" : "open"
+  }
+
+  /// A draft has no merge state, and the computer's poller may not refresh the PR for minutes,
+  /// so the merge state GitHub computes after Ready for review is read directly (web
+  /// `useGitHubPrDetails` does the same) and held until the catalog reports one of its own.
+  mutating func observeMerge(_ pr: SessionPullRequest, merge: String) {
+    guard ["c", "b", "d", "h", "u"].contains(merge) else { return }
+    merges[key(pr)] = merge
   }
 
   mutating func apply(_ session: SessionItem) -> SessionItem {
@@ -28,6 +38,18 @@ struct SessionPullRequestUpdates {
       updated.status = status
       return updated
     }
+    result.pullRequests = result.pullRequests.map { pr in
+      let id = key(pr)
+      guard let merge = merges[id] else { return pr }
+      // The catalog's own state wins once it has one; a closed, merged or re-drafted PR drops it.
+      guard pr.merge == nil, pr.status == "open" else {
+        merges.removeValue(forKey: id)
+        return pr
+      }
+      var updated = pr
+      updated.merge = merge
+      return updated
+    }
     if let pending {
       result.pullRequests = result.pullRequests.map { pr in
         guard key(pr) == key(pending.pr), pending.merged || pr.status == "draft" else { return pr }
@@ -37,6 +59,32 @@ struct SessionPullRequestUpdates {
       }
     }
     return result
+  }
+}
+
+/// Reads GitHub's merge state after Ready for review. GitHub computes it in the background
+/// (`unknown` meanwhile), so a few spaced reads replace waiting on the computer's PR poller.
+/// Bounded; a failed read ends it quietly, since the catalog still converges on its own.
+enum PullRequestMergeSettle {
+  static let attempts = 15
+  static let interval: Duration = .seconds(2)
+
+  /// GitHub REST `mergeable_state` mapped like the CLI poller's `mapMergeState`; nil while pending.
+  static func code(state: String?, mergeable: Bool?, draft: Bool) -> String? {
+    guard !draft else { return nil }
+    let known = ["clean": "c", "blocked": "b", "dirty": "d", "behind": "h", "unstable": "u", "has_hooks": "u"]
+    if let state, let code = known[state] { return code }
+    return mergeable == false ? "d" : nil
+  }
+
+  static func run(attempts: Int = attempts, read: () async throws -> String?, sleep: () async throws -> Void) async -> String? {
+    for attempt in 0..<attempts {
+      do {
+        if attempt > 0 { try await sleep() }
+        if let code = try await read() { return code }
+      } catch { return nil }
+    }
+    return nil
   }
 }
 

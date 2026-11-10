@@ -9,11 +9,17 @@ fun interface PullRequestWriter {
     suspend fun write(scope: RuntimeScope, repository: String, number: Int, method: String?)
 }
 
+/** GitHub's merge state for one PR with the scope's verified account; null while GitHub computes it. */
+fun interface PullRequestMergeReader {
+    suspend fun read(scope: RuntimeScope, repository: String, number: Int): String?
+}
+
 /** A screen subscription uses the app's existing workspace lease; it never creates a runtime. */
 class ChatRepository(
     private val owner: RuntimeOwner,
     private val pullRequests: PullRequestWriter = PullRequestWriter { _, _, _, _ -> throw GitHubWriteFailure("unavailable") },
     private val attachments: AttachmentUploader = AttachmentUploader { _, _, _ -> throw AttachmentFailure("unavailable") },
+    private val mergeStates: PullRequestMergeReader = PullRequestMergeReader { _, _, _ -> throw GitHubWriteFailure("unavailable") },
 ) {
     /** Uploads a turn's attachments natively; only the returned references reach the runtime. */
     suspend fun upload(scope: RuntimeScope, sessionId: String, items: List<PendingAttachment>): List<org.json.JSONObject> =
@@ -43,6 +49,10 @@ class ChatRepository(
 
     suspend fun markReady(scope: RuntimeScope, repository: String, number: Int) =
         pullRequests.write(scope, repository, number, null)
+
+    /** A read, safe to repeat: used to settle the merge state after Ready for review. */
+    suspend fun mergeState(scope: RuntimeScope, repository: String, number: Int): String? =
+        mergeStates.read(scope, repository, number)
 
     /** The project's provider choices (models, efforts, modes) for the composer's run config; a read. */
     suspend fun options(scope: RuntimeScope, projectId: String?): CreationOptions =
