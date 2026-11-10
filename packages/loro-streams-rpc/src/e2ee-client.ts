@@ -62,8 +62,14 @@ const ackSchema = z.object({
 });
 const attempt = <A>(body: () => A) =>
   Effect.try({ try: body, catch: () => new Error('e2ee_rpc_invalid') });
-const key = (args: Pick<E2eeDispatchInput, 'sessionId' | 'userTurnId'>) =>
-  JSON.stringify([args.sessionId, args.userTurnId]);
+/** One stored original per message ID and content: an edit keeps its ID, is signed again
+ * and gets its own original, while a retry of the same content reuses the stored one. */
+const key = (args: Pick<E2eeDispatchInput, 'sessionId' | 'userTurnId' | 'inputConfig'>) =>
+  JSON.stringify([
+    args.sessionId,
+    args.userTurnId,
+    turnExecutionDigest({ inputConfig: args.inputConfig }) ?? null,
+  ]);
 /** The signed `expiresAt` of every `session/dispatch-turn` original: no deadline. */
 export const E2EE_DISPATCH_NO_DEADLINE = 0;
 export const e2eeRpcDigest = (frame: Uint8Array) => sha256(frame);
@@ -361,7 +367,7 @@ export function makeE2eeRpcClient(options: {
         signer: value.requesterDevice,
         frame: value.frame,
       }),
-    readIncoming: (intent: Pick<E2eeDispatchInput, 'sessionId' | 'userTurnId'>) =>
+    readIncoming: (intent: Pick<E2eeDispatchInput, 'sessionId' | 'userTurnId' | 'inputConfig'>) =>
       options.originals.read('received', key(intent)),
     sealAck: (
       machineId: string,

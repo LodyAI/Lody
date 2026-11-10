@@ -432,11 +432,12 @@ describe('trusted-host encrypted dispatch originals', () => {
         Buffer.from(f.input.inputConfig.prompt)
       )
     ).toBe(false);
+    // Input that cannot run is never signed.
     await expect(
       Effect.runPromise(
         reopened.prepareDispatch(f.machineId, { ...f.input, inputConfig: { prompt: 'different' } })
       )
-    ).rejects.toThrow('intent_conflict');
+    ).rejects.toThrow('e2ee_rpc_invalid');
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, f.input))).toEqual(first);
   });
 
@@ -493,14 +494,15 @@ describe('trusted-host encrypted dispatch originals', () => {
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
     const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
     expect(opened.args).toStrictEqual(canonical);
-    await expect(
-      Effect.runPromise(
-        reopened.prepareDispatch(f.machineId, {
-          ...input,
-          inputConfig: { ...inputConfig, prompt: 'changed composer input' },
-        })
-      )
-    ).rejects.toThrow('intent_conflict');
+    // An edit keeps the message ID and is signed again as its own original.
+    const edited = await Effect.runPromise(
+      reopened.prepareDispatch(f.machineId, {
+        ...input,
+        inputConfig: { ...inputConfig, prompt: 'changed composer input' },
+      })
+    );
+    expect(edited.requestId).not.toBe(original.requestId);
+    expect(edited.e2eeIntent).not.toBe(original.e2eeIntent);
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
   });
 
@@ -537,7 +539,7 @@ describe('trusted-host encrypted dispatch originals', () => {
           responseHex
         )
       )
-    ).rejects.toThrow('intent_conflict');
+    ).rejects.toThrow('e2ee_rpc_original_missing');
     expect(
       await Effect.runPromise(f.sender.acceptResponse(f.machineId, input, responseHex))
     ).toEqual(f.ack);
