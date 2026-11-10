@@ -4858,19 +4858,23 @@ extension RuntimeContract {
   public struct PromptShortcutsParamsList: Codable, Sendable, Equatable {
     public var workspaceId: String
     public var userId: String
-    public init(workspaceId: String, userId: String) {
+    public var fresh: Bool?
+    public init(workspaceId: String, userId: String, fresh: Bool? = nil) {
       self.workspaceId = workspaceId
       self.userId = userId
+      self.fresh = fresh
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
       self.userId = try c.decode(String.self, forKey: Key("userId"))
+      self.fresh = try c.decodeIfPresent(Bool.self, forKey: Key("fresh"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encode(self.userId, forKey: Key("userId"))
+      try c.encodeIfPresent(self.fresh, forKey: Key("fresh"))
     }
   }
 

@@ -2487,7 +2487,8 @@
           "properties": {
             "workspaceId": { "type": "string", "minLength": 1 },
             "userId": { "type": "string" },
-            "action": { "type": "string", "const": "list" }
+            "action": { "type": "string", "const": "list" },
+            "fresh": { "type": "boolean" }
           },
           "required": ["workspaceId", "userId", "action"]
         },

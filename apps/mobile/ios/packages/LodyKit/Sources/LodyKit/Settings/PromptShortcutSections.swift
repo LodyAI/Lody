@@ -5,7 +5,10 @@ typealias PromptShortcutEntry = RuntimeContract.PromptShortcutIndexEntry
 typealias PromptShortcutValue = RuntimeContract.PromptShortcut
 
 enum PromptShortcutRequest: Sendable {
+  /// The runtime's recent listing; it re-reads the access directory at most every 30 s.
   case list
+  /// A listing that re-reads the access directory first (the Settings page).
+  case refresh
   case read(PromptShortcutEntry)
   case save(entry: PromptShortcutEntry?, value: PromptShortcutValue, bodyDocId: String)
 }
